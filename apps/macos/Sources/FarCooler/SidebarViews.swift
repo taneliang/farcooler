@@ -150,6 +150,8 @@ struct WorktreeSection: View {
     var countsWidth: CGFloat = 0
 
     @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.boardMotionSlowdown) private var slowdown
     /// See `WorkspaceStyle.navigatorSelection(active:)`.
     ///
     /// `.key` and not `!= .inactive`: with two Far Cooler windows open the
@@ -198,6 +200,7 @@ struct WorktreeSection: View {
                 // the list.
                 ForEach(worktree.terminals) { t in
                     row(t, ordinal: numbering[t.id])
+                        .transition(BoardMotion.rowTransition(reduceMotion: reduceMotion, slowedBy: slowdown))
                 }
             }
         }
@@ -212,16 +215,11 @@ struct WorktreeSection: View {
             // Chevron, branch glyph, then the title over its branch: one
             // column each (ov-83), so under a workspace the chevron is at B,
             // the glyph at C and both lines at D.
-            Button(action: onToggle) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-                    .rotationEffect(.degrees(showsTerminals ? 90 : 0))
-                    .frame(width: SidebarGrid.chevronColumn, height: 16, alignment: .leading)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .gridMark("worktree", .chevron)
+            // The shared chevron (ov-101): its terminals are this view's
+            // own rows, but the row around it is a control of its own.
+            DisclosureButton(
+                expanded: showsTerminals, accessibilityLabel: "Terminals in \(worktree.task)",
+                gridRow: "worktree", width: SidebarGrid.chevronColumn, action: onToggle)
 
             Image(systemName: Self.glyph)
                 .font(.system(size: 10, weight: .medium))
@@ -560,6 +558,15 @@ struct ProjectHeader: View {
     var onToggleCollapse: (() -> Void)?
 
     @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Show or Hide, on the shared spring (ov-101): its workspaces are
+    /// siblings of this row in the sidebar's flat list, so they come and go
+    /// as a workspace's worktrees do.
+    private func toggleCollapse() {
+        guard let onToggleCollapse else { return }
+        BoardMotion.toggle(reduceMotion: reduceMotion, onToggleCollapse)
+    }
 
     var body: some View {
         // One band, and a `+` that is a Button rather than a Menu — so it sits in exactly the same column
@@ -634,8 +641,8 @@ struct ProjectHeader: View {
                     // Finder's own words for a sidebar section, at the
                     // trailing edge. Kept while collapsed: a section with
                     // nothing under it has to say it can open.
-                    if let onToggleCollapse {
-                        Button(isCollapsed ? "Show" : "Hide", action: onToggleCollapse)
+                    if onToggleCollapse != nil {
+                        Button(isCollapsed ? "Show" : "Hide", action: toggleCollapse)
                             .buttonStyle(.plain)
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.secondary)
@@ -651,7 +658,7 @@ struct ProjectHeader: View {
         // The whole row toggles, not just the chevron: a section label is a big
         // easy target and a 9-point glyph is not. The `+` and `…` are real
         // Buttons, which take their own clicks ahead of this.
-        .onTapGesture { onToggleCollapse?() }
+        .onTapGesture { toggleCollapse() }
         .onHover { hovering = $0 }
         // The `+`, the `…` and the chevron arrive at the same instant. Cut
         // hard, that is three things appearing out of nothing under a
@@ -1345,17 +1352,13 @@ struct HiddenWorktrees: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SidebarRow(indent: 0) {
-                SidebarDisclosureHeader(
-                    title: "Hidden", glyph: "eye.slash", count: worktrees.count,
-                    attention: attentionStatus,
-                    attentionHelp: "\(attention) waiting on you, inside a hidden worktree",
-                    isExpanded: isExpanded, onToggle: onToggle)
-            }
-            .padding(.vertical, SidebarGrid.headerVerticalPadding)
-
-            if isExpanded {
+        SidebarGroupSection(
+            title: "Hidden", id: "group.hidden", glyph: "eye.slash", count: worktrees.count,
+            attention: attentionStatus,
+            attentionHelp: "\(attention) waiting on you, inside a hidden worktree",
+            isExpanded: isExpanded, onToggle: onToggle
+        ) {
+            VStack(alignment: .leading, spacing: 0) {
                 ForEach(worktrees) { ws in
                     // At D, where a worktree's title is: these are
                     // worktrees, without their chevrons or glyphs.
@@ -1426,6 +1429,7 @@ struct WorkspaceRow: View {
     @State private var hovering = false
     @Environment(\.colorScheme) private var scheme
     @Environment(\.controlActiveState) private var controlActiveState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var windowActive: Bool { controlActiveState == .key }
 
     var body: some View {
@@ -1433,17 +1437,9 @@ struct WorkspaceRow: View {
             // Chevron at column A, glyph at B, name at C (ov-83): a
             // worktree's chevron sits under this glyph, its own glyph under
             // this name.
-            Button(action: onToggle) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-                    .rotationEffect(.degrees(isOpen ? 90 : 0))
-                    .frame(width: SidebarGrid.chevronColumn, height: 16, alignment: .leading)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .gridMark("workspace", .chevron)
-            .accessibilityLabel(isOpen ? "Hide Worktrees" : "Show Worktrees")
+            DisclosureButton(
+                expanded: isOpen, accessibilityLabel: "Worktrees in \(name)", gridRow: "workspace",
+                width: SidebarGrid.chevronColumn, action: onToggle)
 
             Image(systemName: Self.glyph)
                 .font(.system(size: 11, weight: .medium))
@@ -1523,7 +1519,9 @@ struct WorkspaceRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction(named: "Open", onSelect)
-        .accessibilityAction(named: isOpen ? "Hide Worktrees" : "Show Worktrees", onToggle)
+        .accessibilityAction(named: isOpen ? "Hide Worktrees" : "Show Worktrees") {
+            BoardMotion.toggle(reduceMotion: reduceMotion, onToggle)
+        }
     }
 }
 
@@ -1689,82 +1687,71 @@ struct UnclaimedWorktrees<Row: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SidebarRow(indent: 0) {
-                SidebarDisclosureHeader(
-                    title: "Unclaimed", glyph: "questionmark.folder", count: worktrees.count,
-                    attention: attentionStatus,
-                    attentionHelp: attention == 1
-                        ? "1 waiting on you, in a worktree no workspace owns"
-                        : "\(attention) waiting on you, in worktrees no workspace owns",
-                    isExpanded: isExpanded, onToggle: onToggle)
-                .help("Worktrees no workspace owns yet")
-            }
-            .padding(.top, ColumnGrid.rhythm)
-            .padding(.vertical, SidebarGrid.headerVerticalPadding)
-
-            if isExpanded {
+        SidebarGroupSection(
+            title: "Unclaimed", id: "group.unclaimed", glyph: "questionmark.folder", count: worktrees.count,
+            attention: attentionStatus,
+            attentionHelp: attention == 1
+                ? "1 waiting on you, in a worktree no workspace owns"
+                : "\(attention) waiting on you, in worktrees no workspace owns",
+            help: "Worktrees no workspace owns yet",
+            isExpanded: isExpanded, onToggle: onToggle
+        ) {
+            VStack(alignment: .leading, spacing: 0) {
                 ForEach(worktrees) { worktree in row(worktree) }
             }
         }
+        .padding(.top, ColumnGrid.rhythm)
     }
 }
 
-/// The collapsible heading of a group of rows below a repository: Hidden and
-/// Unclaimed.
+/// A group of rows below a repository, Hidden and Unclaimed: the one
+/// collapsible section (ov-101), in the sidebar's metrics, with a
+/// workspace's columns since these sit among the workspaces (ov-83):
+/// chevron at A, glyph at B, title at C, and its count trailing, tertiary
+/// (the owner: counts go in the header's trailing slot). The most urgent
+/// status inside, when something in the group wants you, is the one thing
+/// in color, beside the count.
 ///
-/// One view because they were two copies of the same header, and the copies
-/// had drifted from the rows above them: they swapped between two chevron
-/// symbols instead of rotating one, as `WorktreeSection` and `WorkspaceRow` do,
-/// and set their label in a size of their own. The label is
-/// `WorkspaceStyle.sectionTitle`, the project heading's own style.
-struct SidebarDisclosureHeader: View {
+/// It was `SidebarDisclosureHeader`, a header of its own with its own
+/// chevron, its own animation and the count beside the title.
+struct SidebarGroupSection<Content: View>: View {
     let title: String
+    let id: String
     /// What the group is drawn as in column B, as a workspace is.
     let glyph: String
     let count: Int
-    /// The most urgent status inside, when something in the group wants you.
     let attention: Status?
     let attentionHelp: String
+    var help: String?
     let isExpanded: Bool
     let onToggle: () -> Void
+    @ViewBuilder let content: () -> Content
 
     var body: some View {
-        Button(action: onToggle) {
-            HStack(spacing: 0) {
-                // Chevron at A, glyph at B, title at C: a workspace's
-                // columns, since these sit among the workspaces (ov-83).
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    .animation(.snappy(duration: 0.15), value: isExpanded)
-                    .frame(width: SidebarGrid.chevronColumn, alignment: .leading)
-                    .gridMark("group", .chevron)
-                Image(systemName: glyph)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.tertiary)
-                    .frame(width: SidebarGrid.glyphColumn, alignment: .leading)
-                    .gridMark("group", .icon)
-                Text(title)
-                    .font(WorkspaceStyle.sectionTitle)
-                    .foregroundStyle(.secondary)
-                    .gridMark("group", .text)
-                    .padding(.trailing, SidebarGrid.cellGap)
-                Text("\(count)")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
+        CollapsibleSection(
+            id: id, metrics: .sidebar,
+            isExpanded: Binding(get: { isExpanded }, set: { open in if open != isExpanded { onToggle() } }),
+            count: count, accessibilityLabel: title,
+            label: { _ in
+                HStack(spacing: 0) {
+                    Image(systemName: glyph)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: SidebarGrid.glyphColumn, alignment: .leading)
+                        .gridMark("group", .icon)
+                        .accessibilityHidden(true)
+                    SectionTitle(text: title, style: .group, tone: .quiet, gridRow: "group")
+                }
+                .help(help ?? "")
+            },
+            accessory: {
                 if let attention {
                     StatusGlyph(status: attention, inAppDiameter: 5)
                         .help(attentionHelp)
-                        .padding(.leading, SidebarGrid.cellGap)
+                        .padding(.trailing, SidebarGrid.cellGap)
                 }
-                Spacer(minLength: 0)
-            }
-            .frame(minHeight: ColumnGrid.rowHeight - 2 * SidebarGrid.headerVerticalPadding)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+            },
+            content: content)
     }
 }
 

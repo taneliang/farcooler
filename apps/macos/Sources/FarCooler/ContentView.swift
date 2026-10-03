@@ -11,6 +11,7 @@ struct ContentView: View {
     @ObservedObject private var themes = Themes.shared
     @Environment(\.openSettings) private var openSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selection: Selection?
     @State private var expanded: Set<String> = []
     /// Which projects have their hidden worktrees showing. Collapsed is the
@@ -1287,10 +1288,24 @@ struct ContentView: View {
     /// go behind an `if`, and wrapping fifty lines of view builder in one would
     /// have re-indented the whole block to say one thing. A builder method is
     /// what this file already does for the detail side — see `tiled(_:group:)`.
+    @ViewBuilder
     private func sidebarRow(_ entry: SidebarEntry) -> some View {
-        // One column in per level: see `SidebarEntry.depth`.
-        sidebarRowContent(entry)
-            .sidebarDepth(entry.depth)
+        // Everything under a repository's header is what a collapsed one
+        // hides. Coming and going as a disclosure opens and closes, on the
+        // shared spring (ov-101): the rows under a header are its siblings
+        // here, not its children.
+        if !folded(entry) {
+            // One column in per level: see `SidebarEntry.depth`.
+            sidebarRowContent(entry)
+                .sidebarDepth(entry.depth)
+                .transition(BoardMotion.rowTransition(reduceMotion: reduceMotion))
+        }
+    }
+
+    /// Whether `entry` is under a collapsed repository's header.
+    private func folded(_ entry: SidebarEntry) -> Bool {
+        if case .repository = entry.kind { return false }
+        return preferences.isProjectCollapsed(entry.collapseKey)
     }
 
     @ViewBuilder
@@ -1300,9 +1315,6 @@ struct ContentView: View {
         switch entry.kind {
         case .repository:
             projectHeader(entry)
-        // Everything under the header is what a collapsed project hides.
-        case _ where preferences.isProjectCollapsed(key):
-            EmptyView()
         case .workspace(let name):
             if let workspace = entry.workspace {
                 WorkspaceRow(
