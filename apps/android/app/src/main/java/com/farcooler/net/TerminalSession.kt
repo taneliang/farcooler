@@ -226,7 +226,7 @@ class TerminalSession(
     /** Starts painting a stream that has not spoken yet. See [waitForTheFirstByte]. */
     private var firstPaint: Job? = null
 
-    /** The re-attach waiting to happen, if any. Cancelled by [teardown]. See [StreamRetry]. */
+    /** The re-attach waiting to happen, if any. Canceled by [teardown]. See [StreamRetry]. */
     private val streamRetry = StreamRetry(scope, wanted = { started })
 
     /**
@@ -1338,7 +1338,7 @@ class TerminalSession(
     /**
      * Everything [teardown] stops except the poll loop, for the callers that
      * hand the screen to polling and retry — [streamEnded], the first-byte
-     * deadline and [open], which every retry goes through. Cancelling the
+     * deadline and [open], which every retry goes through. Canceling the
      * poller there would freeze the pane on its last capture for the length of
      * the backoff.
      */

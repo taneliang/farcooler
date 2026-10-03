@@ -1,5 +1,5 @@
 {
-  "about": "Which themes a phone offers across several runners. Read by AgentKit's ThemeCatalogTests (ThemeCatalog.merged) and Android's ThemeCatalogTest (ThemeCatalog.merged and Themes.merge). Each case lists runners in the order they answered; the catalog must not depend on that order. A theme is its name plus a background that tells same-named themes apart.",
+  "about": "Which themes a phone offers across several runners. Read by AgentKit's ThemeCatalogTests and Android's ThemeCatalogTest, which each drive their own ThemeCatalog.merged with it; neither drives the app's Themes object from it. Each case lists runners in the order they answered; the catalog must not depend on that order. A theme is its name plus a background that tells same-named themes apart.",
   "builtIn": [
     { "name": "Nord", "background": 1 },
     { "name": "Solarized", "background": 2 }

@@ -88,6 +88,7 @@ object Themes {
     private val _selected = MutableStateFlow(FALLBACK_NAME)
     val selected: StateFlow<String> = _selected.asStateFlow()
 
+    @Synchronized
     fun initialize(context: Context) {
         if (prefs != null) return
         prefs = context.applicationContext.getSharedPreferences("farcooler", Context.MODE_PRIVATE)
