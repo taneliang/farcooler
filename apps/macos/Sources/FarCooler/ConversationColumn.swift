@@ -83,6 +83,11 @@ struct ConversationHeader: View {
     /// Stop Being Orchestrator: the terminal keeps running as an ordinary
     /// one (`OrchestratorAdoption.steppedDown`).
     var onStepDown: () -> Void = {}
+    /// Whether answering a decision wakes the agent; nil from a runner that
+    /// can't, which draws no switch. Here since the old sidebar's workspace
+    /// row, its only home before, went (ov-178).
+    var wakeOnAnswer: Bool? = nil
+    var onSetWakeOnAnswer: (Bool) -> Void = { _ in }
 
     @Environment(\.colorScheme) private var scheme
 
@@ -103,25 +108,20 @@ struct ConversationHeader: View {
                     .accessibilityLabel("Unread")
             }
             Spacer(minLength: 0)
-            if canAct, seat != nil {
+            // Drawn with no orchestrator too (ov-178): Show Charter and Wake
+            // the Agent When You Answer are the workspace's, not the seat's.
+            let items = Self.menu(hasSeat: seat != nil, charter: charter, wakeOnAnswer: wakeOnAnswer)
+            if canAct, seat != nil || !items.isEmpty {
                 Menu {
-                    Menu("Replace Orchestrator") {
-                        ForEach(OrchestratorHarness.allCases) { harness in
-                            Button("\(harness.title)…") { onReplace(harness) }
-                        }
-                    }
-                    if let charter {
-                        switch charter {
-                        case .open(let url): Button("Show Charter") { onShowCharter(url) }
-                        case .unavailable(let why): Button("Show Charter") {}.disabled(true).help(why)
-                        }
-                    }
+                    ForEach(items, id: \.self) { item in menuItem(item) }
                     if seat?.terminal.canSwitchPaneMode == true || seat?.terminal.isAgentPane == true {
                         Button(seat?.terminal.isAgentPane == true ? "Show as Terminal" : "Show as Chat", action: onTogglePaneMode)
                     }
-                    Divider()
-                    Button("Restart", action: onRestart)
-                    Button("Stop Being Orchestrator", action: onStepDown)
+                    if seat != nil {
+                        Divider()
+                        Button("Restart", action: onRestart)
+                        Button("Stop Being Orchestrator", action: onStepDown)
+                    }
                 } label: {
                     Image(systemName: "ellipsis")
                 }
@@ -137,6 +137,50 @@ struct ConversationHeader: View {
 }
 
 extension ConversationHeader {
+    /// The workspace's items in the header's menu, in `WorkspaceMenu`'s
+    /// order: Replace Orchestrator with one seated (starting one is the
+    /// column's own placeholder's), Show Charter where this runner says
+    /// where it is, and Wake the Agent When You Answer from a runner that
+    /// said whether it's on.
+    nonisolated static func menu(hasSeat: Bool, charter: CharterAccess?, wakeOnAnswer: Bool?) -> [WorkspaceMenu.Item] {
+        WorkspaceMenu.items(hasBoard: false, hasOrchestrator: hasSeat, wakeOnAnswer: wakeOnAnswer).filter { item in
+            switch item {
+            case .showBoard, .startOrchestrator: return false
+            case .showCharter: return charter != nil
+            case .replaceOrchestrator, .wakeOnAnswer: return true
+            }
+        }
+    }
+
+    /// One of `menu`'s items, drawn.
+    @ViewBuilder
+    fileprivate func menuItem(_ item: WorkspaceMenu.Item) -> some View {
+        switch item {
+        case .replaceOrchestrator:
+            // An ellipsis on each harness: choosing one asks first, because
+            // the orchestrator running now closes.
+            Menu(item.title) {
+                ForEach(OrchestratorHarness.allCases) { harness in
+                    Button("\(harness.title)…") { onReplace(harness) }
+                }
+            }
+        case .showCharter:
+            switch charter {
+            case .open(let url)?: Button(item.title) { onShowCharter(url) }
+            // Disabled with the reason rather than left out: the item is
+            // how anybody learns a charter exists.
+            case .unavailable(let why)?: Button(item.title) {}.disabled(true).help(why)
+            case nil: EmptyView()
+            }
+        case .wakeOnAnswer:
+            Divider()
+            Toggle(item.title, isOn: Binding(get: { wakeOnAnswer ?? false }, set: onSetWakeOnAnswer))
+                .help("When you answer one of this board’s decisions, type the answer into the agent working that task, or else the orchestrator, once it’s idle.")
+        case .showBoard, .startOrchestrator:
+            EmptyView()
+        }
+    }
+
     /// The agent the header names beside "Orchestrator": its harness while
     /// one runs, and nothing otherwise. A lost pane reports no process, which
     /// `Terminal.name(of:)` calls "shell", and "Orchestrator · shell" named

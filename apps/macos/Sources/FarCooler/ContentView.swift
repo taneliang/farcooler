@@ -2637,6 +2637,13 @@ struct ContentView: View {
                     },
                     onStepDown: {
                         if let seat { Task { await stepDown(seat) } }
+                    },
+                    wakeOnAnswer: workspace.wakeOnAnswer,
+                    onSetWakeOnAnswer: { on in
+                        guard let client = store.clients[host] else { return }
+                        Task {
+                            if let refused = await client.setWakeOnAnswer(workspace, on: on) { errorBanner = refused }
+                        }
                     })
                 if let seat {
                     let sharers = WorkspaceScreen.sharers(
@@ -3244,18 +3251,18 @@ struct ContentView: View {
         )
     }
 
+    /// The detail with no workspace to show: the fleet's own state first,
+    /// before it has anything in it (`FleetPlaceholder`), then "choose one".
     private var placeholder: some View {
-        ContentUnavailableView {
-            Label("No Workspace Selected", systemImage: "square.stack.3d.up")
-        } description: {
-            Text("Choose one from the title bar. A workspace lists its orchestrator, tasks and worktrees on the left, and shows the one you pick.")
-        } actions: {
-            if !workspaceRepositories.isEmpty {
-                Button("New Workspace…") {
-                    newWorkspaceName = NewWorkspaceName(name: "")
-                }
-            }
-        }
+        let local = store.clients[""]
+        return FleetPlaceholder(
+            phase: FleetPlaceholder.phase(
+                hasWorktrees: !store.fleet.worktrees.isEmpty, localLoaded: local?.hasLoaded == true,
+                localError: local?.lastError, hasRepositories: !store.repositories.isEmpty),
+            onNewWorkspace: workspaceRepositories.isEmpty ? nil : { newWorkspaceName = NewWorkspaceName(name: "") },
+            onAddRepository: { showAddRepository = true },
+            onNewWorktree: { newWorktreeIntent = NewWorktreeIntent() },
+            onTryAgain: { Task { await local?.refresh() } })
     }
 
     // MARK: - Routing
@@ -4228,7 +4235,18 @@ struct ContentView: View {
         case .nextWorktree: stepWorktree(by: 1)
         case .previousWorktree: stepWorktree(by: -1)
         case .openInEditor: openInPreferredEditor()
-        case .reload: Task { for client in store.clients.values { await client.refresh() } }
+        // Everything the old sidebar's Refresh button read, on every
+        // runner: the fleet, and its repositories, roots and layouts, as a
+        // reconnection re-reads them (`DaemonClient.onReconnect`).
+        case .reload:
+            Task {
+                for client in store.clients.values {
+                    await client.refresh()
+                    await client.refreshRepositories()
+                    await client.refreshRoots()
+                    await client.refreshLayouts()
+                }
+            }
         case .showShortcuts: showShortcuts = true
         // With the sidebar hidden its search isn't there to focus: the
         // palette finds the same workspaces, tasks and agents.
