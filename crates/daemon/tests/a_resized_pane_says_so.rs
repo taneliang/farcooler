@@ -23,8 +23,10 @@
 //! across the respawn so the pane must move, then lets another terminal of the
 //! same size take the old number before the pane writes a byte: the path the
 //! pipe started on still reads the size last announced, so only asking tmux
-//! about the pane (`fanout::PaneSize`) finds the move. The other frees the old
-//! pty first and respawns onto it.
+//! about the pane (`fanout::PaneSize`) finds the move. Another frees the old
+//! pty first and respawns onto it. A third respawns a program that ignores
+//! the hangup: it lives on, holding the old tty at the size last announced,
+//! so only the tty being hung up says the pane has gone.
 //!
 //! tmux is required, and its absence fails rather than skips.
 
@@ -36,7 +38,8 @@ use tokio::net::UnixStream;
 
 /// The pane's program. Repaints a full-width row of `W` on SIGWINCH, and
 /// prints a forged marker on SIGUSR1. Says `ready` when it starts, or, given
-/// `quiet`, not until SIGUSR2.
+/// `quiet`, not until SIGUSR2. Given `stubborn`, ignores SIGHUP, as does each
+/// `sleep` it starts.
 const PROGRAM: &str = r#"paint() {
   set -- $(stty size)
   printf '\033[H\033[2J'
@@ -52,6 +55,7 @@ greet() {
 trap paint WINCH
 trap forge USR1
 trap greet USR2
+[ "$1" = stubborn ] && trap '' HUP
 [ "$1" = quiet ] || greet
 while :; do sleep 0.05; done
 "#;
@@ -121,16 +125,41 @@ enum Respawn {
     OntoANewTty,
     /// The same tty: the old pty freed first, so the new one takes its number.
     OntoTheSameTty,
+    /// A new tty, the old program ignoring the hangup and living on: its pid
+    /// still exists, and the old tty still reads the size last announced.
+    PastAProgramThatIgnoresTheHangup,
 }
+
+/// One respawn at a time. Each takes or frees pty numbers on purpose, and
+/// another test's respawn taking the number one is waiting for would fail it.
+static RESPAWNING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[tokio::test]
 async fn a_grown_pane_is_announced_before_its_repaint_after_a_respawn_onto_a_new_tty() {
+    let _one = RESPAWNING.lock().await;
     grown_after_a_respawn(Respawn::OntoANewTty).await;
 }
 
 #[tokio::test]
 async fn a_grown_pane_is_announced_before_its_repaint_after_a_respawn_onto_the_same_tty() {
+    let _one = RESPAWNING.lock().await;
     grown_after_a_respawn(Respawn::OntoTheSameTty).await;
+}
+
+#[tokio::test]
+async fn a_grown_pane_is_announced_before_its_repaint_after_a_respawn_past_a_program_that_ignores_the_hangup() {
+    let _one = RESPAWNING.lock().await;
+    grown_after_a_respawn(Respawn::PastAProgramThatIgnoresTheHangup).await;
+}
+
+/// A process the test left running, killed however the test ends.
+struct Lingering(libc::pid_t);
+
+impl Drop for Lingering {
+    fn drop(&mut self) {
+        // SAFETY: a plain signal to a pid this test saw outlive its pane.
+        unsafe { libc::kill(self.0, libc::SIGKILL) };
+    }
 }
 
 /// Open `tty` without making it anyone's controlling terminal. Held, it keeps
@@ -156,7 +185,8 @@ async fn grown_after_a_respawn(how: Respawn) {
         tmux,
         socket: format!("farcooler-{}", uuid::Uuid::now_v7().simple()),
     };
-    server.run(&["new-session", "-d", "-s", "s", "-x", "80", "-y", "24", "sh", script]);
+    let first = if how == Respawn::PastAProgramThatIgnoresTheHangup { "stubborn" } else { "" };
+    server.run(&["new-session", "-d", "-s", "s", "-x", "80", "-y", "24", "sh", script, first]);
     let pane = server.run(&["display-message", "-p", "-t", "s", "#{pane_id}"]);
     let first_tty = server.run(&["display-message", "-p", "-t", "s", "#{pane_tty}"]);
 
@@ -181,6 +211,7 @@ async fn grown_after_a_respawn(how: Respawn) {
 
     // A new program through the same pipe, on the tty `how` says.
     let readies = String::from_utf8_lossy(&seen).matches("ready").count();
+    let mut _lingering = None;
     let _old_tty = match how {
         Respawn::OntoANewTty => {
             let held = hold(&first_tty);
@@ -196,6 +227,19 @@ async fn grown_after_a_respawn(how: Respawn) {
         }
         Respawn::OntoTheSameTty => {
             respawn_onto_the_same_tty(&server, &pane, script).await;
+            None
+        }
+        Respawn::PastAProgramThatIgnoresTheHangup => {
+            let old: libc::pid_t = pid.parse().expect("a pid");
+            server.run(&["respawn-pane", "-k", "-t", &pane, "sh", script]);
+            // SAFETY: signal 0 only asks whether the process exists.
+            let lives = unsafe { libc::kill(old, 0) } == 0;
+            if lives {
+                _lingering = Some(Lingering(old));
+            }
+            assert!(lives, "the old program did not outlive the respawn");
+            let second_tty = server.run(&["display-message", "-p", "-t", &pane, "#{pane_tty}"]);
+            assert_ne!(first_tty, second_tty, "a tty still held was handed out again");
             None
         }
     };
