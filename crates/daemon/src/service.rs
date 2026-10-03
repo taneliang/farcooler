@@ -10237,7 +10237,16 @@ mod hook_file_tests {
     /// that didn't run shows up as an answer that came too fast.
     fn hung_git_in(repo: &Path) -> &'static std::ffi::OsStr {
         std::fs::write(repo.join("ls-files"), "exec sleep 30\n").unwrap();
+        lists_no_hooks_or_filters(repo);
         std::ffi::OsStr::new("/bin/sh")
+    }
+
+    /// Every git first lists the repository's hooks and filters
+    /// (`crate::git_guard::LISTING`, a `git config`) and refuses to go on
+    /// without the answer. A stand-in has to give one: exit 1, which is
+    /// git's "no key matched".
+    fn lists_no_hooks_or_filters(repo: &Path) {
+        std::fs::write(repo.join("config"), "exit 1\n").unwrap();
     }
 
     /// m7: no git at all is "can't tell", and so tracked. In a repository
@@ -10308,6 +10317,7 @@ mod hook_file_tests {
         // one file's two gits and not for a second `ls-files`.
         std::fs::write(repo.join("ls-files"), "sleep 0.4\n").unwrap();
         std::fs::write(repo.join("rev-parse"), "echo .git\n").unwrap();
+        lists_no_hooks_or_filters(&repo);
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(700);
         with_git_as(
             std::ffi::OsStr::new("/bin/sh"),

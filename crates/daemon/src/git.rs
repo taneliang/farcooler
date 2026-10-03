@@ -120,13 +120,42 @@ thread_local! {
 }
 
 /// `git_bytes`, with the program and the timeout named.
+///
+/// Two gits, both under `crate::git_guard`'s pins and inside the one
+/// `timeout`: `git config` first, for the hook and filter names this
+/// repository's config chose, then the call itself with those pinned too.
+/// A listing that fails fails the call: running it without the pins would be
+/// running it unguarded.
 async fn run_bounded(
     program: &std::ffi::OsStr,
     timeout: Duration,
     cwd: &Path,
     args: &[&str],
 ) -> Result<GitBytes> {
-    let child = Command::new(program)
+    let deadline = tokio::time::Instant::now() + timeout;
+    let pins = pins_by(program, deadline, cwd).await?;
+    let out = spawn_bounded(program, deadline, cwd, &crate::git_guard::args(args), &pins).await?;
+    Ok(GitBytes { ok: out.code == Some(0), stdout: out.stdout, stderr: out.stderr })
+}
+
+/// What one guarded git gave back.
+struct Spawned {
+    code: Option<i32>,
+    stdout: Vec<u8>,
+    stderr: String,
+}
+
+/// Start one git with `pins`, killed at `deadline`.
+async fn spawn_bounded(
+    program: &std::ffi::OsStr,
+    deadline: tokio::time::Instant,
+    cwd: &Path,
+    args: &[&str],
+    pins: &[crate::git_guard::Pin],
+) -> Result<Spawned> {
+    let mut cmd = Command::new(program);
+    crate::git_guard::apply(cmd.as_std_mut(), pins);
+    let child = cmd
         .current_dir(cwd)
         .args(args)
         .stdin(Stdio::null())
@@ -135,7 +164,7 @@ async fn run_bounded(
         .kill_on_drop(true)
         .output();
 
-    let out = match tokio::time::timeout(timeout, child).await {
+    let out = match tokio::time::timeout_at(deadline, child).await {
         Ok(Ok(out)) => out,
         Ok(Err(e)) => {
             tracing::warn!(error = %e, "failed to spawn git");
@@ -149,11 +178,38 @@ async fn run_bounded(
         }
     };
 
-    Ok(GitBytes {
-        ok: out.status.success(),
+    Ok(Spawned {
+        code: out.status.code(),
         stdout: out.stdout,
         stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
     })
+}
+
+/// The pins a program that runs git in `cwd` on the daemon's behalf should
+/// carry (`gh`): `crate::git_guard`'s fixed set and this repository's hook
+/// and filter names, read within [`GIT_TIMEOUT`].
+pub async fn guard_pins(cwd: &Path) -> Result<Vec<crate::git_guard::Pin>> {
+    pins_by(&program(), tokio::time::Instant::now() + GIT_TIMEOUT, cwd).await
+}
+
+/// `crate::git_guard`'s fixed pins, and the by-name ones for `cwd`.
+async fn pins_by(
+    program: &std::ffi::OsStr,
+    deadline: tokio::time::Instant,
+    cwd: &Path,
+) -> Result<Vec<crate::git_guard::Pin>> {
+    let mut pins = crate::git_guard::fixed();
+    let listing = spawn_bounded(program, deadline, cwd, crate::git_guard::LISTING, &pins).await?;
+    // 1 is "no key matched", which is the answer for most repositories.
+    match listing.code {
+        Some(0) => pins.extend(crate::git_guard::pins_from(&listing.stdout)),
+        Some(1) => {}
+        _ => {
+            tracing::warn!(stderr = %listing.stderr, "could not read this repository's hooks and filters");
+            return Err(DomainError::OperationFailed);
+        }
+    }
+    Ok(pins)
 }
 
 /// MVP supports ordinary non-bare repositories with a valid HEAD and a writable
