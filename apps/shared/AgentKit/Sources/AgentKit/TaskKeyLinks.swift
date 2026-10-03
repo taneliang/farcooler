@@ -36,6 +36,14 @@ public struct TaskKeyTarget: Equatable, Hashable, Sendable {
         self.task = task
         self.key = key
     }
+
+    /// The same place as a `Destination` (ov-182), in this device's own
+    /// ids, so a link can open through the destination path once each app
+    /// has one: the linker's closure becomes `open(target.destination)`.
+    public var destination: Destination {
+        Destination(
+            runner: .init(host: runner), place: .task(workspace: workspace, task: .init(id: task, key: key)))
+    }
 }
 
 /// One runner's keys that may become links: its workspaces' prefixes, and
@@ -93,6 +101,11 @@ public enum TaskKeyLinks {
     /// but a letter, a digit, `_` or `-`: "nov-190", "ov-190a",
     /// "fix-ov-190" and "ov-190-fix" aren't keys, "(ov-190)." is. The
     /// prefix's case is the workspace's own: "OV-190" isn't "ov-190".
+    ///
+    /// Two more aren't: a key with a `.` and a digit after it, a version
+    /// ("ov-1.2"), and a key in a word that holds `://`, a bare URL's path
+    /// (".../tree/ov-190"), which is the URL's. A word here runs between
+    /// ASCII whitespace.
     public static func matches(in text: String, prefixes: Set<String>, known: Set<String>) -> [Match] {
         guard !prefixes.isEmpty, !known.isEmpty else { return [] }
         let units = Array(text.utf16)
@@ -111,7 +124,8 @@ public enum TaskKeyLinks {
                 continue
             }
             while k < units.count, isASCIIDigit(units[k]) { k += 1 }
-            if k == units.count || !joins(units[k]) {
+            let version = k + 1 < units.count && units[k] == dot && isASCIIDigit(units[k + 1])
+            if k == units.count || !joins(units[k]), !version, !inURL(units, from: i, to: k) {
                 let prefix = String(decoding: units[i..<j], as: UTF16.self)
                 let key = String(decoding: units[i..<k], as: UTF16.self)
                 if prefixes.contains(prefix), known.contains(key) {
@@ -185,6 +199,24 @@ public enum TaskKeyLinks {
         return out
     }
 
+    /// Whether the word holding `units[from..<to]` holds `://`.
+    private static func inURL(_ units: [UInt16], from: Int, to: Int) -> Bool {
+        var start = from
+        while start > 0, !isASCIISpace(units[start - 1]) { start -= 1 }
+        var end = to
+        while end < units.count, !isASCIISpace(units[end]) { end += 1 }
+        guard end - start >= 3 else { return false }
+        return (start..<(end - 2)).contains {
+            units[$0] == colon && units[$0 + 1] == slash && units[$0 + 2] == slash
+        }
+    }
+
+    /// Tab, line feed, vertical tab, form feed, return or space.
+    private static func isASCIISpace(_ u: UInt16) -> Bool { (0x09...0x0D).contains(u) || u == 0x20 }
+
+    private static let dot = UInt16(UInt8(ascii: "."))
+    private static let colon = UInt16(UInt8(ascii: ":"))
+    private static let slash = UInt16(UInt8(ascii: "/"))
     private static let hyphen = UInt16(UInt8(ascii: "-"))
     private static let underscore = UInt16(UInt8(ascii: "_"))
 
@@ -234,6 +266,20 @@ public struct TaskKeyLinker: Equatable, Sendable {
         TaskKeyLinks.linked(text, index: index)
     }
 
+    /// The tasks `linked` (text this linker linked) links to, once each in
+    /// the order they're first linked: one accessibility action apiece, as
+    /// a link inside a row that speaks as one element can't be reached by
+    /// itself (`taskKeyActions(_:linker:)`).
+    public func targets(in linked: AttributedString) -> [TaskKeyTarget] {
+        var seen = Set<String>()
+        return linked.runs.compactMap { run -> TaskKeyTarget? in
+            guard let url = run.link, let (runner, key) = TaskKeyLinks.parse(url), runner == index.runner,
+                let target = index.targets[key], seen.insert(key).inserted
+            else { return nil }
+            return target
+        }
+    }
+
     /// Open the task a link names, when it's on this runner's boards: true
     /// when it named one, opened or not, so the guard never hands a task
     /// link to the system.
@@ -256,4 +302,33 @@ extension TaskKeyTarget {
     /// Where a phone opens it: the task, pushed over the screen showing, as
     /// a pane's task chip opens one (`ShellPaneBar.chipTitle`).
     var phoneRoute: PhoneRoute { .task(PhoneWorkspace(runner: runner, workspace: workspace), task: task) }
+}
+
+extension TaskKeyLinker {
+    /// The phone's linker for one runner: its workspaces' prefixes and the
+    /// boards it has read, each link opening its task's route through
+    /// `open` (the navigator's push). Links nothing before the runner is
+    /// known or without a way to open. Here rather than in the app so
+    /// `swift test` holds the wiring: the iOS target has no unit tests.
+    static func phone(
+        runner: String?, workspaces: [WorkspaceSummary], boards: [String: TaskBoardModel],
+        open: (@MainActor (PhoneRoute) -> Void)?
+    ) -> TaskKeyLinker {
+        guard let runner, let open else { return .none }
+        let index = TaskKeyIndex(runner: runner, workspaces: workspaces, boards: boards)
+        return TaskKeyLinker(index: index) { open($0.phoneRoute) }
+    }
+}
+
+extension View {
+    /// One accessibility action per task `linked` links, "Open ov-190",
+    /// for a row that speaks as one element: VoiceOver can't reach a link
+    /// inside such a row's text, and these open the same task a tap would.
+    public func taskKeyActions(_ linked: AttributedString, linker: TaskKeyLinker) -> some View {
+        accessibilityActions {
+            ForEach(linker.targets(in: linked), id: \.key) { target in
+                Button("Open \(target.key)") { linker.open(target) }
+            }
+        }
+    }
 }

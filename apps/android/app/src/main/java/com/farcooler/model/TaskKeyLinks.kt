@@ -13,7 +13,18 @@ data class TaskKeyTarget(
     val task: String,
     /** Its key, "ov-190". */
     val key: String,
-)
+) {
+    /**
+     * The same place as a [Destination] (ov-182), in this device's own ids, so
+     * a link can open through the destination path once the app has one.
+     * AgentKit's `TaskKeyTarget.destination`.
+     */
+    val destination: Destination
+        get() = Destination(
+            runner = Destination.Runner(host = runner),
+            place = Destination.Place.Task(workspace, Destination.TaskRef(id = task, key = key)),
+        )
+}
 
 /** One runner's keys that may become links: its workspaces' prefixes, and the tasks on the boards read so far. */
 data class TaskKeyIndex(
@@ -65,6 +76,11 @@ object TaskKeyLinks {
      * A key is `<prefix>-<digits>`, the prefix an ASCII letter and then letters
      * or digits. Either side of it is the text's edge or anything but a letter,
      * a digit, `_` or `-`. The prefix's case is the workspace's own.
+     *
+     * Two more aren't: a key with a `.` and a digit after it, a version
+     * ("ov-1.2"), and a key in a word that holds `://`, a bare URL's path
+     * (".../tree/ov-190"), which is the URL's. A word here runs between ASCII
+     * whitespace.
      */
     fun matches(text: String, prefixes: Set<String>, known: Set<String>): List<Match> {
         if (prefixes.isEmpty() || known.isEmpty()) return emptyList()
@@ -83,7 +99,8 @@ object TaskKeyLinks {
                 continue
             }
             while (k < text.length && text[k].isAsciiDigit()) k += 1
-            if (k == text.length || !joins(text[k])) {
+            val version = k + 1 < text.length && text[k] == '.' && text[k + 1].isAsciiDigit()
+            if ((k == text.length || !joins(text[k])) && !version && !inUrl(text, i, k)) {
                 val key = text.substring(i, k)
                 if (text.substring(i, j) in prefixes && key in known) found.add(Match(i, key))
             }
@@ -110,16 +127,6 @@ object TaskKeyLinks {
         return runCatching { unescape(parts[0]) to unescape(parts[1]) }.getOrNull()
     }
 
-    /**
-     * Whether a link may be opened: the web, mail and a task link, nothing
-     * else. AgentKit's `Markdown.opens`: task text and replies are written by
-     * agents, and an app's own scheme or `file:` must not open on a tap.
-     */
-    fun opens(url: String): Boolean {
-        val scheme = url.substringBefore(':', missingDelimiterValue = "").lowercase()
-        return scheme in setOf("http", "https", "mailto") || parse(url) != null
-    }
-
     /** The task [url] names on [index]'s runner, or null: another runner's, a key it hasn't read, or no task link. */
     fun target(url: String, index: TaskKeyIndex): TaskKeyTarget? {
         val (runner, key) = parse(url) ?: return null
@@ -129,6 +136,18 @@ object TaskKeyLinks {
     private fun escape(part: String): String = URLEncoder.encode(part, "UTF-8").replace("+", "%20")
 
     private fun unescape(part: String): String = URLDecoder.decode(part.replace("+", "%2B"), "UTF-8")
+
+    /** Whether the word holding `text[from until to]` holds `://`. AgentKit's `inURL`. */
+    private fun inUrl(text: String, from: Int, to: Int): Boolean {
+        var start = from
+        while (start > 0 && !text[start - 1].isAsciiSpace()) start -= 1
+        var end = to
+        while (end < text.length && !text[end].isAsciiSpace()) end += 1
+        return text.substring(start, end).contains("://")
+    }
+
+    /** Tab, line feed, vertical tab, form feed, return or space. */
+    private fun Char.isAsciiSpace(): Boolean = this in '\u0009'..'\u000D' || this == ' '
 
     private fun Char.isAsciiLetter(): Boolean = this in 'a'..'z' || this in 'A'..'Z'
 

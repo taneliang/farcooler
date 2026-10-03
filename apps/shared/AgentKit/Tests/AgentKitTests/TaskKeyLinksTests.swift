@@ -146,3 +146,55 @@ struct TaskKeyLinksTests {
         #expect(opened.last?.phoneRoute == .task(PhoneWorkspace(runner: "r1", workspace: "w-lo"), task: "t3"))
     }
 }
+
+extension TaskKeyLinksTests {
+    /// **The phone's link opens its task's route** through the navigator's
+    /// push, with the runner and the workspace each where they go: what
+    /// `Connection.taskKeyLinker` hands the screens.
+    @Test("The phone's linker pushes the linked task's route")
+    func thePhoneWiring() throws {
+        final class Box: @unchecked Sendable { var routes: [PhoneRoute] = [] }
+        let box = Box()
+        let main = WorkspaceSummary(id: "w-main", name: "Main", taskPrefix: "ov", isMain: true, ordinal: 0)
+        let boards = [
+            "w-main": TaskBoardModel(columns: [
+                TaskBoardColumn(
+                    status: .todo, rows: [TaskRow(id: "t190", key: "ov-190", title: "T", status: .todo, statusSince: .now)])
+            ])
+        ]
+        let linker = TaskKeyLinker.phone(runner: "R1", workspaces: [main], boards: boards) { box.routes.append($0) }
+        #expect(linker.index.runner == "R1")
+        #expect(linker.follow(try #require(TaskKeyLinks.url(runner: "R1", key: "ov-190"))))
+        #expect(box.routes == [.task(PhoneWorkspace(runner: "R1", workspace: "w-main"), task: "t190")])
+
+        // No runner yet, or nothing to push with: nothing is linked.
+        #expect(TaskKeyLinker.phone(runner: nil, workspaces: [main], boards: boards) { _ in } == .none)
+        #expect(TaskKeyLinker.phone(runner: "R1", workspaces: [main], boards: boards, open: nil) == .none)
+    }
+
+    /// **A row that speaks as one element still offers its links**, one
+    /// action per task, in order, the same one twice only once, and none
+    /// for a key the text quotes or a link to the web.
+    @Test("A linked line's tasks, once each, for its accessibility actions")
+    func theActions() throws {
+        final class Box: @unchecked Sendable { var targets: [TaskKeyTarget] = [] }
+        let box = Box()
+        let linker = TaskKeyLinker(index: Self.index()) { box.targets.append($0) }
+        let text = try AttributedString(
+            markdown: "lo-3 before ov-190, `ov-7`, [ov-7](https://x.dev) and lo-3 again")
+        let targets = linker.targets(in: linker.linked(text))
+        #expect(targets.map(\.key) == ["lo-3", "ov-190"])
+        #expect(linker.targets(in: text).isEmpty, "unlinked text has no actions")
+    }
+
+    /// **A link's target is a `Destination`** (ov-182) in this device's ids,
+    /// so the apps can open links through it with one line.
+    @Test("A task link's target as a destination")
+    func theDestination() {
+        let target = TaskKeyTarget(runner: "R1", workspace: "w-main", task: "t190", key: "ov-190")
+        #expect(
+            target.destination
+                == Destination(
+                    runner: .init(host: "R1"), place: .task(workspace: "w-main", task: .init(id: "t190", key: "ov-190"))))
+    }
+}
