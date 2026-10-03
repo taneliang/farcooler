@@ -50,6 +50,154 @@ impl Drop for Attachment {
     }
 }
 
+/// How much of a pane's output one connection may have waiting for its client.
+///
+/// `MAX_UNACKED_TERMINAL_BYTES`, the protocol's own figure for how far a client
+/// may fall behind a terminal: a second of a fast build log, about four
+/// thousand lines of `yes`. Past it, `TerminalSink` drops the backlog and
+/// resyncs rather than holding more.
+pub const TERMINAL_BACKLOG_BYTES: usize = farcooler_protocol::MAX_UNACKED_TERMINAL_BYTES as usize;
+
+/// `terminal.attach`'s side of `Runtime::attach`: a pane's output, as
+/// `TerminalFrame`s on this connection's push queue.
+///
+/// **What happens when the client falls behind** (ov-118). The queue refuses a
+/// frame that would take it past `TERMINAL_BACKLOG_BYTES`. This sink then
+/// throws away everything still queued — the client is better served by the
+/// pane as it is now than by a second of output it has not read — and drops
+/// every byte after it until the connection is draining again. Then the
+/// runtime captures the pane, and two frames go out in place of everything
+/// dropped:
+///
+/// - a `Gap` (`GAP_REASON_CLIENT_TOO_SLOW`) saying where the stream resumes and
+///   how many bytes are missing. No client reads it yet — each one ignores
+///   every frame kind but `Output` — and it is sent anyway, because it is the
+///   protocol's own word for exactly this and costs a few bytes.
+/// - an `Output` carrying a reset and the full replay (`runtime::reset_then`).
+///   This is the part the clients act on, and they need no change for it: iOS,
+///   Android and the Mac all feed `Output` bytes to the same `farcooler_vt`
+///   emulator, and a reset followed by the replay leaves it holding what a
+///   fresh attach would. (The Mac streams through `Runtime::stream` on a pipe,
+///   not this path, so it never sees one.)
+///
+/// Bytes are never dropped from the middle of what a client is fed without a
+/// resync after them, so an escape sequence cut in half is always followed by
+/// the reset that abandons it.
+///
+/// Sequence numbers go on counting what was dropped, so `start_sequence` jumps
+/// across a gap by exactly `Gap.lost_bytes`.
+struct TerminalSink {
+    push: farcooler_transport::PushSender,
+    terminal_id: bytes::Bytes,
+    epoch: u64,
+    /// The byte offset of the next run, which is what makes
+    /// `TerminalOutput.start_sequence` mean anything. Counted here rather than
+    /// in `Runtime`, because it is a property of this attachment and not of
+    /// the pane: two clients watching the same pane attached at different
+    /// moments.
+    sequence: u64,
+    /// Bytes dropped since the last thing the client was sent, while behind.
+    lost: Option<u64>,
+}
+
+impl TerminalSink {
+    fn new(push: farcooler_transport::PushSender, terminal: Uuid, epoch: u64) -> Self {
+        Self {
+            push,
+            terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
+            epoch,
+            sequence: 0,
+            lost: None,
+        }
+    }
+
+    fn frame(&self, kind: farcooler_protocol::v1::terminal_frame::Kind) -> farcooler_protocol::v1::Event {
+        farcooler_protocol::v1::Event {
+            event_id: farcooler_protocol::ids::new_id(),
+            // Zero, like every other event. The offset that matters for a
+            // terminal is a byte count, and it rides in the frame where it has
+            // a documented unit.
+            sequence: 0,
+            payload: Some(farcooler_protocol::v1::event::Payload::TerminalFrame(
+                farcooler_protocol::v1::TerminalFrame {
+                    terminal_id: self.terminal_id.clone(),
+                    epoch: self.epoch,
+                    kind: Some(kind),
+                },
+            )),
+        }
+    }
+
+    fn output_frame(&self, start: u64, bytes: Vec<u8>) -> farcooler_protocol::v1::Event {
+        self.frame(farcooler_protocol::v1::terminal_frame::Kind::Output(
+            farcooler_protocol::v1::TerminalOutput {
+                start_sequence: start,
+                payload: bytes::Bytes::from(bytes),
+            },
+        ))
+    }
+}
+
+impl crate::runtime::AttachSink for TerminalSink {
+    fn output(&mut self, bytes: Vec<u8>) -> crate::runtime::Taken {
+        use crate::runtime::Taken;
+        use farcooler_transport::Pushed;
+
+        let len = bytes.len() as u64;
+        let start = self.sequence;
+        self.sequence += len;
+        if let Some(lost) = self.lost.as_mut() {
+            *lost += len;
+            return Taken::Behind;
+        }
+        match self.push.push(self.output_frame(start, bytes)) {
+            Pushed::Queued => Taken::Sent,
+            Pushed::Closed => Taken::Gone,
+            Pushed::Full => {
+                // Everything queued goes, and is counted: the client resumes
+                // from the first byte of the first frame dropped here.
+                let dropped: u64 = self
+                    .push
+                    .clear()
+                    .into_iter()
+                    .filter_map(|event| match event.payload {
+                        Some(farcooler_protocol::v1::event::Payload::TerminalFrame(
+                            farcooler_protocol::v1::TerminalFrame {
+                                kind: Some(farcooler_protocol::v1::terminal_frame::Kind::Output(output)),
+                                ..
+                            },
+                        )) => Some(output.payload.len() as u64),
+                        _ => None,
+                    })
+                    .sum();
+                tracing::debug!(dropped = dropped + len, "a client fell behind a terminal; resyncing");
+                self.lost = Some(dropped + len);
+                Taken::Behind
+            }
+        }
+    }
+
+    fn caught_up(&self) -> impl std::future::Future<Output = bool> + Send {
+        let push = self.push.clone();
+        async move { push.drained().await }
+    }
+
+    fn resync(&mut self, picture: Vec<u8>) -> bool {
+        let lost = self.lost.take().unwrap_or(0);
+        let start = self.sequence;
+        self.sequence += picture.len() as u64;
+        let gap = self.frame(farcooler_protocol::v1::terminal_frame::Kind::Gap(
+            farcooler_protocol::v1::Gap {
+                resumed_at_sequence: start,
+                lost_bytes: Some(lost),
+                reason: farcooler_protocol::v1::GapReason::ClientTooSlow as i32,
+            },
+        ));
+        let output = self.output_frame(start, picture);
+        self.push.replace(vec![gap, output])
+    }
+}
+
 pub struct Rpc {
     service: Arc<Service>,
     watcher: Arc<crate::watch::Watcher>,
@@ -61,7 +209,7 @@ pub struct Rpc {
     /// clients that never asked, and it drops frames from a slow reader, which
     /// for terminal bytes is an escape sequence cut in half. See
     /// `Handler::pushes`.
-    push: tokio::sync::mpsc::UnboundedSender<farcooler_protocol::v1::Event>,
+    push: farcooler_transport::PushSender,
     /// The attachment this connection is currently serving, so a second
     /// `terminal.attach` can end the first rather than interleave with it.
     attachment: Arc<std::sync::Mutex<Option<Attachment>>>,
@@ -88,7 +236,7 @@ impl Rpc {
         watcher: Arc<crate::watch::Watcher>,
         peer: Peer,
         stop: Arc<tokio::sync::Notify>,
-        push: tokio::sync::mpsc::UnboundedSender<farcooler_protocol::v1::Event>,
+        push: farcooler_transport::PushSender,
         attachment: Arc<std::sync::Mutex<Option<Attachment>>>,
     ) -> Self {
         Self {
@@ -146,7 +294,10 @@ pub struct RpcFactory {
     /// Built here rather than by the attach handler because `serve_connection`
     /// asks for the receiving half once, before the first request — a handler
     /// that only had one after somebody attached would have nothing to hand it.
-    push: tokio::sync::mpsc::UnboundedSender<farcooler_protocol::v1::Event>,
+    ///
+    /// Bounded at `TERMINAL_BACKLOG_BYTES`. See `TerminalSink` for what happens
+    /// at the bound.
+    push: farcooler_transport::PushSender,
     /// The receiving half, until `Handler::pushes` takes it.
     ///
     /// A `std::sync::Mutex` and not a `tokio` one: it is locked once, held for
@@ -154,11 +305,7 @@ pub struct RpcFactory {
     /// because a receiver can only be taken once — a second
     /// `serve_connection` on the same handler gets `None` and pushes nothing,
     /// rather than half of every attachment's bytes.
-    pushes: Arc<
-        std::sync::Mutex<
-            Option<tokio::sync::mpsc::UnboundedReceiver<farcooler_protocol::v1::Event>>,
-        >,
-    >,
+    pushes: Arc<std::sync::Mutex<Option<farcooler_transport::PushReceiver>>>,
     /// The attachment this connection is serving, so a second attach can end
     /// the first. Shared with every `Rpc` this builds, for the reason `session`
     /// is: the clones are one connection, not several.
@@ -178,7 +325,7 @@ impl RpcFactory {
         peer: Peer,
     ) -> Self {
         let session = service.sessions().open(peer.client_id.clone());
-        let (push, pushes) = tokio::sync::mpsc::unbounded_channel();
+        let (push, pushes) = farcooler_transport::push_queue(TERMINAL_BACKLOG_BYTES);
         Self {
             service,
             watcher,
@@ -233,9 +380,7 @@ impl Handler for RpcFactory {
     }
 
     /// This connection's own channel, taken once. See the field.
-    fn pushes(
-        &self,
-    ) -> Option<tokio::sync::mpsc::UnboundedReceiver<farcooler_protocol::v1::Event>> {
+    fn pushes(&self) -> Option<farcooler_transport::PushReceiver> {
         self.pushes.lock().ok().and_then(|mut held| held.take())
     }
 
@@ -1552,48 +1697,9 @@ impl Rpc {
                 let epoch = svc.terminal_epoch(id).unwrap_or(0);
 
                 let service = self.service.clone();
-                let push = self.push.clone();
-                let terminal_id = bytes::Bytes::copy_from_slice(id.as_bytes());
+                let sink = TerminalSink::new(self.push.clone(), id, epoch);
                 let task = tokio::spawn(async move {
-                    // The byte offset of the next run, which is what makes
-                    // `TerminalOutput.start_sequence` mean anything. Counted
-                    // here rather than in `Runtime`, because it is a property of
-                    // this attachment and not of the pane: two clients watching
-                    // the same pane attached at different moments.
-                    let mut sequence = 0u64;
-                    let _ = service
-                        .runtime()
-                        .attach(pane, |chunk| {
-                            let start = sequence;
-                            sequence += chunk.len() as u64;
-                            push
-                                .send(farcooler_protocol::v1::Event {
-                                    event_id: farcooler_protocol::ids::new_id(),
-                                    // Zero, like every other event. The offset
-                                    // that matters for a terminal is a byte
-                                    // count, and it rides in the frame where it
-                                    // has a documented unit.
-                                    sequence: 0,
-                                    payload: Some(
-                                        farcooler_protocol::v1::event::Payload::TerminalFrame(
-                                            farcooler_protocol::v1::TerminalFrame {
-                                                terminal_id: terminal_id.clone(),
-                                                epoch,
-                                                kind: Some(
-                                                    farcooler_protocol::v1::terminal_frame::Kind::Output(
-                                                        farcooler_protocol::v1::TerminalOutput {
-                                                            start_sequence: start,
-                                                            payload: bytes::Bytes::from(chunk),
-                                                        },
-                                                    ),
-                                                ),
-                                            },
-                                        ),
-                                    ),
-                                })
-                                .is_ok()
-                        })
-                        .await;
+                    let _ = service.runtime().attach(pane, sink).await;
                 });
 
                 // One attachment per connection, so this ends whatever the last
@@ -2498,6 +2604,65 @@ pub fn empty_payload() -> Option<request::Payload> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **A client that stops reading a terminal holds a bounded backlog, and
+    /// is resynced when it comes back** (ov-118). 32 MiB of output into an
+    /// attachment nobody reads: the queue never holds more than its bound plus
+    /// one frame, where it used to hold all 32. When a reader appears, what it
+    /// gets first is a `Gap` naming every dropped byte, then a reset and a
+    /// fresh picture — never the middle of the stream.
+    #[tokio::test]
+    async fn a_stalled_terminal_client_holds_a_bounded_backlog_and_is_resynced() {
+        use crate::runtime::{AttachSink, Taken};
+        use farcooler_protocol::v1::{event::Payload, terminal_frame::Kind};
+
+        const CHUNK: usize = 16 * 1024;
+        let (push, mut pushes) = farcooler_transport::push_queue(TERMINAL_BACKLOG_BYTES);
+        let mut sink = TerminalSink::new(push.clone(), Uuid::now_v7(), 3);
+
+        let mut most = 0;
+        let mut behind = 0;
+        let total = 32 * 1024 * 1024;
+        for _ in 0..(total / CHUNK) {
+            match sink.output(vec![b'y'; CHUNK]) {
+                Taken::Sent => {}
+                Taken::Behind => behind += 1,
+                Taken::Gone => panic!("nobody hung up"),
+            }
+            most = most.max(push.queued_bytes());
+        }
+        let bound = TERMINAL_BACKLOG_BYTES + CHUNK + 1024;
+        assert!(behind > 0, "the scenario should actually fall behind");
+        assert!(most <= bound, "a client that never read held {most} bytes, more than {bound}");
+
+        // Behind, and staying behind until the connection asks for more.
+        let early = tokio::time::timeout(std::time::Duration::from_millis(50), sink.caught_up()).await;
+        assert!(early.is_err(), "nothing is reading, so a picture would only queue");
+
+        let reader = tokio::spawn(async move {
+            let gap = pushes.recv().await.expect("a gap");
+            let picture = pushes.recv().await.expect("a picture");
+            (gap, picture, pushes)
+        });
+        assert!(sink.caught_up().await);
+        assert!(sink.resync(b"\x1b[?2026h\x1bcPICTURE\x1b[?2026l".to_vec()));
+        let (gap, picture, _still_reading) = reader.await.unwrap();
+
+        let Some(Payload::TerminalFrame(gap)) = gap.payload else { panic!("not a frame") };
+        let Some(Kind::Gap(gap)) = gap.kind else { panic!("not a gap: {:?}", gap.kind) };
+        assert_eq!(gap.reason, farcooler_protocol::v1::GapReason::ClientTooSlow as i32);
+        // Nothing was read before the stall, so everything was lost.
+        assert_eq!(gap.lost_bytes, Some(total as u64));
+        assert_eq!(gap.resumed_at_sequence, total as u64);
+
+        let Some(Payload::TerminalFrame(picture)) = picture.payload else { panic!("not a frame") };
+        let Some(Kind::Output(picture)) = picture.kind else { panic!("not output") };
+        assert_eq!(picture.start_sequence, total as u64);
+        assert!(picture.payload.starts_with(b"\x1b[?2026h\x1bc"));
+
+        // And live output flows again behind it.
+        assert_eq!(sink.output(b"next".to_vec()), Taken::Sent);
+    }
 
     #[test]
     fn scope_is_ordered_so_admin_can_do_everything() {
