@@ -98,6 +98,7 @@ async fn subscribe(install: &str, pane: &str) -> UnixStream {
 }
 
 #[tokio::test]
+#[ignore = "ov-197: assumes a respawned pane gets a new tty; macOS can hand the same tty back"]
 async fn a_grown_pane_is_announced_before_its_repaint_even_after_a_respawn() {
     let tmux = farcooler_core::programs::find("tmux").expect("these tests need tmux");
     let dir = tempfile::tempdir().expect("tempdir");
