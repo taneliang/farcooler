@@ -40,6 +40,10 @@ fn run(dir: &Path, args: &[&str]) -> String {
     let out = cmd
         .current_dir(dir)
         .args(["-c", "core.hooksPath=/dev/null"])
+        // An identity on every call, not only in the repositories that set
+        // one: a CI runner has no global user.name, so any commit the setup
+        // makes elsewhere (a superproject, a moved submodule) would refuse.
+        .args(["-c", "user.name=t", "-c", "user.email=t@example.com"])
         .args(args)
         .output()
         .unwrap_or_else(|e| panic!("git {args:?}: {e}"));
