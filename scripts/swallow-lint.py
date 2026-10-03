@@ -15,7 +15,7 @@ apps' own sources for the shapes that swallow a call to the host:
           cancellation-safe runCatching) used as a statement, with its result
           ignored or only `.getOrNull()`ed; and a `catch (e: Exception)` whose
           body is empty once comments and `e.rethrowIfCancellation()` are
-          taken out. Searched in the network and model code.
+          taken out. Searched in all of the Android app's Kotlin.
 
 A `Task.sleep`, a decode or a notification post is not a call to the host and
 isn't matched. A call split so that `try?` and the callee sit on different
@@ -45,10 +45,9 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 ALLOW = ROOT / "scripts" / "swallow-lint-allow.txt"
 
 SWIFT_ROOTS = ["apps/macos/Sources", "apps/ios", "apps/shared/AgentKit/Sources"]
-KOTLIN_ROOTS = [
-    "apps/android/app/src/main/java/com/farcooler/net",
-    "apps/android/app/src/main/java/com/farcooler/model",
-]
+# All of the app's Kotlin, not just net/ and model/: a screen that calls the
+# connection itself (ui/Sheets.kt's new terminal) swallows just as well.
+KOTLIN_ROOTS = ["apps/android/app/src/main/java/com/farcooler"]
 SKIP_PARTS = {"Tests", "FarCoolerUITests", "test", "androidTest", ".build", "build"}
 
 # `_ = try?` (awaited or not) or `try? await`, then a call to the host.
@@ -145,7 +144,9 @@ def swift_hits(text: str) -> list[tuple[int, str, str]]:
 
 # A line ending in one of these hands its value to the next line, so a
 # runCatching there is an expression, not a statement.
-VALUE_BEFORE = re.compile(r"(?:=|\(|,|->|\?:|\b(?:let|run|map|mapNotNull|also|apply|takeIf|with)\s*\{)\s*$")
+VALUE_BEFORE = re.compile(
+    r"(?:=|\(|,|->|\?:|\b(?:let|run|map|mapNotNull|also|apply|takeIf|with)\s*\{"
+    r"|\bwithContext\([^()]*\)\s*\{)\s*$")
 
 
 def in_value_position(lines: list[str], index: int) -> bool:
@@ -168,6 +169,11 @@ def kotlin_hits(text: str) -> list[tuple[int, str, str]]:
             begin = starts[index] + len(line) - len(line.lstrip())
             end = balanced_end(text, begin, "{", "}")
             after = text[end:]
+            # `.onSuccess { … }` looks at the value, not the failure: step over
+            # it and judge what follows.
+            while (step := re.match(r"^\s*\??\.\s*onSuccess\s*\{", after)):
+                end = balanced_end(text, end + step.end() - 1, "{", "}")
+                after = text[end:]
             # `.getOrNull()` as a statement throws the failure away all the same.
             ignored = re.match(r"^\s*\??\.\s*getOrNull\s*\(\s*\)", after)
             if ignored:
@@ -288,9 +294,12 @@ def self_test() -> int:
         ("kotlin", 'val x =\n    runCatching { g() }\n        .getOrNull()?.items ?: emptyList()', False),
         ("kotlin", 'read = { w ->\n    attempt { g(w) }\n        .getOrNull()\n}', False),
         ("kotlin", 'val y = raw?.let {\n    runCatching { g(it) }.getOrNull()\n}', False),
+        ("kotlin", 'val z = withContext(Dispatchers.Default) {\n    runCatching { g() }.getOrNull()\n}', False),
         ("kotlin", 'scope.launch {\n    attempt { core.call("x") }\n}', True),
         ("kotlin", 'fun f() {\n    attempt { g() }\n        .onFailure { show(it) }\n}', False),
         ("kotlin", 'fun f() {\n    runCatching { g() }.getOrElse { return }\n}', False),
+        ("kotlin", 'fun f() {\n    runCatching { g() }\n        .onSuccess { use(it) }\n        .onFailure { show(it) }\n}', False),
+        ("kotlin", 'fun f() {\n    runCatching { g() }.onSuccess { use(it) }\n}', True),
         ("kotlin", 'fun f() {\n    try { g() } catch (e: Exception) {\n        e.rethrowIfCancellation()\n        show(e)\n    }\n}', False),
         ("kotlin", '/** caught by `catch (e: Exception) {}` */', False),
     ]
