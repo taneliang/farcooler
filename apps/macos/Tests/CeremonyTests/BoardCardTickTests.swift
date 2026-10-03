@@ -7,16 +7,15 @@ import os
 
 @testable import Far_Cooler
 
-/// A card on a quiet board turns stale on the minute: the orange sentence, the
-/// orange border and the clock icon, together, with no data change.
+/// A card on a quiet board turns stale on the minute: its metadata line
+/// reads "In Progress · no movement for 1d", with no data change (ov-92: the
+/// mark is quiet text now, no orange sentence, icon or border).
 ///
 /// The board redraws only when a task changes, and a card crosses a day of
-/// silence at whatever minute it crosses it. So each of the card's three stale
-/// marks is drawn inside `BoardTick`, and this draws the real `TaskListRow` in
-/// an unshown window, moves the board's clock past the day, and reads the
-/// three marks back out of the pixels. A mark drawn from `Date()` outside a
-/// tick — as the border and the icon were until ov-29 — stays grey here and
-/// fails its own line, while the other two pass.
+/// silence at whatever minute it crosses it. So the line is drawn inside
+/// `BoardTick`, and this draws the real `TaskListRow` in an unshown window,
+/// moves the board's clock past the day, and reads the change back out of
+/// the pixels. A line drawn from `Date()` outside a tick stays as it was.
 ///
 /// Ink, not a question put to the view, because a view asked whether it is
 /// stale will answer from its model while painting the last redraw: the
@@ -34,50 +33,26 @@ struct BoardCardTickTests {
         var board: BoardClock { BoardClock(interval: 0.05) { [self] in now } }
     }
 
-    /// Orange pixels in three places on the card: a band down its left edge
-    /// (the border), its first line, beside the key (the icon), and the rest
-    /// of its inside (the sentence — nothing else on this card is orange).
-    /// The two inner regions keep six points off every edge, clear of the
-    /// border's rounded corners, whose ink would otherwise count for the
-    /// other marks.
-    struct Ink: CustomStringConvertible {
-        var border = 0, icon = 0, sentence = 0
-        var description: String { "border \(border), icon \(icon), sentence \(sentence)" }
-    }
-
-    /// Where the card's first line, its key and the clock icon, ends: its
-    /// 8 pt top padding and a line of key.
-    private static let firstLine: CGFloat = 24
-
-    private static func ink(_ view: NSView) -> Ink {
+    /// The card's pixels, to compare a redraw against.
+    private static func pixels(_ view: NSView) -> [UInt32] {
         let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
         view.cacheDisplay(in: view.bounds, to: rep)
-        let scale = CGFloat(rep.pixelsWide) / view.bounds.width
-        let (w, h) = (CGFloat(rep.pixelsWide), CGFloat(rep.pixelsHigh))
-        let pt = { (value: CGFloat) in Int((value * scale).rounded()) }
-        var ink = Ink()
+        var out: [UInt32] = []
         for y in 0..<rep.pixelsHigh {
             for x in 0..<rep.pixelsWide {
-                guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB),
-                    c.alphaComponent > 0.3, c.redComponent > 0.7,
-                    c.redComponent - c.blueComponent > 0.3
-                else { continue }
-                let (fx, fy) = (CGFloat(x), CGFloat(y))
-                if x < pt(1.5), fy > h * 0.3, fy < h * 0.7 {
-                    ink.border += 1
-                } else if x > pt(6), x < rep.pixelsWide - pt(6), y > pt(6), y < pt(Self.firstLine) {
-                    ink.icon += 1
-                } else if x > pt(6), fx < w - CGFloat(pt(6)), y >= pt(Self.firstLine),
-                    y < rep.pixelsHigh - pt(6)
-                {
-                    ink.sentence += 1
-                }
+                var p = [Int](repeating: 0, count: 4)
+                rep.getPixel(&p, atX: x, y: y)
+                out.append(UInt32(p[0]) << 24 | UInt32(p[1]) << 16 | UInt32(p[2]) << 8 | UInt32(p[3]))
             }
         }
-        return ink
+        return out
     }
 
-    @Test func aQuietCardTurnsStaleOnTheMinuteBorderIconAndSentence() async throws {
+    private static func differing(_ a: [UInt32], _ b: [UInt32]) -> Int {
+        zip(a, b).filter { $0 != $1 }.count + abs(a.count - b.count)
+    }
+
+    @Test func aQuietCardTurnsStaleOnTheMinute() async throws {
         // Now, on the real clock, so a mark that reads `Date()` instead of the
         // board's clock sees the card as fresh — which is what a quiet board
         // does to it.
@@ -100,7 +75,7 @@ struct BoardCardTickTests {
         // The process's appearance as well as the view's: the pane chrome the
         // border is stroked over resolves its system color against
         // `NSApp.effectiveAppearance` (`blend` in Theme.swift), so on a Mac in
-        // Dark mode the orange border lands on dark chrome and reads as too
+        // Dark mode the card resolves against dark chrome and reads as too
         // dark to count, whatever the host view says.
         let app = NSApplication.shared
         let appearance = app.appearance
@@ -120,21 +95,20 @@ struct BoardCardTickTests {
         window.setContentSize(host.fittingSize)
         host.layoutSubtreeIfNeeded()
 
-        let before = Self.ink(host)
-        #expect(before.border == 0 && before.icon == 0 && before.sentence == 0, "fresh: \(before)")
+        let before = Self.pixels(host)
+        let line = { TaskRowMeta.line(row, at: clock.now).lead }
+        #expect(line()?.hasPrefix("Updated") == true || line()?.hasPrefix("Added") == true, "fresh: \(line() ?? "")")
 
         // Two minutes on: a day and a minute of silence. Nothing about the
         // card has changed but the time.
         clock.move(by: 120)
-        var after = Ink()
+        #expect(line() == "In Progress · no movement for 1d")
+        var changed = 0
         let deadline = Date().addingTimeInterval(5)
         repeat {
             try await Task.sleep(for: .milliseconds(50))
-            after = Self.ink(host)
-        } while (after.border == 0 || after.icon == 0 || after.sentence == 0) && Date() < deadline
-
-        #expect(after.sentence > 20, "the stale sentence did not tick: \(after)")
-        #expect(after.border > 20, "the orange border did not tick: \(after)")
-        #expect(after.icon > 20, "the clock icon did not tick: \(after)")
+            changed = Self.differing(before, Self.pixels(host))
+        } while changed <= 20 && Date() < deadline
+        #expect(changed > 20, "the stale line did not tick: \(changed) pixels changed")
     }
 }

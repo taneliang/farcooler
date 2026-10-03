@@ -52,9 +52,10 @@ struct TaskRowMetaTests {
         }
         let blocked = TaskRowMeta.line(Self.row(.todo, blocked: true), at: Self.now)
         #expect(blocked.tone == .attention && blocked.lead == "Waiting on ov-27")
-        // A task that hasn't moved in a day says so in orange, never the
-        // accent.
+        // A task that hasn't moved in a day says so quietly: no accent, no
+        // semantic color.
         let stale = TaskRowMeta.line(Self.row(.inProgress, daysAgo: 3), at: Self.now)
-        #expect(stale.tone == .stale && stale.lead?.hasPrefix("Hasn’t moved") == true)
+        #expect(stale.tone == .quiet && TaskRowMetaView.color(stale.tone) == .secondary)
+        #expect(stale.lead == "In Progress · no movement for 3d")
     }
 }

@@ -5,17 +5,16 @@ import SwiftUI
 /// is very distracting"): "<status or time> · <progress>", e.g. "Done 6d ago"
 /// or "Updated 2h ago · 3 of 5", quiet, with a monochrome checklist glyph
 /// before the progress. Color only where the row needs the person: a
-/// decision waiting or a task blocked on another (the accent), and a task
-/// that hasn't moved in a day (orange, with its clock and border: someone
-/// should look). Labels live in the task view, not here.
+/// decision waiting or a task blocked on another. A task that hasn't moved
+/// in a day says so in the same quiet text, "In Progress · no movement for
+/// 3d", with no color, icon or border of its own. Labels live in the task
+/// view, not here.
 enum TaskRowMeta {
     enum Tone: Equatable {
         /// Secondary, the row's ordinary metadata.
         case quiet
         /// The accent: the row needs the person.
         case attention
-        /// Orange: it hasn't moved in a day.
-        case stale
     }
 
     struct Line: Equatable {
@@ -47,10 +46,15 @@ enum TaskRowMeta {
     }
 
     static func line(_ row: TaskRow, at now: Date) -> Line {
-        let stale = row.stalenessNote(at: now)
-        let lead = row.blockedSummary ?? stale ?? row.timeNote(at: now)
-        let tone: Tone = needsAttention(row) ? .attention : stale != nil ? .stale : .quiet
-        return Line(lead: lead, progress: progress(row), tone: tone)
+        let lead = row.blockedSummary ?? stale(row, at: now) ?? row.timeNote(at: now)
+        return Line(lead: lead, progress: progress(row), tone: needsAttention(row) ? .attention : .quiet)
+    }
+
+    /// "In Progress · no movement for 3d", or nil for a row still moving.
+    static func stale(_ row: TaskRow, at now: Date) -> String? {
+        guard row.staleness(at: now) == .stale else { return nil }
+        let days = max(1, Int(row.stoppedFor(at: now) / 86_400))
+        return "\(row.status.title) · no movement for \(days)d"
     }
 }
 
@@ -63,7 +67,6 @@ struct TaskRowMetaView: View {
         switch tone {
         case .quiet: .secondary
         case .attention: .accentColor
-        case .stale: .orange
         }
     }
 

@@ -1221,20 +1221,9 @@ struct TaskListRow: View {
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel("Worktree \(worktree.task)")
                     }
-                    // A stale row is visibly different, which is the
-                    // board's whole job beyond showing state: a task sitting
-                    // in `todo` that you assumed was in flight is the failure
-                    // mode of the factory. On the board's tick, like the
-                    // sentence and the border: a card crosses a day of
-                    // silence on a quiet board with no data change to redraw
-                    // it, and its three stale marks turn together.
-                    BoardTick { now in
-                        if row.staleness(at: now) == .stale {
-                            Image(systemName: "clock.badge.exclamationmark")
-                                .foregroundStyle(.orange)
-                                .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                        }
-                    }
+                    // A stale row says so in its metadata line, quietly
+                    // (`TaskRowMeta.stale`): no icon, color or border of its
+                    // own (ov-92).
                 }
                 Text(row.title)
                     .font(
@@ -1265,15 +1254,10 @@ struct TaskListRow: View {
             }
         }
         .overlay(
-            BoardTick { now in
-                let stale = row.staleness(at: now) == .stale
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(
-                        selected
-                            ? (keyed ? Color.accentColor : Color.secondary.opacity(0.6))
-                            : stale ? Color.orange.opacity(0.55) : WorkspaceStyle.hairline,
-                        lineWidth: selected || stale ? 1 : 0.5)
-            }
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(
+                    selected ? (keyed ? Color.accentColor : Color.secondary.opacity(0.6)) : WorkspaceStyle.hairline,
+                    lineWidth: selected ? 1 : 0.5)
         )
         .contentShape(Rectangle())
         .onTapGesture { if let onChoose { onChoose() } else { store.choose(row) } }
