@@ -519,14 +519,31 @@ in `Request.required_capabilities` turns that into a refusal.
 
 `./scripts/proto-lint.py` enforces the first rule against
 `proto/baseline/<channel>.proto`, which the promotion workflow commits for
-preview and stable, and the Canary workflow commits for canary after every
-successful ship. How long a field is frozen depends on the channel: **permanent**
+preview and stable, and `canary-baseline.yml` commits for canary when a Canary
+run that shipped ends. How long a field is frozen depends on the channel: **permanent**
 once it ships in a stable release, **one preview** in preview — that is where the
 protocol's shape is still being discovered, and carrying every exploratory field
 to 1.0 is worse than a tester having to update. In canary a field is frozen
 **from the moment a Canary build carrying it ships**, because that build is on
 the owner's phones within the hour and the next push's daemon has to decode it.
 Local freezes nothing.
+
+Removing a field means reserving its number (`reserved 4;`, and its name if you
+like): the lint accepts that, as protobuf does, and refuses a reserved number
+used again. A changed meaning takes a new number.
+
+**In canary, on main is as good as shipped.** The baseline is recorded when a
+Canary run ends, so Canary's own `wire` job also runs `--since-baseline`: the
+candidate is checked against every version of the proto on main since the
+recorded commit. That includes commits no build ever carried, such as a run
+cancelled mid-build or the middle commits of a push of several, so a field
+added in one commit and renamed in the next is red on its first push. The way
+out is the same as for a shipped field: reserve the old number. If it certainly
+never shipped, a hand commit on main may instead move the first line of
+`proto/baseline/canary.proto` to a commit at or after the fix; Canary ignores a
+push to `proto/baseline/`, so that ships nothing. The lint refuses a baseline
+whose first line names no commit, or one main no longer has, rather than check
+the baseline alone.
 
 ## CI
 

@@ -448,23 +448,41 @@ def since_baseline_problems(repo, baseline_text, current_text, proto="proto/farc
     against the one before: a field the previous push added and this one
     renumbered went to TestFlight clean. Every commit after the recorded one,
     up to HEAD's parent, may have shipped, so each distinct proto among them
-    is owed compatibility too. Commits that never shipped (a run cancelled in
-    its build) are checked all the same: the wire is additive-only from the
-    moment a field lands on main, and the way out of a red here is to restore
-    the field, or reserve its tag, as for any other break.
+    is owed compatibility too.
+
+    So are commits that never shipped: a run cancelled in its build, and every
+    commit but the last of a push of several. The wire is additive-only from
+    the moment a field lands on main. A field added and then removed before
+    anything shipped is still a red here, and the ways out are, in order:
+
+      - reserve its number (`reserved N;`), and give a changed meaning a new
+        number, exactly as for a field that shipped;
+      - or, when it certainly never shipped, move the baseline's first line
+        to a commit at or after its removal, by hand, on main. canary.yml
+        ignores a push to proto/baseline/, so this ships nothing.
+
+    The commit the baseline names must be in this history. A missing first
+    line or a commit main no longer has (rewritten, or the line edited) fails
+    rather than quietly checking the baseline alone, which is the gap this
+    exists to close.
     """
     def git(*args):
         return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
 
     match = RECORDED.match(baseline_text)
     if not match:
-        return [], "the baseline names no commit, so only it was compared"
+        raise Unchecked(
+            "the canary baseline's first line names no commit, so the commits since it cannot be found. "
+            "Restore the line `// Shipped by Canary at <commit on main>.` naming the commit whose proto it holds."
+        )
     recorded = match.group(1)
     if git("rev-parse", "--is-shallow-repository").stdout.strip() != "false":
         raise Unchecked("this checkout is shallow, so the commits since the canary baseline cannot be read. Check out with fetch-depth: 0.")
     if git("cat-file", "-e", f"{recorded}^{{commit}}").returncode != 0:
-        # Full history without it: rewritten, as canary-baseline.sh allows.
-        return [], f"the baseline's commit {recorded[:10]} is not in this history, so only the baseline was compared"
+        raise Unchecked(
+            f"the canary baseline names {recorded}, which is not in this history (main rewritten, or the line edited), "
+            f"so the commits since it cannot be found. Point its first line at the commit on main whose proto it holds."
+        )
     log = git("log", "--format=%H", f"{recorded}..HEAD^", "--", proto)
     if log.returncode != 0:
         raise Unchecked(f"git log failed: {log.stderr.strip()}")
@@ -482,7 +500,7 @@ def since_baseline_problems(repo, baseline_text, current_text, proto="proto/farc
     return problems, f"and with the {len(seen)} other version(s) of the wire on main since it"
 
 
-def lint(channel, baseline_dir):
+def lint(channel, baseline_dir, proto=PROTO):
     """The problems, and the line to print if there are none."""
     problems = capability_problems()
     baseline_path = baseline_dir / f"{channel}.proto"
@@ -491,8 +509,24 @@ def lint(channel, baseline_dir):
             f"no {channel} baseline yet — nothing has shipped, so nothing was compared "
             f"(only the capability table was checked)"
         )
-    problems += compare(parse(baseline_path.read_text()), parse(PROTO.read_text()))
+    problems += compare(parse(baseline_path.read_text()), parse(proto.read_text()))
     return problems, f"proto is compatible with the {channel} baseline"
+
+
+def check(channel, since_baseline=False, root=ROOT):
+    """What `--channel` prints: the lint, and with `since_baseline` main since it.
+
+    One function so the self-test runs exactly what the gate runs; raises
+    Unchecked when the history cannot be read.
+    """
+    baseline_dir, proto = root / "proto" / "baseline", root / "proto" / "farcooler.proto"
+    problems, verdict = lint(channel, baseline_dir, proto)
+    baseline = baseline_dir / f"{channel}.proto"
+    if since_baseline and baseline.exists():
+        more, note = since_baseline_problems(root, baseline.read_text(), proto.read_text())
+        problems += more
+        verdict = f"{verdict}, {note}"
+    return problems, verdict
 
 
 def self_test():
@@ -823,14 +857,34 @@ def self_test():
         since_cases = [
             ("a field added since the baseline, then removed", header, alpha, 1),
             ("the same, kept", header, alpha + "message B { string beta = 1; }\n", 0),
-            ("a baseline naming no commit", alpha, alpha, 0),
-            ("a baseline commit not in history", header.replace(r, "0" * 40), alpha, 0),
+            ("an unshipped field removed, its number reserved", header, alpha + "message B { reserved 1; }\n", 0),
         ]
         for what, base, current, want in since_cases:
             count += 1
             got, _ = since_baseline_problems(repo, base, current)
             if len(got) != want:
                 failures.append(f"since-baseline case {what!r}: expected {want} problem(s), got {got}")
+        # A baseline whose commit cannot be found refuses, rather than quietly
+        # checking the baseline alone.
+        for what, base in [("naming no commit", alpha), ("naming a commit not in history", header.replace(r, "0" * 40))]:
+            count += 1
+            try:
+                since_baseline_problems(repo, base, alpha)
+                failures.append(f"since-baseline: a baseline {what} passed instead of refusing")
+            except Unchecked:
+                pass
+        # End to end, as `--channel canary --since-baseline` runs: the
+        # baseline file and the working proto in the tree, beta removed.
+        count += 1
+        (repo / "proto" / "baseline").mkdir()
+        (repo / "proto" / "baseline" / "canary.proto").write_text(header)
+        (repo / "proto" / "farcooler.proto").write_text(alpha)
+        strict, _ = check("canary", since_baseline=True, root=repo)
+        loose, _ = check("canary", since_baseline=False, root=repo)
+        if not any("beta" in p for p in strict) or loose:
+            failures.append(f"--since-baseline end to end: expected beta's removal only with the flag, got {strict} and {loose}")
+        (repo / "proto" / "baseline" / "canary.proto").unlink()
+        (repo / "proto" / "baseline").rmdir()
         # HEAD's own change is the candidate, not a version it owes: with H
         # adding gamma, a current proto without gamma is not refused for it.
         count += 1
@@ -911,16 +965,11 @@ def main():
         problems = compare(parse(old.read_text()), parse(new.read_text()))
         verdict = f"{new} is compatible with {old}"
     else:
-        problems, verdict = lint(args.channel, ROOT / "proto" / "baseline")
-        baseline = ROOT / "proto" / "baseline" / f"{args.channel}.proto"
-        if args.since_baseline and baseline.exists():
-            try:
-                more, note = since_baseline_problems(ROOT, baseline.read_text(), PROTO.read_text())
-            except Unchecked as e:
-                print(f"::error::{e}", file=sys.stderr)
-                return 1
-            problems += more
-            verdict = f"{verdict}, {note}"
+        try:
+            problems, verdict = check(args.channel, args.since_baseline)
+        except Unchecked as e:
+            print(f"::error::{e}", file=sys.stderr)
+            return 1
     if problems:
         print(f"\n{len(problems)} wire compatibility problem(s):\n", file=sys.stderr)
         for p in problems:
