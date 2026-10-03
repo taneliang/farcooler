@@ -912,7 +912,9 @@ mod tests {
     // MESSAGES are codex's own, read with `strings` from the installed
     // codex-cli 0.153.4 binary (app-server turn_processor.rs); the code
     // -32600 and the framing around them are invented. Replace with recorded
-    // frames when one is captured.
+    // frames when one is captured: that takes a real codex driven by
+    // `tests/fixtures/capture_turn.py` through a Stop and a Send Now at a
+    // turn's end, which is a run on the owner's machine, not a test.
     const SYNTHETIC_NO_TURN_TO_INTERRUPT: &str =
         r#"{"id":2,"error":{"code":-32600,"message":"no active turn to interrupt"}}"#;
     const SYNTHETIC_NO_TURN_TO_STEER: &str =
@@ -1178,6 +1180,93 @@ take; printf '{"id":5,"result":{}}\n'; read -r done"#,
         assert!(ended.iter().any(|e| matches!(e, AgentEvent::TurnEnded { .. })), "{ended:?}");
         let events = next(&mut backend).await;
         assert!(events.is_empty(), "a stale Stop is not an error: {events:?}");
+    }
+
+    #[tokio::test]
+    async fn a_live_turns_stop_refusal_is_said_even_when_the_turn_ends_right_after() {
+        // Refused BEFORE `turn/completed`, for a reason that is not the turn
+        // being gone: the turn was still running when Stop failed, so the
+        // person is told, and the completion that follows does not unsay it.
+        let (mut backend, _capture) = fake_app_server(
+            r#"take; fix 9 1; fix 11; take; refuse; fix 29; read -r done"#,
+            SYNTHETIC_INTERRUPT_FAILED,
+        )
+        .await;
+        backend.prompt("hello", &[]).await.expect("the turn goes out");
+        next(&mut backend).await;
+        next(&mut backend).await;
+        backend.cancel().await.expect("Stop goes out");
+        let refused = next(&mut backend).await;
+        assert_eq!(
+            refused,
+            vec![AgentEvent::Message {
+                role: farcooler_agent_core::event::Role::Agent,
+                text: "Codex couldn’t stop this turn. Try again in a moment.".into(),
+                parent: None,
+            }],
+            "not silent"
+        );
+        let ended = next(&mut backend).await;
+        assert!(ended.iter().any(|e| matches!(e, AgentEvent::TurnEnded { .. })), "{ended:?}");
+    }
+
+    #[tokio::test]
+    async fn codexs_own_no_turn_answer_is_benign_even_before_turn_completed_arrives() {
+        // The case the text match exists for: codex finished the turn and
+        // answered the Stop and the Send Now before its `turn/completed`
+        // reached us, so the id we track still names the turn. Only codex's
+        // words say it is over. Exact 0.153.4 text (SYNTHETIC framing).
+        for (refusal, steer) in [
+            (SYNTHETIC_NO_TURN_TO_INTERRUPT, false),
+            (SYNTHETIC_NO_TURN_TO_STEER, true),
+        ] {
+            let (mut backend, _capture) = fake_app_server(
+                r#"take; fix 9 1; fix 11; take; refuse; fix 29; read -r done"#,
+                refusal,
+            )
+            .await;
+            backend.prompt("hello", &[]).await.expect("the turn goes out");
+            next(&mut backend).await;
+            next(&mut backend).await;
+            if steer {
+                backend.steer("also this", &[]).await.expect("the steer goes out");
+            } else {
+                backend.cancel().await.expect("Stop goes out");
+            }
+            assert_eq!(backend.turn_id.as_deref(), Some(TURN), "still tracked as running");
+            let events = next(&mut backend).await;
+            assert!(events.is_empty(), "{refusal}: nothing went wrong: {events:?}");
+            let returned = backend.take_returned_steers();
+            if steer {
+                assert_eq!(texts(&returned), ["also this"], "never lost");
+            }
+        }
+    }
+
+    #[test]
+    fn the_stale_turn_texts_are_codexs_own_exactly() {
+        // Read with `strings` from the installed codex-cli 0.153.4 binary,
+        // beside `app-server/src/request_processors/turn_processor.rs`. A
+        // codex that rewords these makes a stale Stop say "Try again", which
+        // is loud rather than silent; this table is what notices first.
+        for stale in [
+            "no active turn to interrupt",
+            "no active turn to steer",
+            "expected active turn id `019fe879-657e` but found `019fe879-9999`",
+            "expected active turn id  but found ",
+        ] {
+            assert!(stale_turn_refusal(stale), "{stale:?} means the turn is over");
+        }
+        for live in [
+            "cannot steer a review turn",
+            "cannot steer a compact turn",
+            "failed to interrupt turn: channel closed",
+            "failed to steer turn: channel closed",
+            "completed rollout item has no active turn",
+            "expectedTurnId must not be empty",
+        ] {
+            assert!(!stale_turn_refusal(live), "{live:?} is not the turn being over");
+        }
     }
 
     #[tokio::test]
