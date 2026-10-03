@@ -1324,7 +1324,7 @@ struct WorktreeDetail: View {
     private func cardMenu(_ t: Terminal) -> some View {
         Button("Open") { onOpenTerminal(t) }
         if let kind = LostPane.Kind(state: t.state) {
-            Divider()
+            Divider() // style-exempt: a context menu's section break
             ForEach(LostPane.actions(for: kind), id: \.title) { action in
                 Button(action.title) { onTerminalAction(TerminalAction(action), t) }
             }

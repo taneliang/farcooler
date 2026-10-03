@@ -53,7 +53,7 @@ struct LostTerminalPage: View {
                         ScreenPreviewText(lines: lastScreen, width: 640, size: 11)
                             .padding(10)
                             .background(
-                                RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: Palette.background)))
+                                RoundedRectangle.card.fill(Color(nsColor: Palette.background)))
                             .textSelection(.enabled)
                     }
                 }
