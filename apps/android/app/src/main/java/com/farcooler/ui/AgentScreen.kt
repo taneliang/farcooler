@@ -920,7 +920,10 @@ private fun AgentComposer(
     }
 
     var mentionResults by remember { mutableStateOf<List<String>>(emptyList()) }
-    var attachments by remember { mutableStateOf<List<AgentStream.Attachment>>(emptyList()) }
+    // Ready photos, and how many are still being fitted. See [ComposerPhotos]:
+    // the send waits for the fit, so a photo cannot slip to the next prompt.
+    var photos by remember { mutableStateOf(ComposerPhotos()) }
+    val attachments = photos.ready
     var attachmentError by remember { mutableStateOf<String?>(null) }
     var overflowOpen by remember { mutableStateOf(false) }
 
@@ -944,16 +947,13 @@ private fun AgentComposer(
         // as they came is what this used to do, and the protocol refused every
         // photo over a megabyte. See [PromptImageBudget]. Off the main thread:
         // decoding a camera photo is tens of milliseconds at best.
+        photos = photos.began()
         scope.launch {
             val fitted = withContext(Dispatchers.Default) {
                 runCatching { PromptImageBudget.fit(bytes) { promptImageEncoder(bytes) } }.getOrNull()
             }
-            if (fitted == null) {
-                attachmentError = "That photo couldn’t be prepared to send."
-                return@launch
-            }
-            attachments = attachments + AgentStream.Attachment(fitted.second, fitted.first)
-            attachmentError = null
+            photos = photos.finished(fitted?.let { AgentStream.Attachment(it.second, it.first) })
+            attachmentError = if (fitted == null) "That photo couldn’t be prepared to send." else null
         }
     }
 
@@ -1020,7 +1020,7 @@ private fun AgentComposer(
             ComposerToken.None -> Unit
         }
 
-        if (attachments.isNotEmpty()) {
+        if (attachments.isNotEmpty() || photos.preparing > 0) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 attachments.forEachIndexed { index, attachment ->
                     Row(
@@ -1037,7 +1037,7 @@ private fun AgentComposer(
                             Modifier
                                 .minimumInteractiveComponentSize()
                                 .clickable {
-                                    attachments = attachments.filterIndexed { i, _ -> i != index }
+                                    photos = photos.removed(index)
                                 },
                             contentAlignment = Alignment.Center,
                         ) {
@@ -1047,6 +1047,20 @@ private fun AgentComposer(
                                 modifier = Modifier.size(14.dp),
                             )
                         }
+                    }
+                }
+                // Until the fit lands, which is also why Send is off.
+                if (photos.preparing > 0) {
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Preparing…", style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
@@ -1220,13 +1234,13 @@ private fun AgentComposer(
             IconButton(
                 onClick = {
                     val message = field.text.trim()
-                    if (message.isEmpty() && attachments.isEmpty()) return@IconButton
+                    if (!photos.canSend(message)) return@IconButton
                     onSend(message, attachments)
                     field = TextFieldValue("")
-                    attachments = emptyList()
+                    photos = photos.sent()
                     mentionResults = emptyList()
                 },
-                enabled = field.text.isNotBlank() || attachments.isNotEmpty(),
+                enabled = photos.canSend(field.text),
             ) {
                 Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
             }
