@@ -19,6 +19,9 @@ struct ProjectTerminals {
     /// The one open in the main area, by id.
     var selected: String?
     var onOpen: (Terminal) -> Void = { _ in }
+    /// Restart or Dismiss, from a lost terminal's context menu: ov-191's
+    /// answers, as the worktree page's cards offer them.
+    var onAction: (TerminalAction, Terminal) -> Void = { _, _ in }
     /// New Terminal, the section's trailing row. Nil where the runner can't
     /// take one.
     var onNew: (() -> Void)?
@@ -78,7 +81,7 @@ struct ProjectTerminalsSection: View {
             ForEach(terminals.terminals) { terminal in
                 ProjectTerminalRow(
                     terminal: terminal, selected: terminal.id == terminals.selected, keyed: keyed,
-                    onOpen: { terminals.onOpen(terminal) })
+                    onOpen: { terminals.onOpen(terminal) }, onAction: { terminals.onAction($0, terminal) })
             }
             if let onNew = terminals.onNew {
                 Button(action: onNew) {
@@ -115,6 +118,7 @@ private struct ProjectTerminalRow: View {
     let selected: Bool
     let keyed: Bool
     let onOpen: () -> Void
+    let onAction: (TerminalAction) -> Void
 
     var body: some View {
         // A button, so it's reached by the keyboard as well as the mouse.
@@ -137,9 +141,23 @@ private struct ProjectTerminalRow: View {
             .navigatorRow(selected: selected, keyed: keyed, minHeight: ColumnGrid.rowHeight)
         }
         .buttonStyle(.plain)
+        .contextMenu { menu }
         .accessibilityLabel(terminal.label)
         .accessibilityValue(terminal.status.label)
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier("navigator-terminal-\(terminal.id)")
+    }
+
+    /// Open, and for a terminal with no running pane the lost page's own
+    /// answers (ov-191), as `WorktreeDetail`'s cards have them.
+    @ViewBuilder
+    private var menu: some View {
+        Button("Open", action: onOpen)
+        if let kind = LostPane.Kind(state: terminal.state) {
+            Divider()  // style-exempt: menu section break
+            ForEach(LostPane.actions(for: kind), id: \.title) { action in
+                Button(action.title) { onAction(TerminalAction(action)) }
+            }
+        }
     }
 }

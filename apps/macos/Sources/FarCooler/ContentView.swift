@@ -1568,26 +1568,8 @@ struct ContentView: View {
                     to: .workspace(host: host, workspace: workspace.id, focus: .worktree(checkout.id, terminal: terminal.id)),
                     key: PaneRef(host: host, worktree: checkout.id, terminal: terminal.id))
             },
-            onNew: usable ? { Task { await newProjectTerminal(in: checkout, workspace: workspace.id) } } : nil)
-    }
-
-    /// New Terminal in the Terminals section: a shell in the main checkout,
-    /// in a window of its own, opened in the workspace it was asked from,
-    /// with the keyboard. Nothing else starts one (ov-190: no auto-start).
-    private func newProjectTerminal(in checkout: Worktree, workspace: String) async {
-        let host = checkout.host ?? ""
-        guard
-            let created = await act(
-                on: checkout, default: nil as Terminal?,
-                { c in
-                    await c.createTerminal(
-                        in: checkout, preset: "shell", title: "Terminal \(checkout.terminals.count + 1)")
-                })
-        else { return }
-        trail = nil
-        keyboardOnBoard = false
-        selection = .workspace(host: host, workspace: workspace, focus: .worktree(checkout.id, terminal: created.id))
-        keyPane = PaneRef(host: host, worktree: checkout.id, terminal: created.id)
+            onAction: { action, terminal in Task { await run(action, on: terminal, in: checkout) } },
+            onNew: usable ? { Task { await openShell(besideOrchestratorIn: checkout, workspace: workspace.id) } } : nil)
     }
 
     /// ↑ or ↓ in the navigator onto `item`: it's selected, and the
@@ -3709,13 +3691,22 @@ struct ContentView: View {
         return created
     }
 
-    /// ⌃B %, ⌃B " or ⌃B c with the keyboard in the Orchestrator column: a
-    /// shell in the main checkout, in a window of its own, opened beside the board in
-    /// the workspace on screen. Never a split of the
+    /// ⌃B %, ⌃B " or ⌃B c with the keyboard in the Orchestrator column, and
+    /// New Terminal in the navigator's Terminals section (ov-178): a shell
+    /// in the main checkout, in a window of its own, opened beside the board
+    /// in `workspace`, else the workspace on screen. Never a split of the
     /// orchestrator's window, which would make a checkout terminal only the
     /// column could draw (ov-78).
-    private func openShell(besideOrchestratorIn checkout: Worktree) async {
-        guard case .workspace(let host, let id, _)? = selection else { return }
+    private func openShell(besideOrchestratorIn checkout: Worktree, workspace: String? = nil) async {
+        let host = checkout.host ?? ""
+        let id: String
+        if let workspace {
+            id = workspace
+        } else if case .workspace(host, let current, _)? = selection {
+            id = current
+        } else {
+            return
+        }
         guard
             let created = await act(
                 on: checkout, default: nil as Terminal?,
@@ -3724,6 +3715,8 @@ struct ContentView: View {
                         in: checkout, preset: "shell", title: "Terminal \(checkout.terminals.count + 1)")
                 })
         else { return }
+        trail = nil
+        keyboardOnBoard = false
         selection = .workspace(host: host, workspace: id, focus: .worktree(checkout.id, terminal: created.id))
         keyPane = PaneRef(host: host, worktree: checkout.id, terminal: created.id)
     }
