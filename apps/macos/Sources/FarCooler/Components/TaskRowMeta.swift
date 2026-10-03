@@ -1,14 +1,13 @@
 import AgentKit
 import SwiftUI
 
-/// A task row's one metadata line (ov-92, owner, 2 Oct: "the blue checkmark
-/// is very distracting"): "<status or time> · <progress>", e.g. "Done 6d ago"
-/// or "Updated 2h ago · 3 of 5", quiet, with a monochrome checklist glyph
-/// before the progress. Color only where the row needs the person: a
-/// decision waiting or a task blocked on another. A task that hasn't moved
-/// in a day says so in the same quiet text, "In Progress · no movement for
-/// 3d", with no color, icon or border of its own. Labels live in the task
-/// view, not here.
+/// A compact task row's second line (ov-104, after ov-92's quiet metadata):
+/// "<lead> · <agent> · <progress>", e.g. "claude working · 3 of 5",
+/// "Waiting on ov-90 · 1 of 4" or "Done 6d ago". The status itself is the
+/// group's header, so the line leads with what the header doesn't say: what
+/// the task waits on, how long it has sat, the ask, or when it landed. Color
+/// only where the row needs the person: a decision waiting, an agent asking,
+/// or a task blocked on another.
 enum TaskRowMeta {
     enum Tone: Equatable {
         /// Secondary, the row's ordinary metadata.
@@ -17,17 +16,26 @@ enum TaskRowMeta {
         case attention
     }
 
+    /// Who's on the task, in a word: "claude working", "codex needs you",
+    /// "2 agents working", "No Agent".
+    struct Agent: Equatable {
+        var word: String
+        var needsYou = false
+    }
+
     struct Line: Equatable {
-        /// What it says first: why it's blocked, its staleness, or its time.
+        /// What it says first: why it's blocked, its staleness, the ask, or
+        /// its time.
         var lead: String?
+        var agent: Agent?
         /// Its acceptance progress, "3 of 5", or nil.
         var progress: String?
         var tone: Tone
 
-        var isEmpty: Bool { lead == nil && progress == nil }
+        var isEmpty: Bool { lead == nil && agent == nil && progress == nil }
         /// Read as one line, for VoiceOver and the tests.
         var text: String {
-            [lead, progress.map { "\($0) met" }].compactMap { $0 }.joined(separator: " · ")
+            [lead, agent?.word, progress.map { "\($0) met" }].compactMap { $0 }.joined(separator: " · ")
         }
     }
 
@@ -45,23 +53,59 @@ enum TaskRowMeta {
         return "\(progress.met) of \(progress.total)"
     }
 
-    static func line(_ row: TaskRow, at now: Date) -> Line {
-        let lead = row.blockedSummary ?? stale(row, at: now) ?? row.timeNote(at: now)
-        return Line(lead: lead, progress: progress(row), tone: needsAttention(row) ? .attention : .quiet)
+    /// What a Needs Decision row asks, short enough for the line.
+    static let ask = "Answer to unblock"
+
+    static func line(_ row: TaskRow, agent: Agent? = nil, at now: Date) -> Line {
+        let lead =
+            row.blockedSummary ?? stale(row, at: now)
+            ?? (row.status == .needsDecision ? ask : nil)
+            ?? (row.status.isFinished || agent == nil ? row.timeNote(at: now) : nil)
+        return Line(
+            lead: lead, agent: agent, progress: progress(row),
+            tone: needsAttention(row) || agent?.needsYou == true ? .attention : .quiet)
     }
 
-    /// "In Progress · no movement for 3d", or nil for a row still moving.
+    /// "No movement for 3d", or nil for a row still moving.
     static func stale(_ row: TaskRow, at now: Date) -> String? {
         guard row.staleness(at: now) == .stale else { return nil }
         let days = max(1, Int(row.stoppedFor(at: now) / 86_400))
-        return "\(row.status.title) · no movement for \(days)d"
+        return "No movement for \(days)d"
+    }
+
+    /// The agents on a task, in a word, from their panes: the harness and
+    /// what the most urgent is doing. "No Agent" for a task in progress with
+    /// nobody on it; nil with nothing to say.
+    static func agent(live: [BoardPane], presence: TaskAgentPresence) -> Agent? {
+        if case .noAgent = presence { return Agent(word: presence.title ?? "No Agent") }
+        guard !live.isEmpty else { return nil }
+        let statuses = live.map(\.terminal.status)
+        let status = Status.mostUrgent(in: statuses) ?? statuses[0]
+        let who = live.count == 1 ? Terminal.name(of: live[0].terminal.preset) : "\(live.count) agents"
+        return Agent(word: [who, word(status)].compactMap { $0 }.joined(separator: " "), needsYou: status == .blocked)
+    }
+
+    /// What an agent's state reads as beside its name.
+    static func word(_ status: Status) -> String? {
+        switch status {
+        case .working: "working"
+        case .blocked: "needs you"
+        case .starting: "starting"
+        case .idle, .done: "idle"
+        case .failed, .failedRun, .failedTurn: "failed"
+        case .exited, .lost: "stopped"
+        default: nil
+        }
     }
 }
 
-/// The metadata line, drawn: one size, one quiet color unless the row needs
-/// the person, and the checklist glyph monochrome beside the progress.
+/// The second line, drawn: one size, one quiet color unless the row needs
+/// the person, and the checklist glyph monochrome beside the progress. The
+/// agent's word goes first when the row is too narrow for all of it: the
+/// lead and the progress are what the line is for.
 struct TaskRowMetaView: View {
     let row: TaskRow
+    var agent: TaskRowMeta.Agent?
 
     static func color(_ tone: TaskRowMeta.Tone) -> Color {
         switch tone {
@@ -72,20 +116,42 @@ struct TaskRowMetaView: View {
 
     var body: some View {
         BoardTick { now in
-            let line = TaskRowMeta.line(row, at: now)
+            let line = TaskRowMeta.line(row, agent: agent, at: now)
             if !line.isEmpty {
-                HStack(spacing: 4) {
-                    if let lead = line.lead { Text(lead).lineLimit(1) }
-                    if line.lead != nil, line.progress != nil { Text("·") }
-                    if let progress = line.progress {
-                        Image(systemName: "checklist")
-                        Text(progress).monospacedDigit()
-                    }
+                ViewThatFits(in: .horizontal) {
+                    words(line).fixedSize()
+                    words(Self.without(line))
                 }
                 .font(.system(size: WorkspaceStyle.PaneText.minimum))
                 .foregroundStyle(Self.color(line.tone))
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(line.text)
+            }
+        }
+    }
+
+    /// The line without the agent's word, or, with no word to drop, as it is
+    /// with its lead truncating.
+    static func without(_ line: TaskRowMeta.Line) -> TaskRowMeta.Line {
+        var shorter = line
+        if shorter.lead != nil { shorter.agent = nil }
+        return shorter
+    }
+
+    private func words(_ line: TaskRowMeta.Line) -> some View {
+        HStack(spacing: 4) {
+            if let lead = line.lead { Text(lead).lineLimit(1) }
+            if let agent = line.agent {
+                if line.lead != nil { Text("·") }
+                Text(agent.word).lineLimit(1)
+            }
+            if let progress = line.progress {
+                if line.lead != nil || line.agent != nil { Text("·") }
+                HStack(spacing: 4) {
+                    Image(systemName: "checklist")
+                    Text(progress).monospacedDigit()
+                }
+                .fixedSize()
             }
         }
     }

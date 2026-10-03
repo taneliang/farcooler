@@ -56,6 +56,6 @@ struct TaskRowMetaTests {
         // semantic color.
         let stale = TaskRowMeta.line(Self.row(.inProgress, daysAgo: 3), at: Self.now)
         #expect(stale.tone == .quiet && TaskRowMetaView.color(stale.tone) == .secondary)
-        #expect(stale.lead == "In Progress · no movement for 3d")
+        #expect(stale.lead == "No movement for 3d")
     }
 }

@@ -75,7 +75,7 @@ enum WorkspaceWorktrees {
         var seen = Set<String>()
         var out: [Entry] = []
         for section in board.sections {
-            for row in section.visibleRows(showingAllDone: true, now: now) {
+            for row in section.orderedRows {
                 guard let worktree = worktree(of: row, host: host, in: fleet), seen.insert(worktree.id).inserted
                 else { continue }
                 out.append(Entry(worktree: worktree, task: row))

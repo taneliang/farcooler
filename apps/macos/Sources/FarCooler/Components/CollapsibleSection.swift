@@ -218,13 +218,7 @@ struct CollapsibleSection<Label: View, Accessory: View, Content: View>: View {
             .accessibilityIdentifier("section-\(id)")
             accessory()
             if !fillsRow { Spacer(minLength: 0) }
-            if let count {
-                Text("\(count)")
-                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-            }
+            if let count { SectionCount(count: count).accessibilityHidden(true) }
         }
     }
 }
@@ -280,6 +274,41 @@ extension CollapsibleSection where Label == SectionTitle, Accessory == EmptyView
     }
 }
 
+/// A header's count (ov-104, owner: "parentheses are a plain-text habit"):
+/// right-aligned at the trailing edge, tertiary, in tabular digits, as Mail
+/// and Xcode draw theirs. Never "Title (N)".
+struct SectionCount: View {
+    let count: Int
+
+    var body: some View {
+        Text("\(count)")
+            .font(.system(size: WorkspaceStyle.PaneText.secondary))
+            .monospacedDigit()
+            .foregroundStyle(.tertiary)
+            .lineLimit(1)
+    }
+}
+
+/// A group's header that doesn't open and close: Unread's Finished, New and
+/// Activity, the History page's Today and Earlier. Its title in the quiet
+/// group style, and its count trailing (`SectionCount`).
+struct GroupHeader: View {
+    let title: String
+    let count: Int?
+
+    var body: some View {
+        HStack(spacing: SidebarGrid.gap) {
+            SectionTitle(text: title, style: .minor)
+            Spacer(minLength: 0)
+            if let count { SectionCount(count: count) }
+        }
+        .frame(minHeight: 2 * ColumnGrid.rhythm)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(count.map { "\(title), \($0)" } ?? title)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
 /// The sections drawn through `CollapsibleSection`, by id.
 struct CollapsibleSectionsKey: PreferenceKey {
     static let defaultValue: Set<String> = []
@@ -292,8 +321,11 @@ extension View {
     /// A row in the navigator (the orchestrator's, a worktree's): its inset
     /// on the grid, and its selection drawn as a Mac list draws one, in the
     /// accent while the navigator has the keyboard, else gray.
-    func navigatorRow(selected: Bool, keyed: Bool, minHeight: CGFloat = ColumnGrid.twoLineRowHeight) -> some View {
-        modifier(NavigatorRowStyle(selected: selected, keyed: keyed, minHeight: minHeight))
+    func navigatorRow(
+        selected: Bool, keyed: Bool, minHeight: CGFloat = ColumnGrid.twoLineRowHeight,
+        trailing: CGFloat = ColumnGrid.step
+    ) -> some View {
+        modifier(NavigatorRowStyle(selected: selected, keyed: keyed, minHeight: minHeight, trailing: trailing))
     }
 }
 
@@ -301,6 +333,9 @@ struct NavigatorRowStyle: ViewModifier {
     let selected: Bool
     let keyed: Bool
     let minHeight: CGFloat
+    /// Its inset at the trailing edge: a task row's runs to the header's
+    /// count, a rhythm in, rather than a step (ov-104).
+    var trailing: CGFloat = ColumnGrid.step
 
     /// The selection's fill, shared with the task cards'.
     static func fill(keyed: Bool) -> Color {
@@ -309,7 +344,8 @@ struct NavigatorRowStyle: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .padding(.horizontal, ColumnGrid.step)
+            .padding(.leading, ColumnGrid.step)
+            .padding(.trailing, trailing)
             .padding(.vertical, ColumnGrid.rhythm / 2)
             .frame(minHeight: minHeight)
             .background {

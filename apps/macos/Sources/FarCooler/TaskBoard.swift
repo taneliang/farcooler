@@ -80,34 +80,39 @@ final class TaskBoardStore: ObservableObject {
     func glance(_ row: TaskRow) {
         if let onGlance { onGlance(row) } else { Task { await open(row) } }
     }
-    // MARK: - Since you were last here
+    // MARK: - Unread (ov-104)
 
-    /// When this person last left this workspace's board, as it stood when
-    /// they came back to it. Held still while they read: `markVisited` writes
-    /// the new moment to disk, and this changes only at `beginVisit`, so the
-    /// summary doesn't empty itself under their eyes.
-    @Published private(set) var visitBaseline: Date?
-    /// Decisions and findings read for the summary, by task id.
+    /// What this person has read on this board, on this device: what the
+    /// Unread section lists and the Done rule keeps (ov-103). Loaded with
+    /// the store, and written as tickets are opened.
+    @Published private(set) var reads: BoardReads
+    /// Where `reads` is kept: this Mac's defaults, until a runner keeps it.
+    let readStore: BoardReadStore
+    /// Notes read for the summary, by task id.
     @Published private(set) var summaryNotes: [String: [TaskNoteRow]] = [:]
     private var noteCache: [String: (updatedAt: Date?, notes: [TaskNoteRow])] = [:]
 
-    /// A visit begins: the last one's end is the summary's "last visit".
-    func beginVisit(in defaults: UserDefaults = .standard) {
-        visitBaseline = BoardVisit.read(host: hostKey, workspace: workspace.id, from: defaults)
+    /// `row` was opened: everything on it so far is read, its notes up to
+    /// the newest one read (`latest`).
+    func markRead(_ row: TaskRow, latest: Date? = nil, now: Date = Date()) {
+        var next = reads
+        next.open(row, latest: latest, now: now)
+        guard next != reads else { return }
+        reads = next
+        readStore.save(reads, host: hostKey, workspace: workspace.id)
     }
 
-    /// A visit ends — the person left the workspace or the app. Called then,
-    /// never continuously. Anything that counts as using the orchestrator or
-    /// board (typing into its pane, acting on a card) can call it too.
-    func markVisited(in defaults: UserDefaults = .standard, now: Date = Date()) {
-        BoardVisit.write(now, host: hostKey, workspace: workspace.id, in: defaults)
+    /// Mark All as Read: everything on the board so far.
+    func markAllRead(now: Date = Date()) {
+        reads.markAllRead(rows: board.rows, now: now)
+        readStore.save(reads, host: hostKey, workspace: workspace.id)
     }
 
-    /// Read the records of the few tasks that moved since `since`, so the
-    /// summary can list their decisions and findings. One `task show` each,
-    /// remembered until the task's `updatedAt` moves.
-    func readSummaryNotes(since: Date) async {
-        let picked = BoardSummary.noteCandidates(rows: board.rows, since: since)
+    /// Read the records of the few tasks that moved inside `window`, so the
+    /// summary can list their notes. One `task show` each, remembered until
+    /// the task's `updatedAt` moves.
+    func readSummaryNotes(window: BoardSummary.Window) async {
+        let picked = BoardSummary.noteCandidates(rows: board.rows, window: window)
         for row in picked where noteCache[row.id]?.updatedAt != row.updatedAt {
             let (data, _) = await client.taskDetail(key: row.key, repository: repositoryID)
             guard let data, let read = try? TaskDetailModel.decode(data) else { continue }
@@ -117,6 +122,21 @@ final class TaskBoardStore: ObservableObject {
             uniqueKeysWithValues: picked.compactMap { row in
                 noteCache[row.id].map { (row.id, $0.notes) }
             })
+    }
+
+    /// The tasks whose notes carry `query`, by id: the History page's note
+    /// search, answered by the runner (`task search`). Empty for a runner
+    /// that can't, or for nothing found.
+    func noteHits(_ query: String) async -> Set<String> {
+        let (data, _) = await client.taskSearch(query: query, repository: repositoryID)
+        guard let data, let hits = try? JSONDecoder().decode(NoteHits.self, from: data) else { return [] }
+        let byKey = Dictionary(board.rows.map { ($0.key, $0.id) }, uniquingKeysWith: { a, _ in a })
+        return Set(hits.hits.compactMap { $0.key.flatMap { byKey[$0] } })
+    }
+
+    private struct NoteHits: Decodable {
+        struct Hit: Decodable { var key: String? }
+        var hits: [Hit]
     }
 
     /// Whether a read has ever come back.
@@ -152,10 +172,13 @@ final class TaskBoardStore: ObservableObject {
     /// an event about another board is not read at all.
     private var seenGeneration = 0
 
-    init(client: DaemonClient, workspace: WorkspaceSummary) {
+    init(client: DaemonClient, workspace: WorkspaceSummary, readStore: BoardReadStore = DefaultsBoardReads()) {
         self.client = client
         self.workspace = workspace
         self.seenGeneration = client.boardGeneration(for: workspace)
+        self.readStore = readStore
+        self.reads = readStore.load(
+            host: client.target.isEmpty ? "local" : client.target, workspace: workspace.id, now: Date())
     }
 
     /// The repository this board is in, by its uuid: what `task show` and
@@ -328,6 +351,9 @@ final class TaskBoardStore: ObservableObject {
         trouble = nil
         readID = row.id
         detail = read
+        // Open on screen, and read: its unread items go (ov-104), as do
+        // notes written while it stays open.
+        markRead(row, latest: read.notes.map(\.at).max())
         let asked = TaskQuestion.open(in: data)
         // Assigned only when it changed, so an unchanged question keeps its
         // view, and the field in it.
@@ -659,6 +685,10 @@ struct TaskBoardView: View {
     /// ↑ or ↓ onto a row: the window selects it, keeping the keyboard
     /// here. Nil opens a task here, which is all a test needs.
     let onStep: ((NavigatorItem) -> Void)?
+    /// A status's History page, opened in the main area (ov-103).
+    let onHistory: (TaskStatus) -> Void
+    /// Bumped by ⌘F: the filter field takes the keyboard.
+    let filterRequest: Int
 
     /// The list's collapsed sections: read from `defaults` in `init`, and
     /// again when the view is handed another board.
@@ -667,12 +697,19 @@ struct TaskBoardView: View {
     /// Worktrees. Their rows leave ↑ and ↓'s walk while closed.
     @State private var closedSections: Set<String>
     @State private var newTaskOpen = false
-    /// Done showing all of its tasks, not just the recent: kept here, not
-    /// in its section, since ↑ and ↓ walk the rows it shows.
-    @State private var showingAllDone = false
+    /// The long sections showing all of their tasks, not just ten: kept
+    /// here, not in each section, since ↑ and ↓ walk the rows they show.
+    @State private var showingMore: Set<TaskStatus> = []
+    /// The navigator's filter (⌘F, ov-103): every section narrowed to the
+    /// tasks whose key or title carries what's typed.
+    @State private var filter = ""
+    @FocusState private var filterFocused: Bool
+    /// Where a task's row is matched as it moves between statuses.
+    @Namespace private var rowSpace
     /// The list has the keyboard: ↑ and ↓ glance through the tasks, Return
     /// opens one.
     @FocusState private var listFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The window this board is in, and the monitor that hears its arrows.
     @State private var windowBox = WindowBox()
     @State private var arrowMonitor: Any?
@@ -718,7 +755,8 @@ struct TaskBoardView: View {
         onEnter: @escaping () -> Void = {}, hasKeyboard: Bool = false,
         worktrees: @escaping (TaskBoardModel) -> BoardWorktrees = { _ in .none },
         orchestrator: NavigatorOrchestrator? = nil, current: NavigatorItem? = nil,
-        onStep: ((NavigatorItem) -> Void)? = nil
+        onStep: ((NavigatorItem) -> Void)? = nil, onHistory: @escaping (TaskStatus) -> Void = { _ in },
+        filterRequest: Int = 0
     ) {
         self.store = store
         self.client = client
@@ -735,6 +773,8 @@ struct TaskBoardView: View {
         self.orchestrator = orchestrator
         self.current = current ?? selected.map(NavigatorItem.task)
         self.onStep = onStep
+        self.onHistory = onHistory
+        self.filterRequest = filterRequest
         _collapsed = State(
             initialValue: BoardForm.collapsed(
                 host: store.hostKey, workspace: store.workspace.id, from: defaults))
@@ -744,8 +784,11 @@ struct TaskBoardView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            filterField
             list
         }
+        // One key column for the whole board, so every title starts at one x.
+        .environment(\.taskKeyWidth, TaskKeyColumn.width(for: store.board.rows.map(\.key)))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(WorkspaceStyle.canvas)
         // The board only moves when a runner says THIS board did. Polling a
@@ -759,22 +802,9 @@ struct TaskBoardView: View {
         .task(id: ObjectIdentifier(store)) { await store.readIfNeverRead() }
         // This board's choices, read again whenever the view is handed
         // another board.
-        // A visit begins when the board comes up and ends when the person
-        // leaves it: the workspace, the window, or the app. The summary's
-        // baseline is read at the start and written at the end, so it holds
-        // still while they read.
-        .onAppear { store.beginVisit(in: defaults) }
-        .onDisappear { store.markVisited(in: defaults) }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willResignActiveNotification)) { _ in
-            store.markVisited(in: defaults)
-        }
-        // Deliberately no re-read when the app comes back: a quick ⌘-Tab out and
-        // in would otherwise shrink "Since Last Visit" to seconds. The stamp
-        // written above is read at the next appear, after the person has
-        // left the workspace.
-        .onChange(of: remembered) { old, key in
-            BoardVisit.write(Date(), host: old.host, workspace: old.workspace, in: defaults)
-            store.beginVisit(in: defaults)
+        .onChange(of: remembered) { _, key in
+            showingMore = []
+            filter = ""
             collapsed = BoardForm.collapsed(host: key.host, workspace: key.workspace, from: defaults)
             closedSections = Self.closedSections(store, defaults)
         }
@@ -811,11 +841,26 @@ struct TaskBoardView: View {
 
     // MARK: - The list
 
+    /// The filter field atop the navigator (⌘F): Esc clears it, and on an
+    /// empty field gives the list the keyboard back.
+    private var filterField: some View {
+        NavigatorFilterField(text: $filter, focused: $filterFocused) {
+            filterFocused = false
+            listFocused = true
+        }
+        .padding(.horizontal, ColumnGrid.a)
+        .padding(.bottom, ColumnGrid.rhythm / 2)
+        .onChange(of: filterRequest) { _, _ in filterFocused = true }
+    }
+
+    private var filtering: Bool { !BoardFilter.isEmpty(filter) }
+
     /// The navigator's three sections (ov-92), each under its own header
     /// and a divider apart: the orchestrator's row, the tasks by status
-    /// under the Since Last Visit summary, and the loose worktrees.
+    /// under the Unread summary, and the loose worktrees.
     private var list: some View {
         let worktrees = worktreesOf(store.board)
+        let shown = BoardFilter.narrowed(store.board, filter)
         let inProgress = store.board.columns.first { $0.status == .inProgress }?.rows.count ?? 0
         return ScrollViewReader { proxy in
             ScrollView {
@@ -833,7 +878,7 @@ struct TaskBoardView: View {
                         VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
                             if store.hasRead {
                                 // Edge to edge, its own inset at column A.
-                                BoardSummaryStrip(store: store, defaults: defaults)
+                                BoardSummaryStrip(store: store, defaults: defaults, filter: filter)
                                     .id(ObjectIdentifier(store))
                                     .padding(.horizontal, -ColumnGrid.a)
                             }
@@ -847,22 +892,35 @@ struct TaskBoardView: View {
                                     }
                                 }
                             } else {
-                                ForEach(store.board.sections) { section in
+                                ForEach(shown.sections) { section in
                                     TaskListSection(
                                         section: section,
-                                        expanded: BoardForm.isExpanded(section, collapsed: collapsed),
+                                        // Filtering opens every section with a match.
+                                        expanded: BoardForm.isExpanded(section, collapsed: filtering ? [] : collapsed),
                                         onToggle: { toggle(section.status) },
                                         store: store, agents: agents, onGoTo: onGoTo,
                                         selected: selected, keyed: hasKeyboard,
                                         worktrees: worktrees,
-                                        showingAllDone: $showingAllDone,
+                                        showingMore: showingMore.contains(section.status),
+                                        onShowMore: {
+                                            withAnimation(BoardMotion.list(reduceMotion: reduceMotion)) {
+                                                if showingMore.contains(section.status) {
+                                                    showingMore.remove(section.status)
+                                                } else {
+                                                    showingMore.insert(section.status)
+                                                }
+                                            }
+                                        },
+                                        filtering: filtering,
+                                        onHistory: onHistory,
                                         onChoose: { row in
                                             listFocused = true
                                             store.choose(row)
-                                        })
+                                        },
+                                        rows: rowSpace)
                                 }
-                                if !store.board.unreadable.isEmpty {
-                                    UnreadableColumnView(rows: store.board.unreadable)
+                                if !shown.unreadable.isEmpty {
+                                    UnreadableColumnView(rows: shown.unreadable)
                                 }
                             }
                         }
@@ -932,7 +990,10 @@ struct TaskBoardView: View {
         Navigator.items(
             orchestrator: orchestrator != nil && !closedSections.contains("orchestrator"),
             tasks: closedSections.contains("tasks")
-                ? [] : BoardKeys.rows(store.board, collapsed: collapsed, showingAllDone: showingAllDone, now: Date()),
+                ? []
+                : BoardKeys.rows(
+                    BoardFilter.narrowed(store.board, filter), collapsed: collapsed, reads: store.reads,
+                    showingMore: showingMore, filtering: filtering, now: Date()),
             worktrees: closedSections.contains("worktrees") ? [] : BoardWorktreesSection.rows(worktrees).map(\.id))
     }
 
@@ -998,13 +1059,19 @@ struct TaskBoardView: View {
 /// top to bottom, opening each beside the board in place of the last.
 enum BoardKeys {
     /// The tasks the list shows, top to bottom: the expanded sections' rows,
-    /// Done's recent ones unless all are shown.
+    /// as each is cut (`TaskBoardColumn.cut`): Done's by its rule, a long
+    /// one's first ten until it shows more.
     static func rows(
-        _ board: TaskBoardModel, collapsed: Set<TaskStatus>, showingAllDone: Bool, now: Date
+        _ board: TaskBoardModel, collapsed: Set<TaskStatus>, reads: BoardReads, showingMore: Set<TaskStatus> = [],
+        filtering: Bool = false, now: Date
     ) -> [String] {
+        // Filtering opens every section with a match.
         board.sections
-            .filter { BoardForm.isExpanded($0, collapsed: collapsed) }
-            .flatMap { $0.visibleRows(showingAllDone: showingAllDone, now: now).map(\.id) }
+            .filter { BoardForm.isExpanded($0, collapsed: filtering ? [] : collapsed) }
+            .flatMap {
+                $0.cut(reads: reads, showingAll: showingMore.contains($0.status), filtering: filtering, now: now)
+                    .rows.map(\.id)
+            }
     }
 
     /// The task `by` rows on from `current` in `ids`, held at either end;
@@ -1093,10 +1160,12 @@ struct NewTaskForm: View {
     }
 }
 
-/// One status in the list form: its header, and its cards when open.
+/// One status in the list form: its header, and its rows when open.
 ///
 /// An empty status is a header reading "Backlog 0" that can't open, so the
-/// list says what isn't there as well as what is.
+/// list says what isn't there as well as what is. Done and Canceled are cut
+/// by `BoardDone`'s rule with a row to the History page under them; a long
+/// section shows ten, and "Show N More" (ov-103).
 private struct TaskListSection: View {
     let section: TaskBoardColumn
     let expanded: Bool
@@ -1110,14 +1179,26 @@ private struct TaskListSection: View {
     let keyed: Bool
     /// Each task's worktree, and its menu.
     let worktrees: BoardWorktrees
-    @Binding var showingAllDone: Bool
+    /// Showing all of a long section.
+    let showingMore: Bool
+    let onShowMore: () -> Void
+    /// The navigator's filter is narrowing it: every match shows.
+    let filtering: Bool
+    /// The History row: its status's page in the main area.
+    let onHistory: (TaskStatus) -> Void
     let onChoose: (TaskRow) -> Void
+    /// Where a row moving between statuses is matched, so it moves rather
+    /// than leaving one section and appearing in another.
+    let rows: Namespace.ID
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Needs Decision is the one status waiting on the person reading, and
     /// the only one drawn in the accent color.
     private var leads: Bool { section.status == .needsDecision }
 
     var body: some View {
+        let cut = section.cut(reads: store.reads, showingAll: showingMore, filtering: filtering, now: Date())
         // Its chevron at column A, its title at B, its count trailing
         // (ov-83), through the board's one collapsible section (ov-92).
         CollapsibleSection(
@@ -1126,8 +1207,8 @@ private struct TaskListSection: View {
             isExpanded: Binding(get: { expanded }, set: { open in if open != expanded { onToggle() } }),
             canExpand: BoardForm.canExpand(section), count: section.count
         ) {
-            VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
-                ForEach(section.visibleRows(showingAllDone: showingAllDone, now: Date())) { row in
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(cut.rows) { row in
                     TaskListRow(
                         row: row, prominent: leads, store: store,
                         live: agents.live(for: row), presence: agents.presence(for: row),
@@ -1138,44 +1219,106 @@ private struct TaskListSection: View {
                             if let worktree = worktrees.byTask[row.id] { worktrees.perform(item, worktree) }
                         },
                         onChoose: { onChoose(row) })
+                    .matchedGeometryEffect(id: row.id, in: rows, isSource: true)
+                    .transition(BoardMotion.rowTransition(reduceMotion: reduceMotion))
                     .id(row.id)
                 }
-                ShowAllDoneButton(section: section, showingAll: $showingAllDone)
+                if cut.hidden > 0 {
+                    SectionFootButton(
+                        title: BoardSectionCut.showMoreTitle(cut.hidden),
+                        id: "board-show-more-\(section.status.rawValue)", action: onShowMore)
+                } else if showingMore, !filtering, !section.status.isFinished,
+                    section.rows.count > BoardSectionCut.limit
+                {
+                    SectionFootButton(
+                        title: "Show Fewer", id: "board-show-fewer-\(section.status.rawValue)", action: onShowMore)
+                }
+                if let total = cut.history, !filtering {
+                    HistoryRow(status: section.status, total: total) { onHistory(section.status) }
+                }
             }
+            .animation(BoardMotion.list(reduceMotion: reduceMotion), value: cut.rows.map(\.id))
         }
     }
 }
 
-/// The quiet button under a Done column that is showing only the recent work.
-/// Nothing for another status, or for a Done with nothing hidden.
-private struct ShowAllDoneButton: View {
-    let section: TaskBoardColumn
-    @Binding var showingAll: Bool
+/// The list's motion (ov-104): insertions, removals and moves on the shared
+/// spring, a cross-fade alone under Reduce Motion.
+enum BoardMotion {
+    static func list(reduceMotion: Bool) -> Animation {
+        reduceMotion ? .easeInOut(duration: 0.2) : WorkspaceMotion.spring
+    }
+
+    /// A row comes in fading and sliding down into its place, and fades as
+    /// the rows under it close up; only fading under Reduce Motion.
+    static func rowTransition(reduceMotion: Bool) -> AnyTransition {
+        reduceMotion
+            ? .opacity
+            : .asymmetric(
+                insertion: .opacity.combined(with: .offset(y: -ColumnGrid.rhythm)),
+                removal: .opacity)
+    }
+
+    /// How long a new arrival's accent wash takes to fade.
+    static let highlightFade: TimeInterval = 1.5
+}
+
+/// "Show 4 More" at the foot of a long section, at column B.
+private struct SectionFootButton: View {
+    let title: String
+    let id: String
+    let action: () -> Void
 
     var body: some View {
-        if section.status == .done, section.count > 0,
-            showingAll || section.hidesDone(showingAllDone: false, now: Date())
-        {
-            Button(showingAll ? "Show Recent Done Only" : BoardDone.showAllTitle(total: section.count)) {
-                showingAll.toggle()
-            }
+        Button(title, action: action)
             .buttonStyle(.plain)
             .font(.system(size: WorkspaceStyle.PaneText.secondary))
             .foregroundStyle(.secondary)
-            .gridMark("showAllDone", .text)
-            // At column B, under the cards' text.
+            .frame(minHeight: 2 * ColumnGrid.rhythm)
             .padding(.leading, ColumnGrid.step)
-            .accessibilityIdentifier("board-show-all-done")
-        }
+            .accessibilityIdentifier(id)
     }
 }
 
-/// One card in the list, after the iPhone's row: its key, title, what it
-/// asks of you, how long it has sat, how much of its acceptance holds, its
-/// labels, and the way to its agent, which sits beside the words rather than
-/// under them, since a list row has the width.
+/// "All Done  94 ›": every task in the status, on the History page (ov-103).
+/// Its count trailing as a header's is, never in parentheses.
+struct HistoryRow: View {
+    let status: TaskStatus
+    let total: Int
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text(BoardDone.historyTitle(status))
+                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: SidebarGrid.gap)
+                SectionCount(count: total)
+                // Forward, a way to a page: not a disclosure's chevron.
+                Image(systemName: "chevron.forward")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.leading, ColumnGrid.step)
+            .padding(.trailing, ColumnGrid.rhythm)
+            .frame(minHeight: ColumnGrid.rowHeight)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(hovering ? 0.06 : 0)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .accessibilityLabel("\(BoardDone.historyTitle(status)), \(total)")
+        .accessibilityIdentifier("board-history-\(status.rawValue)")
+    }
+}
+
+/// One task in the navigator (ov-104): a compact row, its key and title,
+/// and under the title one quiet line saying what the status header doesn't
+/// (`TaskRowMeta`): what it waits on, who's on it, how much of it holds.
+/// The way to its agent and its worktree's menu are in its context menu.
 ///
-/// Its edge at column A and its text at B, under its section's title.
 /// Internal rather than private for `BoardCardTickTests`, which draws it.
 struct TaskListRow: View {
     let row: TaskRow
@@ -1188,80 +1331,20 @@ struct TaskListRow: View {
     var selected = false
     /// The list has the keyboard: selected reads in the accent.
     var keyed = false
-    /// Its worktree (ov-86): where its work is, named beside its key, with
-    /// its menu on the card's.
+    /// Its worktree (ov-86), whose menu is on the row's.
     var worktree: Worktree?
     var worktreeMenu: [WorktreeMenu.Item] = []
     var performOnWorktree: (WorktreeMenu.Item) -> Void = { _ in }
     var onChoose: (() -> Void)?
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            // The key, the title, then the one metadata line, half a rhythm
-            // apart each (ov-92).
-            VStack(alignment: .leading, spacing: ColumnGrid.rhythm / 2) {
-                HStack(spacing: 6) {
-                    Text(row.key)
-                        .font(.system(size: WorkspaceStyle.PaneText.secondary, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .gridMark("card", .text)
-                    if let worktree {
-                        // The branch glyph the Worktrees section and the
-                        // breadcrumb draw, one for the one idea.
-                        HStack(spacing: 2) {
-                            Image(systemName: WorktreeSection.glyph)
-                                .font(.system(size: WorkspaceStyle.PaneText.minimum - 1, weight: .medium))
-                            Text(worktree.task)
-                                .font(.system(size: WorkspaceStyle.PaneText.minimum))
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
-                        .foregroundStyle(.secondary)
-                        .help("Worktree \(worktree.task)")
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Worktree \(worktree.task)")
-                    }
-                    // A stale row says so in its metadata line, quietly
-                    // (`TaskRowMeta.stale`): no icon, color or border of its
-                    // own (ov-92).
-                }
-                Text(row.title)
-                    .font(
-                        .system(
-                            size: WorkspaceStyle.PaneText.body,
-                            weight: prominent ? .semibold : .regular)
-                    )
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let call = row.callToAction {
-                    Text(call)
-                        .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
-                        .foregroundStyle(Color.accentColor)
-                }
-                TaskRowMetaView(row: row)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            AgentPill(live: live, presence: presence, onGoTo: onGoTo)
+        CompactTaskRow(key: row.key, title: row.title, emphasized: prominent, selected: selected, keyed: keyed) {
+            TaskRowMetaView(row: row, agent: TaskRowMeta.agent(live: live, presence: presence))
         }
-        .padding(.horizontal, ColumnGrid.step)
-        .padding(.vertical, ColumnGrid.rhythm)
-        .background(RoundedRectangle(cornerRadius: 8).fill(WorkspaceStyle.paneChrome))
-        .background {
-            // Selected: a wash under the card, in the accent while the list
-            // has the keyboard, else gray, as a Mac list draws its selection.
-            if selected {
-                RoundedRectangle(cornerRadius: 8).fill(NavigatorRowStyle.fill(keyed: keyed))
-            }
-        }
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(
-                    selected ? (keyed ? Color.accentColor : Color.secondary.opacity(0.6)) : WorkspaceStyle.hairline,
-                    lineWidth: selected ? 1 : 0.5)
-        )
         .contentShape(Rectangle())
         .onTapGesture { if let onChoose { onChoose() } else { store.choose(row) } }
-        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
         .contextMenu {
             TaskRowMenu(row: row, live: live, store: store, onGoTo: onGoTo)
             if let worktree, !worktreeMenu.isEmpty {
@@ -1325,72 +1408,6 @@ private struct CardTimeLines: View {
                     .foregroundStyle(.secondary)
             }
         }
-    }
-}
-
-/// The way from a card to the agent working it.
-///
-/// A pill for one pane, the same pill as a menu for several, and a quiet
-/// "No Agent" for a task in progress with nobody on it. The status mark is the
-/// pane's own, drawn by `StatusGlyph` like the sidebar row it leads to — so an
-/// agent waiting on a question is amber here too, and the card says which
-/// agent needs you before you open anything.
-private struct AgentPill: View {
-    let live: [BoardPane]
-    let presence: TaskAgentPresence
-    let onGoTo: (BoardPane) -> Void
-
-    @State private var hovering = false
-
-    var body: some View {
-        switch presence {
-        case .unsaid:
-            EmptyView()
-        case .noAgent:
-            Text(presence.title ?? "")
-                .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                .foregroundStyle(.tertiary)
-        case .agents:
-            if live.count == 1, let pane = live.first {
-                Button { onGoTo(pane) } label: { label(for: [pane]) }
-                    .buttonStyle(.plain)
-                    .help("Go to \(pane.title)")
-            } else {
-                Menu {
-                    GoToAgentItems(live: live, onGoTo: onGoTo)
-                } label: {
-                    label(for: live)
-                }
-                // `.button` with a plain button style, so the menu draws the
-                // same capsule as the single pill instead of AppKit's own
-                // borderless chrome.
-                .menuStyle(.button)
-                .buttonStyle(.plain)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Go to one of the agents on this task")
-            }
-        }
-    }
-
-    private func label(for panes: [BoardPane]) -> some View {
-        HStack(spacing: 4) {
-            if let status = Status.mostUrgent(in: panes.map(\.terminal.status)) ?? panes.first?.terminal.status {
-                StatusGlyph(status: status, inAppDiameter: 6)
-            }
-            Text(presence.title ?? "")
-                .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
-            Image(systemName: panes.count == 1 ? "arrow.right" : "chevron.down")
-                .font(.system(size: 7.5, weight: .bold))
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 7)  // grid-exempt: the agent pill's own inset
-        .padding(.vertical, 2.5)
-        .background(
-            Capsule().fill(Color.primary.opacity(hovering ? 0.12 : 0.07)))
-        .contentShape(Capsule())
-        .onHover { hovering = $0 }
-        .animation(Motion.snap, value: hovering)
     }
 }
 

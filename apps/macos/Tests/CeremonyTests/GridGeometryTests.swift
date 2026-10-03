@@ -342,8 +342,8 @@ struct GridGeometryTests {
     }
 
     @Test func theCollapsedStripsLineReads() {
-        #expect(BoardSummaryStrip.collapsedLine(count: 2, period: .sinceLastVisit) == "2 new since your last visit")
-        #expect(BoardSummaryStrip.collapsedLine(count: 0, period: .sinceLastVisit) == "Nothing new since your last visit")
+        #expect(BoardSummaryStrip.collapsedLine(count: 2, period: .unread) == "2 unread")
+        #expect(BoardSummaryStrip.collapsedLine(count: 0, period: .unread) == "Nothing unread")
         #expect(BoardSummaryStrip.collapsedLine(count: 1, period: .lastHour) == "1 new in the last hour")
         #expect(BoardSummaryStrip.collapsedLine(count: 3, period: .today) == "3 new today")
     }

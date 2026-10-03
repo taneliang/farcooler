@@ -104,7 +104,8 @@ struct WorkspaceScreen: View {
                     onOpen: { row in navigator?.open(.task(place, task: row.id)) },
                     onJump: { agent in openAgent(agent) },
                     onRefresh: { await connection.readBoard(summary) },
-                    onNewTask: PhoneNewTask.offered(connection.daemon) ? { filing = true } : nil)
+                    onNewTask: PhoneNewTask.offered(connection.daemon) ? { filing = true } : nil,
+                    onHistory: { status in navigator?.open(.history(place, status: status.rawValue)) })
                 .task { await connection.readBoard(summary) }
             case .worktrees:
                 WorkspaceWorktrees(connection: connection, summary: summary, place: place)

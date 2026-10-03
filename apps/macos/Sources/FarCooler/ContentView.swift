@@ -92,6 +92,9 @@ struct ContentView: View {
     /// `settleLaunch`.
     @State private var launched = false
     @FocusState private var searchFocused: Bool
+    /// Bumped by ⌘F in a workspace: its navigator's filter takes the
+    /// keyboard (ov-103).
+    @State private var boardFilterRequest = 0
     @State private var removeWorktree: Worktree?
     @State private var removeRepository: RepositoryToRemove?
     @State private var showResumeBranch = false
@@ -440,14 +443,6 @@ struct ContentView: View {
             // that was on screen, not the next one. Focus stays while the
             // same thing is open, whichever of its panes is selected.
             if !WorkspaceSelection.samePlace(old, new) { focusColumn = false }
-            // Leaving a workspace ends a visit to it, whatever was open
-            // beside its board; a loose worktree opened beside that same
-            // board doesn't.
-            if case .workspace(let host, let id, _)? = old,
-                WorkspaceSelection.leaves(old, for: new, beside: new.flatMap(workspaceScene)?.board)
-            {
-                markVisited(host: host, workspace: id)
-            }
             keyboardOnBoard = WorkspaceNavigation.boardKeepsKeyboard(
                 pending: boardKeyboardPending, from: old, to: new)
             boardKeyboardPending = false
@@ -1993,20 +1988,6 @@ struct ContentView: View {
         return made
     }
 
-    /// Mark a visit to a workspace now (`TaskBoardStore.markVisited`): when
-    /// it's left, and when its orchestrator is taken up.
-    private func markVisited(host: String, workspace id: String) {
-        if let board = boardStores["\(host)/\(id)"] {
-            board.markVisited()
-            return
-        }
-        guard let client = store.clients[host],
-            let summary = WorkspaceScreen.workspace(
-                id, host: host, in: store.fleet, repositories: client.repositories.map(\.id))
-        else { return }
-        boardStore(for: summary, client: client, host: host).markVisited()
-    }
-
     /// Whether `existing` still serves `workspace`'s board on `client`.
     ///
     /// Compared by what the board shows — its name — and not the whole
@@ -2544,6 +2525,8 @@ struct ContentView: View {
             leaf = taskRow(host: host, workspace: workspace, id: id).map { "\($0.key) \($0.title)" }
         case .worktree(let id, _)?:
             leaf = worktree(host: host, id: id)?.windowTitle
+        case .history(let status)?:
+            leaf = BoardHistory.title(status)
         case nil:
             break
         }
@@ -2743,6 +2726,14 @@ struct ContentView: View {
                 host: host, id: id, place: place,
                 shown: drawableLayouts(for: place).last { $0.column != .conversation }, keyboard: current,
                 settled: settled)
+        case .workspace(let host, let id, .history(let status)?):
+            if let client = store.clients[host], let workspace = board(host: host, id: id) {
+                BoardHistoryView(
+                    store: boardStore(for: workspace, client: client, host: host), status: status,
+                    onOpen: { row in chooseTask(row.id, host: host, workspace: id, glance: false) })
+            } else {
+                ContentUnavailableView("Board Not Found", systemImage: "checklist")
+            }
         case .workspace(let host, _, .worktree(let wt, _)?), .looseWorktree(let host, let wt, _):
             if !settled {
                 // Passed on the way: its terminals wait until it settles.
@@ -3102,7 +3093,9 @@ struct ContentView: View {
                 worktrees: { board in boardWorktrees(host: host, workspace: workspace, client: client, board: board) },
                 orchestrator: orchestrator,
                 current: Navigator.current(selection, trail: trail, board: id),
-                onStep: { item in step(to: item, host: host, workspace: workspace) }
+                onStep: { item in step(to: item, host: host, workspace: workspace) },
+                onHistory: { status in openHistory(status, host: host, workspace: workspace.id) },
+                filterRequest: boardFilterRequest
             )
         } else {
             // Said, rather than the generic "Select a worktree": this
@@ -3856,11 +3849,6 @@ struct ContentView: View {
         changesFocus = nil
         keyboardOnBoard = false
         let inConversation = shown.contains { $0.column == .conversation && $0.contains(pane) }
-        // Taking up the orchestrator is a visit to its workspace, as reading
-        // its board is: the board's "Since you were last here" starts there.
-        if inConversation, case .workspace(let host, let id, _)? = selection {
-            markVisited(host: host, workspace: id)
-        }
         guard let next = WorkspaceScreen.focusing(pane, selection: selection, shown: shown, fleet: store.fleet)
         else {
             land(on: pane)
@@ -3893,6 +3881,16 @@ struct ContentView: View {
     private func openTask(_ id: String, host: String, workspace: String) {
         trail = nil
         selection = .workspace(host: host, workspace: workspace, focus: .task(id))
+    }
+
+    /// A finished status's History page, in the main area (ov-103). The
+    /// navigator keeps the keyboard, as it does for a task glanced at.
+    private func openHistory(_ status: TaskStatus, host: String, workspace: String) {
+        let next = Selection.workspace(host: host, workspace: workspace, focus: .history(status))
+        guard next != selection else { return }
+        trail = nil
+        focusColumn = false
+        selection = next
     }
 
     /// A row in the navigator chosen: a click opens its task, or, on the
@@ -4101,8 +4099,17 @@ struct ContentView: View {
         case .showShortcuts: showShortcuts = true
         // With the sidebar hidden its search isn't there to focus: the
         // palette finds the same workspaces, tasks and agents.
+        //
+        // In a workspace, ⌘F filters its navigator's tasks instead (ov-103):
+        // the find a person in a list of tasks reaches for.
         case .search:
-            if sidebarVisibility == .detailOnly { showPalette = true } else { searchFocused = true }
+            if case .workspace? = selection, selection.flatMap(workspaceScene)?.board != nil {
+                boardFilterRequest += 1
+            } else if sidebarVisibility == .detailOnly {
+                showPalette = true
+            } else {
+                searchFocused = true
+            }
 
         // Toggles rather than opens. ⌘P on an open palette is what a hand
         // reaches for when it changed its mind, and every switcher on this
@@ -4478,7 +4485,7 @@ struct ContentView: View {
         // A workspace with nothing opened has nothing to heal either: a
         // runner that loses it draws the column's sentence until you choose.
         // A task is its own view's to say it's gone.
-        case .workspace(_, _, nil), .workspace(_, _, .task): return selection
+        case .workspace(_, _, nil), .workspace(_, _, .task), .workspace(_, _, .history): return selection
         case .workspace(let h, _, .worktree(let w, let t)): (host, worktreeID, terminalID) = (h, w, t)
         case .looseWorktree(let h, let w, let t): (host, worktreeID, terminalID) = (h, w, t)
         }

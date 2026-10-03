@@ -71,6 +71,9 @@ extension ContentView {
         /// A worktree opened whole, from a task's Open Worktree or its row
         /// under the workspace, with the pane selected in it.
         case worktree(String, terminal: String?)
+        /// A finished status's History page (ov-103): every task in Done or
+        /// Canceled, grouped by when it landed, searchable.
+        case history(TaskStatus)
     }
 }
 

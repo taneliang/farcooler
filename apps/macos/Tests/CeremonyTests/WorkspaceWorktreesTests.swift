@@ -183,7 +183,7 @@ struct WorkspaceWorktreesTests {
             TaskBoardColumn(status: .backlog, rows: [Self.row("b", "bil-30", .backlog, worktree: "c1")]),
         ])
         let drawn = TaskBoardModel.order.flatMap { status in
-            board.sections.first { $0.status == status }?.visibleRows(showingAllDone: true, now: now) ?? []
+            board.sections.first { $0.status == status }?.orderedRows ?? []
         }.compactMap(\.worktreeID)
         let order = WorkspaceWorktrees.entries(in: Self.billingSummary, host: "", board: board, fleet: fleet, now: now)
             .compactMap { $0.task?.worktreeID }
@@ -242,7 +242,7 @@ struct WorkspaceWorktreesTests {
             let worktrees = BoardWorktreesSection.rows(BoardWorktrees(shown: loose.shown, hidden: loose.hidden))
             let items = Navigator.items(
                 orchestrator: true,
-                tasks: BoardKeys.rows(board, collapsed: [], showingAllDone: true, now: .now),
+                tasks: BoardKeys.rows(board, collapsed: [], reads: BoardReads(floor: .distantPast), filtering: true, now: .now),
                 worktrees: worktrees.map(\.id))
             let tasked = Set(WorkspaceWorktrees.taskWorktrees(on: board, host: "", in: fleet).values.map(\.id))
             #expect(items.first == .orchestrator && items.filter { $0 == .orchestrator }.count == 1)

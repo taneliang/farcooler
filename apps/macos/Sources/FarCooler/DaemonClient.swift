@@ -1159,6 +1159,13 @@ final class DaemonClient: ObservableObject {
         await runRaw(["task", "show", key, "--repo", repository, "--json"], background: true)
     }
 
+    /// Every note in the repository's record carrying `query`, each with its
+    /// task's key: the History page's note search (ov-103).
+    func taskSearch(query: String, repository: String) async -> (data: Data?, message: String?) {
+        // After `--`, so a query starting with a dash is the query.
+        await runRaw(["task", "search", "--repo", repository, "--json", "--", query], background: true)
+    }
+
     /// Move a task to another column. Nil means it went.
     ///
     /// The status word crosses as the CLI's own word, which is the proto's

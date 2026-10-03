@@ -191,6 +191,12 @@ struct PhoneRoot: View {
             } else {
                 RunnerGone()
             }
+        case .history(let place, let status):
+            if let connection = fleet.connection(for: place), let status = TaskStatus(rawValue: status) {
+                BoardHistoryScreen(connection: connection, place: place, status: status)
+            } else {
+                RunnerGone()
+            }
         case .worktree:
             // Never pushed: a worktree covers the stack. See
             // `PhoneNavigator.worktree`.
@@ -236,6 +242,8 @@ struct PhoneRoot: View {
             else { return .gone }
             guard let board = connection.boards[place.workspace] else { return .unknown }
             return board.rows.contains { $0.id == task } ? .here : .gone
+        case .history(let place, _):
+            return fleet.connection(for: place)?.workspace(place.workspace) != nil ? .here : .gone
         case .worktree(let runner, let worktree, _):
             guard let connection = UUID(uuidString: runner).flatMap({ fleet.connection(for: $0) })
             else { return .gone }

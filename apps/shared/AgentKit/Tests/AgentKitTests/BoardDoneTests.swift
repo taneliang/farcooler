@@ -18,40 +18,56 @@ private func row(
         createdAt: created.map { now.addingTimeInterval(-$0) })
 }
 
-@Test("Done shows the last 7 days, newest first, and keeps at least 10")
-func doneShowsTheLastSevenDaysNewestFirstAndKeepsAtLeastTen() {
-    // 12 finished in the last two days, 5 a month ago: all 12 recent, none old.
-    var rows = (0..<12).map { row("r\($0)", .done, since: Double($0) * 3600) }
-    rows += (0..<5).map { row("old\($0)", .done, since: 30 * day + Double($0)) }
-    let shown = BoardDone.visible(rows.reversed(), showingAll: false, now: now)
-    #expect(shown.map(\.key) == (0..<12).map { "r\($0)" })
+private let utc: Calendar = {
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = TimeZone(identifier: "UTC")!
+    return cal
+}()
 
-    // One recent card on a quiet board: topped up to 10 with the newest older ones.
-    let quiet = [row("a", .done, since: 3600)] + (0..<20).map { row("o\($0)", .done, since: 30 * day + Double($0)) }
-    let top = BoardDone.visible(quiet, showingAll: false, now: now)
-    #expect(top.count == 10)
-    #expect(top.first?.key == "a")
-    #expect(top.last?.key == "o8")
+// 1_800_000_000 is 2027-01-15 08:00 UTC, a Friday.
+
+@Test("Done shows the unread and today's, newest first, with a floor of three")
+func doneShowsUnreadAndTodaysWithAFloorOfThree() {
+    // Read up to two days ago; three finished today (08:00 UTC), two
+    // unread from yesterday, ten read last month.
+    let reads = BoardReads(floor: now.addingTimeInterval(-2 * day))
+    let today = (0..<3).map { row("t\($0)", .done, since: Double($0 + 1) * 600) }
+    let unread = (0..<2).map { row("u\($0)", .done, since: 20 * 3600 + Double($0)) }
+    let old = (0..<10).map { row("o\($0)", .done, since: 30 * day + Double($0)) }
+    let shown = BoardDone.shown((old + unread + today).reversed(), reads: reads, now: now, calendar: utc)
+    #expect(shown.map(\.key) == ["t0", "t1", "t2", "u0", "u1"])
+
+    // Yesterday's, once opened, goes: it's read and not today's.
+    var opened = reads
+    opened.open(unread[0], now: now)
+    #expect(BoardDone.shown(today + unread + old, reads: opened, now: now, calendar: utc).map(\.key) == ["t0", "t1", "t2", "u1"])
+
+    // A quiet board: the newest three, however old.
+    #expect(BoardDone.shown(old, reads: reads, now: now, calendar: utc).map(\.key) == ["o0", "o1", "o2"])
+    #expect(BoardDone.shown(Array(old.prefix(2)), reads: reads, now: now, calendar: utc).count == 2)
+    #expect(BoardDone.historyTitle(.done) == "All Done")
+    #expect(BoardDone.historyTitle(.cancelled) == "All Canceled")
 }
 
-@Test("Show All reveals every done card, newest first")
-func showAllRevealsEveryDoneCardNewestFirst() {
-    let rows = (0..<25).map { row("o\($0)", .done, since: 30 * day + Double($0)) }
-    #expect(BoardDone.visible(rows, showingAll: true, now: now).count == 25)
-    #expect(BoardDone.visible(rows, showingAll: true, now: now).first?.key == "o0")
-    #expect(BoardDone.showAllTitle(total: 25) == "Show All Done (25)")
-}
+@Test("Canceled works the same, with the History row; other sections cut at ten")
+func canceledWorksTheSameAndOthersCutAtTen() {
+    let reads = BoardReads(floor: now.addingTimeInterval(-2 * day))
+    let canceled = TaskBoardColumn(status: .cancelled, rows: (0..<15).map { row("c\($0)", .cancelled, since: 40 * day + Double($0)) })
+    let c = canceled.cut(reads: reads, now: now, calendar: utc)
+    #expect(c.rows.map(\.key) == ["c0", "c1", "c2"])
+    #expect(c.history == 15)
+    #expect(c.hidden == 0)
+    // Filtering shows every match.
+    #expect(canceled.cut(reads: reads, filtering: true, now: now, calendar: utc).rows.count == 15)
 
-@Test("Only Done is shortened; Canceled and the rest draw every row")
-func onlyDoneIsShortened() {
-    let old = (0..<15).map { row("c\($0)", .cancelled, since: 40 * day) }
-    let canceled = TaskBoardColumn(status: .cancelled, rows: old)
-    #expect(canceled.visibleRows(showingAllDone: false, now: now).count == 15)
-    #expect(!canceled.hidesDone(showingAllDone: false, now: now))
-    let done = TaskBoardColumn(status: .done, rows: (0..<15).map { row("d\($0)", .done, since: 40 * day + Double($0)) })
-    #expect(done.visibleRows(showingAllDone: false, now: now).count == 10)
-    #expect(done.hidesDone(showingAllDone: false, now: now))
-    #expect(!done.hidesDone(showingAllDone: true, now: now))
+    let todo = TaskBoardColumn(status: .todo, rows: (0..<14).map { row("d\($0)", .todo, since: 40 * day) })
+    let t = todo.cut(reads: reads, now: now, calendar: utc)
+    #expect(t.rows.count == 10)
+    #expect(t.hidden == 4)
+    #expect(t.history == nil)
+    #expect(BoardSectionCut.showMoreTitle(t.hidden) == "Show 4 More")
+    #expect(todo.cut(reads: reads, showingAll: true, now: now, calendar: utc).rows.count == 14)
+    #expect(TaskBoardColumn(status: .done, rows: []).cut(reads: reads, now: now).history == nil)
 }
 
 @Test("The summary lists finished, moved, new and noted work since the start")
@@ -70,33 +86,33 @@ func theSummaryListsWhatChanged() {
     let notes = [
         "id-oldnew": [
             TaskNoteRow(id: "n1", kind: .decision, actor: "user", at: now.addingTimeInterval(-60), body: "Use SQLite\nbecause"),
-            TaskNoteRow(id: "n2", kind: .comment, actor: "user", at: now.addingTimeInterval(-60), body: "meh"),
+            TaskNoteRow(id: "n2", kind: .comment, actor: "user", at: now.addingTimeInterval(-120), body: "meh"),
             TaskNoteRow(id: "n3", kind: .finding, actor: "user", at: now.addingTimeInterval(-9000), body: "old"),
         ]
     ]
-    let summary = BoardSummary.make(rows: rows, notes: notes, since: since)
+    let summary = BoardSummary.make(rows: rows, notes: notes, window: .since(since))
     #expect(summary.finished.map(\.key) == ["fin"])
     #expect(summary.moved.map(\.key) == ["rev", "nd"])
     #expect(summary.moved.first?.detail == "In Review")
     #expect(summary.created.map(\.key) == ["new"])
-    #expect(summary.notes.map(\.detail) == ["Decision: Use SQLite"])
-    #expect(summary.notes.first?.taskID == "id-oldnew")
+    // Activity: every kind a person or agent writes, one entry per ticket.
+    #expect(summary.activity.map(\.key) == ["oldnew"])
+    #expect(summary.activity.first?.kind == .decision)
+    #expect(summary.activity.first?.text == "Use SQLite because")
+    #expect(summary.activity.first?.more == 1)
     #expect(!summary.isEmpty)
-    #expect(BoardSummary.make(rows: rows, since: now).isEmpty)
-    #expect(BoardSummary.nothingNew == "Nothing new since you were last here.")
+    #expect(BoardSummary.make(rows: rows, window: .since(now)).isEmpty)
+    #expect(BoardSummary.nothing(in: .unread) == "You’re all caught up.")
 }
 
-@Test("A period starts where it says it does")
-func aPeriodStartsWhereItSaysItDoes() {
-    var cal = Calendar(identifier: .gregorian)
-    cal.timeZone = TimeZone(identifier: "UTC")!
-    let visit = now.addingTimeInterval(-5 * 3600)
-    #expect(BoardSummary.start(of: .sinceLastVisit, lastVisit: visit, now: now, calendar: cal) == visit)
-    #expect(BoardSummary.start(of: .sinceLastVisit, lastVisit: nil, now: now, calendar: cal) == now.addingTimeInterval(-day))
-    #expect(BoardSummary.start(of: .lastHour, lastVisit: visit, now: now, calendar: cal) == now.addingTimeInterval(-3600))
-    // 1_800_000_000 is 2027-01-15 08:00 UTC; midnight UTC is 1_799_971_200.
-    #expect(BoardSummary.start(of: .today, lastVisit: visit, now: now, calendar: cal).timeIntervalSince1970 == 1_799_971_200)
-    #expect(BoardSummary.Period.allCases.map(\.title) == ["Since Last Visit", "Last Hour", "Today"])
+@Test("A period is a window: Unread by the read state, the others by the clock")
+func aPeriodIsAWindow() {
+    let reads = BoardReads(floor: now.addingTimeInterval(-5 * 3600))
+    #expect(BoardSummary.window(.unread, reads: reads, now: now, calendar: utc) == .unread(reads))
+    #expect(BoardSummary.window(.lastHour, reads: reads, now: now, calendar: utc) == .since(now.addingTimeInterval(-3600)))
+    // Midnight UTC is 1_799_971_200.
+    #expect(BoardSummary.window(.today, reads: reads, now: now, calendar: utc) == .since(Date(timeIntervalSince1970: 1_799_971_200)))
+    #expect(BoardSummary.Period.allCases.map(\.title) == ["Unread", "Last Hour", "Today"])
 }
 
 @Test("Notes are read only for tasks that moved since")
@@ -104,7 +120,7 @@ func notesAreReadOnlyForTasksThatMovedSince() {
     let since = now.addingTimeInterval(-3600)
     let rows = (0..<15).map { row("t\($0)", .inProgress, since: 100 + Double($0)) }
         + [row("still", .inProgress, since: 9000), row("x", .cancelled, since: 10)]
-    let picked = BoardSummary.noteCandidates(rows: rows, since: since)
+    let picked = BoardSummary.noteCandidates(rows: rows, window: .since(since))
     #expect(picked.count == 10)
     #expect(picked.first?.key == "t0")
     #expect(!picked.contains { $0.key == "still" || $0.key == "x" })
@@ -125,7 +141,10 @@ func todayStartsAtLocalMidnightOnASpringForwardDay() {
     cal.timeZone = TimeZone(identifier: "America/New_York")!
     // 2027-03-14 15:00 EDT (19:00 UTC), after the 02:00 jump. Midnight that day was EST.
     let at = Date(timeIntervalSince1970: 1_805_050_800)  // 2027-03-14 19:00 UTC
-    let start = BoardSummary.start(of: .today, lastVisit: nil, now: at, calendar: cal)
+    guard case .since(let start) = BoardSummary.window(.today, reads: .firstLook(now: at), now: at, calendar: cal) else {
+        Issue.record("Today is a time window")
+        return
+    }
     #expect(start.timeIntervalSince1970 == 1_805_000_400)  // 2027-03-14 05:00 UTC = 00:00 EST
     #expect(at.timeIntervalSince(start) == 14 * 3600, "only 14 hours elapsed, not 15: an hour was skipped")
 }

@@ -1,28 +1,24 @@
 import Foundation
 
-/// What the Done column shows: the work finished lately, newest first.
+/// What the Done and Canceled sections show (ov-103), and how long any other
+/// section runs before "Show N More".
 ///
-/// Until this rule a board drew every task ever finished, in the order the
-/// runner listed them (oldest filed first), so a board with a month of work
-/// opened on the oldest cards and the ones just finished were at the bottom
-/// of a long column nobody scrolled. The rule is one function here, shared by
-/// the Mac, the iPhone and (as a twin in Kotlin) Android, so a card is in
-/// Done's short view on all three or none.
-///
-/// Canceled is not Done and is not shaped by this rule: it is its own status
-/// and keeps its own column and section.
+/// Done shows every task finished and still unread (`BoardReads`), however
+/// many, plus everything finished today, with a floor of the latest three on
+/// a quiet day. The rest are on the History page, behind the "All Done"
+/// row. Canceled works the same. The rule is one function here, shared by the
+/// Mac and the iPhone, and transcribed for Android, so a task is in Done's
+/// short view on all three or none.
 public enum BoardDone {
-    /// A card finished within this long is always shown.
-    public static let recentWindow: TimeInterval = 7 * 24 * 60 * 60
+    /// Done shows at least this many, however old.
+    public static let floor = 3
 
-    /// A board shows at least this many, however old, so a quiet week doesn't
-    /// empty the column.
-    public static let minimumShown = 10
+    /// The row that opens the History page: "All Done", "All Canceled".
+    /// Its count is drawn beside it, as a header's is, never in parentheses.
+    public static func historyTitle(_ status: TaskStatus) -> String { "All \(status.title)" }
 
-    /// The button that reveals the rest. `total` is every done task.
-    public static func showAllTitle(total: Int) -> String { "Show All Done (\(total))" }
-
-    /// The done tasks, newest finished first. A tie keeps the runner's order.
+    /// The finished tasks, newest finished first. A tie keeps the runner's
+    /// order.
     public static func newestFirst(_ rows: [TaskRow]) -> [TaskRow] {
         rows.enumerated()
             .sorted { a, b in
@@ -32,29 +28,58 @@ public enum BoardDone {
             .map(\.element)
     }
 
-    /// The done tasks to draw: everything finished inside `recentWindow`, or
-    /// the newest `minimumShown`, whichever is more. All of them, newest first,
-    /// when `showingAll`.
-    public static func visible(_ rows: [TaskRow], showingAll: Bool, now: Date) -> [TaskRow] {
-        let sorted = newestFirst(rows)
-        guard !showingAll else { return sorted }
-        let cutoff = now.addingTimeInterval(-recentWindow)
-        let recent = sorted.prefix { $0.statusSince >= cutoff }.count
-        return Array(sorted.prefix(max(recent, minimumShown)))
+    /// The finished tasks to draw, newest first: the unread ones, those
+    /// finished today, and at least the newest `floor`.
+    public static func shown(
+        _ rows: [TaskRow], reads: BoardReads, now: Date, calendar: Calendar = .current
+    ) -> [TaskRow] {
+        newestFirst(rows).enumerated()
+            .filter { index, row in
+                index < floor || reads.finishedUnread(row) || calendar.isDate(row.statusSince, inSameDayAs: now)
+            }
+            .map(\.element)
     }
 }
 
+/// How a section in the navigator is cut (ov-103).
+public enum BoardSectionCut {
+    /// A section other than Done and Canceled shows this many before "Show
+    /// N More".
+    public static let limit = 10
+
+    /// "Show 4 More".
+    public static func showMoreTitle(_ hidden: Int) -> String { "Show \(hidden) More" }
+}
+
 extension TaskBoardColumn {
-    /// The rows this column draws. Only Done is shortened; every other status
-    /// draws all of its rows in the runner's order.
-    public func visibleRows(showingAllDone: Bool, now: Date) -> [TaskRow] {
-        status == .done
-            ? BoardDone.visible(rows, showingAll: showingAllDone, now: now) : rows
+    /// What this section draws, and what it leaves out.
+    public struct Cut: Equatable, Sendable {
+        public var rows: [TaskRow]
+        /// Left out of a long section until "Show N More".
+        public var hidden: Int
+        /// Done and Canceled: the row to the History page, with every task
+        /// in the status.
+        public var history: Int?
     }
 
-    /// Whether Done is hiding anything: the button's reason to exist.
-    public func hidesDone(showingAllDone: Bool, now: Date) -> Bool {
-        status == .done && !showingAllDone
-            && visibleRows(showingAllDone: false, now: now).count < rows.count
+    /// Every row, in the order the section draws them: Done and Canceled
+    /// newest finished first, any other in the runner's order.
+    public var orderedRows: [TaskRow] { status.isFinished ? BoardDone.newestFirst(rows) : rows }
+
+    /// The rows this section draws. Done and Canceled by `BoardDone`'s rule,
+    /// with the History row; any other the first `limit` until `showingAll`.
+    /// A filtered list (`filtering`) shows every match.
+    public func cut(
+        reads: BoardReads, showingAll: Bool = false, filtering: Bool = false, now: Date,
+        calendar: Calendar = .current
+    ) -> Cut {
+        if status.isFinished {
+            let shown = filtering ? BoardDone.newestFirst(rows) : BoardDone.shown(rows, reads: reads, now: now, calendar: calendar)
+            return Cut(rows: shown, hidden: 0, history: rows.isEmpty ? nil : rows.count)
+        }
+        guard !showingAll, !filtering, rows.count > BoardSectionCut.limit else {
+            return Cut(rows: rows, hidden: 0, history: nil)
+        }
+        return Cut(rows: Array(rows.prefix(BoardSectionCut.limit)), hidden: rows.count - BoardSectionCut.limit, history: nil)
     }
 }

@@ -33,6 +33,7 @@ enum SelectionMemory {
             case nil: third = ""
             case .task(let task): third = "task:\(task)"
             case .worktree(let worktree, let terminal): third = opened(worktree, terminal)
+            case .history(let status): third = "history:\(status.rawValue)"
             }
             return "\(host)|\(id)|\(third)"
         case .looseWorktree(let host, let worktree, let terminal):
@@ -52,6 +53,9 @@ enum SelectionMemory {
             let rest = third.dropFirst("worktree:".count).split(separator: ":", maxSplits: 1).map(String.init)
             guard let id = rest.first, !id.isEmpty else { return nil }
             focus = .worktree(id, terminal: rest.count > 1 ? rest[1] : nil)
+        } else if third.hasPrefix("history:") {
+            guard let status = TaskStatus(rawValue: String(third.dropFirst("history:".count))) else { return nil }
+            focus = .history(status)
         } else if !third.isEmpty {
             return nil
         }

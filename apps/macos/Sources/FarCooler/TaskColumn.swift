@@ -496,6 +496,8 @@ enum WorkspaceNavigation {
         switch focus {
         case .task(let t):
             return [top, Crumb(title: task(t), target: nil)]
+        case .history(let status):
+            return [top, Crumb(title: BoardHistory.title(status), target: nil)]
         case .worktree(let wt, _):
             let here = Crumb(title: worktree(wt), target: nil)
             if case .workspace(host, id, .task(let t)?)? = back(from: selection, trail: trail) {

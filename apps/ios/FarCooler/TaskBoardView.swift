@@ -59,16 +59,21 @@ struct WorkspaceBoardList: View {
     /// Files a task, where this runner lets a phone do that; nil draws the
     /// empty board without the button.
     let onNewTask: (() -> Void)?
+    /// A finished status's History page, pushed (ov-103).
+    let onHistory: (TaskStatus) -> Void
 
     @State private var collapsed: Set<TaskStatus>
-    /// Done shows its recent cards until this is asked for (`BoardDone`).
-    @State private var showingAllDone = false
+    /// What's been read on this board, on this phone (ov-104): what Done
+    /// keeps (`BoardDone`). Read again whenever the list comes back.
+    @State private var reads: BoardReads
+    /// The long sections showing every task, not just ten.
+    @State private var showingMore: Set<TaskStatus> = []
 
     init(
         board: TaskBoardModel?, unread: Bool, place: PhoneWorkspace, speaksOfAgents: Bool,
         waiting: Int, agents: @escaping (TaskRow) -> [BoardAgent], onOpen: @escaping (TaskRow) -> Void,
         onJump: @escaping (BoardAgent) -> Void, onRefresh: @escaping () async -> Void,
-        onNewTask: (() -> Void)? = nil
+        onNewTask: (() -> Void)? = nil, onHistory: @escaping (TaskStatus) -> Void = { _ in }
     ) {
         self.board = board
         self.unread = unread
@@ -80,8 +85,10 @@ struct WorkspaceBoardList: View {
         self.onJump = onJump
         self.onRefresh = onRefresh
         self.onNewTask = onNewTask
+        self.onHistory = onHistory
         _collapsed = State(
             initialValue: BoardForm.collapsed(host: place.runner, workspace: place.workspace))
+        _reads = State(initialValue: PhoneReads.load(place))
     }
 
     var body: some View {
@@ -115,6 +122,7 @@ struct WorkspaceBoardList: View {
             }
         }
         .refreshable { await onRefresh() }
+        .onAppear { reads = PhoneReads.load(place) }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("board")
     }
@@ -163,7 +171,9 @@ struct WorkspaceBoardList: View {
                 let open = BoardForm.isExpanded(section, collapsed: collapsed)
                 Section {
                     if open {
-                        ForEach(section.visibleRows(showingAllDone: showingAllDone, now: Date())) { row in
+                        let cut = section.cut(
+                            reads: reads, showingAll: showingMore.contains(section.status), now: Date())
+                        ForEach(cut.rows) { row in
                             let live = speaksOfAgents ? agents(row) : []
                             TaskBoardCardRow(
                                 row: row,
@@ -173,15 +183,33 @@ struct WorkspaceBoardList: View {
                                 onOpen: { onOpen(row) },
                                 onJump: onJump)
                         }
-                        if section.status == .done,
-                            showingAllDone || section.hidesDone(showingAllDone: false, now: Date())
-                        {
-                            Button(
-                                showingAllDone
-                                    ? "Show Recent Done Only" : BoardDone.showAllTitle(total: section.count)
-                            ) { showingAllDone.toggle() }
+                        if cut.hidden > 0 {
+                            Button(BoardSectionCut.showMoreTitle(cut.hidden)) {
+                                withAnimation { _ = showingMore.insert(section.status) }
+                            }
                             .font(.footnote)
-                            .accessibilityIdentifier("board-show-all-done")
+                            .accessibilityIdentifier("board-show-more-\(section.id)")
+                        }
+                        if let total = cut.history {
+                            // "All Done  94 ›": the History page, pushed.
+                            Button { onHistory(section.status) } label: {
+                                HStack {
+                                    Text(BoardDone.historyTitle(section.status))
+                                    Spacer()
+                                    Text("\(total)")
+                                        .monospacedDigit()
+                                        .foregroundStyle(.tertiary)
+                                    Image(systemName: "chevron.forward")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.tertiary)
+                                }
+                                .contentShape(.rect)
+                            }
+                            .buttonStyle(.plain)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("\(BoardDone.historyTitle(section.status)), \(total)")
+                            .accessibilityIdentifier("board-history-\(section.id)")
                         }
                     }
                 } header: {
@@ -241,10 +269,12 @@ struct WorkspaceBoardList: View {
                 // monospaced digit.
                 Text(section.title)
                     .foregroundStyle(expandable ? .primary : .secondary)
+                Spacer()
+                // Trailing, tertiary, in tabular digits, as the Mac's
+                // headers count (ov-104).
                 Text("\(section.count)")
                     .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                Spacer()
+                    .foregroundStyle(.tertiary)
                 if expandable {
                     Image(systemName: "chevron.forward")
                         .font(.caption.weight(.semibold))
@@ -260,6 +290,21 @@ struct WorkspaceBoardList: View {
         .accessibilityLabel("\(section.title) \(section.count)")
         .accessibilityValue(expandable ? (open ? "Expanded" : "Collapsed") : "Empty")
         .accessibilityIdentifier("board-section-\(section.id)")
+    }
+}
+
+/// What's been read on a workspace's board on this phone (ov-104): the Mac's
+/// rule (`BoardReads`), kept in this phone's defaults by runner and
+/// workspace. A task opened is read (`TaskScreen`).
+enum PhoneReads {
+    static func load(_ place: PhoneWorkspace, now: Date = Date()) -> BoardReads {
+        DefaultsBoardReads().load(host: place.runner, workspace: place.workspace, now: now)
+    }
+
+    static func open(_ row: TaskRow, latest: Date?, place: PhoneWorkspace, now: Date = Date()) {
+        var reads = load(place, now: now)
+        reads.open(row, latest: latest, now: now)
+        DefaultsBoardReads().save(reads, host: place.runner, workspace: place.workspace)
     }
 }
 

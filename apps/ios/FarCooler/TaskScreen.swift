@@ -67,6 +67,9 @@ struct TaskScreen: View {
         if let read = await connection.taskRecord(task) {
             record = read.detail
             question = read.question
+            // Opened and read: its finish no longer keeps it in Done's short
+            // list (ov-103).
+            if let row { PhoneReads.open(row, latest: read.detail.notes.map(\.at).max(), place: place) }
         }
     }
 

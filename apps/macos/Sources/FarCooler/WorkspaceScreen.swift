@@ -294,6 +294,9 @@ enum WorkspaceScreen {
                 {
                     out.append(shown)
                 }
+            case .history:
+                // A page, with no terminal in it.
+                break
             }
             return out
         }

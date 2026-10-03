@@ -8,7 +8,7 @@ import os
 @testable import Far_Cooler
 
 /// A card on a quiet board turns stale on the minute: its metadata line
-/// reads "In Progress · no movement for 1d", with no data change (ov-92: the
+/// reads "No movement for 1d", with no data change (ov-92: the
 /// mark is quiet text now, no orange sentence, icon or border).
 ///
 /// The board redraws only when a task changes, and a card crosses a day of
@@ -102,7 +102,7 @@ struct BoardCardTickTests {
         // Two minutes on: a day and a minute of silence. Nothing about the
         // card has changed but the time.
         clock.move(by: 120)
-        #expect(line() == "In Progress · no movement for 1d")
+        #expect(line() == "No movement for 1d")
         var changed = 0
         let deadline = Date().addingTimeInterval(5)
         repeat {

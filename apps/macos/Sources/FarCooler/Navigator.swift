@@ -292,3 +292,49 @@ struct OrchestratorRowView: View {
         }
     }
 }
+
+/// The filter field atop the navigator (⌘F, ov-103): the system's own
+/// rounded field, a magnifying glass in it, and a clear button while it
+/// holds something. Esc clears it; on an empty field, Esc leaves it
+/// (`onLeave`), as the sidebar's search does (`SearchEscape`).
+struct NavigatorFilterField: View {
+    @Binding var text: String
+    var focused: FocusState<Bool>.Binding
+    var placeholder = "Filter"
+    let onLeave: () -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "line.3.horizontal.decrease")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+            TextField(placeholder, text: $text)
+                .textFieldStyle(.plain)
+                .font(.system(size: WorkspaceStyle.PaneText.body))
+                .focused(focused)
+                .onExitCommand {
+                    let next = SearchEscape.after(query: text)
+                    text = next.query
+                    if !next.keepsFocus { onLeave() }
+                }
+                .accessibilityIdentifier("navigator-filter")
+            if !text.isEmpty {
+                Button { text = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Clear Filter")
+                .accessibilityLabel("Clear Filter")
+            }
+        }
+        .padding(.horizontal, 7)  // grid-exempt: the filter field's own inset
+        .frame(height: 22)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.05)))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(focused.wrappedValue ? Color.accentColor.opacity(0.6) : WorkspaceStyle.hairline, lineWidth: focused.wrappedValue ? 1 : 0.5))
+        .help("Filter tasks by key or title (⌘F)")
+    }
+}
