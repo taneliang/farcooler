@@ -143,31 +143,37 @@ struct WorkspaceSwitcherButton: NSViewRepresentable {
     }
 }
 
-/// Needs You in the title bar (ov-86): the tray, with its count in amber
-/// while anything is waiting. The sidebar's Needs You row, for a window
-/// without the sidebar.
+/// The words and tint of the title bar's Needs You button (ov-91).
+enum NeedsYouToolbar {
+    /// The tooltip: "Needs You (N)", plain when nothing waits.
+    static func tooltip(count: Int) -> String { count > 0 ? "Needs You (\(count))" : "Needs You" }
+    /// Accent while something waits, secondary otherwise. Never amber.
+    static func isTinted(count: Int) -> Bool { count > 0 }
+    /// The badge's text; nil at zero, "99+" past 99.
+    static func badge(count: Int) -> String? { count <= 0 ? nil : count > 99 ? "99+" : "\(count)" }
+    static func accessibilityLabel(count: Int) -> String {
+        count == 0 ? "Needs You, nothing waiting" : count == 1 ? "Needs You, 1 item" : "Needs You, \(count) items"
+    }
+}
+
+/// Needs You in the title bar (ov-86, restyled in ov-91): a standard
+/// toolbar button, the tray with the count as the system's badge, tinted
+/// with the accent while anything waits. The sidebar's Needs You row, for
+/// a window without the sidebar.
 struct NeedsYouToolbarButton: View {
     let count: Int
     let selected: Bool
     let onSelect: () -> Void
 
-    @Environment(\.colorScheme) private var scheme
-
     var body: some View {
         Button(action: onSelect) {
-            HStack(spacing: 3) {
-                Image(systemName: count > 0 ? "tray.full" : "tray")
-                    .symbolVariant(selected ? .fill : .none)
-                if count > 0 {
-                    Text("\(count)")
-                        .font(.system(size: 11, weight: .semibold))
-                        .monospacedDigit()
-                }
-            }
-            .foregroundStyle(count > 0 ? GlancePalette.amber(scheme) : Color.secondary)
+            Label("Needs You", systemImage: "tray")
+                .symbolVariant(selected ? .fill : .none)
+                .foregroundStyle(NeedsYouToolbar.isTinted(count: count) ? Color.accentColor : Color.secondary)
         }
-        .help(count == 0 ? "Needs You" : count == 1 ? "Needs You: 1 item" : "Needs You: \(count) items")
-        .accessibilityLabel(count == 1 ? "Needs You, 1 item" : "Needs You, \(count) items")
+        .badge(NeedsYouToolbar.badge(count: count).map { Text($0) })
+        .help(NeedsYouToolbar.tooltip(count: count))
+        .accessibilityLabel(NeedsYouToolbar.accessibilityLabel(count: count))
         .accessibilityIdentifier("toolbar-needs-you")
     }
 }

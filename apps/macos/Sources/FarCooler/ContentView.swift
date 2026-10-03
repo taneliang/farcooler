@@ -238,6 +238,11 @@ struct ContentView: View {
                     // lights, and Needs You beside it (ov-86): what the
                     // sidebar was for, so it can stay hidden.
                     ToolbarItem(placement: .navigation) { workspaceSwitcher }
+                        // A title popup, not a glass button: no capsule.
+                        .sharedBackgroundVisibility(.hidden)
+                    // Two items, not one: the system would otherwise draw
+                    // them inside a single capsule (ov-91).
+                    ToolbarSpacer(.fixed, placement: .navigation)
                     ToolbarItem(placement: .navigation) {
                         NeedsYouToolbarButton(
                             count: store.needsYou.count, selected: selection == .needsYou,
