@@ -937,7 +937,7 @@ struct TaskBoardView: View {
     /// (`unanimatedWhenFiltering`).
     private var list: some View {
         let shown = BoardFilter.narrowed(store.board, filter)
-        let plan = plan(worktrees: worktreesOf(store.board), shown: shown)
+        let plan = self.plan(worktrees: worktreesOf(store.board), shown: shown)
         let worktrees = plan.worktrees
         let inProgress = store.board.columns.first { $0.status == .inProgress }?.rows.count ?? 0
         let unreadable = !shown.unreadable.isEmpty
@@ -1094,7 +1094,7 @@ struct TaskBoardView: View {
     /// are what the filter leaves out.
     private func items(worktrees all: BoardWorktrees) -> [NavigatorItem] {
         let shown = BoardFilter.narrowed(store.board, filter)
-        let plan = plan(worktrees: all, shown: shown)
+        let plan = self.plan(worktrees: all, shown: shown)
         let tasksOpen = !closedSections.contains("tasks")
         let unread = tasksOpen && store.hasRead && plan.showsUnread && !unreadCollapsed
             ? BoardSummaryStrip.lines(BoardSummaryStrip.summary(store: store, reads: store.reads, filter: filter))

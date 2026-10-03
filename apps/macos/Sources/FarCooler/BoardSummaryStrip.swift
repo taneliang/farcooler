@@ -235,7 +235,7 @@ struct BoardSummaryStrip: View {
 
     /// The task a line is about: a line's id is its task's, then what
     /// happened ("<task>/done", "<task>/activity").
-    static func task(ofLine line: String) -> String {
+    nonisolated static func task(ofLine line: String) -> String {
         String(line.prefix { $0 != "/" })
     }
 
