@@ -4,9 +4,9 @@ import Foundation
 // Everything the sidebar does, and where else it's done (ov-86 review M1).
 //
 // A new window opens without the sidebar, so nothing may be reachable only
-// from it. The title bar's switcher, the runner banner, the workspace
-// navigator (ov-92: what the orchestrator's rail did is its first row) and
-// the worktree menus are drawn from the values here, and
+// from it. The title bar's switcher, the toolbar's runner item, the
+// workspace navigator (ov-92: what the orchestrator's rail did is its first
+// row) and the worktree menus are drawn from the values here, and
 // `SidebarParityTests` checks that between them they offer every
 // `SidebarAction`.
 
@@ -232,22 +232,6 @@ enum WorkspaceSwitcherMenu {
         out.append(.item(title: "Add Repository…", symbol: "folder.badge.plus", command: .addRepository))
         out.append(.item(title: "Add Device or Runner…", symbol: "qrcode", command: .addRunner))
         out.append(.item(title: "Runners and Devices…", symbol: "server.rack", command: .runners))
-        return out
-    }
-}
-
-/// The runner banner over the detail (ov-86 review M1): the status bar's
-/// trouble, shown whether or not the sidebar is. Nothing while every runner
-/// is well and current.
-enum RunnerBanner {
-    /// What the banner offers: the runners' state, a retry for each runner
-    /// in trouble, and the update for each out of date. Empty when there's
-    /// nothing to say.
-    static func actions(trouble: Bool, unhealthy: [String], stale: [String]) -> [SidebarAction] {
-        var out: [SidebarAction] = []
-        if trouble || !unhealthy.isEmpty { out.append(.runnerStatus) }
-        if !unhealthy.isEmpty { out.append(.retryRunner) }
-        if !stale.isEmpty { out.append(.updateDaemon) }
         return out
     }
 }
