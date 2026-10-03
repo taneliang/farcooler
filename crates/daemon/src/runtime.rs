@@ -428,14 +428,14 @@ impl Runtime {
     ///
     /// **A sink can fall behind** (ov-118). It used to be able to take bytes
     /// without limit, which is how a phone that stopped reading grew the
-    /// daemon's memory at a `yes`'s rate. Now it may answer `Taken::Behind`: it
+    /// daemon's memory at a `yes`'s rate. Now it may answer `crate::resync::Taken::Behind`: it
     /// has dropped what it was holding, and every byte until it catches up is
     /// dropped too. This loop then keeps reading the fanout — a pipe nobody reads
     /// is a pane's output backed up for every OTHER watcher — and, once the sink
     /// says it has caught up, captures the pane afresh and hands it over as a
     /// `resync`: a full reset and a full replay, which repaints a client from
     /// nothing, whatever half-sequence its emulator was left holding.
-    pub async fn attach(&self, pane: TaggedPane, mut sink: impl AttachSink) -> Result<()> {
+    pub async fn attach(&self, pane: TaggedPane, mut sink: impl crate::resync::AttachSink) -> Result<()> {
         use tokio::io::AsyncReadExt;
 
         // The replay first, exactly as `stream` sends it. Handed over in one
@@ -492,13 +492,13 @@ impl Runtime {
                         // with the first live bytes, and for the same reason:
                         // tmux cannot capture a pane and mark a point in its
                         // output at the same instant.
-                        let picture = reset_then(self.opening_replay(&pane.pane_id).await);
+                        let picture = crate::resync::reset_then(self.opening_replay(&pane.pane_id).await);
                         if !sink.resync(picture) {
                             break;
                         }
                         behind = false;
                     }
-                    _ = tokio::time::sleep(RESYNC_GROUND_WAIT), if owed => {
+                    _ = tokio::time::sleep(crate::resync::RESYNC_GROUND_WAIT), if owed => {
                         boundary = crate::fanout::Boundary::default();
                     }
                     read = reader.read(&mut buf) => match read {
@@ -509,7 +509,7 @@ impl Runtime {
                         Ok(n) => {
                             let bytes = strip.strip(&buf[..n]);
                             boundary.feed(&bytes);
-                            if sink.output(bytes) == Taken::Gone {
+                            if sink.output(bytes) == crate::resync::Taken::Gone {
                                 break;
                             }
                         }
@@ -529,9 +529,9 @@ impl Runtime {
                     boundary.feed(&bytes);
                     bytes
                 }) {
-                    Taken::Sent => {}
-                    Taken::Behind => behind = true,
-                    Taken::Gone => break,
+                    crate::resync::Taken::Sent => {}
+                    crate::resync::Taken::Behind => behind = true,
+                    crate::resync::Taken::Gone => break,
                 },
             }
         }
@@ -951,69 +951,9 @@ fn synchronized(out: Vec<u8>) -> Vec<u8> {
     framed
 }
 
-/// How long a resync that is owed waits for the output to reach ground before
-/// it is taken anyway. See `Runtime::attach`.
-const RESYNC_GROUND_WAIT: std::time::Duration = std::time::Duration::from_millis(250);
-
-/// Where `Runtime::attach` puts a pane's output. See `attach`.
-pub trait AttachSink: Send {
-    /// Take the opening picture. It is never dropped for being large or for
-    /// being raced by live output. False when nothing will read it.
-    fn open(&mut self, picture: Vec<u8>) -> bool;
-
-    /// Take a run of output. While the sink is behind it drops this and says
-    /// so again.
-    fn output(&mut self, bytes: Vec<u8>) -> Taken;
-
-    /// Resolves when a sink that fell behind could deliver a picture now
-    /// rather than queue it behind a stall. False when nothing will read it.
-    fn caught_up(&self) -> impl std::future::Future<Output = bool> + Send;
-
-    /// Put this picture in place of everything that was dropped. False when
-    /// nothing will read it.
-    fn resync(&mut self, picture: Vec<u8>) -> bool;
-}
-
-/// What became of one `AttachSink::output`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Taken {
-    Sent,
-    /// Dropped, along with whatever the sink was still holding. Every byte
-    /// from here is dropped too, until a `resync`.
-    Behind,
-    /// Nobody is reading. Stop.
-    Gone,
-}
-
-/// A replay that also clears whatever a client was holding: RIS (`ESC c`)
-/// ahead of the picture, inside its synchronized update when it has one.
-///
-/// The opening replay is written into a fresh emulator, so it can lean on
-/// starting from nothing. A resync is written into one that has been fed a
-/// stream with a hole in it, and the hole can end anywhere — inside a CSI, an
-/// OSC, a UTF-8 character, on the alternate screen with the mouse on. The reset
-/// starts with ESC, which abandons any sequence in progress, and then puts back
-/// every mode, both screens, the scroll region and the history to their
-/// defaults: the same emulator a reattach builds, without the reattach. And it
-/// is history the clear has to reach — the replay brings its own scrollback, so
-/// without the reset the client's history would hold everything twice.
-///
-/// Inside the synchronized update, not ahead of it, so the emptied screen is
-/// never a frame anyone sees.
-pub(crate) fn reset_then(picture: Vec<u8>) -> Vec<u8> {
-    const OPEN: &[u8] = b"\x1b[?2026h";
-    const RESET: &[u8] = b"\x1bc";
-    let at = if picture.starts_with(OPEN) { OPEN.len() } else { 0 };
-    let mut out = Vec::with_capacity(picture.len() + RESET.len());
-    out.extend_from_slice(&picture[..at]);
-    out.extend_from_slice(RESET);
-    out.extend_from_slice(&picture[at..]);
-    out
-}
-
 #[cfg(test)]
 mod replay_tests {
-    use super::{SYNCHRONIZED_REPLAY_BUDGET, replay, reset_then};
+    use super::{SYNCHRONIZED_REPLAY_BUDGET, replay};
     use farcooler_tmux::windows::PaneModes;
     use farcooler_vt::Terminal;
 
@@ -1073,48 +1013,6 @@ mod replay_tests {
 
         t.scroll(40);
         assert_eq!(row(&t, 0), "old1", "scrolling back reaches the oldest line tmux kept");
-    }
-
-    /// **A resync leaves a client holding exactly what a fresh attach would**
-    /// (ov-118). The client has been fed a stream with a hole in it: here it
-    /// stopped on the alternate screen, mouse on, inside a half-written CSI,
-    /// with an hour of history of its own. What the daemon sends in place of
-    /// the hole has to wipe all of that, or the history arrives twice and the
-    /// next byte is read as the end of a sequence that was never finished.
-    #[test]
-    fn a_resync_repaints_a_client_as_if_it_had_just_attached() {
-        let history: Vec<String> = (1..=30).map(|i| format!("old{i}")).collect();
-        let screen: Vec<String> = (1..=10).map(|i| format!("now{i}")).collect();
-        let picture =
-            replay(Some(primary()), Some(&history.join("\n")), Some(&screen.join("\n")), Some((3, 9)));
-
-        let fresh = opened(&picture, 10);
-
-        let mut stale = Terminal::new(80, 10);
-        for i in 1..=50 {
-            stale.feed(format!("stale{i}\r\n").as_bytes());
-        }
-        // Alternate screen, mouse reporting, and a CSI cut off mid-parameter.
-        stale.feed(b"\x1b[?1049h\x1b[?1003h\x1b[?1006hTUI\x1b[3");
-        stale.feed(&reset_then(picture.clone()));
-
-        let snapshot = |t: &Terminal| farcooler_vt::grid::snapshot(t);
-        assert_eq!(history_size(&stale), history_size(&fresh), "the history, once");
-        for index in 0..10 {
-            assert_eq!(row(&stale, index), row(&fresh, index), "row {index}");
-        }
-        assert_eq!(stale.mode(), fresh.mode(), "the modes a fresh emulator would have");
-        assert_eq!(snapshot(&stale).cursor_column, snapshot(&fresh).cursor_column);
-        assert_eq!(snapshot(&stale).cursor_row, snapshot(&fresh).cursor_row);
-    }
-
-    /// Inside the synchronized update, so the reset is never shown on its own.
-    #[test]
-    fn the_reset_is_inside_the_picture_s_synchronized_update() {
-        let picture = replay(Some(primary()), None, Some("now"), Some((0, 0)));
-        let reset = reset_then(picture.clone());
-        assert!(reset.starts_with(b"\x1b[?2026h\x1bc"), "{reset:?}");
-        assert_eq!(&reset[b"\x1b[?2026h\x1bc".len()..], &picture[b"\x1b[?2026h".len()..]);
     }
 
     /// The scrollback is not the screen, and must not arrive as both.

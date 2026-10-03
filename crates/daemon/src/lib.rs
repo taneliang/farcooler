@@ -25,6 +25,7 @@ pub mod paths;
 pub mod proc_cwd;
 pub mod push;
 pub mod reconcile;
+pub mod resync;
 pub mod rendezvous;
 pub mod rpc;
 pub mod review;
