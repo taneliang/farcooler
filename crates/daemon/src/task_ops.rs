@@ -570,6 +570,11 @@ pub fn note(svc: &Service, watcher: &Watcher, req: &pb::TaskNoteAppend) -> Resul
     if task.status == TaskStatus::NeedsDecision && matches!(kind, NoteKind::Question | NoteKind::Answer) {
         watcher.announce_needs_you();
     }
+    // Every client's answer arrives here, so this is where the agent waiting
+    // on it is woken (`watch::answer_wake`).
+    if kind == NoteKind::Answer {
+        watcher.answered(&task, &written);
+    }
     Ok(pb_note(&written))
 }
 

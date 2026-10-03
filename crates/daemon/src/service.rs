@@ -4922,7 +4922,11 @@ impl Service {
         // A clone, but not a copy: `LiveInventory` shares one `Arc` view, so
         // this is the same inventory rather than a second one that could
         // disagree with it.
-        Runtime { tmux: self.tmux.clone(), inventory: self.inventory.clone() }
+        Runtime {
+            tmux: self.tmux.clone(),
+            inventory: self.inventory.clone(),
+            marks: Some(self.root.clone()),
+        }
     }
 
     pub async fn send_input(&self, id: Uuid, data: &str) -> Result<()> {
@@ -5026,6 +5030,13 @@ impl Service {
     /// The live runtime view as of the last refresh.
     pub fn inventory_snapshot(&self) -> farcooler_core::inventory::RuntimeSnapshot {
         self.inventory.snapshot()
+    }
+
+    /// Whether tmux says `term` is running now, from the inventory's current
+    /// view. Fine for choosing whom to tell something, as `live_orchestrator`
+    /// is for showing; never for taking a seat.
+    pub(crate) fn is_running(&self, term: &models::Terminal) -> bool {
+        self.derive_one(term).state == TerminalState::Running
     }
 
     fn derive_one(&self, term: &models::Terminal) -> DerivedTerminal {

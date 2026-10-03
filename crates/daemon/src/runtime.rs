@@ -25,6 +25,39 @@ use crate::paths;
 pub struct Runtime {
     pub tmux: TmuxServer,
     pub inventory: LiveInventory,
+    /// The runtime directory, where input to a terminal is marked
+    /// (`mark_input`). `None` marks nothing.
+    pub marks: Option<std::path::PathBuf>,
+}
+
+/// Where the last input to `terminal` is marked, under the runtime directory.
+pub(crate) fn input_mark(root: &std::path::Path, terminal: Uuid) -> std::path::PathBuf {
+    root.join("input").join(terminal.simple().to_string())
+}
+
+/// Say that someone just typed into `terminal`: the time, in Unix
+/// milliseconds, in a file of its own.
+///
+/// A file rather than memory because the typing doesn't pass through the
+/// daemon. The Mac types through `farcooler terminal input`, a process of
+/// its own that speaks to tmux directly (see this module's docs), and the
+/// daemon is the one that has to know: it holds an answer back from a pane
+/// someone is typing in (`watch::Watcher::pump_wakes`). Best effort: a mark
+/// that can't be written only means an answer might not wait.
+pub fn mark_input(root: &std::path::Path, terminal: Uuid) {
+    let path = input_mark(root, terminal);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64);
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(&path, now.to_string());
+}
+
+/// When someone last typed into `terminal`, if anyone has (`mark_input`).
+pub fn last_input(root: &std::path::Path, terminal: Uuid) -> Option<i64> {
+    std::fs::read_to_string(input_mark(root, terminal)).ok()?.trim().parse().ok()
 }
 
 impl Runtime {
@@ -44,7 +77,7 @@ impl Runtime {
         let tmux = TmuxServer::new(&install_id, host_id);
         let inventory = LiveInventory::new(tmux.clone());
         inventory.refresh().await;
-        Ok(Self { tmux, inventory })
+        Ok(Self { tmux, inventory, marks: Some(root.to_path_buf()) })
     }
 
     /// Resolve a short terminal id against the LIVE panes.
@@ -84,7 +117,14 @@ impl Runtime {
             .ok_or(DomainError::NotFound)?
             .pane_id
             .clone();
+        self.mark(id);
         self.tmux.send_keys(&pane, data).await
+    }
+
+    fn mark(&self, id: Uuid) {
+        if let Some(root) = &self.marks {
+            mark_input(root, id);
+        }
     }
 
     /// Exact input bytes, hex encoded, to the live pane proving this terminal.
@@ -97,6 +137,7 @@ impl Runtime {
             .ok_or(DomainError::NotFound)?
             .pane_id
             .clone();
+        self.mark(id);
         self.tmux.send_bytes_hex(&pane, hex).await
     }
 
@@ -512,11 +553,17 @@ impl Runtime {
             .clone();
 
         let mut lines = BufReader::new(tokio::io::stdin()).lines();
+        // At most one mark a second: a typist sends a line per key.
+        let mut marked: Option<std::time::Instant> = None;
 
         while let Ok(Some(line)) = lines.next_line().await {
             let hex = line.trim();
             if hex.is_empty() {
                 continue;
+            }
+            if marked.is_none_or(|at| at.elapsed() >= std::time::Duration::from_secs(1)) {
+                self.mark(id);
+                marked = Some(std::time::Instant::now());
             }
 
             if self.tmux.send_bytes_hex(&pane, hex).await.is_err() {

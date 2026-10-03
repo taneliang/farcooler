@@ -724,6 +724,23 @@ impl Store {
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
     }
 
+    /// The terminals opened for `task` (`create_terminal_for_task`), oldest
+    /// first. Any state: a caller that wants the live ones asks tmux.
+    pub fn terminals_for_task(&self, task: Uuid) -> Result<Vec<Terminal>> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(
+                r#"SELECT id, worktree_id, title, command_preset, intent, runtime_confirmed,
+                          exit_code, exit_signal, lease_generation, epoch,
+                          "columns", "rows", resource_version, pane_mode, agent_session_id, task_id,
+                          workspace_id, role, split_of, split_of_orchestrator
+                   FROM terminals WHERE task_id = ?1 ORDER BY rowid"#,
+            )
+            .map_err(map_err)?;
+        let rows = stmt.query_map(params![uuid_blob(task)], row_to_terminal).map_err(map_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
+    }
+
     /// Every terminal claiming this agent session.
     ///
     /// The join a live agent session arrives on: a hook process knows its own

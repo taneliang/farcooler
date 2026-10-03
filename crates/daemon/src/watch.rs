@@ -34,6 +34,8 @@ use uuid::Uuid;
 use crate::service::Service;
 use crate::wire;
 
+mod answer_wake;
+
 /// How often to look.
 ///
 /// A second is well under the time it takes a human to notice, and far above
@@ -875,6 +877,13 @@ pub struct Watcher {
     /// per-connection identity for it would buy multi-user semantics for a
     /// product that has one user.
     watched: std::sync::Mutex<HashMap<String, Watched>>,
+    /// Held across one pass of `pump_wakes`, so two passes can't both type
+    /// the same answer.
+    wake_pump: tokio::sync::Mutex<()>,
+    /// Whether an answer may be waiting to be told, so a tick with nothing
+    /// queued doesn't read the store. True at start, for answers queued
+    /// before a restart. See `answer_wake`.
+    wakes_hint: std::sync::atomic::AtomicBool,
 }
 
 /// One client's claim about what it is showing, and when it said so.
@@ -2682,6 +2691,8 @@ impl Watcher {
             last_count: std::sync::Mutex::new(None),
             asks_told: std::sync::Mutex::new(HashMap::new()),
             ask_sync: tokio::sync::Mutex::new(()),
+            wake_pump: tokio::sync::Mutex::new(()),
+            wakes_hint: std::sync::atomic::AtomicBool::new(true),
             clears_pending: std::sync::Mutex::new(HashSet::new()),
             taps: std::sync::Mutex::new(None),
             #[cfg(test)]
@@ -4232,6 +4243,9 @@ impl Watcher {
             tokio::select! {
                 _ = ticker.tick() => {
                     self.sample().await;
+                    // After the sample, so an agent that just went idle is
+                    // told on the tick that saw it.
+                    self.spawn_wake_pump();
                     // Gated: a drained set lookup per repository, and a git
                     // process only for repositories the filesystem says
                     // actually gained or lost a worktree. The separate forced

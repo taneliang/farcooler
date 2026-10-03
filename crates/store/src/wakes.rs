@@ -30,6 +30,8 @@ pub struct PendingWake {
     pub task: Uuid,
     /// The answer as written.
     pub body: String,
+    /// Who wrote it.
+    pub actor: Actor,
     /// Unix milliseconds.
     pub enqueued_at: i64,
 }
@@ -53,7 +55,7 @@ impl Store {
         let conn = self.conn();
         let mut stmt = conn
             .prepare(
-                "SELECT w.note_id, w.task_id, n.body, w.enqueued_at
+                "SELECT w.note_id, w.task_id, n.body, n.actor, w.enqueued_at
                    FROM answer_wakes w JOIN task_notes n ON n.id = w.note_id
                   WHERE w.done_at IS NULL
                   ORDER BY w.enqueued_at, w.rowid",
@@ -61,7 +63,16 @@ impl Store {
             .map_err(map_err)?;
         let rows = stmt
             .query_map([], |r| {
-                Ok(PendingWake { note: get_uuid(r, 0)?, task: get_uuid(r, 1)?, body: r.get(2)?, enqueued_at: r.get(3)? })
+                let actor: String = r.get(3)?;
+                Ok(PendingWake {
+                    note: get_uuid(r, 0)?,
+                    task: get_uuid(r, 1)?,
+                    body: r.get(2)?,
+                    // An unreadable word is nobody in particular: the wake
+                    // still goes to the agent rather than being dropped.
+                    actor: Actor::parse(&actor).unwrap_or(Actor::User),
+                    enqueued_at: r.get(4)?,
+                })
             })
             .map_err(map_err)?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
@@ -132,6 +143,7 @@ mod tests {
         let pending = store.pending_answer_wakes().unwrap();
         assert_eq!(pending.len(), 1);
         assert_eq!((pending[0].note, pending[0].task, pending[0].body.as_str()), (answer.id, task, "Drill in"));
+        assert_eq!(pending[0].actor, Actor::User);
         assert!(store.any_pending_answer_wake().unwrap());
 
         let told = store.finish_answer_wake(answer.id, Some("Told Agent 2 about the decision")).unwrap();
