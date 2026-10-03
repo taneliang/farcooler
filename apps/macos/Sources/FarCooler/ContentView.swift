@@ -1274,7 +1274,7 @@ struct ContentView: View {
         return TitleStatusRoom(
             switcherTitle: switcher.title, switcherRepository: switcher.repository,
             editor: detailWorktree != nil, changes: changesToolbarState != nil,
-            trouble: RunnerStatusItem.label(troubles: runnerTroubles, stale: store.staleHosts),
+            trouble: RunnerStatusItem.label(troubles: runnerTroubles, stale: store.staleHosts, ahead: store.aheadHosts),
             needsYou: store.needsYou.count)
     }
 
