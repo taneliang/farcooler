@@ -193,18 +193,11 @@ class AppModel(
 
         fleet.onFleet = { host, snapshot ->
             // An agent on a task is left to its task's push (ov-107), the
-            // rule the iPhone and the Mac use: `TaskLink.leavesBannerToTask`.
-            val noticeReaches = com.farcooler.model.TaskLink.taskNoticeReachesPhone(
-                fleet.connection(host.id)?.daemon?.value, push.registered.value,
+            // rule the iPhone and the Mac use: see `TaskLink.agentReports`.
+            val reports = com.farcooler.model.TaskLink.agentReports(
+                snapshot, fleet.connection(host.id)?.daemon?.value, push.registered.value,
             )
-            for (worktree in snapshot.worktrees) {
-                for (terminal in worktree.terminals) {
-                    notifier.report(
-                        terminal, worktree.task, host.displayLabel,
-                        leftToTask = com.farcooler.model.TaskLink.leavesBannerToTask(terminal, worktree, noticeReaches),
-                    )
-                }
-            }
+            for (report in reports) notifier.report(report, host.displayLabel)
         }
 
         // The first moment every runner has said what needs you — or failed —

@@ -77,4 +77,27 @@ object TaskLink {
      */
     fun taskNoticeReachesPhone(daemon: DaemonBuild?, registered: Boolean): Boolean =
         daemon != null && daemon.can("task_notices") && daemon.pushPaired && registered
+
+    /**
+     * Every pane in [fleet] as [com.farcooler.notify.Notifier.report] takes
+     * it, read from the runner [daemon] describes (ov-107). The fold is the
+     * one decision in the app's fleet loop, so it is made here, where a test
+     * reaches it, and the loop only hands each report on.
+     */
+    fun agentReports(fleet: Fleet, daemon: DaemonBuild?, registered: Boolean): List<AgentReport> {
+        val reaches = taskNoticeReachesPhone(daemon, registered)
+        return fleet.worktrees.flatMap { worktree ->
+            worktree.terminals.map { terminal ->
+                AgentReport(terminal, worktree.task, leavesBannerToTask(terminal, worktree, reaches))
+            }
+        }
+    }
 }
+
+/**
+ * One pane's change, as the local notifier hears it: the pane, its
+ * worktree's name for the body, and whether its banner is left to its task's
+ * push (ov-107). See [TaskLink.agentReports].
+ */
+data class AgentReport(val terminal: Terminal, val worktree: String, val leftToTask: Boolean)
+

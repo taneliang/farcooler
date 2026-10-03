@@ -117,4 +117,19 @@ class TaskLinkTest {
         org.junit.Assert.assertFalse(TaskLink.taskNoticeReachesPhone(build(setOf("tasks"), true), registered = true))
         org.junit.Assert.assertFalse(TaskLink.taskNoticeReachesPhone(null, registered = true))
     }
+
+    /** The app's fleet loop: the reports [TaskLink.agentReports] hands the notifier. */
+    @Test
+    fun `the fleet's reports leave a task-bound agent to its task's push`() {
+        val agent = Terminal(id = "a", preset = "claude", state = "running", activity = "blocked", taskId = "t-4")
+        val loose = Terminal(id = "l", preset = "claude", state = "running", activity = "blocked")
+        val fleet = Fleet(worktrees = listOf(worktree(terminals = listOf(agent, loose)).copy(task = "lane")))
+        val paired = DaemonBuild("v", true, "linux", capabilities = setOf("tasks", "task_notices"), pushPaired = true)
+        val reports = TaskLink.agentReports(fleet, paired, registered = true).associateBy { it.terminal.id }
+        org.junit.Assert.assertTrue(reports.getValue("a").leftToTask)
+        org.junit.Assert.assertFalse(reports.getValue("l").leftToTask)
+        assertEquals("lane", reports.getValue("a").worktree)
+        org.junit.Assert.assertFalse(TaskLink.agentReports(fleet, null, registered = true).single { it.terminal.id == "a" }.leftToTask)
+    }
 }
+

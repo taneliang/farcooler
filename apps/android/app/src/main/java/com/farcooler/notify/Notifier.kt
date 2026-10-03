@@ -140,13 +140,16 @@ class Notifier(
     /**
      * Announce a change, if it is worth announcing.
      *
-     * [leftToTask] is [com.farcooler.model.TaskLink.leavesBannerToTask]'s
+     * [AgentReport.leftToTask] is [com.farcooler.model.TaskLink.agentReports]'s
      * answer for this pane: an agent working on a task is told about through
      * the task's push, under the task's own tag, so its own banner would say
      * the same thing twice (ov-107). Still recorded as announced, so a fold
      * that ends doesn't replay old news.
      */
-    fun report(terminal: Terminal, worktree: String, runner: String, leftToTask: Boolean = false) {
+    fun report(report: com.farcooler.model.AgentReport, runner: String) {
+        val terminal = report.terminal
+        val worktree = report.worktree
+        val leftToTask = report.leftToTask
         val activity = terminal.agent
         val news = Announced(activity, terminal.turnDidFail)
         val previous = announced.put(terminal.id, news)
