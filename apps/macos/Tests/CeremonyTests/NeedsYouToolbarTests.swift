@@ -8,8 +8,8 @@ struct NeedsYouToolbarTests {
     @Test("The tooltip names the count, and says nothing of it when nothing waits")
     func tooltipNamesTheCount() {
         #expect(NeedsYouToolbar.tooltip(count: 0) == "Needs You")
-        #expect(NeedsYouToolbar.tooltip(count: 1) == "Needs You (1)")
-        #expect(NeedsYouToolbar.tooltip(count: 12) == "Needs You (12)")
+        #expect(NeedsYouToolbar.tooltip(count: 1) == "1 thing needs you")
+        #expect(NeedsYouToolbar.tooltip(count: 12) == "12 things need you")
     }
 
     @Test("The count is text beside the tray: none at zero, capped at 99+")

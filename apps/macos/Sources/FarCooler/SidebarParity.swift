@@ -153,7 +153,9 @@ indirect enum SwitcherEntry: Hashable {
     /// A repository's name, over its workspaces.
     case header(String)
     case workspace(name: String, waiting: Int, current: Bool, number: Int?, command: SwitcherCommand)
-    case item(title: String, symbol: String, command: SwitcherCommand)
+    /// `badge`, when it isn't 0, is a count in the menu's own badge, at the
+    /// item's trailing edge: never "Needs You (3)" (ov-101).
+    case item(title: String, symbol: String, badge: Int = 0, command: SwitcherCommand)
     /// A line that says something and does nothing: the runners' state.
     case status(String, trouble: Bool)
     case submenu(title: String, symbol: String, entries: [SwitcherEntry])
@@ -162,7 +164,7 @@ indirect enum SwitcherEntry: Hashable {
     /// Every command this line, or a menu under it, can send.
     var commands: [SwitcherCommand] {
         switch self {
-        case .workspace(_, _, _, _, let command), .item(_, _, let command): return [command]
+        case .workspace(_, _, _, _, let command), .item(_, _, _, let command): return [command]
         case .submenu(_, _, let entries): return entries.flatMap(\.commands)
         case .header, .status, .separator: return []
         }
@@ -222,7 +224,7 @@ enum WorkspaceSwitcherMenu {
                     command: .reconnect(host: host)))
         }
         out.append(.separator)
-        out.append(.item(title: needsYou > 0 ? "Needs You (\(needsYou))" : "Needs You", symbol: "tray", command: .needsYou))
+        out.append(.item(title: "Needs You", symbol: "tray", badge: needsYou, command: .needsYou))
         out.append(.item(title: "Go to Anything…", symbol: "magnifyingglass", command: .find))
         out.append(.separator)
         if offersNewWorkspace {

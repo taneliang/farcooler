@@ -134,8 +134,13 @@ struct WorkspaceSwitcherButton: View {
                     item.image = Self.dot(.clear)
                 }
                 menu.addItem(item)
-            case .item(let title, let symbol, let command):
-                menu.addItem(item(title, command, symbol: symbol))
+            case .item(let title, let symbol, let badge, let command):
+                let item = item(title, command, symbol: symbol)
+                if badge > 0 {
+                    item.badge = NSMenuItemBadge(count: badge)
+                    item.setAccessibilityLabel("\(title), \(badge)")
+                }
+                menu.addItem(item)
             case .status(let text, let trouble):
                 let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
                 item.isEnabled = false
@@ -170,8 +175,15 @@ struct WorkspaceSwitcherButton: View {
 
 /// The words and tint of the title bar's Needs You item (ov-91, ov-105).
 enum NeedsYouToolbar {
-    /// The tooltip: "Needs You (N)", plain when nothing waits.
-    static func tooltip(count: Int) -> String { count > 0 ? "Needs You (\(count))" : "Needs You" }
+    /// The tooltip: what waits, in the sidebar's words ("3 things need
+    /// you"), plain when nothing does. Never "Needs You (3)" (ov-101).
+    static func tooltip(count: Int) -> String {
+        switch count {
+        case ...0: "Needs You"
+        case 1: "1 thing needs you"
+        default: "\(count) things need you"
+        }
+    }
     /// The count beside the tray, as text; nil at zero, "99+" past 99.
     static func countText(count: Int) -> String? { count <= 0 ? nil : count > 99 ? "99+" : "\(count)" }
     /// Whether the count wears the accent: the only color in the toolbar,
