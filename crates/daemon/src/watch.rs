@@ -609,6 +609,29 @@ fn agent_observation(folded: AgentActivity) -> AgentActivity {
     activity::seen(folded)
 }
 
+/// A chat pane's observation, when a turn has failed that its row has not yet
+/// shown.
+///
+/// The watcher sees a chat pane only at its ticks, and needs `CONFIRMATIONS`
+/// of them to believe a Working. A refused key ends the turn in milliseconds,
+/// with nothing before it, so the row went Idle to Idle and never reached
+/// Done — never in front of anybody, failure or not. So a failure the row has
+/// not shown is observed as `Done` itself, which `advance(Idle, Done)` takes,
+/// until the row is on that `Done`; `failures_shown` then stops it, so a row
+/// somebody has looked at is not lit up again. Not while the agent is busy:
+/// a new turn already under way is the newer news.
+fn agent_failure_observation(
+    observed: AgentActivity,
+    failed_turns: u64,
+    failures_shown: u64,
+) -> AgentActivity {
+    if failed_turns > failures_shown && matches!(observed, AgentActivity::Idle | AgentActivity::Done) {
+        AgentActivity::Done
+    } else {
+        observed
+    }
+}
+
 /// A tagged pane with no durable terminal record is not a third worktree pane.
 /// It is residue from a close that removed the record before tmux collapsed the
 /// split. Leaving it in the layout gives clients a real rectangle with nothing
@@ -1033,6 +1056,9 @@ struct Observed {
     /// Re-derived from the log on every tick rather than latched here, so it
     /// cannot outlive the turn verdict it describes.
     turn_failed: bool,
+    /// The supervisor's `failed_turns` count this row has already shown as
+    /// `Done`. Chat panes only; see `agent_failure_observation`.
+    failures_shown: u64,
     /// The last few things the agent SAID, from its own session log.
     ///
     /// NEVER cleared, by anything, including the turn ending — see
@@ -2272,6 +2298,7 @@ impl Observed {
             blocked_question: None,
             last_card_push: None,
             turn_failed: false,
+            failures_shown: 0,
             feed: farcooler_core::feed::Feed::default(),
             signals: Signals::default(),
             pending: None,
@@ -4715,6 +4742,9 @@ impl Watcher {
             // its turn went, and "we could not tell" must never render as an
             // alarm.
             let mut turn_failed = false;
+            // A chat pane's count of failed turns, from the supervisor. Zero
+            // everywhere else. See `agent_failure_observation`.
+            let mut failed_turns = 0;
             // What the log said about the turn, and whether the screen alone
             // carried a Working past it this tick -- `Observed::observe_led` and
             // `went_unwritten`. Set in the same arm, for the same reason.
@@ -4779,8 +4809,20 @@ impl Watcher {
                     {
                         // How the last turn went, off the protocol: the
                         // same field a terminal pane's log fills below.
-                        turn_failed = self.service.agents().turn_failed(id);
-                        agent_observation(self.service.agents().activity(id))
+                        let agents = self.service.agents();
+                        turn_failed = agents.turn_failed(id);
+                        failed_turns = agents.failed_turns(id);
+                        let shown = self
+                            .state
+                            .lock()
+                            .await
+                            .get(&id)
+                            .map_or(0, |entry| entry.failures_shown);
+                        agent_failure_observation(
+                            agent_observation(agents.activity(id)),
+                            failed_turns,
+                            shown,
+                        )
                     },
                     // The SAME question the label just asked, not a hardcoded
                     // yes. `set_pane_mode` writes the mode and the harness in
@@ -4955,6 +4997,9 @@ impl Watcher {
             let previous_state = entry.state;
 
             let activity_moved = entry.observe_led(observed, lead, now);
+            if entry.activity == AgentActivity::Done {
+                entry.failures_shown = entry.failures_shown.max(failed_turns);
+            }
 
             // The one thing this loop knows that the review cache cannot: files
             // under this worktree are probably moving right now.
@@ -5030,12 +5075,17 @@ impl Watcher {
             // Redaction and truncation happen inside `farcooler_core::feed`.
             // Nothing on this path may hand a raw tool argument to a client.
             let signals_moved = entry.saw_events(&events);
+            // How the last turn went moving is news by itself. A row still on
+            // the unseen Done of a turn that worked, whose next turn is then
+            // refused, folds Done -> Done: the activity never moves, and
+            // without this the row went on showing the success.
+            let outcome_moved = entry.turn_failed != turn_failed;
             let changed = entry.should_announce(
                 activity_moved.is_some(),
                 terminal_state,
                 &command,
                 &blocked_question,
-                signals_moved,
+                signals_moved || outcome_moved,
             );
             if !changed {
                 continue;
@@ -5327,6 +5377,82 @@ fn now_millis() -> i64 {
 
 #[cfg(test)]
 mod tests {
+    /// A chat pane's failed turn reaches the row through the supervisor,
+    /// because a chat pane has no session log for `turn_failed` to come from
+    /// (ov-140) — including when the row is already on the Done of a turn
+    /// that worked, where the activity does not move at all.
+    #[tokio::test]
+    async fn a_chat_panes_failed_turn_reaches_its_row() {
+        use farcooler_agent::event::{AgentEvent, EndReason, FailureKind, Role};
+        use farcooler_protocol::v1::event::Payload;
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let rows = svc.store.list_worktrees_for_repository(repo).unwrap();
+        let main = rows.iter().find(|w| w.is_main_checkout).unwrap();
+        let term = svc.create_terminal(main.id, "shell", "shell").await.expect("a shell pane");
+        let row = svc.store.get_terminal(term.id).unwrap();
+        svc.store
+            .set_pane_mode(term.id, row.resource_version, farcooler_store::models::PaneMode::Agent, None, false)
+            .unwrap();
+        let watcher = Watcher::new(svc.clone());
+        let mut rx = watcher.subscribe();
+        let failed_on_the_wire = |rx: &mut broadcast::Receiver<Event>| {
+            let mut failed = None;
+            while let Ok(event) = rx.try_recv() {
+                if let Some(Payload::TerminalChanged(t)) = event.payload
+                    && t.id.as_ref() == term.id.as_bytes()
+                {
+                    failed = Some(t.turn_failed);
+                }
+            }
+            failed
+        };
+
+        // A refused key on the first prompt: nothing before the end, so the
+        // row never saw Working. Before, it stayed Idle and nobody was told.
+        let refused = || AgentEvent::TurnEnded {
+            reason: EndReason::Failed { kind: FailureKind::Auth, detail: String::new() },
+        };
+        svc.agents().record(term.id, vec![refused()], &|_, _| {});
+        for _ in 0..CONFIRMATIONS {
+            watcher.sample().await;
+        }
+        let seen = watcher.observed_snapshot().await;
+        assert_eq!(seen[&term.id].activity, AgentActivity::Done, "a failure is news");
+        assert!(seen[&term.id].turn_failed);
+        assert_eq!(failed_on_the_wire(&mut rx), Some(true));
+        // Looked at, it stays looked at: the same failure does not light the
+        // row up again.
+        watcher.mark_seen(term.id).await;
+        for _ in 0..CONFIRMATIONS {
+            watcher.sample().await;
+        }
+        assert_eq!(watcher.observed_snapshot().await[&term.id].activity, AgentActivity::Idle);
+
+        // A turn that worked, left unseen.
+        svc.agents().record(
+            term.id,
+            vec![AgentEvent::Message { role: Role::Agent, text: "hi".into(), parent: None }],
+            &|_, _| {},
+        );
+        for _ in 0..CONFIRMATIONS {
+            watcher.sample().await;
+        }
+        svc.agents().record(term.id, vec![AgentEvent::TurnEnded { reason: EndReason::EndTurn }], &|_, _| {});
+        for _ in 0..CONFIRMATIONS {
+            watcher.sample().await;
+        }
+        let seen = watcher.observed_snapshot().await;
+        assert_eq!(seen[&term.id].activity, AgentActivity::Done);
+        assert!(!seen[&term.id].turn_failed);
+        assert_eq!(failed_on_the_wire(&mut rx), Some(false));
+
+        // The next one is refused, with the row still on that Done.
+        svc.agents().record(term.id, vec![refused()], &|_, _| {});
+        watcher.sample().await;
+        assert!(watcher.observed_snapshot().await[&term.id].turn_failed, "the row says it failed");
+        assert_eq!(failed_on_the_wire(&mut rx), Some(true), "and a client is told");
+    }
+
     /// A claim made on the hook path, which has no watcher to call, is
     /// announced at the next tick, and only then.
     #[tokio::test]

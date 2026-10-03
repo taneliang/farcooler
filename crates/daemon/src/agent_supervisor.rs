@@ -160,6 +160,9 @@ struct SessionState {
     /// (`wire::failure_narrowed`), so it is the outcome of the turn the row is
     /// announcing and nothing older.
     turn_failed: bool,
+    /// How many turns have ended `Failed`, ever. A count rather than a flag
+    /// so `watch` can tell a NEW failure from the one it already showed.
+    failed_turns: u64,
     /// Which run of the shim this transcript belongs to.
     ///
     /// The same idea as a terminal's `epoch`, and for the same reason. A shim
@@ -307,6 +310,11 @@ impl AgentSupervisor {
     /// field a terminal pane's session log fills.
     pub fn turn_failed(&self, terminal: Uuid) -> bool {
         self.sessions.lock().ok().and_then(|s| s.get(&terminal).map(|st| st.turn_failed)).unwrap_or(false)
+    }
+
+    /// How many of this pane's turns have ended `Failed`. See `failed_turns`.
+    pub fn failed_turns(&self, terminal: Uuid) -> u64 {
+        self.sessions.lock().ok().and_then(|s| s.get(&terminal).map(|st| st.failed_turns)).unwrap_or(0)
     }
 
     /// Why this pane has no agent in it, as a stable word, when it has none.
@@ -719,6 +727,7 @@ impl AgentSupervisor {
                     }
                     AgentEvent::TurnEnded { reason } => {
                         entry.turn_failed = matches!(reason, EndReason::Failed { .. });
+                        entry.failed_turns += u64::from(entry.turn_failed);
                         // The backend's own words go to the log and nowhere
                         // else: they are for whoever is debugging this, not
                         // the agent's to have said.
@@ -978,6 +987,7 @@ mod tests {
         };
         supervisor.record(terminal, vec![failed], &|_, _| {});
         assert!(supervisor.turn_failed(terminal), "a failed turn has to reach the row");
+        assert_eq!(supervisor.failed_turns(terminal), 1);
         assert_eq!(supervisor.activity(terminal), AgentActivity::Done);
         supervisor.record(terminal, vec![AgentEvent::TurnEnded { reason: EndReason::EndTurn }], &|_, _| {});
         assert!(!supervisor.turn_failed(terminal), "and stop once a turn works");
