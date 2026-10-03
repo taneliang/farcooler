@@ -29,6 +29,8 @@ import SwiftUI
 //   -phone-saved-gone        the last launch kept a stack whose task is gone
 //   -phone-billing-led       Billing has its orchestrator from the start
 //   -phone-webhooks-hidden   fc-3-webhooks is put away, in Billing's Hidden
+//   -phone-usage-old         the runner is older than spend: no agent_usage
+//   -phone-usage-fails       the runner doesn't answer usage.task
 //
 // A Darwin notification from the test stands in for a notification tapped
 // while the app is open: `com.farcooler.harness.agent`, the blocked
@@ -241,7 +243,9 @@ final class HarnessRunner {
             ],
             build: DaemonBuild(
                 version: "harness", matches: true, platform: "harness",
-                capabilities: ["tasks", "needs_you", "workstreams", "terminal_task"],
+                capabilities: Set(
+                    ["tasks", "needs_you", "workstreams", "terminal_task"]
+                        + (CommandLine.arguments.contains("-phone-usage-old") ? [] : ["agent_usage"])),
                 grantedScope: Self.readOnly ? "read" : "control"))
         // What a poll does with a fleet: the runner's projection for the
         // glances, which they need before they'll take a Needs You list.
@@ -336,8 +340,11 @@ final class HarnessRunner {
                 "notes": waiting.contains("decision:\(Self.decisionTask)")
                     ? [question] : [question, answered]
             ])
+        case "usage.task" where CommandLine.arguments.contains("-phone-usage-fails"):
+            throw ClientCore.CoreError.rejected("unavailable", word: "unavailable")
         case "usage.task":
-            // bil-7 has had two agents on it; every other task none yet.
+            // bil-7 has had two agents on it, one of whose claude turns stated
+            // only part of its usage; every other task none yet.
             guard args["task"] as? String == Self.decisionTask else {
                 let nothing: [String: Any] = [
                     "task": args["task"] as? String ?? "", "price_table": "2026-09-25",
@@ -346,7 +353,7 @@ final class HarnessRunner {
                 return try json(nothing)
             }
             let claude: [String: Any] = [
-                "turns": 9, "active_ms": 7_800_000, "input_tokens": 41_000, "output_tokens": 18_400,
+                "turns": 9, "turns_partial": 1, "active_ms": 7_800_000, "input_tokens": 41_000, "output_tokens": 18_400,
                 "cache_read_tokens": 1_020_000, "cache_write_tokens": 62_000, "cost_reported_micros": 2_870_000,
             ]
             let codex: [String: Any] = [
@@ -356,7 +363,7 @@ final class HarnessRunner {
             let spent: [String: Any] = [
                 "task": Self.decisionTask, "price_table": "2026-09-25",
                 "totals": [
-                    "turns": 12, "active_ms": 10_200_000, "input_tokens": 251_000, "output_tokens": 27_400,
+                    "turns": 12, "turns_partial": 1, "active_ms": 10_200_000, "input_tokens": 251_000, "output_tokens": 27_400,
                     "cache_read_tokens": 1_084_000, "cache_write_tokens": 62_000, "cost_reported_micros": 2_870_000,
                     "unpriced_tokens": 283_000,
                 ],

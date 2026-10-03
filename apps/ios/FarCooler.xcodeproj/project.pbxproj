@@ -200,6 +200,7 @@
 		CB742AFCE4CC587F846E7346 /* WorkspaceScreenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5951CB89F4FA52438238F13D; };
 		2232A3951E945F7A908424FF /* DynamicTypeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C87B55135D175AF3A39B2978; };
 		D7BFEA1F317D5A418F93A1C3 /* TaskScreenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD1F3CC700F95FB48294AB37; };
+		BA4F814C42865BCAAEDFBAEA /* TaskUsageUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F860D3E7F71F5B29BC2E5034; };
 		9FE140CA75A9558496196D4A /* PhoneReopenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70571C4EE1465283B9786587; };
 		19B7EA784E635D98BE09B664 /* TerminalPermissionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23895DE7BEE35D69A0A6AEF3; };
 		721F4953DDF9524495D06AFE /* TerminalLigatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90C6D3916C0759178BBBDF27; };
@@ -371,6 +372,7 @@
 		5951CB89F4FA52438238F13D /* WorkspaceScreenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceScreenTests.swift; sourceTree = "<group>"; };
 		C87B55135D175AF3A39B2978 /* DynamicTypeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicTypeTests.swift; sourceTree = "<group>"; };
 		FD1F3CC700F95FB48294AB37 /* TaskScreenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskScreenTests.swift; sourceTree = "<group>"; };
+		F860D3E7F71F5B29BC2E5034 /* TaskUsageUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskUsageUITests.swift; sourceTree = "<group>"; };
 		70571C4EE1465283B9786587 /* PhoneReopenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneReopenTests.swift; sourceTree = "<group>"; };
 		23895DE7BEE35D69A0A6AEF3 /* TerminalPermissionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalPermissionTests.swift; sourceTree = "<group>"; };
 		90C6D3916C0759178BBBDF27 /* TerminalLigatureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalLigatureTests.swift; sourceTree = "<group>"; };
@@ -544,6 +546,7 @@
 				5951CB89F4FA52438238F13D /* WorkspaceScreenTests.swift */,
 				C87B55135D175AF3A39B2978 /* DynamicTypeTests.swift */,
 				FD1F3CC700F95FB48294AB37 /* TaskScreenTests.swift */,
+				F860D3E7F71F5B29BC2E5034 /* TaskUsageUITests.swift */,
 				70571C4EE1465283B9786587 /* PhoneReopenTests.swift */,
 				23895DE7BEE35D69A0A6AEF3 /* TerminalPermissionTests.swift */,
 				90C6D3916C0759178BBBDF27 /* TerminalLigatureTests.swift */,
@@ -1156,6 +1159,7 @@
 				CB742AFCE4CC587F846E7346 /* WorkspaceScreenTests.swift in Sources */,
 				2232A3951E945F7A908424FF /* DynamicTypeTests.swift in Sources */,
 				D7BFEA1F317D5A418F93A1C3 /* TaskScreenTests.swift in Sources */,
+				BA4F814C42865BCAAEDFBAEA /* TaskUsageUITests.swift in Sources */,
 				9FE140CA75A9558496196D4A /* PhoneReopenTests.swift in Sources */,
 				19B7EA784E635D98BE09B664 /* TerminalPermissionTests.swift in Sources */,
 				721F4953DDF9524495D06AFE /* TerminalLigatureTests.swift in Sources */,

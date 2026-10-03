@@ -675,6 +675,9 @@ UI_TEST_SOURCES = [
     # task under it, and a decision answered from Needs You. Needs no runner,
     # for the same reason.
     "TaskScreenTests.swift",
+    # A task's Usage section over the canned runner: its spend, an older
+    # runner, a failed read (ov-195). Needs no runner, for the same reason.
+    "TaskUsageUITests.swift",
     # The stack reopening where a relaunch left it, and a decision push
     # landing on its task (ov-66). Needs no runner, for the same reason.
     "PhoneReopenTests.swift",
