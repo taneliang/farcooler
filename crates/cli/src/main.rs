@@ -1409,6 +1409,10 @@ fn status_json(
         // Whether this runner's task notices reach the owner's devices as
         // pushes (ov-94): the Mac then leaves them to the push.
         "pushPaired": host.push_paired,
+        // The runner's own id (`Host.runner_id`), which a task notice names
+        // it by (ov-106): a click on a pushed notice finds its runner here.
+        // Null from a runner too old to say.
+        "runnerId": (!host.runner_id.is_empty()).then_some(&host.runner_id),
         "roots": counts.roots,
         "repositories": counts.repositories,
         "worktrees": counts.worktrees,
@@ -4833,6 +4837,12 @@ mod tests {
         let counts = StatusCounts { roots: 0, repositories: 0, worktrees: 0, terminals: 0 };
         let host = farcooler_protocol::v1::Host { push_paired: true, ..Default::default() };
         assert_eq!(status_json(&host, &[], counts)["pushPaired"], true);
+        // And which runner it is, by the id the notice names it by (ov-106).
+        let counts = || StatusCounts { roots: 0, repositories: 0, worktrees: 0, terminals: 0 };
+        let host = farcooler_protocol::v1::Host { runner_id: "r-1".into(), ..Default::default() };
+        assert_eq!(status_json(&host, &[], counts())["runnerId"], "r-1");
+        let json = status_json(&farcooler_protocol::v1::Host::default(), &[], counts());
+        assert!(json.get("runnerId").is_some_and(|v| v.is_null()), "{json}");
     }
 
     /// **A runner whose agents run a stand-in says so, in `status`** (ov-49).
