@@ -227,12 +227,16 @@ struct OrchestratorRowView: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 0) {
+            // In the mark cell, so its title is on the text column with
+            // every other row's (`NavigatorGrid`).
             icon
-                .frame(width: ColumnGrid.step, alignment: .leading)
+                .frame(width: NavigatorGrid.mark)
+                .gridMark("orchestrator", .icon)
             VStack(alignment: .leading, spacing: 2) {
                 if model.state == .none {
                     Text(OrchestratorRow.word(.none))
                         .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
+                        .gridMark("orchestrator", .text)
                     actions
                 } else {
                     HStack(spacing: 6) {
@@ -266,7 +270,8 @@ struct OrchestratorRowView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .navigatorRow(selected: selected, keyed: keyed)
+        .navigatorRow(selected: selected, keyed: keyed, leading: 0)
+        .gridMark("orchestrator", .box)
         .onTapGesture(perform: model.onSelect)
         // With no orchestrator its two menus stay reachable on their own.
         .accessibilityElement(children: model.state == .none ? .contain : .combine)
@@ -342,10 +347,9 @@ struct OrchestratorRowView: View {
 /// something. Esc clears it; on an empty field, Esc leaves it
 /// (`onLeave`), as the sidebar's search does (`SearchEscape`).
 ///
-/// Laid out as a navigator row is (ov-177): one row tall, its glyph a step
-/// in from its edge and its text a step after that, so with its edge where
-/// a row's selection starts, the glyph sits on a row's icon column and the
-/// text on its title's.
+/// Laid out on the navigator's grid (`NavigatorGrid`, ov-177): one row tall,
+/// its box from the grid's edge, its glyph centered in the mark cell, and
+/// its text on the text column, where every row's text starts.
 struct NavigatorFilterField: View {
     @Binding var text: String
     var focused: FocusState<Bool>.Binding
@@ -358,7 +362,7 @@ struct NavigatorFilterField: View {
             Image(systemName: glyph)
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
-                .frame(width: ColumnGrid.step, alignment: .leading)
+                .frame(width: NavigatorGrid.mark)
                 .gridMark("filter", .icon)
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
@@ -382,10 +386,10 @@ struct NavigatorFilterField: View {
                 .accessibilityLabel("Clear Filter")
             }
         }
-        .padding(.leading, ColumnGrid.step)
         .padding(.trailing, ColumnGrid.rhythm)
         .frame(height: ColumnGrid.rowHeight)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.05)))
+        .gridMark("filter", .box)
         .overlay(
             RoundedRectangle(cornerRadius: 6)
                 .strokeBorder(focused.wrappedValue ? Color.accentColor.opacity(0.6) : WorkspaceStyle.hairline, lineWidth: focused.wrappedValue ? 1 : 0.5))

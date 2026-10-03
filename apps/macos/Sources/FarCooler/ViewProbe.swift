@@ -22,16 +22,27 @@ struct ProbedViewsKey: PreferenceKey {
 
 private struct IdentifiedModifier: ViewModifier {
     let id: String
+    /// Whether it's the view's accessibility identifier too: not for a
+    /// region whose controls carry their own (`probed(_:)`).
+    var labels = true
     @Environment(\.gridProbing) private var probing
 
     func body(content: Content) -> some View {
         if probing {
-            content
-                .anchorPreference(key: ProbedViewsKey.self, value: .bounds) { [ProbedView(id: id, bounds: $0)] }
-                .accessibilityIdentifier(id)
+            // Added to what's inside it, not set: `anchorPreference` would
+            // hide every probed view within this one, as a header's probe
+            // hid its own button.
+            labeled(
+                content.transformAnchorPreference(key: ProbedViewsKey.self, value: .bounds) {
+                    $0.append(ProbedView(id: id, bounds: $1))
+                })
         } else {
-            content.accessibilityIdentifier(id)
+            labeled(content)
         }
+    }
+
+    @ViewBuilder private func labeled(_ view: some View) -> some View {
+        if labels { view.accessibilityIdentifier(id) } else { view }
     }
 }
 
@@ -40,5 +51,12 @@ extension View {
     /// test with where it was drawn (`ProbedViewsKey`).
     func identified(_ id: String) -> some View {
         modifier(IdentifiedModifier(id: id))
+    }
+
+    /// Reported to a test as `identified(_:)` is, and nothing else: for a
+    /// region a test points at, such as a section's header row, whose own
+    /// controls carry the accessibility identifiers.
+    func probed(_ id: String) -> some View {
+        modifier(IdentifiedModifier(id: id, labels: false))
     }
 }

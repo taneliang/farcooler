@@ -4,8 +4,9 @@ import SwiftUI
 /// Unread (ov-104): a compact, collapsible strip at the top of the board
 /// listing what's new to this person, each item opening its task. An item
 /// stays until its ticket is opened, and opening it clears that ticket's
-/// items (`BoardReads`). Mark All as Read is its header's button
-/// (`MarkAllReadButton`), in its context menu and in the Board menu (⇧⌘K).
+/// items (`BoardReads`). Mark All as Read is its header's button on hover
+/// (`MarkAllReadButton`), its header's VoiceOver action, in its context menu
+/// and in the Board menu (⇧⌘K).
 ///
 /// The board's header hosts it. What goes in the strip is `BoardSummary`'s;
 /// this view only draws the lines and reads the records of the tasks that
@@ -72,9 +73,10 @@ struct BoardSummaryStrip: View {
                 accessibilityLabel: "Unread",
                 label: { open in headerLabel(summary, open: open) },
                 accessory: {
-                    // In sight, not only in the menus (ov-177: the owner
-                    // didn't find it there).
-                    if !collapsed, !summary.isEmpty {
+                    // On the header, not only in the menus (ov-177: the owner
+                    // didn't find it there), in words, while the pointer is
+                    // over the header (round 2).
+                    if offersMarkRead(summary) {
                         MarkAllReadButton(filtering: filtering) { markRead(summary) }
                     }
                 }
@@ -101,9 +103,15 @@ struct BoardSummaryStrip: View {
                 }
                 .animation(BoardMotion.list(reduceMotion: reduceMotion, slowedBy: slowdown), value: Self.identities(summary))
             }
+            // The button's action without the pointer, for VoiceOver.
+            .headerAction(
+                offersMarkRead(summary)
+                    ? SectionHeaderAction(name: MarkAllReadButton.title(filtering: filtering)) { markRead(summary) }
+                    : nil)
             // Measured from the board column's edge, as the list below is:
-            // the disclosure at column A, everything else at B.
-            .padding(.horizontal, ColumnGrid.a)
+            // the disclosure at the grid's edge, everything else at its
+            // text column (`NavigatorGrid`).
+            .padding(.horizontal, NavigatorGrid.edge)
             .padding(.top, Self.insets(collapsed: collapsed).top)
             .padding(.bottom, Self.insets(collapsed: collapsed).bottom)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -221,6 +229,10 @@ struct BoardSummaryStrip: View {
 
     /// Whether the navigator's filter narrows the strip.
     private var filtering: Bool { !BoardFilter.isEmpty(filter) }
+
+    /// Whether the header offers Mark All as Read: open, with something
+    /// to read.
+    private func offersMarkRead(_ summary: BoardSummary) -> Bool { !collapsed && !summary.isEmpty }
 
     /// Mark All as Read from the strip: unfiltered, everything on the board;
     /// filtered, only the tasks it lists, the ones its count counts (ov-177
@@ -390,38 +402,5 @@ struct ActivityNoteView: View {
     /// "12m ago · +2 more".
     static func foot(_ entry: BoardSummary.Activity, now: Date) -> String {
         [TaskRow.ago(now.timeIntervalSince(entry.at)), entry.moreLine].compactMap { $0 }.joined(separator: " · ")
-    }
-}
-
-/// Mark All as Read on Unread's header (ov-177): a checkmark in a circle, in
-/// secondary, trailing beside the count, drawn while there's anything to
-/// read. Also in the header's context menu and Board ▸ Mark All as Read
-/// (⇧⌘K). The task selected keeps its lines until the selection moves on
-/// (`HeldRead`); the rest leave on the shared spring.
-struct MarkAllReadButton: View {
-    /// The navigator's filter narrows the strip: only what it lists is read.
-    var filtering = false
-    let action: () -> Void
-
-    /// What it says it does: everything, or under a filter, what's listed.
-    static func title(filtering: Bool) -> String { filtering ? "Mark These as Read" : "Mark All as Read" }
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.boardMotionSlowdown) private var slowdown
-
-    var body: some View {
-        Button {
-            withAnimation(BoardMotion.list(reduceMotion: reduceMotion, slowedBy: slowdown), action)
-        } label: {
-            Image(systemName: "checkmark.circle")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .frame(width: ColumnGrid.step, height: ColumnGrid.rowHeight)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        // ⇧⌘K is the menu's, which reads the whole board.
-        .help(filtering ? Self.title(filtering: true) : "Mark All as Read (⇧⌘K)")
-        .accessibilityLabel(Self.title(filtering: filtering))
-        .identified("board-mark-all-read")
     }
 }

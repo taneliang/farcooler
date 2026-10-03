@@ -36,10 +36,10 @@ struct BoardHeader: View {
             row(.short)
             row(.overflow)
         }
-        // Title at column B; the controls end at column A's distance from
-        // the trailing edge.
-        .padding(.leading, ColumnGrid.b)
-        .padding(.trailing, ColumnGrid.a)
+        // Title on the navigator's text column; the controls end at its
+        // edge's distance from the trailing edge.
+        .padding(.leading, NavigatorGrid.text)
+        .padding(.trailing, NavigatorGrid.edge)
         // The shared height, so its divider lines up with the main area's
         // (ov-92): it was 40 pt, its padding around a 24 pt control.
         .columnHeader()

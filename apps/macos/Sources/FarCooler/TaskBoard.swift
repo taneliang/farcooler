@@ -877,10 +877,10 @@ struct TaskBoardView: View {
             filterFocused = false
             listFocused = true
         }
-        // On the list's grid (ov-177): its edges where a row's selection
-        // runs, at column A and A in from the trailing edge, and a rhythm
-        // over it; the list's own top inset is the rhythm under it.
-        .padding(.horizontal, ColumnGrid.a)
+        // On the list's grid (ov-177): its box from the grid's edge, where
+        // a row's selection runs, to as far in from the trailing edge, and
+        // a rhythm over it; the list's own top inset is the rhythm under it.
+        .padding(.horizontal, NavigatorGrid.edge)
         .padding(.top, ColumnGrid.rhythm)
         .onChange(of: filterRequest) { _, _ in filterFocused = true }
     }
@@ -952,7 +952,7 @@ struct TaskBoardView: View {
                             model: orchestrator, inProgress: inProgress, selected: place == .orchestrator,
                             keyed: hasKeyboard)
                         .id(NavigatorItem.orchestrator)
-                        .padding(.horizontal, ColumnGrid.a)
+                        .padding(.horizontal, NavigatorGrid.edge)
                         if plan.showsTasks(unreadable: unreadable) || plan.showsWorktrees { Divider() }
                     }
                     if plan.showsTasks(unreadable: unreadable) {
@@ -1046,7 +1046,7 @@ struct TaskBoardView: View {
                     collapsed: $unreadCollapsed, onChooseLine: { chooseLine($0) }
                 )
                 .id(ObjectIdentifier(store))
-                .padding(.horizontal, -ColumnGrid.a)
+                .padding(.horizontal, -NavigatorGrid.edge)
             }
             if !store.hasRead && store.reading {
                 centered { ProgressView() }
@@ -1138,7 +1138,7 @@ struct TaskBoardView: View {
                     defaults.set(!open, forKey: Self.closedKey(id, store: store))
                 }),
             count: count, content: content)
-        .padding(.horizontal, ColumnGrid.a)
+        .padding(.horizontal, NavigatorGrid.edge)
     }
 
     /// Listen for ↑ and ↓, repeats included, in this board's window while

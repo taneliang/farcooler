@@ -228,21 +228,38 @@ struct GridGeometryTests {
         return store
     }
 
-    @Test("Every board row's chevron and text is on the board column's grid", arguments: [false, true])
-    func theBoardIsOnTheGrid(collapsedSummary: Bool) async {
+    /// The orchestrator's row, running, or with none and its Start menu.
+    private static func orchestrator(running: Bool) -> NavigatorOrchestrator {
+        running
+            ? NavigatorOrchestrator(state: .working, agent: "claude", status: .working, nowDoing: "Reading the board")
+            : NavigatorOrchestrator(state: .none, offers: [.start(.claude)])
+    }
+
+    @Test(
+        "Every board row's chevron and text is on the board column's grid",
+        arguments: [(false, true), (true, false)])
+    func theBoardIsOnTheGrid(collapsedSummary: Bool, orchestratorRunning: Bool) async {
         let store = await Self.store()
         #expect(store.board.rows.count == 3)
         let defaults = UserDefaults(suiteName: "grid-\(UUID().uuidString)")!
         defaults.set(collapsedSummary, forKey: "board.summary.collapsed.\(store.hostKey).\(store.workspace.id)")
         let board = TaskBoardView(
-            store: store, client: store.client, agents: .none, onGoTo: { _ in }, defaults: defaults)
+            store: store, client: store.client, agents: .none, onGoTo: { _ in }, defaults: defaults,
+            orchestrator: Self.orchestrator(running: orchestratorRunning))
         let found = await marks(board, width: WorkspaceColumns.navigatorDefault)
         var expect: [String: CGFloat] = [
-            "header.text": ColumnGrid.b,
-            // The filter's glyph and text on a row's icon and title columns
-            // (ov-177).
-            "filter.icon": ColumnGrid.b,
-            "filter.text": ColumnGrid.c,
+            "header.text": NavigatorGrid.text,
+            // Round 2 of ov-177: the filter's box and the orchestrator's
+            // from the grid's edge, their glyphs in the mark cell, and their
+            // words on the text column every row's words start on. Round 1
+            // had their text a column further in, at C, which read as an
+            // indent.
+            "filter.box": NavigatorGrid.edge,
+            "filter.icon": NavigatorGrid.edge,
+            "filter.text": NavigatorGrid.text,
+            "orchestrator.box": NavigatorGrid.edge,
+            "orchestrator.icon": NavigatorGrid.edge,
+            "orchestrator.text": NavigatorGrid.text,
             "summary.chevron": ColumnGrid.a,
             "summary.text": ColumnGrid.b,
             "status.chevron": ColumnGrid.a,
@@ -256,6 +273,13 @@ struct GridGeometryTests {
             expect["summary.key.text"] = ColumnGrid.b
         }
         check(found, expect: expect)
+        // Two lines, and only two: every box and chevron at the edge, every
+        // word at the text column.
+        let edges = Set(found.filter { $0.role == .box || $0.role == .chevron }.map(\.x))
+        let words = Set(
+            found.filter { $0.role == .text && $0.row != "summary.title" }.map(\.x))
+        #expect(edges == [NavigatorGrid.edge], "boxes and chevrons at \(edges.sorted())")
+        #expect(words == [NavigatorGrid.text], "text starts at \(words.sorted())")
         // The items' titles in one column after the widest key, "ov-1234":
         // past the key, and the same x for every item.
         let titles = Set(found.filter { $0.row == "summary.title" }.map(\.x))

@@ -43,9 +43,36 @@ enum ColumnGrid {
     static let twoLineRowHeight: CGFloat = 5 * rhythm
 }
 
-/// What a mark in a row is, for `GridGeometryTests`.
+/// The navigator's grid: two lines down the board column, and nothing
+/// between them (ov-177, round 2).
+///
+/// - `edge`: where everything drawn full width starts. A section's chevron,
+///   the filter field's box, and a row's selection (the orchestrator's
+///   included) all start here.
+/// - `text`: where every word starts. The header's title, a section's and a
+///   group's title, a task's key, the filter's text and the orchestrator's
+///   title all start here.
+///
+/// A mark (chevron, filter glyph, orchestrator status) sits in the one cell
+/// between the two lines. The owner's screenshot of 3 October showed the
+/// filter's text and the orchestrator's title a column further in, at C,
+/// with their glyphs on the rows' text column. Their boxes looked indented
+/// as a result.
+enum NavigatorGrid {
+    /// The leading edge of full-width things: column A.
+    static let edge: CGFloat = ColumnGrid.a
+    /// The mark cell, from `edge` to `text`: one step.
+    static let mark: CGFloat = ColumnGrid.step
+    /// The text column: column B.
+    static let text: CGFloat = edge + mark
+    /// How far into a box drawn from `edge` its text starts.
+    static let textInset: CGFloat = text - edge
+}
+
+/// What a mark in a row is, for `GridGeometryTests`. `box` is the leading
+/// edge of a filled shape: a field, a row's selection.
 enum GridRole: String, Sendable {
-    case chevron, icon, text
+    case chevron, icon, text, box
 }
 
 /// One mark a row reported: which row type, which kind of mark, and where it
@@ -83,8 +110,10 @@ private struct GridMarkModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         if probing {
-            content.anchorPreference(key: GridMarksKey.self, value: .bounds) {
-                [GridMark(row: row, role: role, bounds: $0)]
+            // Added to the marks inside it, not set: a box's mark would
+            // otherwise hide its own glyph's and text's.
+            content.transformAnchorPreference(key: GridMarksKey.self, value: .bounds) {
+                $0.append(GridMark(row: row, role: role, bounds: $1))
             }
         } else {
             content

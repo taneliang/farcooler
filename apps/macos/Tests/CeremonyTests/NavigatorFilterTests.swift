@@ -164,6 +164,42 @@ struct NavigatorFilterTests {
             return true
         }
 
+        /// Move the pointer to the middle of the view `identifier` names,
+        /// or off the window with nil, as the mouse would. False when it
+        /// isn't drawn.
+        @discardableResult
+        func hover(_ identifier: String?) -> Bool {
+            let at: NSPoint
+            if let identifier {
+                guard let frame = seen.views[identifier] else { return false }
+                at = NSPoint(x: frame.midX, y: Self.height - frame.midY)
+            } else {
+                at = NSPoint(x: -50, y: -50)
+            }
+            // To the hosting view's own tracking area, as the window server
+            // would deliver it: an event sent through the window reaches a
+            // hover region only by way of that area. Entered first, which
+            // the view needs before it hit-tests a move.
+            let area = host.trackingAreas.first { ($0.owner as AnyObject?) === host }
+            let now = ProcessInfo.processInfo.systemUptime
+            if let area, !pointerInside {
+                host.mouseEntered(
+                    with: NSEvent.enterExitEvent(
+                        with: .mouseEntered, location: at, modifierFlags: [], timestamp: now,
+                        windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                        trackingNumber: area.hash, userData: nil)!)
+                pointerInside = true
+            }
+            host.mouseMoved(
+                with: NSEvent.mouseEvent(
+                    with: .mouseMoved, location: at, modifierFlags: [], timestamp: now,
+                    windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0)!)
+            return true
+        }
+
+        /// Whether `hover` has sent the pointer into the window.
+        private var pointerInside = false
+
         /// The navigator's filter field.
         var field: NSTextField? {
             func find(_ view: NSView) -> NSTextField? {
@@ -363,7 +399,8 @@ struct NavigatorFilterTests {
         defer { harness.close() }
         await harness.select("t2")
         await harness.settle()
-        #expect(harness.identifiers.contains("board-mark-all-read"))
+        #expect(harness.hover("section-header-summary"))
+        await harness.settle()
         #expect(harness.press("board-mark-all-read"), "no Mark All as Read on Unread's header")
         await harness.settle(40)
         let ids = harness.identifiers
@@ -374,6 +411,24 @@ struct NavigatorFilterTests {
         await harness.settle(40)
         #expect(harness.identifiers.contains("board-summary-empty"))
         #expect(!harness.identifiers.contains("board-mark-all-read"), "offered with nothing to read")
+    }
+
+    /// The header's button is words, drawn only while the pointer is over
+    /// the header (ov-177, round 2: the owner couldn't tell what the
+    /// checkmark did). (Fails with the button always drawn, as round 1 had
+    /// it, and with it never drawn.)
+    @Test("Mark All as Read shows only while the pointer is over Unread's header")
+    func markAllReadOnHover() async {
+        let harness = await Harness()
+        defer { harness.close() }
+        await harness.settle()
+        #expect(!harness.identifiers.contains("board-mark-all-read"), "drawn without the pointer")
+        #expect(harness.hover("section-header-summary"), "no Unread header drawn")
+        await harness.settle()
+        #expect(harness.identifiers.contains("board-mark-all-read"), "not drawn with the pointer on the header")
+        harness.hover("board-summary-item-t1/created")
+        await harness.settle()
+        #expect(!harness.identifiers.contains("board-mark-all-read"), "still drawn with the pointer on a row")
     }
 
     /// Filtered, the header's button reads only what the strip lists, the
@@ -387,6 +442,8 @@ struct NavigatorFilterTests {
         defer { harness.close() }
         await harness.settle()
         harness.type("refund")
+        await harness.settle()
+        harness.hover("section-header-summary")
         await harness.settle()
         #expect(harness.press("board-mark-all-read"), "no button on the filtered strip")
         await harness.settle(40)

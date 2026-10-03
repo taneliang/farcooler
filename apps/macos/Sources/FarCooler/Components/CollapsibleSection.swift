@@ -202,6 +202,9 @@ struct CollapsibleSection<Label: View, Accessory: View, Content: View>: View {
     @ViewBuilder let label: (Bool) -> Label
     @ViewBuilder let accessory: () -> Accessory
     @ViewBuilder let content: () -> Content
+    /// What VoiceOver offers on the header besides opening and closing it:
+    /// a hover-only accessory's action (`headerAction(_:)`).
+    var headerAction: SectionHeaderAction?
 
     /// The caller's state, when it keeps it.
     private var binding: Binding<Bool>?
@@ -211,6 +214,8 @@ struct CollapsibleSection<Label: View, Accessory: View, Content: View>: View {
     @State private var stored: Bool
     /// Closing, until its spring settles: what the content is clipped for.
     @State private var clip = SectionClip()
+    /// The pointer is over the header row (`sectionHeaderHovered`).
+    @State private var headerHovered = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.boardMotionSlowdown) private var slowdown
 
@@ -363,10 +368,14 @@ struct CollapsibleSection<Label: View, Accessory: View, Content: View>: View {
                 if fillsRow { Spacer(minLength: SidebarGrid.gap) }
             }
             accessory()
+                .environment(\.sectionHeaderHovered, headerHovered)
             if !fillsRow { Spacer(minLength: 0) }
             if let count { SectionCount(count: count).accessibilityHidden(true) }
         }
         .padding(metrics.headerInsets)
+        .contentShape(Rectangle())
+        .onHover { headerHovered = $0 }
+        .probed("section-header-\(id)")
     }
 
     private func toggleButton<Face: View>(@ViewBuilder _ face: () -> Face) -> some View {
@@ -394,6 +403,9 @@ struct CollapsibleSection<Label: View, Accessory: View, Content: View>: View {
         .accessibilityLabel(count.map { "\(accessibilityLabel), \($0)" } ?? accessibilityLabel)
         .accessibilityValue(canExpand ? (expanded ? "Expanded" : "Collapsed") : "")
         .accessibilityAddTraits(metrics.isHeading ? [.isHeader, .isButton] : .isButton)
+        .accessibilityActions {
+            if let headerAction { Button(headerAction.name, action: headerAction.perform) }
+        }
         .accessibilityIdentifier("section-\(id)")
     }
 }
@@ -558,9 +570,10 @@ extension View {
     /// accent while the navigator has the keyboard, else gray.
     func navigatorRow(
         selected: Bool, keyed: Bool, minHeight: CGFloat = ColumnGrid.twoLineRowHeight,
-        trailing: CGFloat = ColumnGrid.step
+        leading: CGFloat = NavigatorGrid.textInset, trailing: CGFloat = ColumnGrid.step
     ) -> some View {
-        modifier(NavigatorRowStyle(selected: selected, keyed: keyed, minHeight: minHeight, trailing: trailing))
+        modifier(
+            NavigatorRowStyle(selected: selected, keyed: keyed, minHeight: minHeight, leading: leading, trailing: trailing))
     }
 }
 
@@ -568,6 +581,10 @@ struct NavigatorRowStyle: ViewModifier {
     let selected: Bool
     let keyed: Bool
     let minHeight: CGFloat
+    /// Its content's inset from the selection's leading edge: the text
+    /// column's (`NavigatorGrid.textInset`), or 0 for a row that draws its
+    /// own mark cell first, as the orchestrator's does.
+    var leading: CGFloat = NavigatorGrid.textInset
     /// Its inset at the trailing edge: a task row's runs to the header's
     /// count, a rhythm in, rather than a step (ov-104).
     var trailing: CGFloat = ColumnGrid.step
@@ -579,7 +596,7 @@ struct NavigatorRowStyle: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .padding(.leading, ColumnGrid.step)
+            .padding(.leading, leading)
             .padding(.trailing, trailing)
             .padding(.vertical, ColumnGrid.rhythm / 2)
             .frame(minHeight: minHeight)
