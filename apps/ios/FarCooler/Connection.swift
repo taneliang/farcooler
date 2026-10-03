@@ -13,7 +13,10 @@ final class Connection: ObservableObject {
         case connecting
         /// First contact: the host's fingerprint, awaiting a human.
         case needsApproval(String)
-        case failed(String)
+        /// Stopped: what it means, and the words to show for it. The kind is
+        /// named where the failure is raised — the core's word, or the app's
+        /// own decision — and never read back out of the words (ov-127).
+        case failed(Failure, String)
         case connected
         /// There WAS a connection, it went away, and one is being made again.
         ///
@@ -367,14 +370,14 @@ final class Connection: ObservableObject {
 
         guard let key = Identity.privateKey() else {
             if mine == attempt {
-                phase = .failed(RunnerTrouble.Said.noIdentity)
+                phase = .failed(.noIdentity, RunnerTrouble.Said.noIdentity)
             }
             return
         }
 
         let nodeKey = NodeIdentity.storedPrivateKey
         if case .tailcat = host.reach, nodeKey == nil {
-            if mine == attempt { phase = .failed(Self.noNodeKey) }
+            if mine == attempt { phase = .failed(.noNodeKey, Self.noNodeKey) }
             return
         }
 
@@ -584,13 +587,13 @@ final class Connection: ObservableObject {
     private func reconnect(attempt: Int) async {
         guard case .reconnecting = phase, let host else { return }
         guard let key = Identity.privateKey() else {
-            phase = .failed(RunnerTrouble.Said.noIdentity)
+            phase = .failed(.noIdentity, RunnerTrouble.Said.noIdentity)
             return
         }
 
         let nodeKey = NodeIdentity.storedPrivateKey
         if case .tailcat = host.reach, nodeKey == nil {
-            phase = .failed(Self.noNodeKey)
+            phase = .failed(.noNodeKey, Self.noNodeKey)
             return
         }
 
@@ -634,7 +637,7 @@ final class Connection: ObservableObject {
     /// spins forever over something retrying will never fix.
     private func retryOrGiveUp(on error: Error, attempt: Int) {
         let next = classify(error)
-        guard case .failed(let message) = next else {
+        guard case .failed(let kind, _) = next else {
             // The host key is unknown again, which is a question for a human
             // and not something to retry past.
             phase = next
@@ -646,7 +649,7 @@ final class Connection: ObservableObject {
         // there: this file is in the iOS target, CI compiles it and never runs
         // it, and a table nothing reads back is a table that drifts. This is
         // the mechanism only.
-        switch Failure(message: message).retry {
+        switch kind.retry {
         case .never:
             phase = next
         case .afterAWhile:
@@ -728,7 +731,7 @@ final class Connection: ObservableObject {
     /// about to succeed, and until this existed the only way out of that was to
     /// kill the app.
     func giveUp(on host: Runner) {
-        abandon(RunnerTrouble.Said.stoppedWaiting(for: host.words))
+        abandon(.stopped, RunnerTrouble.Said.stoppedWaiting(for: host.words))
     }
 
     /// Stop, for good, because nobody wants this runner any more.
@@ -798,10 +801,10 @@ final class Connection: ObservableObject {
     /// call sites pass it now, and `HostKeyQuestion` is what stops the pair
     /// coming apart again.
     func declineHostKey(_ host: Runner) {
-        abandon(RunnerTrouble.Said.declined(runner: host.words))
+        abandon(HostKeyQuestion.declining, RunnerTrouble.Said.declined(runner: host.words))
     }
 
-    private func abandon(_ message: String) {
+    private func abandon(_ kind: Failure, _ message: String) {
         attempt += 1
         poller?.cancel()
         newsRefresh?.cancel()
@@ -810,28 +813,28 @@ final class Connection: ObservableObject {
         // underneath would put the spinner back thirty seconds later, which is
         // the opposite of what was asked for.
         reconnectTask?.cancel()
-        phase = .failed(message)
+        phase = .failed(kind, message)
     }
 
-    /// Turn the core's message into a phase a view can act on.
+    /// Turn the core's answer into a phase a view can act on.
     ///
     /// The unknown-host case is not a failure — it is a question — and it has
     /// to be told apart from one, or the user is shown "try again" for
-    /// something retrying will never fix.
+    /// something retrying will never fix. Both are read off the core's words
+    /// (`CoreError.unreached`), never its prose: see `RunnerTrouble`.
     private func classify(_ error: Error) -> Phase {
-        let message = error.localizedDescription
-        if let fingerprint = fingerprint(in: message) {
+        guard
+            let core = error as? ClientCore.CoreError,
+            case let .unreached(message, trouble, tunnel, fingerprint) = core
+        else {
+            return .failed(.other, error.localizedDescription)
+        }
+        if let fingerprint = RunnerTrouble.hostKeyQuestion(
+            trouble: trouble, fingerprint: fingerprint)
+        {
             return .needsApproval(fingerprint)
         }
-        return .failed(message)
-    }
-
-    private func fingerprint(in message: String) -> String? {
-        guard message.contains("is unknown") else { return nil }
-        return message
-            .split(separator: " ")
-            .first { $0.hasPrefix("SHA256:") }
-            .map(String.init)
+        return .failed(Failure(trouble: trouble, tunnel: tunnel), message)
     }
 
     /// What the daemon on the other end is, asked once per connection.

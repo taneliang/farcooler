@@ -700,8 +700,8 @@ struct LinkStatusChip: View {
         // own full-screen failure agrees, drawing every kind but a changed host
         // key in `.tertiary`. This chip was the one surface still calling it a
         // failure.
-        case .failed(let message):
-            return Connection.Failure(message: message) == .daemonMissing ? .secondary : .red
+        case .failed(let kind, _):
+            return kind == .daemonMissing ? .secondary : .red
         // Left red deliberately. A fingerprint nobody has answered is not a
         // fault, but until somebody does this device cannot talk to that runner
         // at all, and the row is the one place that says so.

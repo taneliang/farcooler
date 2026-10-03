@@ -13,81 +13,76 @@ struct RunnerTroubleTests {
     private let tunneled = RunnerTrouble.Words(
         name: "the spare room", reachDetail: "e, through the tunnel", port: nil)
 
-    // MARK: - Reading the core's message
+    // MARK: - Reading the core's word
 
-    /// The substrings are the ones `crates/client/src/ssh.rs` and `session.rs`
-    /// produce, each a distinctive phrase from the MIDDLE of its message rather
-    /// than a prefix — so wrapping the error in more context does not stop it
-    /// matching. Nothing tested this classifier before it moved here.
+    /// Every `trouble` word the core can send on a failed connect: the arms of
+    /// `SshError::word` and `SessionError::word` in `crates/client`, whose
+    /// test holds each failure to a word of its own. Copied by hand — the
+    /// Rust test is what stops two failures sharing one; this is what stops a
+    /// word this table expects from going unread.
+    static let everyCoreWord = [
+        "unreachable", "handshake_failed", "key_rejected", "bad_key", "host_key_changed",
+        "host_key_unknown", "exec_failed", "tunnel", "tunnel_port_closed", "protocol",
+        "wrong_result", "daemon_missing", "version_mismatch", "refused", "disconnected",
+        "bad_config",
+    ]
+
+    /// The kinds a word decides, by the word and never by the prose around
+    /// it (ov-127). These were phrases matched out of the middle of Rust's
+    /// `Display` strings, so a reword there changed the button.
     @Test(arguments: [
-        ("The host rejected this key.", RunnerTrouble.keyRejected),
-        (
-            "The key mini.local presented is not the one Far Cooler has recorded.",
-            RunnerTrouble.hostKeyChanged
-        ),
-        ("Far Cooler cannot reach mini.local (os error 61)", RunnerTrouble.unreachable),
-        ("The runner did not answer.", RunnerTrouble.daemonMissing),
-        ("This device has no SSH key and one could not be generated.", RunnerTrouble.noIdentity),
-        ("This device has no tunnel key.", RunnerTrouble.noNodeKey),
-        (
-            "The key mini.local presented has not been trusted on this device.",
-            RunnerTrouble.keyNotTrusted
-        ),
-        ("Stopped waiting for mini.local.", RunnerTrouble.stopped),
+        ("key_rejected", RunnerTrouble.keyRejected),
+        ("host_key_changed", RunnerTrouble.hostKeyChanged),
+        ("unreachable", RunnerTrouble.unreachable),
+        ("daemon_missing", RunnerTrouble.daemonMissing),
     ])
-    func aMessageIsClassifiedByThePhraseInsideIt(message: String, kind: RunnerTrouble) {
-        #expect(RunnerTrouble(message: message) == kind)
+    func aFailureIsClassifiedByTheCoresWord(word: String, kind: RunnerTrouble) {
+        #expect(RunnerTrouble(trouble: word) == kind)
     }
 
-    /// The phrase is looked for anywhere in the message, not at the front.
-    @Test func aWrappedMessageStillMatches() {
-        let wrapped = "While connecting: the host rejected this key. (attempt 3)"
-        #expect(RunnerTrouble(message: wrapped) == .keyRejected)
+    /// Every other word, no word, and a word from a newer core are `other`,
+    /// which is the only kind that puts the core's own words on screen — the
+    /// right reading of a failure this app cannot explain.
+    @Test func aWordWithNoCaseIsUndiagnosed() {
+        for word in ["handshake_failed", "bad_key", "exec_failed", "tunnel_port_closed", "quic"] {
+            #expect(RunnerTrouble(trouble: word) == .other, "\(word)")
+        }
+        #expect(RunnerTrouble(trouble: nil) == .other)
+        #expect(RunnerTrouble(trouble: nil).showsTheRunnersOwnWords)
     }
 
-    /// Anything with no phrase this app knows is `other`, which is the only
-    /// kind that puts the core's own words on screen.
-    @Test func anUnrecognizedMessageIsUndiagnosed() {
-        #expect(RunnerTrouble(message: "kex_exchange_identification: banner line") == .other)
-        #expect(RunnerTrouble(message: "").showsTheRunnersOwnWords)
-    }
-
-    /// **The bug this case exists for.** `tunnel_error` renders every tunnel
-    /// failure but a refused port as `cannot open the tunnel: <word>`, which
-    /// matches none of the phrases above — so a revoked device fell through to
-    /// `other`, and `other` is the one kind that puts the core's own words on
-    /// screen. The person read `cannot open the tunnel: no_answer`: a raw
-    /// machine word, in the situation where a clear sentence matters most.
+    /// A tunnel failure is named by the tunnel's own stable word, which
+    /// crosses as `tunnel` beside `"trouble": "tunnel"`.
     @Test(arguments: [
-        ("cannot open the tunnel: no_answer", RunnerTrouble.TunnelWord.noAnswer),
-        ("cannot open the tunnel: derp", RunnerTrouble.TunnelWord.rendezvous),
-        ("cannot open the tunnel: no_tailcat", RunnerTrouble.TunnelWord.notInThisBuild),
-        ("cannot open the tunnel: io", RunnerTrouble.TunnelWord.unspecified),
+        ("no_answer", RunnerTrouble.TunnelWord.noAnswer),
+        ("derp", RunnerTrouble.TunnelWord.rendezvous),
+        ("no_tailcat", RunnerTrouble.TunnelWord.notInThisBuild),
+        ("io", RunnerTrouble.TunnelWord.unspecified),
     ])
     func aTunnelFailureIsClassifiedByItsStableWord(
-        message: String, word: RunnerTrouble.TunnelWord
+        tunnel: String, word: RunnerTrouble.TunnelWord
     ) {
-        #expect(RunnerTrouble(message: message) == .tunnelFailed(word))
+        #expect(RunnerTrouble(trouble: "tunnel", tunnel: tunnel) == .tunnelFailed(word))
     }
 
-    /// Every word `farcooler_tailcat::TunnelError::code` can send is one this
-    /// app has a case for. A word added in Rust with no case here would land on
-    /// `unspecified`, which is a sentence — never on `other`, which is the raw
-    /// text.
+    /// A tunnel word this build has never seen, or none at all, is still a
+    /// sentence — `unspecified` — and never `other`, which is the raw text.
     @Test func aWordThisBuildHasNeverSeenIsStillASentence() {
-        #expect(
-            RunnerTrouble(message: "cannot open the tunnel: quic")
-                == .tunnelFailed(.unspecified))
-        // Not even an empty one gets through as itself.
-        #expect(RunnerTrouble(message: "cannot open the tunnel: ") == .tunnelFailed(.unspecified))
+        #expect(RunnerTrouble(trouble: "tunnel", tunnel: "quic") == .tunnelFailed(.unspecified))
+        #expect(RunnerTrouble(trouble: "tunnel", tunnel: nil) == .tunnelFailed(.unspecified))
     }
 
-    /// The word is read out of the middle of a wrapped message too, and it ends
-    /// at the first space rather than swallowing whatever follows it.
-    @Test func theWordIsReadOutOfAWrappedMessage() {
+    /// The first-contact question is the word plus the fingerprint field, and
+    /// nothing else: no fingerprint, or another word, is no question.
+    @Test func theHostKeyQuestionIsTheWordAndTheField() {
         #expect(
-            RunnerTrouble(message: "While connecting: cannot open the tunnel: derp (attempt 3)")
-                == .tunnelFailed(.rendezvous))
+            RunnerTrouble.hostKeyQuestion(trouble: "host_key_unknown", fingerprint: "SHA256:abc")
+                == "SHA256:abc")
+        #expect(RunnerTrouble.hostKeyQuestion(trouble: "host_key_unknown", fingerprint: nil) == nil)
+        #expect(RunnerTrouble.hostKeyQuestion(trouble: "host_key_unknown", fingerprint: "") == nil)
+        #expect(
+            RunnerTrouble.hostKeyQuestion(trouble: "host_key_changed", fingerprint: "SHA256:abc")
+                == nil)
     }
 
     /// **The rule, stated as a test.** No tunnel failure may put the core's
@@ -97,6 +92,7 @@ struct RunnerTroubleTests {
     @Test func noTunnelFailurePutsAMachineWordOnAScreen() {
         for word in RunnerTrouble.TunnelWord.allCases {
             let kind = RunnerTrouble.tunnelFailed(word)
+            // The core's log line, which `detail` must never fall back to.
             let message = "cannot open the tunnel: \(word.rawValue)"
             #expect(
                 !kind.showsTheRunnersOwnWords,

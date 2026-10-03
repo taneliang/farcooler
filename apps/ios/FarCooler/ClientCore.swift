@@ -67,11 +67,16 @@ actor ClientCore {
         /// The link is gone, as opposed to the request being refused.
         ///
         /// Answered by the core rather than worked out from the message here:
-        /// Rust still has the error's type at the moment it is produced, and
-        /// `Connection.Failure` matching substrings is a compromise the
-        /// connect path makes because a connect failure genuinely arrives as
-        /// prose. A call on a live session need not make it.
+        /// Rust still has the error's type at the moment it is produced.
         case disconnected(String)
+        /// A connect that failed, with the core's stable word for why.
+        ///
+        /// `trouble` is the connect line's `trouble` (`SessionError::word`),
+        /// `tunnel` the tunnel's own word beside it, and `fingerprint` the
+        /// host's key when the word is `host_key_unknown`. `Connection` reads
+        /// these through `RunnerTrouble(trouble:tunnel:)` and never the
+        /// message, which it keeps only to show (ov-127).
+        case unreached(String, trouble: String, tunnel: String?, fingerprint: String?)
         case malformed
 
         var errorDescription: String? {
@@ -79,6 +84,7 @@ actor ClientCore {
             case .notStarted: return "The client core could not be started."
             case .rejected(let message, _, _): return message
             case .disconnected(let message): return message
+            case .unreached(let message, _, _, _): return message
             case .malformed: return "The client core returned something unreadable."
             }
         }
@@ -344,6 +350,12 @@ actor ClientCore {
                 let message = object["error"] as? String ?? "the host refused the request"
                 if object["disconnected"] as? Bool == true {
                     continuation.resume(throwing: CoreError.disconnected(message))
+                } else if let trouble = object["trouble"] as? String {
+                    // Only a connect's answer carries `trouble`.
+                    continuation.resume(
+                        throwing: CoreError.unreached(
+                            message, trouble: trouble, tunnel: object["tunnel"] as? String,
+                            fingerprint: object["fingerprint"] as? String))
                 } else {
                     continuation.resume(
                         throwing: CoreError.rejected(

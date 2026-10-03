@@ -51,13 +51,15 @@ struct HostKeyQuestionTests {
 
     // MARK: - The circle
 
-    /// Backing out has to land somewhere the app can name. The sentence is
-    /// written in one file and matched in the same one, and this is what stops
-    /// a reword turning a decision somebody made into "Can't Connect".
-    @Test func decliningClassifiesAsKeyNotTrusted() {
-        let said = RunnerTrouble.Said.declined(runner: named("box.local"))
-        #expect(RunnerTrouble(message: said) == .keyNotTrusted)
-        #expect(RunnerTrouble(message: said) == HostKeyQuestion.declining)
+    /// Backing out has to land somewhere the app can name, and it is named
+    /// by kind, never read back out of the sentence (ov-127): no word the core
+    /// can send lands there, so a decision somebody made cannot be mistaken
+    /// for a failure the runner reported, or the other way round.
+    @Test func decliningIsAKindNoCoreWordProduces() {
+        #expect(HostKeyQuestion.declining == .keyNotTrusted)
+        for word in RunnerTroubleTests.everyCoreWord {
+            #expect(RunnerTrouble(trouble: word) != HostKeyQuestion.declining, "\(word)")
+        }
     }
 
     /// Not a fault, and it must not be dressed as one — no red, and no "Try
@@ -89,8 +91,7 @@ struct HostKeyQuestionTests {
     /// The circle closed: decline, land, and the move offered there gets you
     /// back to a fingerprint on screen.
     @Test func theWayBackFromDecliningReachesTheQuestionAgain() {
-        let kind = RunnerTrouble(message: RunnerTrouble.Said.declined(runner: named("box.local")))
-        let acts = kind.nextMove.acts
+        let acts = HostKeyQuestion.declining.nextMove.acts
         #expect(acts.contains(.forgetThePinnedKey))
         #expect(acts.contains(.dialAgain))
     }
@@ -126,31 +127,15 @@ struct HostKeyQuestionTests {
 
     // MARK: - The sentences the app writes
 
-    /// Each of the four sentences this app composes itself, read back through
-    /// the classifier that has to recognize it. A reword breaks exactly one of
-    /// these, by name.
-    @Test func everySentenceTheAppWritesClassifiesBack() {
-        let stopped = RunnerTrouble.Said.stoppedWaiting(for: named("10.0.0.4"))
-        #expect(RunnerTrouble(message: stopped) == .stopped)
-        #expect(RunnerTrouble(message: RunnerTrouble.Said.noIdentity) == .noIdentity)
-        #expect(RunnerTrouble(message: RunnerTrouble.Said.noNodeKey) == .noNodeKey)
-        let declined = RunnerTrouble.Said.declined(runner: named("box"))
-        #expect(RunnerTrouble(message: declined) == .keyNotTrusted)
-    }
-
-    /// The four are told APART, not merely recognized. A phrase generic enough
-    /// to match two of them would pass the test above and still send somebody
-    /// to the wrong button.
-    @Test func theAppsFourSentencesAreDistinct() {
-        let said = [
-            RunnerTrouble.Said.declined(runner: named("box")),
-            RunnerTrouble.Said.stoppedWaiting(for: named("box")),
-            RunnerTrouble.Said.noIdentity,
-            RunnerTrouble.Said.noNodeKey,
-        ]
-        let kinds = said.map { RunnerTrouble(message: $0) }
-        #expect(kinds == [.keyNotTrusted, .stopped, .noIdentity, .noNodeKey])
-        #expect(!kinds.contains(.other))
+    /// The four kinds this app raises itself are never a reading of the core's
+    /// words. They are set beside their sentence in `Connection`; a core word
+    /// that mapped onto one would let a runner's failure put "Not Now"'s
+    /// landing, or "Stopped waiting", on a screen nobody chose.
+    @Test func noCoreWordIsAKindTheAppRaises() {
+        let raised: [RunnerTrouble] = [.keyNotTrusted, .stopped, .noIdentity, .noNodeKey]
+        for word in RunnerTroubleTests.everyCoreWord {
+            #expect(!raised.contains(RunnerTrouble(trouble: word)), "\(word)")
+        }
     }
 
     /// **The two sentences that name a runner name the runner.**

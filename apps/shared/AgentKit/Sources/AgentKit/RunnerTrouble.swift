@@ -23,32 +23,20 @@ import Foundation
 /// with, or a host key that changed underneath us. Each of these has exactly one
 /// useful next move and they are not the same move.
 ///
-/// Read off the message rather than a typed error because the message is all
-/// that crosses the FFI boundary on the connect path — the core hands back
-/// Rust's `Display` output as a string, with nothing beside it. The substrings
-/// are the ones in `crates/client/src/ssh.rs` and `session.rs`; each is a
-/// distinctive phrase
-/// from the middle of its message rather than a prefix, so wrapping the error in
-/// more context does not stop it matching.
+/// **Read off the core's word, never its message** (ov-127). A failed connect
+/// crosses the FFI as `{"error": <prose>, "trouble": <word>}`, plus `tunnel`
+/// for a tunnel failure — `SshError::word` and `SessionError::word` in
+/// `crates/client`, whose tests hold each failure to a word of its own. This
+/// used to match phrases out of the middle of Rust's `Display` strings —
+/// "rejected this key", "cannot reach" — so a reword there changed which button
+/// a person was offered and every test on both sides stayed green. The prose
+/// still crosses, for the two kinds that show it: a changed host key, whose
+/// text carries the two fingerprints being compared, and the undiagnosed
+/// failure, where the core's account is the only account there is.
 ///
-/// **One of them is not a phrase, and must not be read as one.**
-/// `SshError::Tunnel` renders as `cannot open the tunnel: <word>`, and the word
-/// is `farcooler_tailcat::TunnelError::code` — a stable machine word that
-/// already crosses the FFI on purpose, wrapped in a sentence for a log. So the
-/// tunnel failures are classified by READING THAT WORD (``TunnelWord``), never
-/// by matching the English around it. That prose can be reworded; the word is
-/// the thing whose own doc promises it will not be.
-///
-/// **The FFI is deliberately not widened to carry a code beside the message
-/// here.** `push_call` already does exactly that for a call on a live session,
-/// and `ClientCore.CoreError` states why the connect path is the exception: a
-/// connect failure genuinely arrives as prose, because two of these have
-/// nothing but the message to show — a changed host key, whose text carries the
-/// two fingerprints being compared and must not be paraphrased, and the
-/// undiagnosed failure, where the core's account is the only account there is.
-/// A code cannot replace those. What a code can do is stop a code being
-/// recovered from the sentence printed around it, and that is the whole of the
-/// change this seam needed.
+/// The kinds this APP raises — ``noIdentity``, ``noNodeKey``,
+/// ``keyNotTrusted``, ``stopped`` — are named by the code that raises them,
+/// beside the sentence in ``Said``, and never recovered from that sentence.
 enum RunnerTrouble: Equatable {
     /// The host answered but does not know this device's key.
     /// `SshError::AuthRejected` — fixed by authorizing, not by retrying.
@@ -126,77 +114,44 @@ enum RunnerTrouble: Equatable {
         /// word lands.
         case unspecified = "io"
 
-        /// What `SshError::Tunnel`'s `Display` puts in front of the word.
-        ///
-        /// The one string in this file that has to match Rust exactly.
-        /// `crates/client/src/ssh.rs`'s
-        /// `the_tunnel_message_carries_the_word_the_apps_read` is the other
-        /// half of that pair, and it names this file — because a reword on
-        /// either side is silent everywhere else.
-        static let marker = "cannot open the tunnel: "
-
-        /// The word inside a tunnel failure's message, or nil if this is not
-        /// one.
-        ///
-        /// Looked for anywhere in the message rather than at the front, for
-        /// the reason every phrase below is: wrapping the error in more
-        /// context must not stop it matching. The word runs to the first
-        /// space or the end, so trailing context does not become part of it.
-        static func inside(_ message: String) -> TunnelWord? {
-            guard let start = message.range(of: marker)?.upperBound else { return nil }
-            let word = message[start...].prefix { !$0.isWhitespace }
-            // Never nil past this point: an unknown word is a sentence this
-            // app wrote, never the word itself on a screen.
-            return TunnelWord(rawValue: String(word)) ?? .unspecified
+        /// The core's `tunnel` word, or ``unspecified`` for one this build
+        /// has never seen — or none at all: an unknown word is a sentence
+        /// this app wrote, never the word itself on a screen.
+        init(word: String?) {
+            self = word.flatMap(TunnelWord.init(rawValue:)) ?? .unspecified
         }
     }
 
     /// The sentences the APP writes, as opposed to the ones the core sends.
     ///
-    /// Four of the ten kinds above are diagnosed by matching a phrase in a
-    /// message this app composed itself, which is a round trip with a seam in
-    /// the middle: reword the sentence in `Connection` and the classifier
-    /// quietly stops matching it, so a decision the user made turns into
-    /// `.other` — "Can't Connect", the core's own words, and "Try Again" for a
-    /// question nobody answered.
+    /// Each is raised beside the kind it belongs to — `Connection` sets
+    /// `.failed(.stopped, Said.stoppedWaiting(…))`, never the sentence alone —
+    /// so a reword is a reword and cannot reclassify anything. They used to be
+    /// matched back by phrase, which is how a decision somebody made could turn
+    /// into "Can't Connect" (ov-127).
     ///
-    /// Nothing about that failure is visible in a diff or a build. So the
-    /// sentence and the phrase that recognizes it live in one file, and
-    /// `RunnerTroubleTests` reads each one back through `init(message:)`. That
-    /// test is the only enforcement this rule has, and it is the reason these
-    /// are here rather than beside the code that raises them.
-    /// **The two that name a runner take ``Words``, not a `String`.** That is a
-    /// fix and not a tidy-up. Both call sites in `Connection` passed
-    /// `Runner.address`, which returns the empty string for a tunneled runner
-    /// and whose own doc says "nothing a person reads should be built out of
-    /// this" — so a stalled tunneled runner read "Stopped waiting for ." and a
-    /// declined one read "The key  presented has not been trusted on this
-    /// device." Correct when they were written: `Runner` was an address until
-    /// `Reach` arrived, and `headline` was taught `words.name` while these were
-    /// left behind. Android had already moved to `named`.
-    ///
-    /// Nothing could go red about it. `Connection` is in the iOS target, which
-    /// CI compiles and never runs, so the guard has to be one a COMPILE can
-    /// make: an address is a `String` and a ``Words`` is not, and the only
-    /// `Words` in the app is `Runner.words`, which is built out of
-    /// `Runner.named`.
+    /// **The two that name a runner take ``Words``, not a `String`.** Both call
+    /// sites in `Connection` passed `Runner.address`, which returns the empty
+    /// string for a tunneled runner, so a stalled tunneled runner read "Stopped
+    /// waiting for ." — an address is a `String` and a ``Words`` is not, and the
+    /// only `Words` in the app is `Runner.words`, built out of `Runner.named`.
     enum Said {
         /// The user was shown a fingerprint and backed out of the question.
-        /// Matches on "has not been trusted".
+        /// ``RunnerTrouble/keyNotTrusted``.
         static func declined(runner: Words) -> String {
             "The key \(runner.name) presented has not been trusted on this device. "
                 + "Far Cooler won’t connect until it is."
         }
 
-        /// The user stopped waiting out a dial. Matches on "Stopped waiting".
+        /// The user stopped waiting out a dial. ``RunnerTrouble/stopped``.
         static func stoppedWaiting(for runner: Words) -> String {
             "Stopped waiting for \(runner.name). It may be asleep or off the network."
         }
 
-        /// No SSH key, and none could be made. Matches on "no SSH key".
+        /// No SSH key, and none could be made. ``RunnerTrouble/noIdentity``.
         static let noIdentity = "This device has no SSH key and one could not be generated."
 
-        /// A tunneled runner and no node key. Matches on "no tunnel key".
+        /// A tunneled runner and no node key. ``RunnerTrouble/noNodeKey``.
         ///
         /// **The dial does not mint one.** A tunneled runner was granted against
         /// ONE public half, which is now a line in that runner's allowlist;
@@ -209,21 +164,36 @@ enum RunnerTrouble: Equatable {
             + "Add this device again to get one."
     }
 
-    init(message: String) {
-        // First, and by the machine word rather than by a phrase. See the
-        // header: the word is what the core promises to keep stable, and the
-        // sentence printed around it is not.
-        if let word = TunnelWord.inside(message) { self = .tunnelFailed(word) }
-        else if message.contains("rejected this key") { self = .keyRejected }
-        else if message.contains("is not the one Far Cooler has recorded") {
-            self = .hostKeyChanged
-        } else if message.contains("cannot reach") { self = .unreachable }
-        else if message.contains("did not answer") { self = .daemonMissing }
-        else if message.contains("no SSH key") { self = .noIdentity }
-        else if message.contains("no tunnel key") { self = .noNodeKey }
-        else if message.contains("has not been trusted") { self = .keyNotTrusted }
-        else if message.contains("Stopped waiting") { self = .stopped }
-        else { self = .other }
+    /// What the core's word for a failed connect means.
+    ///
+    /// `trouble` is the connect line's `trouble` and `tunnel` its `tunnel`; see
+    /// the header. A word this build has no case for — `handshake_failed`,
+    /// `bad_key`, a word added in Rust next year, or none at all — is
+    /// ``other``, the one kind that shows the core's own words, which is the
+    /// right reading of a failure this app cannot explain.
+    init(trouble: String?, tunnel: String? = nil) {
+        switch trouble {
+        case "key_rejected": self = .keyRejected
+        case "host_key_changed": self = .hostKeyChanged
+        case "unreachable": self = .unreachable
+        case "daemon_missing": self = .daemonMissing
+        case "tunnel": self = .tunnelFailed(TunnelWord(word: tunnel))
+        default: self = .other
+        }
+    }
+
+    /// The fingerprint to put to a person, when the core's word says this
+    /// failure is the first-contact question rather than a failure at all.
+    ///
+    /// The fingerprint is a field of its own on the connect line. It used to be
+    /// the first word starting `SHA256:` in a message that contained "is
+    /// unknown", which a reword of `SshError::HostKeyUnknown` would have
+    /// turned into "Can't Connect" for every new runner.
+    static func hostKeyQuestion(trouble: String?, fingerprint: String?) -> String? {
+        guard trouble == "host_key_unknown", let fingerprint, !fingerprint.isEmpty else {
+            return nil
+        }
+        return fingerprint
     }
 
     /// The one action that fits what happened.
@@ -495,8 +465,8 @@ enum RunnerTrouble: Equatable {
         case .daemonMissing:
             return "SSH connected, but the Far Cooler daemon didn’t answer. Install it there."
         // The app's own sentences for the tunnel's four stable words. Never
-        // `message`: `message` is `cannot open the tunnel: <word>`, and the
-        // word is the thing this table exists to keep off a screen.
+        // `message`: `message` is the core's log line around the word, and
+        // the word is the thing this table exists to keep off a screen.
         //
         // `crates/cli/src/runner_pipe.rs`'s `sentence` says the same four
         // things to whoever is reading a terminal. Reword one and the other

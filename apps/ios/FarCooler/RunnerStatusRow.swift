@@ -185,15 +185,13 @@ struct RunnerStatusRow: View {
             }
             .font(.footnote)
 
-        case .failed(let message):
-            failed(message)
+        case .failed(let kind, let message):
+            failed(kind, message)
         }
     }
 
     @ViewBuilder
-    private func failed(_ message: String) -> some View {
-        let kind = Connection.Failure(message: message)
-
+    private func failed(_ kind: Connection.Failure, _ message: String) -> some View {
         // Red for the one failure that is genuinely alarming and the app's
         // ordinary text for the rest — `RunnerTrouble.isAlarming` names which,
         // and its doc says why every kind being red was wrong.
