@@ -24,11 +24,23 @@ pub struct ChatSession<B: AgentBackend> {
     /// A bool says the same thing, and says it for a backend whose turn ids
     /// look nothing like ACP's.
     in_flight: bool,
+    /// Queued prompts whose user message the transcript already shows.
+    ///
+    /// A steer the agent turned down comes back to the queue after
+    /// `steer_queued` reported it as said. Sending it again must not say it
+    /// twice.
+    shown: std::collections::HashSet<String>,
 }
 
 impl<B: AgentBackend> ChatSession<B> {
     pub fn new(backend: B) -> Self {
-        ChatSession { backend, queue: VecDeque::new(), next_queue_id: 0, in_flight: false }
+        ChatSession {
+            backend,
+            queue: VecDeque::new(),
+            next_queue_id: 0,
+            in_flight: false,
+            shown: std::collections::HashSet::new(),
+        }
     }
 
     pub fn capabilities(&self) -> Capabilities {
@@ -81,6 +93,8 @@ impl<B: AgentBackend> ChatSession<B> {
     pub fn edit_queued(&mut self, id: &str, text: &str) -> Vec<AgentEvent> {
         let Some(entry) = self.queue.iter_mut().find(|q| q.id == id) else { return Vec::new() };
         entry.text = text.to_string();
+        // Rewritten, so the transcript's copy is no longer what will be sent.
+        self.shown.remove(id);
         vec![self.queue_event()]
     }
 
@@ -88,6 +102,7 @@ impl<B: AgentBackend> ChatSession<B> {
     pub fn cancel_queued(&mut self, id: &str) -> Vec<AgentEvent> {
         let before = self.queue.len();
         self.queue.retain(|q| q.id != id);
+        self.shown.remove(id);
         if self.queue.len() == before { return Vec::new() }
         vec![self.queue_event()]
     }
@@ -124,10 +139,11 @@ impl<B: AgentBackend> ChatSession<B> {
             return Err(e);
         }
 
-        Ok(vec![
-            self.queue_event(),
-            AgentEvent::Message { role: Role::User, text: queued.text, parent: None },
-        ])
+        let mut events = vec![self.queue_event()];
+        if !self.shown.remove(&queued.id) {
+            events.push(AgentEvent::Message { role: Role::User, text: queued.text, parent: None });
+        }
+        Ok(events)
     }
 
     /// Wait for the backend, and drain the queue when a turn ends.
@@ -146,11 +162,35 @@ impl<B: AgentBackend> ChatSession<B> {
     /// directly and pass what comes out through here, so the queue is drained
     /// on exactly the same signal either way.
     pub async fn absorb(&mut self, mut events: Vec<AgentEvent>) -> Vec<AgentEvent> {
+        // A steer the agent turned down goes back to the FRONT of the queue:
+        // it was written before anything still waiting, and the user asked
+        // for it to go first. Done before the turn-end drain below, so a
+        // turn that ended in this same batch sends it next.
+        let returned = self.backend.take_returned_steers();
+        for steer in returned.iter().rev() {
+            let id = self.next_queue_id;
+            self.next_queue_id += 1;
+            self.queue.push_front(QueuedPrompt {
+                id: id.to_string(),
+                text: steer.text.clone(),
+                images: steer.images.clone(),
+            });
+            self.shown.insert(id.to_string());
+        }
         if events.iter().any(|e| matches!(e, AgentEvent::TurnEnded { .. })) {
             self.in_flight = false;
             // The turn is over, so anything held back can go now. This is the
             // only moment it is safe to send one.
             events.extend(self.send_next_queued().await);
+        } else if !returned.is_empty() {
+            if self.in_flight {
+                // Still running: it waits, visibly, for this turn to end.
+                events.push(self.queue_event());
+            } else {
+                // The turn it was aimed at already ended, so nothing else
+                // will drain the queue. It starts the next turn now.
+                events.extend(self.send_next_queued().await);
+            }
         }
         events
     }
@@ -175,11 +215,14 @@ impl<B: AgentBackend> ChatSession<B> {
         match self.backend.prompt(&next.text, &next.images).await {
             Ok(()) => {
                 self.in_flight = true;
-                events.push(AgentEvent::Message {
-                    role: Role::User,
-                    text: next.text,
-                    parent: None,
-                });
+                // A returned steer is already in the transcript.
+                if !self.shown.remove(&next.id) {
+                    events.push(AgentEvent::Message {
+                        role: Role::User,
+                        text: next.text,
+                        parent: None,
+                    });
+                }
                 events
             }
             Err(_) => {
@@ -227,6 +270,8 @@ mod tests {
         end_turn: bool,
         /// Every `prompt` fails, to exercise the requeue path.
         failing: bool,
+        /// Steers the "agent" turned down, handed back on the next drain.
+        returned: Vec<farcooler_agent_core::backend::ReturnedSteer>,
     }
 
     impl Fake {
@@ -237,6 +282,7 @@ mod tests {
                 steered: Vec::new(),
                 end_turn: true,
                 failing: false,
+                returned: Vec::new(),
             }
         }
 
@@ -268,6 +314,9 @@ mod tests {
         }
         async fn cancel(&mut self) -> Result<(), BackendError> {
             Ok(())
+        }
+        fn take_returned_steers(&mut self) -> Vec<farcooler_agent_core::backend::ReturnedSteer> {
+            std::mem::take(&mut self.returned)
         }
         async fn next_events(&mut self) -> Result<Vec<AgentEvent>, BackendError> {
             if self.end_turn {
@@ -311,6 +360,76 @@ mod tests {
         assert!(events.iter().any(
             |e| matches!(e, AgentEvent::Message { role: Role::User, text, .. } if text == "second")
         ));
+    }
+
+    fn turn_down(s: &mut ChatSession<Fake>, text: &str) {
+        s.backend.returned.push(farcooler_agent_core::backend::ReturnedSteer {
+            text: text.into(),
+            images: Vec::new(),
+        });
+    }
+
+    fn said_by_user(events: &[AgentEvent], text: &str) -> usize {
+        events
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::Message { role: Role::User, text: t, .. } if t == text))
+            .count()
+    }
+
+    #[tokio::test]
+    async fn a_steer_that_raced_the_turns_end_is_sent_as_the_next_turn_not_lost() {
+        // Send Now as the turn finished: the pane showed it as said, codex
+        // turned it down for a turn that no longer existed, and nothing ever
+        // sent it. It starts the next turn instead, and is not said twice.
+        let mut s = ChatSession::new(Fake::new(true));
+        s.prompt("first", Vec::new()).await.unwrap();
+        s.prompt("late", Vec::new()).await.unwrap();
+        let queued = s.queued_ids();
+        let steered = s.steer_queued(&queued[0]).await.unwrap();
+        assert_eq!(said_by_user(&steered, "late"), 1, "shown as said when it went out");
+
+        turn_down(&mut s, "late");
+        let events = s
+            .absorb(vec![AgentEvent::TurnEnded { reason: EndReason::EndTurn }])
+            .await;
+        assert_eq!(s.backend().sent, vec!["first".to_string(), "late".to_string()]);
+        assert!(s.turn_in_flight(), "it is the turn now running");
+        assert_eq!(said_by_user(&events, "late"), 0, "already in the transcript");
+    }
+
+    #[tokio::test]
+    async fn a_steer_turned_down_after_the_turn_already_ended_still_goes_out() {
+        // The refusal can arrive in a later batch than the turn's end, when
+        // nothing else will ever drain the queue.
+        let mut s = ChatSession::new(Fake::new(true));
+        s.prompt("first", Vec::new()).await.unwrap();
+        s.absorb(vec![AgentEvent::TurnEnded { reason: EndReason::EndTurn }]).await;
+        assert!(!s.turn_in_flight());
+
+        turn_down(&mut s, "late");
+        s.absorb(Vec::new()).await;
+        assert_eq!(s.backend().sent, vec!["first".to_string(), "late".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_steer_the_running_turn_cannot_take_waits_at_the_front_of_the_queue() {
+        let mut s = ChatSession::new(Fake::new(true));
+        s.prompt("first", Vec::new()).await.unwrap();
+        s.prompt("later", Vec::new()).await.unwrap();
+
+        turn_down(&mut s, "now please");
+        let events = s.absorb(Vec::new()).await;
+        let Some(AgentEvent::PromptQueue { items }) = events.last() else {
+            panic!("the queue is shown with the message back in it: {events:?}")
+        };
+        let texts: Vec<_> = items.iter().map(|q| q.text.as_str()).collect();
+        assert_eq!(texts, ["now please", "later"], "first, as it was asked to be");
+
+        let events = s
+            .absorb(vec![AgentEvent::TurnEnded { reason: EndReason::EndTurn }])
+            .await;
+        assert_eq!(s.backend().sent.last().map(String::as_str), Some("now please"));
+        assert_eq!(said_by_user(&events, "now please"), 0, "already in the transcript");
     }
 
     #[tokio::test]

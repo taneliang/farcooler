@@ -66,6 +66,14 @@ impl Capabilities {
     }
 }
 
+/// A steered message the agent did not take. See
+/// `AgentBackend::take_returned_steers`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReturnedSteer {
+    pub text: String,
+    pub images: Vec<PromptImage>,
+}
+
 /// How to start an agent process, with the program already resolved.
 ///
 /// The search happens in `farcooler-agent`, which can reach
@@ -240,6 +248,21 @@ pub trait AgentBackend: Send {
     ) -> impl std::future::Future<Output = Result<(), BackendError>> + Send;
 
     fn cancel(&mut self) -> impl std::future::Future<Output = Result<(), BackendError>> + Send;
+
+    /// Steers the agent turned down after `steer` had already returned.
+    ///
+    /// `steer` returning Ok means the message went out, not that it landed.
+    /// codex answers later, and turns down a steer aimed at a turn that ended
+    /// while it was on the wire — the commonest way Send Now meets the end of
+    /// a turn. A backend hands such a message back here, and `ChatSession`
+    /// puts it where it will still be sent, so it is never lost.
+    ///
+    /// Drained by `ChatSession::absorb` after every batch. None by default:
+    /// a backend whose steer cannot be refused after the fact has nothing to
+    /// hand back.
+    fn take_returned_steers(&mut self) -> Vec<ReturnedSteer> {
+        Vec::new()
+    }
 
     /// Block until the backend has something to say.
     ///

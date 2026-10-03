@@ -7,7 +7,9 @@
 //! makes the compiler enumerate the places that have to change.
 
 use farcooler_acp::backend::AcpBackend;
-use farcooler_agent_core::backend::{AgentBackend, BackendError, Capabilities, Launch};
+use farcooler_agent_core::backend::{
+    AgentBackend, BackendError, Capabilities, Launch, ReturnedSteer,
+};
 use farcooler_agent_core::event::{AgentEvent, PromptImage};
 use farcooler_core::activity::{AdapterBackend, AdapterSpec};
 
@@ -185,6 +187,14 @@ impl AgentBackend for Backend {
             Backend::Acp(b) => b.cancel().await,
             Backend::Codex(b) => b.cancel().await,
             Backend::Claude(b) => b.cancel().await,
+        }
+    }
+
+    fn take_returned_steers(&mut self) -> Vec<ReturnedSteer> {
+        match self {
+            Backend::Acp(b) => b.take_returned_steers(),
+            Backend::Codex(b) => b.take_returned_steers(),
+            Backend::Claude(b) => b.take_returned_steers(),
         }
     }
 
