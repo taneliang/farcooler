@@ -5364,15 +5364,36 @@ mod tests {
     #[tokio::test]
     async fn blocking_and_closing_a_pane_announce_needs_you_changed() {
         use farcooler_protocol::v1::event::Payload;
-        fn heard(rx: &mut broadcast::Receiver<Event>) -> bool {
-            let mut seen = false;
-            while let Ok(event) = rx.try_recv() {
-                seen |= matches!(event.payload, Some(Payload::NeedsYouChanged(_)));
-            }
-            seen
+        /// A `NeedsYouChanged` arrives, waited for rather than looked for
+        /// after a fixed wait.
+        async fn heard(rx: &mut broadcast::Receiver<Event>) -> bool {
+            let wait = async {
+                loop {
+                    match rx.recv().await {
+                        Ok(event) if matches!(event.payload, Some(Payload::NeedsYouChanged(_))) => return true,
+                        Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(broadcast::error::RecvError::Closed) => return false,
+                    }
+                }
+            };
+            tokio::time::timeout(std::time::Duration::from_secs(10), wait).await.unwrap_or(false)
         }
-        async fn after_the_debounce() {
-            tokio::time::sleep(NEEDS_YOU_DEBOUNCE + std::time::Duration::from_millis(100)).await;
+        /// Every announcement already made has been sent: the debounce's flag
+        /// is down. A fixed wait past the debounce passed, on a loaded box,
+        /// with an earlier announcement still in flight, which then landed
+        /// after `subscribe` and answered for a later one.
+        async fn quiet(watcher: &Watcher) {
+            let pending = || watcher.needs_you_pending.load(std::sync::atomic::Ordering::SeqCst);
+            for _ in 0..400 {
+                if !pending() {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+            panic!("an announcement never went out");
+        }
+        fn drain(rx: &mut broadcast::Receiver<Event>) {
+            while rx.try_recv().is_ok() {}
         }
         let (dir, svc, repo) = crate::test_support::fixture().await;
         let rows = svc.store.list_worktrees_for_repository(repo).unwrap();
@@ -5398,7 +5419,7 @@ mod tests {
             .pane_id;
         // A first sighting, settled, before anything is listened for.
         watcher.sample().await;
-        after_the_debounce().await;
+        quiet(&watcher).await;
         let mut rx = watcher.subscribe();
         // `/bin/cat`: a shell may alias `cat` to a pager.
         let show = format!("clear; /bin/cat '{}'; sleep 600\n", capture.display());
@@ -5414,14 +5435,16 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
         assert!(blocked, "the dialog never read as Blocked: {:?}", svc.runtime().screen(term.id).await.map(|s| s.0));
-        after_the_debounce().await;
-        assert!(heard(&mut rx), "the agent blocked and nothing said the list moved");
+        assert!(heard(&mut rx).await, "the agent blocked and nothing said the list moved");
 
+        // The same again before the close: nothing from the block is left to
+        // answer for it.
+        quiet(&watcher).await;
+        drain(&mut rx);
         svc.stop_terminal(term.id).await.expect("stopped");
         svc.remove_terminal(term.id).await.expect("closed");
         watcher.sample().await;
-        after_the_debounce().await;
-        assert!(heard(&mut rx), "the pane closed and nothing said the list moved");
+        assert!(heard(&mut rx).await, "the pane closed and nothing said the list moved");
     }
 
     /// Every tick walks the panes' processes: a real shell in a real pane,
@@ -8560,7 +8583,16 @@ mod needs_you_push_tests {
         tokio::time::pause();
         watcher.push_if_paired(pane, AgentActivity::Blocked, "claude", blocked(), false, None);
         watcher.announce_needs_you();
-        tokio::time::sleep(COUNT_NOTICE_EVERY * 2).await;
+        // The clock is paused, so these waits are exact. The count notice is
+        // scheduled once the debounce has passed, and runs (its flag goes
+        // down, just before it would gather) one interval later: both seen,
+        // so the zero below is a timer that ran and gathered nothing, not one
+        // that had not fired yet.
+        let pending = || watcher.count_pending.load(std::sync::atomic::Ordering::SeqCst);
+        tokio::time::sleep(NEEDS_YOU_DEBOUNCE + std::time::Duration::from_millis(10)).await;
+        assert!(pending(), "no count notice was scheduled, so nothing here was tested");
+        tokio::time::sleep(COUNT_NOTICE_EVERY).await;
+        assert!(!pending(), "the count notice never ran");
         assert_eq!(watcher.counts_gathered.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 
