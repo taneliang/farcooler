@@ -332,7 +332,7 @@ impl Runtime {
         // one's pipe and silently end its stream. See `fanout`.
         let mut reader = self.attach_to_fanout(&pane.pane_id).await?;
         let mut buf = vec![0u8; 16 * 1024];
-        let mut strip = (!sizes).then(crate::fanout::MarkerStrip::default);
+        let mut strip = (!sizes).then(crate::fanout::MarkerStrip::holding);
 
         // Stop when whoever asked for this stops listening.
         //
@@ -448,7 +448,7 @@ impl Runtime {
         let mut buf = vec![0u8; 16 * 1024];
         // No size markers over the wire: nothing on this path asks for them
         // yet, and the clients on it do not honor them. See `stream`.
-        let mut strip = crate::fanout::MarkerStrip::default();
+        let mut strip = crate::fanout::MarkerStrip::holding();
         loop {
             match reader.read(&mut buf).await {
                 Ok(0) | Err(_) => break,

@@ -137,7 +137,8 @@ async fn a_grown_pane_is_announced_before_its_repaint_even_after_a_respawn() {
     let readies = String::from_utf8_lossy(&seen).matches("ready").count();
     server.run(&["respawn-pane", "-k", "-t", &pane, "sh", script]);
     let second_tty = server.run(&["display-message", "-p", "-t", &pane, "#{pane_tty}"]);
-    eprintln!("tty before the respawn {first_tty}, after {second_tty}");
+    // A different tty, or this test proves nothing about following one.
+    assert_ne!(first_tty, second_tty, "the respawned pane kept its tty");
     read_until(&mut watcher, &mut seen, |s| s.matches("ready").count() > readies).await;
 
     server.run(&["resize-window", "-t", "s", "-x", "120", "-y", "30"]);

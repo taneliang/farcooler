@@ -279,11 +279,19 @@ const MARKER_TAG: &str = ">farcooler-size;";
 /// trailing escape until the next write, which may be never); if the next read
 /// completes it, a string terminator is written in place of the rest, which
 /// ends the control string the client has started without a size in it.
+///
+/// `holding` is for the other side of the fanout, removing the RUNNER's
+/// markers for a client that did not ask for them. There a partial match is
+/// held until the next read instead: the fanout sends each marker whole, so
+/// the rest is already on its way, and passing the start on would leave an
+/// old client — or a person's terminal — an empty control string.
 #[derive(Default)]
 pub struct MarkerStrip {
     matched: usize,
     carried: bool,
     dropping: Option<Dropping>,
+    hold: bool,
+    held: Vec<u8>,
 }
 
 #[derive(Default)]
@@ -300,9 +308,14 @@ const FORGED_PREFIX: &[u8] = b"\x1bP>farcooler-size";
 const FORGED_LIMIT: usize = 64;
 
 impl MarkerStrip {
+    /// A strip that holds a partial match across reads. See the type's docs.
+    pub fn holding() -> Self {
+        Self { hold: true, ..Self::default() }
+    }
+
     pub fn strip(&mut self, input: &[u8]) -> Vec<u8> {
         let mut out = Vec::with_capacity(input.len());
-        let mut held: Vec<u8> = Vec::new();
+        let mut held = std::mem::take(&mut self.held);
         for &byte in input {
             if let Some(dropping) = &mut self.dropping {
                 dropping.length += 1;
@@ -342,7 +355,9 @@ impl MarkerStrip {
                 out.push(byte);
             }
         }
-        if !held.is_empty() {
+        if self.hold {
+            self.held = held;
+        } else if !held.is_empty() {
             out.append(&mut held);
             self.carried = true;
         }
@@ -350,14 +365,101 @@ impl MarkerStrip {
     }
 }
 
+/// Where in a program's output a size marker may go.
+///
+/// Only between whole things: an ESC that lands inside a CSI aborts it and its
+/// remaining parameters print as text, and one inside a multi-byte UTF-8
+/// character prints U+FFFD. Pipe reads are cut wherever the bytes happened to
+/// be, so the fanout follows the output just closely enough to know whether it
+/// is at ground — outside any escape, control string or character — after
+/// each byte. A small DEC-style parser: escapes with intermediates, CSI, the
+/// string-carrying OSC, DCS, SOS, PM and APC (ended by ST, BEL for OSC, or
+/// CAN/SUB), and UTF-8.
+#[derive(Default)]
+struct Boundary {
+    state: Parse,
+}
+
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+enum Parse {
+    #[default]
+    Ground,
+    /// Continuation bytes still owed by a UTF-8 character.
+    Utf8(u8),
+    Escape,
+    EscapeIntermediate,
+    Csi,
+    /// OSC, DCS, SOS, PM or APC.
+    String,
+    StringEscape,
+}
+
+impl Boundary {
+    fn at_ground(&self) -> bool {
+        self.state == Parse::Ground
+    }
+
+    fn feed(&mut self, bytes: &[u8]) {
+        for &byte in bytes {
+            self.step(byte);
+        }
+    }
+
+    /// Advance by one byte; true if the output is at ground after it.
+    fn step(&mut self, byte: u8) -> bool {
+        const ESC: u8 = 0x1b;
+        const CAN: u8 = 0x18;
+        const SUB: u8 = 0x1a;
+        self.state = match (self.state, byte) {
+            // Cancels whatever was in progress, everywhere.
+            (_, CAN | SUB) => Parse::Ground,
+            (Parse::Utf8(owed), 0x80..=0xbf) => {
+                if owed > 1 { Parse::Utf8(owed - 1) } else { Parse::Ground }
+            }
+            // A character cut short: the byte starts afresh.
+            (Parse::Utf8(_), _) => {
+                self.state = Parse::Ground;
+                return self.step(byte);
+            }
+            (Parse::Ground, ESC) => Parse::Escape,
+            (Parse::Ground, 0xc2..=0xdf) => Parse::Utf8(1),
+            (Parse::Ground, 0xe0..=0xef) => Parse::Utf8(2),
+            (Parse::Ground, 0xf0..=0xf4) => Parse::Utf8(3),
+            (Parse::Ground, _) => Parse::Ground,
+            (Parse::Escape, b'[') => Parse::Csi,
+            (Parse::Escape, b']' | b'P' | b'X' | b'^' | b'_') => Parse::String,
+            (Parse::Escape | Parse::EscapeIntermediate, ESC) => Parse::Escape,
+            (Parse::Escape | Parse::EscapeIntermediate, 0x20..=0x2f) => Parse::EscapeIntermediate,
+            (Parse::Escape | Parse::EscapeIntermediate, 0x00..=0x1f) => self.state,
+            (Parse::Escape | Parse::EscapeIntermediate, _) => Parse::Ground,
+            (Parse::Csi, ESC) => Parse::Escape,
+            (Parse::Csi, 0x40..=0x7e) => Parse::Ground,
+            (Parse::Csi, _) => Parse::Csi,
+            (Parse::String, ESC) => Parse::StringEscape,
+            (Parse::String, 0x07) => Parse::Ground,
+            (Parse::String, _) => Parse::String,
+            (Parse::StringEscape, b'\\') => Parse::Ground,
+            // An escape inside a string that is not its terminator starts a
+            // new sequence, as it does in the client's parser.
+            (Parse::StringEscape, _) => {
+                self.state = Parse::Escape;
+                return self.step(byte);
+            }
+        };
+        self.at_ground()
+    }
+}
+
 /// The part that has nothing to do with processes, so a test can drive it.
 ///
 /// With a `size`, the pane's size is announced in the stream: to each watcher
 /// as it arrives, and to everyone whenever it changes. A change is checked for
-/// after every read, BEFORE the bytes read are passed on, which is what puts
-/// the marker ahead of the program's repaint: a program cannot answer a
-/// SIGWINCH it has not been sent, and by the time its answer has been read the
-/// new size is already on the tty.
+/// after every read, and the marker goes in before the bytes read — or, when
+/// the output so far stopped inside an escape sequence or a character, at the
+/// first point it is whole again (`Boundary`) — which is what puts it ahead of
+/// the program's repaint: a program cannot answer a SIGWINCH it has not been
+/// sent, and by the time its answer has been read the new size is already on
+/// the tty.
 ///
 /// Only after a read: a quiet pane costs nothing. A resize that nobody writes
 /// after is not announced until somebody does, and a client covers that gap by
@@ -442,6 +544,9 @@ where
     });
 
     let mut strip = MarkerStrip::default();
+    let mut boundary = Boundary::default();
+    // A size waiting for the output to reach a boundary. See `Boundary`.
+    let mut pending: Option<(u16, u16)> = None;
     let mut buf = vec![0u8; 16 * 1024];
     loop {
         tokio::select! {
@@ -452,13 +557,37 @@ where
                     // A send with no receivers is not a failure. It is an
                     // ordinary moment between one watcher leaving and the next
                     // arriving, and the bytes are genuinely nobody's.
-                    let output = strip.strip(&buf[..n]);
+                    let mut output = strip.strip(&buf[..n]);
                     if let Some(size) = &size
                         && let Some(now) = size.lock().await.read(last_size).await
                         && Some(now) != last_size
                     {
                         last_size = Some(now);
-                        let _ = tx.send(bytes::Bytes::from(size_marker(now.0, now.1)));
+                        pending = Some(now);
+                    }
+                    // Not inside a sequence or a character the program had
+                    // started: the marker goes at the first byte boundary where
+                    // the output is back at ground. What comes before it is the
+                    // end of something written before the resize, so this is
+                    // also the right order.
+                    if let Some((columns, rows)) = pending {
+                        let at = if boundary.at_ground() {
+                            Some(0)
+                        } else {
+                            output.iter().position(|&b| boundary.step(b)).map(|i| i + 1)
+                        };
+                        if let Some(at) = at {
+                            let tail = output.split_off(at);
+                            boundary.feed(&tail);
+                            if !output.is_empty() {
+                                let _ = tx.send(bytes::Bytes::from(output));
+                            }
+                            let _ = tx.send(bytes::Bytes::from(size_marker(columns, rows)));
+                            pending = None;
+                            output = tail;
+                        }
+                    } else {
+                        boundary.feed(&output);
                     }
                     if !output.is_empty() {
                         let _ = tx.send(bytes::Bytes::from(output));
@@ -711,6 +840,80 @@ mod tests {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(2), served).await;
     }
 
+    /// A resize that lands while the program is halfway through an escape
+    /// sequence or a UTF-8 character must not put the marker inside it: an
+    /// ESC in the middle of a CSI aborts it, and the rest of its parameters
+    /// print as text; in the middle of a character it prints U+FFFD. Pipe
+    /// reads cut wherever they like, and a resize is when output is densest.
+    #[tokio::test]
+    async fn a_resize_mid_sequence_is_announced_at_the_next_boundary() {
+        for (head, tail, shown) in [
+            (&b"\x1b[3"[..], &b"8;5;1mX"[..], "X"),
+            (&b"\xc3"[..], &b"\xa9Y"[..], "\u{e9}Y"),
+        ] {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let path = dir.path().join("fanout.sock");
+            let listener = UnixListener::bind(&path).expect("bind");
+            let (size, probe) = adjustable(20, 4);
+
+            let (mut writer, reader) = tokio::io::duplex(64 * 1024);
+            let served = tokio::spawn(async move { serve_on(reader, listener, Some(probe)).await });
+
+            let mut watcher = UnixStream::connect(&path).await.expect("watcher");
+            let mut seen = farcooler_vt::size_marker(20, 4);
+            expect_bytes(&mut watcher, &seen).await;
+
+            writer.write_all(head).await.expect("write");
+            writer.flush().await.expect("flush");
+            expect_bytes(&mut watcher, head).await;
+            seen.extend_from_slice(head);
+
+            *size.lock().expect("size lock") = (40, 6);
+            writer.write_all(tail).await.expect("write");
+            writer.flush().await.expect("flush");
+            let mut rest = vec![0u8; tail.len() + farcooler_vt::size_marker(40, 6).len()];
+            tokio::time::timeout(std::time::Duration::from_secs(5), watcher.read_exact(&mut rest))
+                .await
+                .expect("the bytes never came")
+                .expect("read");
+            seen.extend_from_slice(&rest);
+
+            let mut t = farcooler_vt::Terminal::new(20, 4);
+            t.set_accept_stream_sizes(true);
+            t.feed(&seen);
+            assert_eq!((t.columns(), t.rows()), (40, 6), "{seen:?}");
+            let row: String =
+                farcooler_vt::grid::snapshot(&t).rows[0].cells.iter().map(|c| c.ch).collect();
+            assert_eq!(row.trim_end(), shown, "the marker was spliced inside: {seen:?}");
+
+            drop(writer);
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(2), served).await;
+        }
+    }
+
+    /// Where the output is at ground, byte by byte, for the shapes a program
+    /// actually writes.
+    #[test]
+    fn the_boundary_follows_sequences_strings_and_characters() {
+        let cases: &[(&[u8], &[bool])] = &[
+            (b"a", &[true]),
+            (b"\x1b[1;2m", &[false, false, false, false, false, true]),
+            (b"\x1b(B", &[false, false, true]),
+            (b"\x1b]0;t\x07", &[false, false, false, false, false, true]),
+            (b"\x1b]0;t\x1b\\", &[false, false, false, false, false, false, true]),
+            (b"\x1bPq#\x1b\\", &[false, false, false, false, false, true]),
+            ("é".as_bytes(), &[false, true]),
+            ("─".as_bytes(), &[false, false, true]),
+            (b"\x1b[3\x18", &[false, false, false, true]),
+            (b"\x1b[3\x1b[m", &[false, false, false, false, false, true]),
+        ];
+        for (bytes, wanted) in cases {
+            let mut boundary = Boundary::default();
+            let got: Vec<bool> = bytes.iter().map(|&b| boundary.step(b)).collect();
+            assert_eq!(&got, wanted, "{bytes:?}");
+        }
+    }
+
     /// However a pipe splits a printed marker, no size gets through — checked
     /// by what an emulator that trusts sizes ends up holding, which is the
     /// only thing that matters.
@@ -730,6 +933,23 @@ mod tests {
             let row: String =
                 farcooler_vt::grid::snapshot(&t).rows[0].cells.iter().map(|c| c.ch).collect();
             assert_eq!(row.trim_end(), "ab", "split at {split}: {out:?}");
+        }
+    }
+
+    /// Removing the runner's own markers for a client that did not ask for
+    /// them leaves exactly the program's bytes, wherever a read split one:
+    /// not even an empty control string gets through.
+    #[test]
+    fn a_holding_strip_leaves_exactly_the_program_bytes() {
+        let mut stream = b"a\x1b[1mb".to_vec();
+        stream.extend_from_slice(&farcooler_vt::size_marker(120, 30));
+        stream.extend_from_slice("c─".as_bytes());
+        let wanted = [&b"a\x1b[1mb"[..], "c─".as_bytes()].concat();
+        for split in 1..stream.len() {
+            let mut strip = MarkerStrip::holding();
+            let mut out = strip.strip(&stream[..split]);
+            out.extend(strip.strip(&stream[split..]));
+            assert_eq!(out, wanted, "split at {split}");
         }
     }
 
