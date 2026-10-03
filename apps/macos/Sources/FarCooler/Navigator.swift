@@ -14,19 +14,43 @@ import SwiftUI
 /// One row of the navigator ↑ and ↓ step through.
 enum NavigatorItem: Hashable {
     case orchestrator
+    /// A line of Unread, by its id (`BoardSummaryStrip.lines`): its task,
+    /// chosen there (ov-177).
+    case unread(String)
     case task(String)
     case worktree(String)
+
+    /// The task it opens: a task row's, or an Unread line's.
+    var taskID: String? {
+        switch self {
+        case .task(let id): id
+        case .unread(let line): BoardSummaryStrip.task(ofLine: line)
+        case .orchestrator, .worktree: nil
+        }
+    }
 }
 
 enum Navigator {
     typealias Selection = ContentView.Selection
 
     /// The rows top to bottom, section by section: the orchestrator's,
-    /// the tasks the list shows, then the Worktrees section's. Only the
+    /// Unread's lines, the tasks the list shows, then the Worktrees section's. Only the
     /// loose worktrees are rows of their own, a task's being named on its
     /// task's row; and the orchestrator is never a worktree, nor its task.
-    static func items(orchestrator: Bool, tasks: [String], worktrees: [String]) -> [NavigatorItem] {
-        (orchestrator ? [.orchestrator] : []) + tasks.map(NavigatorItem.task) + worktrees.map(NavigatorItem.worktree)
+    static func items(
+        orchestrator: Bool, unread: [String] = [], tasks: [String], worktrees: [String]
+    ) -> [NavigatorItem] {
+        (orchestrator ? [.orchestrator] : []) + unread.map(NavigatorItem.unread) + tasks.map(NavigatorItem.task)
+            + worktrees.map(NavigatorItem.worktree)
+    }
+
+    /// The row lit for `current`, given the Unread line the selection was
+    /// chosen at (`line`): that line while its task is still the one
+    /// selected, so the selection stays where it was clicked (ov-177).
+    static func place(_ current: NavigatorItem?, line: String?) -> NavigatorItem? {
+        guard let line, let current, case .task(let id) = current, BoardSummaryStrip.task(ofLine: line) == id
+        else { return current }
+        return .unread(line)
     }
 
     /// The row `selection` lights in board `board`'s navigator: the task
@@ -148,6 +172,18 @@ enum OrchestratorRow {
         return rest.wholeMatch(of: /\d+[hms]( \d+[ms])?/) != nil
     }
 
+    /// The row's title, the one place the navigator names it: there's only
+    /// ever one orchestrator, so it's a row, not a section under a header
+    /// (ov-177).
+    static let title = "Orchestrator"
+
+    /// The row's quiet last line: its agent, then how many tasks are in
+    /// progress, "claude · 3 tasks in progress"; nil with neither.
+    static func foot(agent: String?, inProgress count: Int) -> String? {
+        let parts = [agent, inProgress(count)].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
     /// "3 tasks in progress", or nil with none.
     static func inProgress(_ count: Int) -> String? {
         switch count {
@@ -197,9 +233,12 @@ struct OrchestratorRowView: View {
                     actions
                 } else {
                     HStack(spacing: 6) {
-                        Text(model.agent ?? "Orchestrator")
+                        // What it is, on the row itself: there's no section
+                        // header over it to say so (ov-177).
+                        Text(OrchestratorRow.title)
                             .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
                             .lineLimit(1)
+                            .gridMark("orchestrator", .text)
                         Text(OrchestratorRow.word(model.state))
                             .font(.system(size: WorkspaceStyle.PaneText.secondary))
                             .foregroundStyle(model.state == .needsYou ? Color.accentColor : Color.secondary)
@@ -214,8 +253,8 @@ struct OrchestratorRowView: View {
                             .help(doing)
                             .accessibilityIdentifier("orchestrator-now-doing")
                     }
-                    if let count = OrchestratorRow.inProgress(inProgress) {
-                        Text(count)
+                    if let foot = OrchestratorRow.foot(agent: model.agent, inProgress: inProgress) {
+                        Text(foot)
                             .font(.system(size: WorkspaceStyle.PaneText.minimum))
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
@@ -298,6 +337,11 @@ struct OrchestratorRowView: View {
 /// search's magnifying glass) in it, and a clear button while it holds
 /// something. Esc clears it; on an empty field, Esc leaves it
 /// (`onLeave`), as the sidebar's search does (`SearchEscape`).
+///
+/// Laid out as a navigator row is (ov-177): one row tall, its glyph a step
+/// in from its edge and its text a step after that, so with its edge where
+/// a row's selection starts, the glyph sits on a row's icon column and the
+/// text on its title's.
 struct NavigatorFilterField: View {
     @Binding var text: String
     var focused: FocusState<Bool>.Binding
@@ -306,10 +350,12 @@ struct NavigatorFilterField: View {
     let onLeave: () -> Void
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 0) {
             Image(systemName: glyph)
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
+                .frame(width: ColumnGrid.step, alignment: .leading)
+                .gridMark("filter", .icon)
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
                 .font(.system(size: WorkspaceStyle.PaneText.body))
@@ -320,6 +366,7 @@ struct NavigatorFilterField: View {
                     if !next.keepsFocus { onLeave() }
                 }
                 .accessibilityIdentifier("navigator-filter")
+                .gridMark("filter", .text)
             if !text.isEmpty {
                 Button { text = "" } label: {
                     Image(systemName: "xmark.circle.fill")
@@ -331,8 +378,9 @@ struct NavigatorFilterField: View {
                 .accessibilityLabel("Clear Filter")
             }
         }
-        .padding(.horizontal, 7)  // grid-exempt: the filter field's own inset
-        .frame(height: 22)
+        .padding(.leading, ColumnGrid.step)
+        .padding(.trailing, ColumnGrid.rhythm)
+        .frame(height: ColumnGrid.rowHeight)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.05)))
         .overlay(
             RoundedRectangle(cornerRadius: 6)

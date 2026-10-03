@@ -2426,6 +2426,8 @@ struct ContentView: View {
             selectOrchestrator(keyboard: .board)
         case .task(let id):
             chooseTask(id, host: host, workspace: workspace.id, glance: true)
+        case .unread(let line):
+            chooseTask(BoardSummaryStrip.task(ofLine: line), host: host, workspace: workspace.id, glance: true)
         case .worktree(let id):
             if let found = worktree(host: host, id: id) { glance(at: found) }
         }

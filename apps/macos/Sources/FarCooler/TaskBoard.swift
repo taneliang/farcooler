@@ -102,6 +102,19 @@ final class TaskBoardStore: ObservableObject {
         readStore.save(reads, host: hostKey, workspace: workspace.id)
     }
 
+    /// The task selected, and the reads it was selected under (ov-177):
+    /// Unread lists it by those (`BoardSummary.make(…held:)`), so opening it,
+    /// or Mark All as Read, leaves its lines where they are until the
+    /// selection moves on.
+    @Published private(set) var held: HeldRead?
+
+    /// `taskID` is selected now, or nothing is: hold the reads as they are
+    /// before opening it reads it, and let go of the last one's.
+    func hold(_ taskID: String?) {
+        guard held?.taskID != taskID else { return }
+        held = taskID.map { HeldRead(taskID: $0, reads: reads) }
+    }
+
     /// Mark All as Read: everything on the board so far.
     func markAllRead(now: Date = Date()) {
         reads.markAllRead(rows: board.rows, now: now)
@@ -112,7 +125,7 @@ final class TaskBoardStore: ObservableObject {
     /// Unread can list their notes. One `task show` each, remembered until
     /// the task's `updatedAt` moves.
     func readSummaryNotes(reads: BoardReads) async {
-        let picked = BoardSummary.noteCandidates(rows: board.rows, reads: reads)
+        let picked = noteCandidates(reads: reads)
         for row in picked where noteCache[row.id]?.updatedAt != row.updatedAt {
             let (data, _) = await client.taskDetail(key: row.key, repository: repositoryID)
             guard let data, let read = try? TaskDetailModel.decode(data) else { continue }
@@ -704,6 +717,13 @@ struct TaskBoardView: View {
     /// tasks whose key or title carries what's typed.
     @State private var filter = ""
     @FocusState private var filterFocused: Bool
+    /// The Unread line the selection was chosen at, while its task is the
+    /// one selected: lit there, in place, and where ↑ and ↓ go on from
+    /// (ov-177).
+    @State private var unreadLine: String?
+    /// Unread closed: kept here rather than in the strip, since ↑ and ↓ walk
+    /// its lines only while it's open.
+    @State private var unreadCollapsed: Bool
     /// Where a task's row is matched as it moves between statuses.
     @Namespace private var rowSpace
     /// The list has the keyboard: ↑ and ↓ glance through the tasks, Return
@@ -730,6 +750,9 @@ struct TaskBoardView: View {
         var items: [NavigatorItem] = []
         weak var store: TaskBoardStore?
         var onStep: ((NavigatorItem) -> Void)?
+        /// An Unread line stepped to, or nil for any other row: the view
+        /// lights it there.
+        var onLine: ((String?) -> Void)?
 
         /// ↑ or ↓: the row above or below the one selected (or the last
         /// one stepped to), across the sections, selected in its place.
@@ -739,9 +762,12 @@ struct TaskBoardView: View {
             guard let next = Navigator.step(from: from, by: by, in: items), next != from
             else { return from == nil ? .ignored : .handled }
             stepped = next
+            if case .unread(let line) = next { onLine?(line) } else { onLine?(nil) }
+            // An Unread line opens its task, held where it is (ov-177).
+            if let id = next.taskID { store?.hold(id) }
             if let onStep {
-                onStep(next)
-            } else if case .task(let id) = next, let store, let row = BoardKeys.row(id, in: store.board) {
+                onStep(next.taskID.map(NavigatorItem.task) ?? next)
+            } else if let id = next.taskID, let store, let row = BoardKeys.row(id, in: store.board) {
                 store.glance(row)
             }
             return .handled
@@ -779,6 +805,7 @@ struct TaskBoardView: View {
             initialValue: BoardForm.collapsed(
                 host: store.hostKey, workspace: store.workspace.id, from: defaults))
         _closedSections = State(initialValue: Self.closedSections(store, defaults))
+        _unreadCollapsed = State(initialValue: defaults.bool(forKey: BoardSummaryStrip.collapsedKey(store)))
     }
 
     var body: some View {
@@ -805,8 +832,10 @@ struct TaskBoardView: View {
         .onChange(of: remembered) { _, key in
             showingMore = []
             filter = ""
+            unreadLine = nil
             collapsed = BoardForm.collapsed(host: key.host, workspace: key.workspace, from: defaults)
             closedSections = Self.closedSections(store, defaults)
+            unreadCollapsed = defaults.bool(forKey: BoardSummaryStrip.collapsedKey(store))
         }
     }
 
@@ -848,95 +877,102 @@ struct TaskBoardView: View {
             filterFocused = false
             listFocused = true
         }
+        // On the list's grid (ov-177): its edges where a row's selection
+        // runs, at column A and A in from the trailing edge, and a rhythm
+        // over it; the list's own top inset is the rhythm under it.
         .padding(.horizontal, ColumnGrid.a)
-        .padding(.bottom, ColumnGrid.rhythm / 2)
+        .padding(.top, ColumnGrid.rhythm)
         .onChange(of: filterRequest) { _, _ in filterFocused = true }
     }
 
     private var filtering: Bool { !BoardFilter.isEmpty(filter) }
 
-    /// The navigator's three sections (ov-92), each under its own header
-    /// and a divider apart: the orchestrator's row, the tasks by status
-    /// under the Unread summary, and the loose worktrees.
+    /// What the navigator draws for the filter as it is (`NavigatorFiltering`).
+    private func plan(worktrees: BoardWorktrees, shown: TaskBoardModel) -> NavigatorFiltering {
+        NavigatorFiltering.make(
+            filter: filter, board: shown, hasOrchestrator: orchestrator != nil, agent: orchestrator?.agent,
+            unreadMatches: store.hasRead
+                && !BoardSummaryStrip.summary(store: store, reads: store.reads, filter: filter).isEmpty,
+            worktrees: worktrees)
+    }
+
+    /// The row lit: the window's, or the Unread line its task was chosen
+    /// at (`Navigator.place`).
+    private var place: NavigatorItem? { Navigator.place(current, line: unreadLine) }
+
+    /// The Unread line lit, if the selection is lit there.
+    private var litLine: String? {
+        if case .unread(let line)? = place { return line }
+        return nil
+    }
+
+    /// An Unread line clicked: its task opens, lit on the line. A line of
+    /// the task already selected only moves the light there; clicked again,
+    /// it closes the task, as a row does.
+    private func chooseLine(_ line: String) {
+        let id = BoardSummaryStrip.task(ofLine: line)
+        listFocused = true
+        guard let row = store.board.rows.first(where: { $0.id == id }) else { return }
+        let moving = selected == id && litLine != line
+        unreadLine = line
+        if !moving { store.choose(row) }
+    }
+
+    /// A task's row clicked: as `chooseLine`, from its status.
+    private func chooseRow(_ row: TaskRow) {
+        listFocused = true
+        let moving = selected == row.id && litLine != nil
+        unreadLine = nil
+        if !moving { store.choose(row) }
+    }
+
+    /// The navigator's sections (ov-92), a divider apart: the orchestrator's
+    /// row, then Tasks, the tasks by status under Unread, and Worktrees, the
+    /// loose worktrees. The orchestrator's is a row and not a section
+    /// (ov-177): there's only ever one, and the row says what it is.
+    ///
+    /// While the filter narrows it, only what matches is drawn, and with
+    /// nothing matching, one "No Results" (`NavigatorFiltering`); and the
+    /// list jumps to what matches rather than moving there
+    /// (`unanimatedWhenFiltering`).
     private var list: some View {
-        let worktrees = worktreesOf(store.board)
         let shown = BoardFilter.narrowed(store.board, filter)
+        let plan = plan(worktrees: worktreesOf(store.board), shown: shown)
+        let worktrees = plan.worktrees
         let inProgress = store.board.columns.first { $0.status == .inProgress }?.rows.count ?? 0
+        let unreadable = !shown.unreadable.isEmpty
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
-                    if let orchestrator {
-                        section("Orchestrator", id: "orchestrator") {
-                            OrchestratorRowView(
-                                model: orchestrator, inProgress: inProgress, selected: current == .orchestrator,
-                                keyed: hasKeyboard)
-                            .id(NavigatorItem.orchestrator)
-                        }
-                        Divider()
+                    if plan.isEmpty(unreadable: unreadable) {
+                        NavigatorNoResults(filter: filter)
                     }
-                    section("Tasks", id: "tasks") {
-                        VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
-                            if store.hasRead {
-                                // Edge to edge, its own inset at column A.
-                                BoardSummaryStrip(store: store, defaults: defaults, filter: filter)
-                                    .id(ObjectIdentifier(store))
-                                    .padding(.horizontal, -ColumnGrid.a)
-                            }
-                            if !store.hasRead && store.reading {
-                                centered { ProgressView() }
-                            } else if let trouble = store.trouble, !store.hasRead {
-                                centered {
-                                    VStack(spacing: 10) {
-                                        Text(trouble)
-                                        Button("Try Again") { Task { await store.reload() } }
-                                    }
-                                }
-                            } else {
-                                ForEach(shown.sections) { section in
-                                    TaskListSection(
-                                        section: section,
-                                        // Filtering opens every section with a match.
-                                        expanded: BoardForm.isExpanded(section, collapsed: filtering ? [] : collapsed),
-                                        onToggle: { toggle(section.status) },
-                                        store: store, agents: agents, onGoTo: onGoTo,
-                                        selected: selected, keyed: hasKeyboard,
-                                        worktrees: worktrees,
-                                        showingMore: showingMore.contains(section.status),
-                                        onShowMore: {
-                                            withAnimation(BoardMotion.list(reduceMotion: reduceMotion)) {
-                                                if showingMore.contains(section.status) {
-                                                    showingMore.remove(section.status)
-                                                } else {
-                                                    showingMore.insert(section.status)
-                                                }
-                                            }
-                                        },
-                                        filtering: filtering,
-                                        onHistory: onHistory,
-                                        onChoose: { row in
-                                            listFocused = true
-                                            store.choose(row)
-                                        },
-                                        rows: rowSpace)
-                                }
-                                if !shown.unreadable.isEmpty {
-                                    UnreadableColumnView(rows: shown.unreadable)
-                                }
-                            }
+                    if let orchestrator, plan.showsOrchestrator {
+                        OrchestratorRowView(
+                            model: orchestrator, inProgress: inProgress, selected: place == .orchestrator,
+                            keyed: hasKeyboard)
+                        .id(NavigatorItem.orchestrator)
+                        .padding(.horizontal, ColumnGrid.a)
+                        if plan.showsTasks(unreadable: unreadable) || plan.showsWorktrees { Divider() }
+                    }
+                    if plan.showsTasks(unreadable: unreadable) {
+                        section("Tasks", id: "tasks") {
+                            tasks(plan, shown: shown, worktrees: worktrees)
                         }
                     }
-                    if !worktrees.isEmpty {
-                        Divider()
+                    if plan.showsWorktrees {
+                        if plan.showsTasks(unreadable: unreadable) { Divider() }
                         section("Worktrees", id: "worktrees", count: worktrees.shown.count) {
                             BoardWorktreesSection(worktrees: worktrees, keyed: hasKeyboard)
                         }
                     }
                 }
                 .padding(.vertical, ColumnGrid.rhythm)
+                .unanimatedWhenFiltering(filter)
             }
             // The row selected stays in sight as ↑ and ↓ step past the edge,
             // scrolled by as little as that takes.
-            .onChange(of: current) { _, item in
+            .onChange(of: place) { _, item in
                 guard let item, hasKeyboard else { return }
                 withAnimation(WorkspaceMotion.spring) {
                     switch item {
@@ -970,31 +1006,109 @@ struct TaskBoardView: View {
         }
         .onChange(of: focusRequest) { _, _ in listFocused = true }
         // The window caught up with the steps taken.
-        .onChange(of: current, initial: true) { _, now in
+        .onChange(of: place, initial: true) { _, now in
             heard.stepped = nil
             heard.selected = now
         }
+        // The selection moved off the line's task: the line is let go of,
+        // so coming back to the task from elsewhere lights its row.
+        .onChange(of: current) { _, now in
+            if let line = unreadLine, now?.taskID != BoardSummaryStrip.task(ofLine: line) { unreadLine = nil }
+        }
+        // What's selected holds its Unread lines in place, however it was
+        // chosen: here, from a notice, from the palette (ov-177).
+        .onChange(of: selected, initial: true) { _, id in store.hold(id) }
         .onChange(of: listFocused) { _, focused in if focused { onKeyboard() } }
         .onChange(of: hasKeyboard, initial: true) { _, keyed in heard.keyed = keyed }
         .onChange(of: items(worktrees: worktreesOf(store.board)), initial: true) { _, items in heard.items = items }
-        .onChange(of: ObjectIdentifier(store), initial: true) { _, _ in heard.store = store }
+        .onChange(of: ObjectIdentifier(store), initial: true) { _, _ in
+            heard.store = store
+            store.hold(selected)
+        }
         // On every update, so a later capture in it can never go stale.
-        .background { let _ = heard.onStep = onStep; Color.clear }
+        .background {
+            let _ = heard.onStep = onStep
+            let _ = heard.onLine = { unreadLine = $0 }
+            Color.clear
+        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("board-list")
     }
 
+    /// The Tasks section's content: Unread, then each status.
+    @ViewBuilder
+    private func tasks(_ plan: NavigatorFiltering, shown: TaskBoardModel, worktrees: BoardWorktrees) -> some View {
+        VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
+            if store.hasRead, plan.showsUnread {
+                // Edge to edge, its own inset at column A.
+                BoardSummaryStrip(
+                    store: store, defaults: defaults, filter: filter, selectedLine: litLine, keyed: hasKeyboard,
+                    collapsed: $unreadCollapsed, onChooseLine: { chooseLine($0) }
+                )
+                .id(ObjectIdentifier(store))
+                .padding(.horizontal, -ColumnGrid.a)
+            }
+            if !store.hasRead && store.reading {
+                centered { ProgressView() }
+            } else if let trouble = store.trouble, !store.hasRead {
+                centered {
+                    VStack(spacing: 10) {
+                        Text(trouble)
+                        Button("Try Again") { Task { await store.reload() } }
+                    }
+                }
+            } else {
+                ForEach(plan.sections) { section in
+                    TaskListSection(
+                        section: section,
+                        // Filtering opens every section with a match.
+                        expanded: BoardForm.isExpanded(section, collapsed: filtering ? [] : collapsed),
+                        onToggle: { toggle(section.status) },
+                        store: store, agents: agents, onGoTo: onGoTo,
+                        selected: selected, lit: litLine == nil ? selected : nil, keyed: hasKeyboard,
+                        worktrees: worktrees,
+                        showingMore: showingMore.contains(section.status),
+                        onShowMore: {
+                            withAnimation(BoardMotion.list(reduceMotion: reduceMotion)) {
+                                if showingMore.contains(section.status) {
+                                    showingMore.remove(section.status)
+                                } else {
+                                    showingMore.insert(section.status)
+                                }
+                            }
+                        },
+                        filtering: filtering,
+                        onHistory: onHistory,
+                        onChoose: { chooseRow($0) },
+                        rows: rowSpace)
+                }
+                if !shown.unreadable.isEmpty {
+                    UnreadableColumnView(rows: shown.unreadable)
+                }
+            }
+        }
+    }
+
     /// The rows the navigator shows, top to bottom: what ↑ and ↓ walk.
-    /// A closed section's rows aren't shown, so they aren't walked.
-    private func items(worktrees: BoardWorktrees) -> [NavigatorItem] {
-        Navigator.items(
-            orchestrator: orchestrator != nil && !closedSections.contains("orchestrator"),
-            tasks: closedSections.contains("tasks")
-                ? []
-                : BoardKeys.rows(
-                    BoardFilter.narrowed(store.board, filter), collapsed: collapsed, reads: store.reads,
-                    keeping: selected, showingMore: showingMore, filtering: filtering, now: Date()),
-            worktrees: closedSections.contains("worktrees") ? [] : BoardWorktreesSection.rows(worktrees).map(\.id))
+    /// A closed section's rows aren't shown, so they aren't walked, nor
+    /// are what the filter leaves out.
+    private func items(worktrees all: BoardWorktrees) -> [NavigatorItem] {
+        let shown = BoardFilter.narrowed(store.board, filter)
+        let plan = plan(worktrees: all, shown: shown)
+        let tasksOpen = !closedSections.contains("tasks")
+        let unread = tasksOpen && store.hasRead && plan.showsUnread && !unreadCollapsed
+            ? BoardSummaryStrip.lines(BoardSummaryStrip.summary(store: store, reads: store.reads, filter: filter))
+            : []
+        return Navigator.items(
+            orchestrator: orchestrator != nil && plan.showsOrchestrator,
+            unread: unread,
+            tasks: tasksOpen
+                ? BoardKeys.rows(
+                    shown, collapsed: collapsed, reads: store.reads, keeping: selected, showingMore: showingMore,
+                    filtering: filtering, now: Date())
+                : [],
+            worktrees: closedSections.contains("worktrees") || !plan.showsWorktrees
+                ? [] : BoardWorktreesSection.rows(plan.worktrees).map(\.id))
     }
 
     private static func closedSections(_ store: TaskBoardStore, _ defaults: UserDefaults) -> Set<String> {
@@ -1006,7 +1120,9 @@ struct TaskBoardView: View {
         "navigator.closed.\(store.hostKey).\(store.workspace.id).\(id)"
     }
 
-    static let navigatorSections = ["orchestrator", "tasks", "worktrees"]
+    /// The navigator's collapsible sections. Not the orchestrator's row
+    /// (ov-177), whose closed state, kept from before, is no longer read.
+    static let navigatorSections = ["tasks", "worktrees"]
 
     /// A navigator section (ov-92): the one collapsible section, in the
     /// navigator's style, its open state kept per board on this Mac.
@@ -1177,9 +1293,12 @@ private struct TaskListSection: View {
     @ObservedObject var store: TaskBoardStore
     let agents: BoardAgents
     let onGoTo: (BoardPane) -> Void
-    /// The task open beside the board, and whether the list has the
-    /// keyboard, which draws it in the accent rather than gray.
+    /// The task open beside the board, which the section keeps though
+    /// opening it read it; the row lit, the same task unless it's lit on its
+    /// Unread line (ov-177); and whether the list has the keyboard, which
+    /// draws it in the accent rather than gray.
     let selected: String?
+    let lit: String?
     let keyed: Bool
     /// Each task's worktree, and its menu.
     let worktrees: BoardWorktrees
@@ -1225,7 +1344,7 @@ private struct TaskListSection: View {
                     TaskListRow(
                         row: row, prominent: leads, store: store,
                         live: agents.live(for: row), presence: agents.presence(for: row),
-                        onGoTo: onGoTo, selected: row.id == selected, keyed: keyed,
+                        onGoTo: onGoTo, selected: row.id == lit, keyed: keyed,
                         worktree: worktrees.byTask[row.id],
                         worktreeMenu: worktrees.byTask[row.id].map(worktrees.menu) ?? [],
                         performOnWorktree: { item in

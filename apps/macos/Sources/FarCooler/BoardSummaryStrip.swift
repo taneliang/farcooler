@@ -4,8 +4,8 @@ import SwiftUI
 /// Unread (ov-104): a compact, collapsible strip at the top of the board
 /// listing what's new to this person, each item opening its task. An item
 /// stays until its ticket is opened, and opening it clears that ticket's
-/// items (`BoardReads`). Mark All as Read is in its header's context menu and
-/// in the Board menu.
+/// items (`BoardReads`). Mark All as Read is its header's button
+/// (`MarkAllReadButton`), in its context menu and in the Board menu (⇧⌘K).
 ///
 /// The board's header hosts it. What goes in the strip is `BoardSummary`'s;
 /// this view only draws the lines and reads the records of the tasks that
@@ -15,8 +15,19 @@ struct BoardSummaryStrip: View {
     let defaults: UserDefaults
     /// The navigator's filter (⌘F), which narrows this too.
     var filter = ""
+    /// The line the selection was chosen at, drawn selected in place
+    /// (ov-177), and whether the navigator has the keyboard.
+    var selectedLine: String?
+    var keyed = false
+    /// A line chosen: the navigator opens its task, and remembers the line.
+    /// Nil opens the task here.
+    var onChooseLine: ((String) -> Void)?
 
-    @State private var collapsed: Bool
+    /// Closed: the navigator's, when it keeps it to walk the lines with ↑
+    /// and ↓; else this strip's own.
+    private var collapsedBinding: Binding<Bool>?
+    @State private var ownCollapsed: Bool
+    private var collapsed: Bool { collapsedBinding?.wrappedValue ?? ownCollapsed }
     /// What was listed at the last draw, by identity: what tells a new
     /// arrival from an item that was already there (`BoardArrivals`). Nil
     /// before the first, so nothing flashes on opening the board.
@@ -26,14 +37,21 @@ struct BoardSummaryStrip: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.boardMotionSlowdown) private var slowdown
 
-    init(store: TaskBoardStore, defaults: UserDefaults = .standard, filter: String = "") {
+    init(
+        store: TaskBoardStore, defaults: UserDefaults = .standard, filter: String = "", selectedLine: String? = nil,
+        keyed: Bool = false, collapsed: Binding<Bool>? = nil, onChooseLine: ((String) -> Void)? = nil
+    ) {
         self.store = store
         self.defaults = defaults
         self.filter = filter
-        _collapsed = State(initialValue: defaults.bool(forKey: Self.collapsedKey(store)))
+        self.selectedLine = selectedLine
+        self.keyed = keyed
+        self.collapsedBinding = collapsed
+        self.onChooseLine = onChooseLine
+        _ownCollapsed = State(initialValue: defaults.bool(forKey: Self.collapsedKey(store)))
     }
 
-    private static func collapsedKey(_ store: TaskBoardStore) -> String {
+    static func collapsedKey(_ store: TaskBoardStore) -> String {
         "board.summary.collapsed.\(store.hostKey).\(store.workspace.id)"
     }
 
@@ -47,13 +65,17 @@ struct BoardSummaryStrip: View {
                 isExpanded: Binding(
                     get: { !collapsed },
                     set: { open in
-                        collapsed = !open
-                        defaults.set(collapsed, forKey: Self.collapsedKey(store))
+                        if let collapsedBinding { collapsedBinding.wrappedValue = !open } else { ownCollapsed = !open }
+                        defaults.set(!open, forKey: Self.collapsedKey(store))
                     }),
                 count: collapsed ? nil : summary.count,
                 accessibilityLabel: "Unread",
                 label: { open in headerLabel(summary, open: open) },
-                accessory: { EmptyView() }
+                accessory: {
+                    // In sight, not only in the menus (ov-177: the owner
+                    // didn't find it there).
+                    if !collapsed, !summary.isEmpty { MarkAllReadButton { store.markAllRead() } }
+                }
             ) {
                 VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
                     if summary.isEmpty {
@@ -68,10 +90,11 @@ struct BoardSummaryStrip: View {
                             .accessibilityIdentifier("board-summary-empty")
                             .transition(.opacity)
                     } else {
-                        group("Finished", summary.finished, now: now)
-                        group("Needs You or Review", summary.moved, now: now)
-                        group("New", summary.created, now: now)
-                        activity(summary.activity, now: now)
+                        let first = Self.firstGroup(summary)
+                        group("Finished", summary.finished, follows: first != 0, now: now)
+                        group("Needs You or Review", summary.moved, follows: first != 1, now: now)
+                        group("New", summary.created, follows: first != 2, now: now)
+                        activity(summary.activity, follows: first != 3, now: now)
                     }
                 }
                 .animation(BoardMotion.list(reduceMotion: reduceMotion, slowedBy: slowdown), value: Self.identities(summary))
@@ -89,11 +112,17 @@ struct BoardSummaryStrip: View {
                 Button("Mark All as Read") { store.markAllRead() }
                     .disabled(summary.isEmpty)
             }
-            .task(id: Self.notesKey(reads: store.reads, generation: store.generation, count: store.board.rows.count, collapsed: collapsed)) {
+            // Read again for a selection, too: the task selected keeps its
+            // notes here until the selection moves on (ov-177).
+            .task(id: Self.notesKey(reads: store.reads, generation: store.generation, count: store.board.rows.count, collapsed: collapsed, held: store.held?.taskID)) {
                 guard !collapsed else { return }
                 await store.readSummaryNotes(reads: store.reads)
             }
-            .onChange(of: Self.identities(summary), initial: true) { _, ids in arrive(ids) }
+            // What arrived on the board, not what the filter let back in:
+            // clearing the filter washes nothing (ov-177).
+            .onChange(of: Self.identities(Self.summary(store: store, reads: store.reads, filter: "")), initial: true) {
+                _, ids in arrive(ids)
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("board-summary")
@@ -102,7 +131,9 @@ struct BoardSummaryStrip: View {
     /// The summary drawn: what's unread on `store`'s board by `reads`,
     /// narrowed by the navigator's filter.
     static func summary(store: TaskBoardStore, reads: BoardReads, filter: String) -> BoardSummary {
-        let summary = BoardSummary.make(rows: store.board.rows, notes: store.summaryNotes, reads: reads)
+        // The task selected by the reads it was selected under (ov-177).
+        let summary = BoardSummary.make(
+            rows: store.board.rows, notes: store.summaryNotes, reads: reads, held: store.held)
         guard !BoardFilter.isEmpty(filter) else { return summary }
         let keep = Set(store.board.rows.filter { BoardFilter.matches($0, filter) }.map(\.id))
         return summary.filtered { keep.contains($0) }
@@ -159,13 +190,16 @@ struct BoardSummaryStrip: View {
         var generation: Int
         var count: Int
         var collapsed: Bool
+        var held: String?
     }
 
-    static func notesKey(reads: BoardReads, generation: Int, count: Int, collapsed: Bool) -> NotesKey {
+    static func notesKey(
+        reads: BoardReads, generation: Int, count: Int, collapsed: Bool, held: String? = nil
+    ) -> NotesKey {
         let marks = reads.opened.values.map(\.timeIntervalSince1970).reduce(0, +)
         return NotesKey(
             reads: "\(reads.floor.timeIntervalSince1970) \(marks)", generation: generation, count: count,
-            collapsed: collapsed)
+            collapsed: collapsed, held: held)
     }
 
     /// "Unread" open; closed, one quiet line saying how much (ov-83).
@@ -183,23 +217,50 @@ struct BoardSummaryStrip: View {
         }
     }
 
-    private func open(_ taskID: String) {
+    /// A line chosen: its task opens, and the line stays where it is while
+    /// the task is selected (`TaskBoardStore.hold`).
+    private func open(_ line: String, task taskID: String) {
+        store.hold(taskID)
+        if let onChooseLine { return onChooseLine(line) }
         if let row = store.board.rows.first(where: { $0.id == taskID }) { store.choose(row) }
+    }
+
+    /// Every line ↑ and ↓ walk, top to bottom, by the id it's drawn with:
+    /// each group's lines as drawn, past five only "and 2 more", then
+    /// Activity's.
+    static func lines(_ summary: BoardSummary) -> [String] {
+        [summary.finished, summary.moved, summary.created].flatMap { BoardSummary.capped($0).shown.map(\.id) }
+            + BoardSummary.capped(summary.activity).shown.map(\.id)
+    }
+
+    /// The task a line is about: a line's id is its task's, then what
+    /// happened ("<task>/done", "<task>/activity").
+    static func task(ofLine line: String) -> String {
+        String(line.prefix { $0 != "/" })
+    }
+
+    /// Which group is drawn first, under the header, 0 to 3 in the order
+    /// they're drawn: it's the one group no other group's rows are over.
+    static func firstGroup(_ summary: BoardSummary) -> Int? {
+        [summary.finished.isEmpty, summary.moved.isEmpty, summary.created.isEmpty, summary.activity.isEmpty]
+            .firstIndex(of: false)
     }
 
     /// A group: its header with its count trailing, then its items as
     /// compact rows, "and 2 more" past five.
-    @ViewBuilder private func group(_ title: String, _ items: [BoardSummary.Item], now: Date) -> some View {
+    @ViewBuilder private func group(
+        _ title: String, _ items: [BoardSummary.Item], follows: Bool, now: Date
+    ) -> some View {
         if !items.isEmpty {
             let capped = BoardSummary.capped(items)
             VStack(alignment: .leading, spacing: 0) {
-                GroupHeader(title: title, count: items.count)
+                GroupHeader(title: title, count: items.count, follows: follows)
                     .gridMark("summary.group", .text)
                     .padding(.leading, ColumnGrid.step)
                 ForEach(capped.shown) { item in
                     CompactTaskRow(
-                        key: item.key, title: item.title, highlighted: arrived.contains(item.id),
-                        keyMark: "summary.key", titleMark: "summary.title"
+                        key: item.key, title: item.title, selected: item.id == selectedLine, keyed: keyed,
+                        highlighted: arrived.contains(item.id), keyMark: "summary.key", titleMark: "summary.title"
                     ) {
                         Text(Self.when(item, now: now))
                             .font(.system(size: WorkspaceStyle.PaneText.minimum))
@@ -207,10 +268,12 @@ struct BoardSummaryStrip: View {
                             .lineLimit(1)
                     }
                     .contentShape(Rectangle())
-                    .onTapGesture { open(item.taskID) }
+                    .onTapGesture { open(item.id, task: item.taskID) }
+                    .id(NavigatorItem.unread(item.id))
                     .transition(BoardMotion.rowTransition(reduceMotion: reduceMotion, slowedBy: slowdown))
                     .accessibilityElement(children: .combine)
                     .accessibilityAddTraits(.isButton)
+                    .accessibilityAction(.default) { open(item.id, task: item.taskID) }
                     .accessibilityIdentifier("board-summary-item-\(item.id)")
                 }
                 more(capped.more)
@@ -221,26 +284,30 @@ struct BoardSummaryStrip: View {
 
     /// Activity: one entry per ticket, its newest note's kind and text on
     /// two lines, when, and how many older ones it has.
-    @ViewBuilder private func activity(_ entries: [BoardSummary.Activity], now: Date) -> some View {
+    @ViewBuilder private func activity(
+        _ entries: [BoardSummary.Activity], follows: Bool, now: Date
+    ) -> some View {
         if !entries.isEmpty {
             let capped = BoardSummary.capped(entries)
             VStack(alignment: .leading, spacing: 0) {
-                GroupHeader(title: "Activity", count: entries.count)
+                GroupHeader(title: "Activity", count: entries.count, follows: follows)
                     .gridMark("summary.group", .text)
                     .padding(.leading, ColumnGrid.step)
                 ForEach(capped.shown) { entry in
                     CompactTaskRow(
-                        key: entry.key, title: entry.title,
+                        key: entry.key, title: entry.title, selected: entry.id == selectedLine, keyed: keyed,
                         highlighted: arrived.contains("\(entry.id)/\(entry.noteID)"),
                         keyMark: "summary.key", titleMark: "summary.title"
                     ) {
                         ActivityNoteView(entry: entry, now: now)
                     }
                     .contentShape(Rectangle())
-                    .onTapGesture { open(entry.taskID) }
+                    .onTapGesture { open(entry.id, task: entry.taskID) }
+                    .id(NavigatorItem.unread(entry.id))
                     .transition(BoardMotion.rowTransition(reduceMotion: reduceMotion, slowedBy: slowdown))
                     .accessibilityElement(children: .combine)
                     .accessibilityAddTraits(.isButton)
+                    .accessibilityAction(.default) { open(entry.id, task: entry.taskID) }
                     .accessibilityIdentifier("board-summary-activity-\(entry.key)")
                 }
                 more(capped.more)
@@ -300,5 +367,32 @@ struct ActivityNoteView: View {
     /// "12m ago · +2 more".
     static func foot(_ entry: BoardSummary.Activity, now: Date) -> String {
         [TaskRow.ago(now.timeIntervalSince(entry.at)), entry.moreLine].compactMap { $0 }.joined(separator: " · ")
+    }
+}
+
+/// Mark All as Read on Unread's header (ov-177): a checkmark in a circle, in
+/// secondary, trailing beside the count, drawn while there's anything to
+/// read. Also in the header's context menu and Board ▸ Mark All as Read
+/// (⇧⌘K). The task selected keeps its lines until the selection moves on
+/// (`HeldRead`); the rest leave on the shared spring.
+struct MarkAllReadButton: View {
+    let action: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.boardMotionSlowdown) private var slowdown
+
+    var body: some View {
+        Button {
+            withAnimation(BoardMotion.list(reduceMotion: reduceMotion, slowedBy: slowdown), action)
+        } label: {
+            Image(systemName: "checkmark.circle")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .frame(width: ColumnGrid.step, height: ColumnGrid.rowHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Mark All as Read (⇧⌘K)")
+        .accessibilityLabel("Mark All as Read")
+        .accessibilityIdentifier("board-mark-all-read")
     }
 }

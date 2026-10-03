@@ -37,7 +37,7 @@ struct CollapsibleSectionTests {
     final class Seen { var ids: Set<String> = [] }
 
     /// Drawn, the navigator registers every section it has through the
-    /// shared component: the three navigator sections, Unread,
+    /// shared component: Tasks and Worktrees, Unread,
     /// every task status, and Hidden under Worktrees. (Fails for any of
     /// them drawn its own way, as all but Worktrees were before.)
     @Test("Every navigator section is drawn through CollapsibleSection")
@@ -70,9 +70,12 @@ struct CollapsibleSectionTests {
             try? await Task.sleep(for: .milliseconds(20))
         }
         window.close()
-        let expected: Set<String> = Set(["orchestrator", "tasks", "summary", "worktrees", "worktrees.hidden"])
+        let expected: Set<String> = Set(["tasks", "summary", "worktrees", "worktrees.hidden"])
             .union(TaskBoardModel.order.map { "status.\($0.rawValue)" })
         #expect(expected.subtracting(seen.ids).isEmpty, "not through the shared section: \(expected.subtracting(seen.ids))")
+        // The orchestrator is a row, not a section: there's only ever one
+        // (ov-177).
+        #expect(!seen.ids.contains("orchestrator"))
     }
 
     /// No navigator file rolls its own disclosure: no chevron of its own,

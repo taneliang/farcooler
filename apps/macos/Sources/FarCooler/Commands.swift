@@ -217,9 +217,13 @@ struct FarCoolerCommands: Commands {
         }
 
         // The navigator's board. Mark All as Read is the Unread section's
-        // context menu too; here so it can be found (ov-104 review).
+        // context menu and its header's button too; here so it can be found
+        // (ov-104 review). ⇧⌘K, as feed readers keep ⌘K: plain ⌘K is a
+        // terminal's clear, and nothing here or in the system's menus holds
+        // ⇧⌘K (ov-177).
         CommandMenu("Board") {
             Button("Mark All as Read") { AppCommand.markAllRead.post() }
+                .keyboardShortcut("k", modifiers: [.command, .shift])
                 .disabled(!MainWindowFocus.marksRead(mainWindow))
         }
 

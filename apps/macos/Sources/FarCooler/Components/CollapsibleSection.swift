@@ -475,9 +475,22 @@ struct SectionCount: View {
 /// A group's header that doesn't open and close: Unread's Finished, New and
 /// Activity, the History page's Today and Earlier. Its title in the quiet
 /// group style, and its count trailing (`SectionCount`).
+///
+/// Set apart from the rows over it and close to its own (ov-177, the owner:
+/// "more vertical spacing around subheadings … it's a little hard to notice
+/// them"): a group that `follows` another has `above` more room over it
+/// than the rows have between them, and its title sits at the foot of its
+/// line, so less of the line's room is under it.
 struct GroupHeader: View {
     let title: String
     let count: Int?
+    /// Another group's rows are over it; false for the first under its
+    /// section's header, which has room enough.
+    var follows = false
+
+    /// The room a following group's header takes over it, more than the
+    /// list's own spacing.
+    static let above = ColumnGrid.rhythm
 
     var body: some View {
         HStack(spacing: SidebarGrid.gap) {
@@ -485,7 +498,8 @@ struct GroupHeader: View {
             Spacer(minLength: 0)
             if let count { SectionCount(count: count) }
         }
-        .frame(minHeight: 2 * ColumnGrid.rhythm)
+        .frame(minHeight: 2 * ColumnGrid.rhythm, alignment: .bottom)
+        .padding(.top, follows ? Self.above : 0)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(count.map { "\(title), \($0)" } ?? title)
         .accessibilityAddTraits(.isHeader)

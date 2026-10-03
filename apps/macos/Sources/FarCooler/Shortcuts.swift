@@ -117,7 +117,7 @@ enum Shortcut {
                 Item(keys: "Esc", action: "Back to the orchestrator, from a task or a worktree"),
                 Item(keys: "⌃⌘↩", action: "Focus: what’s selected at full size, without the navigator; again to put it back"),
                 Item(keys: "⌥⌘1 ⌥⌘2 ⌥⌘3", action: "Select the orchestrator; go to the navigator; go to what’s selected"),
-                Item(keys: "↑ ↓", action: "In the navigator: the orchestrator, the tasks and the worktrees, in turn"),
+                Item(keys: "↑ ↓", action: "In the navigator: the orchestrator, Unread, the tasks and the worktrees, in turn"),
                 Item(keys: "⌃⌘↓ ⌃⌘↑", action: "Next / previous worktree, in the navigator’s order"),
                 Item(keys: "⌃⌘] ⌃⌘[", action: "A task’s next / previous tab: Overview, Agent, Changes"),
                 Item(keys: "⌘1 … ⌘9", action: "Go to a workspace, in the title bar’s order"),
@@ -132,6 +132,7 @@ enum Shortcut {
                 Item(keys: "⌘N", action: "New worktree — describe what you want done and go"),
                 Item(keys: "⌥⌘N", action: "New workspace"),
                 Item(keys: "⇧⌘B", action: "Show this workspace’s board"),
+                Item(keys: "⇧⌘K", action: "Mark everything in the board’s Unread as read"),
                 Item(keys: "⇧⌘R", action: "Add Repository"),
                 Item(keys: "⇧⌘E", action: "Open this worktree in your editor"),
             ]

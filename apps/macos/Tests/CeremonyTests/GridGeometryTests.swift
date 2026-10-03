@@ -239,6 +239,10 @@ struct GridGeometryTests {
         let found = await marks(board, width: WorkspaceColumns.navigatorDefault)
         var expect: [String: CGFloat] = [
             "header.text": ColumnGrid.b,
+            // The filter's glyph and text on a row's icon and title columns
+            // (ov-177).
+            "filter.icon": ColumnGrid.b,
+            "filter.text": ColumnGrid.c,
             "summary.chevron": ColumnGrid.a,
             "summary.text": ColumnGrid.b,
             "status.chevron": ColumnGrid.a,
