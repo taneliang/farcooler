@@ -1696,38 +1696,70 @@ mod contracts {
             .collect()
     }
 
-    #[test]
-    fn every_notify_fixture_is_what_wire_body_writes() {
-        let written = written();
-        if std::env::var_os("FARCOOLER_WRITE_CONTRACTS").is_some() {
-            for (name, body) in &written {
+    /// Whether to rewrite the fixtures rather than compare. Refused under CI:
+    /// a producer that rewrote its fixture there would pass by definition.
+    fn rewriting() -> bool {
+        let asked = std::env::var_os("FARCOOLER_WRITE_CONTRACTS").is_some();
+        assert!(
+            !(asked && std::env::var("CI").is_ok_and(|v| v == "true")),
+            "FARCOOLER_WRITE_CONTRACTS is set under CI, which would make this test pass by rewriting its fixtures"
+        );
+        asked
+    }
+
+    /// Every fixture in `dir` is exactly what `written` holds, and no other
+    /// fixture is there, which nothing would keep in step.
+    fn compare(dir: &std::path::Path, written: &[(&'static str, serde_json::Value)], producer: &str) {
+        if rewriting() {
+            for (name, body) in written {
                 let text = serde_json::to_string_pretty(body).expect("pretty") + "\n";
-                std::fs::write(dir().join(format!("{name}.json")), text).expect("write a fixture");
+                std::fs::write(dir.join(format!("{name}.json")), text).expect("write a fixture");
             }
         }
-        for (name, body) in &written {
-            let path = dir().join(format!("{name}.json"));
+        for (name, body) in written {
+            let path = dir.join(format!("{name}.json"));
             let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
             let fixture: serde_json::Value = serde_json::from_str(&text).expect("the fixture is JSON");
             assert_eq!(
                 &fixture,
                 body,
-                "test/fixtures/contracts/notify/{name}.json is not what wire_body writes. If the change is \
-                 deliberate, rerun with FARCOOLER_WRITE_CONTRACTS=1 and the relay's suite will say whether \
-                 it still reads it. Written:\n{}",
+                "{} is not what {producer} writes. If the change is deliberate, rerun with \
+                 FARCOOLER_WRITE_CONTRACTS=1 and the relay's suite will say whether it still reads it. \
+                 Written:\n{}",
+                path.display(),
                 serde_json::to_string_pretty(body).unwrap_or_default()
             );
         }
-        // And no fixture this test does not write, which nothing would keep
-        // in step.
-        let mut on_disk: Vec<String> = std::fs::read_dir(dir())
-            .expect("the notify fixtures")
+        let mut on_disk: Vec<String> = std::fs::read_dir(dir)
+            .expect("the fixtures")
             .filter_map(|e| e.ok()?.file_name().into_string().ok())
             .filter(|n| n.ends_with(".json"))
             .collect();
         on_disk.sort();
         let mut names: Vec<String> = written.iter().map(|(n, _)| format!("{n}.json")).collect();
         names.sort();
-        assert_eq!(on_disk, names, "a notify fixture with no producer");
+        assert_eq!(on_disk, names, "a fixture in {} with no producer", dir.display());
+    }
+
+    #[test]
+    fn every_notify_fixture_is_what_wire_body_writes() {
+        compare(&dir(), &written(), "wire_body");
+    }
+
+    /// The runner's other three bodies: its heartbeat, its withdrawal on
+    /// unpairing, and the cards it retires. The relay's suite posts each, and
+    /// reads the heartbeat back out of `/v1/pulse` into the pulse fixture.
+    #[test]
+    fn every_runner_fixture_is_what_the_runner_sends() {
+        let mut beat = serde_json::to_value(beat_body(Some(INSTALL))).expect("serialize");
+        assert_eq!(beat["version"], farcooler_protocol::BUILD, "the version is the build stamp");
+        assert_eq!(beat["name"], runner_name(), "the name is this computer's");
+        beat["version"] = VERSION.into();
+        beat["name"] = "Studio".into();
+        let terminals = ["term-01999a8f2c4e".to_string(), "term-01999a90aa10".to_string()];
+        let retire = serde_json::to_value(Retirement { terminals: &terminals }).expect("serialize");
+        let written = [("heartbeat", beat), ("withdraw", withdraw_body(Some(INSTALL))), ("retire", retire)];
+        let runner = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test/fixtures/contracts/runner");
+        compare(&runner, &written, "the runner");
     }
 }
