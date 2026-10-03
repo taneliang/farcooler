@@ -491,6 +491,9 @@ AGENTKIT_SOURCES = [
     # phone's card turns stale on the minute by the same rule as the Mac's.
     # See `BoardClockTests`.
     "BoardClock.swift",
+    # Task keys in text as links (ov-196): which words are keys, the link's
+    # URL, and the linker `MarkdownView.swift` reads from the environment.
+    "TaskKeyLinks.swift",
 ]
 # The widget extension's own sources, in `apps/ios/FarCoolerActivity/`.
 #

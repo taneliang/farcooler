@@ -1,0 +1,35 @@
+{
+  "_comment": "Which words in task text and transcripts become task links (ov-196). Read by AgentKit's TaskKeyLinksTests and Android's TaskKeyLinksTest. A key is <prefix>-<number> with a word boundary on each side, where the prefix is one of the runner's workspaces' task prefixes AND the key is a task on a board the app has read. A boundary is anything but a letter, a digit, '_' or '-'. Offsets are UTF-16 code units, the unit both languages index strings by.",
+  "prefixes": ["ov", "lo"],
+  "known": ["ov-190", "ov-7", "ov-1900", "lo-3"],
+  "cases": [
+    { "text": "see ov-190", "links": [{ "start": 4, "key": "ov-190" }] },
+    { "text": "ov-190", "links": [{ "start": 0, "key": "ov-190" }] },
+    { "text": "Done in ov-190.", "links": [{ "start": 8, "key": "ov-190" }] },
+    { "text": "(ov-190), [ov-7]", "links": [{ "start": 1, "key": "ov-190" }, { "start": 11, "key": "ov-7" }] },
+    { "text": "ov-7 and lo-3", "links": [{ "start": 0, "key": "ov-7" }, { "start": 9, "key": "lo-3" }] },
+    { "text": "after ov-190: lo-3!", "links": [{ "start": 6, "key": "ov-190" }, { "start": 14, "key": "lo-3" }] },
+    { "text": "ov-1900 is its own task", "links": [{ "start": 0, "key": "ov-1900" }] },
+    { "text": "line one\nov-7 on line two", "links": [{ "start": 9, "key": "ov-7" }] },
+    { "text": "😀 ov-190", "links": [{ "start": 3, "key": "ov-190" }] },
+    { "text": "worktrees/ov-190 and \"ov-7\"", "links": [{ "start": 10, "key": "ov-190" }, { "start": 22, "key": "ov-7" }] },
+
+    { "text": "utf-8 text", "links": [] },
+    { "text": "an x-86 build", "links": [] },
+    { "text": "ov-0 is not a task", "links": [] },
+    { "text": "ov-191 is unknown", "links": [] },
+    { "text": "zz-190 has no workspace", "links": [] },
+    { "text": "OV-190 is not the prefix", "links": [] },
+    { "text": "nov-190", "links": [] },
+    { "text": "fix-ov-190", "links": [] },
+    { "text": "ov-190-fix", "links": [] },
+    { "text": "ov-190a", "links": [] },
+    { "text": "ov-190_x", "links": [] },
+    { "text": "ov-19", "links": [] },
+    { "text": "2ov-190", "links": [] },
+    { "text": "éov-190", "links": [] },
+    { "text": "ov-", "links": [] },
+    { "text": "ov--190", "links": [] },
+    { "text": "", "links": [] }
+  ]
+}

@@ -251,22 +251,35 @@ public enum Markdown {
     @MainActor
     public static let inlineCache = RenderMemo<String, AttributedString>(limit: 1_000)
 
-    /// Whether a link may be opened: the web and mail, nothing else.
+    /// Whether a link may be opened: the web, mail and a task link
+    /// (`TaskKeyLinks`, ov-196), nothing else.
     ///
     /// Task text and replies are written by agents. A `file:` link to a
     /// `.command` runs it in Terminal on one click on a Mac, an app's own
     /// scheme hands off to that app, and none of it asks first (ov-98 review
     /// B1). So any other scheme isn't a link at all (`inline`), and the views
-    /// refuse to open one besides (`openGuard`).
+    /// refuse to open one besides (`openGuard`). A task link is the one
+    /// `farcooler://` URL let through, and the guard opens it in the app
+    /// itself, never through the system.
     public static func opens(_ url: URL) -> Bool {
-        ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "")
+        ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") || TaskKeyLinks.parse(url) != nil
     }
 
-    /// The open-URL handler every Markdown view draws under: `opens`'s
-    /// links go to the system, everything else is dropped.
-    public static var openGuard: OpenURLAction {
-        OpenURLAction { url in opens(url) ? .systemAction : .discarded }
+    /// The open-URL handler every Markdown view draws under: a task link
+    /// goes to `linker`, opened in the app or not at all; the rest of
+    /// `opens`'s links go to the system; everything else is dropped.
+    public static func openGuard(_ linker: TaskKeyLinker) -> OpenURLAction {
+        OpenURLAction { url in
+            if TaskKeyLinks.parse(url) != nil {
+                MainActor.assumeIsolated { _ = linker.follow(url) }
+                return .handled
+            }
+            return opens(url) ? .systemAction : .discarded
+        }
     }
+
+    /// `openGuard(_:)` with no task links to follow.
+    public static var openGuard: OpenURLAction { openGuard(.none) }
 
     @MainActor
     public static func cachedRuns(_ text: String, spacing: MarkdownSpacing = .reply) -> [Run] {
@@ -304,6 +317,9 @@ public struct MarkdownText: View {
     /// 8 pt rhythm (ov-98).
     public var spacing: MarkdownSpacing = .reply
 
+    /// The task keys its text links (ov-196), and where they go.
+    @Environment(\.taskKeyLinker) private var linker
+
     @ScaledMetric(relativeTo: .body)
     private var h1Size = MarkdownTypeScale.h1
     @ScaledMetric(relativeTo: .body)
@@ -334,8 +350,9 @@ public struct MarkdownText: View {
         .font(secondary ? .caption : .body)
         .foregroundStyle(secondary ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
         .textSelection(.enabled)
-        // A second line of defense behind `Markdown.inline`'s filter.
-        .environment(\.openURL, Markdown.openGuard)
+        // A second line of defense behind `Markdown.inline`'s filter, and
+        // the way a task key's link reaches its task.
+        .environment(\.openURL, Markdown.openGuard(linker))
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -343,7 +360,7 @@ public struct MarkdownText: View {
     private func view(for run: Markdown.Run) -> some View {
         switch run {
         case let .prose(paragraphs):
-            Text(Self.merged(paragraphs))
+            Text(linker.linked(Self.merged(paragraphs)))
                 .fixedSize(horizontal: false, vertical: true)
                 .lineSpacing(3)
         case let .block(block):
@@ -389,12 +406,12 @@ public struct MarkdownText: View {
     private func view(for block: Markdown.Block) -> some View {
         switch block {
         case let .paragraph(text):
-            Text(Markdown.inline(text))
+            Text(linker.linked(Markdown.inline(text)))
                 .fixedSize(horizontal: false, vertical: true)
                 .lineSpacing(3)
 
         case let .heading(level, text):
-            Text(Markdown.inline(text))
+            Text(linker.linked(Markdown.inline(text)))
                 .font(headingFont(level))
                 .fixedSize(horizontal: false, vertical: true)
                 .lineSpacing(2)
@@ -413,7 +430,7 @@ public struct MarkdownText: View {
         case let .quote(text):
             HStack(spacing: 8) {
                 Rectangle().fill(.quaternary).frame(width: 2)
-                Text(Markdown.inline(text))
+                Text(linker.linked(Markdown.inline(text)))
                     .fixedSize(horizontal: false, vertical: true)
                     .lineSpacing(3)
             }
@@ -433,7 +450,7 @@ public struct MarkdownText: View {
             Text(symbol)
                 .foregroundStyle(.secondary)
                 .frame(minWidth: 14, alignment: .trailing)
-            Text(Markdown.inline(text))
+            Text(linker.linked(Markdown.inline(text)))
                 .fixedSize(horizontal: false, vertical: true)
                 .lineSpacing(3)
             Spacer(minLength: 0)
@@ -623,6 +640,7 @@ enum MarkdownBlockSpacing {
 private struct MarkdownTable: View {
     let header: [String]
     let rows: [[String]]
+    @Environment(\.taskKeyLinker) private var linker
 
     var body: some View {
         // The first version scrolled sideways with single-line cells, which is
@@ -659,7 +677,7 @@ private struct MarkdownTable: View {
             let cells = allRows[row]
             return column < cells.count ? cells[column] : ""
         }()
-        return Text(Markdown.inline(text))
+        return Text(linker.linked(Markdown.inline(text)))
             .font(.callout)
             .lineSpacing(1)
             .fixedSize(horizontal: false, vertical: true)
