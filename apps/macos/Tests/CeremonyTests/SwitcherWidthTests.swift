@@ -124,7 +124,7 @@ struct SwitcherWidthTests {
         let fresh = try #require(try await Self.widths(.fromTheStart))
         // Room for the whole label, and the label at its whole width.
         #expect(fresh.item > fresh.label)
-        let changed = try #require(try await Self.widths(when)); print("WIDTHS \(when) \(changed) fresh \(fresh)")
+        let changed = try #require(try await Self.widths(when))
         #expect(changed == fresh, "changed \(when): \(changed); from the start: \(fresh)")
     }
 }
