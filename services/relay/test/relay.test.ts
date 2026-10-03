@@ -1315,7 +1315,7 @@ describe('the Android push body', () => {
     expect(message.data).toEqual({ kind: 'decision', task: 'bil-7' })
   })
 
-  it("names the decision's runner to an Android phone, and only a decision's", async () => {
+  it("names the decision's runner to an Android phone", async () => {
     // A task key is only unique on its own runner, so a phone with two runners
     // needs the runner beside the key (ov-72).
     const calls = watchFetch()
@@ -1329,6 +1329,19 @@ describe('the Android push body', () => {
     expect(fcm(calls).data).toEqual({
       kind: 'decision', task: 'bil-7', runner: '7537626f-0002-415e-1e11-000d48034210',
     })
+  })
+
+  it("names an agent's runner to an Android phone beside its terminal", async () => {
+    // So a tap waits for the runner the pane is on (ov-183).
+    const calls = watchFetch()
+    await register('user_1', android)
+    await pair('user_1', 'mine')
+    await post(
+      '/v1/notify',
+      { title: 'claude needs you', terminal: 'term-1', status: 'blocked', runner: '7537626F-0002-415E-1E11-000D48034210' },
+      'mine',
+    )
+    expect(fcm(calls).data).toMatchObject({ terminal: 'term-1', runner: '7537626f-0002-415e-1e11-000d48034210' })
   })
 
   it('leaves a finished agent on the quiet channel', async () => {
@@ -4304,18 +4317,22 @@ describe('/v1/notify and Live Activities', () => {
       expect(row?.needs_you).toBe(1)
     })
 
-    it("carries a decision's runner id to the phone, and drops one that isn't an id", async () => {
+    it("carries a decision's and an agent's runner id to the phone, and drops one that isn't an id", async () => {
       // A key on two runners can't be routed without it (ov-72). The value is
-      // the runner's `Host.runner_id`, lowercased as the heartbeat's is, and
-      // a decision alone carries it: an agent notice is routed by terminal.
+      // the runner's `Host.runner_id`, lowercased as the heartbeat's is. An
+      // agent notice carries it too, so a tap waits for the runner its pane
+      // is on rather than searching every one (ov-183).
       const calls = watchFetch()
       await ready()
       const runner = '7537626F-0002-415E-1E11-000D48034210'
       await post('/v1/notify', { kind: 'decision', task: 'bil-7', runner, title: 'bil-7 needs a decision', needsYou: 1 }, 'mine')
       await post('/v1/notify', { kind: 'decision', task: 'bil-8', runner: 'not an id!', title: 'bil-8 needs a decision', needsYou: 2 }, 'mine')
       await post('/v1/notify', { title: 'claude needs you', terminal: 'term-1', status: 'blocked', runner, needsYou: 3 }, 'mine')
+      await post('/v1/notify', { title: 'claude finished', terminal: 'term-2', status: 'done', needsYou: 3 }, 'mine')
       const alerts = pushes(calls).filter(call => call.headers['apns-push-type'] === 'alert')
-      expect(alerts.map(call => call.body.runner)).toEqual(['7537626f-0002-415e-1e11-000d48034210', undefined, undefined])
+      expect(alerts.map(call => call.body.runner)).toEqual([
+        '7537626f-0002-415e-1e11-000d48034210', undefined, '7537626f-0002-415e-1e11-000d48034210', undefined,
+      ])
     })
 
     it("moves a card's count on a decision, with the one alert and no second", async () => {

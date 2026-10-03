@@ -1110,9 +1110,10 @@ async function notify(request: Request, env: Env): Promise<Response> {
           failed: body.failed,
           kind,
           task: typeof body.task === 'string' ? body.task.slice(0, 64) : undefined,
-          // Only on a decision, and only if it looks like a runner id: the
-          // heartbeat's own test, so a stray value is no id rather than a 400.
-          runner: (kind === 'decision' || kind === 'task') && typeof body.runner === 'string'
+          // A decision's, a task notice's and an agent's (ov-183), and only
+          // if it looks like a runner id: the heartbeat's own test, so a stray
+          // value is no id rather than a 400.
+          runner: typeof body.runner === 'string'
             && /^[A-Za-z0-9-]{1,64}$/.test(body.runner)
             ? body.runner.toLowerCase()
             : undefined,

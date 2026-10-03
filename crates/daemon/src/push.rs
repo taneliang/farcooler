@@ -234,9 +234,11 @@ struct Notification<'a> {
     install: Option<&'a str>,
     /// This runner's id as a phone knows it, `Host.runner_id`, derived from
     /// the install id as the daemon derives it for every client. On a
-    /// decision alone: a task key is only unique on its own runner, and this
-    /// is what lets a phone with two runners open the right one (ov-72). The
-    /// beat's `runner` is the same value. Absent with no install id.
+    /// decision and a task notice, since a task key is only unique on its own
+    /// runner, and this is what lets a phone with two runners open the right
+    /// one (ov-72); and on an agent notice, so a tap waits for the runner its
+    /// pane is on (ov-183). The beat's `runner` is the same value. Absent
+    /// with no install id.
     #[serde(skip_serializing_if = "Option::is_none")]
     runner: Option<String>,
     /// The claude permission ask held open on this pane, so the lock screen's
@@ -530,8 +532,8 @@ fn wire_anchor(trace: &[u8], anchor: Option<i64>) -> Option<i64> {
 /// What `notify` sends for an `Outgoing`, keyed by its kind: spec §7's contract.
 ///
 /// - An agent notice (no kind) carries everything it always has, plus its
-///   workspace and the count. `None` if it names no terminal: the relay would
-///   write a roster row keyed by nothing.
+///   workspace, the count and its runner. `None` if it names no terminal:
+///   the relay would write a roster row keyed by nothing.
 /// - A decision carries its kind, task, workspace, title, subtitle and count,
 ///   and no terminal, status, label or `failed`.
 /// - A count carries its kind and the count, and nothing else.
@@ -561,6 +563,9 @@ fn wire_body<'a>(o: &Outgoing<'a>) -> Option<Notification<'a>> {
             failed: Some(o.failed),
             terminal: Some(o.terminal?),
             workspace: o.workspace,
+            // So a tap can wait for this runner rather than search every
+            // one for the pane (ov-183). Older relays and apps ignore it.
+            runner: o.install.map(|id| crate::service::stable_host_id(id).to_string()),
             started_at: o.started_at,
             insertions: o.insertions,
             deletions: o.deletions,
@@ -1284,8 +1289,9 @@ mod tests {
 
     /// A decision names the runner it is on as a phone knows it
     /// (`Host.runner_id`), the beat's own spelling, so a task key on two
-    /// runners can be routed (ov-72). No other kind does, and none with no
-    /// install id.
+    /// runners can be routed (ov-72). So does an agent notice, so a tap can
+    /// wait for the runner its pane is on (ov-183). A count doesn't, and none
+    /// with no install id.
     #[test]
     fn a_decision_names_its_runner_as_the_phone_knows_it() {
         let sent = |kind: Option<&'static str>, install| {
@@ -1307,7 +1313,8 @@ mod tests {
             "7537626f-0002-415e-1e11-000d48034210"
         );
         assert!(sent(Some("decision"), None).get("runner").is_none());
-        assert!(sent(None, Some(install)).get("runner").is_none());
+        assert_eq!(sent(None, Some(install))["runner"], "7537626f-0002-415e-1e11-000d48034210");
+        assert!(sent(None, None).get("runner").is_none());
         assert!(sent(Some("count"), Some(install)).get("runner").is_none());
     }
 

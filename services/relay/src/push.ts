@@ -60,11 +60,13 @@ export interface Payload {
   kind?: string
   task?: string
   /// The runner a decision's task is on, as a phone knows it
-  /// (`Host.runner_id`), so a key on two runners opens the right one. Only a
-  /// decision carries it; forwarded as sent, never stored. A UUID the
-  /// daemon derived from its install id: it names no person, path or host.
+  /// (`Host.runner_id`), so a key on two runners opens the right one.
+  /// Forwarded as sent, never stored. A UUID the daemon derived from its
+  /// install id: it names no person, path or host.
   ///
-  /// A task notice (`kind: "task"`, ov-94) carries it too, for the same reason.
+  /// A task notice (`kind: "task"`, ov-94) carries it too, for the same
+  /// reason, and an agent notice (ov-183), so a tap waits for the runner its
+  /// pane is on rather than searching every one.
   runner?: string
   /// A task notice's class: `decision`, `review`, `blocked`, `done` or `new`.
   /// Picks the Android channel, and tells the apps which buttons to draw.
