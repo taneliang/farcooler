@@ -40,8 +40,11 @@
 //! having resolved perfectly. So `search_path` hands the whole list to the
 //! child, and callers that spawn a user's program are expected to use it.
 
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::sync::{Condvar, Mutex, MutexGuard, OnceLock};
+use std::time::{Duration, Instant};
 
 /// Where package managers put things, for when the login shell cannot answer.
 ///
@@ -67,28 +70,101 @@ const KNOWN_PREFIXES: &[&str] = &[
 ///
 /// Cached: `tmux` is resolved on the way into every tmux command, and asking a
 /// login shell each time would put a shell spawn in front of every keystroke.
+/// A program that was found is cached for good; one that was not is asked
+/// about again after `RETRY_AFTER`, so installing it, or a login shell that
+/// failed once, does not need a daemon restart.
 pub fn find(name: &str) -> Option<PathBuf> {
-    // A path, not a name. Used as given so a config file can point at a program
-    // in a directory nothing here would guess.
-    if name.contains('/') {
-        let path = PathBuf::from(name);
-        return is_executable(&path).then_some(path);
+    finder().find(name)
+}
+
+/// How long the login shell gets to print its `PATH`.
+///
+/// Generous for a real profile — nvm and oh-my-zsh together take a second or
+/// two — and short enough that a profile waiting on the network, or on a
+/// prompt nobody will answer, costs one bounded wait rather than every tmux
+/// command for the life of the daemon.
+const LOGIN_SHELL_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long a failure — a login shell that timed out or failed, or a program
+/// nobody could find — is believed before it is asked about again.
+const RETRY_AFTER: Duration = Duration::from_secs(60);
+
+/// `find`'s cache, with the login shell it asks.
+///
+/// A struct rather than bare statics so a test can build one around a fake
+/// shell and a short clock; the process uses the one in `finder()`.
+struct Finder {
+    /// Never held across a resolve, only across a map read or write. The slow
+    /// part — the login shell — has its own single-flight in `LoginPath`, so
+    /// a lookup that is cheap (a program on the inherited `PATH`) never waits
+    /// behind one that is not.
+    names: Mutex<HashMap<String, Known>>,
+    login: LoginPath,
+}
+
+enum Known {
+    Found(PathBuf),
+    Missing { since: Instant },
+}
+
+impl Finder {
+    fn new(login: LoginPath) -> Self {
+        Self { names: Mutex::default(), login }
     }
 
-    let mut cache = cache().lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(found) = cache.get(name) {
-        return found.clone();
+    fn find(&self, name: &str) -> Option<PathBuf> {
+        // A path, not a name. Used as given so a config file can point at a
+        // program in a directory nothing here would guess.
+        if name.contains('/') {
+            let path = PathBuf::from(name);
+            return is_executable(&path).then_some(path);
+        }
+
+        match lock(&self.names).get(name) {
+            Some(Known::Found(path)) => return Some(path.clone()),
+            Some(Known::Missing { since }) if since.elapsed() < self.login.retry_after => {
+                return None;
+            }
+            _ => {}
+        }
+
+        let found = self.resolve(name);
+        let known = match &found {
+            Some(path) => Known::Found(path.clone()),
+            None => {
+                tracing::warn!(
+                    program = %name,
+                    "could not find it on PATH, through the login shell, or in any known \
+                     install prefix"
+                );
+                Known::Missing { since: Instant::now() }
+            }
+        };
+        lock(&self.names).insert(name.to_string(), known);
+        found
     }
-    let found = resolve(name);
-    if found.is_none() {
-        tracing::warn!(
-            program = %name,
-            "could not find it on PATH, through the login shell, or in any known \
-             install prefix"
-        );
+
+    fn resolve(&self, name: &str) -> Option<PathBuf> {
+        inherited_path()
+            .and_then(|dirs| find_in(name, &dirs))
+            .or_else(|| self.login.get().and_then(|dirs| find_in(name, &dirs)))
+            .or_else(|| find_in(name, &prefixes()))
     }
-    cache.insert(name.to_string(), found.clone());
-    found
+}
+
+fn finder() -> &'static Finder {
+    static FINDER: OnceLock<Finder> = OnceLock::new();
+    FINDER.get_or_init(|| {
+        Finder::new(LoginPath::new(
+            PathBuf::from(crate::shell::login_shell()),
+            LOGIN_SHELL_TIMEOUT,
+            RETRY_AFTER,
+        ))
+    })
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// The `PATH` to give a program *the user* installed, when spawning it.
@@ -102,18 +178,27 @@ pub fn find(name: &str) -> Option<PathBuf> {
 ///
 /// Unlike `find`, this always asks the login shell rather than stopping at the
 /// first answer: the point is the whole list, not the first hit. That is one
-/// shell spawn, cached for the life of the process, and it is paid on the path
-/// that starts an agent rather than on the path that resolves `tmux` in front
-/// of a keystroke.
+/// shell spawn, shared with `find`, and it is paid on the path that starts an
+/// agent rather than on the path that resolves `tmux` in front of a keystroke.
+///
+/// Kept for the life of the process only once the login shell has answered;
+/// without its answer the list is built again on the next call, so a shell
+/// that failed once is asked again after `RETRY_AFTER`.
 pub fn search_path() -> OsString {
-    static PATH: std::sync::OnceLock<OsString> = std::sync::OnceLock::new();
-    PATH.get_or_init(|| {
-        let mut dirs = inherited_path().unwrap_or_default();
-        dirs.extend(login_shell_path().unwrap_or_default());
-        dirs.extend(prefixes());
-        join_unique(dirs)
-    })
-    .clone()
+    static PATH: OnceLock<OsString> = OnceLock::new();
+    if let Some(path) = PATH.get() {
+        return path.clone();
+    }
+    let mut dirs = inherited_path().unwrap_or_default();
+    let login = finder().login.get();
+    let complete = login.is_some();
+    dirs.extend(login.unwrap_or_default());
+    dirs.extend(prefixes());
+    let joined = join_unique(dirs);
+    if complete {
+        let _ = PATH.set(joined.clone());
+    }
+    joined
 }
 
 /// `dirs` as a `PATH`, first occurrence winning and duplicates dropped.
@@ -141,20 +226,6 @@ const SEPARATOR: char = ':';
 #[cfg(not(unix))]
 const SEPARATOR: char = ';';
 
-type Cache = std::sync::Mutex<std::collections::HashMap<String, Option<PathBuf>>>;
-
-fn cache() -> &'static Cache {
-    static CACHE: std::sync::OnceLock<Cache> = std::sync::OnceLock::new();
-    CACHE.get_or_init(Default::default)
-}
-
-fn resolve(name: &str) -> Option<PathBuf> {
-    inherited_path()
-        .and_then(|dirs| find_in(name, &dirs))
-        .or_else(|| login_shell_path().and_then(|dirs| find_in(name, &dirs)))
-        .or_else(|| find_in(name, &prefixes()))
-}
-
 /// `PATH` as it was inherited, split into directories.
 fn inherited_path() -> Option<Vec<PathBuf>> {
     let raw = std::env::var_os("PATH")?;
@@ -173,38 +244,176 @@ fn prefixes() -> Vec<PathBuf> {
     dirs
 }
 
-/// What the user's login shell says `PATH` is.
+/// What the user's login shell says `PATH` is, asked at most once at a time.
 ///
 /// A **login** shell (`-l`), because that is what reads the profile where a
 /// package manager puts its `PATH` line — `.zprofile`, `.bash_profile`,
 /// `config.fish`. A non-login shell reads none of it and would answer with the
-/// same stripped `PATH` this function exists to get around.
+/// same stripped `PATH` this exists to get around.
 ///
-/// Failure is not an error worth reporting. A shell that cannot start, a
-/// profile that exits non-zero, a host with no passwd entry: each simply
-/// means the next step gets a turn.
-fn login_shell_path() -> Option<Vec<PathBuf>> {
-    let shell = crate::shell::login_shell();
-    let output = std::process::Command::new(&shell)
-        // `-l` for the profile, `-c` for the one command. Printing `$PATH`
-        // rather than `command -v <name>` so ONE shell spawn answers for every
-        // program this is ever asked about, however many that turns out to be.
-        .args(["-lc", "printf %s \"$PATH\""])
-        // No stdin, and stderr discarded: a profile that prints a banner or a
-        // warning is extremely common and none of it is this function's news.
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
+/// Three properties, each the fix for a way one bad profile used to wedge every
+/// tmux command in the daemon:
+///
+/// - **A deadline.** A profile can wait on the network or on a prompt forever.
+///   Past `timeout` the shell's whole process group is killed and reaped, so a
+///   `sleep` or `curl` it started goes too.
+/// - **Single-flight, without a lock across the spawn.** One caller asks; the
+///   others wait on a condition variable for its answer, and a `find` that
+///   never needs the login shell never touches this at all.
+/// - **A failure is believed for `retry_after`, not forever.** A profile that
+///   failed once because the network was down gets another turn.
+struct LoginPath {
+    shell: PathBuf,
+    timeout: Duration,
+    retry_after: Duration,
+    state: Mutex<Asked>,
+    answered: Condvar,
+}
+
+enum Asked {
+    Never,
+    Asking,
+    Answered(Vec<PathBuf>),
+    Failed { at: Instant },
+}
+
+impl LoginPath {
+    fn new(shell: PathBuf, timeout: Duration, retry_after: Duration) -> Self {
+        Self { shell, timeout, retry_after, state: Mutex::new(Asked::Never), answered: Condvar::new() }
     }
-    let raw = String::from_utf8(output.stdout).ok()?;
-    let raw = raw.trim();
-    if raw.is_empty() {
-        return None;
+
+    /// The login shell's `PATH`, or `None` while a recent failure stands.
+    ///
+    /// Failure is not an error worth surfacing. A shell that cannot start, a
+    /// profile that exits non-zero or hangs, a host with no passwd entry: each
+    /// is logged once with its reason and simply means the next step gets a
+    /// turn.
+    fn get(&self) -> Option<Vec<PathBuf>> {
+        let mut state = lock(&self.state);
+        loop {
+            match &*state {
+                Asked::Answered(dirs) => return Some(dirs.clone()),
+                Asked::Failed { at } if at.elapsed() < self.retry_after => return None,
+                // Bounded: whoever is asking gives up after `timeout`, and the
+                // guard below settles the state even if that caller panics.
+                Asked::Asking => {
+                    state = self.answered.wait(state).unwrap_or_else(|e| e.into_inner());
+                }
+                Asked::Never | Asked::Failed { .. } => break,
+            }
+        }
+        *state = Asked::Asking;
+        drop(state);
+
+        let mut settle = Settle { login: self, outcome: None };
+        let answer = self.ask();
+        settle.outcome = Some(answer.clone());
+        drop(settle);
+        answer.ok()
     }
-    Some(std::env::split_paths(raw).collect())
+
+    fn ask(&self) -> Result<Vec<PathBuf>, String> {
+        use std::io::Read;
+        use std::os::unix::process::CommandExt;
+
+        let mut child = std::process::Command::new(&self.shell)
+            // `-l` for the profile, `-c` for the one command. Printing `$PATH`
+            // rather than `command -v <name>` so ONE shell spawn answers for
+            // every program this is ever asked about.
+            .args(["-lc", "printf %s \"$PATH\""])
+            // No stdin, and stderr discarded: a profile that prints a banner or
+            // a warning is extremely common and none of it is this function's
+            // news.
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            // Its own process group, so a timeout can kill whatever the
+            // profile started along with the shell itself.
+            .process_group(0)
+            .spawn()
+            .map_err(|e| format!("could not start it: {e}"))?;
+
+        // Read on a thread, so a full pipe cannot stall the shell and a
+        // background job holding the pipe open cannot stall this.
+        let mut stdout = child.stdout.take().expect("stdout is piped");
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut out = Vec::new();
+            let _ = stdout.read_to_end(&mut out);
+            let _ = tx.send(out);
+        });
+
+        let deadline = Instant::now() + self.timeout;
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Ok(None) => {
+                    kill_group_and_reap(&mut child);
+                    return Err(format!("timed out after {:?}", self.timeout));
+                }
+                Err(e) => {
+                    kill_group_and_reap(&mut child);
+                    return Err(format!("could not wait for it: {e}"));
+                }
+            }
+        };
+        if !status.success() {
+            return Err(format!("it exited with {status}"));
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let out = rx
+            .recv_timeout(remaining.max(Duration::from_millis(100)))
+            .map_err(|_| "it exited but left its output open".to_string())?;
+        let raw = String::from_utf8(out).map_err(|_| "its PATH was not UTF-8".to_string())?;
+        let raw = raw.trim();
+        if raw.is_empty() {
+            return Err("it printed an empty PATH".to_string());
+        }
+        Ok(std::env::split_paths(raw).collect())
+    }
+}
+
+/// Settles `LoginPath::get`'s state on every way out, a panic included, so a
+/// waiter is never left waiting on an `Asking` nobody will finish.
+struct Settle<'a> {
+    login: &'a LoginPath,
+    outcome: Option<Result<Vec<PathBuf>, String>>,
+}
+
+impl Drop for Settle<'_> {
+    fn drop(&mut self) {
+        let next = match self.outcome.take() {
+            Some(Ok(dirs)) => Asked::Answered(dirs),
+            Some(Err(reason)) => {
+                tracing::warn!(
+                    shell = %self.login.shell.display(),
+                    %reason,
+                    retry_in = ?self.login.retry_after,
+                    "the login shell did not say what PATH is"
+                );
+                Asked::Failed { at: Instant::now() }
+            }
+            None => Asked::Failed { at: Instant::now() },
+        };
+        *lock(&self.login.state) = next;
+        self.login.answered.notify_all();
+    }
+}
+
+/// SIGKILL the child's process group, then wait for the child so it is not
+/// left a zombie.
+fn kill_group_and_reap(child: &mut std::process::Child) {
+    // SAFETY: `kill` takes no pointers. The child was spawned with
+    // `process_group(0)` and has not been waited for, so its pid is still its
+    // own and is the id of the group it leads.
+    unsafe {
+        libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL);
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /// The first `dir/name` in `dirs` that is an executable file.
@@ -408,9 +617,141 @@ mod tests {
 
     #[test]
     fn a_program_that_does_not_exist_is_none_and_stays_none() {
-        // The negative is cached too. Without that, every tmux command on a
-        // host with no tmux would spawn a login shell to be told so again.
+        // The negative is cached too, for `RETRY_AFTER`. Without that, every
+        // tmux command on a host with no tmux would spawn a login shell to be
+        // told so again.
         assert_eq!(find("farcooler-no-such-program-anywhere"), None);
         assert_eq!(find("farcooler-no-such-program-anywhere"), None);
+    }
+
+    /// A fake login shell: `body` as a `/bin/sh` script, ignoring the `-lc`
+    /// it is handed.
+    fn fake_shell(dir: &Path, body: &str) -> PathBuf {
+        let path = dir.join("fake-shell");
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    fn wait_for_file(path: &Path) -> String {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Ok(text) = std::fs::read_to_string(path)
+                && !text.trim().is_empty()
+            {
+                return text.trim().to_string();
+            }
+            assert!(Instant::now() < deadline, "{} never appeared", path.display());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn a_login_shell_that_hangs_times_out_and_blocks_no_one_else() {
+        // The wedge, as it happened: a profile waiting on the network never
+        // returns. The lookup that asked must give up, kill and reap the
+        // shell, and — while it is still waiting — a lookup that never needed
+        // the login shell must not queue up behind it.
+        let dir = scratch("hanging-shell");
+        let pid_file = dir.join("pid");
+        let shell = fake_shell(&dir, &format!("echo $$ > '{}'\nexec sleep 1000", pid_file.display()));
+        let timeout = Duration::from_secs(2);
+        let finder = std::sync::Arc::new(Finder::new(LoginPath::new(
+            shell,
+            timeout,
+            Duration::from_secs(60),
+        )));
+
+        let stuck = {
+            let finder = finder.clone();
+            std::thread::spawn(move || {
+                let started = Instant::now();
+                let found = finder.find("farcooler-not-on-any-path");
+                (found, started.elapsed())
+            })
+        };
+        let pid: libc::pid_t = wait_for_file(&pid_file).parse().unwrap();
+
+        // The other caller, while the shell is still hanging.
+        let started = Instant::now();
+        let sh = finder.find("sh");
+        let waited = started.elapsed();
+        assert!(sh.is_some(), "sh is on the inherited PATH");
+        assert!(
+            waited < Duration::from_millis(500),
+            "a lookup that needs no login shell waited {waited:?} behind one that does"
+        );
+        assert!(!stuck.is_finished(), "the hanging lookup should still be waiting");
+
+        let (found, took) = stuck.join().unwrap();
+        assert_eq!(found, None);
+        assert!(took >= timeout, "gave up after {took:?}, before the timeout");
+        assert!(took < timeout + Duration::from_secs(2), "took {took:?}; the timeout is not a bound");
+
+        // Killed and reaped: not running, and not a zombie either, because
+        // `kill(pid, 0)` still succeeds on a zombie.
+        // SAFETY: signal 0 checks for existence and delivers nothing.
+        let alive = unsafe { libc::kill(pid, 0) } == 0;
+        assert!(!alive, "the timed-out shell {pid} is still around");
+    }
+
+    #[test]
+    fn a_failed_login_shell_is_asked_again_after_its_ttl() {
+        // A profile that failed once — the network was down, a mount was
+        // late — must get another turn, not be believed for the life of the
+        // daemon. The fake fails on its first run and answers after that.
+        let dir = scratch("retry-shell");
+        let count = dir.join("count");
+        let answer = dir.join("answer-dir");
+        let shell = fake_shell(
+            &dir,
+            &format!(
+                "echo run >> '{count}'\n\
+                 [ \"$(wc -l < '{count}')\" -gt 1 ] || exit 1\n\
+                 printf %s '{answer}'",
+                count = count.display(),
+                answer = answer.display(),
+            ),
+        );
+        let retry_after = Duration::from_millis(300);
+        let login = LoginPath::new(shell, Duration::from_secs(5), retry_after);
+        let runs = || std::fs::read_to_string(&count).unwrap_or_default().lines().count();
+
+        assert_eq!(login.get(), None, "the first run fails");
+        assert_eq!(login.get(), None, "and is believed for a while");
+        assert_eq!(runs(), 1, "without asking the shell again");
+
+        std::thread::sleep(retry_after + Duration::from_millis(100));
+        assert_eq!(login.get(), Some(vec![answer.clone()]), "asked again once the TTL is up");
+        assert_eq!(login.get(), Some(vec![answer]), "and an answer is kept");
+        assert_eq!(runs(), 2);
+    }
+
+    #[test]
+    fn callers_that_arrive_together_share_one_login_shell() {
+        // Single-flight: eight lookups at once is one shell, not eight.
+        let dir = scratch("single-flight-shell");
+        let count = dir.join("count");
+        let shell = fake_shell(
+            &dir,
+            &format!("echo run >> '{}'\nsleep 0.3\nprintf %s /shared", count.display()),
+        );
+        let login = std::sync::Arc::new(LoginPath::new(
+            shell,
+            Duration::from_secs(5),
+            Duration::from_secs(60),
+        ));
+        let callers: Vec<_> = (0..8)
+            .map(|_| {
+                let login = login.clone();
+                std::thread::spawn(move || login.get())
+            })
+            .collect();
+        for caller in callers {
+            assert_eq!(caller.join().unwrap(), Some(vec![PathBuf::from("/shared")]));
+        }
+        let runs = std::fs::read_to_string(&count).unwrap().lines().count();
+        assert_eq!(runs, 1, "{runs} shells for one question");
     }
 }
