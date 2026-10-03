@@ -31,7 +31,7 @@ struct AgentRowView: View {
         // would say the same thing twice.
         case let .message(role, text, _):
             MessageRow(
-                role: role, text: text, isLive: isLast,
+                role: role, text: text, isLive: isLast, rowID: row.id,
                 // Only the user's own words are editable — an agent reply or a
                 // thought was never something typed into the composer, so
                 // there is nothing to put back into it.
@@ -146,6 +146,8 @@ private struct MessageRow: View {
     let role: Role
     let text: String
     var isLive: Bool = false
+    /// The transcript row's id, for a thought's accessibility identifier.
+    var rowID = 0
     /// `nil` for every row that is not the user's own — see `AgentRowView`.
     var onEdit: (() -> Void)?
 
@@ -196,7 +198,7 @@ private struct MessageRow: View {
             // a long turn. But a finished thought is scratch work, and a
             // transcript of them is unreadable — so it folds itself away the
             // moment anything follows it.
-            ThoughtRow(text: text, isLive: isLive)
+            ThoughtRow(text: text, isLive: isLive, rowID: rowID)
         }
     }
 }
@@ -205,6 +207,7 @@ private struct MessageRow: View {
 private struct ThoughtRow: View {
     let text: String
     let isLive: Bool
+    var rowID = 0
 
     @State private var expanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -213,7 +216,7 @@ private struct ThoughtRow: View {
         // The shared section (ov-101). A click toggles the reader's own
         // choice, whatever the live rule is showing.
         CollapsibleSection(
-            id: "thought", metrics: .inline,
+            id: "thought.\(rowID)", metrics: .inline,
             isExpanded: Binding(get: { showing }, set: { _ in expanded.toggle() }),
             accessibilityLabel: isLive ? "Thinking" : "Thought", fillsRow: false,
             label: { _ in
@@ -281,9 +284,12 @@ private struct ToolRowView: View {
                 // not beside it: the chevron belongs to the row it opens, and
                 // outside the fill it aligned the detail to the wrong edge.
                 CollapsibleSection(
-                    id: "tool", metrics: .card,
+                    id: "tool.\(tool.id)", metrics: .card,
                     isExpanded: Binding(get: { showingDetail }, set: { _ in expanded.toggle() }),
-                    accessibilityLabel: tool.title,
+                    // What the row says, read in full: its title, where,
+                    // and its status (ov-101 review).
+                    accessibilityLabel: [tool.title, tool.locations.first, status.label]
+                        .compactMap { $0 }.joined(separator: ", "),
                     label: { _ in label },
                     accessory: { EmptyView() }
                 ) {
@@ -452,9 +458,10 @@ private struct SubagentBlockView: View {
     var body: some View {
         // The shared section (ov-101), in the card's metrics.
         CollapsibleSection(
-            id: "subagent", metrics: .card,
+            id: "subagent.\(block.id)", metrics: .card,
             isExpanded: Binding(get: { showing }, set: { toggled = $0 }),
-            accessibilityLabel: block.tool.title,
+            accessibilityLabel: [block.tool.title, block.subtitle, status.label]
+                .filter { !$0.isEmpty }.joined(separator: ", "),
             label: { _ in header },
             accessory: { EmptyView() }
         ) {

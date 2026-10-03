@@ -79,16 +79,20 @@ struct SectionMetrics: Equatable {
     var minHeight: CGFloat = ColumnGrid.rowHeight
     /// Around the header alone: the content keeps its own.
     var headerInsets = EdgeInsets()
+    /// Whether its header is a heading for VoiceOver's rotor: a section's
+    /// is; a tool call's or a card's details' isn't (ov-101 review).
+    var isHeading = false
 
     /// The board's navigator: its sections, task statuses and groups.
-    static let navigator = SectionMetrics(spacing: ColumnGrid.rhythm)
+    static let navigator = SectionMetrics(spacing: ColumnGrid.rhythm, isHeading: true)
     /// The sidebar: a group of rows below a repository (Unclaimed, Hidden),
     /// at the sidebar's edges, its rows straight under it.
     static let sidebar = SectionMetrics(
         spacing: 0, minHeight: ColumnGrid.rowHeight - 2 * SidebarGrid.headerVerticalPadding,
         headerInsets: EdgeInsets(
             top: SidebarGrid.headerVerticalPadding, leading: SidebarGrid.edge,
-            bottom: SidebarGrid.headerVerticalPadding, trailing: SidebarGrid.edge))
+            bottom: SidebarGrid.headerVerticalPadding, trailing: SidebarGrid.edge),
+        isHeading: true)
     /// A small disclosure in running text: a thought, a card's details, a
     /// settings row's.
     static let inline = SectionMetrics(spacing: 6, chevronWidth: 14, minHeight: 0)
@@ -206,7 +210,7 @@ struct CollapsibleSection<Label: View, Accessory: View, Content: View>: View {
     private let defaults: UserDefaults
     @State private var stored: Bool
     /// Closing, until its spring settles: what the content is clipped for.
-    @State private var closing = false
+    @State private var clip = SectionClip()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.boardMotionSlowdown) private var slowdown
 
@@ -286,11 +290,12 @@ struct CollapsibleSection<Label: View, Accessory: View, Content: View>: View {
     /// Open or close it, on the shared spring.
     private func set(_ open: Bool) {
         guard canExpand, open != expanded else { return }
-        closing = !open
+        let closing = open ? nil : clip.close()
+        if open { clip.open() }
         BoardMotion.toggle(reduceMotion: reduceMotion, slowedBy: slowdown) {
             if let binding { binding.wrappedValue = open } else { stored = open }
         } completion: {
-            if !open { closing = false }
+            if let closing { clip.settle(closing) }
         }
         if let key { defaults.set(open, forKey: key) }
     }
@@ -313,17 +318,22 @@ struct CollapsibleSection<Label: View, Accessory: View, Content: View>: View {
                         .transition(Self.contentTransition(reduceMotion: reduceMotion, slowedBy: slowdown))
                 }
             }
-            .clipShape(ClipWhile(clips: closing))
+            .clipShape(ClipWhile(clips: clip.closing))
         }
         // Closed from outside, too: a transcript row folding itself once the
-        // turn moves on. `set` has already said so for a click.
+        // turn moves on. `set` has already said so for a click. Opened again
+        // before that close settles, it stops clipping at once (ov-101
+        // review): an opening section is never clipped.
         .onChange(of: expanded) { was, now in
-            guard was, !now, !closing else { return }
-            closing = true
-            let settle = 0.6 * slowdown
-            Task {
-                try? await Task.sleep(for: .seconds(settle))
-                closing = false
+            if now {
+                clip.open()
+            } else if was, !clip.closing {
+                let closing = clip.close()
+                let settle = 0.6 * slowdown
+                Task {
+                    try? await Task.sleep(for: .seconds(settle))
+                    clip.settle(closing)
+                }
             }
         }
         // Added to, not set: a section inside another one registers too.
@@ -383,7 +393,7 @@ struct CollapsibleSection<Label: View, Accessory: View, Content: View>: View {
         }
         .accessibilityLabel(count.map { "\(accessibilityLabel), \($0)" } ?? accessibilityLabel)
         .accessibilityValue(canExpand ? (expanded ? "Expanded" : "Collapsed") : "")
-        .accessibilityAddTraits(toggle == .row ? [.isHeader, .isButton] : .isButton)
+        .accessibilityAddTraits(metrics.isHeading ? [.isHeader, .isButton] : .isButton)
         .accessibilityIdentifier("section-\(id)")
     }
 }
@@ -479,6 +489,33 @@ struct GroupHeader: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(count.map { "\(title), \($0)" } ?? title)
         .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// Whether a section's content is clipped: only while it closes, until that
+/// close settles or it opens again, whichever comes first. Each close is
+/// numbered, so a close that settles after the section has opened (and
+/// perhaps closed again) changes nothing.
+struct SectionClip: Equatable {
+    private(set) var closing = false
+    private var generation = 0
+
+    /// It began to close: clip, until `settle` with what this returns.
+    mutating func close() -> Int {
+        generation += 1
+        closing = true
+        return generation
+    }
+
+    /// It began to open: never clipped.
+    mutating func open() {
+        generation += 1
+        closing = false
+    }
+
+    /// The close numbered `close` has settled.
+    mutating func settle(_ close: Int) {
+        if close == generation { closing = false }
     }
 }
 

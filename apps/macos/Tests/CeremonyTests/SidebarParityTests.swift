@@ -108,6 +108,26 @@ struct SidebarParityTests {
         ) == [.open])
     }
 
+    /// Needs You's count is the menu's badge, never "(3)" in its title
+    /// (ov-101).
+    @Test("Needs You in the switcher wears its count as a badge")
+    func needsYouBadge() {
+        var fleet = Fleet(runtimeHealthy: true, livePanes: 0, worktrees: [Self.worktree("lane")], branchPrefix: nil)
+        fleet.runnerWorkspaces[""] = [Self.main]
+        func needsYou(_ count: Int) -> (title: String, badge: Int)? {
+            WorkspaceSwitcherMenu.entries(
+                groups: WorkspaceNumbers.groups(in: fleet), current: nil, waiting: { _ in 0 }, showsHosts: false,
+                needsYou: count, offersNewWorkspace: false, status: "1 live", statusTrouble: false, troubled: []
+            ).compactMap { entry -> (String, Int)? in
+                if case .item(let title, _, let badge, .needsYou) = entry { return (title, badge) }
+                return nil
+            }.first
+        }
+        #expect(needsYou(3)?.title == "Needs You")
+        #expect(needsYou(3)?.badge == 3)
+        #expect(needsYou(0)?.badge == 0)
+    }
+
     /// Each repository in the switcher carries its header's actions.
     @Test("Each repository in the switcher has Reconnect, New Terminal and Remove Repository")
     func repositoriesCarryTheirActions() {

@@ -90,26 +90,43 @@ struct CollapsibleSectionTests {
         }
     }
 
-    /// The disclosures in `text`, a Swift file's source: a system
-    /// `DisclosureGroup` or `OutlineGroup`, a chevron turned by
-    /// `rotationEffect` within a few lines of it, or a chevron swapped for
-    /// another by a ternary. Comments aside.
+    /// The disclosures in `text`, a Swift file's source:
+    /// - a system `DisclosureGroup` or `OutlineGroup`;
+    /// - a disclosure glyph (a chevron or a triangle), or an image named by
+    ///   a variable, turned by `rotationEffect` within eight lines;
+    /// - a glyph swapped for another, by a ternary or an `if`/`else`;
+    /// - a Show/Hide button toggling something without a chevron at all.
+    ///
+    /// Comments aside, and a line saying `not a disclosure` (a sort arrow
+    /// that turns, say) is excused.
     static func disclosures(in text: String) -> [String] {
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map { line -> String in
+        let raw = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let lines = raw.map { line -> String in
+            if line.contains("not a disclosure") { return "" }
             // Code only: what a comment says about a disclosure isn't one.
-            guard let cut = line.range(of: "//") else { return String(line) }
+            guard let cut = line.range(of: "//") else { return line }
             return String(line[..<cut.lowerBound])
         }
         var found: [String] = []
         let system = try! Regex(#"\b(DisclosureGroup|OutlineGroup|disclosureGroupStyle)\b"#)
-        let swap = try! Regex(#"\?\s*"chevron\.[a-z.]+"\s*:\s*"chevron\."#)
+        let glyph = try! Regex(#""(chevron\.(right|down|forward)|arrowtriangle\.|triangle)"#)
+        let named = try! Regex(#"systemName:\s*[A-Za-z_(]"#)
+        let swap = try! Regex(#"\?\s*"(chevron|arrowtriangle|triangle)[a-z.]*"\s*:\s*"(chevron|arrowtriangle|triangle)"#)
+        let words = try! Regex(#"Button\([^"]*\?\s*("Show\b[^"]*"\s*:\s*"Hide|"Hide\b[^"]*"\s*:\s*"Show)\b"#)
         for (index, line) in lines.enumerated() {
+            let next = lines[index..<min(lines.count, index + 8)]
             if line.contains(system) { found.append("\(index + 1): a system disclosure") }
-            if line.contains(swap) { found.append("\(index + 1): a chevron swapped for another") }
-            if line.contains("\"chevron.") {
-                let window = lines[index..<min(lines.count, index + 8)]
-                if window.contains(where: { $0.contains(".rotationEffect") }) {
-                    found.append("\(index + 1): a chevron of its own, turned")
+            if line.contains(swap) { found.append("\(index + 1): a glyph swapped for another") }
+            if line.contains(words) { found.append("\(index + 1): Show and Hide words for a disclosure") }
+            if line.contains(glyph) || line.contains(named) {
+                if next.contains(where: { $0.contains(".rotationEffect") }) {
+                    found.append("\(index + 1): a disclosure glyph of its own, turned")
+                }
+                if line.contains(glyph),
+                    let other = next.firstIndex(where: { $0.contains("} else {") }),
+                    lines[other..<min(lines.count, other + 4)].contains(where: { $0.contains(glyph) })
+                {
+                    found.append("\(index + 1): a glyph swapped for another by if/else")
                 }
             }
         }
@@ -130,12 +147,67 @@ struct CollapsibleSectionTests {
                 Issue.record("\(file.lastPathComponent):\(hit); use CollapsibleSection or DisclosureButton")
             }
         }
-        // The scan sees each kind, and not a comment.
-        #expect(Self.disclosures(in: "DisclosureGroup(\"Details\") { Text(\"x\") }").count == 1)
-        #expect(Self.disclosures(in: "Image(systemName: \"chevron.right\")\n    .font(.caption2)\n    .rotationEffect(.degrees(open ? 90 : 0))").count == 1)
-        #expect(Self.disclosures(in: "Image(systemName: open ? \"chevron.down\" : \"chevron.right\")").count == 1)
-        #expect(Self.disclosures(in: "// the DisclosureGroup it was").isEmpty)
-        #expect(Self.disclosures(in: "Image(systemName: \"chevron.forward\")").isEmpty)
+    }
+
+    /// The scan sees each kind, and passes what isn't one.
+    @Test("The disclosure scan catches each kind and excuses the rest")
+    func scanCatches() {
+        let caught = [
+            "DisclosureGroup(\"Details\") { Text(\"x\") }",
+            "Image(systemName: \"chevron.right\")\n    .font(.caption2)\n    .rotationEffect(.degrees(open ? 90 : 0))",
+            "Image(systemName: \"arrowtriangle.right.fill\")\n    .rotationEffect(.degrees(open ? 90 : 0))",
+            "Image(systemName: glyph)\n    .rotationEffect(.degrees(open ? 90 : 0))",
+            "Image(systemName: open ? \"chevron.down\" : \"chevron.right\")",
+            "if open {\n    Image(systemName: \"chevron.down\")\n} else {\n    Image(systemName: \"chevron.right\")\n}",
+            "Button(open ? \"Hide\" : \"Show\") { open.toggle() }",
+        ]
+        for source in caught { #expect(Self.disclosures(in: source).count == 1, "missed: \(source)") }
+        let passed = [
+            "// the DisclosureGroup it was",
+            "Image(systemName: \"chevron.forward\")",
+            "Image(systemName: \"arrow.up\")  // not a disclosure: a sort order\n    .rotationEffect(.degrees(up ? 0 : 180))",
+            ".accessibilityAction(named: open ? \"Hide Worktrees\" : \"Show Worktrees\") {}",
+            "Button(agent ? \"Show as Terminal\" : \"Show as Chat\", action: flip)",
+        ]
+        for source in passed { #expect(Self.disclosures(in: source).isEmpty, "wrongly caught: \(source)") }
+    }
+
+    /// The clip is on only while a section closes: opened again before the
+    /// close settles, it's off at once, and that close settling later
+    /// doesn't touch it (ov-101 review, M3).
+    @Test("A section is clipped only while it closes")
+    func clipOnlyWhileClosing() {
+        var clip = SectionClip()
+        #expect(!clip.closing)
+        let first = clip.close()
+        #expect(clip.closing)
+        clip.settle(first)
+        #expect(!clip.closing)
+        // Closed, then opened within the settle: unclipped at once.
+        let second = clip.close()
+        clip.open()
+        #expect(!clip.closing)
+        // Closed again; the first close's late settle leaves it clipped,
+        // its own settle clears it.
+        let third = clip.close()
+        clip.settle(second)
+        #expect(clip.closing)
+        clip.settle(third)
+        #expect(!clip.closing)
+    }
+
+    /// Under Reduce Motion every collapsible cross-fades instead of
+    /// springing, and the section reaches motion only through `BoardMotion`.
+    @Test("Under Reduce Motion a section cross-fades, and moves only through BoardMotion")
+    func reduceMotion() throws {
+        #expect(BoardMotion.list(reduceMotion: true) == .easeInOut(duration: 0.2))
+        #expect(BoardMotion.list(reduceMotion: false) == WorkspaceMotion.spring)
+        let source = try String(
+            contentsOf: Self.sources.appendingPathComponent("Components/CollapsibleSection.swift"), encoding: .utf8)
+        #expect(!source.contains("withAnimation("), "a section animates other than through BoardMotion")
+        #expect(!source.contains("WorkspaceMotion.spring"), "a section springs whatever Reduce Motion says")
+        #expect(source.contains("BoardMotion.toggle(reduceMotion: reduceMotion"))
+        #expect(source.contains("contentTransition(reduceMotion: reduceMotion"))
     }
 
     /// The header answers the keyboard and VoiceOver the same way

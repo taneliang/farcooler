@@ -20,7 +20,7 @@ struct DiffView: View {
     @State private var expanded = false
 
     /// Cached, because `body` reads this even when the diff is COLLAPSED --
-    /// the header and the "Show N lines" label both need the count -- and a
+    /// the header and the "N lines" disclosure both need the count -- and a
     /// row's body runs again every time it is realized while scrolling.
     private var lines: [DiffComputation.Line] {
         DiffComputation.cachedCompute(old: diff.oldText ?? "", new: diff.newText)
@@ -31,15 +31,21 @@ struct DiffView: View {
         VStack(alignment: .leading, spacing: 6) {
             header(for: rows)
 
-            if rows.count > Self.collapseThreshold && !expanded {
-                Button {
-                    expanded = true
-                } label: {
-                    Text("Show \(rows.count) lines")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+            if rows.count > Self.collapseThreshold {
+                // The shared section (ov-101), where a one-way "Show N lines"
+                // button was: it opens on the shared spring, and closes again.
+                CollapsibleSection(
+                    id: "diff.\(diff.path)", metrics: .inline, isExpanded: $expanded,
+                    accessibilityLabel: "\(rows.count) lines", fillsRow: false,
+                    label: { _ in
+                        Text("\(rows.count) lines")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    },
+                    accessory: { EmptyView() }
+                ) {
+                    diffBody(rows)
                 }
-                .buttonStyle(.plain)
             } else {
                 diffBody(rows)
             }
