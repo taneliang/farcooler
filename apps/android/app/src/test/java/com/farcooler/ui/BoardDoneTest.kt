@@ -75,7 +75,10 @@ class BoardDoneTest {
         assertEquals("All Done", history.title)
         val more = BoardList.entries(board, open, now, reads, showingMore = setOf(TaskStatus.TODO))
         assertEquals(17, more.filterIsInstance<BoardListEntry.Card>().size)
-        assertTrue(more.none { it is BoardListEntry.ShowMore })
+        assertEquals("Show Fewer", more.filterIsInstance<BoardListEntry.ShowMore>().single().title)
+        // Every canceled task drawn: no History row.
+        val few = TaskBoard(listOf(TaskBoardColumn(TaskStatus.CANCELLED, listOf(row("c", hour, TaskStatus.CANCELLED)))))
+        assertTrue(BoardList.entries(few, setOf(TaskStatus.CANCELLED), now, reads).none { it is BoardListEntry.History })
         assertNull(BoardSectionCut.cut(TaskBoardColumn(TaskStatus.DONE, emptyList()), reads, now).history)
         // No count in parentheses anywhere.
         assertFalse(BoardSectionCut.showMoreTitle(4).contains("("))
@@ -101,7 +104,9 @@ class BoardDoneTest {
         assertEquals(listOf("Mac", "Daemon", "Phones"), BoardHistory.areas(rows))
         assertEquals(listOf("old", "yday"), BoardHistory.filter(rows, "", "Mac").map { it.key })
         assertEquals(listOf("tue"), BoardHistory.filter(rows, "TUESDAY daemon").map { it.key })
-        assertEquals("7:00 AM", BoardHistory.landed(rows[3], now, utc, Locale.US, WeekFields.ISO))
+        assertEquals("7:00 AM", BoardHistory.landed(rows[3], now, utc, Locale.US, WeekFields.ISO).replace('\u202F', ' '))
+        // A 24-hour locale reads as one.
+        assertEquals("07:00", BoardHistory.landed(rows[3], now, utc, Locale.GERMANY, WeekFields.ISO))
         assertEquals("Dec 6, 2026", BoardHistory.landed(rows[0], now, utc, Locale.US, WeekFields.ISO))
     }
 }

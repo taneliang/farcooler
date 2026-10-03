@@ -710,7 +710,9 @@ object BoardSectionCut {
         zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
     ): Cut {
         if (column.status.isFinished) {
-            return Cut(BoardDone.shown(column.rows, reads, nowMs, zone), 0, column.rows.size.takeIf { it > 0 })
+            val shown = BoardDone.shown(column.rows, reads, nowMs, zone)
+            // The History row only while some aren't drawn here.
+            return Cut(shown, 0, column.rows.size.takeIf { shown.size < it })
         }
         if (showingAll || column.rows.size <= LIMIT) return Cut(column.rows, 0, null)
         return Cut(column.rows.take(LIMIT), column.rows.size - LIMIT, null)
@@ -777,13 +779,17 @@ object BoardHistory {
         week: java.time.temporal.WeekFields = java.time.temporal.WeekFields.of(locale),
     ): String {
         val at = java.time.Instant.ofEpochMilli(row.statusSince).atZone(zone)
-        val pattern = when (period(row.statusSince, nowMs, zone, week)) {
-            Period.TODAY, Period.YESTERDAY -> "h:mm a"
-            Period.THIS_WEEK -> "EEE h:mm a"
+        // The time in the locale's own style, so a 24-hour phone reads 19:00.
+        val time = java.time.format.DateTimeFormatter.ofLocalizedTime(java.time.format.FormatStyle.SHORT).withLocale(locale)
+        return when (period(row.statusSince, nowMs, zone, week)) {
+            Period.TODAY, Period.YESTERDAY -> time.format(at)
+            Period.THIS_WEEK -> java.time.format.DateTimeFormatter.ofPattern("EEE", locale).format(at) + " " + time.format(at)
             Period.EARLIER ->
-                if (at.year == java.time.Instant.ofEpochMilli(nowMs).atZone(zone).year) "MMM d" else "MMM d, yyyy"
+                java.time.format.DateTimeFormatter.ofPattern(
+                    if (at.year == java.time.Instant.ofEpochMilli(nowMs).atZone(zone).year) "MMM d" else "MMM d, yyyy",
+                    locale,
+                ).format(at)
         }
-        return java.time.format.DateTimeFormatter.ofPattern(pattern, locale).format(at)
     }
 
     /** Rows in [area] (null for any) whose key or title carries every word of [query]. */

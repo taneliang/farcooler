@@ -60,6 +60,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.coroutineScope
@@ -162,6 +163,12 @@ fun BoardTab(
     var reads by remember(workspace.id) {
         mutableStateOf(readsStore.load(connection.host.id, workspace.id, System.currentTimeMillis()))
     }
+    // Read again on coming back: a task opened from a push or Needs You read
+    // it while this board wasn't looking.
+    LifecycleResumeEffect(workspace.id) {
+        reads = readsStore.load(connection.host.id, workspace.id, System.currentTimeMillis())
+        onPauseOrDispose {}
+    }
 
     // Read on opening, whatever was last read: the row that opened this may
     // be showing a count from before the last reconnect. While it is open, a
@@ -243,7 +250,10 @@ fun BoardTab(
                             }
                             is BoardListEntry.ShowMore -> item(key = entry.key) {
                                 TextButton(
-                                    onClick = { showingMore = showingMore + entry.status.wire },
+                                    onClick = {
+                                        val word = entry.status.wire
+                                        showingMore = if (entry.showingAll) showingMore - word else showingMore + word
+                                    },
                                     modifier = Modifier.padding(start = 8.dp).testTag("board-show-more-${entry.status.wire}"),
                                 ) { Text(entry.title) }
                             }

@@ -35,10 +35,10 @@ sealed interface BoardListEntry {
         override val key: String get() = "task/${row.id}"
     }
 
-    /** Under a long section showing ten: shows the rest. */
-    data class ShowMore(val status: TaskStatus, val hidden: Int) : BoardListEntry {
+    /** Under a long section: shows the rest ([hidden] of them), or, showing all, puts them away again. */
+    data class ShowMore(val status: TaskStatus, val hidden: Int, val showingAll: Boolean = false) : BoardListEntry {
         override val key: String get() = "show-more/${status.wire}"
-        val title: String get() = BoardSectionCut.showMoreTitle(hidden)
+        val title: String get() = if (showingAll) "Show Fewer" else BoardSectionCut.showMoreTitle(hidden)
     }
 
     /** Under Done or Canceled: "All Done  94 ›", the History page (ov-103). */
@@ -75,7 +75,11 @@ object BoardList {
                 if (expanded) {
                     cut.rows.map(BoardListEntry::Card) +
                         listOfNotNull(
-                            cut.hidden.takeIf { it > 0 }?.let { BoardListEntry.ShowMore(section.status, it) },
+                            cut.hidden.takeIf { it > 0 }?.let { BoardListEntry.ShowMore(section.status, it) }
+                                ?: BoardListEntry.ShowMore(section.status, 0, showingAll = true).takeIf {
+                                    section.status in showingMore && !section.status.isFinished &&
+                                        count > BoardSectionCut.LIMIT
+                                },
                             cut.history?.let { BoardListEntry.History(section.status, it) },
                         )
                 } else {
