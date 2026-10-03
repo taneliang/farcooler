@@ -22,7 +22,6 @@ apps/ios/FarCooler/Connection.swift :: loadInbox :: try? await core.call("change
 apps/ios/FarCooler/Connection.swift :: loadNeedsYou :: try? await rpc("needs_you") :: poll read: keeps the last list; derived Needs You fills in
 apps/ios/FarCooler/Connection.swift :: taskRecord :: try? await rpc("task.get", ["task": task]) :: TODO(ov-179): a failed read leaves the task screen blank with no reason
 apps/ios/FarCooler/Connection.swift :: loadThemes :: try? await core.call("themes") :: poll read of runner themes; the built-ins stay
-apps/ios/FarCooler/Connection.swift :: act :: _ = try? await core.call(method, ["terminal": terminal.id]) :: TODO(ov-179): refused restart/stop/dismiss is silent
 apps/ios/FarCooler/Connection.swift :: close :: _ = try? await core.call("terminal.stop", ["terminal": terminal.id]) :: deliberate (doc comment): the refusal is a Rust enum name, the tab staying is the truth; still TODO(ov-179)
 apps/ios/FarCooler/Connection.swift :: close :: _ = try? await core.call("terminal.remove", ["terminal": terminal.id]) :: deliberate (doc comment): the refusal is a Rust enum name, the tab staying is the truth; still TODO(ov-179)
 apps/ios/FarCooler/Connection.swift :: hostThemes :: try? await core.call("themes") :: TODO(ov-179): Settings shows an empty theme list on a failed read
