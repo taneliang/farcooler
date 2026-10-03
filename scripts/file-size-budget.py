@@ -118,19 +118,19 @@ def breaches(found: dict[str, int], allowed: dict[str, int]) -> list[str]:
             cap = allowed[path]
             if n > cap:
                 msgs.append(
-                    f"{path}: {n} lines, up from its grandfathered {cap}.\n"
-                    f"  This file is already over the {BUDGET}-line budget and may only shrink.\n"
-                    f"  Move what you added, or at least {n - cap} lines of what was there, into a\n"
+                    f"{path}: {n:,} lines, up from its grandfathered {cap:,}.\n"
+                    f"  This file is already over the {BUDGET:,}-line budget and may only shrink.\n"
+                    f"  Move at least {n - cap} line{'s' if n - cap != 1 else ''} out into a\n"
                     f"  new file: a type, a handler group or an inline test module that\n"
                     f"  stands on its own. Then run ./scripts/file-size-budget.py --update\n"
-                    f"  if it ends up below {cap}. Don't raise the number in\n"
+                    f"  if it ends up below {cap:,}. Don't raise the number in\n"
                     f"  {MANIFEST.relative_to(ROOT)}: that is the growth this check exists to stop."
                 )
         elif n > BUDGET:
             msgs.append(
-                f"{path}: {n} lines, over the {BUDGET}-line budget.\n"
+                f"{path}: {n:,} lines, over the {BUDGET:,}-line budget.\n"
                 f"  Split it before it lands: move a type, a group of related functions or\n"
-                f"  its inline tests into a sibling file, so each part is under {BUDGET}.\n"
+                f"  its inline tests into a sibling file, so each part is at most {BUDGET:,}.\n"
                 f"  New files aren't grandfathered; only those over the budget when it\n"
                 f"  landed are listed in {MANIFEST.relative_to(ROOT)}."
             )
