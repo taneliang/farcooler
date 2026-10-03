@@ -315,21 +315,15 @@ impl CodexBackend {
                 // Steers waiting on this turn's id have no turn to join. Back
                 // to the queue, which sends them as the next turn.
                 self.returned.append(&mut self.held_steers);
-                // The server's own sentence, because it is the only thing that
-                // can tell a user what to do about it — "unauthorized: run
-                // `codex login`" is actionable and "the turn ended" is not.
-                // Ordered before `TurnEnded` so folding the batch in order
-                // lands on idle rather than on working.
-                Ok(vec![
-                    AgentEvent::Message {
-                        role: farcooler_agent_core::event::Role::Agent,
-                        text: format!("The agent couldn’t run that turn: {message}"),
-                        parent: None,
-                    },
-                    AgentEvent::TurnEnded {
-                        reason: farcooler_agent_core::event::EndReason::Refusal,
-                    },
-                ])
+                // A failed end, not the server's sentence drawn as the agent
+                // speaking — which is what this was, under `Refusal`, a word
+                // that means the MODEL declined. The sentence ("unauthorized:
+                // run `codex login`") is kept as the failure's detail, and its
+                // kind is what a client can act on.
+                let kind = farcooler_agent_core::event::classify_error(None, None, &message);
+                Ok(vec![AgentEvent::TurnEnded {
+                    reason: farcooler_agent_core::event::EndReason::Failed { kind, detail: message },
+                }])
             }
         }
     }
@@ -1436,16 +1430,17 @@ take; printf '{"id":5,"result":{}}\n'; read -r done"#,
             "the turn has to end, or activity stays Working: {events:?}"
         );
         assert_eq!(backend.pending_turn, None, "no turn is in flight anymore");
-        // The server's own words, including the half it buried in `data`,
-        // because "run `codex login`" is the only actionable part.
-        assert!(
-            events.iter().any(|e| matches!(
-                e,
-                AgentEvent::Message { text, .. }
-                    if text.contains("unauthorized") && text.contains("codex login")
-            )),
-            "{events:?}"
-        );
+        // Failed, as auth, with the server's own words — including the half
+        // it buried in `data` — kept as the detail rather than drawn as the
+        // agent speaking.
+        let [AgentEvent::TurnEnded {
+            reason: farcooler_agent_core::event::EndReason::Failed { kind, detail },
+        }] = events.as_slice()
+        else {
+            panic!("one failed end and no words: {events:?}");
+        };
+        assert_eq!(*kind, farcooler_agent_core::event::FailureKind::Auth);
+        assert!(detail.contains("codex login"), "{detail}");
     }
 
     #[test]

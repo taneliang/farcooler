@@ -12,6 +12,7 @@
 
 use farcooler_agent_core::event::{
     AgentEvent, AgentGapReason, Diff, EndReason, PermissionOption, PlanEntry, Role, ToolStatus,
+    classify_error,
 };
 
 /// Where a frame came from, which decides whether the user's own words are
@@ -66,6 +67,9 @@ pub fn frame_to_events(
             // leaves the pane on Working forever, which is the failure
             // `end_reason` already reasons about on the ACP side.
             let status = params["turn"]["status"].as_str().unwrap_or_default();
+            if status == "failed" {
+                return vec![AgentEvent::TurnEnded { reason: failed(&params["turn"]["error"]) }];
+            }
             vec![AgentEvent::TurnEnded { reason: end_reason(status) }]
         }
         "thread/tokenUsage/updated" => {
@@ -144,31 +148,15 @@ pub fn frame_to_events(
         // cannot show" — telling the user history was missing when in fact
         // nothing was missing and something had gone wrong.
         //
-        // A `Message` rather than a `TurnEnded`, for two reasons. `TurnStatus`
-        // has its own `failed` and `turn/completed` still arrives to carry it,
-        // so ending the turn here would end it twice. And `willRetry` is
-        // exactly the case where the turn is NOT over — stopping the pane on a
-        // retryable stream disconnect would abandon a turn codex is still
-        // working on. The neutral vocabulary has no error event, so the
-        // server's own words in the transcript is the honest surface.
-        "error" => {
-            let error = &params["error"];
-            let mut text = format!(
-                "Error: {}",
-                error["message"]
-                    .as_str()
-                    .filter(|m| !m.is_empty())
-                    .unwrap_or("codex reported an error without describing it")
-            );
-            if let Some(details) = error["additionalDetails"].as_str().filter(|d| !d.is_empty()) {
-                text.push_str("\n\n");
-                text.push_str(details);
-            }
-            if params["willRetry"].as_bool().unwrap_or(false) {
-                text.push_str("\n\nRetrying.");
-            }
-            vec![AgentEvent::Message { role: Role::Agent, text, parent: None }]
-        }
+        //
+        // And not a `Message` either, which is what it was: the server's raw
+        // sentence drawn as the agent speaking. Nothing at all, for two
+        // reasons. `TurnStatus` has its own `failed`, and the `turn/completed`
+        // that carries it brings the same `TurnError` — that is where the
+        // turn ends as `Failed`, once. And `willRetry` is exactly the case
+        // where the turn is NOT over: a retryable stream disconnect that codex
+        // is already recovering from is nothing the person has to act on.
+        "error" => Vec::new(),
         // Known, and deliberately silent. Each of these is real and none of
         // them belongs in a transcript, so an empty vector is the correct
         // answer rather than a Gap.
@@ -691,6 +679,34 @@ fn content_text(content: &serde_json::Value) -> String {
         .unwrap_or_default()
 }
 
+/// A `TurnError`, as the failed end it describes.
+///
+/// `codexErrorInfo` is the machine word, and comes in two shapes: a bare
+/// string (`"unauthorized"`) or an object keyed by the variant carrying the
+/// upstream `httpStatusCode` (`{"httpConnectionFailed":{"httpStatusCode":502}}`).
+pub fn failed(error: &serde_json::Value) -> EndReason {
+    let info = &error["codexErrorInfo"];
+    let (code, status) = match info {
+        serde_json::Value::String(word) => (Some(word.as_str()), None),
+        serde_json::Value::Object(map) => match map.iter().next() {
+            Some((word, inner)) => (
+                Some(word.as_str()),
+                inner["httpStatusCode"].as_u64().and_then(|s| u16::try_from(s).ok()),
+            ),
+            None => (None, None),
+        },
+        _ => (None, None),
+    };
+    let mut detail = error["message"].as_str().unwrap_or_default().to_string();
+    if let Some(more) = error["additionalDetails"].as_str().filter(|d| !d.is_empty()) {
+        if !detail.is_empty() {
+            detail.push_str(": ");
+        }
+        detail.push_str(more);
+    }
+    EndReason::Failed { kind: classify_error(code, status, &detail), detail }
+}
+
 /// A turn's `status`, as the reason it ended.
 pub fn end_reason(status: &str) -> EndReason {
     match status {
@@ -1168,10 +1184,10 @@ mod tests {
     }
 
     #[test]
-    fn a_server_error_reads_as_a_failure_rather_than_as_missing_history() {
+    fn a_server_error_is_neither_missing_history_nor_the_agent_speaking() {
         // Unhandled, this drew "Something happened here that this version
-        // cannot show" — telling the user history was missing when nothing was
-        // missing and something had gone wrong.
+        // cannot show". Then it drew the server's raw sentence as the agent's
+        // own answer. The failure belongs to the `turn/completed` after it.
         let events = frame_to_events(
             "error",
             &serde_json::json!({ "threadId": "t", "turnId": "u", "willRetry": true,
@@ -1179,16 +1195,7 @@ mod tests {
                            "additionalDetails": "upstream closed the connection" } }),
             Origin::Live,
         );
-        let [AgentEvent::Message { role: Role::Agent, text, .. }] = events.as_slice() else {
-            panic!("expected the server's own words: {events:?}");
-        };
-        assert!(text.starts_with("Error: stream disconnected"), "{text}");
-        assert!(text.contains("upstream closed the connection"), "{text}");
-        assert!(text.contains("Retrying."), "willRetry means the turn is not over: {text}");
-        assert!(
-            !events.iter().any(|e| matches!(e, AgentEvent::TurnEnded { .. })),
-            "turn/completed carries the end; ending it here too would end it twice"
-        );
+        assert!(events.is_empty(), "{events:?}");
     }
 
     #[test]

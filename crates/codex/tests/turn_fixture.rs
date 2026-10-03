@@ -5,7 +5,7 @@
 //! by hand. The same rule the `identity` table lives by: read off a running
 //! instance, never guessed.
 
-use farcooler_agent_core::event::{AgentEvent, EndReason, Role};
+use farcooler_agent_core::event::{AgentEvent, EndReason, FailureKind, Role};
 use farcooler_codex::normalize::{Origin, frame_to_events};
 
 /// Every frame in the fixture, as the events a transcript would show.
@@ -116,5 +116,41 @@ fn a_resumed_thread_restores_both_sides_of_the_conversation() {
     assert!(
         !events.iter().any(|e| matches!(e, AgentEvent::Gap { .. })),
         "restoring history must not draw a break: {events:?}"
+    );
+}
+
+/// A turn codex failed, normalized.
+///
+/// `fixtures/synthetic_turn_failed.jsonl` is SYNTHETIC: written by hand from
+/// the pinned schema (`vendor/codex-app-server.schema.json`: `ErrorNotification`,
+/// `TurnStatus::failed`, `TurnError.codexErrorInfo`), because capturing a real
+/// one means running the real codex out of quota, which lanes may not.
+#[test]
+fn a_failed_turn_ends_failed_with_its_kind_and_says_nothing_as_the_agent() {
+    let raw = include_str!("fixtures/synthetic_turn_failed.jsonl");
+    let mut all = Vec::new();
+    for line in raw.lines().filter(|l| !l.trim().is_empty()) {
+        let value: serde_json::Value = serde_json::from_str(line).expect("fixture line is JSON");
+        let method = value["method"].as_str().expect("a notification");
+        all.extend(frame_to_events(method, &value["params"], Origin::Live));
+    }
+    // `status: failed` used to fall through `end_reason` to `EndTurn`.
+    let ended: Vec<_> = all
+        .iter()
+        .filter_map(|e| match e {
+            AgentEvent::TurnEnded { reason } => Some(reason),
+            _ => None,
+        })
+        .collect();
+    let [EndReason::Failed { kind, detail }] = ended.as_slice() else {
+        panic!("one turn, ended as failed: {all:?}");
+    };
+    assert_eq!(*kind, FailureKind::Quota);
+    assert!(detail.contains("usage limit"), "{detail}");
+    // And the `error` notification before it was drawn as "Error: You've hit
+    // your usage limit…" in the agent's voice.
+    assert!(
+        !all.iter().any(|e| matches!(e, AgentEvent::Message { role: Role::Agent, .. })),
+        "the server's error was drawn as the agent's answer: {all:?}"
     );
 }
