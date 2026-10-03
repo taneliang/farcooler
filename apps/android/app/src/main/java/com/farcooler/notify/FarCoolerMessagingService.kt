@@ -59,41 +59,37 @@ class FarCoolerMessagingService : FirebaseMessagingService() {
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
-        val data = message.data
-        val title = data["title"] ?: message.notification?.title ?: return
-        val body = data["body"] ?: message.notification?.body.orEmpty()
+        // Read by [PushMessage.of], which the JVM tests run against the
+        // relay's own FCM messages (`test/fixtures/contracts/push/fcm/`).
+        val read = PushMessage.of(message.data, message.notification?.title, message.notification?.body)
+            ?: return
+        val title = read.title
+        val body = read.body
         // A task notice (ov-94): one card per task, under its notice id, and a
         // decision's answers as buttons. A decision arrives as data, so this
         // runs for it with the app in the background too.
-        TaskNotice.of(data)?.let { notice ->
+        if (read is PushMessage.Task) {
+            val notice = read.notice
             val settings = com.farcooler.data.Settings(this)
             if (notice.event != null && settings.wantsTaskEvent(notice.event)) {
                 TaskNotices.post(this, notice, title, body)
             }
             return
         }
-        val terminal = data[Notifier.PUSH_EXTRA_TERMINAL].orEmpty()
-        // `blocked` is the state worth a high-importance channel; anything else
-        // the daemon chose to send is news that can wait.
-        //
+        val card = read as PushMessage.Card
+        val terminal = card.terminal
         // This read used to be `data["activity"]`, a key no producer has ever
         // sent under any name — so the high-importance channel that exists for
         // "an agent has stopped and is waiting for you" was unreachable from
         // the push path, and had been since it was written. It is spelled the
         // producer's way now, and `33159fd` put it on the wire: `sendFcm` sends
-        // `data.status` for exactly this read.
-        //
-        // This used to point at [NotificationCopy.channelFor] for what still had
-        // to change on the relay before that key carried anything. Nothing does.
-        // What that commit could not fix here it fixed elsewhere — a phone
-        // nobody is holding never reaches this line at all, and takes the
-        // `android.notification.channel_id` the same commit added instead.
-        val channel = NotificationCopy.channelForPush(data)
-
-        // A decision names a task and no terminal: the tap opens its card.
-        val kind = data[Notifier.PUSH_EXTRA_KIND]
-        val task = data[Notifier.PUSH_EXTRA_TASK]?.takeIf { kind == Notifier.KIND_DECISION }
-        val runner = data[Notifier.PUSH_EXTRA_RUNNER]?.takeIf { task != null && it.isNotEmpty() }
+        // `data.status` for exactly this read. A phone nobody is holding never
+        // reaches this line at all, and takes the `android.notification.channel_id`
+        // the same commit added instead.
+        val channel = card.channel
+        val kind = card.kind
+        val task = card.task
+        val runner = card.runner
         val postedAs = NotificationCopy.postedAs(terminal, task, title)
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP

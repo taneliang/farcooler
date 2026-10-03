@@ -1,8 +1,10 @@
 package com.farcooler
 
 import com.farcooler.account.Account
-import com.farcooler.notify.NotificationCopy
+import com.farcooler.notify.Notifier
+import com.farcooler.notify.PushMessage
 import com.farcooler.notify.TaskNotice
+import com.farcooler.notify.TaskNotices
 import java.io.File
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -36,18 +38,44 @@ class ContractTest {
         )
         val path = "registration/android.json"
         if (System.getenv("FARCOOLER_WRITE_CONTRACTS") != null) {
+            // A producer that rewrote its fixture in CI would pass by definition.
+            check(System.getenv("CI") != "true") { "FARCOOLER_WRITE_CONTRACTS is set under CI" }
             contractFile(path).writeText(pretty.encodeToString(JsonElement.serializer(), sent) + "\n")
         }
         assertEquals("$path is not what Account.registration sends", contract(path), sent)
     }
 
-    /** What each FCM fixture is to this app: a task notice, or none. */
-    private val expected: Map<String, TaskNotice?> = mapOf(
-        "agent-blocked" to null,
-        "agent-done-failed" to null,
-        "decision-legacy" to TaskNotice("ov-90", runner, "decision", noticeId, listOf("pdfkit", "pdf.js")),
-        "task-decision" to TaskNotice("ov-90", runner, "decision", noticeId, listOf("pdfkit", "pdf.js")),
-        "task-review" to TaskNotice("ov-90", runner, "review", noticeId, emptyList()),
+    /** What `onMessageReceived` reads off each FCM fixture. */
+    private val expected: Map<String, PushMessage> = mapOf(
+        "agent-blocked" to PushMessage.Card(
+            title = "claude needs you",
+            body = "auth-refactor — Do you want to run git push --force-with-lease?",
+            terminal = "term-01999a8f2c4e",
+            channel = Notifier.CHANNEL_BLOCKED,
+            kind = null, task = null, runner = null,
+        ),
+        "agent-done-failed" to PushMessage.Card(
+            title = "codex failed",
+            body = "pdf-export — Its last turn didn’t finish",
+            terminal = "term-01999a90aa10",
+            channel = Notifier.CHANNEL_DONE,
+            kind = null, task = null, runner = null,
+        ),
+        "decision-legacy" to PushMessage.Task(
+            TaskNotice("ov-90", runner, "decision", noticeId, listOf("pdfkit", "pdf.js")),
+            "ov-90 Pick a PDF library",
+            "Needs your decision · Which PDF library should export use?",
+        ),
+        "task-decision" to PushMessage.Task(
+            TaskNotice("ov-90", runner, "decision", noticeId, listOf("pdfkit", "pdf.js")),
+            "ov-90 Pick a PDF library",
+            "Needs your decision · Which PDF library should export use?",
+        ),
+        "task-review" to PushMessage.Task(
+            TaskNotice("ov-90", runner, "review", noticeId, emptyList()),
+            "ov-90 Pick a PDF library",
+            "Moved to In Review · 3 files changed",
+        ),
     )
 
     @Test
@@ -61,35 +89,28 @@ class ContractTest {
             // `RemoteMessage.data` is a map of strings, and so is this.
             val data = message.getValue("data").jsonObject.mapValues { it.value.jsonPrimitive.content }
             val notification = message["notification"]?.jsonObject
-            assertEquals(name, expected.getValue(name), TaskNotice.of(data))
-
-            // What `onMessageReceived` titles the card with: the data's own
-            // title for a card the app draws, else the notification's.
-            val title = data["title"] ?: notification?.get("title")?.jsonPrimitive?.content
-            assertEquals(name, expectedTitle(name), title)
+            val read = PushMessage.of(
+                data,
+                notification?.get("title")?.jsonPrimitive?.content,
+                notification?.get("body")?.jsonPrimitive?.content,
+            )
+            assertEquals(name, expected.getValue(name), read)
 
             // Where Firebase files a card it draws, and where this app files
             // one it draws itself, must be the same channel.
             val firebase = message["android"]?.jsonObject?.get("notification")?.jsonObject
             if (firebase != null) {
-                assertEquals(name, NotificationCopy.channelForPush(data), firebase.getValue("channel_id").jsonPrimitive.content)
+                val channel = firebase.getValue("channel_id").jsonPrimitive.content
+                when (read) {
+                    is PushMessage.Card -> assertEquals(name, read.channel, channel)
+                    is PushMessage.Task -> assertEquals(name, TaskNotices.channelFor(read.notice.event!!), channel)
+                    null -> throw AssertionError("$name read as nothing")
+                }
             } else {
                 assertNull("$name: a card the app draws has no Firebase notification", notification)
             }
         }
-        assertEquals("term-01999a8f2c4e", fcmData("agent-blocked")["terminal"])
-        assertEquals("blocked", fcmData("agent-blocked")["status"])
     }
-
-    private fun expectedTitle(name: String): String = when {
-        name.startsWith("agent-blocked") -> "claude needs you"
-        name == "agent-done-failed" -> "codex failed"
-        else -> "ov-90 Pick a PDF library"
-    }
-
-    private fun fcmData(name: String): Map<String, String> =
-        contract("push/fcm/$name.json").getValue("message").jsonObject.getValue("data").jsonObject
-            .mapValues { it.value.jsonPrimitive.content }
 
     private val pretty = Json { prettyPrint = true; prettyPrintIndent = "  " }
 
