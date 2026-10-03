@@ -411,6 +411,11 @@ AGENTKIT_SOURCES = [
     # When the phone asks for notification permission, and the line it says
     # first. See `NotificationAskTests`.
     "NotificationAsk.swift",
+    # First run (ov-205): which harnesses a runner can start, the 127 "not
+    # installed" exit, and the words for the phone's empty states. `FirstRun`
+    # before `FirstRunCopy`, which reads its `AgentHarness`.
+    "FirstRun.swift",
+    "FirstRunCopy.swift",
     # The five task notice classes, a task push read off its payload, and a
     # decision's answer buttons (ov-94). Here and in `notify_build_ids`: the
     # service extension makes a decision's category from its options.
