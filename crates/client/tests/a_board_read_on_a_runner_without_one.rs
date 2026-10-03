@@ -6,22 +6,24 @@
 //! the `require(...)` line from either would leave every other test green,
 //! since a real daemon refuses with the same code. So the peer here is not a
 //! daemon. It answers the handshake as a runner from before the board — the
-//! two floor capabilities and nothing else — and then only counts what it is
+//! two floor capabilities and nothing else — and then only reports what it is
 //! sent. Refused with the runner's own code and nothing on the wire is the
 //! claim; a request arriving is the failure.
-
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+//!
+//! "Nothing on the wire" is shown by a sentinel, not a sleep: after the
+//! refusals, a read the old runner does serve is sent, and it must be the
+//! FIRST request the peer reads. One connection is one ordered stream, so a
+//! refused read that went out anyway would be read before it.
 
 use farcooler_client::session::{Session, SessionError};
 use farcooler_protocol::v1::{ServerHello, WireEnvelope, wire_envelope};
 use farcooler_transport::codec::{FrameReader, FrameWriter};
 
-/// A peer that says hello as an old runner and counts every request after.
-async fn an_old_runner(socket: &std::path::Path) -> Arc<AtomicUsize> {
+/// A peer that says hello as an old runner and reports the method of every
+/// request after, in the order it read them.
+async fn an_old_runner(socket: &std::path::Path) -> tokio::sync::mpsc::UnboundedReceiver<String> {
     let listener = tokio::net::UnixListener::bind(socket).expect("bind");
-    let requests = Arc::new(AtomicUsize::new(0));
-    let counted = Arc::clone(&requests);
+    let (requests, read) = tokio::sync::mpsc::unbounded_channel();
     tokio::spawn(async move {
         let Ok((stream, _)) = listener.accept().await else { return };
         let (read, write) = stream.into_split();
@@ -48,15 +50,33 @@ async fn an_old_runner(socket: &std::path::Path) -> Arc<AtomicUsize> {
         if writer.write_frame(&reply).await.is_err() {
             return;
         }
-        // Counted, never answered: a read that reached here has already done
+        // Reported, never answered: a read that reached here has already done
         // the wrong thing, and an answer would only let it look right.
         while let Ok(Some(frame)) = reader.read_frame().await {
-            if matches!(frame.body, Some(wire_envelope::Body::Request(_))) {
-                counted.fetch_add(1, Ordering::SeqCst);
+            if let Some(wire_envelope::Body::Request(request)) = frame.body {
+                let _ = requests.send(request.method);
             }
         }
     });
-    requests
+    read
+}
+
+/// The first request the old runner read, sending `worktree.list` (which it
+/// does serve) to make sure there is one. Never answered, so the call is
+/// dropped once the peer has it.
+async fn first_request(
+    session: &mut Session,
+    requests: &mut tokio::sync::mpsc::UnboundedReceiver<String>,
+) -> Option<String> {
+    let bound = std::time::Duration::from_secs(5);
+    tokio::time::timeout(bound, async {
+        tokio::select! {
+            answered = session.worktrees() => panic!("the old runner never answers: {answered:?}"),
+            first = requests.recv() => first,
+        }
+    })
+    .await
+    .expect("the sentinel never reached the peer, so this proves nothing")
 }
 
 fn refused_as_unsupported(result: Result<serde_json::Value, SessionError>, what: &str) {
@@ -77,7 +97,7 @@ fn refused_as_unsupported(result: Result<serde_json::Value, SessionError>, what:
 async fn task_list_and_task_get_are_refused_without_a_request() {
     let dir = tempfile::tempdir().unwrap();
     let socket = dir.path().join("old.sock");
-    let requests = an_old_runner(&socket).await;
+    let mut requests = an_old_runner(&socket).await;
 
     let mut session = Session::connect_local(&socket).await.expect("connect to the old runner");
     assert!(!session.can(farcooler_protocol::capability::TASKS));
@@ -95,9 +115,11 @@ async fn task_list_and_task_get_are_refused_without_a_request() {
         .expect("task.get went to the runner and waited for an answer");
     refused_as_unsupported(get, "task.get");
 
-    // Give a request that was sent anyway the time to arrive and be counted.
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    assert_eq!(requests.load(Ordering::SeqCst), 0, "a board read reached a runner without a board");
+    assert_eq!(
+        first_request(&mut session, &mut requests).await.as_deref(),
+        Some("worktree.list"),
+        "a board read reached a runner without a board"
+    );
 }
 
 /// The same for Needs You and the phone's two new writes: a runner without
@@ -107,7 +129,7 @@ async fn task_list_and_task_get_are_refused_without_a_request() {
 async fn needs_you_and_the_phones_writes_are_refused_without_a_request() {
     let dir = tempfile::tempdir().unwrap();
     let socket = dir.path().join("old.sock");
-    let requests = an_old_runner(&socket).await;
+    let mut requests = an_old_runner(&socket).await;
 
     let mut session = Session::connect_local(&socket).await.expect("connect to the old runner");
     assert!(!session.can(farcooler_protocol::capability::NEEDS_YOU));
@@ -134,6 +156,9 @@ async fn needs_you_and_the_phones_writes_are_refused_without_a_request() {
         .expect("workspace.start_orchestrator went to the runner and waited for an answer");
     refused_as_unsupported(started.map(|_| serde_json::Value::Null), "workspace.start_orchestrator");
 
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    assert_eq!(requests.load(Ordering::SeqCst), 0, "a request reached a runner that can't serve it");
+    assert_eq!(
+        first_request(&mut session, &mut requests).await.as_deref(),
+        Some("worktree.list"),
+        "a request reached a runner that can't serve it"
+    );
 }
