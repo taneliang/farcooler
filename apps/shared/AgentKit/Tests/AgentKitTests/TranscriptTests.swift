@@ -623,3 +623,23 @@ private func seq(_ n: UInt64, _ e: AgentEvent) -> Sequenced { Sequenced(seq: n, 
 
     #expect(t.rows.contains { $0.kind == .message(role: .user, text: "use unittest", parent: nil) })
 }
+
+@Test func aFailedSendTakesBackOnlyItsOwnRow() {
+    // The Mac keeps the words in the composer until a send succeeds (ov-136),
+    // so a send that failed must not also leave them in the conversation
+    // looking sent. Two identical messages: the first went, the second
+    // failed, and only the second is taken back.
+    var t = Transcript()
+    t.appendLocalUserMessage("ship it")
+    let failed = t.appendLocalUserMessage("ship it")
+    t.withdrawLocalUserMessage(rowID: failed)
+
+    let users = t.rows.filter { $0.kind == .message(role: .user, text: "ship it", parent: nil) }
+    #expect(users.count == 1)
+    #expect(users.first?.id != failed)
+
+    // And it is forgotten as an echo: a queue report naming the same words
+    // now withdraws the one that went, not a row that is already gone.
+    t.apply([Sequenced(seq: 0, event: .promptQueue(items: [QueuedPrompt(id: "0", text: "ship it")]))])
+    #expect(!t.rows.contains { $0.kind == .message(role: .user, text: "ship it", parent: nil) })
+}

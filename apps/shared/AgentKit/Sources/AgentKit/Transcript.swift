@@ -418,7 +418,10 @@ public struct Transcript: Sendable {
     /// it read that from stale state and a message that actually went straight
     /// out was never drawn at all. So a mid-turn message is drawn here like
     /// any other and withdrawn again by the `promptQueue` that reports it held.
-    public mutating func appendLocalUserMessage(_ text: String) {
+    ///
+    /// Returns the row it drew, for `withdrawLocalUserMessage(rowID:)`.
+    @discardableResult
+    public mutating func appendLocalUserMessage(_ text: String) -> Int {
         // Recorded before the append, because that is the id the row is about
         // to be given — the withdrawal below has to name this exact row.
         let rowID = nextRowID
@@ -429,6 +432,20 @@ public struct Transcript: Sendable {
         // continuation of what the user just typed.
         breakBeforeNextMessage = true
         unconfirmedEchoes.append(LocalEcho(rowID: rowID, text: text))
+        return rowID
+    }
+
+    /// Take back a message drawn by `appendLocalUserMessage` whose send failed.
+    ///
+    /// For a composer that keeps the words until the send succeeds (the Mac's,
+    /// ov-136). Left on screen, the echo read as sent while the same words sat
+    /// in the field to be tried again, so a retry that worked drew them twice.
+    /// By id, like the `promptQueue` withdrawal, so it can only take back the
+    /// row this send drew; nothing if that row has gone already.
+    public mutating func withdrawLocalUserMessage(rowID: Int) {
+        guard let echo = unconfirmedEchoes.firstIndex(where: { $0.rowID == rowID }) else { return }
+        unconfirmedEchoes.remove(at: echo)
+        removeRow(id: rowID)
     }
 
     /// Withdraw one row by the id it was created with.
