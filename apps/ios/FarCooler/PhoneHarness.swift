@@ -217,11 +217,8 @@ final class HarnessRunner {
     /// The items still waiting, by id.
     private var waiting: [String]
     /// Every write the screens made, as `harness-sent` shows it:
-    /// `task.note <task> <body>`, `start <workspace> <harness> replace=<b>`,
-    /// `task.create <workspace> <title>`.
+    /// `task.note <task> <body>`, `start <workspace> <harness> replace=<b>`.
     private(set) var sent: [String] = []
-    /// Tasks filed from the phone, on Billing's board.
-    private var filed: [[String: Any]] = []
 
     init(connection: Connection) {
         self.connection = connection
@@ -414,31 +411,6 @@ final class HarnessRunner {
             sent.append("\(method) fc-3-webhooks")
             connection.standIn(on: fleet())
             return try json([:])
-        case "task.create":
-            // Billing's board, as the user; the title held to 200 scalars
-            // the way the client core holds it, refused by its word.
-            guard args["repository"] as? String == Self.repository,
-                args["workspace"] as? String == Self.billing,
-                let title = args["title"] as? String, !title.isEmpty
-            else { throw ClientCore.CoreError.rejected("bad create", word: "invalid-argument") }
-            guard title.unicodeScalars.count <= 200 else {
-                throw ClientCore.CoreError.rejected("title too long", word: "invalid-argument", what: "title")
-            }
-            // As long as a runner on a slow link takes, so a second tap on
-            // Add Task has time to land while the first is out.
-            try? await Task.sleep(for: .seconds(1))
-            if title == "Refuse me" {
-                throw ClientCore.CoreError.rejected("scope", word: "scope-denied")
-            }
-            let key = "bil-\(20 + filed.count)"
-            filed.append([
-                "id": "0198f2c0-0000-7000-8000-0000000f\(String(format: "%04d", filed.count))",
-                "key": key, "title": title, "status": "backlog",
-                "status_since": Int64(Date().timeIntervalSince1970 * 1000),
-                "intent": args["intent"] as? String ?? "", "workspace": Self.billing,
-            ])
-            sent.append("task.create billing \(title)")
-            return try json(filed.last ?? [:])
         default:
             throw ClientCore.CoreError.rejected("not in the harness", word: "unimplemented")
         }
@@ -542,7 +514,7 @@ final class HarnessRunner {
                 "id": Self.doneTask, "key": "bil-5", "title": "Stripe webhooks",
                 "status": "done", "status_since": now - 86_400_000, "workspace": Self.billing,
             ],
-        ] + filed
+        ]
     }
 }
 #endif

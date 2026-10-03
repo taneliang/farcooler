@@ -197,10 +197,5 @@ final class ReadScopeTests: XCTestCase {
             app.descendants(matching: .any)["task-question"].waitForExistence(timeout: 10),
             "the question isn't shown")
         XCTAssertFalse(app.buttons["task-answer-pdfkit"].exists, "an answer is offered")
-
-        // Nor a way to file a task.
-        app.navigationBars.buttons["BackButton"].firstMatch.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["board"].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.buttons["new-task"].exists, "New Task… offered")
     }
 }

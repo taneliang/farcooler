@@ -4,7 +4,7 @@ import Testing
 @testable import AgentKit
 
 /// The iPhone's follow-ups to 4A (ov-66): the stack reopening where it was,
-/// a decision push landing on its task, and New Task… on a board. In
+/// a decision push landing on its task, and answering a task's question. In
 /// AgentKit for `PhoneNavigationTests`' reason: the iOS target has no unit
 /// tests, and each of these looks fine in a screenshot when it's wrong.
 struct PhoneFollowUpTests {
@@ -201,67 +201,41 @@ struct PhoneFollowUpTests {
         #expect(PushTap(userInfo: [:], thread: "") == nil)
     }
 
-    // MARK: - New Task…
+    // MARK: - Answering, the one task write (ov-184)
 
-    /// **A title is counted in Unicode scalars, 200 at most**, as the runner
-    /// counts it: 199 flags' worth of characters is 398 scalars.
-    @Test("A title fits in 200 Unicode scalars, trimmed and not empty")
-    func aTitleFitsInTwoHundredScalars() {
-        #expect(PhoneNewTask.titleFits(String(repeating: "a", count: 200)))
-        #expect(!PhoneNewTask.titleFits(String(repeating: "a", count: 201)))
-        #expect(PhoneNewTask.titleFits("  " + String(repeating: "a", count: 200) + "\n"))
-        #expect(!PhoneNewTask.titleFits("   "))
-        // 101 flags: 101 characters, 202 scalars.
-        #expect(!PhoneNewTask.titleFits(String(repeating: "🇸🇬", count: 101)))
-        #expect(PhoneNewTask.titleFits(String(repeating: "🇸🇬", count: 100)))
-        #expect(PhoneNewTask.isTooLong(String(repeating: "a", count: 201)))
-        #expect(!PhoneNewTask.isTooLong(""))
+    /// **An answer is a `task.note` of kind `answer`**, the one kind the
+    /// client core still takes from a phone: anything else it refuses before
+    /// the runner sees it, and the waiting agent would never wake.
+    @Test("An answer goes out as a task note of kind answer")
+    func anAnswerIsATaskNoteOfKindAnswer() {
+        #expect(PhoneTaskAnswer.method == "task.note")
+        #expect(
+            PhoneTaskAnswer.request(task: "0192-task", body: "Postgres")
+                == ["task": "0192-task", "kind": "answer", "body": "Postgres"])
     }
 
-    /// **The arguments name the board**: a workspace's, or for an implicit
-    /// one only its repository; the title trimmed, details as the intent.
-    @Test("task.create names the workspace's board, and details are the intent")
-    func theRequestNamesTheBoard() {
-        let billing = WorkspaceSummary(
-            id: "ws-billing", name: "Billing", taskPrefix: "bil", isMain: false, ordinal: 1,
-            repository: "repo-1")
-        #expect(
-            PhoneNewTask.request(billing, title: "  Ship it ", details: "")
-                == ["repository": "repo-1", "workspace": "ws-billing", "title": "Ship it"])
-        #expect(
-            PhoneNewTask.request(.implicit(repository: "repo-1"), title: "Ship", details: " Why \n")
-                == ["repository": "repo-1", "title": "Ship", "intent": "Why"])
-    }
+    /// **No iPhone, Watch or extension source names a task write the
+    /// orchestrator owns** (ov-184), so no screen can reach one through the
+    /// client core, which has no arm for them either
+    /// (`no_phone_can_write_a_task` in `crates/client`).
+    @Test("No iOS source names task.create, task.update or task.set_status")
+    func noPhoneSourceNamesATaskWrite() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        // …/apps/shared/AgentKit/Tests/AgentKitTests/<this file>
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let ios = root.appendingPathComponent("ios")
+        let walker = try #require(FileManager.default.enumerator(at: ios, includingPropertiesForKeys: nil))
+        let sources = walker.compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" }
+        #expect(sources.count > 50, "found \(sources.count) sources under \(ios.path), so this proves nothing")
+        // Proves the scan reads string literals: the board's read is found
+        // where the app names it (the answer's is `PhoneTaskAnswer.method`).
+        let texts = try sources.map { ($0.lastPathComponent, try String(contentsOf: $0, encoding: .utf8)) }
+        #expect(texts.contains { $0.1.contains("\"task.get\"") })
 
-    /// **New Task… is hidden on a Read grant, and a refusal is a sentence**,
-    /// the Mac's for a title too long, never the runner's word.
-    @Test("New Task is offered below Read, and its refusals are sentences")
-    func newTaskOfferAndRefusals() {
-        func build(_ scope: String) -> DaemonBuild {
-            DaemonBuild(
-                version: "1", matches: true, platform: "p", capabilities: [], grantedScope: scope)
+        let writes = ["task.create", "task.update", "task.set_status", "task.move", "task.block"]
+        let named = texts.flatMap { name, text in
+            writes.filter { text.contains("\"\($0)\"") }.map { "\($0) in \(name)" }
         }
-        #expect(!PhoneNewTask.offered(build("read")))
-        #expect(PhoneNewTask.offered(build("control")))
-        #expect(PhoneNewTask.offered(build("unspecified")))
-        #expect(PhoneNewTask.offered(nil))
-
-        #expect(
-            PhoneNewTask.refusal(word: "invalid-argument", what: "title")
-                == "That title is too long. Shorten it to add the task.")
-        #expect(
-            PhoneNewTask.refusal(word: "scope-denied", what: nil)
-                == "This device can only look at this runner, so it can’t add tasks.")
-        #expect(
-            PhoneNewTask.refusal(word: "not-found", what: nil)
-                == "This board isn’t on the runner anymore.")
-        #expect(
-            PhoneNewTask.refusal(word: nil, what: nil)
-                == "Couldn’t add that task. Check that the runner is reachable, then try again.")
-        for word in ["capability-unsupported", "invalid-argument", "internal"] {
-            let sentence = PhoneNewTask.refusal(word: word, what: nil)
-            #expect(!sentence.contains(word), "a runner's word never reaches the screen")
-            #expect(sentence.hasSuffix("."))
-        }
+        #expect(named.isEmpty, "a task write the orchestrator owns: \(named)")
     }
 }

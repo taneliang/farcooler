@@ -37,6 +37,15 @@ public enum BoardForm {
         board.rows.isEmpty && board.unreadable.isEmpty
     }
 
+    /// What an empty board says under "No Tasks". The orchestrator owns the
+    /// task list (ov-184), so on a workspace that has one, the line points
+    /// at it; Main has none, and says only what the board is for.
+    public static func blankLine(ledByOrchestrator: Bool) -> String {
+        ledByOrchestrator
+            ? "Ask your orchestrator to plan the work. Its tasks appear here, grouped by status."
+            : "Tasks on this workspace’s board appear here, grouped by status."
+    }
+
     /// Whether a section is drawn open, given the statuses this board has
     /// collapsed. An empty one never is.
     public static func isExpanded(_ section: TaskBoardColumn, collapsed: Set<TaskStatus>) -> Bool {

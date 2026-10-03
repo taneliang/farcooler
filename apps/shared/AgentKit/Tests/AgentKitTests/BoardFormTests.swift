@@ -72,3 +72,19 @@ func emptyStatusesAreNamedOnce() {
     #expect(BoardForm.emptyNote(three) == "Backlog, In Review and Canceled are empty.")
     #expect(BoardForm.emptyNote(TaskBoardModel(columns: [todo])) == nil)
 }
+
+/// **An empty board points at the orchestrator** (ov-184): it owns the task
+/// list, so a workspace with one says to ask it; Main, with none, says only
+/// what the board is for. Neither offers to file a task.
+@Test("An empty board points at the orchestrator, or on Main says what it's for")
+func anEmptyBoardPointsAtTheOrchestrator() {
+    let led = BoardForm.blankLine(ledByOrchestrator: true)
+    #expect(led.hasPrefix("Ask your orchestrator to plan the work."))
+    let main = BoardForm.blankLine(ledByOrchestrator: false)
+    #expect(!main.contains("orchestrator"))
+    for line in [led, main] {
+        #expect(!line.localizedCaseInsensitiveContains("new task"))
+        #expect(!line.localizedCaseInsensitiveContains("add a task"))
+        #expect(line.hasSuffix("."))
+    }
+}

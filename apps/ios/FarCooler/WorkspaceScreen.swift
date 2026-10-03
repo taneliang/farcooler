@@ -9,8 +9,9 @@ import SwiftUI
 //   Replace; starting, "Starting Orchestrator…" and, after 30 seconds, the
 //   warning that the seat can stick (spec §8).
 // - Board: the list form, in-line (`WorkspaceBoardList`). A card pushes its
-//   task, so the board is never covered by a jump. New Task… files one
-//   (`NewTaskSheet`), below a Read grant.
+//   task, so the board is never covered by a jump. The orchestrator owns the
+//   task list (ov-184): the board reads, and a decision is answered from its
+//   task, but nothing here files, moves or edits a task.
 // - Worktrees: the ones it owns, with their tasks and changes. New Worktree…
 //   claims the worktree for this workspace.
 
@@ -22,7 +23,6 @@ struct WorkspaceScreen: View {
 
     /// The segment on screen, kept per workspace (`WorkspaceSegment`).
     @State private var segment: WorkspaceSegment
-    @State private var filing = false
 
     init(fleet: FleetStore, hosts: RunnerStore, connection: Connection, place: PhoneWorkspace) {
         self.fleet = fleet
@@ -104,7 +104,8 @@ struct WorkspaceScreen: View {
                     onOpen: { row in navigator?.open(.task(place, task: row.id)) },
                     onJump: { agent in openAgent(agent) },
                     onRefresh: { await connection.readBoard(summary) },
-                    onNewTask: PhoneNewTask.offered(connection.daemon) ? { filing = true } : nil,
+                    ledByOrchestrator: WorkspaceSegment.offered(implicit: summary.isImplicit)
+                        .contains(.orchestrator),
                     onHistory: { status in navigator?.open(.history(place, status: status.rawValue)) })
                 .task { await connection.readBoard(summary) }
             case .worktrees:
@@ -112,17 +113,6 @@ struct WorkspaceScreen: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .toolbar {
-            if shown == .board && PhoneNewTask.offered(connection.daemon) {
-                ToolbarItem(placement: .primaryAction) {
-                    Button("New Task…", systemImage: "plus") { filing = true }
-                        .accessibilityIdentifier("new-task")
-                }
-            }
-        }
-        .sheet(isPresented: $filing) {
-            NewTaskSheet(connection: connection, workspace: summary)
-        }
         // A bar of the navigation bar's own, so the control sits in its
         // material and takes its touches, rather than under its edge.
         .safeAreaBar(edge: .top) {

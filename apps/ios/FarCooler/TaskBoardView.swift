@@ -56,9 +56,9 @@ struct WorkspaceBoardList: View {
     let onOpen: (TaskRow) -> Void
     let onJump: (BoardAgent) -> Void
     let onRefresh: () async -> Void
-    /// Files a task, where this runner lets a phone do that; nil draws the
-    /// empty board without the button.
-    let onNewTask: (() -> Void)?
+    /// Whether this workspace has an orchestrator to plan its work (not
+    /// Main), which is what an empty board points at (ov-184).
+    let ledByOrchestrator: Bool
     /// A finished status's History page, pushed (ov-103).
     let onHistory: (TaskStatus) -> Void
 
@@ -73,7 +73,7 @@ struct WorkspaceBoardList: View {
         board: TaskBoardModel?, unread: Bool, place: PhoneWorkspace, speaksOfAgents: Bool,
         waiting: Int, agents: @escaping (TaskRow) -> [BoardAgent], onOpen: @escaping (TaskRow) -> Void,
         onJump: @escaping (BoardAgent) -> Void, onRefresh: @escaping () async -> Void,
-        onNewTask: (() -> Void)? = nil, onHistory: @escaping (TaskStatus) -> Void = { _ in }
+        ledByOrchestrator: Bool = false, onHistory: @escaping (TaskStatus) -> Void = { _ in }
     ) {
         self.board = board
         self.unread = unread
@@ -84,7 +84,7 @@ struct WorkspaceBoardList: View {
         self.onOpen = onOpen
         self.onJump = onJump
         self.onRefresh = onRefresh
-        self.onNewTask = onNewTask
+        self.ledByOrchestrator = ledByOrchestrator
         self.onHistory = onHistory
         _collapsed = State(
             initialValue: BoardForm.collapsed(host: place.runner, workspace: place.workspace))
@@ -95,17 +95,12 @@ struct WorkspaceBoardList: View {
         Group {
             if let board, BoardForm.isBlank(board), !unread {
                 // Seven headers each reading zero is a blank page. Say what
-                // the board is for, and offer the one move.
+                // the board is for, and who fills it: the orchestrator owns
+                // the task list (ov-184), so there's no button here.
                 ContentUnavailableView {
                     Label("No Tasks", systemImage: "checklist")
                 } description: {
-                    Text("Tasks on this workspace’s board appear here, grouped by status.")
-                } actions: {
-                    if let onNewTask {
-                        Button("New Task…", action: onNewTask)
-                            .buttonStyle(.borderedProminent)
-                            .accessibilityIdentifier("board-empty-new-task")
-                    }
+                    Text(BoardForm.blankLine(ledByOrchestrator: ledByOrchestrator))
                 }
                 .accessibilityIdentifier("board-empty")
             } else if let board {

@@ -102,7 +102,6 @@ SOURCES = [
     # A task's Usage section: what its agents spent (ov-195).
     "TaskUsageSection.swift",
     # New Task… on a workspace's board, through `task.create` (ov-66).
-    "NewTaskSheet.swift",
     # The same stack over a canned runner, for the UI suite. DEBUG only.
     "PhoneHarness.swift",
     "ShellHarness.swift",

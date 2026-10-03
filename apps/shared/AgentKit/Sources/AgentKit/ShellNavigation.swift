@@ -2098,71 +2098,23 @@ enum PhoneDecisionLink {
     }
 }
 
-/// New Task… on a phone's board (ov-66, the owner's ruling 4): filing a
-/// task through the client core's `task.create` (`crates/client/src/ffi.rs`),
-/// which files it as the user. Android's `NewTask`, word for word, and the
-/// Mac's `TaskBoardWrites` for the title's limit and its too-long line.
-enum PhoneNewTask {
-    /// The runner's cap on a title, in Unicode scalars (`checked_title`).
-    static let titleLimit = 200
+/// The one task write a phone makes: an answer to an agent's question.
+///
+/// The orchestrator owns the task list (ov-184). A phone reads the board and
+/// answers decisions; it never creates, edits, re-statuses or deletes a task.
+/// The client core refuses any `task.note` that isn't an answer
+/// (`crates/client/src/ffi.rs`, `task_note_of`) and has no arm for
+/// `task.create`, `task.update` or `task.set_status`. Android's `TaskAnswer`,
+/// word for word.
+enum PhoneTaskAnswer {
+    /// The wire method an answer goes out on.
+    static let method = "task.note"
 
-    /// The Mac's line for a title past the cap, verbatim.
-    static let tooLong = "That title is too long. Shorten it to add the task."
-
-    /// Whether a board offers New Task…: filing a task is a Control-scope
-    /// write, so a Read grant gets no button. A runner that hasn't said
-    /// isn't "read" (`DaemonBuild.mayAct`).
-    static func offered(_ build: DaemonBuild?) -> Bool { build?.mayAct ?? true }
-
-    /// Whether the runner will take `title`: not empty once trimmed, and at
-    /// most `titleLimit` Unicode scalars. Scalars rather than characters, as
-    /// the runner counts: a flag is one character and two scalars.
-    static func titleFits(_ title: String) -> Bool {
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !trimmed.isEmpty && trimmed.unicodeScalars.count <= titleLimit
-    }
-
-    /// Whether `title` has words in it and too many of them.
-    static func isTooLong(_ title: String) -> Bool {
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !trimmed.isEmpty && !titleFits(trimmed)
-    }
-
-    /// `task.create`'s arguments: `workspace`'s board, the title trimmed,
-    /// and `details` as the intent when there are any. An implicit
-    /// workspace names none, and the task goes on its repository's board.
-    static func request(_ workspace: WorkspaceSummary, title: String, details: String)
-        -> [String: String]
-    {
-        var args = [
-            "repository": workspace.repository ?? workspace.id,
-            "title": title.trimmingCharacters(in: .whitespacesAndNewlines),
-        ]
-        if let board = workspace.boardWorkspace { args["workspace"] = board }
-        let intent = details.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !intent.isEmpty { args["intent"] = intent }
-        return args
-    }
-
-    /// The one line a failed create leaves on the sheet, from the runner's
-    /// `word` and `what`; never the runner's own words. No word is a link
-    /// that dropped rather than a runner that said no.
-    static func refusal(word: String?, what: String?) -> String {
-        if what == "title" { return tooLong }
-        switch word {
-        case "scope-denied":
-            return "This device can only look at this runner, so it can’t add tasks."
-        case "capability-unsupported":
-            return "This runner’s Far Cooler is too old to add tasks from a phone. "
-                + "Update it there, then try again."
-        case "not-found":
-            return "This board isn’t on the runner anymore."
-        case .some:
-            return "The runner couldn’t add that task. "
-                + "That’s a problem in the app, not in anything you typed."
-        case nil:
-            return "Couldn’t add that task. Check that the runner is reachable, then try again."
-        }
+    /// `task.note`'s arguments for `body` as the answer to `task`'s question.
+    /// The runner writes it as the person, takes the decision off Needs You,
+    /// and wakes the agent waiting on it.
+    static func request(task: String, body: String) -> [String: String] {
+        ["task": task, "kind": "answer", "body": body]
     }
 }
 

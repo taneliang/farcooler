@@ -184,37 +184,20 @@ final class WorkspaceScreenTests: XCTestCase {
         XCTAssertEqual(mount.value as? String, before, "the pane was built again")
     }
 
-    /// **A second tap on Add Task while the first is out files nothing
-    /// more.** The runner takes a second to answer; the button is gone
-    /// under the finger for that second, and one task is filed.
-    func testAddTaskTappedTwiceFilesOneTask() throws {
+    /// **The board files nothing** (ov-184): the orchestrator owns the task
+    /// list, so a Control-scope phone on a workspace's board gets no New
+    /// Task…, in the toolbar or anywhere else.
+    func testTheBoardOffersNoWayToFileATask() throws {
         let app = launch()
         openWorkspace(app, "Billing")
         choose(app, "Board")
-        let add = app.buttons["new-task"]
-        XCTAssertTrue(add.waitForExistence(timeout: 10), "no New Task…")
-        add.tap()
-        let title = app.textFields["new-task-title"]
-        XCTAssertTrue(title.waitForExistence(timeout: 5), "no New Task sheet")
-        title.tap()
-        title.typeText("Email the invoice")
-        // Where the button is now, fixed: after the first tap there's a
-        // spinner there instead, and the second tap lands on whatever is.
-        let frame = app.buttons["new-task-add"].frame
-        let spot = app.coordinate(withNormalizedOffset: .zero)
-            .withOffset(CGVector(dx: frame.midX, dy: frame.midY))
-        // Both touches in one gesture: two `tap()`s would wait out the
-        // first create between them, which is no test at all.
-        spot.doubleTap()
-        XCTAssertTrue(
-            element(app, "board-card-bil-20").waitForExistence(timeout: 10),
-            "the filed task isn't on the board")
-        // Past the second create's answer, had there been one.
-        Thread.sleep(forTimeInterval: 2)
+        XCTAssertTrue(element(app, "board").waitForExistence(timeout: 10), "the board did not show")
+        XCTAssertTrue(element(app, "board-card-bil-9").waitForExistence(timeout: 10), "no cards")
+        XCTAssertFalse(app.buttons["new-task"].exists, "New Task… is in the toolbar")
+        XCTAssertFalse(app.buttons["board-empty-new-task"].exists, "New Task… is on the board")
         XCTAssertEqual(
-            element(app, "harness-sent").value as? String, "task.create billing Email the invoice",
-            "Add Task filed more than once")
-        XCTAssertFalse(element(app, "board-card-bil-21").exists, "a second task was filed")
+            app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'New Task'")).count, 0,
+            "a New Task button is on the board")
     }
 
     /// **Covered, the orchestrator stops; back on it, it's read again**
@@ -293,50 +276,6 @@ final class WorkspaceScreenTests: XCTestCase {
         return false
     }
 
-    /// **New Task… files a task on the board** (ov-66, ruling 4): a title
-    /// past 200 scalars says the Mac's line and can't be added, a refusal
-    /// is a sentence that keeps the sheet up, and a filed task is on the
-    /// board when the sheet closes.
-    func testNewTaskFilesATaskOnTheBoard() throws {
-        let app = launch()
-        openWorkspace(app, "Billing")
-        choose(app, "Board")
-        let add = app.buttons["new-task"]
-        XCTAssertTrue(add.waitForExistence(timeout: 10), "no New Task…")
-        add.tap()
-
-        let title = app.textFields["new-task-title"]
-        XCTAssertTrue(title.waitForExistence(timeout: 5), "no New Task sheet")
-        title.tap()
-        title.typeText(String(repeating: "a", count: 201))
-        let tooLong = element(app, "new-task-too-long")
-        XCTAssertTrue(tooLong.waitForExistence(timeout: 5), "a title past 200 says nothing")
-        XCTAssertEqual(tooLong.label, "That title is too long. Shorten it to add the task.")
-        XCTAssertFalse(app.buttons["new-task-add"].isEnabled, "Add Task takes a title too long")
-        title.typeText(XCUIKeyboardKey.delete.rawValue)
-        XCTAssertFalse(tooLong.exists, "200 scalars is still too long")
-        XCTAssertTrue(app.buttons["new-task-add"].isEnabled)
-
-        // The runner says no: its sentence, and the sheet stays.
-        title.clearText()
-        title.typeText("Refuse me")
-        app.buttons["new-task-add"].tap()
-        // The label's words, not its icon, which carries the same name.
-        let failure = app.staticTexts["new-task-failure"].firstMatch
-        XCTAssertTrue(failure.waitForExistence(timeout: 10), "the refusal said nothing")
-        XCTAssertEqual(
-            failure.label, "This device can only look at this runner, so it can’t add tasks.")
-
-        title.clearText()
-        title.typeText("Email the invoice")
-        app.buttons["new-task-add"].tap()
-        let card = element(app, "board-card-bil-20")
-        XCTAssertTrue(card.waitForExistence(timeout: 10), "the filed task isn't on the board")
-        XCTAssertFalse(title.exists, "the sheet is still up")
-        XCTAssertEqual(
-            element(app, "harness-sent").value as? String, "task.create billing Email the invoice")
-    }
-
     /// **Empty statuses are said once, in a line at the end, and aren't
     /// headers.** A status with tasks opens; Done starts collapsed.
     func testEmptyStatusesAreOneLineAndDoneStartsCollapsed() throws {
@@ -361,16 +300,5 @@ final class WorkspaceScreenTests: XCTestCase {
         done.tap()
         XCTAssertTrue(element(app, "board-card-bil-5").waitForExistence(timeout: 5))
         XCTAssertEqual(element(app, "board-section-done").value as? String, "Expanded")
-    }
-}
-
-private extension XCUIElement {
-    /// Delete everything in a text field, one key at a time: what a person
-    /// holding Delete does. Tapped first, since a sheet that was sending
-    /// took the focus away.
-    func clearText() {
-        tap()
-        let typed = (value as? String) ?? ""
-        typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: typed.count))
     }
 }
