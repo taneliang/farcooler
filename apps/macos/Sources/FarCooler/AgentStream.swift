@@ -243,7 +243,6 @@ final class AgentStream: ObservableObject {
         // row then; until it does, what you typed is on screen. Drawn BEFORE
         // the call for that reason: a queue report that beat a later echo
         // would leave the words in the conversation and the queue both.
-        let echo = transcript.appendLocalUserMessage(text)
         // Written to a temp file and handed to the CLI by path.
         //
         // The CLI reads the bytes and puts them in the prompt as image blocks;
@@ -256,21 +255,67 @@ final class AgentStream: ObservableObject {
             let url = FileManager.default.temporaryDirectory
                 .appendingPathComponent("farcooler-attach-\(UUID().uuidString)")
                 .appendingPathExtension(image.mime == "image/png" ? "png" : "jpg")
-            guard (try? image.data.write(to: url)) != nil else { continue }
+            // A picture that can't be handed over stops the send. It used to
+            // be skipped, and the message went without it, saying nothing.
+            do {
+                try image.data.write(to: url)
+            } catch {
+                for url in scratch { try? FileManager.default.removeItem(at: url) }
+                failure = AgentActionFailure(.send, Self.pictureUnsent)
+                return false
+            }
             scratch.append(url)
             arguments += ["--image", url.path]
         }
         defer { for url in scratch { try? FileManager.default.removeItem(at: url) } }
+        // Drawn after the pictures are ready, so a send stopped above draws
+        // nothing, and before the call, for the queue report's sake (above).
+        let echo = transcript.appendLocalUserMessage(text)
         do {
             _ = try await runCLI(arguments + ["--json"])
             return true
         } catch {
-            // The words are still in the composer, so the echo comes back
-            // out: left in, a Try Again that worked would draw them twice.
+            guard Self.sendIsKnownUnsent(error) else {
+                // No word from a runner: the link dropped or timed out, maybe
+                // after the daemon took the prompt. It may be with the agent
+                // already, which redraws nothing for a prompt that went
+                // straight in, so the echo stays. Saying "wasn't sent" here
+                // invited a second copy of the prompt; this says what is
+                // known, and offers no Try Again. The words stay in the field
+                // for a person who checks and wants to send them again.
+                failure = AgentActionFailure(.send, Self.sendMayNotHaveLanded, canRetry: false)
+                return false
+            }
+            // Refused, so certainly not sent. The words are still in the
+            // composer, so the echo comes back out: left in, a Try Again that
+            // worked would draw them twice.
             transcript.withdrawLocalUserMessage(rowID: echo)
             failure = AgentActionFailure(.send, Self.sentence(.send, for: error))
             return false
         }
+    }
+
+    /// What a send says when a picture couldn't be read or handed over.
+    static let pictureUnsent = "Couldn’t attach the picture. Your message wasn’t sent."
+
+    /// What a send says when the runner may have it: no refusal came back.
+    static let sendMayNotHaveLanded =
+        "Your message may not have reached the runner. Check the chat before sending it again."
+
+    /// Whether a failed send certainly didn't reach the agent: the CLI wasn't
+    /// there, it refused the size before sending, or a runner refused it by
+    /// word. Anything else broke after it may have landed.
+    static func sendIsKnownUnsent(_ error: Error) -> Bool {
+        guard case let StreamError.failed(message) = error else { return true }
+        let lower = message.lowercased()
+        if lower.contains("too large") || lower.contains("payload") { return true }
+        return word(of: error) != nil
+    }
+
+    /// Say a send failed before it reached this stream: the composer couldn't
+    /// read a picture it was given.
+    func refuseSend(_ sentence: String) {
+        failure = AgentActionFailure(.send, sentence)
     }
 
     /// Rewrite a message that has not gone out yet.
@@ -318,9 +363,10 @@ final class AgentStream: ObservableObject {
             failedAnswer = (requestID, optionID)
             return
         }
-        // The agent resumes without acknowledging the request it was blocked
-        // on (ACP sends no `Resolved`), so the card comes down here, and only
-        // if it is still the one this answered.
+        // Down at once, and only if it is still the one this answered. The
+        // daemon records a `Resolved` for a shim ask once the shim has the
+        // answer, which would clear it on a later poll; a hook ask may never
+        // get one here. This is the fast path for both.
         if transcript.pendingPermission?.id == requestID {
             transcript.clearPendingPermission()
         }
@@ -511,9 +557,13 @@ enum AgentAction: Equatable {
 struct AgentActionFailure: Equatable {
     let action: AgentAction
     let sentence: String
+    /// Whether Try Again is offered. Not for a send that may have landed:
+    /// trying again could give the agent the prompt twice.
+    let canRetry: Bool
 
-    init(_ action: AgentAction, _ sentence: String) {
+    init(_ action: AgentAction, _ sentence: String, canRetry: Bool = true) {
         self.action = action
         self.sentence = sentence
+        self.canRetry = canRetry
     }
 }

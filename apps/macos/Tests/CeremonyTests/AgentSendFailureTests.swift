@@ -169,20 +169,50 @@ struct AgentSendFailureTests {
 
     // MARK: - Sends
 
-    /// A send that fails says false, so the composer keeps the words; says why
-    /// beside the composer; and takes back the echo, so the words aren't also
-    /// in the conversation looking sent.
-    @Test func aFailedSendKeepsNothingLookingSent() async {
+    /// A send the runner refuses says false, so the composer keeps the words;
+    /// says why beside the composer, with Try Again; and takes back the echo,
+    /// so the words aren't also in the conversation looking sent.
+    @Test func aRefusedSendKeepsNothingLookingSent() async {
         let runner = Runner()
-        runner.refusals["agent-prompt"] = "error: connection refused"
+        runner.refusals["agent-prompt"] = "error: no such terminal\ncode: not-found"
         let stream = await stream(runner)
 
         let sent = await stream.send("add tests")
 
         #expect(!sent)
-        #expect(stream.failure == AgentActionFailure(.send, "Couldn’t reach this runner. Your message wasn’t sent."))
+        #expect(stream.failure?.sentence.hasPrefix("Your message wasn’t sent. ") == true)
+        #expect(stream.failure?.canRetry == true)
         #expect(!stream.transcript.rows.contains { $0.kind == .message(role: .user, text: "add tests", parent: nil) })
         #expect(runner.calls("agent-prompt") == [["terminal", "agent-prompt", "t1", "add tests", "--json"]])
+    }
+
+    /// A send with no word back (the link dropped, maybe after the daemon took
+    /// it) may be with the agent. The echo stays, the line says it may not
+    /// have arrived, and there is no Try Again to send it twice.
+    @Test func aSendThatMayHaveLandedKeepsItsEchoAndOffersNoRetry() async {
+        let runner = Runner()
+        runner.refusals["agent-prompt"] = "error: connection reset by peer"
+        let stream = await stream(runner)
+
+        #expect(!(await stream.send("add tests")))
+
+        #expect(stream.failure == AgentActionFailure(.send, AgentStream.sendMayNotHaveLanded, canRetry: false))
+        #expect(stream.transcript.rows.contains { $0.kind == .message(role: .user, text: "add tests", parent: nil) })
+        await stream.retry()
+        #expect(runner.calls("agent-prompt").count == 1, "nothing sends it again by itself")
+    }
+
+    /// A picture the composer can't read stops the send, rather than going
+    /// without it.
+    @Test func anUnreadablePictureStopsTheSend() throws {
+        let readable = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ov-136-\(UUID().uuidString).png")
+        try Data([1, 2, 3]).write(to: readable)
+        defer { try? FileManager.default.removeItem(at: readable) }
+        let gone = readable.deletingLastPathComponent().appendingPathComponent("ov-136-gone.png")
+
+        #expect(composerImages([readable])?.map(\.data) == [Data([1, 2, 3])])
+        #expect(composerImages([readable, gone]) == nil)
     }
 
     /// A refusal the runner names is said in this app's sentence for it, after
@@ -200,7 +230,7 @@ struct AgentSendFailureTests {
     /// and takes down the last send's failure.
     @Test func aSendThatWorksClearsTheFailure() async {
         let runner = Runner()
-        runner.refusals["agent-prompt"] = "error: connection refused"
+        runner.refusals["agent-prompt"] = "error: no\ncode: not-found"
         let stream = await stream(runner)
         _ = await stream.send("add tests")
         runner.refusals = [:]

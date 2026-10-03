@@ -99,11 +99,7 @@ struct AgentComposer: View {
             if let failure = stream.failure, failure.action.queuedID == nil {
                 AgentFailureLine(
                     sentence: failure.sentence,
-                    onRetry: {
-                        // A send's words are in the field: sending them again
-                        // is Return. Anything else, the stream runs again.
-                        if failure.action == .send { send() } else { Task { await stream.retry() } }
-                    },
+                    onRetry: retry(failure),
                     onDismiss: { stream.dismissFailure() })
             }
 
@@ -763,6 +759,17 @@ struct AgentComposer: View {
 
     // MARK: - Send
 
+    /// Try Again for `failure`, or nil to offer none: for a send that may have
+    /// landed, and for a failed send whose words have since been cleared,
+    /// where it would do nothing.
+    private func retry(_ failure: AgentActionFailure) -> (() -> Void)? {
+        guard failure.canRetry else { return nil }
+        guard failure.action == .send else { return { Task { await stream.retry() } } }
+        let empty = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty
+        // A send's words are in the field: sending them again is Return.
+        return empty ? nil : { send() }
+    }
+
     private func send() {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !attachments.isEmpty else { return }
@@ -777,9 +784,11 @@ struct AgentComposer: View {
         // file on the Mac that picked it, and the agent runs on the host —
         // so it worked when those were the same box and silently referred
         // to nothing when they were not, which is every remote host.
-        let images = attachments.compactMap { attachment -> ComposerImage? in
-            guard let data = try? Data(contentsOf: attachment.url) else { return nil }
-            return ComposerImage(mime: mimeType(for: attachment.url), data: data)
+        // All of them or no send: a picture that can't be read (moved or
+        // deleted since it was dropped) used to be left out without a word.
+        guard let images = composerImages(attachments.map(\.url)) else {
+            stream.refuseSend(AgentStream.pictureUnsent)
+            return
         }
         let body = trimmed
         let sentIDs = attachments.map(\.id)
@@ -800,6 +809,16 @@ struct AgentComposer: View {
             attachments = []
         }
     }
+}
+
+/// Every attached picture's bytes, or nil if any can't be read.
+func composerImages(_ urls: [URL]) -> [ComposerImage]? {
+    var images: [ComposerImage] = []
+    for url in urls {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        images.append(ComposerImage(mime: mimeType(for: url), data: data))
+    }
+    return images
 }
 
 /// Whether the composer empties once a send has gone: only if it still holds
