@@ -78,26 +78,42 @@ struct MarkReadConfirmationTests {
         #expect(Self.allUnread(harness), "read on Cancel")
     }
 
-    /// The header's VoiceOver action is Mark All as Read, and it asks too.
-    /// (Fails with the header offering no action, and with the action
-    /// reading straight away.)
+    /// The header's VoiceOver action, as the strip hands it to its header
+    /// (`BoardSummaryStrip.markReadAction`): named for what it reads, and
+    /// asking before it reads, filtered or not. Built directly, as `swift
+    /// test`'s hosting view exposes no accessibility tree. (Fails with the
+    /// action reading straight away, past `MarkReadConfirmation`.)
     @Test("Unread's VoiceOver action asks before it reads")
-    func voiceOverActionAsks() async throws {
+    func voiceOverActionAsks() async {
         let harness = await Harness()
         defer { harness.close() }
         harness.marks.answer = nil
         await harness.settle()
-        let header = try #require(Self.element("section-summary", in: harness.host), "no Unread header for VoiceOver")
-        let action = try #require(
-            header.accessibilityCustomActions()?.first { $0.name == "Mark All as Read" },
-            "Unread's header offers no Mark All as Read to VoiceOver")
-        Self.perform(action)
+        let store = harness.store
+        let summary = BoardSummaryStrip.summary(store: store, reads: store.reads, filter: "")
+        let all = BoardSummaryStrip.markReadAction(
+            summary, filtering: false, store: store, confirmation: harness.marks.confirmation)
+        #expect(all.name == "Mark All as Read")
+        all.perform()
         await harness.settle(20)
         #expect(harness.marks.asked == [MarkReadRequest(filtering: false, tasks: 3)])
         #expect(Self.allUnread(harness), "read before the person answered")
+        harness.marks.reply(false)
+        await harness.settle(20)
+        #expect(Self.allUnread(harness), "read on Cancel")
+
+        let narrowed = BoardSummaryStrip.summary(store: store, reads: store.reads, filter: "refund")
+        let these = BoardSummaryStrip.markReadAction(
+            narrowed, filtering: true, store: store, confirmation: harness.marks.confirmation)
+        #expect(these.name == "Mark These as Read")
+        these.perform()
+        await harness.settle(20)
+        #expect(harness.marks.asked.last == MarkReadRequest(filtering: true, tasks: 1))
+        #expect(Self.allUnread(harness), "read before the person answered")
         harness.marks.reply(true)
         await harness.settle(40)
-        #expect(harness.identifiers.contains("board-summary-empty"), "Mark as Read read nothing")
+        #expect(!harness.identifiers.contains("board-summary-item-t2/created"), "Mark as Read read nothing")
+        #expect(harness.identifiers.contains("board-summary-item-t1/created"), "read past the filter")
     }
 
     /// Unread's context menu asks too. (Fails with the menu item reading
@@ -228,24 +244,6 @@ struct MarkReadConfirmationTests {
             with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
             windowNumber: window.windowNumber, context: nil, characters: characters,
             charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code)!
-    }
-
-    /// The accessibility element whose identifier is `id`, under `root`.
-    static func element(_ id: String, in root: NSAccessibilityProtocol) -> NSAccessibilityProtocol? {
-        if root.accessibilityIdentifier() == id { return root }
-        for child in root.accessibilityChildren() ?? [] {
-            if let child = child as? NSAccessibilityProtocol, let found = element(id, in: child) { return found }
-        }
-        return nil
-    }
-
-    /// Perform `action` as VoiceOver's Actions rotor would.
-    static func perform(_ action: NSAccessibilityCustomAction) {
-        if let handler = action.handler {
-            _ = handler()
-        } else if let target = action.target as? NSObject, let selector = action.selector {
-            target.perform(selector, with: action)
-        }
     }
 
     /// Choose `title` from the context menu of the view `identifier` names,

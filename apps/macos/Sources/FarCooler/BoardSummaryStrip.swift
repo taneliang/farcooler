@@ -105,10 +105,7 @@ struct BoardSummaryStrip: View {
                 .animation(BoardMotion.list(reduceMotion: reduceMotion, slowedBy: slowdown), value: Self.identities(summary))
             }
             // The button's action without the pointer, for VoiceOver.
-            .headerAction(
-                offersMarkRead(summary)
-                    ? SectionHeaderAction(name: MarkAllReadButton.title(filtering: filtering)) { markRead(summary) }
-                    : nil)
+            .headerAction(offersMarkRead(summary) ? markReadAction(summary) : nil)
             // Measured from the board column's edge, as the list below is:
             // the disclosure at the grid's edge, everything else at its
             // text column (`NavigatorGrid`).
@@ -238,12 +235,28 @@ struct BoardSummaryStrip: View {
     /// Mark All as Read from the strip, once asked (ov-210): unfiltered,
     /// everything on the board; filtered, only the tasks it lists, the ones
     /// its count counts (ov-177 review: one click beside "3" cleared all 15).
-    private func markRead(_ summary: BoardSummary) {
-        let animation = BoardMotion.list(reduceMotion: reduceMotion, slowedBy: slowdown)
-        guard filtering else { return store.askToMarkAllRead(confirmation, animation: animation) }
-        let request = MarkReadRequest(filtering: true, tasks: MarkReadRequest.tasks(in: summary))
-        confirmation.confirm(request) { [store] _ in
-            withAnimation(animation) { Self.markRead(summary, in: store) }
+    private func markRead(_ summary: BoardSummary) { markReadAction(summary).perform() }
+
+    /// Mark All as Read as this strip offers it now: the header's VoiceOver
+    /// action, and what its button and context menu do.
+    private func markReadAction(_ summary: BoardSummary) -> SectionHeaderAction {
+        Self.markReadAction(
+            summary, filtering: filtering, store: store, confirmation: confirmation,
+            animation: BoardMotion.list(reduceMotion: reduceMotion, slowedBy: slowdown))
+    }
+
+    /// Mark All as Read on `store`'s Unread, named for whether it's
+    /// `filtering`, asking `confirmation` before it reads anything.
+    static func markReadAction(
+        _ summary: BoardSummary, filtering: Bool, store: TaskBoardStore, confirmation: MarkReadConfirmation,
+        animation: Animation? = nil
+    ) -> SectionHeaderAction {
+        SectionHeaderAction(name: MarkAllReadButton.title(filtering: filtering)) {
+            guard filtering else { return store.askToMarkAllRead(confirmation, animation: animation) }
+            let request = MarkReadRequest(filtering: true, tasks: MarkReadRequest.tasks(in: summary))
+            confirmation.confirm(request) { _ in
+                withAnimation(animation) { Self.markRead(summary, in: store) }
+            }
         }
     }
 
