@@ -256,11 +256,6 @@ final class PaneDrag: ObservableObject {
     func begin(_ terminal: String) {
         self.terminal = terminal
         landing = nil
-        // A worktree drag has no end hook, so one released anywhere but a
-        // row that took it is still "in flight". Any other drag beginning
-        // means it isn't — and a pane dropped on a workspace header must not
-        // move that worktree. See `WorktreeDrag.receive(_:on:)`.
-        WorktreeDrag.shared.cancel()
     }
 
     /// Hovering over a pane's edge. Refused when nothing is being dragged, and

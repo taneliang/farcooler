@@ -5,17 +5,17 @@ import Testing
 
 @testable import Far_Cooler
 
-/// The sidebar and the board column on one grid (ov-83): every chevron, icon
-/// and text start of every row type lands on a `ColumnGrid` column, and on
-/// the one the owner's ruling names.
+/// The board column on one grid (ov-83): every chevron, icon and text start
+/// of every row type lands on a `ColumnGrid` column, and on the one the
+/// owner's ruling names. (The old Fleet sidebar was on it too, until it went,
+/// ov-178.)
 ///
-/// Measured, not computed. The real row views are drawn, each reporting
-/// where its marks landed through `gridMark(_:_:)`, at the depth
-/// `ContentView.sidebarRows` gives it; and the board is the real
-/// `TaskBoardView`, over a board read through a stubbed CLI. ov-78's
-/// `SidebarColumnTests` read the constants the rows were meant to lay out
-/// from, and passed while a repository's name sat 12 pt off its column,
-/// pushed there by a chevron cell drawn invisibly.
+/// Measured, not computed. The board is the real `TaskBoardView`, over a
+/// board read through a stubbed CLI, each row reporting where its marks
+/// landed through `gridMark(_:_:)`. ov-78's `SidebarColumnTests` read the
+/// constants the rows were meant to lay out from, and passed while a
+/// repository's name sat 12 pt off its column, pushed there by a chevron
+/// cell drawn invisibly.
 @MainActor
 struct GridGeometryTests {
     struct Mark: CustomStringConvertible {
@@ -80,129 +80,6 @@ struct GridGeometryTests {
                 #expect(abs(mark.x - column) < 0.5, "\(mark), not at \(column)")
             }
         }
-    }
-
-    // MARK: - The sidebar
-
-    /// An agent with a feed and a running subagent, so the lines under its
-    /// name are drawn too.
-    private static let terminal: Terminal = {
-        var terminal = Terminal(
-            id: "t", short: "t", title: "claude", preset: "claude", state: "running", epoch: 0)
-        terminal.line = "Reading the board"
-        terminal.feed = ["Ran the tests"]
-        terminal.subagents = ["explorer"]
-        return terminal
-    }()
-
-    private static func worktree(_ id: String, workspace: String?, hidden: Bool = false) -> Worktree {
-        Worktree(
-            id: id, short: id, task: id, branch: "feat/\(id)", repository: "r", host: "",
-            path: "/tmp/\(id)", state: hidden ? "hidden" : "active", terminals: [terminal],
-            repositoryID: "repo", workspace: workspace)
-    }
-
-    /// One repository: Main with a worktree, an empty workspace, and an
-    /// unclaimed worktree; every row type the sidebar draws, at the depths
-    /// `sidebarRows` gives them.
-    private static func rows() -> [SidebarEntry] {
-        var fleet = Fleet(
-            runtimeHealthy: true, livePanes: 0,
-            worktrees: [worktree("w", workspace: "ws"), worktree("u", workspace: nil)],
-            branchPrefix: nil)
-        fleet.runnerWorkspaces[""] = [
-            WorkspaceSummary(id: "ws", name: "Main", taskPrefix: "fc", isMain: true, ordinal: 0, repository: "repo"),
-            WorkspaceSummary(id: "e", name: "Empty", taskPrefix: "em", isMain: false, ordinal: 1, repository: "repo"),
-        ]
-        return ContentView.sidebarRows(fleet: fleet, open: { _ in true })
-    }
-
-    private struct Search: View {
-        @State private var query = ""
-        @FocusState private var focused: Bool
-        var body: some View { SidebarSearchRow(query: $query, focused: $focused) }
-    }
-
-    private static func section(_ worktree: Worktree) -> WorktreeSection {
-        WorktreeSection(
-            worktree: worktree, isExpanded: true, selected: nil, onSelect: { _ in }, onToggle: {},
-            onNewTerminal: {}, onHide: {}, onUnhide: {}, onRemove: {},
-            onTerminalAction: { _, _ in })
-    }
-
-    @ViewBuilder
-    private static func draw(_ entry: SidebarEntry) -> some View {
-        switch entry.kind {
-        case .repository:
-            ProjectHeader(name: entry.project, count: 1, onToggleCollapse: {})
-                .sidebarDepth(entry.depth)
-        case .workspace(let name):
-            WorkspaceRow(
-                name: name, workspace: entry.workspace?.id ?? "", taskPrefix: "fc", seat: nil,
-                implicit: false, count: 1, unread: false, isSelected: false, onSelect: {},
-                actions: nil, isOpen: true)
-                .sidebarDepth(entry.depth)
-        case .worktree:
-            section(entry.worktree!).sidebarDepth(entry.depth)
-        case .noWorktrees:
-            NoWorktreesRow().sidebarDepth(entry.depth)
-        case .unclaimed:
-            UnclaimedWorktrees(
-                worktrees: entry.worktrees, isExpanded: true, onToggle: {},
-                row: { section($0).sidebarDepth(1) })
-                .sidebarDepth(entry.depth)
-        case .hidden:
-            EmptyView()
-        }
-    }
-
-    @Test("Every sidebar row's chevron, icon and text is on a grid column")
-    func theSidebarIsOnTheGrid() async {
-        let rows = Self.rows()
-        #expect(
-            rows.map(\.kind) == [
-                .repository, .workspace("Main"), .worktree("w"), .workspace("Empty"), .noWorktrees,
-                .unclaimed(count: 1),
-            ])
-        let sidebar = VStack(alignment: .leading, spacing: 0) {
-            SidebarTitleRow(busy: false) { EmptyView() }
-            Search()
-            NeedsYouRow(count: 2, isSelected: false, onSelect: {})
-            ForEach(rows) { Self.draw($0) }
-            HiddenWorktrees(
-                project: "r", worktrees: [Self.worktree("h", workspace: nil, hidden: true)],
-                isExpanded: true, onToggle: {}, onUnhide: { _ in })
-            // A silent runner's header, which names the runner.
-            ProjectHeader(name: "carl", count: 0)
-        }
-        let found = await marks(sidebar, width: 260, height: 1200)
-        check(found, expect: [
-            "title.text": ColumnGrid.a,
-            "search.text": ColumnGrid.a,
-            "needsYou.icon": ColumnGrid.a,
-            "needsYou.text": ColumnGrid.b,
-            // The shared section's chevron at A, the name at B (ov-101).
-            "repository.chevron": ColumnGrid.a,
-            "repository.text": ColumnGrid.b,
-            "workspace.chevron": ColumnGrid.a,
-            "workspace.icon": ColumnGrid.b,
-            "workspace.text": ColumnGrid.c,
-            "worktree.chevron": ColumnGrid.b,
-            "worktree.icon": ColumnGrid.c,
-            "worktree.text": ColumnGrid.d,
-            "worktree.branch.text": ColumnGrid.d,
-            "terminal.icon": ColumnGrid.d,
-            "terminal.text": ColumnGrid.column(4),
-            "terminal.step.text": ColumnGrid.column(4),
-            "terminal.subagent.text": ColumnGrid.column(4),
-            "noWorktrees.text": ColumnGrid.c,
-            "group.chevron": ColumnGrid.a,
-            "group.icon": ColumnGrid.b,
-            "group.text": ColumnGrid.c,
-            "hidden.text": ColumnGrid.d,
-            "runner.icon": ColumnGrid.a,
-            "runner.text": ColumnGrid.b,
-        ])
     }
 
     // MARK: - The board column
@@ -328,7 +205,7 @@ struct GridGeometryTests {
     /// The row files, and how much of each holds rows: TaskBoard.swift's
     /// task detail, from `struct TaskCard` on, is another lane's.
     private static let rowFiles: [(name: String, until: String?)] = [
-        ("SidebarViews.swift", nil), ("SidebarLayout.swift", nil), ("WorkspaceSidebar.swift", nil),
+        ("SidebarViews.swift", nil), ("SidebarLayout.swift", nil),
         ("BoardHeader.swift", nil), ("BoardSummaryStrip.swift", nil),
         ("TaskBoard.swift", "struct TaskCard: View"), ("TaskListSection.swift", nil), ("Navigator.swift", nil), ("BoardWorktreesSection.swift", nil),
     ]

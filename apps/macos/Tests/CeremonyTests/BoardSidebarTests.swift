@@ -712,7 +712,7 @@ struct BoardSidebarTests {
         client.stopEvents()
     }
 
-    // MARK: - The sidebar: repository, workspace, then its rows
+    // MARK: - Workspaces: their order, their counts, their seats
 
     private static func worktree(
         _ id: String, workspace: String?, repository: String = repoA, name: String = "overnight",
@@ -739,37 +739,12 @@ struct BoardSidebarTests {
         return t
     }
 
-    /// The workspace level is drawn even when Main is the only workspace, so
-    /// the model is visible before the first split.
-    @Test func theSidebarShowsTheWorkspaceLevelEvenWithOnlyMain() {
-        let rows = ContentView.sidebarRows(fleet: Self.fleet(
-            workspaces: [Self.summary(Self.main, "Main", isMain: true)],
-            worktrees: [Self.worktree("lane", workspace: Self.main)]))
-        #expect(rows.map(\.kind) == [.repository, .workspace("Main")])
-        let open = ContentView.sidebarRows(
-            fleet: Self.fleet(
-                workspaces: [Self.summary(Self.main, "Main", isMain: true)],
-                worktrees: [Self.worktree("lane", workspace: Self.main)]),
-            open: { _ in true })
-        #expect(open.map(\.kind) == [.repository, .workspace("Main"), .worktree("lane")])
-    }
-
-    @Test func unclaimedWorktreesSitBelowTheWorkspaces() {
-        let rows = ContentView.sidebarRows(fleet: Self.fleet(
-            workspaces: [Self.summary(Self.main, "Main", isMain: true)],
-            worktrees: [Self.worktree("lane", workspace: Self.main), Self.worktree("stray", workspace: nil)]))
-        #expect(rows.map(\.kind).last == .unclaimed(count: 1))
-        #expect(rows.last?.worktrees.map(\.id) == ["stray"])
-        #expect(!rows.map(\.kind).contains(.worktree("stray")), "an unclaimed worktree was drawn twice")
-    }
-
-    /// Main first, then the rest by their ordinal, one row each, and a
-    /// workspace with no worktrees still listed. Its worktrees are one click
-    /// down, under its row's chevron, and the repository lists none of its
-    /// own (spec §4.5). Hidden worktrees stay the repository's, last.
-    @Test("A repository lists workspaces, not worktrees")
-    func aRepositoryListsWorkspacesNotWorktrees() {
-        let ops = "0198f2c0-0000-7000-8000-0000000000ee"
+    /// Every workspace, by repository, Main first and then by ordinal, a
+    /// workspace with no worktrees still listed: the order the switcher
+    /// lists and ⌘1–9 numbers, kept from the old sidebar's (ov-178).
+    @Test("The directory lists each repository's workspaces, Main first, then by ordinal")
+    func theDirectoryListsWorkspacesInOrder() {
+        let ops = "0198f2c0-0000-7000-8000-0000000000ef"
         let fleet = Self.fleet(
             workspaces: [
                 Self.summary(ops, "Ops", ordinal: 2), Self.summary(Self.billing, "Billing", ordinal: 1),
@@ -780,46 +755,44 @@ struct BoardSidebarTests {
                 Self.worktree("stray", workspace: nil),
                 Self.worktree("old", workspace: Self.main, state: "hidden"),
             ])
-        let rows = ContentView.sidebarRows(fleet: fleet)
-        #expect(rows.map(\.kind) == [
-            .repository,
-            .workspace("Main"), .workspace("Billing"), .workspace("Ops"),
-            .unclaimed(count: 1), .hidden(count: 1),
-        ])
-        #expect(!rows.contains { if case .worktree = $0.kind { true } else { false } })
-        #expect(rows.filter { if case .workspace = $0.kind { true } else { false } }.map(\.workspace?.id) == [Self.main, Self.billing, ops])
-        // The repository is a section header, so its workspaces sit flush
-        // under it, and Unclaimed and Hidden with them (ov-63).
-        #expect(rows.map(\.depth) == [0, 0, 0, 0, 0, 0])
-        #expect(rows.first { $0.kind == .workspace("Main") }?.worktrees.map(\.id) == ["lane"])
-
-        // Billing opened: its worktree, directly under it, one step in
-        // (ov-78).
-        let open = ContentView.sidebarRows(
-            fleet: fleet, open: { $0 == SidebarEntry.openKey(host: "", workspace: Self.billing) })
-        #expect(open.map(\.kind).prefix(5) == [
-            .repository, .workspace("Main"), .workspace("Billing"), .worktree("bill"), .workspace("Ops"),
-        ])
-        #expect(open.map(\.depth).prefix(5) == [0, 0, 0, 1, 0])
-
-        // Ops, empty: its sentence starts where a worktree's title would,
-        // a gutter past a worktree row's chevron (checklist step 20).
-        let empty = ContentView.sidebarRows(
-            fleet: fleet, open: { $0 == SidebarEntry.openKey(host: "", workspace: ops) })
-        #expect(empty.first { $0.kind == .noWorktrees }?.depth == 2)
+        let groups = WorkspaceDirectory.groups(in: fleet)
+        #expect(groups.count == 1)
+        #expect(groups.first?.workspaces.map(\.id) == [Self.main, Self.billing, ops])
+        #expect(groups.first?.project == "overnight")
+        #expect(groups.first?.repositoryID == Self.repoA)
     }
 
     /// A runner without `workstreams` has one implicit workspace per
-    /// repository: a row called Main, with the repository's worktrees under
-    /// it, and nothing unclaimed.
+    /// repository, called Main.
     @Test func aRunnerWithoutWorkspacesListsItsImplicitWorkspace() {
-        let rows = ContentView.sidebarRows(fleet: Self.fleet(
+        let groups = WorkspaceDirectory.groups(in: Self.fleet(
             workspaces: nil,
             worktrees: [Self.worktree("a", workspace: nil), Self.worktree("b", workspace: nil)]))
-        #expect(rows.map(\.kind) == [.repository, .workspace("Main")])
-        #expect(rows[1].worktrees.map(\.id) == ["a", "b"])
-        #expect(rows[1].workspace == WorkspaceSummary.implicit(repository: Self.repoA))
-        #expect(rows[1].menu.isEmpty, "an implicit workspace has no orchestrator or charter")
+        #expect(groups.map(\.workspaces) == [[WorkspaceSummary.implicit(repository: Self.repoA)]])
+        #expect(WorkspaceNumbers.groups(in: Self.fleet(workspaces: nil, worktrees: [Self.worktree("a", workspace: nil)]))
+            .first?.places.map(\.name) == ["Main"])
+    }
+
+    /// Repositories are told apart by the uuid, not the display name: two
+    /// called the same are two groups, in the runner's order. One whose
+    /// runner lists no workspace of its own has none to list, and a worktree
+    /// with no repository is in none.
+    @Test func repositoriesAreJoinedByTheirID() {
+        var ungrouped = Self.worktree("loose", workspace: nil, repository: Self.repoB)
+        ungrouped.repository = ""
+        let groups = WorkspaceDirectory.groups(in: Self.fleet(
+            workspaces: [
+                Self.summary(Self.main, "Main", isMain: true),
+                Self.summary(Self.otherMain, "Main", isMain: true, repository: Self.repoB),
+            ],
+            worktrees: [
+                Self.worktree("a", workspace: Self.main),
+                Self.worktree("b", workspace: nil, repository: Self.repoB),
+                Self.worktree("c", workspace: nil, repository: "0198f2c0-0000-7000-8000-0000000000f0"),
+                ungrouped,
+            ]))
+        #expect(groups.map(\.repositoryID) == [Self.repoA, Self.repoB])
+        #expect(groups.map { $0.workspaces.map(\.id) } == [[Self.main], [Self.otherMain]])
     }
 
     /// The board's "waiting on you" is the workspace's decision items, alone
@@ -872,133 +845,44 @@ struct BoardSidebarTests {
         #expect(WorkspaceCounts.count(for: Self.summary(Self.billing, "Billing"), host: "remote", in: items) == 1)
     }
 
-    /// An open workspace lists its worktrees in the runner's order, each
-    /// named with its open tasks' keys, "fc-3-webhooks · bil-9", with no
-    /// board read (spec §3.2).
-    @Test("An open workspace lists its worktrees with their open task keys")
-    func anOpenWorkspaceListsItsWorktreesWithTheirOpenTaskKeys() {
-        var hooks = Self.worktree("fc-3-webhooks", workspace: Self.billing)
-        hooks.openTasks = [NeedsYouTask(id: "t-9", key: "bil-9", title: "Invoice PDF export", status: "in_progress")]
-        let scratch = Self.worktree("scratch", workspace: Self.billing)
-        let rows = ContentView.sidebarRows(
-            fleet: Self.fleet(
-                workspaces: [Self.summary(Self.main, "Main", isMain: true), Self.summary(Self.billing, "Billing")],
-                worktrees: [hooks, Self.worktree("lane", workspace: Self.main), scratch]),
-            open: { $0 == SidebarEntry.openKey(host: "", workspace: Self.billing) })
-        let disclosure = rows.first { $0.kind == .workspace("Billing") }
-        #expect(disclosure?.worktrees.map(\.rowTitle) == ["fc-3-webhooks · bil-9", "scratch"])
-        let listed = rows.compactMap { row -> String? in
-            if case .worktree = row.kind, row.workspace?.id == Self.billing { return row.worktree?.rowTitle }
-            return nil
-        }
-        #expect(listed == ["fc-3-webhooks · bil-9", "scratch"])
-    }
-
-    /// A workspace with no worktrees, opened, says so in one line (spec §8);
-    /// New Worktree… is on its row's menu. Not while searching, where the
-    /// line would look like a hit.
-    @Test("A workspace with no worktrees says so when it's opened")
-    func aWorkspaceWithNoWorktreesSaysSo() {
-        let fleet = Self.fleet(
-            workspaces: [Self.summary(Self.main, "Main", isMain: true), Self.summary(Self.billing, "Billing")],
-            worktrees: [Self.worktree("lane", workspace: Self.main)])
-        let closed = ContentView.sidebarRows(fleet: fleet)
-        #expect(closed.map(\.kind) == [.repository, .workspace("Main"), .workspace("Billing")])
-        let open = ContentView.sidebarRows(
-            fleet: fleet, open: { $0 == SidebarEntry.openKey(host: "", workspace: Self.billing) })
-        #expect(open.last?.kind == .noWorktrees)
-        #expect(open.last?.workspace?.id == Self.billing)
-        #expect(NoWorktreesRow.sentence == "No worktrees yet")
-        #expect(NoWorktreesRow.help == "The orchestrator makes them as it dispatches tasks.")
-        let searching = ContentView.sidebarRows(fleet: fleet, query: "billing", open: { _ in true })
-        #expect(searching.map(\.kind) == [.repository, .workspace("Billing")])
-    }
-
-    /// A workspace row carries ov-60's menu, Replace in place of Start while
-    /// one runs.
-    @Test("A workspace row offers Show Board, Start Orchestrator and Show Charter")
-    func aWorkspaceRowOffersShowBoardStartOrchestratorAndShowCharter() {
-        let conductor = Self.orchestrator("conductor", workspace: Self.billing)
-        let rows = ContentView.sidebarRows(fleet: Self.fleet(
-            workspaces: [
-                Self.summary(Self.main, "Main", isMain: true),
-                Self.summary(Self.billing, "Billing", orchestrator: "conductor"),
-            ],
-            worktrees: [Self.worktree("checkout", workspace: Self.main, terminals: [conductor])]))
-        #expect(rows.first { $0.kind == .workspace("Main") }?.menu == [.showBoard, .startOrchestrator, .showCharter])
-        #expect(rows.first { $0.kind == .workspace("Billing") }?.menu == [.showBoard, .replaceOrchestrator, .showCharter])
-    }
-
-    /// The orchestrator runs in the main checkout, so the runner lists it
-    /// among that worktree's terminals. It gets its own row under ITS
-    /// workspace and is left out of the worktree's, so it is drawn once.
-    @Test func theOrchestratorIsDrawnOnceInItsOwnRow() {
-        let conductor = Self.orchestrator("conductor", workspace: Self.billing)
-        let shell = Self.terminal("shell", preset: "zsh", taskId: nil)
-        let rows = ContentView.sidebarRows(fleet: Self.fleet(
-            workspaces: [
-                Self.summary(Self.main, "Main", isMain: true), Self.summary(Self.billing, "Billing"),
-            ],
-            worktrees: [Self.worktree("checkout", workspace: Self.main, terminals: [conductor, shell])]),
-            open: { _ in true })
-        let orchestrators = rows.filter { if case .workspace = $0.kind { true } else { false } }
-        #expect(orchestrators.map(\.orchestrator?.terminal.id) == [nil, "conductor"])
-        #expect(orchestrators.last?.orchestrator?.worktree.id == "checkout", "where selecting it goes")
-        let checkout = rows.first { $0.kind == .worktree("checkout") }?.worktree
-        #expect(checkout?.terminals.map(\.id) == ["shell"], "the orchestrator was drawn twice")
-    }
-
-    /// The row shows the runner's live seat, `WorkspaceSummary.orchestrator`.
-    /// A stopped orchestrator left beside it — stopped, then a new one started
-    /// without `--replace` — is not the seat, so it stays among its
-    /// worktree's terminals rather than being drawn nowhere, whichever of the
-    /// two the runner lists last.
+    /// The seat is the runner's live one, `WorkspaceSummary.orchestrator`.
+    /// A stopped orchestrator left beside it (stopped, then a new one started
+    /// without `--replace`) is not the seat, so it stays among the checkout's
+    /// own terminals rather than being drawn nowhere, whichever of the two
+    /// the runner lists last.
     @Test func aStoppedOrchestratorBesideTheLiveOneIsNotLost() {
         var stopped = Self.orchestrator("stopped", workspace: Self.billing)
         stopped.state = "exited"
         let live = Self.orchestrator("live", workspace: Self.billing)
+        let billing = Self.summary(Self.billing, "Billing", orchestrator: "live")
         for terminals in [[live, stopped], [stopped, live]] {
-            let rows = ContentView.sidebarRows(fleet: Self.fleet(
-                workspaces: [
-                    Self.summary(Self.main, "Main", isMain: true),
-                    Self.summary(Self.billing, "Billing", orchestrator: "live"),
-                ],
-                worktrees: [Self.worktree("checkout", workspace: Self.main, terminals: terminals)]),
-                open: { _ in true })
-            let seat = rows.last { $0.kind == .workspace("Billing") }?.orchestrator?.terminal.id
-            #expect(seat == "live", "\(terminals.map(\.id))")
-            let checkout = rows.first { $0.kind == .worktree("checkout") }?.worktree
-            #expect(checkout?.terminals.map(\.id) == ["stopped"], "\(terminals.map(\.id))")
+            let fleet = Self.fleet(
+                workspaces: [Self.summary(Self.main, "Main", isMain: true), billing],
+                worktrees: [Self.worktree("checkout", workspace: Self.main, terminals: terminals)])
+            #expect(WorkspaceScreen.orchestrator(of: billing, host: "", in: fleet)?.terminal.id == "live")
+            #expect(
+                WorkspaceScreen.ownTerminals(of: fleet.worktrees[0], fleet: fleet).terminals.map(\.id) == ["stopped"],
+                "\(terminals.map(\.id))")
         }
 
         // The seat wins over a role match even when both are running: the
         // runner's word for which one is live, not whichever it lists first.
         let other = Self.orchestrator("other", workspace: Self.billing)
-        let seated = ContentView.sidebarRows(fleet: Self.fleet(
-            workspaces: [
-                Self.summary(Self.main, "Main", isMain: true),
-                Self.summary(Self.billing, "Billing", orchestrator: "live"),
-            ],
-            worktrees: [Self.worktree("checkout", workspace: Self.main, terminals: [other, live])]),
-            open: { _ in true })
-        #expect(seated.last { $0.kind == .workspace("Billing") }?.orchestrator?.terminal.id == "live")
-        #expect(
-            seated.first { $0.kind == .worktree("checkout") }?.worktree?.terminals.map(\.id)
-                == ["other"])
+        let seated = Self.fleet(
+            workspaces: [Self.summary(Self.main, "Main", isMain: true), billing],
+            worktrees: [Self.worktree("checkout", workspace: Self.main, terminals: [other, live])])
+        #expect(WorkspaceScreen.orchestrator(of: billing, host: "", in: seated)?.terminal.id == "live")
+        #expect(WorkspaceScreen.ownTerminals(of: seated.worktrees[0], fleet: seated).terminals.map(\.id) == ["other"])
 
         // A runner that names no seat: only a live orchestrator is taken by
-        // its role, and a stopped one alone leaves the row empty and itself
-        // in its worktree.
-        let unseated = ContentView.sidebarRows(fleet: Self.fleet(
-            workspaces: [
-                Self.summary(Self.main, "Main", isMain: true), Self.summary(Self.billing, "Billing"),
-            ],
-            worktrees: [Self.worktree("checkout", workspace: Self.main, terminals: [stopped])]),
-            open: { _ in true })
-        #expect(unseated.last { $0.kind == .workspace("Billing") }?.orchestrator == nil)
-        #expect(
-            unseated.first { $0.kind == .worktree("checkout") }?.worktree?.terminals.map(\.id)
-                == ["stopped"])
+        // its role, and a stopped one alone leaves the workspace without one
+        // and itself in its checkout.
+        let unnamed = Self.summary(Self.billing, "Billing")
+        let unseated = Self.fleet(
+            workspaces: [Self.summary(Self.main, "Main", isMain: true), unnamed],
+            worktrees: [Self.worktree("checkout", workspace: Self.main, terminals: [stopped])])
+        #expect(WorkspaceScreen.orchestrator(of: unnamed, host: "", in: unseated) == nil)
+        #expect(WorkspaceScreen.ownTerminals(of: unseated.worktrees[0], fleet: unseated).terminals.map(\.id) == ["stopped"])
     }
 
     /// ⌘] and ⌘[, ⌥⌘↓ and ⌥⌘↑ and ⌃⌘1… step through the terminals of the
@@ -1034,48 +918,6 @@ struct BoardSidebarTests {
         #expect(!ContentView.keeps(
             store, for: Self.summary(Self.billing, "Billing"),
             client: DaemonClient(target: "", notifications: NotificationCenter())))
-    }
-
-    /// Rows are joined to their repository by the uuid, not the display name:
-    /// two repositories called the same are two groups, and an unclaimed
-    /// worktree lands under its own.
-    @Test func rowsJoinTheirRepositoryByItsID() {
-        let otherMain = "0198f2c0-0000-7000-8000-0000000000ff"
-        let rows = ContentView.sidebarRows(fleet: Self.fleet(
-            workspaces: [
-                Self.summary(Self.main, "Main", isMain: true),
-                Self.summary(otherMain, "Main", isMain: true, repository: Self.repoB),
-            ],
-            worktrees: [
-                Self.worktree("a", workspace: Self.main),
-                Self.worktree("loose", workspace: nil, repository: Self.repoB),
-            ]))
-        #expect(rows.map(\.kind) == [
-            .repository, .workspace("Main"),
-            .repository, .workspace("Main"), .unclaimed(count: 1),
-        ])
-        #expect(rows.filter { $0.kind == .repository }.map(\.repositoryID) == [Self.repoA, Self.repoB])
-        #expect(rows.last?.repositoryID == Self.repoB)
-    }
-
-    /// A drag reorders within one workspace, or within Unclaimed — where a
-    /// worktree naming a workspace the runner doesn't list is drawn too — and
-    /// not across: the order can't move a worktree to another workspace.
-    @Test func aDragReordersOnlyWithinOnePlace() {
-        let lane = Self.worktree("lane", workspace: Self.main)
-        let next = Self.worktree("next", workspace: Self.main)
-        let bill = Self.worktree("bill", workspace: Self.billing)
-        let stray = Self.worktree("stray", workspace: nil)
-        let orphan = Self.worktree("orphan", workspace: "0198f2c0-0000-7000-8000-0000000000ee")
-        let fleet = Self.fleet(
-            workspaces: [
-                Self.summary(Self.main, "Main", isMain: true), Self.summary(Self.billing, "Billing"),
-            ],
-            worktrees: [lane, next, bill, stray, orphan])
-        #expect(ContentView.sameSidebarPlace(lane, next, in: fleet))
-        #expect(!ContentView.sameSidebarPlace(lane, bill, in: fleet))
-        #expect(!ContentView.sameSidebarPlace(lane, stray, in: fleet))
-        #expect(ContentView.sameSidebarPlace(stray, orphan, in: fleet))
     }
 
     // MARK: - Decoding the fields the sidebar groups by
@@ -1301,141 +1143,40 @@ struct BoardSidebarTests {
                 == "first", "an older CLI's checkout is found by its name")
     }
 
-    // MARK: - Dragging a worktree onto another workspace
+    // MARK: - Move to Workspace
 
-    /// Dropping a row reorders within its own workspace, and moves the
-    /// worktree to another workspace of its repository — dropped on one of
-    /// that workspace's rows or on its header — the drag's version of
-    /// `farcooler worktree assign`. Never into Unclaimed, never the main
-    /// checkout, never on a runner without `workstreams`, and never across
-    /// repositories.
-    @Test func aWorktreeDroppedOnAnotherWorkspaceMovesThere() {
-        let billing = Self.summary(Self.billing, "Billing")
-        let main = Self.summary(Self.main, "Main", isMain: true)
-        let lane = Self.worktree("lane", workspace: Self.main)
-        let next = Self.worktree("next", workspace: Self.main)
-        let bill = Self.worktree("bill", workspace: Self.billing)
+    /// Move to Workspace ▸ (`farcooler worktree assign`) offers the other
+    /// workspaces of the worktree's repository, on its runner: never its
+    /// own, never another repository's, never for the main checkout, and
+    /// nothing on a runner that can't assign. Nothing un-assigns, so an
+    /// unclaimed worktree is offered every workspace and Unclaimed is never
+    /// one.
+    @Test func moveToWorkspaceOffersTheRepositorysOtherWorkspaces() {
+        let ops = "0198f2c0-0000-7000-8000-0000000000ef"
+        let lane = Self.worktree("lane", workspace: Self.billing)
         let stray = Self.worktree("stray", workspace: nil)
         var checkout = Self.worktree("checkout", workspace: Self.main)
         checkout.is_main_checkout = true
-        let elsewhere = Self.worktree("elsewhere", workspace: Self.otherMain, repository: Self.repoB)
-        let hidden = Self.worktree("old", workspace: Self.billing, state: "hidden")
         let fleet = Self.fleet(
-            workspaces: [main, billing, Self.summary(Self.otherMain, "Main", isMain: true, repository: Self.repoB)],
-            worktrees: [lane, next, bill, stray, checkout, elsewhere, hidden])
-        func meaning(
-            _ dragged: Worktree, _ target: WorktreeDrag.Target, assigns: Bool = true
-        ) -> ContentView.DropMeaning? {
-            ContentView.dropMeaning(dragged, onto: target, in: fleet, assigns: assigns)
+            workspaces: [
+                Self.summary(Self.main, "Main", isMain: true), Self.summary(Self.billing, "Billing"),
+                Self.summary(ops, "Ops", ordinal: 2),
+                Self.summary(Self.otherMain, "Main", isMain: true, repository: Self.repoB),
+            ],
+            worktrees: [lane, stray, checkout])
+        func targets(_ w: Worktree, assigns: Bool = true) -> [String] {
+            ContentView.moveTargets(for: w, in: fleet, assigns: assigns).map(\.id)
         }
-        #expect(meaning(lane, .worktree("next", .above)) == .reorder)
-        #expect(meaning(lane, .worktree("bill", .below)) == .assign(billing))
-        #expect(meaning(lane, .workspace(Self.billing)) == .assign(billing))
-        #expect(meaning(stray, .worktree("bill", .above)) == .assign(billing), "Unclaimed is claimed")
-        #expect(meaning(stray, .workspace(Self.main)) == .assign(main))
-        #expect(meaning(lane, .workspace(Self.main)) == nil, "already there")
-        #expect(meaning(lane, .worktree("stray", .above)) == nil, "into Unclaimed")
-        #expect(meaning(bill, .worktree("stray", .below)) == nil, "into Unclaimed")
-        #expect(meaning(checkout, .workspace(Self.billing)) == nil, "the main checkout")
-        #expect(meaning(checkout, .worktree("bill", .above)) == nil, "the main checkout")
-        #expect(meaning(checkout, .worktree("lane", .above)) == .reorder, "the checkout still reorders")
-        #expect(meaning(lane, .workspace(Self.billing), assigns: false) == nil, "no workstreams")
-        #expect(meaning(lane, .worktree("bill", .above), assigns: false) == nil, "no workstreams")
-        #expect(meaning(lane, .workspace(Self.otherMain)) == nil, "another repository's")
-        #expect(meaning(lane, .worktree("elsewhere", .above)) == nil, "another repository's")
-        #expect(meaning(lane, .worktree("old", .above)) == nil, "a hidden row")
-        #expect(meaning(hidden, .worktree("bill", .above)) == nil, "a hidden row dragged")
-        #expect(meaning(lane, .worktree("lane", .above)) == nil, "onto itself")
-        let loose = Self.worktree("loose", workspace: nil, repository: Self.repoB)
-        let across = Self.fleet(workspaces: [main], worktrees: [stray, loose])
-        #expect(
-            ContentView.dropMeaning(stray, onto: .worktree("loose", .above), in: across, assigns: true) == nil,
-            "Unclaimed onto another repository's Unclaimed")
-
-        // The seam the hover and the drop share: by id, asking whether that
-        // worktree's runner assigns.
-        var asked: [String] = []
-        let seam = ContentView.dropMeaning(
-            of: "lane", onto: .workspace(Self.billing), in: fleet,
-            assigns: { asked.append($0.id); return true })
-        #expect(seam?.0.id == "lane")
-        #expect(seam?.1 == .assign(billing))
-        #expect(asked == ["lane"])
-        #expect(
-            ContentView.dropMeaning(of: "lane", onto: .workspace(Self.billing), in: fleet, assigns: { _ in false })
-                == nil)
-        #expect(ContentView.dropMeaning(of: "gone", onto: .workspace(Self.billing), in: fleet, assigns: { _ in true }) == nil)
-
+        #expect(targets(lane) == [Self.main, ops])
+        #expect(targets(stray) == [Self.main, Self.billing, ops])
+        #expect(targets(checkout).isEmpty, "the main checkout")
+        #expect(targets(lane, assigns: false).isEmpty, "no workstreams")
         var remote = lane
         remote.host = "remote"
-        #expect(meaning(remote, .workspace(Self.billing)) == nil, "another runner's")
-    }
-
-    /// A row refuses a card it would only ignore — no insertion line, no
-    /// drop — by asking the sidebar's rule while it hovers, and a header
-    /// lights only for a card it would take.
-    @Test func aRowTakesOnlyADropThatMeansSomething() {
-        let drag = WorktreeDrag.shared
-        let before = drag.accepts
-        defer {
-            drag.accepts = before
-            drag.cancel()
-        }
-        drag.accepts = { _, target in target != .workspace("unclaimed") && target != .worktree("stray", .above) }
-
-        drag.begin("lane")
-        drag.hover("stray", .above)
-        #expect(drag.landing == nil, "an insertion line for a drop that does nothing")
-        drag.hover(workspace: "unclaimed")
-        #expect(drag.workspaceLanding == nil)
-        #expect(!drag.drop(on: .worktree("stray", .above)))
-        #expect(drag.completion?.target != .worktree("stray", .above))
-
-        drag.begin("lane")
-        drag.hover(workspace: "billing")
-        #expect(drag.workspaceLanding == "billing")
-        #expect(drag.drop(on: .workspace("billing")))
-        #expect(drag.completion?.target == .workspace("billing"))
-        #expect(drag.workspaceLanding == nil, "the header stayed lit after the drop")
-
-        // A header lit for a card the rule then refuses goes dark.
-        drag.begin("lane")
-        drag.hover(workspace: "billing")
-        #expect(drag.workspaceLanding == "billing")
-        drag.accepts = { _, _ in false }
-        drag.hover(workspace: "billing")
-        #expect(drag.workspaceLanding == nil, "a refused header stayed lit")
-    }
-
-    /// A worktree drag that ended without a drop — released over a row that
-    /// refused it, over nothing, or with Escape — has no end hook to clear
-    /// it. A later, unrelated drag released on a workspace header must not
-    /// move that worktree: a pane drag beginning ends it.
-    @Test func anUnrelatedDropAfterARefusedWorktreeDragAssignsNothing() {
-        let drag = WorktreeDrag.shared
-        let before = drag.accepts
-        defer {
-            drag.accepts = before
-            drag.cancel()
-        }
-        drag.accepts = { _, target in target != .worktree("stray", .above) }
-        let completed = drag.completion
-
-        drag.begin("lane")
-        drag.hover("stray", .above)  // refused, so no drop is ever performed
-        PaneDrag.shared.begin("t7")
-        drag.hover(workspace: "billing")
-        #expect(drag.workspaceLanding == nil, "a pane drag lit a header for a worktree")
-        #expect(!drag.drop(on: .workspace("billing")))
-        #expect(drag.completion == completed, "a stale worktree was dropped")
-
-        // Text dragged in from another app begins no pane drag here. The drop
-        // is read, and its payload isn't the stale worktree's id.
-        drag.begin("lane")
-        drag.hover("stray", .above)
-        #expect(!drag.drop(on: .workspace("billing"), carrying: "some text"))
-        #expect(drag.completion == completed, "a stale worktree was dropped by text from elsewhere")
-        #expect(drag.dragged == nil)
+        #expect(targets(remote).isEmpty, "another runner's")
+        var older = lane
+        older.repositoryID = nil
+        #expect(targets(older).isEmpty, "a CLI too old to say its repository")
     }
 
     // MARK: - An orchestrator's pane in the detail
@@ -1451,12 +1192,6 @@ struct BoardSidebarTests {
         let shell = Self.terminal("shell", preset: "zsh", taskId: nil)
         var checkout = Self.worktree("checkout", workspace: Self.main, terminals: [conductor, shell])
         checkout.is_main_checkout = true
-        let rows = ContentView.sidebarRows(fleet: Self.fleet(
-            workspaces: [
-                Self.summary(Self.main, "Main", isMain: true),
-                Self.summary(Self.billing, "Billing", orchestrator: "conductor"),
-            ],
-            worktrees: [checkout]))
         func pane(_ id: String) -> PaneRect {
             PaneRect(id: id, short: id, title: nil, left: 0, top: 0, columns: 80, rows: 24, focused: true, zoomed: false)
         }
@@ -1469,7 +1204,10 @@ struct BoardSidebarTests {
                 Self.summary(Self.billing, "Billing", orchestrator: "conductor"),
             ],
             worktrees: [checkout])
-        #expect(rows.contains { $0.kind == .workspace("Billing") && $0.orchestrator?.terminal.id == "conductor" })
+        #expect(
+            WorkspaceScreen.orchestrator(
+                of: Self.summary(Self.billing, "Billing", orchestrator: "conductor"), host: "", in: fleet)?.terminal.id
+                == "conductor")
         func shown(_ selection: ContentView.Selection) -> [ShownLayout] {
             WorkspaceScreen.shown(selection, in: fleet, layouts: { _, _ in [shells, own] })
         }
@@ -1491,9 +1229,7 @@ struct BoardSidebarTests {
 
     /// The checkout's layouts and the orchestrator's window, as tmux has them
     /// once the orchestrator was the last thing focused: its window active.
-    private static func checkoutWithAnOrchestrator() -> (
-        checkout: Worktree, rows: [SidebarEntry], layouts: [PaneGroup]
-    ) {
+    private static func checkoutWithAnOrchestrator() -> (checkout: Worktree, layouts: [PaneGroup]) {
         let conductor = Self.orchestrator("conductor", workspace: Self.billing)
         var checkout = Self.worktree(
             "checkout", workspace: Self.main,
@@ -1502,12 +1238,6 @@ struct BoardSidebarTests {
                 Self.terminal("s2", preset: "zsh", taskId: nil), Self.terminal("s3", preset: "zsh", taskId: nil),
             ])
         checkout.is_main_checkout = true
-        let rows = ContentView.sidebarRows(fleet: Self.fleet(
-            workspaces: [
-                Self.summary(Self.main, "Main", isMain: true),
-                Self.summary(Self.billing, "Billing", orchestrator: "conductor"),
-            ],
-            worktrees: [checkout]))
         func pane(_ id: String, left: Int = 0, focused: Bool = false) -> PaneRect {
             PaneRect(
                 id: id, short: id, title: nil, left: left, top: 0, columns: 40, rows: 24,
@@ -1521,7 +1251,7 @@ struct BoardSidebarTests {
             window("@2", active: true, [pane("conductor", focused: true)]),
             window("@3", active: false, [pane("s3", focused: true)]),
         ]
-        return (checkout, rows, layouts)
+        return (checkout, layouts)
     }
 
     /// Selecting the main checkout's row opens on its own layout, never on
@@ -1532,8 +1262,7 @@ struct BoardSidebarTests {
     /// That holds with no row drawn for it too: a fleet read with no
     /// workspaces for the runner still lists the orchestrator's window.
     @Test func theCheckoutsRowNeverOpensOnAnOrchestratorsWindow() {
-        let (checkout, rows, layouts) = Self.checkoutWithAnOrchestrator()
-        #expect(rows.contains { $0.kind == .workspace("Billing") && $0.orchestrator?.terminal.id == "conductor" })
+        let (checkout, layouts) = Self.checkoutWithAnOrchestrator()
         #expect(ContentView.orchestrators(in: checkout) == ["conductor"])
 
         #expect(ContentView.shownLayout(layouts, of: checkout)?.id == "@1", "opened on the orchestrator")
@@ -1558,10 +1287,10 @@ struct BoardSidebarTests {
             layouts: { _, _ in [layouts[0], shared] })
         #expect(moved.first?.groups.map(\.id) == ["@2"])
 
-        // No orchestrator row drawn — no workspaces in the fleet read for
-        // this runner — and its window is still left out.
-        let unseated = ContentView.sidebarRows(fleet: Self.fleet(workspaces: nil, worktrees: [checkout]))
-        #expect(!unseated.contains { $0.orchestrator != nil })
+        // No workspace seats it (no workspaces in the fleet read for this
+        // runner), and its window is still left out.
+        let unseated = Self.fleet(workspaces: nil, worktrees: [checkout])
+        #expect(WorkspaceScreen.seated(in: checkout, fleet: unseated).isEmpty)
         #expect(
             ContentView.shownLayout(layouts, of: checkout)?.id == "@1",
             "opened on the orchestrator with no row drawn for it")
@@ -1578,7 +1307,7 @@ struct BoardSidebarTests {
     /// tmux calls active, and ⌃B n and ⌃B p step through the checkout's own
     /// layouts, never into the orchestrator's.
     @Test func numberKeysStayInTheCheckoutsOwnLayouts() {
-        let (checkout, _, layouts) = Self.checkoutWithAnOrchestrator()
+        let (checkout, layouts) = Self.checkoutWithAnOrchestrator()
         let fleet = Self.fleet(
             workspaces: [
                 Self.summary(Self.main, "Main", isMain: true),
@@ -1598,37 +1327,5 @@ struct BoardSidebarTests {
         #expect(ContentView.layout(stepping: 1, from: "@3", in: own)?.id == "@1")
         #expect(ContentView.layout(stepping: -1, from: "@1", in: own)?.id == "@3")
         #expect(ContentView.layout(stepping: 1, from: "@2", in: [layouts[1]]) == nil)
-    }
-
-    // MARK: - Searching for an orchestrator
-
-    /// Typing an orchestrator's name finds its own row, under its
-    /// workspace, and not the checkout it runs in — which, with the
-    /// orchestrator drawn elsewhere, would be a hit with nothing in it that
-    /// matched. A search for the checkout's own shell still finds the
-    /// checkout, and a search nothing matches leaves the repository out.
-    @Test func searchingForAnOrchestratorFindsItsRow() {
-        var conductor = Self.orchestrator("conductor", workspace: Self.billing)
-        conductor.title = "orchestrator"
-        var shell = Self.terminal("shell", preset: "zsh", taskId: nil)
-        shell.title = "server"
-        var checkout = Self.worktree("checkout", workspace: Self.main, terminals: [conductor, shell])
-        checkout.is_main_checkout = true
-        let fleet = Self.fleet(
-            workspaces: [
-                Self.summary(Self.main, "Main", isMain: true),
-                Self.summary(Self.billing, "Billing", orchestrator: "conductor"),
-            ],
-            worktrees: [checkout, Self.worktree("bill", workspace: Self.billing)])
-
-        let found = ContentView.sidebarRows(fleet: fleet, query: "orchestr")
-        #expect(found.map(\.kind) == [.repository, .workspace("Billing")])
-        #expect(found.last?.orchestrator?.terminal.id == "conductor")
-
-        let server = ContentView.sidebarRows(fleet: fleet, query: "server")
-        #expect(server.map(\.kind) == [.repository, .workspace("Main"), .worktree("checkout")])
-        #expect(server.last?.worktree?.terminals.map(\.id) == ["shell"])
-
-        #expect(ContentView.sidebarRows(fleet: fleet, query: "nothing like it").isEmpty)
     }
 }

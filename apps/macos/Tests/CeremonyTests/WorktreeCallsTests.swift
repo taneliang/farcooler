@@ -134,9 +134,6 @@ struct WorktreeCallsTests {
         }
         await record("hide", ["worktree", "hide", "w1"]) { await $0.hideWorktree("w1") }
         await record("unhide", ["worktree", "unhide", "w1"]) { await $0.unhideWorktree("w1") }
-        await record("reorder", ["worktree", "reorder", "w1", "w2"]) {
-            await $0.reorderWorktrees(["w1", "w2"])
-        }
         await record("remove", ["worktree", "remove", "w1"]) {
             _ = await $0.removeWorktree("w1", confirm: "")
         }
@@ -445,23 +442,6 @@ struct WorktreeCallsTests {
         #expect(
             await refusal("error: no workspace matching \"0198f2c0\"").said
                 == "Couldn’t move “fix it” to Billing. Check that the runner is reachable, then try again.")
-    }
-
-    /// The reorder after a drag moved a worktree says its failure in our
-    /// words: the reorder answers whether the runner took it, and the banner
-    /// is the sentence that says the move held.
-    @Test func aReorderAfterAMoveFailsInItsOwnWords() async {
-        let client = DaemonClient(target: "", notifications: NotificationCenter())
-        let runner = Recorder()
-        client.commandRunnerForTesting = { args -> (data: Data?, message: String?) in
-            if args.prefix(2) == ["worktree", "reorder"] { return (nil, "error: no\ncode: not-found") }
-            return runner.answer(args)
-        }
-        #expect(!(await client.reorderWorktrees(["w1", "w2"])))
-        #expect(await client.reorderWorktrees(["w1"]), "one card has no order to refuse")
-        #expect(
-            DaemonClient.movedButNotPlaced(Self.worktree, to: Self.billing)
-                == "Moved “fix it” to Billing, but couldn’t put it where you dropped it.")
     }
 
     /// The symptom the argv bug had, from the outside: a search that finds

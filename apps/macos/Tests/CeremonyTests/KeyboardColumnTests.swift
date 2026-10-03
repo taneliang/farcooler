@@ -86,22 +86,6 @@ struct KeyboardColumnTests {
         #expect(WorkspaceScreen.shown(workspace, in: fleet, layouts: { _, _ in Self.layouts() }).isEmpty)
     }
 
-    /// A workspace's row stays lit with a task open in it; with one of its
-    /// worktrees open, that worktree's row is lit instead.
-    @Test("A workspace row stays lit with a task open")
-    func aWorkspaceRowStaysLitWithATaskOpen() {
-        // Bound first: inside `#expect`, a bare `.task(…)` doesn't reach
-        // `Focus.task`, and the expectation passed whatever the rule said.
-        let task: ContentView.Focus = .task("t-9")
-        let worktree: ContentView.Focus = .worktree("w", terminal: nil)
-        let lit = ContentView.highlightsWorkspace(nil)
-        let withTask = ContentView.highlightsWorkspace(task)
-        let withWorktree = ContentView.highlightsWorkspace(worktree)
-        #expect(lit)
-        #expect(withTask)
-        #expect(!withWorktree)
-    }
-
     /// ⌥⌘1 and ⌥⌘3 give the keyboard to the pane tmux has focused in that
     /// column, which is the one its view draws focused and hands typed keys
     /// to: in a two-pane layout whose second pane is focused, not the first,

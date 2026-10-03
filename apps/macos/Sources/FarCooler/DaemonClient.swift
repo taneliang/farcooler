@@ -2335,12 +2335,6 @@ final class DaemonClient: ObservableObject {
         return words
     }
 
-    /// The banner for a worktree that moved to `workspace` and then couldn't
-    /// be put where it was dropped: the move held, the place didn't.
-    static func movedButNotPlaced(_ worktree: Worktree, to workspace: WorkspaceSummary) -> String {
-        "Moved “\(WorktreeName.display(worktree.task))” to \(workspace.name), but couldn’t put it where you dropped it."
-    }
-
     /// Why a worktree didn't move to `workspace`, by the `code:` word on the
     /// CLI's stderr. A failure with no word never reached the daemon's
     /// answer — the runner wasn't reachable, or the CLI couldn't find one of
@@ -2363,30 +2357,6 @@ final class DaemonClient: ObservableObject {
         case nil:
             return "Couldn’t move \(name) to \(workspace.name). Check that the runner is reachable, then try again."
         }
-    }
-
-    /// Put these worktrees in this order on the runner, first one first.
-    ///
-    /// The whole visible order rather than "move this one up". The sidebar draws
-    /// one project at a time and leaves hidden worktrees out, so an index means
-    /// nothing without saying what it is an index among — the runner permutes
-    /// exactly the cards it is named among the ranks they already hold and
-    /// leaves everything else where it was.
-    ///
-    /// Followed by a refresh, like every other mutation here. The local list is
-    /// never rearranged optimistically: the runner is the one that decides, and
-    /// a card that moved on screen and not on disk is the failure this whole
-    /// feature exists to remove.
-    ///
-    /// True once the runner has taken it, for a caller that says a failure
-    /// in its own words — the reorder after a drag moved a worktree to a
-    /// workspace.
-    @discardableResult
-    func reorderWorktrees(_ worktrees: [String]) async -> Bool {
-        guard worktrees.count > 1 else { return true }
-        let placed = await run(["worktree", "reorder"] + worktrees) != nil
-        await refresh()
-        return placed
     }
 
     /// What asking the daemon to remove a worktree came back with.

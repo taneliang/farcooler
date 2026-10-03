@@ -19,8 +19,8 @@ struct WorkspaceStyleAppearanceTests {
     func surfacesFollowTheAppearance() {
         // Read ONCE, as a view body does, then resolved under each appearance.
         let surfaces: [(String, NSColor)] = [
-            ("canvas", WorkspaceStyle.canvasNS), ("sidebar", WorkspaceStyle.sidebarNS),
-            ("document", WorkspaceStyle.documentNS), ("paneChrome", WorkspaceStyle.paneChromeNS),
+            ("canvas", WorkspaceStyle.canvasNS), ("document", WorkspaceStyle.documentNS),
+            ("paneChrome", WorkspaceStyle.paneChromeNS),
         ]
         for (name, color) in surfaces {
             let light = brightness(color, .aqua)

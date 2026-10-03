@@ -16,13 +16,6 @@ struct ContentView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.markReadConfirmation) private var markReadConfirmation
     @State private var selection: Selection?
-    @State private var expanded: Set<String> = []
-    /// Which projects have their hidden worktrees showing. Collapsed is the
-    /// point of hiding, so absence means collapsed.
-    @State private var hiddenExpanded: Set<String> = []
-    /// Which repositories have their Unclaimed group open, by
-    /// `SidebarEntry.group`. Collapsed by default: absence means collapsed.
-    @State private var unclaimedExpanded: Set<String> = []
 
     /// What a `+` meant, carried whole from the control that was clicked to
     /// the sheet it opens — or nil when no sheet is up.
@@ -77,7 +70,6 @@ struct ContentView: View {
     @State private var showAddRepository = false
     @State private var showAdd = false
     @State private var showShortcuts = false
-    @State private var query = ""
     @State private var showQuickCreate = false
     /// The ⌘N panel's start in flight, kept here so it survives the panel
     /// closing and reopening.
@@ -95,7 +87,6 @@ struct ContentView: View {
     /// Whether the launch rule has chosen where the window opens. See
     /// `settleLaunch`.
     @State private var launched = false
-    @FocusState private var searchFocused: Bool
     /// Bumped by ⌘F in a workspace: its navigator's filter takes the
     /// keyboard (ov-103).
     @State private var boardFilterRequest = 0
@@ -173,8 +164,6 @@ struct ContentView: View {
     /// The task whose changes the keyboard is in: the Diff menu's
     /// shortcuts are for the diff you clicked into.
     @State private var changesFocus: String?
-    /// Whether the one-time workspaces tip is up. See `WorkspacesTip`.
-    @State private var showWorkspacesTip = WorkspacesTip.shouldShow()
     /// The key monitor that turns Esc into Back. See `EscapeBack`.
     @State private var escapeMonitor: Any?
     /// ⌥⌘2 gave the board the keyboard: no terminal takes typed keys until
@@ -192,9 +181,6 @@ struct ContentView: View {
         let name: String
         var id: String { name }
     }
-    /// Which workspaces are open in the sidebar, their worktrees listed, as
-    /// `SidebarEntry.openKey`s, one a line. Empty by default (spec §9).
-    @AppStorage("sidebar.openWorktrees") private var openWorktrees = ""
     /// Whether this window's navigator is put away (⌘B, ov-178): as the
     /// last window left it, and out the first time. See
     /// `NavigatorVisibility`.
@@ -817,67 +803,7 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Sidebar
-
-    /// The sidebar's rows: worktrees matching the search, under their
-    /// repository and workspace, on every runner. See
-    /// `ContentView.sidebarRows(fleet:query:silentHosts:)`.
-    ///
-    /// Hidden worktrees are separated rather than filtered out: they still
-    /// belong to the project, and a collapsed section at the bottom is how you
-    /// get back to one.
-    ///
-    /// Each row has a stable `id`, not its position: `ForEach` used to key
-    /// this list by `.offset`, so inserting a group renumbered every header
-    /// after it and any transient `@State` (row hovering) followed the index
-    /// instead of following the row it belonged to.
-    private var sidebarEntries: [SidebarEntry] {
-        Self.sidebarRows(fleet: store.fleet, query: query, silentHosts: silentHosts, open: isOpen)
-    }
-
-    /// Whether a workspace's row is open: as it was left
-    /// (`sidebar.openWorktrees`), or because the selection is inside it.
-    private func isOpen(_ key: String) -> Bool {
-        if openWorktreesSet.contains(key) { return true }
-        guard case .workspace(let host, let id, .worktree?)? = selection else { return false }
-        return key == SidebarEntry.openKey(host: host, workspace: id)
-    }
-
-    private var openWorktreesSet: Set<String> {
-        Set(openWorktrees.split(separator: "\n").map(String.init))
-    }
-
-    private func toggleWorktrees(_ key: String) {
-        var set = openWorktreesSet
-        if set.contains(key) { set.remove(key) } else { set.insert(key) }
-        openWorktrees = set.sorted().joined(separator: "\n")
-    }
-
-    /// New Worktree… from a workspace row's menu: in the workspace first,
-    /// so the sheet claims what it makes for it
-    /// (`claim(newWorktreeIn:…)`).
-    private func newWorktreeAction(for entry: SidebarEntry) -> () -> Void {
-        let host = entry.host
-        let project = entry.project
-        let workspace = entry.workspace?.id
-        return {
-            if let workspace { selection = .workspace(host: host, workspace: workspace, focus: nil) }
-            newWorktree(host: host, project: project)
-        }
-    }
-
-    /// Whether a workspace's row is lit for what's open in it: with nothing
-    /// or a task open, yes; with a worktree open, that worktree's row under
-    /// it is.
-    nonisolated static func highlightsWorkspace(_ focus: Focus?) -> Bool {
-        if case .worktree? = focus { return false }
-        return true
-    }
-
-    /// Show Board: the workspace, with its board on screen.
-    private func showBoard(host: String, workspace: String) {
-        selection = .workspace(host: host, workspace: workspace, focus: nil)
-    }
+    // MARK: - Workspaces and repositories
 
     /// Repositories New Workspace… can make one in: on runners with
     /// workspaces.
@@ -885,13 +811,16 @@ struct ContentView: View {
         store.repositories.filter { store.fleet.runnerWorkspaces[$0.host] != nil }
     }
 
-    /// Every workspace in the sidebar, for the palette.
+    /// Every workspace, for the palette, in the switcher's order
+    /// (`WorkspaceDirectory`).
     private var paletteWorkspaces: [PaletteWorkspace] {
-        Self.sidebarRows(fleet: store.fleet).compactMap { row in
-            guard case .workspace(let name) = row.kind, let workspace = row.workspace else { return nil }
-            return PaletteWorkspace(
-                host: row.host, id: workspace.id, name: name, repository: row.project,
-                hasOrchestrator: row.orchestrator != nil)
+        WorkspaceDirectory.groups(in: store.fleet).flatMap { group in
+            group.workspaces.map { workspace in
+                PaletteWorkspace(
+                    host: group.host, id: workspace.id, name: workspace.isImplicit ? "Main" : workspace.name,
+                    repository: group.project,
+                    hasOrchestrator: WorkspaceScreen.orchestrator(of: workspace, host: group.host, in: store.fleet) != nil)
+            }
         }
     }
 
@@ -908,7 +837,8 @@ struct ContentView: View {
         }
     }
 
-    /// A project header's repository, on its way to `RemoveRepositorySheet`.
+    /// A repository the switcher's Remove Repository… named, on its way to
+    /// `RemoveRepositorySheet`.
     /// `.sheet(item:)` needs `Identifiable`; a bare tuple is not one.
     private struct RepositoryToRemove: Identifiable {
         let host: String
@@ -919,22 +849,7 @@ struct ContentView: View {
     /// Whether to name runners at all.
     private var showHosts: Bool { store.hosts.count > 1 }
 
-    /// Runners with nothing to show yet still get a header.
-    ///
-    /// A runner that has never connected has no rows, and without this it
-    /// would simply be missing — leaving you to wonder where it went rather
-    /// than seeing that it needs attention.
-    ///
-    /// The local runner is excluded: it already has a dedicated placeholder
-    /// (`fleetPlaceholder`, below) that reads its loading/error state in more
-    /// detail than a bare header could say. Only a REMOTE runner that has
-    /// contributed nothing gets one of these instead.
-    private var silentHosts: [String] {
-        let present = Set(store.fleet.worktrees.map { $0.host ?? "" })
-        return store.hosts.filter { !present.contains($0) && !$0.isEmpty }
-    }
-
-    /// One runner's daemon, as something the sidebar can offer to replace —
+    /// One runner's daemon, as something the runner item can offer to replace —
     /// or nil, which is the ordinary case and the quiet one.
     ///
     /// This is the only place that pairs a host with the client that can act
@@ -1003,48 +918,15 @@ struct ContentView: View {
         }
     }
 
-    /// A plain, non-optional entry point into `newMainTerminal(host:repositoryID:project:)`.
-    ///
-    /// `ProjectHeader.onNewTerminal` is optional — nil for a silent host's
-    /// placeholder — and a ternary handing back `Task { await ... }` directly
-    /// for the non-nil branch leaves the compiler unable to settle on which
-    /// `Task.init` overload the closure means, reported as an unhelpful
-    /// "ambiguous use of 'init(name:priority:operation:)'" with no line
-    /// pointing at the ternary itself. A named function sidesteps it.
+    /// A plain, non-optional entry point into `newMainTerminal(host:repositoryID:project:)`,
+    /// for the switcher's New Terminal in Checkout.
     private func startMainTerminal(host: String, repositoryID: String?, project: String) {
         Task { await newMainTerminal(host: host, repositoryID: repositoryID, project: project) }
     }
 
-    /// A drop that landed: what it means, then tell the runner.
-    ///
-    /// Here rather than in the row because only this level can see a whole
-    /// project group. See `dropMeaning` for which drops mean what; one it
-    /// has no meaning for never got this far, because the row asked it
-    /// while hovering (`WorktreeDrag.accepts`), and is ignored here too.
-    private func landed(_ done: WorktreeDrag.Completion) {
-        guard
-            let (dragged, meaning) = Self.dropMeaning(
-                of: done.dragged, onto: done.target, in: store.fleet, assigns: Self.assigns(store))
-        else { return }
-        switch meaning {
-        case .reorder:
-            if case .worktree(let target, let edge) = done.target { reorder(done.dragged, to: target, edge) }
-        case .assign(let workspace):
-            move(dragged, to: workspace) {
-                // Dropped between two of that workspace's rows: there, too.
-                // A failure now is said in our words: the move itself held.
-                if case .worktree(let target, let edge) = done.target {
-                    reorder(
-                        done.dragged, to: target, edge,
-                        failure: DaemonClient.movedButNotPlaced(dragged, to: workspace))
-                }
-            }
-        }
-    }
-
     /// Move a worktree to another workspace (`farcooler worktree assign`):
-    /// a drop on a workspace row, or Move to Workspace ▸.
-    private func move(_ worktree: Worktree, to workspace: WorkspaceSummary, then: @escaping () -> Void = {}) {
+    /// Move to Workspace ▸.
+    private func move(_ worktree: Worktree, to workspace: WorkspaceSummary) {
         Task {
             // Refused first, as every write here is; see `act(on:_:)`.
             if let why = store.refusal(for: worktree) {
@@ -1054,176 +936,8 @@ struct ContentView: View {
             guard let client = store.client(for: worktree) else { return }
             // Nothing moves on screen until the runner says it has: a
             // refused move leaves the row where it was, with the sentence.
-            if let refused = await client.assignWorktree(worktree, to: workspace) {
-                errorBanner = refused
-                return
-            }
-            then()
+            if let refused = await client.assignWorktree(worktree, to: workspace) { errorBanner = refused }
         }
-    }
-
-    /// Put `dragged` on `edge` of `target` and tell the runner.
-    ///
-    /// The runner is sent the group's WHOLE order, not "move this one" — see
-    /// `WorktreeReorder` in the proto for why an index alone would be
-    /// meaningless against a list this has already filtered. The order is the
-    /// repository's, which each workspace's rows keep, so a drop within a
-    /// workspace lands where it was dropped — and so does one that moved the
-    /// worktree to that workspace first. Every card in a group is on one
-    /// runner and in one project, which is what makes a single call to a
-    /// single client the whole of it.
-    ///
-    /// `failure`, when given, is the banner for a reorder the runner
-    /// refuses, in place of the CLI's own words.
-    private func reorder(
-        _ dragged: String, to target: String, _ edge: WorktreeOrder.Edge, failure: String? = nil
-    ) {
-        guard
-            let group = sidebarEntries.first(where: { g in
-                g.kind == .repository && g.worktrees.contains { $0.id == dragged }
-            })
-        else { return }
-        let shown = group.worktrees
-        guard shown.contains(where: { $0.id == target }) else { return }
-        let ids = shown.map(\.id)
-        let next = WorktreeOrder.moved(ids, dragging: dragged, to: target, edge)
-        // A drop that changes nothing costs no round trip. It is not free: a
-        // reorder makes every other connected client re-read the fleet.
-        guard next != ids, let anchor = shown.first else { return }
-        let order = next.compactMap { id in shown.first { $0.id == id }?.short }
-        guard let failure else {
-            Task { await act(on: anchor) { client in await client.reorderWorktrees(order) } }
-            return
-        }
-        Task {
-            if let why = store.refusal(for: anchor) {
-                errorBanner = "Cannot do that: \(why)"
-                return
-            }
-            guard let client = store.client(for: anchor) else { return }
-            if !(await client.reorderWorktrees(order)) { errorBanner = failure }
-        }
-    }
-
-    /// What dropping a worktree's row means.
-    enum DropMeaning: Equatable {
-        /// Put it between two rows of its own workspace, or of Unclaimed.
-        case reorder
-        /// Give it to this workspace (`farcooler worktree assign`).
-        case assign(WorkspaceSummary)
-    }
-
-    /// What dropping `dragged` on `target` does, or nil for nothing — and a
-    /// drop that would do nothing is refused while hovering, so it draws no
-    /// insertion line.
-    ///
-    /// - On a row in its own workspace, or Unclaimed onto Unclaimed: a
-    ///   reorder, as before.
-    /// - On a row in another workspace of its repository, or on that
-    ///   workspace's header: it moves there, the drag's version of `farcooler
-    ///   worktree assign`. Only on a runner with `workstreams` (`assigns`),
-    ///   which is the one that has the command.
-    /// - Never into Unclaimed: nothing un-assigns a worktree, and the drop
-    ///   has no command to send.
-    /// - Never the main checkout: it is the repository's own directory, where
-    ///   every workspace's orchestrator runs, not one workspace's worktree.
-    /// - Never across repositories or runners — Unclaimed onto Unclaimed
-    ///   included, which `sameSidebarPlace` alone would call one place.
-    /// - Never a hidden row or onto one, nor a row onto itself. Neither can
-    ///   happen from the sidebar today — hidden rows are no drag source or
-    ///   target, and `WorktreeDrag.allows` refuses a row's own — so these
-    ///   hold the rule to what it says rather than guard a live path.
-    ///
-    /// Asked twice, from one place: by the rows while a card hovers
-    /// (`WorktreeDrag.accepts`) and by `landed` before anything is written,
-    /// both through `dropMeaning(of:onto:in:assigns:)`.
-    static func dropMeaning(
-        _ dragged: Worktree, onto target: WorktreeDrag.Target, in fleet: Fleet, assigns: Bool
-    ) -> DropMeaning? {
-        let host = dragged.host ?? ""
-        let listed = fleet.runnerWorkspaces[host] ?? []
-        func workspace(_ id: String?) -> WorkspaceSummary? {
-            guard let id, let repository = dragged.repositoryID else { return nil }
-            return listed.first { $0.id == id && $0.repository == repository }
-        }
-        func assign(_ to: WorkspaceSummary?) -> DropMeaning? {
-            guard assigns, !dragged.isMainCheckout, let to, dragged.workspace != to.id else { return nil }
-            return .assign(to)
-        }
-        switch target {
-        case .workspace(let id):
-            return assign(workspace(id))
-        case .worktree(let id, _):
-            guard
-                let onto = fleet.worktrees.first(where: { ($0.host ?? "") == host && $0.id == id }),
-                onto.id != dragged.id, !onto.isHidden, !dragged.isHidden,
-                (onto.repositoryID ?? onto.repository) == (dragged.repositoryID ?? dragged.repository)
-            else { return nil }
-            if sameSidebarPlace(dragged, onto, in: fleet) { return .reorder }
-            return assign(workspace(onto.workspace))
-        }
-    }
-
-    /// `dropMeaning` for a dragged worktree's id, with the worktree it is:
-    /// the one seam the hover and the drop both go through, so the two can't
-    /// come to disagree. `assigns` says whether a worktree's runner has
-    /// `workstreams`; see `assigns(_:)`. Nil for an id the fleet doesn't
-    /// have.
-    static func dropMeaning(
-        of dragged: String, onto target: WorktreeDrag.Target, in fleet: Fleet,
-        assigns: (Worktree) -> Bool
-    ) -> (Worktree, DropMeaning)? {
-        guard let moving = fleet.worktrees.first(where: { $0.id == dragged }),
-            let meaning = dropMeaning(moving, onto: target, in: fleet, assigns: assigns(moving))
-        else { return nil }
-        return (moving, meaning)
-    }
-
-    /// Whether a worktree's runner can take `worktree assign`, as `store`
-    /// knows it at the moment of asking.
-    static func assigns(_ store: FleetStore) -> (Worktree) -> Bool {
-        { store.client(for: $0)?.daemonBuild?.can("workstreams") ?? false }
-    }
-
-    /// Whether two worktrees are drawn under the same workspace, or both in
-    /// Unclaimed: the rows a drag may reorder between.
-    static func sameSidebarPlace(_ a: Worktree, _ b: Worktree, in fleet: Fleet) -> Bool {
-        let listed = Set((fleet.runnerWorkspaces[a.host ?? ""] ?? []).map(\.id))
-        func place(_ w: Worktree) -> String? { w.workspace.flatMap { listed.contains($0) ? $0 : nil } }
-        return place(a) == place(b)
-    }
-
-    /// A workspace header's menu: its board, its orchestrator, its charter.
-    private func workspaceActions(_ entry: SidebarEntry) -> WorkspaceHeaderActions? {
-        guard let workspace = entry.workspace, !workspace.isImplicit else { return nil }
-        let host = entry.host
-        return WorkspaceHeaderActions(
-            // The board's own gate: a runner without `tasks` has none.
-            hasBoard: store.clients[host]?.daemonBuild.map { $0.can("tasks") } ?? true,
-            hasOrchestrator: entry.orchestrator != nil,
-            charter: CharterAccess.of(workspace, host: host),
-            onShowBoard: { showBoard(host: host, workspace: workspace.id) },
-            onStart: { harness, replace in
-                switch OrchestratorRequest(harness: harness, replace: replace) {
-                case .confirmReplace(let harness):
-                    orchestratorReplacement = OrchestratorReplacement(
-                        host: host, workspace: workspace, harness: harness)
-                case .start(let harness):
-                    startOrchestrator(workspace, host: host, harness: harness, replace: false)
-                }
-            },
-            onShowCharter: { url in
-                if !NSWorkspace.shared.open(url) {
-                    errorBanner = "Couldn’t open \(workspace.name)’s charter. It may have been moved or deleted."
-                }
-            },
-            wakeOnAnswer: workspace.wakeOnAnswer,
-            onSetWakeOnAnswer: { on in
-                guard let client = store.clients[host] else { return }
-                Task {
-                    if let refused = await client.setWakeOnAnswer(workspace, on: on) { errorBanner = refused }
-                }
-            })
     }
 
     /// Start `workspace`'s orchestrator, or replace the one running. The row
@@ -1275,594 +989,16 @@ struct ContentView: View {
             errorBanner = "That agent has closed, and its worktree is gone."
             return
         }
-        expanded.insert(pane.worktree.id)
         selection = landed
-    }
-
-    /// One row of the sidebar, drawn from its entry.
-    ///
-    /// Lifted out of `sidebar` when projects became collapsible: the rows had to
-    /// go behind an `if`, and wrapping fifty lines of view builder in one would
-    /// have re-indented the whole block to say one thing. A builder method is
-    /// what this file already does for the detail side — see `tiled(_:group:)`.
-    @ViewBuilder
-    private func sidebarRow(_ entry: SidebarEntry) -> some View {
-        // Everything under a repository's header is what a collapsed one
-        // hides. Coming and going as a disclosure opens and closes, on the
-        // shared spring (ov-101): the rows under a header are its siblings
-        // here, not its children.
-        if !folded(entry) {
-            // One column in per level: see `SidebarEntry.depth`.
-            sidebarRowContent(entry)
-                .sidebarDepth(entry.depth)
-                .transition(BoardMotion.rowTransition(reduceMotion: reduceMotion))
-        }
-    }
-
-    /// Whether `entry` is under a collapsed repository's header.
-    private func folded(_ entry: SidebarEntry) -> Bool {
-        if case .repository = entry.kind { return false }
-        return preferences.isProjectCollapsed(entry.collapseKey)
-    }
-
-    @ViewBuilder
-    private func sidebarRowContent(_ entry: SidebarEntry) -> some View {
-        let key = entry.collapseKey
-        let usable = store.refusal(for: entry.host) == nil
-        switch entry.kind {
-        case .repository:
-            projectHeader(entry)
-        case .workspace(let name):
-            if let workspace = entry.workspace {
-                WorkspaceRow(
-                    name: name, workspace: workspace.id, taskPrefix: workspace.taskPrefix,
-                    seat: entry.orchestrator, implicit: workspace.isImplicit,
-                    count: WorkspaceCounts.count(for: workspace, host: entry.host, in: store.needsYou),
-                    unread: ConversationColumn.unread(entry.orchestrator),
-                    isSelected: selection?.host == entry.host && selection?.workspace == workspace.id
-                        && Self.highlightsWorkspace(selection?.focus),
-                    onSelect: { selection = .workspace(host: entry.host, workspace: workspace.id, focus: nil) },
-                    actions: usable ? workspaceActions(entry) : nil,
-                    isOpen: isOpen(SidebarEntry.openKey(host: entry.host, workspace: workspace.id)),
-                    onToggle: { toggleWorktrees(SidebarEntry.openKey(host: entry.host, workspace: workspace.id)) },
-                    onNewWorktree: usable ? newWorktreeAction(for: entry) : nil)
-            }
-        case .worktree:
-            if let worktree = entry.worktree { worktreeRow(worktree, usable: usable) }
-        case .noWorktrees:
-            NoWorktreesRow()
-        case .unclaimed:
-            UnclaimedWorktrees(
-                worktrees: entry.worktrees,
-                // Open while the selection is inside it, too: a worktree
-                // chosen from the palette or the attention cycle has to be
-                // somewhere you can see.
-                isExpanded: unclaimedExpanded.contains(entry.group)
-                    || entry.worktrees.contains { $0.id == currentWorktree?.id },
-                onToggle: {
-                    if unclaimedExpanded.contains(entry.group) {
-                        unclaimedExpanded.remove(entry.group)
-                    } else {
-                        unclaimedExpanded.insert(entry.group)
-                    }
-                },
-                // One step in from the group's header, as a workspace's
-                // worktrees are from its row.
-                row: { worktree in
-                    worktreeRow(worktree, usable: usable).sidebarDepth(1)
-                })
-        case .hidden:
-            HiddenWorktrees(
-                project: key,
-                worktrees: entry.worktrees,
-                isExpanded: hiddenExpanded.contains(key),
-                onToggle: {
-                    if hiddenExpanded.contains(key) {
-                        hiddenExpanded.remove(key)
-                    } else {
-                        hiddenExpanded.insert(key)
-                    }
-                },
-                onUnhide: { ws in
-                    Task { await act(on: ws) { c in await c.unhideWorktree(ws.short) } }
-                }
-            )
-        }
-    }
-
-    /// A repository's header — or a silent runner's, which names the runner.
-    private func projectHeader(_ group: SidebarEntry) -> some View {
-        let key = group.collapseKey
-        // A silent host's placeholder has no project of its own to name or add
-        // into — the header names the runner instead, and there is nothing yet
-        // to route a `+` to.
-        let isSilentHost = group.project.isEmpty
-        return ProjectHeader(
-            name: isSilentHost ? (group.host.isEmpty ? "This Mac" : group.host) : group.project,
-            count: group.worktrees.count,
-            onNewWorktree: isSilentHost
-                ? nil : { newWorktree(host: group.host, project: group.project) },
-            onNewTerminal: isSilentHost
-                ? nil
-                : {
-                    startMainTerminal(
-                        host: group.host, repositoryID: group.repositoryID, project: group.project)
-                },
-            onRemove: isSilentHost
-                ? nil
-                : {
-                    guard
-                        let repo = repository(
-                            host: group.host, id: group.repositoryID, project: group.project)
-                    else { return }
-                    removeRepository = RepositoryToRemove(host: group.host, repository: repo)
-                },
-            host: group.host,
-            hostState: store.state(of: group.host),
-            daemonUpdate: daemonUpdate(for: group.host),
-            showHost: isSilentHost ? false : showHosts,
-            onReconnect: { store.reconnect(group.host) },
-            isCollapsed: preferences.isProjectCollapsed(key),
-            // A silent host's header has no worktrees under it, so there is
-            // nothing for a chevron to do.
-            onToggleCollapse: isSilentHost ? nil : { preferences.toggleProject(key) }
-        )
-    }
-
-    private var sidebar: some View {
-        VStack(spacing: 0) {
-            sidebarHeader
-            searchField
-
-            // Gated on the rows, not the raw merged worktree count: a
-            // runner that has never connected contributes no worktrees but
-            // still gets a `silentHosts` header in them (unless it's the
-            // local runner, which has its own placeholder below). Gating on
-            // `worktrees.isEmpty` instead used to short-circuit straight to
-            // the LOCAL runner's empty state whenever the merged fleet had
-            // no rows — even with a remote runner configured and its header
-            // sitting right below — making that remote runner vanish from
-            // the sidebar entirely rather than showing as unreachable.
-            // `query.isEmpty` keeps this from swallowing a plain "no search
-            // results" into the same screen.
-            let entries = sidebarEntries
-            if entries.isEmpty && query.isEmpty {
-                fleetPlaceholder
-                Spacer(minLength: 0)
-            } else if entries.isEmpty {
-                ContentUnavailableView.search(text: query)
-                    .padding(.vertical, 32)
-                Spacer(minLength: 0)
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        NeedsYouRow(
-                            count: store.needsYou.count, isSelected: selection == .needsYou,
-                            onSelect: { selection = .needsYou })
-                            .padding(.bottom, ColumnGrid.rhythm)
-                        ForEach(entries) { entry in sidebarRow(entry) }
-                    }
-                    .padding(.bottom, 10)
-                }
-            }
-
-            statusBar
-        }
-        .background(WorkspaceStyle.sidebar)
-        // Once, on the first launch after workspaces became places.
-        .overlay(alignment: .bottom) {
-            if showWorkspacesTip {
-                WorkspacesTipView {
-                    WorkspacesTip.dismiss()
-                    showWorkspacesTip = false
-                }
-                .padding(.bottom, 28)
-                .transition(.opacity)
-            }
-        }
-        // A finished drag, published by the row that took the drop. The row
-        // says only that a card landed on another card's top or bottom edge;
-        // what that MEANS needs the whole project group, which is here.
-        .onReceive(WorktreeDrag.shared.$completion.compactMap { $0 }) { landed($0) }
-        // The rule a row asks while a card hovers over it. Reads the store
-        // it was handed, which is a reference, so it answers from the fleet
-        // as it is at the moment of asking, not as it was here.
-        .onAppear {
-            let store = store
-            WorktreeDrag.shared.accepts = { dragged, target in
-                Self.dropMeaning(of: dragged, onto: target, in: store.fleet, assigns: Self.assigns(store)) != nil
-            }
-            WorktreeDrag.shared.endStaleDragsOnMouseDown()
-        }
-        // Declared in exactly one place. A second declaration on the
-        // `NavigationSplitView`'s sidebar closure made which width the column
-        // settled on nondeterministic, and the window drifted with it.
-        .navigationSplitViewColumnWidth(min: 220, ideal: 248, max: 360)
-    }
-
-    /// Search, because worktrees are unbounded. See `SidebarSearchRow`.
-    private var searchField: some View {
-        SidebarSearchRow(query: $query, focused: $searchFocused)
-    }
-
-    private var sidebarHeader: some View {
-        SidebarTitleRow(busy: store.clients.values.contains(where: \.busy)) {
-            // A menu rather than a button, because "add a repository" has to be
-            // reachable at all times. It used to live only in the empty state,
-            // so once you had one worktree there was no way to add a second
-            // repository without dropping to the terminal.
-            SidebarMenuButton(
-                systemImage: "plus",
-                help: "Add a worktree, a workspace, a repository, or a runner",
-                items: [
-                    SidebarMenuItem(title: "New Worktree…") {
-                        newWorktreeIntent = NewWorktreeIntent()
-                    },
-                ]
-                // The workspace, which was only in the palette (ov-81 P15).
-                + (workspaceRepositories.isEmpty
-                    ? []
-                    : [SidebarMenuItem(title: "New Workspace…") {
-                        newWorkspaceName = NewWorkspaceName(name: "")
-                    }])
-                + [
-                    SidebarMenuItem(title: "Add Repository…") { showAddRepository = true },
-                    // Here as well as in the picker, because this is the menu
-                    // people open looking for "add a thing" — and a runner is
-                    // a thing you add.
-                    // Straight to the thing, rather than to the tab that
-                    // contains a field that does it. This opened Settings on
-                    // the Runners tab and left you to find the text field at
-                    // the bottom of a list of existing runners — and it offered
-                    // only the typing road, when the shorter one is to scan a
-                    // code from a device that already knows the address, the
-                    // user, the port and the host key.
-                    SidebarMenuItem(title: "Add Device or Runner…") { showAdd = true },
-                ])
-        }
-    }
-
-    /// Shown only once a fleet has actually been read.
-    ///
-    /// Telling someone they have no worktrees when the truth is that we could
-    /// not read them is worse than saying nothing, because it sends them to
-    /// create one they already have.
-    ///
-    /// Reads the LOCAL runner's own load state, not a merged one across every
-    /// configured runner: this Mac is always present (`FleetStore.hosts` puts
-    /// it first), and it is the one runner whose failure to answer is worth a
-    /// dedicated screen here rather than a row in the sidebar saying so — which
-    /// is what an unreachable REMOTE runner gets instead, so its own trouble
-    /// does not blank out a sidebar the local runner is perfectly able to show.
-    @ViewBuilder
-    private var fleetPlaceholder: some View {
-        let local = store.clients[""]
-        if local?.hasLoaded == true {
-            emptyFleet
-        } else if let error = local?.lastError {
-            VStack(spacing: 10) {
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 26))
-                    .foregroundStyle(.orange)
-                Text("Couldn’t Read the Fleet").font(.callout.weight(.medium))
-                // The heading, then a sentence, then the box — the shape
-                // `ChangesPane` settled on for this exact string, and the
-                // wording it uses, because it is the same event: the command
-                // that reads something came back non-zero.
-                //
-                // `lastError` is `farcooler`'s stderr. It used to be this
-                // caption, centered under a heading the app wrote, in the
-                // app's own face — so ssh's words read as Far Cooler's
-                // account of the runner. Nothing is dropped moving it: when
-                // this Mac's own daemon will not answer, those words are the
-                // only diagnosis anyone has. No cause is named above them
-                // either, because from here it is unknowable and a guess
-                // sends somebody to fix the wrong thing — see
-                // `Enrollment.note(about:outcome:)`.
-                Text("The command that reads it didn’t finish.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                DetailBox(text: error)
-                    .frame(maxWidth: 420)
-                Button("Try Again") {
-                    Task { await local?.refresh() }
-                }
-                .padding(.top, 4)
-            }
-            .padding(.horizontal, 26)
-            .padding(.vertical, 34)
-        } else {
-            ProgressView()
-                .controlSize(.small)
-                .padding(.vertical, 40)
-        }
-    }
-
-    private var emptyFleet: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "rectangle.stack")
-                .font(.system(size: 26))
-                .foregroundStyle(.tertiary)
-            Text("No worktrees").font(.callout.weight(.medium))
-            Text("A worktree is a directory and branch of its own.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-
-            if store.repositories.isEmpty {
-                Text("Add a repository to get started.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .multilineTextAlignment(.center)
-                Button("Add Repository…") { showAddRepository = true }.padding(.top, 4)
-            } else {
-                Button("New Worktree…") {
-                    newWorktreeIntent = NewWorktreeIntent()
-                }.padding(.top, 4)
-            }
-        }
-        .padding(.horizontal, 26)
-        .padding(.vertical, 34)
-    }
-
-    /// Whether the daemon starts at login.
-    ///
-    /// Lives in Settings now. It is a preference you set once, not a status you
-    /// watch, and a permanent control in the status bar made a piece of
-    /// configuration look like live information.
-    @ViewBuilder
-
-    private var statusBar: some View {
-        VStack(spacing: 0) {
-            Divider()
-            HStack(spacing: 7) {
-                // Red, not amber, when the runtime is down. Amber means one
-                // thing in this app and in both phones — an agent is waiting
-                // on you — and nobody is waiting here: tmux is the runtime
-                // every pane on every runner lives inside, and a fleet that
-                // cannot reach it cannot show you a single one of them. That
-                // is a failure rather than a request. iOS settled this in
-                // `7e4a4f7` and Android followed in `8481657`, which left this
-                // dot as the last place the three apps disagreed about it.
-                //
-                // Neutral, not green, when it is healthy — the other half of
-                // the same line, and `8741757` recorded it here rather than
-                // changing it inside an amber sweep. Three arguments, and they
-                // agree. Green in this palette is `Status.done` and nothing
-                // else: `StatusGlyph` says so outright, `150eb0f` took it back
-                // off `WorktreeDot`, and a permanent green at the foot of the
-                // window is the one place a person looks for finished agents.
-                // `HostDot` states the principle a few hundred lines away —
-                // "a dot that is always there is a dot nobody reads, and the
-                // whole point is that you notice it only when something is
-                // wrong" — and draws `EmptyView()` for `.connected` on that
-                // reasoning; this dot cannot vanish, because it is the mark the
-                // "tmux unavailable" sentence needs, so neutral is the same
-                // argument at the only volume available. And both phones
-                // already moved: iOS in `8481657`, Android's `Dns` tint to
-                // `onSurfaceVariant`, so the Mac was again the last surface out
-                // of step on a line whose other half it had just fixed.
-                //
-                // The audit that prompted this had it backwards, which is worth
-                // recording because it is the second time: item 5 reads "iOS
-                // draws a green dot for a healthy connection where the other
-                // two draw nothing — Keep the Mac's." The Mac drew green too,
-                // and had drawn it longer. Same shape as `150eb0f`, where the
-                // Mac was credited with avoiding the exact bug it had.
-                //
-                // "N live" beside it already says the fleet is alive, and the
-                // per-runner dots to the right still name anyone who isn't.
-                //
-                // Red only for `runtimeDown`. With no runner connected the bar
-                // says so in neutral words rather than "tmux unavailable" in
-                // red: a runner between reconnection attempts is not known to
-                // have lost anything. See `FleetStore.Reading`.
-                Circle()
-                    .fill(store.reading.isTrouble ? Color.red : Color.secondary)
-                    .frame(width: 7, height: 7)
-                Text(store.reading.sentence)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                // The dot above is an OR across every runner, deliberately —
-                // ANDing would turn the bar red every time one laptop was
-                // merely asleep. But on a fleet of more than one, an OR alone
-                // means it takes just ONE healthy runner to keep that dot
-                // quiet while a second sits there unreachable or without
-                // tmux at all, invisibly. These name that runner instead of
-                // letting the merged dot speak for it; a click retries it at
-                // once, same as a header's own dot.
-                //
-                // This read "orange" and "green" for those two states, which
-                // it did until `8741757` and the line above respectively.
-                // `FleetStore.unhealthyHosts` records both moves and why
-                // neither touches the argument.
-                //
-                // Built by hand here rather than calling `HostDot`, and
-                // deliberately so, not as an oversight: `HostDot` draws
-                // `EmptyView()` for `.connected`, which is right for a
-                // header naming only whether the RUNNER answers, but wrong
-                // here — a runner can be fully reachable and still be the
-                // reason this row reads red (reachable, no tmux), and
-                // that case has to draw a dot. See `troubleColor(for:)`
-                // below for the resulting, deliberately different, palette.
-                if showHosts && !store.unhealthyHosts.isEmpty {
-                    ForEach(store.unhealthyHosts, id: \.self) { host in
-                        Button {
-                            store.reconnect(host)
-                        } label: {
-                            Circle()
-                                .fill(troubleColor(for: host))
-                                .frame(width: 6, height: 6)
-                        }
-                        .buttonStyle(.plain)
-                        .help(
-                            "\(host.isEmpty ? "this Mac" : host): \(troubleReason(for: host)) — click to retry"
-                        )
-                    }
-                }
-
-                // A runner running a daemon that is not this app's build.
-                //
-                // Beside the trouble dots and not among them: those say a
-                // runner cannot do its job, this says it is doing its job as a
-                // different program from the one this app was built against —
-                // and unlike them, a click here must not act, it must ask. See
-                // `FleetStore.staleHosts` for why the two lists stay separate,
-                // and `DaemonUpdateBar` for why this one is not hidden on a
-                // fleet of one the way `showHosts` hides the rest.
-                if !store.staleHosts.isEmpty {
-                    DaemonUpdateBar(targets: store.staleHosts.compactMap(daemonUpdate(for:)))
-                }
-
-                Spacer()
-
-                Button {
-                    Task {
-                        for client in store.clients.values {
-                            await client.refresh()
-                            // Roots and layouts too, not only repositories —
-                            // a reconnection now re-seeds all three on its
-                            // own (see `DaemonClient.onReconnect`), and this
-                            // button asking for less than that would be a
-                            // step backwards from what happens automatically.
-                            await client.refreshRepositories()
-                            await client.refreshRoots()
-                            await client.refreshLayouts()
-                        }
-                    }
-                } label: {
-                    Image(systemName: "arrow.clockwise").font(.system(size: 11))
-                }
-                .buttonStyle(.borderless)
-                .help("Refresh")
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 9)
-        }
-    }
-
-    /// A trouble dot's color, for a runner `store.unhealthyHosts` has
-    /// already decided is not fully well.
-    ///
-    /// Not `HostDot`'s palette reused outright: `HostDot` renders nothing at
-    /// all for `.connected`, which is right for a header naming only whether
-    /// the RUNNER is reachable — but a runner can be perfectly reachable
-    /// and still be the reason the fleet's tmux status reads red, and that
-    /// case has to draw something here. ("Orange" here until `8741757`, which
-    /// is the commit that made it red.)
-    private func troubleColor(for host: String) -> Color {
-        switch store.state(of: host) {
-        case .unreachable: return .red
-        // Reachable, and its tmux is not answering — the one case `HostDot`
-        // has nothing to say about, and the reason this function exists. The
-        // same event as the bar's own dot going red a few lines up, so it
-        // wears the same color: a runner whose every pane is unreadable has
-        // failed at the only job it has here.
-        case .connected: return .red
-        case .notInstalled: return .secondary
-        // Neutral rather than amber. Amber would say an agent is waiting on
-        // you; what is waiting is a socket. `Status.tint(_:)` paints `working`
-        // and `starting` in `GlancePalette.ink2` for exactly that reason, and a
-        // connection coming back up is the fleet-level version of the same
-        // sentence. `.connecting` cannot actually reach this — the list this
-        // colors leaves out a runner nothing is yet known about, see
-        // `FleetStore.unhealthyHosts` — and is named beside `.reconnecting`
-        // because they are one situation and the switch is exhaustive.
-        case .connecting, .reconnecting: return .secondary
-        }
-    }
-
-    private func troubleReason(for host: String) -> String {
-        switch store.state(of: host) {
-        case .unreachable(let why): return why
-        case .notInstalled: return "Far Cooler is not installed here"
-        case .reconnecting: return "reconnecting"
-        case .connecting: return "connecting"
-        case .connected: return "tmux is not available here"
-        }
     }
 
     // MARK: - Detail
 
-    /// One worktree's sidebar row.
-    ///
-    /// Extracted from the sidebar builder rather than written inline. With
-    /// eighteen arguments, most of them closures, this call sits right at the
-    /// type checker's budget — adding one more parameter to it pushed the whole
-    /// enclosing expression past "unable to type-check in reasonable time",
-    /// which is a compile error with no line number worth reading.
-    private func worktreeRow(_ ws: Worktree, usable: Bool) -> some View {
-        let client = store.client(for: ws)
-        // The runner's worktree, not the row's `ws`: the row's has the
-        // orchestrators drawn in rows of their own taken out.
-        let listed = worktree(host: ws.host ?? "", id: ws.id) ?? ws
-        let tiled = Set(Self.shownLayout(client?.layouts[ws.id], of: listed)?.terminals ?? [])
-        return WorktreeSection(
-            worktree: ws,
-            isExpanded: expanded.contains(ws.id),
-            selected: Self.selected(in: ws, by: selection),
-            onSelect: { terminal in open(ws, terminal: terminal) },
-            onToggle: { toggle(ws.id) },
-            onNewTerminal: { newTerminal(in: ws) },
-            onHide: {
-                Task { await act(on: ws) { c in await c.hideWorktree(ws.short) } }
-            },
-            onUnhide: {
-                Task { await act(on: ws) { c in await c.unhideWorktree(ws.short) } }
-            },
-            onRemove: { removeWorktree = ws },
-            onTerminalAction: { term, action in
-                Task { await run(action, on: term, in: ws) }
-            },
-            // Never an orchestrator's window: nothing is put beside it.
-            layouts: Self.ownLayouts(client?.layouts[ws.id] ?? [], of: listed),
-            onMoveToLayout: { term, group in
-                moveToLayout(term, in: ws, group: group)
-            },
-            onDropTogether: { dragged, onto in
-                placePane(dragged, onto: onto.id, side: .right, in: ws)
-            },
-            tiled: tiled,
-            onEditorError: { editorError = $0 },
-            usable: usable,
-            reorderable: WorktreeDrag.offersDrag(usable: usable, runner: client?.daemonBuild),
-            moveTargets: Self.moveTargets(for: listed, in: store.fleet, assigns: Self.assigns(store)(listed)),
-            onMove: { target in move(listed, to: target) },
-            roleOffer: roleOffer(in: listed),
-            onShowChanges: showChangesAction(for: listed, usable: usable),
-            changes: changesStatus(ws),
-            countsWidth: countsWidth
-        )
-    }
-
     /// `OrchestratorAdoption.offer` in `worktree`, as the fleet has it when
-    /// the menu opens. Hoisted for `worktreeRow`'s type checker, as
-    /// `changesStatus` is.
+    /// the menu opens.
     private func roleOffer(in worktree: Worktree) -> (Terminal) -> OrchestratorAdoption.Offer? {
         let store = store
         return { OrchestratorAdoption.offer(for: $0, in: worktree, host: worktree.host ?? "", fleet: store.fleet) }
-    }
-
-    /// The diff column's width, for every row in the sidebar at once.
-    ///
-    /// Measured across the whole fleet rather than per row, because a column
-    /// each row sizes for itself is not a column — that was the alignment bug.
-    /// Computed here rather than inside the row for the same reason it is
-    /// measured at all: every row has to agree, and only this level can see
-    /// them all.
-    private var countsWidth: CGFloat {
-        SidebarMetrics.countsWidth(
-            store.clients.values.flatMap { Array($0.changesInbox.values) })
-    }
-
-    /// Diff status for one worktree, or nil when the fleet inbox has not been
-    /// read yet. Hoisted out of the sidebar builder: inline, the chained
-    /// optional subscript pushed that expression past the type checker's budget.
-    private func changesStatus(_ ws: Worktree) -> InboxRow? {
-        guard let client = store.client(for: ws) else { return nil }
-        return client.changesInbox[ws.short]
     }
 
     /// This worktree's changes pane, if it has one open in the layout the
@@ -1949,7 +1085,6 @@ struct ContentView: View {
                     { c in await c.createTerminal(in: listed, preset: "changes", title: "Changes") })
             }
             guard let pane else { return }
-            expanded.insert(listed.id)
             if stays, case .workspace(host, let id, _)? = selection {
                 selection = .workspace(host: host, workspace: id, focus: .worktree(listed.id, terminal: pane.id))
             } else {
@@ -1960,8 +1095,7 @@ struct ContentView: View {
     }
 
     /// Show Changes on `ws`'s row, or nil where it can't be: a runner that
-    /// can't be acted on, or that has said it can't read changes. Hoisted
-    /// for `worktreeRow`'s type checker.
+    /// can't be acted on, or that has said it can't read changes.
     private func showChangesAction(for ws: Worktree, usable: Bool) -> (() -> Void)? {
         guard usable, store.client(for: ws)?.changesSupported != false else { return nil }
         return { showChanges(in: ws) }
@@ -3400,10 +2534,6 @@ struct ContentView: View {
         store.fleet.worktrees.first { ($0.host ?? "") == host && $0.id == id }
     }
 
-    private func toggle(_ id: String) {
-        if expanded.contains(id) { expanded.remove(id) } else { expanded.insert(id) }
-    }
-
     /// Where the window opens: Needs You when anything is waiting, else the
     /// last workspace selection (spec §4.6, ruling 4). See
     /// `SelectionMemory.launch`.
@@ -4110,7 +3240,6 @@ struct ContentView: View {
     /// Go to `pane` wherever it lives: its workspace, its task, or its
     /// worktree (`WorkspaceSelection.landing`).
     private func land(on pane: PaneRef) {
-        expanded.insert(pane.worktree)
         guard let landed = WorkspaceSelection.landing(on: pane, in: store.fleet) else { return }
         navigate(to: landed, key: pane)
     }
@@ -4311,7 +3440,6 @@ struct ContentView: View {
             land(on: PaneRef(host: host, worktree: worktree, terminal: terminal))
 
         case .openWorktree(let id):
-            expanded.insert(id)
             guard let worktree = store.fleet.worktrees.first(where: { $0.id == id }) else { return }
             selection = Self.opening(worktree, terminal: nil, in: store.fleet)
 
@@ -4432,7 +3560,6 @@ struct ContentView: View {
             // the fleet — which, this soon, may not have the terminal yet.
             // A new worktree with no task yet is opened whole, under the
             // workspace it was claimed for.
-            expanded.insert(worktree)
             selection = arrival(host: host, worktree: worktree, terminal: terminal)
             keyPane = PaneRef(host: host, worktree: worktree, terminal: terminal)
             return .started(name: name)
@@ -4477,7 +3604,6 @@ struct ContentView: View {
     /// Select a freshly created worktree, preferring its terminal.
     private func reveal(_ worktree: String?) {
         guard let worktree else { return }
-        expanded.insert(worktree)
         let found = store.fleet.worktrees.first { $0.id == worktree }
         let host = found?.host ?? ""
         selection = arrival(host: host, worktree: worktree, terminal: found?.terminals.first?.id)
@@ -4518,7 +3644,6 @@ struct ContentView: View {
     /// tmux's `c` opens a window with a shell in it. So does this.
     @discardableResult
     private func openTerminalInNewLayout(_ worktree: Worktree) async -> Terminal? {
-        expanded.insert(worktree.id)
         guard
             let created = await act(
                 on: worktree, default: nil as Terminal?,
@@ -4540,7 +3665,6 @@ struct ContentView: View {
     /// column could draw (ov-78).
     private func openShell(besideOrchestratorIn checkout: Worktree) async {
         guard case .workspace(let host, let id, _)? = selection else { return }
-        expanded.insert(checkout.id)
         guard
             let created = await act(
                 on: checkout, default: nil as Terminal?,

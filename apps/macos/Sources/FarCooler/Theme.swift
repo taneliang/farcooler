@@ -83,8 +83,6 @@ enum WorkspaceStyle {
     static let controlTarget: CGFloat = 24
 
     static let paneTitle = Font.system(size: PaneText.title, weight: .medium)
-    static let sidebarPrimary = Font.system(size: 13, weight: .medium)
-    static let sidebarMetadata = Font.system(size: 11)
     static let sectionTitle = Font.system(size: PaneText.title, weight: .semibold)
 
     /// The four sizes a pane's text is allowed to be.
@@ -119,11 +117,6 @@ enum WorkspaceStyle {
 
     /// `canvas` as the dynamic `NSColor` it wraps, so it can be resolved under a chosen appearance.
     static var canvasNS: NSColor { blend(.windowBackgroundColor, withTheme: 0.05) }
-
-    static var sidebar: Color { Color(nsColor: sidebarNS) }
-
-    /// `sidebar` as the dynamic `NSColor` it wraps, so it can be resolved under a chosen appearance.
-    static var sidebarNS: NSColor { blend(.windowBackgroundColor, withTheme: 0.035) }
 
     static var document: Color { Color(nsColor: documentNS) }
 

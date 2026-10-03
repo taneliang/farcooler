@@ -272,7 +272,7 @@ enum WorkspaceWorktrees {
 }
 
 /// ⌘1 through ⌘9 (ov-86): the first nine workspaces, in the order the
-/// title bar's switcher lists them, which is the sidebar's: each runner's
+/// title bar's switcher lists them (`WorkspaceDirectory`): each runner's
 /// repositories, each repository's workspaces.
 enum WorkspaceNumbers {
     /// How many workspaces have a ⌘-number.
@@ -301,22 +301,17 @@ enum WorkspaceNumbers {
 
     /// Every workspace, grouped by repository, numbered in order.
     static func groups(in fleet: Fleet) -> [Group] {
-        var out: [Group] = []
         var number = 0
-        for entry in ContentView.sidebarRows(fleet: fleet) {
-            switch entry.kind {
-            case .repository:
-                out.append(Group(host: entry.host, repository: entry.project, repositoryID: entry.repositoryID, places: []))
-            case .workspace(let name):
-                guard let workspace = entry.workspace, !out.isEmpty else { continue }
-                number += 1
-                out[out.count - 1].places.append(
-                    Place(host: entry.host, workspace: workspace, name: name, number: number <= count ? number : nil))
-            default:
-                continue
-            }
+        return WorkspaceDirectory.groups(in: fleet).map { group in
+            Group(
+                host: group.host, repository: group.project, repositoryID: group.repositoryID,
+                places: group.workspaces.map { workspace in
+                    number += 1
+                    return Place(
+                        host: group.host, workspace: workspace, name: workspace.isImplicit ? "Main" : workspace.name,
+                        number: number <= count ? number : nil)
+                })
         }
-        return out.filter { !$0.places.isEmpty }
     }
 
     /// Where ⌘`number` goes: the workspace with that number, or nil when

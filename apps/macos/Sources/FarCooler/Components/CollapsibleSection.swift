@@ -85,14 +85,6 @@ struct SectionMetrics: Equatable {
 
     /// The board's navigator: its sections, task statuses and groups.
     static let navigator = SectionMetrics(spacing: ColumnGrid.rhythm, chevronWidth: NavigatorGrid.mark, isHeading: true)
-    /// The sidebar: a group of rows below a repository (Unclaimed, Hidden),
-    /// at the sidebar's edges, its rows straight under it.
-    static let sidebar = SectionMetrics(
-        spacing: 0, minHeight: ColumnGrid.rowHeight - 2 * SidebarGrid.headerVerticalPadding,
-        headerInsets: EdgeInsets(
-            top: SidebarGrid.headerVerticalPadding, leading: SidebarGrid.edge,
-            bottom: SidebarGrid.headerVerticalPadding, trailing: SidebarGrid.edge),
-        isHeading: true)
     /// A small disclosure in running text: a thought, a card's details, a
     /// settings row's.
     static let inline = SectionMetrics(spacing: 6, chevronWidth: 14, minHeight: 0)

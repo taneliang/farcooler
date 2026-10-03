@@ -91,4 +91,43 @@ struct FleetSidebarRetiredTests {
         #expect(!NavigatorVisibility.hiddenAtLaunch(in: defaults))
         #expect(NavigatorVisibility.key != "window.sidebar")
     }
+
+    // MARK: - Nothing of the old sidebar is left to reach
+
+    /// Every source file of the app, by name.
+    private static func sources() throws -> [(name: String, text: String)] {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/FarCooler")
+        let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)?
+            .compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" } ?? []
+        return try files.map { ($0.lastPathComponent, try String(contentsOf: $0, encoding: .utf8)) }
+    }
+
+    /// Deleted, not hidden (ov-178's third acceptance line): no view, row
+    /// model, drag or remembered state of the old sidebar is declared
+    /// anywhere, and the window has no split view to draw one in. Its
+    /// preference keys are named only where they're removed.
+    @Test("No old-sidebar type, split view or preference is left in the app")
+    func nothingOfTheOldSidebarIsLeft() throws {
+        let declarations = [
+            "struct WorkspaceRow", "struct ProjectHeader", "struct NeedsYouRow:", "struct TerminalRow",
+            "struct HiddenWorktrees", "struct UnclaimedWorktrees", "struct NoWorktreesRow", "struct HostDot",
+            "struct SidebarSearchRow", "struct SidebarTitleRow", "struct SidebarGroupSection", "struct SidebarEntry",
+            "struct SidebarRow", "struct SidebarMenuButton", "struct WorkspaceHeaderActions", "struct DaemonUpdateBar",
+            "final class WorktreeDrag", "enum SidebarDefault", "enum SidebarMetrics", "enum WorkspacesTip",
+            "func sidebarRows", "func reorderWorktrees", "NavigationSplitView(", "toggleSidebar(_:)",
+        ]
+        let keys = ["\"window.sidebar\"", "\"sidebar.openWorktrees\"", "\"sidebar.collapsedProjects\""]
+        let files = try Self.sources()
+        #expect(files.count > 50, "found \(files.count) source files")
+        for (name, text) in files {
+            for declaration in declarations where text.contains(declaration) {
+                Issue.record("\(name) still has \(declaration)")
+            }
+            for key in keys where text.contains(key) && name != "NavigatorVisibility.swift" {
+                Issue.record("\(name) still reads \(key)")
+            }
+        }
+    }
 }
