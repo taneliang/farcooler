@@ -141,7 +141,7 @@ enum Shortcut {
             [
                 Item(keys: "⌘P", action: "Go to a workspace, task, or terminal, or start a worktree"),
                 Item(keys: "⌘B", action: "Show or hide the sidebar"),
-                Item(keys: "⌘F", action: "Find a workspace, task, or agent"),
+                Item(keys: "⌘F", action: "Filter the workspace’s tasks; elsewhere, find a workspace, task, or agent"),
                 Item(keys: "⌘,", action: "Settings"),
                 Item(keys: "⌘/", action: "Keyboard shortcuts"),
                 Item(keys: "⌘R", action: "Reload the fleet"),

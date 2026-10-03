@@ -37,7 +37,7 @@ struct CollapsibleSectionTests {
     final class Seen { var ids: Set<String> = [] }
 
     /// Drawn, the navigator registers every section it has through the
-    /// shared component: the three navigator sections, Since Last Visit,
+    /// shared component: the three navigator sections, Unread,
     /// every task status, and Hidden under Worktrees. (Fails for any of
     /// them drawn its own way, as all but Worktrees were before.)
     @Test("Every navigator section is drawn through CollapsibleSection")

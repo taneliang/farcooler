@@ -14,7 +14,7 @@ enum SectionHeaderStyle: Equatable {
     /// A navigator section's: Orchestrator, Tasks, Worktrees. Small capitals,
     /// secondary, like a Mac source list's.
     case navigator
-    /// A group inside one: a task status, Since Last Visit. The pane's
+    /// A group inside one: a task status, Unread. The pane's
     /// heading size, semibold.
     case group
     /// A quiet group: Hidden, under Worktrees.

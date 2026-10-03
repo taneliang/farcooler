@@ -393,7 +393,7 @@ the sections for tasks actually) so having the orchestrator in there might also 
 │   3 tasks in progress  │                                      │
 │ ────────────────────── │                                      │
 │ TASKS                  │                                      │
-│  Since Last Visit …    │                                      │
+│  Unread …              │                                      │
 │  Needs Decision 1 bil-7│                                      │
 │  In Progress 2   bil-3 │                                      │
 │  To Do · Done · …      │                                      │
@@ -421,7 +421,39 @@ the sections for tasks actually) so having the orchestrator in there might also 
     orchestrator, the row reads **No Orchestrator**, with **Start Orchestrator** ▸ and, for a claude running in
     a shell here, **Use as Orchestrator…** ▸. A repository's implicit board, which can't have one, has no
     Orchestrator section.
-  - **Tasks:** the status groups, as before (§5), under the Since Last Visit summary.
+  - **Tasks:** a filter field (⌘F) and then the status groups (§5) under the **Unread** summary (ov-104):
+    - **Unread** replaces Since Last Visit, with these groups:
+      - **Finished**, **Needs You or Review** and **New**;
+      - **Activity**, one entry per ticket: its key and title, the newest note's kind as a secondary word and
+        its text wrapped to two lines, its time, and "+N more" for the older notes. It covers every kind a
+        person or an agent writes; a move and a filing are already Finished and New.
+
+      An item stays until its ticket is opened. Opening clears all of that ticket's items. Read state is kept
+      per Mac in `BoardReads`, which holds a floor plus each ticket's last-opened mark. It's stored under
+      `board.read.<runner>.<workspace>` through `BoardReadStore`, the seam a runner-synced store replaces
+      later. The first load starts at the old visit stamp. The period menu also offers **Last Hour** and
+      **Today**, plain time windows that reading doesn't change, and, under Unread, **Mark All as Read**.
+    - **Every task row is compact** (variant B, the owner's pick of three, ov-104), and none is a card:
+      - line one is the key, in monospace and secondary in the board's one key column, then the title;
+      - line two is a quiet meta line saying what the status header doesn't (`TaskRowMeta`): what the task
+        waits on, "No movement for 3d", the ask, who's on it ("claude working", "codex needs you", "No
+        Agent"), when it landed, and "3 of 5".
+
+      The accent is used only for what needs the person. Unread's items, Activity's entries and the History
+      page's rows are the same row (`CompactTaskRow`). The agent pill is gone; Go to Agent and the worktree
+      menu are in the row's context menu.
+    - **Done and Canceled** (ov-103) show every finished task that's still unread, plus everything finished
+      today, with a floor of the latest 3 (`BoardDone.shown`). An **All Done  N ›** row opens the History
+      page. Any other section shows 10, then an inline **Show N More**. Filtering shows every match and opens
+      every section that has one.
+    - **Group headers** use the shared header. The count is right-aligned, tertiary and in tabular digits
+      (`SectionCount`, `GroupHeader`), never "Title (N)".
+    - **Motion:**
+      - insertions, removals and moves run on the shared spring, keyed by ticket, and by note for Activity;
+      - a row moving between statuses is matched across sections;
+      - a new Unread item fades and slides in with an accent wash that fades over 1.5 s (`BoardArrivals`
+        tells what's new);
+      - under Reduce Motion, everything is a cross-fade.
   - **Worktrees:** the loose ones (ov-86), now a section of their own rather than a group among the statuses,
     their hidden ones collapsed under them, and **New Worktree…** as the section's last row. A task's worktree
     is named on its task's row, never here; the main checkout is listed without the orchestrators seated in it.
@@ -773,7 +805,7 @@ sidebar becomes optional; everything it did is reachable without it.
   **Hidden** with Unhide. Rows are drawn without seated orchestrators (`ownTerminals`), so the orchestrator's terminal is never
   listed there (§4.7's one place).
 - **The order** (`WorkspaceWorktrees.entries`): the order the list draws (review M2): sections in `order`, each
-  section's rows as `visibleRows` draws them (Done newest first), a worktree once under its first task; then
+  section's rows as `orderedRows` has them (Done and Canceled newest first), a worktree once under its first task; then
   the Worktrees section's, then its Hidden ones. Collapsed sections, Done's cut tasks and hidden worktrees are
   walked too, in the place they'd be drawn, so nothing is reachable only from the sidebar.
 - **The breadcrumb's last segment is a menu**, "Billing › bil-3 Tax rounding › tax-rounding ▾" after the branch
@@ -814,8 +846,18 @@ count beside it, and New Task… (**+**) and Refresh as icons at the trailing ed
 - **An empty status:** a collapsed header reading "Backlog 0", which can't be expanded.
 - **A status with tasks:** expanded by default. Done and Canceled start collapsed, and their collapse state is
   remembered per workspace.
-- **Card rows:** the iPhone's row (key, title, call to action, time, acceptance, agent control), ported from
-  `ios/TaskBoardView.swift` to the shared view layer where it can be shared.
+- **Rows:** compact, two lines, on the Mac (§4.3, ov-104). The phones keep their card rows.
+- **The cut** (ov-103, `TaskBoardColumn.cut`):
+  - Done and Canceled show the unread and today's, with a floor of 3, and an "All Done  N ›" row to the
+    History page;
+  - other sections show 10 and "Show N More".
+
+  The rule is the same on the Mac, the iPhone and Android (`BoardDone` and its Kotlin twin).
+- **The History page** (`Focus.history` on the Mac, in the main area; a pushed screen on the phones):
+  - every task in the status, grouped Today, Yesterday, This Week and Earlier, newest first;
+  - each row shows its key, its title and when it landed, and opens its ticket;
+  - search by key and title, plus note text on the Mac through `task search`;
+  - area chips from the titles' `<Area>:` prefixes.
 - **Selecting a row** opens the task beside the board (§4.3, §4.4); selecting it again closes it, and ↑/↓ step
   through the rows shown.
 

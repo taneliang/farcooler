@@ -111,7 +111,10 @@ The navigator has three sections:
   progress. It's selected when you arrive, so the conversation is what you see
   first. With no orchestrator, the row says **No Orchestrator** and offers
   **Start Orchestrator** and **Use as Orchestrator…**.
-- **Tasks**: the board, by status, under what's changed since your last visit.
+- **Tasks**: the board, by status, under **Unread**: what's finished, new, or
+  waiting on you, and each ticket's latest note, until you open that ticket.
+  The menu by Unread switches to Last Hour or Today, and has **Mark All as
+  Read**. ⌘F filters every section by key or title.
 - **Worktrees**: the worktrees no task has, and **New Worktree…**.
 
 Select a task or a worktree and it takes the main area; select the orchestrator
@@ -135,7 +138,12 @@ orchestrator rereads it whenever it picks the work back up.
 workspace has tasks waiting on a decision, the header says "3 tasks are waiting
 on you" ("1 task is waiting on you" for one), and "3 waiting" where the room is
 short. It says nothing at zero. Every status is always shown, even an empty one:
-an empty status is a header with a 0. Done and Canceled start collapsed. The
+an empty status is a header with a 0. Each task is one compact row: its key
+and title, and under them what it's waiting on, who's working it and how much
+of it holds. Done and Canceled start collapsed. They show what finished since
+you last opened it and what finished today, and at least the latest three.
+**All Done** opens the History page, which you can search and filter by area.
+A long section shows ten tasks, then **Show N More**. The
 **+** button in the board's header (**New Task…**) files a task by hand. It's
 there when the runner lets this Mac write to the board. Beside it, the arrow
 re-reads the board.
@@ -187,8 +195,8 @@ Agent… and Open Worktree… on its Agent and Changes tabs.
 - ⌃⌘↓ and ⌃⌘↑ (Workspace ▸ Next Worktree and Previous Worktree) go to the next
   or previous worktree, in the order the navigator draws them: each task's,
   section by section (Done newest first), then the ones under Worktrees and
-  Hidden. Tasks in a collapsed section, and older Done tasks the list leaves
-  out, are walked too. A task's worktree opens as its task, with the worktree
+  Hidden. Tasks in a collapsed section, and Done tasks the list leaves on the
+  History page, are walked too. A task's worktree opens as its task, with the worktree
   beneath it. ⌃⌘1 through ⌃⌘9 jump to a terminal on screen (they were ⌘1
   through ⌘9, which now go to workspaces).
 
