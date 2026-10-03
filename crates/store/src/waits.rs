@@ -469,7 +469,7 @@ impl Store {
     ///
     /// A task in that line on that board and not named loses its place. A
     /// task named loses whatever other wait it had. Each task must be on the
-    /// board (`other_board`), named once (`task_ids`), and in a status the
+    /// board (`other_board`), named once (`task_twice`), and in a status the
     /// line takes (`line_status`); anything refused writes nothing.
     pub fn set_line(&self, workspace: Uuid, line: TaskLine, tasks: &[Uuid], actor: Actor) -> Result<Vec<Task>> {
         let now = now_millis();
@@ -478,7 +478,7 @@ impl Store {
             let tx = conn.transaction().map_err(map_err)?;
             let named: std::collections::HashSet<Uuid> = tasks.iter().copied().collect();
             if named.len() != tasks.len() {
-                return Err(DomainError::InvalidArgument { what: "task_ids" });
+                return Err(DomainError::InvalidArgument { what: "task_twice" });
             }
             let mut before = HashMap::new();
             for &id in tasks {

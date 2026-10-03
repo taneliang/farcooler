@@ -64,8 +64,11 @@ const ACTOR_ENV: &str = farcooler_core::pane_env::ACTOR;
 ///
 /// `key` is not here: it is printed unconditionally, because a card that does
 /// not say which task it is about is a card an agent can misfile.
-const SECTIONS: [&str; 8] =
-    ["title", "status", "intent", "acceptance", "constraints", "labels", "blocks", "history"];
+const SECTIONS: [&str; 10] =
+    ["title", "status", "starts", "intent", "acceptance", "constraints", "labels", "blocks", "workers", "history"];
+
+#[path = "task_starts.rs"]
+mod starts;
 
 #[derive(Subcommand)]
 pub enum TaskCmd {
@@ -417,12 +420,15 @@ pub enum TaskCmd {
         #[arg(long)]
         again: bool,
     },
+    #[command(flatten)]
+    Starts(starts::StartCmd),
 }
 
 pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
     let mut link = connect_to(runner).await?;
 
     match cmd {
+        TaskCmd::Starts(cmd) => starts::run(&mut link, cmd, json, &starts::SessionEnv::from_process()).await?,
         TaskCmd::List { workspace, repo, status, stale_for } => {
             let status = match status.as_deref() {
                 Some(word) => Some(status_named(word)?),
@@ -475,7 +481,13 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
             }
             let asked = asked_fields(fields.as_deref())?;
             let borrowed: Vec<&str> = asked.iter().map(String::as_str).collect();
-            print!("{}", render_show(&detail, &borrowed, kind));
+            // Blocks name keys, read from one listing of the board, and only when there are any.
+            let keys = match detail.blocks.is_empty() || !wants(&borrowed, "blocks") {
+                true => Default::default(),
+                false => key_index(&tasks_in(&mut link, &Board::repository(uuid_of(&task.repository_id)), None, None).await?),
+            };
+            let waits_known = link.daemon_capabilities().iter().any(|c| c == farcooler_protocol::capability::TASK_WAITS);
+            print!("{}", render_show(&detail, &borrowed, kind, &keys, waits_known));
         }
 
         TaskCmd::Usage { key, repo } => {
@@ -823,7 +835,8 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
                 return Ok(());
             }
             for b in &l.items {
-                println!("{} waits on {}{}", task.key, short_bytes(&b.blocked_by), said(&b.reason));
+                let on = if b.blocked_by == blocker.id { blocker.key.clone() } else { short_bytes(&b.blocked_by) };
+                println!("{} waits on {on}{}", task.key, said(&b.reason));
             }
         }
 
@@ -910,7 +923,13 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
 ///
 /// The key prints whatever was asked for. A card that does not say which task
 /// it describes is a card that can be filed against the wrong one.
-fn render_show(detail: &pb::TaskDetail, fields: &[&str], notes: Option<NoteKind>) -> String {
+fn render_show(
+    detail: &pb::TaskDetail,
+    fields: &[&str],
+    notes: Option<NoteKind>,
+    keys: &std::collections::HashMap<Uuid, String>,
+    waits_known: bool,
+) -> String {
     let mut out = String::new();
     let Some(task) = &detail.task else { return out };
     out.push_str(&format!("{}\n", task.key));
@@ -920,6 +939,9 @@ fn render_show(detail: &pb::TaskDetail, fields: &[&str], notes: Option<NoteKind>
     }
     if wants(fields, "status") {
         out.push_str(&format!("status\n  {}  {}\n", status_word(task.status), moved_line(task, now_millis())));
+    }
+    if wants(fields, "starts") {
+        out.push_str(&starts::starts_section(task));
     }
     if wants(fields, "intent") && !task.intent.is_empty() {
         out.push_str("intent\n");
@@ -946,9 +968,11 @@ fn render_show(detail: &pb::TaskDetail, fields: &[&str], notes: Option<NoteKind>
     if wants(fields, "blocks") && !detail.blocks.is_empty() {
         out.push_str("blocks\n");
         for b in &detail.blocks {
-            let on = short_bytes(&b.blocked_by);
-            out.push_str(&format!("  waits on {on}{}\n", said(&b.reason)));
+            out.push_str(&starts::block_line(b, task, keys, waits_known));
         }
+    }
+    if wants(fields, "workers") {
+        out.push_str(&starts::workers_section(task, now_millis()));
     }
     // `--notes` is a request for history, so it brings the section with it.
     // Naming a kind and being handed no notes at all is the accept-and-ignore
@@ -1003,15 +1027,21 @@ fn render_list_json(tasks: &[pb::Task]) -> String {
 /// the same thing.
 fn render_list(tasks: &[pb::Task], names: Option<&std::collections::HashMap<Uuid, String>>, now: i64) -> String {
     let mut out = String::new();
+    // When each starts (ov-212), a column only when some row has something to say.
+    let starts: Vec<String> = tasks.iter().map(|t| truncate(&starts::starts_word(t).unwrap_or_default(), 28)).collect();
+    let width = starts.iter().map(|s| s.chars().count()).max().unwrap_or(0);
+    let column = |s: &str| if width == 0 { String::new() } else { format!("{s:<width$}  ") };
     if names.is_some() {
-        out.push_str(&format!("{:<8}  {:<14}  {:<16}  {:>6}  {}\n", "KEY", "STATUS", "WORKSPACE", "MOVED", "TITLE"));
+        let head = format!("{}TITLE", column("STARTS"));
+        out.push_str(&format!("{:<8}  {:<14}  {:<16}  {:>6}  {head}\n", "KEY", "STATUS", "WORKSPACE", "MOVED"));
     }
-    for t in tasks {
+    for (t, starts) in tasks.iter().zip(&starts) {
         // How long since anything moved on it -- a move, a note, an edit --
         // the one clock "stale" reads everywhere, and the one `--stale-for`
         // picked these rows by.
         let since = spoken_gap(stale_for_seconds(tasks_json::last_moved(t), now));
-        let (key, status, title) = (&t.key, status_word(t.status), truncate(&t.title, 60));
+        let (key, status) = (&t.key, status_word(t.status));
+        let title = format!("{}{}", column(starts), truncate(&t.title, 60));
         match names {
             Some(names) => {
                 let workspace = names
@@ -1139,6 +1169,8 @@ fn pb_note_kind(kind: NoteKind) -> i32 {
         NoteKind::Comment => pb::TaskNoteKind::Comment,
         NoteKind::StatusChange => pb::TaskNoteKind::StatusChange,
         NoteKind::Created => pb::TaskNoteKind::Created,
+        NoteKind::Wait => pb::TaskNoteKind::Wait,
+        NoteKind::Worker => pb::TaskNoteKind::Worker,
     }) as i32
 }
 
@@ -1153,6 +1185,8 @@ fn note_kind_of(raw: i32) -> Option<NoteKind> {
         pb::TaskNoteKind::Comment => Some(NoteKind::Comment),
         pb::TaskNoteKind::StatusChange => Some(NoteKind::StatusChange),
         pb::TaskNoteKind::Created => Some(NoteKind::Created),
+        pb::TaskNoteKind::Wait => Some(NoteKind::Wait),
+        pb::TaskNoteKind::Worker => Some(NoteKind::Worker),
     }
 }
 
@@ -1175,7 +1209,7 @@ fn kind_named(word: &str) -> Result<NoteKind, String> {
     NoteKind::parse(word.trim()).ok_or_else(|| {
         format!(
             "{word:?} is not a kind of note. use decision, finding, question, \
-             answer, progress, comment, status_change or created"
+             answer, progress, comment, status_change, created, wait or worker"
         )
     })
 }
@@ -1193,6 +1227,9 @@ fn writable_kind(word: &str) -> Result<NoteKind, String> {
         }
         NoteKind::Created => {
             Err("a task's first entry is written when it is created, never by hand".to_string())
+        }
+        NoteKind::Wait | NoteKind::Worker => {
+            Err("the runner writes those itself, from `task wait`, `task line` and `task worker`".to_string())
         }
         kind => Ok(kind),
     }
@@ -2739,6 +2776,7 @@ mod tests {
             created_at: now_millis() - 86_400_000,
             updated_at: now_millis() - 7_200_000,
             workspace_id: id_bytes(Uuid::now_v7()),
+            ..Default::default()
         };
         let task_id = task.id.clone();
         let note = |kind: NoteKind, body: &str, extra: &str| pb::TaskNote {
@@ -2789,7 +2827,7 @@ mod tests {
             },
         ];
 
-        let rendered = render_show(&detail, &["blocks"], None);
+        let rendered = render_show(&detail, &["blocks"], None, &Default::default(), false);
 
         let (explained, bare) = (short_bytes(&explained), short_bytes(&bare));
         assert!(
@@ -2807,19 +2845,19 @@ mod tests {
     /// expensive, and it gets slower as the board gets more useful.
     #[test]
     fn show_returns_only_the_fields_that_were_asked_for() {
-        let rendered = render_show(&a_task_with_history(), &["intent", "acceptance"], None);
+        let rendered = render_show(&a_task_with_history(), &["intent", "acceptance"], None, &Default::default(), false);
         assert!(rendered.contains("intent"));
         assert!(rendered.contains("acceptance"));
         assert!(!rendered.contains("progress"), "history was not asked for");
         // And the fixture really would have said it, so the line above is
         // doing work rather than passing on an accident of the data.
-        let whole = render_show(&a_task_with_history(), &[], None);
+        let whole = render_show(&a_task_with_history(), &[], None, &Default::default(), false);
         assert!(whole.contains("progress"), "the fixture carries a progress note");
     }
 
     #[test]
     fn decisions_can_be_read_without_the_progress_chatter() {
-        let rendered = render_show(&a_task_with_history(), &[], Some(NoteKind::Decision));
+        let rendered = render_show(&a_task_with_history(), &[], Some(NoteKind::Decision), &Default::default(), false);
         assert!(rendered.contains("use sqlite"));
         assert!(!rendered.contains("building"), "progress notes are the noise this skips");
         // The other kinds go too, not just the loud one.
@@ -3070,7 +3108,7 @@ mod tests {
     /// full — is a check in the `Show` arm, above the first round trip.)
     #[test]
     fn asking_for_one_kind_of_note_is_asking_for_the_history() {
-        let rendered = render_show(&a_task_with_history(), &["intent"], Some(NoteKind::Decision));
+        let rendered = render_show(&a_task_with_history(), &["intent"], Some(NoteKind::Decision), &Default::default(), false);
         assert!(rendered.contains("intent"), "the section that was named");
         assert!(rendered.contains("use sqlite"), "and the notes that were asked for");
         // Still a narrowing, not a floodgate.

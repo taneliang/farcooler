@@ -115,7 +115,7 @@ fn a_line_refuses_a_task_it_cannot_hold() {
     let refused = |ids: &[Uuid], line| store.set_line(main, line, ids, Actor::Manager).unwrap_err();
     assert!(matches!(refused(&[t[0].id, t[1].id], TaskLine::Agent), DomainError::InvalidArgument { what: "line_status" }));
     assert!(matches!(refused(&[t[0].id], TaskLine::Build), DomainError::InvalidArgument { what: "line_status" }));
-    assert!(matches!(refused(&[t[0].id, t[0].id], TaskLine::Agent), DomainError::InvalidArgument { what: "task_ids" }));
+    assert!(matches!(refused(&[t[0].id, t[0].id], TaskLine::Agent), DomainError::InvalidArgument { what: "task_twice" }));
 
     let repo = store.get_task(t[0].id).unwrap().repository_id;
     let other = store.create_workspace(repo, "Billing", "bil").unwrap().id;

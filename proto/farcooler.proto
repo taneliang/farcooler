@@ -3168,7 +3168,8 @@ message TaskSetWait {
 //
 // Refusals, as `Error.what`:
 //   `line`           no line named
-//   `task_ids`       a task named twice
+//   `task_twice`     a task named twice
+//   `task_ids`       an id that isn't one
 //   `other_board`    a task on another board than `workspace_id`
 //   `line_status`    a task whose status doesn't fit the line: AGENT takes
 //                    backlog and todo, BUILD in progress and in review

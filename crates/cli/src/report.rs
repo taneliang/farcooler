@@ -212,6 +212,11 @@ fn midnight(now: i64, days: i32) -> Result<i64, String> {
         .ok_or_else(|| "couldn't work out the local date".to_string())
 }
 
+/// `local`, for `task wait --until`.
+pub(crate) fn local_time(text: &str) -> Option<i64> {
+    local(text)
+}
+
 /// `2026-09-28`, `2026-09-28 14:00` or `2026-09-28T14:00`, local time.
 fn local(text: &str) -> Option<i64> {
     let (date, clock) = match text.split_once(['T', ' ']) {
