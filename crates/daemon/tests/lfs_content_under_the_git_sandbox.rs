@@ -309,3 +309,69 @@ async fn a_repository_git_lfs_made_gets_its_content() {
     f.restat("big.bin");
     assert_eq!(f.status().await, Vec::<String>::new());
 }
+
+/// A commit whose tree is `.gitattributes`, the LFS pointer `file`, and a
+/// symlink `link` to `outside`, made with plumbing because no working tree
+/// on a case- or normalization-insensitive volume can hold both. `file`'s
+/// first directory and `link` are the same name to such a volume.
+fn aliased_commit(repo: &Path, file: &str, link: &str, outside: &Path) {
+    std::fs::create_dir_all(repo).unwrap();
+    run(repo, &["init", "-q", "-b", "main"]);
+    let blobs = repo.parent().unwrap().join("blobs");
+    std::fs::create_dir_all(&blobs).unwrap();
+    let blob = |name: &str, bytes: &[u8]| {
+        let path = blobs.join(name);
+        std::fs::write(&path, bytes).unwrap();
+        let out = run_with(repo, &[], &["hash-object", "-w", "--no-filters", path.to_str().unwrap()]);
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    };
+    let attributes = blob("attributes", b"*.bin filter=lfs -text\n");
+    let pointer = blob("pointer", pointer(&"0".repeat(64), 3).as_bytes());
+    let target = blob("link", outside.as_os_str().as_encoded_bytes());
+    for (mode, sha, path) in [("100644", &attributes, ".gitattributes"), ("100644", &pointer, file), ("120000", &target, link)]
+    {
+        // As written: a Mac's git would otherwise fold NFD to NFC.
+        let out = run_with(
+            repo,
+            &["-c", "core.precomposeUnicode=false"],
+            &["update-index", "--add", "--cacheinfo", &format!("{mode},{sha},{path}")],
+        );
+        assert!(out.status.success(), "update-index {path:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+    let tree = String::from_utf8(run_with(repo, &[], &["write-tree"]).stdout).unwrap().trim().to_string();
+    let commit = String::from_utf8(run_with(repo, &[], &["commit-tree", &tree, "-m", "base"]).stdout).unwrap();
+    run(repo, &["update-ref", "refs/heads/main", commit.trim()]);
+}
+
+/// The ov-187 re-review's reproduction, and its variants: a symlink that a
+/// case-insensitive (APFS) or normalization-insensitive volume reads as the
+/// LFS file's parent directory. Hydrating must not reach through it: the
+/// file of the same name outside the worktree survives. On a volume that
+/// tells the names apart there's no alias, and it holds trivially.
+#[tokio::test]
+async fn hydration_never_reaches_through_a_symlink_aliasing_a_directory() {
+    sandbox_and_helper_are_on();
+    let cases = [
+        ("A/x.bin", "a"),
+        ("Dir/inner/x.bin", "dir"),
+        ("\u{e9}/x.bin", "e\u{301}"),
+        ("e\u{301}/x.bin", "\u{e9}"),
+    ];
+    let mut touched = Vec::new();
+    for (i, (file, link)) in cases.into_iter().enumerate() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let outside = root.join("outside");
+        let victim = outside.join(file.split_once('/').unwrap().1);
+        std::fs::create_dir_all(victim.parent().unwrap()).unwrap();
+        std::fs::write(&victim, "keep me\n").unwrap();
+        let repo = root.join("repo");
+        aliased_commit(&repo, file, link, &outside);
+
+        let _ = create_worktree(&repo, "feature", "main", &root.join("wt")).await;
+        if std::fs::read(&victim).ok().as_deref() != Some(&b"keep me\n"[..]) {
+            touched.push(format!("case {i}: {file:?} beside a link {link:?}"));
+        }
+    }
+    assert_eq!(touched, Vec::<String>::new(), "a file outside the worktree was touched");
+}

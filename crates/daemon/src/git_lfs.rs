@@ -145,37 +145,49 @@ fn hydrate_limit() -> std::time::Duration {
 /// content, from the local store, within [`HYDRATE_LIMIT`]. Best effort:
 /// nothing here fails the worktree.
 ///
-/// The `filter=lfs` files are removed, then a `checkout` of those paths
-/// writes them again from the index through the filter and records them in
-/// the index, so status sees them clean. One that fails or runs out was killed mid-write, so what it leaves
-/// is undone: its `index.lock` removed (nothing else writes a worktree this
-/// new) and the fill run again, which puts every file it didn't finish back
-/// to its pointer. An object the store doesn't have stays a pointer.
+/// git rewrites only what it sees as changed, and a pointer the fill just
+/// wrote matches the index. So the `filter=lfs` entries are taken out of the
+/// index (`rm --cached`, which touches no file), and `checkout HEAD` of those
+/// paths writes them again through the filter and puts them back.
+///
+/// **The daemon itself touches no path in the worktree.** Every write and
+/// unlink is git's, which refuses to go through a symlink on the way to a
+/// path. The daemon's own `unlink` did: on a case-insensitive volume a commit
+/// holding `A/x.bin` and a symlink `a -> <anywhere>` made it delete
+/// `<anywhere>/x.bin` (ov-187 re-review).
+///
+/// One that fails or runs out was killed mid-write, so what it leaves is
+/// undone: its `index.lock` removed (nothing else writes a worktree this new)
+/// and the fill run again, which restores the index from `HEAD` and puts every
+/// file back to its pointer. An object the store doesn't have stays a
+/// pointer.
 pub async fn hydrate(worktree: &Path) {
     if helper().is_none() {
         return;
     }
-    let listed = match crate::git::git_bytes(worktree, &["ls-files", "-z", "--", LFS_PATHS]).await {
-        Ok(l) if l.ok && !l.stdout.is_empty() => l.stdout,
-        _ => return,
-    };
-    // git rewrites only what it sees as changed, and a pointer the fill just
-    // wrote matches the index; gone, it's written again through the filter.
-    for path in listed.split(|b| *b == 0).filter(|p| !p.is_empty()) {
-        let path = worktree.join(<std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(path));
-        if std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_file()) {
-            let _ = std::fs::remove_file(&path);
-        }
+    let listed = crate::git::git_bytes(worktree, &["ls-files", "-z", "--", LFS_PATHS]).await;
+    if !matches!(&listed, Ok(l) if l.ok && !l.stdout.is_empty()) {
+        return;
+    }
+    let unlisted = crate::git::git(worktree, &["rm", "-r", "-q", "--cached", "--", LFS_PATHS]).await;
+    if !matches!(&unlisted, Ok(u) if u.ok) {
+        tracing::warn!("Git LFS files couldn't be marked for hydration; they stay pointers");
+        return;
     }
     let limit = hydrate_limit();
-    match crate::git::git_with(worktree, &["checkout", "-q", "--", LFS_PATHS], &[], limit).await {
+    match crate::git::git_with(worktree, &["checkout", "-q", "HEAD", "--", LFS_PATHS], &[], limit).await {
         Ok(out) if out.ok => return,
         Ok(out) => tracing::warn!(stderr = %out.stderr, "Git LFS files couldn't be hydrated; they stay pointers"),
         Err(_) => tracing::warn!(?limit, "Git LFS files took too long to hydrate; they stay pointers"),
     }
     match crate::git::git(worktree, &["rev-parse", "--absolute-git-dir"]).await {
+        // git's own administrative directory for this worktree, which the
+        // daemon made a moment ago; never a path the commit chose.
         Ok(dir) if dir.ok => {
-            let _ = std::fs::remove_file(Path::new(dir.stdout.trim_end()).join("index.lock"));
+            let lock = Path::new(dir.stdout.trim_end()).join("index.lock");
+            if std::fs::symlink_metadata(&lock).is_ok_and(|m| m.is_file()) {
+                let _ = std::fs::remove_file(&lock);
+            }
         }
         _ => {}
     }
