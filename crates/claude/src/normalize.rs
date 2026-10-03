@@ -194,9 +194,17 @@ pub struct Live {
     streaming: Option<String>,
     /// Messages whose words have actually arrived as deltas.
     drawn: std::collections::HashSet<String>,
+    /// This process's running spend, which each turn's is the growth of.
+    spend: crate::usage::Ledger,
 }
 
 impl Live {
+    /// The live reader of a process started with `--resume`, whose first
+    /// running totals include the restored session's spend.
+    pub fn resumed() -> Live {
+        Live { spend: crate::usage::Ledger::resumed(), ..Live::default() }
+    }
+
     /// What one frame off the wire means, remembering what streamed.
     pub fn frame_to_events(&mut self, frame: &serde_json::Value) -> Vec<AgentEvent> {
         match frame["type"].as_str().unwrap_or_default() {
@@ -205,6 +213,7 @@ impl Live {
                 stream_to_events(frame)
             }
             "assistant" => {
+                self.spend.observe(frame);
                 let drawn = frame["message"]["id"]
                     .as_str()
                     .is_some_and(|id| self.drawn.contains(id));
@@ -219,7 +228,7 @@ impl Live {
                 // when they happened, and counting them again would double a
                 // report.
                 let mut events = frame_to_events_from(frame, Origin::Live);
-                events.extend(crate::usage::turn_usage(frame).map(|usage| AgentEvent::TurnUsage { usage }));
+                events.extend(self.spend.observe(frame).map(|usage| AgentEvent::TurnUsage { usage }));
                 events
             }
             _ => frame_to_events_from(frame, Origin::Live),

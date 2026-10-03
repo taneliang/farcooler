@@ -102,7 +102,11 @@ pub(crate) fn record_chat(store: &Store, terminal: Uuid, usage: &TurnUsage) {
         started_at: active_ms.map(|ms| ended_at - ms),
         ended_at,
         active_ms,
-        usage: if usage.models.is_some() { "reported" } else { "not_reported" },
+        usage: match (&usage.models, usage.partial) {
+            (None, _) => "not_reported",
+            (Some(_), true) => "partial",
+            (Some(_), false) => "reported",
+        },
         models,
     };
     write(store, &turn);

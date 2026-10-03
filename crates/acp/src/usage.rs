@@ -54,7 +54,7 @@ impl Spend {
                 reported_cost_micros: cost,
             }]
         });
-        TurnUsage { key, models, active_ms: None }
+        TurnUsage { key, models, active_ms: None, partial: false }
     }
 }
 

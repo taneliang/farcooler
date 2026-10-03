@@ -25,6 +25,11 @@ pub struct TurnUsage {
     pub models: Option<Vec<ModelUsage>>,
     /// How long the turn ran, by the harness's own clock, in milliseconds.
     pub active_ms: Option<u64>,
+    /// The counts are a floor, not the whole turn: the harness could state
+    /// only part of it (Claude's first turn after `--resume`, whose running
+    /// totals include the spend restored with the session).
+    #[serde(default)]
+    pub partial: bool,
 }
 
 /// One model's share of a turn.

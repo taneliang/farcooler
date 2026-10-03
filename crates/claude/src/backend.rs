@@ -154,7 +154,13 @@ impl ClaudeBackend {
         // Anything the CLI said before announcing itself — the user's own hooks
         // fire first. Mostly nothing, but dropping them unread would be a
         // silent choice rather than a deliberate one.
-        let mut live = crate::normalize::Live::default();
+        // Resumed or not decides what the first turn's running totals mean
+        // (`crate::usage`).
+        let mut live = if resume.is_some() {
+            crate::normalize::Live::resumed()
+        } else {
+            crate::normalize::Live::default()
+        };
         // Built here rather than at the end, so the restore below fills the
         // very tracker this session goes on using — see `history_to_events_with`.
         let mut tasks = crate::normalize::Tasks::default();

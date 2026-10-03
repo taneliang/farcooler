@@ -1,25 +1,172 @@
-//! A turn's spend, read off the stream-json `result` frame that ends it.
+//! A turn's spend, read off the stream-json `result` frames of one process.
 //!
-//! The `result` carries the whole turn's account twice: `usage`, summed over
-//! every model call, and `modelUsage`, the same split by model with Claude
-//! Code's own `costUSD` for each. The split is preferred, because a turn can
-//! spend on more than one model and a report broken down by model needs it;
-//! `usage` with `total_cost_usd` is the fallback for a frame without one.
+//! A chat pane is one long-lived `claude --print` process running many turns,
+//! and a `result`'s `modelUsage` and `total_cost_usd` are RUNNING totals for
+//! that whole process, plus any spend restored when it resumed a session
+//! (Agent SDK, "Track costs in streaming input mode": summing results
+//! double-counts). So a turn is this result's totals less the previous
+//! result's, per model, tokens and `costUSD` alike — the same difference the
+//! codex ledger and ACP's running cost take. Only `usage` is per turn, and it
+//! covers the main loop alone, without subagents.
+//!
+//! The first result of a resumed process has no previous one to subtract,
+//! and its totals carry the restored spend. That turn is recorded from its
+//! per-turn `usage`, on the model the turn's own messages named, with no
+//! reported cost (the daemon estimates one), and marked partial: the
+//! running total is never recorded as a turn.
+
+use std::collections::BTreeMap;
 
 use farcooler_agent_core::usage::{ModelUsage, TurnUsage, usd_to_micros};
 use serde_json::Value;
 
-/// The usage a `result` frame reports, or `None` for any other frame.
-///
-/// A result with neither `modelUsage` nor `usage` still yields a
-/// `TurnUsage`, with `models: None`: the turn ended and said nothing about
-/// what it spent, which is "not reported", not zero.
-pub fn turn_usage(frame: &Value) -> Option<TurnUsage> {
-    if frame["type"].as_str() != Some("result") {
-        return None;
+/// One model's running totals.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Running {
+    input: u64,
+    output: u64,
+    cache_read: u64,
+    cache_write: u64,
+    cost_micros: Option<i64>,
+}
+
+impl Running {
+    fn read(u: &Value) -> Running {
+        let n = |k: &str| u[k].as_u64().unwrap_or(0);
+        Running {
+            input: n("inputTokens"),
+            output: n("outputTokens"),
+            cache_read: n("cacheReadInputTokens"),
+            cache_write: n("cacheCreationInputTokens"),
+            cost_micros: u["costUSD"].as_f64().and_then(usd_to_micros),
+        }
     }
-    let models = by_model(frame).or_else(|| summed(frame));
-    Some(TurnUsage { key: key(frame), models, active_ms: frame["duration_ms"].as_u64() })
+
+    /// Whether `self` could have grown out of `earlier`. A total that went
+    /// down is a different process's, so it is not a difference at all.
+    fn follows(&self, earlier: &Running) -> bool {
+        self.input >= earlier.input
+            && self.output >= earlier.output
+            && self.cache_read >= earlier.cache_read
+            && self.cache_write >= earlier.cache_write
+    }
+}
+
+/// One process's spend so far, for telling each turn's share from it.
+#[derive(Debug, Default)]
+pub struct Ledger {
+    /// The running totals at the last result, by model. `None` before the
+    /// first result.
+    last: Option<BTreeMap<String, Running>>,
+    /// `total_cost_usd` at the last result, for a frame with no split.
+    last_total_cost: Option<i64>,
+    /// The process resumed a session, so its first totals are not its own.
+    resumed: bool,
+    /// The model the current turn's messages named, for a turn read from
+    /// its `usage`.
+    model: Option<String>,
+}
+
+impl Ledger {
+    /// A ledger for a process started with `--resume`.
+    pub fn resumed() -> Ledger {
+        Ledger { resumed: true, ..Ledger::default() }
+    }
+
+    /// Fold one frame in: the turn's usage on a `result`, else `None`.
+    pub fn observe(&mut self, frame: &Value) -> Option<TurnUsage> {
+        match frame["type"].as_str() {
+            Some("assistant") => {
+                if let Some(model) = frame["message"]["model"].as_str().filter(|m| *m != "<synthetic>") {
+                    self.model = Some(model.to_string());
+                }
+                None
+            }
+            Some("result") => Some(self.result(frame)),
+            _ => None,
+        }
+    }
+
+    fn result(&mut self, frame: &Value) -> TurnUsage {
+        let first = self.last.is_none();
+        let split: Option<BTreeMap<String, Running>> = frame["modelUsage"]
+            .as_object()
+            .filter(|m| !m.is_empty())
+            .map(|m| m.iter().map(|(model, u)| (model.clone(), Running::read(u))).collect());
+        let total_cost = frame["total_cost_usd"].as_f64().and_then(usd_to_micros);
+        let restored = first && self.resumed;
+
+        let models = if restored {
+            per_turn(frame, self.model.clone())
+        } else if let Some(now) = &split {
+            let before = self.last.clone().unwrap_or_default();
+            Some(difference(now, &before))
+        } else {
+            per_turn(frame, None).map(|mut models| {
+                let cost = match (total_cost, self.last_total_cost) {
+                    (Some(now), Some(before)) if now >= before => Some(now - before),
+                    (Some(now), None) => Some(now),
+                    _ => None,
+                };
+                models[0].reported_cost_micros = cost;
+                models
+            })
+        };
+
+        if let Some(now) = split {
+            self.last = Some(now);
+        } else if self.last.is_none() {
+            self.last = Some(BTreeMap::new());
+        }
+        self.last_total_cost = total_cost.or(self.last_total_cost);
+        self.model = None;
+        TurnUsage { key: key(frame), models, active_ms: frame["duration_ms"].as_u64(), partial: restored }
+    }
+}
+
+/// Each model's growth since `before`. A model whose totals fell is a reset,
+/// and counts from zero; a model that did not move did no work this turn.
+fn difference(now: &BTreeMap<String, Running>, before: &BTreeMap<String, Running>) -> Vec<ModelUsage> {
+    now.iter()
+        .filter_map(|(model, n)| {
+            let b = before.get(model).filter(|b| n.follows(b)).copied().unwrap_or_default();
+            let cost = match (n.cost_micros, b.cost_micros) {
+                (Some(n), Some(b)) if n >= b => Some(n - b),
+                (Some(n), None) => Some(n),
+                _ => None,
+            };
+            let usage = ModelUsage {
+                model: Some(model.clone()),
+                input: n.input - b.input,
+                output: n.output - b.output,
+                cache_read: n.cache_read - b.cache_read,
+                cache_write: n.cache_write - b.cache_write,
+                cache_write_1h: 0,
+                reported_cost_micros: cost,
+            };
+            let moved = usage.input + usage.output + usage.cache_read + usage.cache_write > 0;
+            moved.then_some(usage)
+        })
+        .collect()
+}
+
+/// The turn's own `usage` (main loop only), with no cost: the caller decides
+/// what it knows about that.
+fn per_turn(frame: &Value, model: Option<String>) -> Option<Vec<ModelUsage>> {
+    let u = frame["usage"].as_object()?;
+    let n = |k: &str| u.get(k).and_then(Value::as_u64).unwrap_or(0);
+    Some(vec![ModelUsage {
+        model,
+        input: n("input_tokens"),
+        output: n("output_tokens"),
+        cache_read: n("cache_read_input_tokens"),
+        cache_write: n("cache_creation_input_tokens"),
+        cache_write_1h: u
+            .get("cache_creation")
+            .and_then(|c| c["ephemeral_1h_input_tokens"].as_u64())
+            .unwrap_or(0),
+        reported_cost_micros: None,
+    }])
 }
 
 /// The result's own `uuid`, which a replay of the same frame repeats. A frame
@@ -29,43 +176,6 @@ fn key(frame: &Value) -> String {
         Some(uuid) if !uuid.is_empty() => format!("claude:{uuid}"),
         _ => format!("claude:{}", fnv(frame.to_string().as_bytes())),
     }
-}
-
-fn by_model(frame: &Value) -> Option<Vec<ModelUsage>> {
-    let split = frame["modelUsage"].as_object().filter(|m| !m.is_empty())?;
-    Some(
-        split
-            .iter()
-            .map(|(model, u)| ModelUsage {
-                model: Some(model.clone()),
-                input: u["inputTokens"].as_u64().unwrap_or(0),
-                output: u["outputTokens"].as_u64().unwrap_or(0),
-                cache_read: u["cacheReadInputTokens"].as_u64().unwrap_or(0),
-                cache_write: u["cacheCreationInputTokens"].as_u64().unwrap_or(0),
-                // Not split by lifetime per model. It only matters for an
-                // estimate, and a model here carries its own `costUSD`.
-                cache_write_1h: 0,
-                reported_cost_micros: u["costUSD"].as_f64().and_then(usd_to_micros),
-            })
-            .collect(),
-    )
-}
-
-fn summed(frame: &Value) -> Option<Vec<ModelUsage>> {
-    let u = frame["usage"].as_object()?;
-    let n = |k: &str| u.get(k).and_then(Value::as_u64).unwrap_or(0);
-    Some(vec![ModelUsage {
-        model: None,
-        input: n("input_tokens"),
-        output: n("output_tokens"),
-        cache_read: n("cache_read_input_tokens"),
-        cache_write: n("cache_creation_input_tokens"),
-        cache_write_1h: u
-            .get("cache_creation")
-            .and_then(|c| c["ephemeral_1h_input_tokens"].as_u64())
-            .unwrap_or(0),
-        reported_cost_micros: frame["total_cost_usd"].as_f64().and_then(usd_to_micros),
-    }])
 }
 
 /// FNV-1a, 64-bit: a stable name for a frame that carried no id. Nothing
@@ -80,75 +190,5 @@ fn fnv(bytes: &[u8]) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The `result` frame of a real turn (`tests/fixtures/turn_basic.jsonl`,
-    /// claude 2.1.x against claude-opus-5[1m]).
-    fn recorded_result() -> Value {
-        include_str!("../tests/fixtures/turn_basic.jsonl")
-            .lines()
-            .map(|l| serde_json::from_str::<Value>(l).unwrap())
-            .find(|f| f["type"] == "result")
-            .expect("the fixture ends its turn")
-    }
-
-    #[test]
-    fn a_recorded_result_reads_per_model_with_the_agents_own_cost() {
-        let usage = turn_usage(&recorded_result()).unwrap();
-        assert_eq!(usage.key, "claude:9e766346-8b18-4f9f-b11d-575d07f891fd");
-        assert_eq!(usage.active_ms, Some(3948));
-        assert_eq!(
-            usage.models,
-            Some(vec![ModelUsage {
-                model: Some("claude-opus-5[1m]".into()),
-                input: 2,
-                output: 4,
-                cache_read: 19912,
-                cache_write: 7018,
-                cache_write_1h: 0,
-                reported_cost_micros: Some(80_246),
-            }])
-        );
-    }
-
-    #[test]
-    fn without_a_split_the_summed_usage_and_total_cost_are_read() {
-        let mut frame = recorded_result();
-        frame.as_object_mut().unwrap().remove("modelUsage");
-        let models = turn_usage(&frame).unwrap().models.unwrap();
-        assert_eq!(models.len(), 1);
-        assert_eq!(models[0].model, None);
-        assert_eq!((models[0].cache_read, models[0].cache_write, models[0].cache_write_1h), (19912, 7018, 7018));
-        assert_eq!(models[0].reported_cost_micros, Some(80_246));
-    }
-
-    /// A result that says nothing about spend is "not reported", not zero.
-    #[test]
-    fn a_result_missing_its_usage_is_not_reported() {
-        let mut frame = recorded_result();
-        let object = frame.as_object_mut().unwrap();
-        object.remove("modelUsage");
-        object.remove("usage");
-        let usage = turn_usage(&frame).unwrap();
-        assert_eq!(usage.models, None);
-        assert_eq!(usage.active_ms, Some(3948), "the turn still ran for as long as it did");
-    }
-
-    #[test]
-    fn only_a_result_frame_is_a_turns_usage() {
-        let assistant = include_str!("../tests/fixtures/turn_basic.jsonl")
-            .lines()
-            .map(|l| serde_json::from_str::<Value>(l).unwrap())
-            .find(|f| f["type"] == "assistant")
-            .unwrap();
-        assert_eq!(turn_usage(&assistant), None, "an assistant frame's usage is one call, not the turn");
-    }
-
-    #[test]
-    fn a_result_without_an_id_is_keyed_the_same_every_time_it_is_heard() {
-        let mut frame = recorded_result();
-        frame.as_object_mut().unwrap().remove("uuid");
-        assert_eq!(turn_usage(&frame).unwrap().key, turn_usage(&frame.clone()).unwrap().key);
-    }
-}
+#[path = "usage_tests.rs"]
+mod tests;

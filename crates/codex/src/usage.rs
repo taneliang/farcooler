@@ -120,6 +120,7 @@ impl TokenLedger {
             key: format!("codex:{turn}"),
             models,
             active_ms: params["turn"]["durationMs"].as_u64(),
+            partial: false,
         }
     }
 }

@@ -40,6 +40,7 @@ fn recorded_claude_turn() -> TurnUsage {
             reported_cost_micros: Some(80_246),
         }]),
         active_ms: Some(3948),
+        partial: false,
     }
 }
 
@@ -75,7 +76,7 @@ async fn a_chat_turns_spend_is_filed_under_its_task_and_never_sent() {
 #[tokio::test]
 async fn a_chat_turn_with_no_usage_is_counted_as_not_reported() {
     let (_dir, svc, task, terminal, _) = a_task_with_an_agent("gemini").await;
-    let silent = TurnUsage { key: "acp:s:1".into(), models: None, active_ms: None };
+    let silent = TurnUsage { key: "acp:s:1".into(), models: None, active_ms: None, partial: false };
     record_chat(&svc.store, terminal, &silent);
     let totals = task_usage(&svc, task).totals.unwrap();
     assert_eq!((totals.turns, totals.turns_not_reported), (1, 1));
