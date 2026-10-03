@@ -238,7 +238,7 @@ fn tty_size(path: &std::path::Path) -> Option<(u16, u16)> {
 /// Which tty tmux says `pane` has now. One tmux process, so only asked when a
 /// size changes or cannot be read — a resize, not a read.
 async fn pane_tty(socket: &str, pane: &str) -> Option<PathBuf> {
-    let tmux = farcooler_core::programs::find("tmux")?;
+    let tmux = farcooler_tmux::server::find_tmux().await?;
     let output = tokio::process::Command::new(tmux)
         .args(["-L", socket, "display-message", "-p", "-t", pane, "#{pane_tty}"])
         .stdin(std::process::Stdio::null())

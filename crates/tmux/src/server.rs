@@ -147,7 +147,7 @@ impl TmuxServer {
         // app: the inventory becomes unusable, `derive_terminal` reports every
         // terminal as `Lost`, and the whole product looks broken because of a
         // missing directory. See `farcooler_core::programs`.
-        let tmux = farcooler_core::programs::find("tmux").ok_or_else(|| {
+        let tmux = find_tmux().await.ok_or_else(|| {
             tracing::warn!("tmux is not installed anywhere this daemon can find");
             DomainError::TmuxUnavailable
         })?;
@@ -271,6 +271,33 @@ fn utf8_locale() -> Option<(&'static str, &'static str)> {
     .map(|value| ("LC_CTYPE", value))
 }
 
+/// Where tmux is, found without blocking the async runtime.
+///
+/// `programs::find` can wait on the user's login shell — up to its timeout,
+/// and every concurrent caller waits on the same shell. Called straight from
+/// async code, each of those waits parks a runtime worker, so a burst of tmux
+/// commands behind a slow profile could stall every worker at once. A cached
+/// answer, which is every call after the first, is taken on the spot; anything
+/// else is resolved on a blocking thread.
+pub async fn find_tmux() -> Option<PathBuf> {
+    off_runtime(farcooler_core::programs::known("tmux"), || {
+        farcooler_core::programs::find("tmux")
+    })
+    .await
+}
+
+/// `known` if there is one, otherwise `find` on a blocking thread. Split out
+/// so a test can hand it a slow `find`.
+async fn off_runtime(
+    known: Option<PathBuf>,
+    find: impl FnOnce() -> Option<PathBuf> + Send + 'static,
+) -> Option<PathBuf> {
+    if known.is_some() {
+        return known;
+    }
+    tokio::task::spawn_blocking(find).await.ok().flatten()
+}
+
 /// Which locale to impose, given what was inherited.
 ///
 /// Pure so it can be tested: the real thing reads process-global environment,
@@ -353,5 +380,43 @@ mod tests {
         // problem that has nothing to do with either.
         let (key, _) = utf8_locale().unwrap_or(("LC_CTYPE", DEFAULT_UTF8_LOCALE));
         assert_eq!(key, "LC_CTYPE");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_slow_lookup_does_not_stall_the_runtime() {
+        // One worker, so a lookup that blocks it stops everything else: here,
+        // a ticker that should keep counting while a login shell takes its
+        // time. On a blocking thread the ticker runs throughout.
+        let ticks = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let ticker = {
+            let ticks = ticks.clone();
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    ticks.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+            })
+        };
+        tokio::task::yield_now().await;
+
+        let found = off_runtime(None, || {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            Some(PathBuf::from("/slow/tmux"))
+        })
+        .await;
+        ticker.abort();
+
+        assert_eq!(found, Some(PathBuf::from("/slow/tmux")));
+        let ticks = ticks.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(ticks >= 20, "the runtime ticked {ticks} times in 500 ms; the lookup blocked it");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_cached_answer_is_taken_without_a_lookup() {
+        let found = off_runtime(Some(PathBuf::from("/cached/tmux")), || {
+            panic!("a cached answer must not be looked up again")
+        })
+        .await;
+        assert_eq!(found, Some(PathBuf::from("/cached/tmux")));
     }
 }

@@ -77,6 +77,23 @@ pub fn find(name: &str) -> Option<PathBuf> {
     finder().find(name)
 }
 
+/// `find`'s answer if it is already cached as found, without ever asking the
+/// login shell.
+///
+/// For async callers: `find` can wait up to `LOGIN_SHELL_TIMEOUT` on a login
+/// shell, which must not happen on a runtime worker. They take this answer
+/// when there is one — every call after the first, for a program that was
+/// found — and otherwise run `find` on a blocking thread.
+pub fn known(name: &str) -> Option<PathBuf> {
+    if name.contains('/') {
+        return None;
+    }
+    match lock(&finder().names).get(name) {
+        Some(Known::Found(path)) => Some(path.clone()),
+        _ => None,
+    }
+}
+
 /// How long the login shell gets to print its `PATH`.
 ///
 /// Generous for a real profile — nvm and oh-my-zsh together take a second or
@@ -360,13 +377,21 @@ impl LoginPath {
                 }
             }
         };
+        // The shell is gone, but anything its profile started in the
+        // background is still in its group, and may be holding stdout open —
+        // an `ssh-agent`, a `sleep`, a stalled `curl`. None of it outlives this
+        // throwaway shell's purpose, so the group goes too, which also closes
+        // the pipe's last writers and lets the reader thread finish. The id is
+        // safe to signal after the reap: a process group's id is not reused
+        // while any member of the group is alive.
+        kill_group(&child);
         if !status.success() {
             return Err(format!("it exited with {status}"));
         }
         let remaining = deadline.saturating_duration_since(Instant::now());
         let out = rx
             .recv_timeout(remaining.max(Duration::from_millis(100)))
-            .map_err(|_| "it exited but left its output open".to_string())?;
+            .map_err(|_| "it exited, but something outside its group kept its output open".to_string())?;
         let raw = String::from_utf8(out).map_err(|_| "its PATH was not UTF-8".to_string())?;
         let raw = raw.trim();
         if raw.is_empty() {
@@ -406,14 +431,18 @@ impl Drop for Settle<'_> {
 /// SIGKILL the child's process group, then wait for the child so it is not
 /// left a zombie.
 fn kill_group_and_reap(child: &mut std::process::Child) {
+    kill_group(child);
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// SIGKILL every process in the group `child` leads.
+fn kill_group(child: &std::process::Child) {
     // SAFETY: `kill` takes no pointers. The child was spawned with
-    // `process_group(0)` and has not been waited for, so its pid is still its
-    // own and is the id of the group it leads.
+    // `process_group(0)`, so its pid is the id of the group it leads.
     unsafe {
         libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL);
     }
-    let _ = child.kill();
-    let _ = child.wait();
 }
 
 /// The first `dir/name` in `dirs` that is an executable file.
@@ -655,7 +684,17 @@ mod tests {
         // the login shell must not queue up behind it.
         let dir = scratch("hanging-shell");
         let pid_file = dir.join("pid");
-        let shell = fake_shell(&dir, &format!("echo $$ > '{}'\nexec sleep 1000", pid_file.display()));
+        let sleeper_file = dir.join("sleeper");
+        // A background job as well as the shell itself, the way a profile's
+        // `curl` or `sleep` would be: killing only the shell would leave it.
+        let shell = fake_shell(
+            &dir,
+            &format!(
+                "sleep 1000 &\necho $! > '{}'\necho $$ > '{}'\nwait",
+                sleeper_file.display(),
+                pid_file.display()
+            ),
+        );
         let timeout = Duration::from_secs(2);
         let finder = std::sync::Arc::new(Finder::new(LoginPath::new(
             shell,
@@ -672,6 +711,7 @@ mod tests {
             })
         };
         let pid: libc::pid_t = wait_for_file(&pid_file).parse().unwrap();
+        let sleeper: libc::pid_t = wait_for_file(&sleeper_file).parse().unwrap();
 
         // The other caller, while the shell is still hanging.
         let started = Instant::now();
@@ -694,6 +734,53 @@ mod tests {
         // SAFETY: signal 0 checks for existence and delivers nothing.
         let alive = unsafe { libc::kill(pid, 0) } == 0;
         assert!(!alive, "the timed-out shell {pid} is still around");
+        assert!(gone_soon(sleeper), "the shell's background job {sleeper} outlived it");
+    }
+
+    /// Whether `pid` stops existing within a couple of seconds. A grandchild
+    /// is reaped by init or launchd once it is reparented, not by this
+    /// process, so it may linger as a zombie for a moment after the kill.
+    fn gone_soon(pid: libc::pid_t) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            // SAFETY: signal 0 checks for existence and delivers nothing.
+            if unsafe { libc::kill(pid, 0) } != 0 {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        // Not left running for the rest of the suite either way.
+        // SAFETY: as above; `pid` is the sleeper this test's fake started.
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+        false
+    }
+
+    #[test]
+    fn a_background_job_holding_the_output_is_killed_and_the_answer_kept() {
+        // A profile that starts something in the background — an agent, a
+        // `sleep`, a slow `curl` — hands it the shell's stdout. The shell
+        // answers and exits, but the pipe stays open while the job lives.
+        // The answer must still be read, promptly, and the job must not be
+        // left running as an orphan.
+        let dir = scratch("background-job-shell");
+        let sleeper_file = dir.join("sleeper");
+        let shell = fake_shell(
+            &dir,
+            &format!("sleep 1000 &\necho $! > '{}'\nprintf %s /answered", sleeper_file.display()),
+        );
+        let timeout = Duration::from_secs(3);
+        let login = LoginPath::new(shell, timeout, Duration::from_secs(60));
+
+        let started = Instant::now();
+        let answer = login.get();
+        let took = started.elapsed();
+        // Checked before the asserts, so a failure does not leave it running.
+        let sleeper: libc::pid_t = wait_for_file(&sleeper_file).parse().unwrap();
+        let killed = gone_soon(sleeper);
+
+        assert_eq!(answer, Some(vec![PathBuf::from("/answered")]));
+        assert!(took < Duration::from_secs(1), "waited {took:?} on a pipe a background job held open");
+        assert!(killed, "the profile's background job {sleeper} was left running");
     }
 
     #[test]
