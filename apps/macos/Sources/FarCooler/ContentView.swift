@@ -1465,6 +1465,7 @@ struct ContentView: View {
         case .open:
             trail = nil
             open(listed, terminal: nil)
+        case .openInEditor: openInPreferredEditor(listed)
         case .showChanges: showChangesAction(for: listed, usable: store.refusal(for: host) == nil)?()
         case .newTerminal: newTerminal(in: listed)
         case .move(let id, _):
@@ -3542,8 +3543,8 @@ struct ContentView: View {
     /// The control gets its probe when it draws; a shortcut can be the first
     /// thing pressed after launch, and without this it would report "no editors
     /// found" on a Mac with four of them installed.
-    private func openInPreferredEditor() {
-        guard let worktree = detailWorktree else {
+    private func openInPreferredEditor(_ chosen: Worktree? = nil) {
+        guard let worktree = chosen ?? detailWorktree else {
             errorBanner = "Open a worktree first — there is nothing to hand to an editor."
             return
         }

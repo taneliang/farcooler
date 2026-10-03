@@ -183,7 +183,7 @@ struct WorktreeMenuItems: View {
 
     var body: some View {
         let moves = items.filter { if case .move = $0 { return true } else { return false } }
-        ForEach(items.filter { [.open, .showChanges, .newTerminal].contains($0) }, id: \.self) { item in
+        ForEach(items.filter { [.open, .openInEditor, .showChanges, .newTerminal].contains($0) }, id: \.self) { item in
             Button(item.title) { perform(item) }
         }
         if !moves.isEmpty {

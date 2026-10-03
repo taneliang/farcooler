@@ -74,8 +74,8 @@ struct SidebarParityTests {
         let shell = Terminal(id: "t1", short: "t1", title: "claude", preset: "claude", state: "running", epoch: 0)
         let offered = Self.navigator(shell: shell)
         let wanted: Set<SidebarAction> = [
-            .openWorktree, .newWorktree, .useAsOrchestrator, .showChanges, .newTerminal, .moveToWorkspace, .hide,
-            .unhide, .removeWorktree,
+            .openWorktree, .openInEditor, .newWorktree, .useAsOrchestrator, .showChanges, .newTerminal,
+            .moveToWorkspace, .hide, .unhide, .removeWorktree,
         ]
         #expect(wanted.subtracting(offered).isEmpty, "the navigator lacks \(wanted.subtracting(offered))")
         // The orchestrator's row, alone, where the rail was.
@@ -105,7 +105,7 @@ struct SidebarParityTests {
         #expect(!items.contains(.hide) && !items.contains(.remove))
         #expect(WorktreeMenu.items(
             for: Self.worktree("lane"), usable: false, showsChanges: true, moveTargets: [Self.billing], adoptable: []
-        ) == [.open])
+        ) == [.open, .openInEditor])
     }
 
     /// Needs You's count is the menu's badge, never "(3)" in its title

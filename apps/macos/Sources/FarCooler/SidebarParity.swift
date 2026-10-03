@@ -20,7 +20,8 @@ enum SidebarAction: String, CaseIterable {
     // A repository header's menu.
     case reconnect, newCheckoutTerminal, removeRepository
     // A worktree row and its menus.
-    case openWorktree, showChanges, newTerminal, moveToWorkspace, useAsOrchestrator, hide, unhide, removeWorktree
+    case openWorktree, openInEditor, showChanges, newTerminal, moveToWorkspace, useAsOrchestrator, hide, unhide,
+        removeWorktree
 }
 
 /// What the workspace navigator offers on its own (ov-92): opening a loose
@@ -51,6 +52,9 @@ extension Navigator {
 enum WorktreeMenu {
     enum Item: Hashable {
         case open
+        /// Open in Editor: the editor you use, for any worktree, not only
+        /// the one on screen (ov-178; the old sidebar row's had it).
+        case openInEditor
         case showChanges
         case newTerminal
         /// Move to Workspace ▸, one item a workspace.
@@ -66,6 +70,7 @@ enum WorktreeMenu {
         var action: SidebarAction {
             switch self {
             case .open: return .openWorktree
+            case .openInEditor: return .openInEditor
             case .showChanges: return .showChanges
             case .newTerminal: return .newTerminal
             case .move: return .moveToWorkspace
@@ -79,6 +84,7 @@ enum WorktreeMenu {
         var title: String {
             switch self {
             case .open: return "Open"
+            case .openInEditor: return "Open in Editor"
             case .showChanges: return "Show Changes"
             case .newTerminal: return "New Terminal"
             case .move(_, let name): return name
@@ -101,7 +107,9 @@ enum WorktreeMenu {
         for worktree: Worktree, usable: Bool, showsChanges: Bool, moveTargets: [WorkspaceSummary],
         adoptable: [Terminal]
     ) -> [Item] {
-        var out: [Item] = [.open]
+        // An editor reads the worktree's files, so it's offered on a runner
+        // that refuses writes too.
+        var out: [Item] = [.open, .openInEditor]
         guard usable else { return out }
         if showsChanges { out.append(.showChanges) }
         out.append(.newTerminal)
