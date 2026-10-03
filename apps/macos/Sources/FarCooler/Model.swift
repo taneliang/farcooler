@@ -942,6 +942,7 @@ extension Terminal: TaskLinkPane {}
 /// A worktree as `TaskLink` asks about it.
 extension Worktree: TaskLinkWorktree {
     var openTaskIDs: [String] { (openTasks ?? []).map(\.id) }
+    var isRepositoryCheckout: Bool { isMainCheckout }
 }
 
 /// A terminal as the board reads it. Both rules are AgentKit's —

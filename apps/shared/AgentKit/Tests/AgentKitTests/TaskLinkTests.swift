@@ -16,6 +16,7 @@ private struct Pane: TaskLinkPane, TaskBoardPane {
 
 private struct Lane: TaskLinkWorktree {
     var openTaskIDs: [String]
+    var isRepositoryCheckout = false
 }
 
 private let bil9 = "0198f2c0-0000-7000-8000-00000000a009"
@@ -100,3 +101,76 @@ func thePhonesFleetNamesAPanesTaskFromOpenTasks() throws {
     pane.role = "shell"
     #expect(TaskLink.task(of: pane, in: worktree) == "0198f2c0-0000-7000-8000-00000000a002")
 }
+
+// Which task an agent's own notifications fold into: the runner's
+// `task_link::task_of`, less the main checkout (ov-107). Android's
+// `TaskLinkTest.kt` states the same cases.
+
+@Test("An agent's notices fold into the task it was opened for, anywhere")
+func anAgentsNoticesFoldIntoTheTaskItWasOpenedFor() {
+    #expect(TaskLink.noticeTask(of: Pane(boardTaskID: bil7), in: Lane(openTaskIDs: [bil9])) == bil7)
+    #expect(TaskLink.noticeTask(of: Pane(boardTaskID: bil7), in: Lane(openTaskIDs: [])) == bil7)
+    // In the main checkout too: it was dispatched there for that task.
+    #expect(
+        TaskLink.noticeTask(
+            of: Pane(boardTaskID: bil7), in: Lane(openTaskIDs: [bil9], isRepositoryCheckout: true)) == bil7)
+}
+
+@Test("An agent opened by hand folds into its lane's one open task, never two")
+func anAgentOpenedByHandFoldsIntoItsLanesOneOpenTask() {
+    #expect(TaskLink.noticeTask(of: Pane(boardTaskID: nil), in: Lane(openTaskIDs: [bil9])) == bil9)
+    #expect(TaskLink.noticeTask(of: Pane(boardTaskID: ""), in: Lane(openTaskIDs: [bil9])) == bil9)
+    #expect(TaskLink.noticeTask(of: Pane(boardTaskID: nil), in: Lane(openTaskIDs: [bil9, bil7])) == nil)
+    #expect(TaskLink.noticeTask(of: Pane(boardTaskID: nil), in: Lane(openTaskIDs: [])) == nil)
+}
+
+@Test("The main checkout is nobody's lane for notices, though its header names the task")
+func theMainCheckoutIsNobodysLaneForNotices() {
+    let checkout = Lane(openTaskIDs: [bil9], isRepositoryCheckout: true)
+    let byHand = Pane(boardTaskID: nil)
+    #expect(TaskLink.task(of: byHand, in: checkout) == bil9, "the header's rule is unchanged")
+    #expect(TaskLink.noticeTask(of: byHand, in: checkout) == nil)
+}
+
+@Test("An orchestrator's notices are its own")
+func anOrchestratorsNoticesAreItsOwn() {
+    #expect(TaskLink.noticeTask(of: Pane(boardTaskID: nil, isOrchestrator: true), in: Lane(openTaskIDs: [bil9])) == nil)
+    #expect(TaskLink.noticeTask(of: Pane(boardTaskID: bil7, isOrchestrator: true), in: Lane(openTaskIDs: [])) == nil)
+}
+
+@Test("A banner is left to the task only where the task's notice arrives")
+func aBannerIsLeftToTheTaskOnlyWhereTheNoticeArrives() {
+    let agent = Pane(boardTaskID: bil7)
+    let loose = Pane(boardTaskID: nil)
+    let lane = Lane(openTaskIDs: [])
+    #expect(TaskLink.leavesBannerToTask(agent, in: lane, noticeReachesHere: true))
+    #expect(!TaskLink.leavesBannerToTask(agent, in: lane, noticeReachesHere: false), "its own banner is all there is")
+    #expect(!TaskLink.leavesBannerToTask(loose, in: lane, noticeReachesHere: true))
+}
+
+@Test("A phone hears a task notice only from a paired runner that sends them, once registered")
+func aPhoneHearsATaskNoticeOnlyFromAPairedRunnerOnceRegistered() {
+    let build = { (capabilities: Set<String>, paired: Bool) in
+        DaemonBuild(version: "v", matches: true, platform: "linux", capabilities: capabilities, pushPaired: paired)
+    }
+    #expect(TaskLink.taskNoticeReachesPhone(build(["tasks", "task_notices"], true), registered: true))
+    #expect(!TaskLink.taskNoticeReachesPhone(build(["tasks", "task_notices"], true), registered: false))
+    #expect(!TaskLink.taskNoticeReachesPhone(build(["tasks", "task_notices"], false), registered: true))
+    #expect(!TaskLink.taskNoticeReachesPhone(build(["tasks"], true), registered: true), "an older runner sends none")
+    #expect(!TaskLink.taskNoticeReachesPhone(nil, registered: true))
+}
+
+/// The phone's own fleet: the fixture's worktree is the main checkout, with
+/// one open task.
+@Test("The phone's fleet leaves a hand-opened agent in the main checkout to itself")
+func thePhonesFleetLeavesAHandOpenedAgentInTheMainCheckoutToItself() throws {
+    let worktree = try #require(FleetDecodeTests.decodeFleet().worktrees.first)
+    #expect(worktree.isRepositoryCheckout)
+    var pane = try #require(worktree.terminals.first)
+    pane.role = "agent"
+    pane.taskId = nil
+    #expect(TaskLink.noticeTask(of: pane, in: worktree) == nil)
+    pane.taskId = "0198f2c0-0000-7000-8000-00000000a002"
+    #expect(TaskLink.leavesBannerToTask(pane, in: worktree, noticeReachesHere: true))
+}
+

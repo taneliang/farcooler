@@ -129,9 +129,16 @@ public struct DaemonBuild: Equatable, Sendable {
     /// say.
     public let runnerId: String?
 
+    /// Whether the runner is paired with the relay (`Host.push_paired`), so
+    /// its task notices reach this account's devices as pushes. False from a
+    /// runner too old to say, and from the Mac's CLI-built value, which reads
+    /// it apart (`DaemonClient.pushPaired`). See
+    /// `TaskLink.taskNoticeReachesPhone`.
+    public let pushPaired: Bool
+
     public init(
         version: String, matches: Bool, platform: String, capabilities: Set<String> = [],
-        grantedScope: String = "unspecified", runnerId: String? = nil
+        grantedScope: String = "unspecified", runnerId: String? = nil, pushPaired: Bool = false
     ) {
         self.version = version
         self.matches = matches
@@ -139,6 +146,7 @@ public struct DaemonBuild: Equatable, Sendable {
         self.capabilities = capabilities
         self.grantedScope = grantedScope
         self.runnerId = runnerId
+        self.pushPaired = pushPaired
     }
 
     /// Whether this connection may ask for the calls that change the runner

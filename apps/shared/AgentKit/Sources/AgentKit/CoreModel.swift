@@ -1200,4 +1200,5 @@ extension Terminal: TaskLinkPane {}
 
 extension Worktree: TaskLinkWorktree {
     var openTaskIDs: [String] { (openTasks ?? []).map(\.id) }
+    var isRepositoryCheckout: Bool { isPrimaryCheckout }
 }
