@@ -802,52 +802,82 @@ jobs:
       # is how eight green scroll tests once covered for a terminal that would
       # not scroll.
 
+  # Whether `ios-ui` runs, and that its class lists are complete.
+  #
+  # On Linux and in seconds, so a PR that touches nothing the iOS app is built
+  # from does not hold two `xcode-27` runners — the pool canary and release
+  # draw on too — for half an hour. Every push to main runs it regardless.
+  # The paths are what the app compiles (apps/ios, AgentKit under
+  # apps/shared), the crates the xcframeworks link (farcooler-client and its
+  # path dependencies core, fence, protocol, tailcat and transport, plus
+  # farcooler-vt, per `cargo metadata`), the .proto protocol compiles, the
+  # shared fixtures, and this job's own scripts and workflow.
+  #
+  # `ios-ui-shards.py --check` runs whatever the paths say: a UI test class
+  # placed in no shard and not in its LOCAL list fails here, which is how a
+  # class added beside another in one file cannot quietly go unrun.
+  ios-ui-plan:
+    name: iOS UI plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.paths.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Every UI test class is placed
+        run: ./scripts/ios-ui-shards.py --check
+      - name: Decide whether the UI tests run
+        id: paths
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" != pull_request ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Not a pull request: the UI tests run."
+            exit 0
+          fi
+          changed=$(git diff --name-only "$BASE...$HEAD")
+          echo "$changed"
+          if echo "$changed" | grep -qE '^(apps/ios/|apps/shared/|crates/(client|core|fence|protocol|tailcat|transport|vt)/|proto/|test/fixtures/|Cargo\.(toml|lock)$|scripts/(ios-ui-tests\.sh|ios-ui-shards\.py|build-ios-frameworks\.sh)$|\.github/workflows/ci\.yml$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Touches what the iOS app is built from: the UI tests run."
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Touches nothing the iOS app is built from: the UI tests are skipped."
+          fi
+
   # The iOS app's own code, executed (ov-127). Until this job the app target
   # was compiled by CI and run by nothing, so a rule that lived only there was
   # untested on iOS even where Android tested its port.
   #
-  # Only the runnerless classes: each launches the app on an in-app harness
-  # (`-shell-harness`, `-agent-layout-harness`, `-phone-harness`, or a fixture
-  # flag) and needs a simulator and nothing else. A live-runner test that
-  # slipped into a list would skip with "NO LIVE RUNNER:", and the script turns
-  # that red — so the lists cannot quietly grow a test that tests nothing here.
-  # `testAHorizontalSwipeOverTheLiveDiffTurnsThePage` is the one live method
-  # inside a runnerless class, and is skipped by name for that reason.
+  # Only the runnerless classes, as `scripts/ios-ui-shards.py` lists them —
+  # by class, because `-only-testing` takes a class and one file can hold
+  # several. Each launches the app on an in-app harness (`-shell-harness`,
+  # `-agent-layout-harness`, `-phone-harness`, or a fixture flag) and needs a
+  # simulator and nothing else. A live-runner test that slipped into a shard
+  # would skip with "NO LIVE RUNNER:", and the script turns that red.
   #
-  # Two shards, because one would be the slowest job in CI by a distance.
-  # Measured from 80 local xcresult bundles (median of passing runs per test,
-  # current tests only): the shell shard's classes sum to about 6 minutes plus
-  # KeyboardTabStripTests, which has no history (16 tests, mostly one launch
-  # each); the phone shard's to about 7. CI's Mac runners are slower than the
-  # laptop the numbers came from, and the first launch after an install can
-  # take a minute, so each shard is expected near 15 minutes with the build.
-  # The iOS job above runs in 3 to 5 (last 12 green runs); its 15-minute
-  # timeout is untouched. 40 here is that 15 times 2.5, per ov-168's rule.
+  # Two shards, so neither is the slowest job in CI by a distance. Measured
+  # from 80 local xcresult bundles (median of passing runs, current tests,
+  # iPhone 17): the shell shard is 44 tests and about 8.5 minutes, the phone
+  # shard 32 tests and about 7 plus four with no history. With the build and
+  # a cold simulator each is expected near 18 minutes on CI; 40 is that
+  # times about 2.2, per ov-168's rule. Replace with the first runs' numbers.
+  # The iOS job above runs in 3 to 5 (last 12 green runs); its 15 stands.
   ios-ui:
     name: iOS UI (${{ matrix.shard }})
+    needs: ios-ui-plan
+    if: needs.ios-ui-plan.outputs.run == 'true'
     runs-on: xcode-27
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - shard: shell
-            classes: >-
-              FarCoolerUITests/ShellGestureTests
-              FarCoolerUITests/ShellColumnCloseTests
-              FarCoolerUITests/ShellPaneScrollTests
-              FarCoolerUITests/TerminalLigatureTests
-              FarCoolerUITests/KeyboardTabStripTests
-          - shard: phone
-            classes: >-
-              FarCoolerUITests/WorkspaceScreenTests
-              FarCoolerUITests/TaskScreenTests
-              FarCoolerUITests/PhoneReopenTests
-              FarCoolerUITests/AgentDraftTests
-              FarCoolerUITests/ChangesPullRequestTests
-              FarCoolerUITests/ComposerKeyboardTests
-              FarCoolerUITests/DynamicTypeTests
-              FarCoolerUITests/RunnerReachTests
+        shard: [shell, phone]
     steps:
       - name: Check the runner has Xcode 27
         run: |
@@ -868,12 +898,14 @@ jobs:
       - name: Install the watchOS platform (several GB)
         run: xcodebuild -downloadPlatform watchOS
 
-      # By UDID, not by name: the image's simulator names change without
-      # warning. The newest iOS runtime installed, and the first iPhone on it.
-      # No iPhone at all is a hard stop with the list printed, not a skip.
+      # By UDID, so the destination cannot be ambiguous. `iPhone 17` on the
+      # newest iOS runtime when the image has one — every local timing and
+      # every layout-sensitive assertion (ShellGestureTests, DynamicTypeTests)
+      # was measured on it — and otherwise the first iPhone on that runtime,
+      # said out loud. No iPhone at all is a hard stop with the list printed.
       - name: Pick a simulator
         run: |
-          udid=$(xcrun simctl list devices available -j | python3 -c '
+          pick=$(xcrun simctl list devices available -j | python3 -c '
           import json, sys
           devices = json.load(sys.stdin)["devices"]
           def version(runtime):
@@ -881,26 +913,43 @@ jobs:
               return [int(p) for p in tail.split("-")[1:] if p.isdigit()]
           ios = sorted((r for r in devices if ".SimRuntime.iOS-" in r), key=version, reverse=True)
           for runtime in ios:
-              for d in devices[runtime]:
-                  if d["name"].startswith("iPhone"):
-                      print(d["udid"])
-                      sys.exit()
+              phones = [d for d in devices[runtime] if d["name"].startswith("iPhone")]
+              if not phones:
+                  continue
+              exact = [d for d in phones if d["name"] == "iPhone 17"]
+              chosen = (exact or phones)[0]
+              print(chosen["udid"], "exact" if exact else "fallback", chosen["name"], runtime)
+              sys.exit()
           ')
-          if [ -z "$udid" ]; then
+          if [ -z "$pick" ]; then
             xcrun simctl list devices available
             echo "No available iPhone simulator on this runner." >&2
             exit 1
           fi
-          xcrun simctl list devices available | grep "$udid"
+          read -r udid how rest <<< "$pick"
+          if [ "$how" = fallback ]; then
+            echo "::warning::No iPhone 17 on this runner; using $rest. Local timings and layouts were measured on iPhone 17."
+          fi
+          echo "Simulator: $rest ($udid)"
           echo "SIMULATOR_ID=$udid" >> "$GITHUB_ENV"
+
+      # Booted, and waited for, in a step of its own, so the first test does
+      # not pay for the boot inside its probe's timeout. A first launch after
+      # an install has still taken over a minute, which is what each test's
+      # `launchDrawn` (180 s for the first frame) is for.
+      - name: Boot the simulator
+        run: |
+          xcrun simctl boot "$SIMULATOR_ID"
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b
 
       # The script, never xcodebuild directly: it fails a run where every test
       # skipped, and one where a test skipped for want of a runner.
       - name: Run the runnerless UI tests
-        env:
-          SKIP_TESTING: >-
-            FarCoolerUITests/ShellPaneScrollTests/testAHorizontalSwipeOverTheLiveDiffTurnsThePage
-        run: ./scripts/ios-ui-tests.sh ${{ matrix.classes }}
+        run: |
+          # The class list is split into arguments on purpose.
+          # shellcheck disable=SC2046
+          SKIP_TESTING="$(./scripts/ios-ui-shards.py --skip)" \
+            ./scripts/ios-ui-tests.sh $(./scripts/ios-ui-shards.py ${{ matrix.shard }})
 
   android:
     name: Android
