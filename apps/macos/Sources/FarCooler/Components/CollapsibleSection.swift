@@ -315,6 +315,17 @@ struct CollapsibleSection<Label: View, Accessory: View, Content: View>: View {
             }
             .clipShape(ClipWhile(clips: closing))
         }
+        // Closed from outside, too: a transcript row folding itself once the
+        // turn moves on. `set` has already said so for a click.
+        .onChange(of: expanded) { was, now in
+            guard was, !now, !closing else { return }
+            closing = true
+            let settle = 0.6 * slowdown
+            Task {
+                try? await Task.sleep(for: .seconds(settle))
+                closing = false
+            }
+        }
         // Added to, not set: a section inside another one registers too.
         .transformPreference(CollapsibleSectionsKey.self) { $0.insert(id) }
     }
