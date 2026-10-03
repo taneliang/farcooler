@@ -400,3 +400,44 @@ fn a_task_finished_without_an_answer_is_waiting_on_nobody() {
     let before = compute(&inputs, Period { since: 100 * H, until: 140 * H }, NOW).totals.decisions;
     assert_eq!((before.unanswered, before.closed_unanswered), (1, 0));
 }
+
+#[test]
+fn a_task_filed_already_done_is_counted_apart() {
+    // A record of past work: filed at 150 and done the same hour, never in
+    // progress. Without the rule it is a third-of-a-board of zeros.
+    let mut inputs = board();
+    inputs.tasks.push(task("lo-2", "Review: a backfilled record", 150).to(150, Done).facts);
+    let r = compute(&inputs, PERIOD, NOW);
+    assert_eq!((r.totals.completed, r.totals.filed_done), (3, 1));
+    // 20, 45, 50, as without it.
+    assert_eq!(r.totals.time_to_done, Some(Spread { count: 3, median_ms: 45 * H, p90_ms: 50 * H }));
+    assert!(r.notable.slowest.iter().all(|t| t.key != "lo-2"));
+    let review = r.by_area.iter().find(|g| g.name == "Review").expect("its group still shows");
+    assert_eq!((review.tally.completed, review.tally.filed_done, review.tally.time_to_done), (0, 1, None));
+}
+
+#[test]
+fn work_time_runs_from_first_in_progress_to_done() {
+    let t = compute(&board(), PERIOD, NOW).totals;
+    // ov-1 95 to 140 (45), ov-2 112 to 130 (18), bil-1 160 to 195 (35).
+    assert_eq!(t.work_time, Some(Spread { count: 3, median_ms: 35 * H, p90_ms: 45 * H }));
+}
+
+#[test]
+fn done_then_canceled_is_not_reopened() {
+    let seed = task("ov-9", "Mac: done, then dropped", 110).to(112, InProgress).to(120, Done).to(130, Cancelled);
+    let inputs = Inputs { tasks: vec![seed.facts], ..Inputs::default() };
+    let t = compute(&inputs, PERIOD, NOW).totals;
+    assert_eq!((t.completed, t.canceled, t.reopened), (0, 1, 0));
+}
+
+#[test]
+fn canceled_then_restored_is_read_as_done_then_reopened_is() {
+    let seed = task("ov-9", "Mac: canceled, then wanted", 110).to(120, Cancelled).to(130, InProgress);
+    let inputs = Inputs { tasks: vec![seed.facts], ..Inputs::default() };
+    let t = compute(&inputs, PERIOD, NOW).totals;
+    assert_eq!((t.canceled, t.reopened), (0, 1));
+    // Restored after the period: it was canceled, then.
+    let t = compute(&inputs, Period { since: 100 * H, until: 125 * H }, NOW).totals;
+    assert_eq!((t.canceled, t.reopened), (1, 0));
+}

@@ -348,8 +348,14 @@ fn headline(t: &Tally) -> Vec<String> {
     }
     moved.push(format!("{} new", t.created));
     lines.push(moved.join(", "));
+    if t.filed_done > 0 {
+        lines.push(format!("{} filed already done, left out of the times below", t.filed_done));
+    }
     if let Some(s) = t.time_to_done {
         lines.push(format!("Median time to done {}; 90% within {}", span(s.median_ms), span(s.p90_ms)));
+    }
+    if let Some(s) = t.work_time {
+        lines.push(format!("Median work time {}, from In Progress to Done; 90% within {}", span(s.median_ms), span(s.p90_ms)));
     }
     let mut came_back = Vec::new();
     if t.reopened > 0 {
@@ -491,7 +497,7 @@ fn render(r: &Report, label: Option<&str>) -> String {
     out.push(String::new());
 
     let t = &r.totals;
-    let nothing = t.created + t.completed + t.canceled + t.reopened + t.decisions.asked + t.decisions.answered == 0
+    let nothing = t.created + t.completed + t.filed_done + t.canceled + t.reopened + t.decisions.asked + t.decisions.answered == 0
         && t.needs_you.times + t.needs_you.waiting == 0
         && t.time_in_status.is_empty();
     if nothing {

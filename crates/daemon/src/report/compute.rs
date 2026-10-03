@@ -55,9 +55,11 @@ impl Question {
 struct Reading<'a> {
     facts: &'a TaskFacts,
     created_in: bool,
-    /// The last move to Done inside the period.
+    /// The last move to Done inside the period, unless the task moved on
+    /// again inside it.
     done_at: Option<i64>,
-    canceled_in: bool,
+    /// The same, for Canceled: the two endings are read alike.
+    canceled_at: Option<i64>,
     reopened: u32,
     fix_rounds: u32,
     spells: Vec<Spell>,
@@ -67,8 +69,27 @@ struct Reading<'a> {
 }
 
 impl Reading<'_> {
+    /// When the task first went into In Progress on its way to `done_at`.
+    /// `None` for a task that reached Done without ever being worked on
+    /// here: one filed already done, a record of work done elsewhere.
+    fn started(&self) -> Option<i64> {
+        let done = self.done_at?;
+        self.spells.iter().find(|s| s.status == TaskStatus::InProgress && s.start <= done).map(|s| s.start)
+    }
+
+    /// Done in the period without ever being in progress: filed done.
+    fn filed_done(&self) -> bool {
+        self.done_at.is_some() && self.started().is_none()
+    }
+
+    /// Filed to done, for a task worked on and done in the period.
     fn time_to_done(&self) -> Option<i64> {
-        self.done_at.map(|at| at - self.facts.task.created_at)
+        self.started().and(self.done_at).map(|at| at - self.facts.task.created_at)
+    }
+
+    /// First In Progress to done: the work time.
+    fn work_time(&self) -> Option<i64> {
+        Some(self.done_at? - self.started()?)
     }
 }
 
@@ -140,7 +161,7 @@ fn read(facts: &TaskFacts, period: Period) -> Reading<'_> {
         facts,
         created_in: period.contains(task.created_at),
         done_at: None,
-        canceled_in: false,
+        canceled_at: None,
         reopened: 0,
         fix_rounds: 0,
         spells: vec![Spell { status: TaskStatus::Backlog, start: task.created_at, end: None }],
@@ -178,11 +199,13 @@ fn read(facts: &TaskFacts, period: Period) -> Reading<'_> {
                 }
                 match (from, to) {
                     (_, TaskStatus::Done) => r.done_at = Some(at),
-                    (_, TaskStatus::Cancelled) => r.canceled_in = true,
+                    (_, TaskStatus::Cancelled) => r.canceled_at = Some(at),
                     (TaskStatus::InReview, TaskStatus::InProgress) => r.fix_rounds += 1,
                     _ => {}
                 }
-                if from == TaskStatus::Done {
+                // Work coming back: out of an ending into an open status. Done
+                // to Canceled is one ending replacing another, not a reopening.
+                if ended(from) && !ended(to) {
                     r.reopened += 1;
                 }
             }
@@ -199,17 +222,22 @@ fn read(facts: &TaskFacts, period: Period) -> Reading<'_> {
             _ => {}
         }
     }
-    // A task done inside the period and then moved on again inside it is
-    // not done. One moved on after the period ended still was, then.
-    if let Some(done) = r.done_at {
-        let undone_in_period = r.spells.iter().any(|s| {
-            s.status == TaskStatus::Done && s.start == done && s.end.is_some_and(|e| period.contains(e))
-        });
-        if undone_in_period {
-            r.done_at = None;
-        }
-    }
+    // A task done (or canceled) inside the period and then moved on again
+    // inside it is not done (or canceled). One moved on after the period
+    // ended still was, then.
+    let moved_on = |at: Option<i64>, status: TaskStatus| {
+        at.filter(|&at| {
+            !r.spells.iter().any(|s| s.status == status && s.start == at && s.end.is_some_and(|e| period.contains(e)))
+        })
+    };
+    r.done_at = moved_on(r.done_at, TaskStatus::Done);
+    r.canceled_at = moved_on(r.canceled_at, TaskStatus::Cancelled);
     r
+}
+
+/// Done and Canceled: the two ways a task ends.
+fn ended(status: TaskStatus) -> bool {
+    matches!(status, TaskStatus::Done | TaskStatus::Cancelled)
 }
 
 /// The part of `[start, end)` inside `[since, horizon)`.
@@ -219,18 +247,22 @@ fn overlap(start: i64, end: Option<i64>, since: i64, horizon: i64) -> i64 {
 
 fn tally(readings: &[&Reading], inputs: &Inputs, period: Period, horizon: i64) -> Tally {
     let mut t = Tally::default();
-    let mut to_done = Vec::new();
+    let (mut to_done, mut work) = (Vec::new(), Vec::new());
     let (mut latency, mut latency_you, mut to_clear) = (Vec::new(), Vec::new(), Vec::new());
     let mut in_status: [Vec<i64>; 5] = Default::default();
     let mut usage: Option<Usage> = None;
 
     for r in readings {
         t.created += u32::from(r.created_in);
-        t.canceled += u32::from(r.canceled_in);
+        t.canceled += u32::from(r.canceled_at.is_some());
+        t.filed_done += u32::from(r.filed_done());
         t.reopened += r.reopened;
         t.fix_rounds += r.fix_rounds;
         t.decisions.recorded += r.recorded;
 
+        if let Some(ms) = r.work_time() {
+            work.push(ms);
+        }
         if let Some(ms) = r.time_to_done() {
             t.completed += 1;
             to_done.push(ms);
@@ -292,6 +324,7 @@ fn tally(readings: &[&Reading], inputs: &Inputs, period: Period, horizon: i64) -
     }
 
     t.time_to_done = spread(to_done);
+    t.work_time = spread(work);
     t.decisions.latency = spread(latency);
     t.decisions.latency_you = spread(latency_you);
     t.needs_you.time_to_clear = spread(to_clear);
@@ -320,7 +353,7 @@ fn waits_on_you(status: TaskStatus) -> bool {
 /// no time in any status but Backlog and To Do. A label every parked task
 /// carries is not news.
 fn quiet(t: &Tally) -> bool {
-    let events = t.created + t.completed + t.canceled + t.reopened + t.fix_rounds
+    let events = t.created + t.completed + t.filed_done + t.canceled + t.reopened + t.fix_rounds
         + t.decisions.asked + t.decisions.answered + t.decisions.unanswered + t.decisions.recorded
         + t.decisions.closed_unanswered
         + t.needs_you.times + t.needs_you.cleared + t.needs_you.waiting;
@@ -399,6 +432,6 @@ fn notable(readings: &[&Reading], period: Period, horizon: i64) -> Notable {
         most_fix_rounds: top(
             readings.iter().filter(|r| r.fix_rounds > 0).map(|r| named(r, None, Some(r.fix_rounds))).collect(),
         ),
-        canceled: top(readings.iter().filter(|r| r.canceled_in).map(|r| named(r, None, None)).collect()),
+        canceled: top(readings.iter().filter(|r| r.canceled_at.is_some()).map(|r| named(r, None, None)).collect()),
     }
 }

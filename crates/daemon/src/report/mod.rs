@@ -104,16 +104,28 @@ pub struct Group {
 pub struct Tally {
     /// Tasks filed in the period.
     pub created: u32,
-    /// Tasks that moved to Done in the period. A task done twice counts once.
+    /// Tasks worked on (in In Progress at some point) that moved to Done in
+    /// the period. A task done twice counts once; one done and then moved on
+    /// again inside the period is not done.
     pub completed: u32,
-    /// Tasks that moved to Canceled in the period.
+    /// Tasks that reached Done in the period without ever being in
+    /// progress: filed already done, a record of work done elsewhere. Kept
+    /// out of `completed` and every duration, where a time to done of zero
+    /// would drag the medians toward nothing.
+    pub filed_done: u32,
+    /// Tasks that moved to Canceled in the period, read as `completed` is:
+    /// one canceled and restored inside the period is not canceled.
     pub canceled: u32,
-    /// Moves out of Done in the period: work that came back.
+    /// Moves from Done or Canceled back to an open status in the period:
+    /// work that came back. Done to Canceled is not one.
     pub reopened: u32,
     /// Moves from In Review back to In Progress in the period.
     pub fix_rounds: u32,
     /// Filed to done, for the tasks completed in the period.
     pub time_to_done: Option<Spread>,
+    /// First In Progress to done, for the same tasks: the work time,
+    /// without the wait in the backlog.
+    pub work_time: Option<Spread>,
     /// Time spent in each open status inside the period, across every task,
     /// in board order. Done and Canceled are endings, not places to wait,
     /// so they are not here. A status no task sat in is left out.

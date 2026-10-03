@@ -88,9 +88,11 @@ fn a_week() -> Report {
         created: 5,
         completed: 3,
         canceled: 1,
+        filed_done: 32,
         reopened: 1,
         fix_rounds: 2,
         time_to_done: Some(Spread { count: 3, median_ms: 3 * HOUR + 10 * MINUTE, p90_ms: 2 * DAY + 5 * HOUR }),
+        work_time: Some(Spread { count: 3, median_ms: 2 * HOUR, p90_ms: 9 * HOUR }),
         time_in_status: vec![StatusTime { status: "in_progress".into(), total_ms: 41 * HOUR, tasks: 4, median_ms: 9 * HOUR }],
         decisions: Decisions {
             asked: 2,
@@ -131,7 +133,9 @@ fn the_summary_says_what_happened_in_plain_words() {
     assert_eq!(lines[0], "Last 7 days · Every repository on this runner");
     for expected in [
         "3 done, 1 canceled, 5 new",
+        "32 filed already done, left out of the times below",
         "Median time to done 3 h 10 min; 90% within 2 d 5 h",
+        "Median work time 2 h, from In Progress to Done; 90% within 9 h",
         "1 task reopened, 2 fix rounds",
         "Acceptance: 4 of 5 lines met; 1 of 2 tasks finished every line",
         "Questions: 2 asked, 1 answered, 1 still open",
