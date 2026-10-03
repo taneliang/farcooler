@@ -81,6 +81,18 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
     var roots by remember { mutableStateOf<List<RepositoryRoot>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var failure by remember { mutableStateOf<String?>(null) }
+    // A theme or agent write the runner refused comes back null, and the list
+    // on screen stays what it was. Said on the screen's failure line, as the
+    // branch prefix already was, rather than looking like a save that did
+    // nothing (ov-167).
+    fun <T> written(result: T?, apply: (T) -> Unit) {
+        if (result == null) {
+            failure = "That runner didn’t accept the change."
+        } else {
+            apply(result)
+            failure = null
+        }
+    }
     var addingRepository by remember { mutableStateOf(false) }
     // The two sections whose read is `Scope::HostAdmin` while this app enrolls
     // at `control`. Their own trouble rather than the screen's one `failure`
@@ -172,7 +184,7 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
             onSave = { edited ->
                 editingTheme = null
                 scope.launch {
-                    connection.upsertTheme(edited)?.let { themes = it }
+                    written(connection.upsertTheme(edited)) { themes = it }
                     // Every picker reads the merged list, so a saved theme has
                     // to reach it — otherwise the thing you just made is
                     // missing from the one place you would choose it.
@@ -189,7 +201,7 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
             onCancel = { editingAdapter = null },
             onSave = { edited ->
                 editingAdapter = null
-                scope.launch { connection.upsertAdapter(edited)?.let { adapters = it } }
+                scope.launch { written(connection.upsertAdapter(edited)) { adapters = it } }
             })
         return
     }
@@ -297,7 +309,7 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
                     ) { Text("Edit") }
                     TextButton(
                         onClick = {
-                            scope.launch { connection.deleteTheme(theme.name)?.let { themes = it }
+                            scope.launch { written(connection.deleteTheme(theme.name)) { themes = it }
                                 connection.reloadThemes() }
                         },
                         enabled = mayAdminister,
@@ -363,7 +375,7 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
                         TextButton(
                             onClick = {
                                 scope.launch {
-                                    connection.deleteAdapter(adapter.preset)?.let { adapters = it }
+                                    written(connection.deleteAdapter(adapter.preset)) { adapters = it }
                                 }
                             },
                             enabled = mayAdminister,
