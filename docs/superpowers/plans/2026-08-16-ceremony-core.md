@@ -1,5 +1,10 @@
 # Ceremony Core Implementation Plan
 
+> **Retired on 2026-10-03 (ov-170).** Task 4's relay work (proof of possession
+> at registration, `/v1/devices/lookup`, `/v1/devices/verify`) was removed from
+> the relay because no client ever called it. The relay half of commit
+> `7fd2cbb2` is gone; migration 0004's columns stay, unused.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the two-QR ceremony's logic once, in Rust, so iOS, Android and macOS share one implementation of every rule that decides whether an enrollment is safe — and add the relay's two changes: proof of possession at registration, and the account lookup.
@@ -270,6 +275,8 @@ grep -n "ceremony" crates/client/include/farcooler_client.h
 ---
 
 ### Task 4: The relay proves possession and answers the account question
+
+> **Retired on 2026-10-03 (ov-170):** no client ever called these routes or sent the proof, so the relay dropped them. See the note at the top.
 
 **Files:**
 - Modify: `services/relay/src/index.ts` — `/v1/devices`, plus `/v1/devices/lookup`

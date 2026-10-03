@@ -1,5 +1,15 @@
 # Onboarding a device without copying a key
 
+> **Retired on 2026-10-03 (ov-170): the relay leg.** The proof of possession at
+> registration (`keyA`, `signature`, `fingerprint` on `/v1/devices`),
+> `/v1/devices/lookup` and `/v1/devices/verify` were removed from the relay,
+> because no client ever called them: no app sent a key or a signature, and no
+> app asked the lookup or promoted a row. The relay half of commit `7fd2cbb2`
+> is gone. The `key_a_fingerprint` and `state` columns stay, since migrations
+> are additive-only, and registration accepts and ignores the old fields. The
+> sections below that describe the relay's lookup, its `pending`/`verified`
+> states and its proof are history, not the current design.
+
 Today, putting Far Cooler on a phone means reading a 400-character public key
 off one screen, getting it onto a runner somehow, running a shell command
 there, and then typing an address, a user and a port back into the app. Every
@@ -108,6 +118,8 @@ means being next to a device that already reaches it.** For a remote fleet that
 is the common case, not the rare one, and the manual path is always there.
 
 ### Two gates, and only one of them is the account
+
+> **Retired on 2026-10-03 (ov-170).** The relay no longer does this: no client ever called it. See the note at the top.
 
 **Both devices must be signed into the same account.** The new device signs in
 and registers its keys through `/v1/devices`, which is session-authenticated — so
@@ -381,6 +393,8 @@ grant from. The manual path — paste the key, type the address — is always
 available and is the answer when nobody can be in the same room.
 
 ## What the relay stores
+
+> **Retired on 2026-10-03 (ov-170).** The relay no longer does this: no client ever called it. See the note at the top.
 
 | | |
 | --- | --- |
