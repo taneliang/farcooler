@@ -722,7 +722,6 @@ struct TaskBoardView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
             if store.hasRead {
                 BoardSummaryStrip(store: store, defaults: defaults)
                     .id(ObjectIdentifier(store))

@@ -272,7 +272,6 @@ struct WorkspaceView<
             if let shown = stage.drawn {
                 VStack(spacing: 0) {
                     breadcrumb(shown)
-                    Divider()
                     detail(shown, settled == shown)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -553,75 +552,71 @@ enum OrchestratorPeek {
     }
 }
 
-/// The breadcrumb over what's opened: each level down to the one you're at,
-/// every one but that a way back to it, and the close button at the far end,
-/// beside the board rather than across the window from it (ov-85).
+/// The breadcrumb over what's opened, a jump bar as Xcode's: each level
+/// down to the one you're at, every one but that a way back to it, and the
+/// close button at the far end (ov-85). Drawn from `pieces`, one style each
+/// (`JumpBar`), in the shared header (`columnHeader`).
 struct DrillBreadcrumb: View {
     let crumbs: [WorkspaceNavigation.Crumb]
-    /// The trailing worktree segment (ov-86): "⎇ tax-rounding ▾", a menu
+    /// The trailing worktree segment (ov-86): "⎇ tax-rounding ⌄", a menu
     /// of the workspace's worktrees, task ones by their task, then the
     /// loose ones. It stands for a worktree opened whole, in place of its
     /// crumb, and follows a task as the worktree beneath it.
     var worktrees: WorktreeCrumb?
     var onGo: (ContentView.Selection) -> Void
-    /// Close: what's opened goes, and the orchestrator fills the main area
-    /// again. Nil where
-    /// there's nothing to close to, and no button.
+    /// Close: what's opened goes, and the orchestrator is selected again.
+    /// Nil where there's nothing to close to, and no button.
     var onClose: (() -> Void)?
 
+    /// One mark the bar draws, and the style it's drawn in.
+    struct Piece: Equatable {
+        enum Kind: Equatable {
+            case separator
+            /// A crumb, by its index in `crumbs`.
+            case crumb(Int)
+            /// The worktree menu's icon, its title and its ⌄.
+            case menuIcon, menuTitle, menuChevron
+        }
+
+        var kind: Kind
+        var style: JumpBar.Style
+    }
+
+    /// Everything the bar draws, in order, each in its one style: what
+    /// `ColumnHeaderTests` reads, and all the view draws from.
+    static func pieces(_ crumbs: [WorkspaceNavigation.Crumb], worktrees: WorktreeCrumb?) -> [Piece] {
+        var out: [Piece] = []
+        for (index, crumb) in crumbs.enumerated() {
+            if index > 0 { out.append(Piece(kind: .separator, style: JumpBar.chevron)) }
+            out.append(Piece(kind: .crumb(index), style: JumpBar.style(crumb.target == nil ? .current : .ancestor)))
+        }
+        if let worktrees {
+            if !crumbs.isEmpty { out.append(Piece(kind: .separator, style: JumpBar.chevron)) }
+            out.append(Piece(kind: .menuIcon, style: JumpBar.icon(.menu, isHere: worktrees.isHere)))
+            out.append(Piece(kind: .menuTitle, style: JumpBar.style(.menu, isHere: worktrees.isHere)))
+            out.append(Piece(kind: .menuChevron, style: JumpBar.chevron))
+        }
+        return out
+    }
+
     var body: some View {
-        HStack(spacing: 6) {
-            ForEach(Array(crumbs.enumerated()), id: \.offset) { index, crumb in
-                if index > 0 { Text("›").foregroundStyle(.tertiary) }
-                if let target = crumb.target {
-                    Button(crumb.title) { onGo(target) }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .help("Go to \(crumb.title)")
-                } else {
-                    Text(crumb.title)
-                        .fontWeight(.semibold)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+        let pieces = Self.pieces(crumbs, worktrees: worktrees)
+        HStack(alignment: .firstTextBaseline, spacing: JumpBar.spacing) {
+            ForEach(Array(pieces.enumerated()), id: \.offset) { _, piece in
+                switch piece.kind {
+                case .separator:
+                    Image(systemName: JumpBar.separatorGlyph)
+                        .font(piece.style.font)
+                        .foregroundStyle(piece.style.color)
+                        .accessibilityHidden(true)
+                case .crumb(let index):
+                    crumb(crumbs[index], style: piece.style)
+                case .menuIcon:
+                    if let worktrees { worktreeMenu(worktrees, pieces: pieces) }
+                case .menuTitle, .menuChevron:
+                    // Drawn inside the menu's label, with its icon.
+                    EmptyView()
                 }
-            }
-            if let worktrees {
-                if !crumbs.isEmpty { Text("›").foregroundStyle(.tertiary) }
-                Menu {
-                    if !worktrees.tasks.isEmpty {
-                        Section("Tasks") {
-                            ForEach(worktrees.tasks) { item in menuItem(item) }
-                        }
-                    }
-                    if !worktrees.loose.isEmpty {
-                        Section("Worktrees") {
-                            ForEach(worktrees.loose) { item in menuItem(item) }
-                        }
-                    }
-                    if worktrees.tasks.isEmpty && worktrees.loose.isEmpty {
-                        Text("No worktrees yet")
-                    }
-                    // The worktree the segment stands for, and what its
-                    // sidebar row's menus did (review M1).
-                    if let name = worktrees.worktree, !worktrees.actions.isEmpty {
-                        Section(name) {
-                            WorktreeMenuItems(items: worktrees.actions, perform: worktrees.perform)
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: WorktreeSection.glyph)
-                            .font(.system(size: 10, weight: .medium))
-                        Text(worktrees.title)
-                            .fontWeight(worktrees.isHere ? .semibold : .regular)
-                            .lineLimit(1)
-                    }
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .help("Go to another worktree in this workspace (⌃⌘↑ ⌃⌘↓)")
-                .accessibilityIdentifier("breadcrumb-worktrees")
             }
             Spacer(minLength: 0)
             if let onClose {
@@ -635,15 +630,87 @@ struct DrillBreadcrumb: View {
                 .help("Close (Esc)")
                 .accessibilityLabel("Close")
                 .accessibilityIdentifier("workspace-close")
+                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] }
             }
         }
-        .font(.system(size: 12))
         .padding(.leading, 12)
         .padding(.trailing, 6)
-        .frame(height: 30)
-        .background(WorkspaceStyle.canvas)
+        .columnHeader()
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Breadcrumb")
+    }
+
+    /// A crumb: a way back while it has a target, else where you are.
+    /// Ancestors keep their width; the current one, a task's long title,
+    /// gives way, cut in its middle.
+    @ViewBuilder
+    private func crumb(_ crumb: WorkspaceNavigation.Crumb, style: JumpBar.Style) -> some View {
+        if let target = crumb.target {
+            Button { onGo(target) } label: {
+                Text(crumb.title).font(style.font).foregroundStyle(style.color).lineLimit(1)
+            }
+            .buttonStyle(.plain)
+            .fixedSize()
+            .help("Go to \(crumb.title)")
+        } else {
+            Text(crumb.title)
+                .font(style.font)
+                .foregroundStyle(style.color)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .layoutPriority(-1)
+        }
+    }
+
+    /// The worktree segment: a menu whose label is drawn here, in the bar's
+    /// type, not the pop-up button's own, which set "Worktrees" a size
+    /// larger than its neighbors (owner, 2 Oct).
+    private func worktreeMenu(_ worktrees: WorktreeCrumb, pieces: [Piece]) -> some View {
+        let icon = pieces.first { $0.kind == .menuIcon }?.style ?? JumpBar.icon(.menu)
+        let title = pieces.first { $0.kind == .menuTitle }?.style ?? JumpBar.style(.menu)
+        let chevron = pieces.first { $0.kind == .menuChevron }?.style ?? JumpBar.chevron
+        return Menu {
+            if !worktrees.tasks.isEmpty {
+                Section("Tasks") {
+                    ForEach(worktrees.tasks) { item in menuItem(item) }
+                }
+            }
+            if !worktrees.loose.isEmpty {
+                Section("Worktrees") {
+                    ForEach(worktrees.loose) { item in menuItem(item) }
+                }
+            }
+            if worktrees.tasks.isEmpty && worktrees.loose.isEmpty {
+                Text("No worktrees yet")
+            }
+            // The worktree the segment stands for, and what its
+            // sidebar row's menus did (review M1).
+            if let name = worktrees.worktree, !worktrees.actions.isEmpty {
+                Section(name) {
+                    WorktreeMenuItems(items: worktrees.actions, perform: worktrees.perform)
+                }
+            }
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Image(systemName: WorktreeSection.glyph)
+                    .font(icon.font)
+                    .foregroundStyle(icon.color)
+                Text(worktrees.title)
+                    .font(title.font)
+                    .foregroundStyle(title.color)
+                    .lineLimit(1)
+                Image(systemName: JumpBar.menuGlyph)
+                    .font(chevron.font)
+                    .foregroundStyle(chevron.color)
+            }
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Go to another worktree in this workspace (⌃⌘↑ ⌃⌘↓)")
+        .accessibilityIdentifier("breadcrumb-worktrees")
     }
 }
 

@@ -40,8 +40,9 @@ struct BoardHeader: View {
         // the trailing edge.
         .padding(.leading, ColumnGrid.b)
         .padding(.trailing, ColumnGrid.a)
-        .padding(.vertical, ColumnGrid.rhythm)
-        .background(WorkspaceStyle.paneChrome)
+        // The shared height, so its divider lines up with the main area's
+        // (ov-92): it was 40 pt, its padding around a 24 pt control.
+        .columnHeader()
         // On the header rather than on the button, so the same form opens
         // from the plus button and from the overflow menu's item.
         .popover(isPresented: $newTaskOpen, arrowEdge: .bottom) {
@@ -54,7 +55,7 @@ struct BoardHeader: View {
 
     private func row(_ level: Level) -> some View {
         HStack(spacing: SidebarGrid.gap) {
-            Text(title).font(WorkspaceStyle.sectionTitle).lineLimit(1).truncationMode(.tail)
+            Text(title).font(ColumnHeader.font(.semibold)).lineLimit(1).truncationMode(.tail)
                 .gridMark("header", .text)
             // The one count worth putting in a title bar, and the sentence is
             // the model's like every other one here. Nothing when nothing is

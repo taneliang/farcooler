@@ -89,10 +89,10 @@ struct ConversationHeader: View {
     var body: some View {
         HStack(spacing: 8) {
             if let seat { StatusGlyph(status: seat.terminal.status) }
-            Text("Orchestrator").font(.system(size: 12, weight: .semibold))
+            Text("Orchestrator").font(ColumnHeader.font(.semibold))
             if let name = Self.agentName(seat) {
                 Text(name)
-                    .font(.system(size: 11))
+                    .font(ColumnHeader.font())
                     .foregroundStyle(.secondary)
             }
             if ConversationColumn.unread(seat) {
@@ -132,8 +132,7 @@ struct ConversationHeader: View {
             }
         }
         .padding(.horizontal, 12)
-        .frame(height: 30)
-        .background(WorkspaceStyle.canvas)
+        .columnHeader()
     }
 }
 

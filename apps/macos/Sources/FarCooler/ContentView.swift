@@ -2584,7 +2584,6 @@ struct ContentView: View {
                     onStepDown: {
                         if let seat { Task { await stepDown(seat) } }
                     })
-                Divider()
                 if let seat {
                     let sharers = WorkspaceScreen.sharers(
                         of: seat, layouts: store.client(for: seat.worktree)?.layouts[seat.worktree.id])
