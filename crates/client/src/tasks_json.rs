@@ -130,6 +130,11 @@ pub fn task_json(task: &pb::Task, now: i64) -> serde_json::Value {
         // without `workstreams`, whose proto3 zero is empty bytes, never the
         // nil uuid, which a client would key a board by.
         "workspace": crate::workspaces_json::workspace_of(Some(&task.workspace_id)),
+        // When it starts, and who works it (ov-212, ov-213). Null and empty
+        // from a runner without `task_waits` or `task_workers`.
+        "wait": task.wait.as_ref().map(crate::task_starts_json::wait_json),
+        "waiting_on": task.waiting_on,
+        "workers": task.workers.iter().map(crate::task_starts_json::worker_json).collect::<Vec<_>>(),
     })
 }
 

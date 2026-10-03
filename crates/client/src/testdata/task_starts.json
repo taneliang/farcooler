@@ -1,0 +1,68 @@
+[
+  {
+    "key": "ov-192",
+    "wait": { "kind": "in_line", "line": "build", "position": 2, "ahead": ["ov-177"], "since": 1000 },
+    "waiting_on": [],
+    "workers": [
+      {
+        "id": "07070707-0707-0707-0707-070707070707",
+        "harness": "claude",
+        "agent_id": "a3fd8fceef581c787",
+        "label": "ov-192 Mac polish",
+        "model": "opus",
+        "state": "finished",
+        "started_at": 2000,
+        "ended_at": 9000,
+        "last_activity_at": null,
+        "doing": "",
+        "linked_by_description": false,
+        "orchestrator_terminal": "08080808-0808-0808-0808-080808080808"
+      }
+    ]
+  },
+  {
+    "key": "ov-12",
+    "wait": { "kind": "until", "until": 1759654800000, "since": 1000 },
+    "waiting_on": ["ov-191", "ov-192"],
+    "workers": []
+  },
+  {
+    "key": "ov-122",
+    "wait": { "kind": "after", "event": "release", "since": 1000 },
+    "waiting_on": [],
+    "workers": []
+  },
+  {
+    "key": "ov-6",
+    "wait": { "kind": "parked", "since": 1000 },
+    "waiting_on": [],
+    "workers": []
+  },
+  {
+    "key": "ov-213",
+    "wait": null,
+    "waiting_on": [],
+    "workers": [
+      {
+        "id": "09090909-0909-0909-0909-090909090909",
+        "harness": "codex",
+        "agent_id": "/root/lane",
+        "label": "",
+        "model": "",
+        "state": "unobserved",
+        "started_at": 3000,
+        "ended_at": null,
+        "last_activity_at": null,
+        "doing": "",
+        "linked_by_description": true,
+        "orchestrator_terminal": null
+      }
+    ]
+  },
+  {
+    "key": "old-runner",
+    "wait": null,
+    "waiting_on": [],
+    "workers": []
+  }
+]
