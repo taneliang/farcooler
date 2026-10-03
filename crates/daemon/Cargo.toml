@@ -13,6 +13,13 @@ path = "src/lib.rs"
 name = "farcoolerd"
 path = "src/main.rs"
 
+# The Git LFS filter the daemon's own gits run in place of git-lfs (see the
+# file, and `git_lfs`). Shipped beside `farcoolerd`. Uses nothing of the
+# daemon's library: std, `sha2` and one `libc` constant.
+[[bin]]
+name = "farcooler-lfs-filter"
+path = "src/bin/farcooler-lfs-filter.rs"
+
 # The default build has no Go archive linked into `farcooler-tailcat`, and
 # that is fine: `allowlist::start_tunnel` exists in this crate's code either
 # way, it just always fails with `no_tailcat` until a platform script supplies
