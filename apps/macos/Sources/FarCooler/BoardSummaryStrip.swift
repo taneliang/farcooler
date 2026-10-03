@@ -74,7 +74,9 @@ struct BoardSummaryStrip: View {
                 accessory: {
                     // In sight, not only in the menus (ov-177: the owner
                     // didn't find it there).
-                    if !collapsed, !summary.isEmpty { MarkAllReadButton { store.markAllRead() } }
+                    if !collapsed, !summary.isEmpty {
+                        MarkAllReadButton(filtering: filtering) { markRead(summary) }
+                    }
                 }
             ) {
                 VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
@@ -109,7 +111,7 @@ struct BoardSummaryStrip: View {
             // navigator's spacing set it apart, as variant B drew the list.
             .contentShape(Rectangle())
             .contextMenu {
-                Button("Mark All as Read") { store.markAllRead() }
+                Button(MarkAllReadButton.title(filtering: filtering)) { markRead(summary) }
                     .disabled(summary.isEmpty)
             }
             // Read again for a selection, too: the task selected keeps its
@@ -215,6 +217,27 @@ struct BoardSummaryStrip: View {
                 .truncationMode(.tail)
                 .gridMark("summary", .text)
         }
+    }
+
+    /// Whether the navigator's filter narrows the strip.
+    private var filtering: Bool { !BoardFilter.isEmpty(filter) }
+
+    /// Mark All as Read from the strip: unfiltered, everything on the board;
+    /// filtered, only the tasks it lists, the ones its count counts (ov-177
+    /// review: one click beside "3" cleared all 15).
+    private func markRead(_ summary: BoardSummary) {
+        guard filtering else { return store.markAllRead() }
+        Self.markRead(summary, in: store)
+    }
+
+    /// Every task `summary` lists, read up to its newest line.
+    static func markRead(_ summary: BoardSummary, in store: TaskBoardStore) {
+        var latest: [String: Date] = [:]
+        for item in summary.finished + summary.moved + summary.created {
+            latest[item.taskID] = max(latest[item.taskID] ?? item.at, item.at)
+        }
+        for entry in summary.activity { latest[entry.taskID] = max(latest[entry.taskID] ?? entry.at, entry.at) }
+        for row in store.board.rows where latest[row.id] != nil { store.markRead(row, latest: latest[row.id]) }
     }
 
     /// A line chosen: its task opens, and the line stays where it is while
@@ -376,7 +399,12 @@ struct ActivityNoteView: View {
 /// (⇧⌘K). The task selected keeps its lines until the selection moves on
 /// (`HeldRead`); the rest leave on the shared spring.
 struct MarkAllReadButton: View {
+    /// The navigator's filter narrows the strip: only what it lists is read.
+    var filtering = false
     let action: () -> Void
+
+    /// What it says it does: everything, or under a filter, what's listed.
+    static func title(filtering: Bool) -> String { filtering ? "Mark These as Read" : "Mark All as Read" }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.boardMotionSlowdown) private var slowdown
 
@@ -391,8 +419,9 @@ struct MarkAllReadButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Mark All as Read (⇧⌘K)")
-        .accessibilityLabel("Mark All as Read")
+        // ⇧⌘K is the menu's, which reads the whole board.
+        .help(filtering ? Self.title(filtering: true) : "Mark All as Read (⇧⌘K)")
+        .accessibilityLabel(Self.title(filtering: filtering))
         .identified("board-mark-all-read")
     }
 }

@@ -375,4 +375,26 @@ struct NavigatorFilterTests {
         #expect(harness.identifiers.contains("board-summary-empty"))
         #expect(!harness.identifiers.contains("board-mark-all-read"), "offered with nothing to read")
     }
+
+    /// Filtered, the header's button reads only what the strip lists, the
+    /// tasks its count counts, and says so. (Fails with it reading the whole
+    /// board, as it did: ov-177 review.)
+    @Test("Filtered, Mark These as Read reads only the matching rows")
+    func markTheseAsRead() async {
+        #expect(MarkAllReadButton.title(filtering: true) == "Mark These as Read")
+        #expect(MarkAllReadButton.title(filtering: false) == "Mark All as Read")
+        let harness = await Harness()
+        defer { harness.close() }
+        await harness.settle()
+        harness.type("refund")
+        await harness.settle()
+        #expect(harness.press("board-mark-all-read"), "no button on the filtered strip")
+        await harness.settle(40)
+        harness.type("")
+        await harness.settle(40)
+        let ids = harness.identifiers
+        #expect(!ids.contains("board-summary-item-t2/created"), "the matching row stayed unread")
+        #expect(ids.contains("board-summary-item-t1/created"), "a row the filter hid was read")
+        #expect(ids.contains("board-summary-item-t3/created"), "a row the filter hid was read")
+    }
 }

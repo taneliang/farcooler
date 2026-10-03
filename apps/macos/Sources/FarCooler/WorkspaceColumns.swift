@@ -38,8 +38,9 @@ enum WorkspaceColumns {
     /// "the sidebar is a little too narrow"). A width dragged is kept.
     static let navigatorDefault: CGFloat = 320
     /// The navigator's widest, however far it's dragged: past this, it's a
-    /// main area of its own and not a list.
-    static let navigatorMaximum: CGFloat = 480
+    /// main area of its own and not a list. 600, wide enough that no width
+    /// dragged before there was a maximum is cut (ov-177 review).
+    static let navigatorMaximum: CGFloat = 600
     /// The navigator's divider.
     static let divider: CGFloat = 1
 
