@@ -1197,7 +1197,9 @@ struct TaskListRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            VStack(alignment: .leading, spacing: 4) {
+            // The key, the title, then the one metadata line, half a rhythm
+            // apart each (ov-92).
+            VStack(alignment: .leading, spacing: ColumnGrid.rhythm / 2) {
                 HStack(spacing: 6) {
                     Text(row.key)
                         .font(.system(size: WorkspaceStyle.PaneText.secondary, design: .monospaced))
@@ -1247,21 +1249,7 @@ struct TaskListRow: View {
                         .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
                         .foregroundStyle(Color.accentColor)
                 }
-                HStack(spacing: 10) {
-                    CardTimeLines(
-                        row: row,
-                        staleSize: WorkspaceStyle.PaneText.secondary,
-                        timeSize: WorkspaceStyle.PaneText.minimum)
-                    if let progress = row.acceptanceProgress {
-                        AcceptanceProgressLabel(progress: progress)
-                    }
-                }
-                if !row.labels.isEmpty {
-                    Text(row.labels.joined(separator: " · "))
-                        .font(.system(size: WorkspaceStyle.PaneText.minimum))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+                TaskRowMetaView(row: row)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             AgentPill(live: live, presence: presence, onGoTo: onGoTo)
@@ -1273,8 +1261,7 @@ struct TaskListRow: View {
             // Selected: a wash under the card, in the accent while the list
             // has the keyboard, else gray, as a Mac list draws its selection.
             if selected {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(keyed ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.08))
+                RoundedRectangle(cornerRadius: 8).fill(NavigatorRowStyle.fill(keyed: keyed))
             }
         }
         .overlay(
@@ -1354,22 +1341,6 @@ private struct CardTimeLines: View {
                     .foregroundStyle(.secondary)
             }
         }
-    }
-}
-
-/// "2 of 5", or "All 5 met" in the accent color once every line holds.
-private struct AcceptanceProgressLabel: View {
-    let progress: TaskAcceptanceProgress
-
-    var body: some View {
-        HStack(spacing: 3) {
-            Image(systemName: progress.isComplete ? "checkmark.circle.fill" : "checkmark.circle")
-            Text(progress.sentence).monospacedDigit()
-        }
-        .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: progress.isComplete ? .medium : .regular))
-        .foregroundStyle(progress.isComplete ? Color.accentColor : Color.secondary)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Acceptance: \(progress.sentence)")
     }
 }
 
