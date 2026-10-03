@@ -1176,6 +1176,12 @@ final class DaemonClient: ObservableObject {
         await runRaw(["task", "show", key, "--repo", repository, "--json"], background: true)
     }
 
+    /// What agents spent on a task (ov-195): `farcooler task usage --json`,
+    /// the shape AgentKit's `TaskUsage` decodes.
+    func taskUsage(key: String, repository: String) async -> (data: Data?, message: String?) {
+        await runRaw(["task", "usage", key, "--repo", repository, "--json"], background: true)
+    }
+
     /// Every note in the repository's record carrying `query`, each with its
     /// task's key: the History page's note search (ov-103).
     func taskSearch(query: String, repository: String) async -> (data: Data?, message: String?) {

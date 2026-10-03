@@ -61,6 +61,13 @@ final class TaskBoardStore: ObservableObject {
         return recent.first { $0.id == id }?.question
     }
 
+    /// What agents spent on each task opened, by id (ov-195): read when it
+    /// opens, and kept so going back to one shows it at once.
+    @Published private(set) var usage: [String: TaskUsageState] = [:]
+
+    /// `id`'s Usage section: what was read for it, or loading until then.
+    func usage(for id: String) -> TaskUsageState { usage[id] ?? .loading }
+
     /// The card that is open, or nil for the board alone.
     @Published var opened: TaskRow?
     /// What choosing a card does: the window opens it in the workspace's
@@ -345,6 +352,20 @@ final class TaskBoardStore: ObservableObject {
             question = nil
         }
         await read(row)
+        await readUsage(row)
+    }
+
+    /// Read what agents spent on `row`. A read that fails keeps what was
+    /// shown before, and with nothing shown, the section goes.
+    func readUsage(_ row: TaskRow) async {
+        let (data, _) = await client.taskUsage(key: row.key, repository: repositoryID)
+        if let data, let read = try? TaskUsage.decode(data) {
+            usage[row.id] = .loaded(read)
+        } else if case .loaded? = usage[row.id] {
+            return
+        } else {
+            usage[row.id] = .unavailable
+        }
     }
 
     /// Read the open card again, keeping what it shows until the new read
@@ -1462,6 +1483,8 @@ struct TaskCard: View {
     /// Whether this connection may answer: not on a read-scoped one. See
     /// `TaskBoardWrites`.
     let canAnswer: Bool
+    /// What its agents spent (ov-195). Nil draws no Usage section.
+    var usage: TaskUsageState? = nil
     /// Send an answer; true when it was written.
     let onAnswer: (String) async -> Bool
     /// Where Answer…'s unsent text is kept: the store, so it outlives this
@@ -1485,6 +1508,9 @@ struct TaskCard: View {
             if let offer = Self.offer(row: row, question: question, canAnswer: canAnswer) {
                 QuestionAnswers(offer: offer, onAnswer: onAnswer, draft: draft)
                     .id(offer.question.id)
+            }
+            if let usage {
+                TaskUsageView(state: usage)
             }
             Divider()
             record

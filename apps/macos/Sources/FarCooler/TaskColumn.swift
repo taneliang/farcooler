@@ -221,6 +221,7 @@ extension TaskColumnCard where Card == TaskCard {
         self.init(row: row, store: store) { shown, detail, question in
             TaskCard(
                 row: shown, detail: detail, question: question, canAnswer: store.canAnswer(row.id),
+                usage: store.usage(for: row.id),
                 onAnswer: { body in await store.answer(row, with: body) },
                 draft: TaskCard.Draft(read: { store.draft(for: $0) }, write: { store.setDraft($1, for: $0) }))
         }
