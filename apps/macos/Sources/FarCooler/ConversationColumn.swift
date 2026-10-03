@@ -173,7 +173,7 @@ extension ConversationHeader {
             case nil: EmptyView()
             }
         case .wakeOnAnswer:
-            Divider()
+            Divider()  // style-exempt: menu section break
             Toggle(item.title, isOn: Binding(get: { wakeOnAnswer ?? false }, set: onSetWakeOnAnswer))
                 .help("When you answer one of this board’s decisions, type the answer into the agent working that task, or else the orchestrator, once it’s idle.")
         case .showBoard, .startOrchestrator:

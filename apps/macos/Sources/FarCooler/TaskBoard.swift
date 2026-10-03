@@ -1001,17 +1001,28 @@ struct TaskBoardView: View {
                             tasks(plan, shown: shown, worktrees: worktrees)
                         }
                     }
+                    // One rule under the tasks, before whatever follows
+                    // them; Terminals and Worktrees, the two lists that
+                    // aren't tasks, are set apart by space (ov-216's
+                    // `Spacing.section`), not by another line.
+                    if plan.showsTasks(unreadable: unreadable) && (terminals.isShown || plan.showsWorktrees) {
+                        Divider()
+                    }
                     if terminals.isShown {
-                        if plan.showsTasks(unreadable: unreadable) { Divider() }
-                        section("Terminals", id: "terminals", count: terminals.terminals.count) {
+                        // No count when it only offers New Terminal: "0"
+                        // would read as something to look at.
+                        section(
+                            "Terminals", id: "terminals",
+                            count: terminals.terminals.isEmpty ? nil : terminals.terminals.count
+                        ) {
                             ProjectTerminalsSection(terminals: terminals, keyed: hasKeyboard)
                         }
                     }
                     if plan.showsWorktrees {
-                        if plan.showsTasks(unreadable: unreadable) || terminals.isShown { Divider() }
                         section("Worktrees", id: "worktrees", count: worktrees.shown.count) {
                             BoardWorktreesSection(worktrees: worktrees, keyed: hasKeyboard)
                         }
+                        .padding(.top, terminals.isShown ? Spacing.section - ColumnGrid.rhythm : 0)
                     }
                 }
                 .padding(.vertical, ColumnGrid.rhythm)
