@@ -2320,6 +2320,7 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::Workspace(_) => "workspace",
         result::Value::WorkspaceList(_) => "workspace_list",
         result::Value::NeedsYouList(_) => "needs_you_list",
+        result::Value::Report(_) => "report",
     }
 }
 

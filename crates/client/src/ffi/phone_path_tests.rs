@@ -443,6 +443,9 @@ fn route(method: Method) -> Option<&'static str> {
         | Method::WorkspaceDelete
         | Method::WorktreeAssign
         | Method::TerminalSetRole => None,
+        // The CLI reads it today; the Summary page (ov-188 phase 3) will
+        // route it here.
+        Method::ReportGet => None,
     }
 }
 

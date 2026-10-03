@@ -421,6 +421,11 @@ pub mod capability {
     /// Mac) leaves a task-bound agent's banner to the task's notice only when
     /// the runner sends one; on an older runner it posts as it always has.
     pub const TASK_NOTICES: &str = "task_notices";
+    /// `report.get`: what got done in a period, from the board's record.
+    ///
+    /// Its own capability because no runner before this one can compute
+    /// it: a client that reads it absent says the runner needs an update.
+    pub const REPORT: &str = "report";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -431,7 +436,7 @@ pub mod capability {
             WORKTREES, TERMINALS, AGENT, CHANGES, STACK, LAYOUT, PASTE, ADAPTERS, THEMES,
             ENROLLMENT, WATCHING, TERMINAL_STREAM, TUNNEL, WORKTREE_ORDER, TASKS,
             LAUNCH_PROMPT, TERMINAL_TASK, WORKTREE_FORK_ONLY, WORKSTREAMS, ORCHESTRATOR_HANDOFF,
-            NEEDS_YOU, WAKE_ON_ANSWER, STREAM_SIZE_MARKERS, TASK_NOTICES,
+            NEEDS_YOU, WAKE_ON_ANSWER, STREAM_SIZE_MARKERS, TASK_NOTICES, REPORT,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
@@ -595,6 +600,7 @@ pub mod method {
         TerminalAttach = "terminal.attach" => TERMINAL_STREAM,
         NeedsYouList = "needs_you.list" => NEEDS_YOU,
         WorkspaceSetSettings = "workspace.set_settings" => WAKE_ON_ANSWER,
+        ReportGet = "report.get" => REPORT,
     }
 }
 
@@ -943,6 +949,34 @@ mod tests {
         for n in 27..=31 {
             assert!(result.field.iter().all(|x| x.number() != n), "Result reused tag {n}");
         }
+    }
+
+    /// `report.get` on tags nothing held before: the request after
+    /// `workspace_set_settings`, the result after `needs_you_list`.
+    #[test]
+    fn report_takes_fresh_tags() {
+        use prost::Message;
+        use prost_types::FileDescriptorSet;
+
+        let set = FileDescriptorSet::decode(
+            &include_bytes!(concat!(env!("OUT_DIR"), "/farcooler_descriptor.bin"))[..],
+        )
+        .expect("the build writes a descriptor");
+        let file = set.file.iter().find(|f| f.package() == "farcooler.v1").expect("farcooler.v1");
+        let number = |m: &str, f: &str| {
+            file.message_type
+                .iter()
+                .find(|x| x.name() == m)
+                .and_then(|x| x.field.iter().find(|x| x.name() == f))
+                .unwrap_or_else(|| panic!("{m} has no field {f}"))
+                .number()
+        };
+        assert_eq!(number("Request", "report_request"), 88);
+        assert_eq!(number("Request", "workspace_set_settings"), 87);
+        assert_eq!(number("Result", "report"), 46);
+        assert_eq!(number("Result", "needs_you_list"), 45);
+        assert_eq!(capability::for_method("report.get"), Some(capability::REPORT));
+        assert!(capability::ALL.contains(&capability::REPORT), "the daemon would not advertise it");
     }
 
     /// The list is asked for by a word of its own, and the daemon

@@ -431,6 +431,9 @@ fn scope_of(method: Method) -> Scope {
         // option names carry, which is the raw command or path
         // (`needs_you::redact_below_control`).
         Method::NeedsYouList => Scope::Read,
+        // Counts, durations, and the keys and titles of tasks: what the board
+        // reads below already show a read-scoped phone.
+        Method::ReportGet => Scope::Read,
         // The board reads. A task's title, intent and record are metadata about
         // work, not the work: no path, no diff, no terminal byte — the same
         // ground `changes.inbox` stands on, and a read-scoped phone has to be
@@ -1854,6 +1857,13 @@ impl Rpc {
                 Ok(result::Value::NeedsYouList(farcooler_protocol::v1::NeedsYouList { items }))
             }
 
+            "report.get" => {
+                let Some(request::Payload::ReportRequest(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::Report(crate::report::serve(&svc.store, &p, crate::review::now_millis())?))
+            }
+
             "stack.get" => {
                 let Some(request::Payload::StackGet(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
@@ -2633,6 +2643,7 @@ mod tests {
             assert_eq!(required_scope(method), Some(Scope::Control), "{method}");
         }
         assert_eq!(required_scope("workspace.list"), Some(Scope::Read));
+        assert_eq!(required_scope("report.get"), Some(Scope::Read), "a report only reads");
         for method in [
             "workspace.create",
             "workspace.rename",

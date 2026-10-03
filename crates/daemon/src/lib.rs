@@ -27,6 +27,7 @@ pub mod push;
 pub mod reconcile;
 pub mod resync;
 pub mod rendezvous;
+pub mod report;
 pub mod rpc;
 pub mod review;
 pub mod review_ops;
