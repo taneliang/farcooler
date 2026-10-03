@@ -916,10 +916,16 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         // while the top agent's own mark is red (ov-125).
         if failing > 0 { return .failed(failing) }
         if let reviews = needsReview, reviews > 0 { return .review(reviews) }
-        let working = agents.filter {
-            $0.status == "working" && confidence(in: $0, at: now) == .known
-        }.count
+        let working = working(at: now)
         return working > 0 ? .working(working) : nil
+    }
+
+    /// How many agents may still be said to be working at `now`: the working
+    /// agents `confidence(in:at:)` vouches for. The relay's `working`, the
+    /// card's "in flight", counts the same agents, and
+    /// `test/fixtures/fleet-composition.json` holds the two to it.
+    public func working(at now: Date) -> Int {
+        agents.filter { $0.status == "working" && confidence(in: $0, at: now) == .known }.count
     }
 
     /// Fold in the one agent a push was about, keeping every other.

@@ -1904,4 +1904,47 @@ mod tests {
         assert!(long.chars().count() <= WIDTH, "{long}");
         assert!(long.ends_with('…'), "{long}");
     }
+
+    /// The daemon's half of `test/fixtures/fleet-composition.json` (ov-166):
+    /// every agent's `rank` there is what this function sends for its status
+    /// and `sinceS`. The app ranks by that number and the relay by the status
+    /// and its own clock, and the table holds both to one order, so a rank
+    /// written into it by hand has to be the one a runner would really send.
+    #[test]
+    fn the_fleet_tables_ranks_are_the_ones_a_runner_sends() {
+        let table: serde_json::Value =
+            serde_json::from_str(include_str!("../../../test/fixtures/fleet-composition.json"))
+                .expect("the fleet table");
+        let mut checked = 0;
+        for case in table["cases"].as_array().expect("cases") {
+            for agent in case["agents"].as_array().expect("agents") {
+                let state = match agent["status"].as_str().expect("status") {
+                    "working" => AgentState::Working,
+                    "blocked" => AgentState::Blocked,
+                    "done" => AgentState::Done,
+                    "idle" => AgentState::Idle,
+                    other => panic!("a status the table should not hold: {other}"),
+                };
+                let since = Duration::from_secs(agent["sinceS"].as_u64().expect("sinceS"));
+                let subject = Subject::Agent {
+                    name: "claude".to_string(),
+                    state,
+                    turn_elapsed: Some(since),
+                    state_age: since,
+                    question: None,
+                    signal: None,
+                };
+                assert_eq!(
+                    u64::from(rank(&subject)),
+                    agent["rank"].as_u64().expect("rank"),
+                    "{} in {:?}",
+                    agent["terminal"],
+                    case["name"]
+                );
+                checked += 1;
+            }
+        }
+        // A table that failed to hold any agents would pass the loop above.
+        assert!(checked > 20, "{checked}");
+    }
 }
