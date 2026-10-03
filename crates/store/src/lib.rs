@@ -32,7 +32,7 @@ pub use models::{
     Task, TaskBlock, TaskNote, TaskStatus, TaskUpdate, Terminal, TerminalRole, TerminalUpdate, Workspace,
     Worktree,
 };
-pub use store::{IDEMPOTENCY_RETENTION_MILLIS, Store};
+pub use store::{DatabaseSchema, IDEMPOTENCY_RETENTION_MILLIS, Store, read_schema};
 pub use tasks::{TaskScope, derive_prefix};
 pub use wakes::PendingWake;
 pub use workspaces::{Vacated, valid_prefix};

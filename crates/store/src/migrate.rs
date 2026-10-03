@@ -20,23 +20,35 @@ const MIGRATIONS: &[(Migration, Older)] = &[
     (migration_0001_initial_schema, Older::Refused),
     (migration_0002_pane_groups, Older::Refused),
     (migration_0003_drop_pane_groups, Older::Refused),
-    (migration_0004_pane_mode, Older::Refused),
+    // Two columns old code never names: one with a default, one nullable.
+    (migration_0004_pane_mode, Older::Welcome),
     (migration_0005_drop_loss_dismissed, Older::Refused),
     (migration_0006_worktrees_are_managed, Older::Refused),
     (migration_0007_review, Older::Refused),
     (migration_0008_drop_task_name, Older::Refused),
     (migration_0009_workspace_order, Older::Refused),
     (migration_0010_the_board, Older::Refused),
-    (migration_0011_terminal_task, Older::Refused),
+    // A nullable column; deleting a task sets it NULL, whoever deletes.
+    (migration_0011_terminal_task, Older::Welcome),
     (migration_0012_every_board_has_a_prefix, Older::Refused),
-    (migration_0013_task_edited_at, Older::Refused),
+    // A nullable column, already read as "no revision we know of".
+    (migration_0013_task_edited_at, Older::Welcome),
     (migration_0014_worktrees, Older::Refused),
     (migration_0015_workspaces, Older::Refused),
-    (migration_0016_tasks_by_worktree, Older::Refused),
-    (migration_0017_terminal_split_of, Older::Refused),
-    (migration_0018_terminal_split_of_orchestrator, Older::Refused),
-    (migration_0019_wake_on_answer, Older::Refused),
-    (crate::usage::migration_0020_agent_turns, Older::Refused),
+    // An index.
+    (migration_0016_tasks_by_worktree, Older::Welcome),
+    // Nullable, and NULL is already "nobody wrote down where it came from".
+    (migration_0017_terminal_split_of, Older::Welcome),
+    // The same, for whether that origin was the orchestrator.
+    (migration_0018_terminal_split_of_orchestrator, Older::Welcome),
+    // A column with a default and a table old code never touches, whose rows
+    // go with their task by cascade. An older build enqueues no wakes; an
+    // answer given while it runs wakes nobody, which is what it did anyway.
+    (migration_0019_wake_on_answer, Older::Welcome),
+    // Two new tables (ov-194) that only usage.rs touches, with no key into
+    // any table old code writes and no trigger. An older build records no
+    // turns; the ones already there wait for a newer build.
+    (crate::usage::migration_0020_agent_turns, Older::Welcome),
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -54,7 +66,6 @@ pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Older {
     Refused,
-    #[allow(dead_code)] // No migration is one yet; the decision is per migration.
     Welcome,
 }
 
@@ -927,6 +938,28 @@ pub(crate) fn migrate_only_to(conn: &mut Connection, version: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Which migrations an older build may read past, pinned (ov-143).
+    ///
+    /// Each was checked for what an older build's code would meet: a column
+    /// it never names with a default or allowing NULL, an index, or a table it
+    /// never touches whose rows cascade with their task. Nothing here adds a
+    /// trigger or a constraint an old write could trip, drops anything, or
+    /// rewrites data. Changing a marking is a decision about every runner's
+    /// downgrade, so it has to change this list too.
+    #[test]
+    fn the_migrations_older_builds_may_read_past() {
+        let welcome: Vec<usize> = MIGRATIONS
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, older))| *older == Older::Welcome)
+            .map(|(i, _)| i + 1)
+            .collect();
+        assert_eq!(welcome, vec![4, 11, 13, 16, 17, 18, 19, 20]);
+        // 0015 reshapes the board, so nothing before it may read past it,
+        // however many `Welcome` migrations follow.
+        assert_eq!(COMPATIBLE_DOWN_TO, 15);
+    }
 
     fn open() -> Connection {
         let conn = Connection::open_in_memory().unwrap();

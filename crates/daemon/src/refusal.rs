@@ -88,12 +88,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         drop(crate::service::Service::open_in(dir.path().to_path_buf()).await.unwrap());
         let conn = rusqlite::Connection::open(dir.path().join("farcooler.db")).unwrap();
-        // One migration on, and, like every migration so far, not one this
-        // build may read past.
-        conn.execute(
-            "UPDATE meta SET value = CAST(value AS INTEGER) + 1
-             WHERE key IN ('schema_version', 'compatible_down_to')",
-            [],
+        // One migration on, and one this build may not read past.
+        conn.execute_batch(
+            "UPDATE meta SET value = CAST(value AS INTEGER) + 1 WHERE key = 'schema_version';
+             UPDATE meta SET value = (SELECT value FROM meta WHERE key = 'schema_version')
+             WHERE key = 'compatible_down_to';",
         )
         .unwrap();
         drop(conn);
