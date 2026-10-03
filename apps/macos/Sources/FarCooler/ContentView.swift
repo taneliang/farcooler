@@ -2435,7 +2435,7 @@ struct ContentView: View {
         return FleetPlaceholder(
             phase: FleetPlaceholder.phase(
                 hasWorktrees: !store.fleet.worktrees.isEmpty, localLoaded: local?.hasLoaded == true,
-                localError: local?.lastError, hasRepositories: !store.repositories.isEmpty),
+                localError: local?.fleetError, hasRepositories: !store.repositories.isEmpty),
             onNewWorkspace: workspaceRepositories.isEmpty ? nil : { newWorkspaceName = NewWorkspaceName(name: "") },
             onAddRepository: { showAddRepository = true },
             onNewWorktree: { newWorktreeIntent = NewWorktreeIntent() },
