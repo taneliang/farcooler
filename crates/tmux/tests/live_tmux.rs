@@ -202,6 +202,38 @@ async fn an_exited_command_is_observed_as_dead_not_silently_gone() {
     srv.kill_server().await.unwrap();
 }
 
+/// The race behind the test above, polled for rather than stumbled into.
+///
+/// tmux sets `pane_dead` on the pty's end of file and the exit status on
+/// SIGCHLD, a loop pass apart. Reading as fast as possible right after each
+/// exit is what lands between the two: on Linux this caught a dead pane with
+/// no code on most runs before `list_tagged_panes` learned to wait. macOS
+/// orders the two the other way, so there it passes either way.
+#[tokio::test]
+async fn a_dead_pane_is_never_read_without_its_exit_code() {
+    let srv = unique_server();
+    let ws = Uuid::now_v7();
+
+    for _ in 0..20 {
+        let t = Uuid::now_v7();
+        srv.create_terminal_window(ws, t, "quick", "/tmp", "sh -c 'exit 42'").await.unwrap();
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let panes = srv.list_tagged_panes().await.unwrap();
+            let p = panes.iter().find(|p| p.terminal_id == t).expect("remain-on-exit retains the pane");
+            if p.dead {
+                assert_eq!(p.dead_status, Some(42), "a dead pane is read with its exit code");
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "timed out waiting for the exit");
+            tokio::task::yield_now().await;
+        }
+    }
+
+    srv.kill_server().await.unwrap();
+}
+
 #[tokio::test]
 async fn a_command_killed_by_a_signal_is_observed_with_its_signal() {
     let srv = unique_server();
