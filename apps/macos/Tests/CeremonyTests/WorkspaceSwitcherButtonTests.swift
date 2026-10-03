@@ -1,17 +1,14 @@
-import AppKit
 import Testing
 
 @testable import Far_Cooler
 
-/// The switcher's bezel (ov-91): standard hover and press highlighting.
-@MainActor
+/// The switcher in the toolbar's leading group (ov-105): VoiceOver hears the
+/// workspace, then its repository.
 struct WorkspaceSwitcherButtonTests {
-    @Test("A toolbar-style button that shows its border only under the pointer")
-    func hoverHighlight() {
-        let button = NSButton()
-        WorkspaceSwitcherButton.configure(button)
-        #expect(button.isBordered)
-        #expect(button.bezelStyle == .recessed)
-        #expect(button.showsBorderOnlyWhileMouseInside)
+    @Test("VoiceOver reads the workspace and its repository")
+    func accessibilityLabel() {
+        #expect(WorkspaceSwitcherButton.accessibilityLabel(title: "Main", repository: "overnight")
+            == "Workspace: Main, overnight")
+        #expect(WorkspaceSwitcherButton.accessibilityLabel(title: "Needs You", repository: "") == "Workspace: Needs You")
     }
 }

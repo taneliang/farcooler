@@ -6,7 +6,7 @@ import Testing
 
 /// Nothing the sidebar does is reachable only from it (ov-86 review M1). A
 /// new window opens without the sidebar, so every `SidebarAction` has to be
-/// offered by the title bar's switcher, the runner banner, the workspace
+/// offered by the title bar's switcher, the toolbar's runner item, the workspace
 /// navigator or a worktree's menus, which are drawn from the values asked
 /// of here. What the orchestrator's rail did lives in the navigator now
 /// (ov-92).
@@ -35,13 +35,20 @@ struct SidebarParityTests {
         let switcher = WorkspaceSwitcherMenu.entries(
             groups: WorkspaceNumbers.groups(in: fleet), current: nil, waiting: { _ in 0 }, showsHosts: false,
             needsYou: 1, offersNewWorkspace: true, status: "tmux unavailable", statusTrouble: true, troubled: ["box"])
-        let banner = RunnerBanner.actions(trouble: true, unhealthy: ["box"], stale: ["box"])
+        // The toolbar's runner item, with one runner offline and both
+        // behind this app's build: its menu, and the item itself, which
+        // says what the status bar said.
+        let troubles = [RunnerStatusItem.Trouble(host: "box", problem: .offline)]
+        let runnerItem = RunnerStatusItem.entries(troubles: troubles, stale: ["box", ""]).compactMap(\.action)
+        let status: [SidebarAction] =
+            RunnerStatusItem.label(troubles: troubles, stale: ["box", ""]) == nil ? [] : [.runnerStatus]
+        let toolbar = runnerItem + status
         let lane = WorktreeMenu.items(
             for: worktree("lane", terminals: [shell]), usable: true, showsChanges: true, moveTargets: [billing],
             adoptable: [shell])
         let hidden = WorktreeMenu.items(
             for: worktree("old", state: "hidden"), usable: true, showsChanges: true, moveTargets: [], adoptable: [])
-        return Set(switcher.flatMap(\.commands).map(\.action) + banner + (lane + hidden).map(\.action))
+        return Set(switcher.flatMap(\.commands).map(\.action) + toolbar + (lane + hidden).map(\.action))
             .union(navigator(shell: shell))
     }
 

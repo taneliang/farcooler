@@ -28,3 +28,18 @@ struct WindowTitleTests {
         #expect(title(leaf: "invoice-pdf", implicit: true).subtitle == "shop")
     }
 }
+
+/// ov-105: the toolbar never shows the title; the switcher and the
+/// breadcrumb already name every place it could.
+struct TitleBarTests {
+    @Test("No selection kind shows a title beside the switcher")
+    func noKindShowsATitle() {
+        let kinds: [ContentView.Selection?] = [
+            nil, .needsYou, .workspace(host: "", workspace: "ws", focus: nil),
+            .workspace(host: "", workspace: "ws", focus: .task("t1")),
+            .workspace(host: "", workspace: "ws", focus: .worktree("w1", terminal: nil)),
+            .looseWorktree(host: "", worktree: "w1", terminal: nil),
+        ]
+        for kind in kinds { #expect(!TitleBar.showsTitle(for: kind), "\(String(describing: kind))") }
+    }
+}

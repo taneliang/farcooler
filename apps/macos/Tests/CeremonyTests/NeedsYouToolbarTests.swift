@@ -2,7 +2,8 @@ import Testing
 
 @testable import Far_Cooler
 
-/// What the title bar's Needs You button says and how it is tinted (ov-91).
+/// What the title bar's Needs You item says and how it's colored (ov-91,
+/// quieted in ov-105).
 struct NeedsYouToolbarTests {
     @Test("The tooltip names the count, and says nothing of it when nothing waits")
     func tooltipNamesTheCount() {
@@ -11,23 +12,23 @@ struct NeedsYouToolbarTests {
         #expect(NeedsYouToolbar.tooltip(count: 12) == "Needs You (12)")
     }
 
-    @Test("It is tinted with the accent only while something waits")
-    func tintFollowsTheCount() {
-        #expect(!NeedsYouToolbar.isTinted(count: 0))
-        #expect(NeedsYouToolbar.isTinted(count: 1))
+    @Test("The count is text beside the tray: none at zero, capped at 99+")
+    func countText() {
+        #expect(NeedsYouToolbar.countText(count: 0) == nil)
+        #expect(NeedsYouToolbar.countText(count: 3) == "3")
+        #expect(NeedsYouToolbar.countText(count: 120) == "99+")
     }
 
-    @Test("The badge shows nothing at zero and caps at 99+")
-    func badgeText() {
-        #expect(NeedsYouToolbar.badge(count: 0) == nil)
-        #expect(NeedsYouToolbar.badge(count: 7) == "7")
-        #expect(NeedsYouToolbar.badge(count: 120) == "99+")
+    @Test("Only the count wears the accent, and only while something waits")
+    func accentFollowsTheCount() {
+        #expect(!NeedsYouToolbar.countIsAccent(count: 0))
+        #expect(NeedsYouToolbar.countIsAccent(count: 3))
     }
 
-    @Test("VoiceOver hears the count in words")
+    @Test("VoiceOver hears how many are waiting")
     func accessibility() {
         #expect(NeedsYouToolbar.accessibilityLabel(count: 0) == "Needs You, nothing waiting")
-        #expect(NeedsYouToolbar.accessibilityLabel(count: 1) == "Needs You, 1 item")
-        #expect(NeedsYouToolbar.accessibilityLabel(count: 3) == "Needs You, 3 items")
+        #expect(NeedsYouToolbar.accessibilityLabel(count: 1) == "Needs You, 1 waiting")
+        #expect(NeedsYouToolbar.accessibilityLabel(count: 3) == "Needs You, 3 waiting")
     }
 }

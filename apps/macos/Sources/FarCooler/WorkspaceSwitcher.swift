@@ -9,10 +9,13 @@ import SwiftUI
 /// repository's own actions, the runners' state, and the places and the
 /// things to add (`WorkspaceSwitcherMenu.entries`).
 ///
-/// An `NSMenu`, not a popover of buttons (review M3): arrow keys, type to
-/// select, Return and VoiceOver come with it. ⌘0 (Workspace ▸ Switch
-/// Workspace…) opens it from the keyboard (`openRequest`).
-struct WorkspaceSwitcherButton: NSViewRepresentable {
+/// A SwiftUI button in the toolbar's leading group, beside the sidebar
+/// button (ov-105): the toolbar draws its glass, its hover and its press,
+/// as it does for every other item. The menu is still an `NSMenu`, not a
+/// popover of buttons (review M3): arrow keys, type to select, Return and
+/// VoiceOver come with it. ⌘0 (Workspace ▸ Switch Workspace…) opens it
+/// from the keyboard (`openRequest`).
+struct WorkspaceSwitcherButton: View {
     let title: String
     let repository: String
     let entries: [SwitcherEntry]
@@ -20,62 +23,77 @@ struct WorkspaceSwitcherButton: NSViewRepresentable {
     let openRequest: Int
     let perform: (SwitcherCommand) -> Void
 
-    /// The bezel (ov-91): borderless until the pointer is over it, then the
-    /// standard recessed highlight, and the pressed one while clicked.
-    static func configure(_ button: NSButton) {
-        button.isBordered = true
-        button.bezelStyle = .recessed
-        button.showsBorderOnlyWhileMouseInside = true
+    /// Where the menu drops from, and what it sends.
+    @State private var coordinator = Coordinator()
+
+    /// What VoiceOver reads: the workspace, then its repository.
+    static func accessibilityLabel(title: String, repository: String) -> String {
+        repository.isEmpty ? "Workspace: \(title)" : "Workspace: \(title), \(repository)"
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    func makeNSView(context: Context) -> NSButton {
-        let button = NSButton(title: "", target: context.coordinator, action: #selector(Coordinator.open(_:)))
-        Self.configure(button)
-        button.imagePosition = .imageTrailing
-        button.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(pointSize: 9, weight: .semibold))
-        button.setAccessibilityIdentifier("workspace-switcher")
-        button.toolTip = "Switch Workspace (⌘0)"
-        context.coordinator.seen = openRequest
-        return button
+    var body: some View {
+        Button {
+            open()
+        } label: {
+            HStack(spacing: 5) {
+                HStack(spacing: 0) {
+                    Text(title)
+                    if !repository.isEmpty { Text(" · \(repository)").foregroundStyle(.secondary) }
+                }
+                .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .imageScale(.small)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .background(MenuAnchor(coordinator: coordinator))
+        }
+        .help("Switch Workspace (⌘0)")
+        .accessibilityLabel(Self.accessibilityLabel(title: title, repository: repository))
+        .accessibilityIdentifier("workspace-switcher")
+        .onChange(of: openRequest) { _, _ in
+            // After the keystroke's own event is done, or the menu would
+            // open inside its handling.
+            DispatchQueue.main.async { open() }
+        }
     }
 
-    func updateNSView(_ button: NSButton, context: Context) {
-        let coordinator = context.coordinator
+    private func open() {
         coordinator.entries = entries
         coordinator.perform = perform
-        let text = NSMutableAttributedString(
-            string: title, attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold)])
-        if !repository.isEmpty {
-            text.append(
-                NSAttributedString(
-                    string: " · \(repository)",
-                    attributes: [
-                        .font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.secondaryLabelColor,
-                    ]))
+        coordinator.open()
+    }
+
+    /// The view under the label, for the menu to drop from. Flipped, so the
+    /// menu's origin is measured down from its top as a button's is.
+    private struct MenuAnchor: NSViewRepresentable {
+        let coordinator: Coordinator
+
+        final class Anchor: NSView {
+            override var isFlipped: Bool { true }
         }
-        text.append(NSAttributedString(string: " "))
-        button.attributedTitle = text
-        button.setAccessibilityLabel(repository.isEmpty ? "Workspace: \(title)" : "Workspace: \(title), \(repository)")
-        if openRequest != coordinator.seen {
-            coordinator.seen = openRequest
-            DispatchQueue.main.async { coordinator.open(button) }
+
+        func makeNSView(context: Context) -> NSView {
+            let view = Anchor()
+            coordinator.anchor = view
+            return view
         }
+
+        func updateNSView(_ view: NSView, context: Context) { coordinator.anchor = view }
     }
 
     @MainActor
     final class Coordinator: NSObject {
         var entries: [SwitcherEntry] = []
         var perform: (SwitcherCommand) -> Void = { _ in }
-        var seen = 0
+        weak var anchor: NSView?
 
-        @objc func open(_ sender: NSButton) {
+        func open() {
+            guard let anchor else { return }
             let menu = NSMenu()
             menu.autoenablesItems = false
             for entry in entries { add(entry, to: menu) }
-            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 4), in: sender)
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.height + 6), in: anchor)
         }
 
         @objc func pick(_ item: NSMenuItem) {
@@ -150,23 +168,24 @@ struct WorkspaceSwitcherButton: NSViewRepresentable {
     }
 }
 
-/// The words and tint of the title bar's Needs You button (ov-91).
+/// The words and tint of the title bar's Needs You item (ov-91, ov-105).
 enum NeedsYouToolbar {
     /// The tooltip: "Needs You (N)", plain when nothing waits.
     static func tooltip(count: Int) -> String { count > 0 ? "Needs You (\(count))" : "Needs You" }
-    /// Accent while something waits, secondary otherwise. Never amber.
-    static func isTinted(count: Int) -> Bool { count > 0 }
-    /// The badge's text; nil at zero, "99+" past 99.
-    static func badge(count: Int) -> String? { count <= 0 ? nil : count > 99 ? "99+" : "\(count)" }
+    /// The count beside the tray, as text; nil at zero, "99+" past 99.
+    static func countText(count: Int) -> String? { count <= 0 ? nil : count > 99 ? "99+" : "\(count)" }
+    /// Whether the count wears the accent: the only color in the toolbar,
+    /// and only while something waits. The tray itself never does.
+    static func countIsAccent(count: Int) -> Bool { count > 0 }
     static func accessibilityLabel(count: Int) -> String {
-        count == 0 ? "Needs You, nothing waiting" : count == 1 ? "Needs You, 1 item" : "Needs You, \(count) items"
+        count > 0 ? "Needs You, \(count) waiting" : "Needs You, nothing waiting"
     }
 }
 
-/// Needs You in the title bar (ov-86, restyled in ov-91): a standard
-/// toolbar button, the tray with the count as the system's badge, tinted
-/// with the accent while anything waits. The sidebar's Needs You row, for
-/// a window without the sidebar.
+/// Needs You in the title bar (ov-86, quieted in ov-105): a monochrome
+/// tray with the count beside it as text, in the accent while anything
+/// waits; just the tray, in secondary, when nothing does. No system badge.
+/// The sidebar's Needs You row, for a window without the sidebar.
 struct NeedsYouToolbarButton: View {
     let count: Int
     let selected: Bool
@@ -174,13 +193,81 @@ struct NeedsYouToolbarButton: View {
 
     var body: some View {
         Button(action: onSelect) {
-            Label("Needs You", systemImage: "tray")
-                .symbolVariant(selected ? .fill : .none)
-                .foregroundStyle(NeedsYouToolbar.isTinted(count: count) ? Color.accentColor : Color.secondary)
+            HStack(spacing: 4) {
+                Image(systemName: "tray")
+                    .symbolVariant(selected ? .fill : .none)
+                    .foregroundStyle(count > 0 ? .primary : .secondary)
+                if let text = NeedsYouToolbar.countText(count: count) {
+                    Text(text)
+                        .monospacedDigit()
+                        .foregroundStyle(NeedsYouToolbar.countIsAccent(count: count) ? Color.accentColor : Color.primary)
+                }
+            }
         }
-        .badge(NeedsYouToolbar.badge(count: count).map { Text($0) })
         .help(NeedsYouToolbar.tooltip(count: count))
         .accessibilityLabel(NeedsYouToolbar.accessibilityLabel(count: count))
         .accessibilityIdentifier("toolbar-needs-you")
+    }
+}
+
+/// The runners' trouble in the toolbar (ov-105): a warning and a few words,
+/// "carl offline", in secondary, with a menu to reconnect, update and
+/// manage. Drawn only while `RunnerStatusItem.label` has something to say.
+/// The update asks before it acts, so it opens `DaemonUpdateCard` from
+/// here rather than updating from the menu.
+struct RunnerStatusMenu: View {
+    let label: String
+    let symbol: String
+    let entries: [RunnerStatusItem.Entry]
+    let updates: [DaemonUpdateTarget]
+    let perform: (RunnerStatusItem.Entry) -> Void
+
+    @State private var showingUpdate = false
+
+    var body: some View {
+        Menu {
+            ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
+                switch entry {
+                case .separator:
+                    Divider()
+                case .note(let text):
+                    Text(text)
+                case .update:
+                    Button(entry.title) { showingUpdate = true }
+                default:
+                    Button(entry.title) { perform(entry) }
+                }
+            }
+        } label: {
+            Label(label, systemImage: symbol)
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(.secondary)
+        }
+        .menuIndicator(.hidden)
+        .help(label)
+        .accessibilityIdentifier("toolbar-runner-status")
+        .popover(isPresented: $showingUpdate, arrowEdge: .bottom) {
+            DaemonUpdateCard(targets: updates) { showingUpdate = false }
+        }
+    }
+}
+
+/// Whether the toolbar shows the window's title (ov-105).
+///
+/// Never, today, and for a different reason at each level. Needs You and a
+/// workspace itself are named by the switcher beside where the title would
+/// sit, so a title there is the switcher again ("Main · overnight ⌄" then
+/// "Main"). A task or a worktree opened is the last crumb of the
+/// breadcrumb over the main area, which every opened place has, so a
+/// title there would be that crumb again. The window keeps its title all
+/// the same (`WindowTitle`), for the Window menu and Mission Control.
+enum TitleBar {
+    static func showsTitle(for selection: ContentView.Selection?) -> Bool {
+        switch selection {
+        // The switcher names it.
+        case nil, .needsYou, .workspace(_, _, nil): return false
+        // The breadcrumb's last crumb names it.
+        case .workspace(_, _, .some), .looseWorktree: return false
+        }
     }
 }

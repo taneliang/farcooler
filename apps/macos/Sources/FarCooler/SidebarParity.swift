@@ -251,3 +251,127 @@ enum RunnerBanner {
         return out
     }
 }
+
+/// The runners' trouble in the toolbar (ov-105, was ov-100's runner bar): a
+/// small trailing item before Needs You, only while a runner is offline,
+/// degraded, or behind this app's build. Nothing while every runner is
+/// well and current; "N live" stays in the switcher's footer.
+enum RunnerStatusItem {
+    /// What is wrong with one runner.
+    enum Problem: Equatable {
+        /// Reconnecting, or unreachable.
+        case offline
+        /// Connected, and its tmux isn't answering.
+        case noTmux
+        /// Reachable, without Far Cooler.
+        case notInstalled
+    }
+
+    struct Trouble: Equatable {
+        let host: String
+        let problem: Problem
+    }
+
+    /// One line of the item's menu.
+    enum Entry: Hashable {
+        /// Says something and does nothing.
+        case note(String)
+        case reconnect(host: String)
+        case reconnectAll
+        /// Opens the update card for the runners behind this app's build.
+        case update(count: Int)
+        case runners
+        case separator
+
+        var title: String {
+            switch self {
+            case .note(let text): return text
+            case .reconnect(let host): return "Reconnect \(RunnerStatusItem.name(host))"
+            case .reconnectAll: return "Reconnect All"
+            case .update(let count): return count == 1 ? "Update Runner…" : "Update \(count) Runners…"
+            case .runners: return "Runners and Devices…"
+            case .separator: return ""
+            }
+        }
+
+        /// The sidebar's action this line stands in for.
+        var action: SidebarAction? {
+            switch self {
+            case .reconnect, .reconnectAll: return .retryRunner
+            case .update: return .updateDaemon
+            case .runners: return .runnerStatus
+            case .note, .separator: return nil
+            }
+        }
+    }
+
+    static func name(_ host: String) -> String { host.isEmpty ? "This Mac" : host }
+
+    /// What is wrong with a runner `FleetStore.unhealthyHosts` named, from
+    /// its state; nil for one still connecting, which nothing is known of.
+    static func problem(_ state: HostState) -> Problem? {
+        switch state {
+        case .connecting: return nil
+        case .reconnecting, .unreachable: return .offline
+        case .notInstalled: return .notInstalled
+        case .connected: return .noTmux
+        }
+    }
+
+    /// The item's words, or nil to show nothing at all.
+    static func label(troubles: [Trouble], stale: [String]) -> String? {
+        if troubles.count == 1, let one = troubles.first {
+            let name = name(one.host)
+            switch one.problem {
+            case .offline: return "\(name) offline"
+            case .noTmux: return "tmux unavailable on \(name)"
+            case .notInstalled: return "Far Cooler isn’t on \(name)"
+            }
+        }
+        if troubles.count > 1 {
+            return troubles.allSatisfy { $0.problem == .offline }
+                ? "\(troubles.count) runners offline" : "\(troubles.count) runners unavailable"
+        }
+        if !stale.isEmpty { return stale.count == 1 ? "Update available" : "\(stale.count) updates available" }
+        return nil
+    }
+
+    /// The item's symbol: the warning while a runner is in trouble, the
+    /// download arrow when the only news is an update.
+    static func symbol(troubles: [Trouble]) -> String {
+        troubles.isEmpty ? "arrow.down.circle" : "exclamationmark.triangle"
+    }
+
+    /// The item's menu: each runner in trouble and its Reconnect, Reconnect
+    /// All when there's more than one, the update for runners behind this
+    /// app's build, then Runners and Devices…. Empty while it's hidden.
+    static func entries(troubles: [Trouble], stale: [String]) -> [Entry] {
+        guard label(troubles: troubles, stale: stale) != nil else { return [] }
+        var out: [Entry] = []
+        if troubles.count > 1 {
+            out += troubles.map { .note("\(name($0.host)): \(words($0.problem))") }
+        }
+        out += troubles.map { .reconnect(host: $0.host) }
+        if troubles.count > 1 { out.append(.reconnectAll) }
+        if !stale.isEmpty {
+            if !out.isEmpty { out.append(.separator) }
+            out.append(
+                .note(
+                    stale.count == 1
+                        ? "\(name(stale[0])) isn’t running this app’s build"
+                        : "\(stale.count) runners aren’t running this app’s build"))
+            out.append(.update(count: stale.count))
+        }
+        out.append(.separator)
+        out.append(.runners)
+        return out
+    }
+
+    private static func words(_ problem: Problem) -> String {
+        switch problem {
+        case .offline: return "offline"
+        case .noTmux: return "tmux unavailable"
+        case .notInstalled: return "Far Cooler isn’t installed"
+        }
+    }
+}
