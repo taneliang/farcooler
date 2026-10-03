@@ -259,6 +259,9 @@ public struct MarkdownText: View {
     /// Reasoning is set smaller and dimmer than a reply, but is otherwise the
     /// same markdown — agents write lists and code in their thinking too.
     public var secondary: Bool = false
+    /// How far apart its blocks sit: a reply's, or a task's text on the
+    /// 8 pt rhythm (ov-98).
+    public var spacing: MarkdownSpacing = .reply
 
     @ScaledMetric(relativeTo: .body)
     private var h1Size = MarkdownTypeScale.h1
@@ -267,9 +270,10 @@ public struct MarkdownText: View {
     @ScaledMetric(relativeTo: .body)
     private var h3Size = MarkdownTypeScale.h3
 
-    public init(text: String, secondary: Bool = false) {
+    public init(text: String, secondary: Bool = false, spacing: MarkdownSpacing = .reply) {
         self.text = text
         self.secondary = secondary
+        self.spacing = spacing
     }
 
     public var body: some View {
@@ -283,7 +287,7 @@ public struct MarkdownText: View {
                             ? 0
                             : MarkdownBlockSpacing.gap(
                                 after: role(for: runs[index - 1]),
-                                before: role(for: run)))
+                                before: role(for: run), style: spacing))
             }
         }
         .font(secondary ? .caption : .body)
@@ -485,7 +489,35 @@ enum MarkdownBlockRole: Equatable {
     case table
 }
 
+/// How far apart a piece of Markdown's blocks sit.
+public enum MarkdownSpacing: Sendable {
+    /// An agent's reply in a transcript: `MarkdownBlockSpacing.gap`'s own
+    /// steps.
+    case reply
+    /// A task's own text, its intent and notes (ov-98): the same steps
+    /// snapped to the 8 pt rhythm the rest of the task view keeps.
+    case document
+}
+
 enum MarkdownBlockSpacing {
+    /// `gap(after:before:)`, for `style`.
+    static func gap(
+        after previous: MarkdownBlockRole, before current: MarkdownBlockRole, style: MarkdownSpacing
+    ) -> CGFloat {
+        let step = gap(after: previous, before: current)
+        switch style {
+        case .reply: return step
+        case .document:
+            // To the nearest whole step, never none: 10 and 12 become 8 and
+            // 16, 18 and 20 become 16 and 24.
+            return max(rhythm, (step / rhythm).rounded() * rhythm)
+        }
+    }
+
+    /// The task view's vertical step (`ColumnGrid.rhythm` on the Mac).
+    static let rhythm: CGFloat = 8
+
+
     /// The point size of the blank line that separates two paragraphs drawn
     /// inside one `Text`.
     ///
@@ -732,6 +764,38 @@ public struct DetailBox: View {
     }
 }
 
+
+// MARK: - A task's text
+
+/// A task's own text, its intent, acceptance lines and notes, read as the
+/// Markdown it's written in (ov-98), so the Mac and the phone draw the same
+/// pieces. The parsing is `Markdown`'s, the chat's own.
+public enum TaskProse {
+    /// Intent or a note's body, split into blocks: what `MarkdownText`
+    /// draws.
+    public static func blocks(_ text: String) -> [Markdown.Block] { Markdown.blocks(text) }
+
+    /// One line's inline Markdown: bold, italic, `code` and links. HTML is
+    /// left as the characters it was typed as; nothing here renders it.
+    public static func inline(_ text: String) -> AttributedString { Markdown.inline(text) }
+
+    /// An acceptance line as its checklist row draws it: its inline
+    /// Markdown, and struck through, all of it, once it's met. The color is
+    /// the row's to choose (secondary when met), so it stays monochrome.
+    public static func acceptance(_ text: String, met: Bool) -> AttributedString {
+        var line = inline(text)
+        if met {
+            line[AttributeScopes.SwiftUIAttributes.StrikethroughStyleAttribute.self] = .single
+        }
+        return line
+    }
+
+    /// The quiet line over a note in the record: "Finding · manager · 4m
+    /// ago". No byline, no middle part.
+    public static func noteLine(kind: String, byline: String, ago: String) -> String {
+        [kind, byline, ago].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+}
 
 // MARK: - Plan status
 
