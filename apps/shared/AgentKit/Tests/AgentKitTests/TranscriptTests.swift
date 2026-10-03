@@ -643,3 +643,50 @@ private func seq(_ n: UInt64, _ e: AgentEvent) -> Sequenced { Sequenced(seq: n, 
     t.apply([Sequenced(seq: 0, event: .promptQueue(items: [QueuedPrompt(id: "0", text: "ship it")]))])
     #expect(!t.rows.contains { $0.kind == .message(role: .user, text: "ship it", parent: nil) })
 }
+
+@Test func aFailedTurnSaysSoInOneLineNamingTheAgent() throws {
+    // ov-140: a failed turn's adapter text stopped being drawn as the agent
+    // speaking, and nothing replaced it — a refused key left the chat silent
+    // while the row said "Failed". One line now, from the daemon's kind.
+    var t = Transcript()
+    t.apply([
+        Sequenced(seq: 0, event: try AgentEvent.decode(from:
+            #"{"SessionStarted":{"session_id":"s","agent_mode":null,"available_modes":[],"model":null,"available_models":[],"config_options":[],"available_commands":[],"backend":"claude"}}"#)),
+        Sequenced(seq: 1, event: try AgentEvent.decode(from:
+            #"{"TurnEnded":{"reason":"Failed","failure":{"kind":"auth","detail":"API Error: 401 invalid x-api-key"}}}"#)),
+    ])
+    guard case let .gap(reason)? = t.rows.last?.kind else {
+        Issue.record("a failed turn drew nothing: \(t.rows)")
+        return
+    }
+    #expect(reason.sentence == "Claude couldn’t sign in.")
+    // The backend's own words are for the log.
+    #expect(reason.detail == nil)
+    #expect(!reason.isLoss)
+}
+
+@Test func eachFailureKindHasItsOwnLine() {
+    let line = { (kind: String, backend: String) in
+        GapReason.turnFailed(kind: kind, backend: backend).sentence
+    }
+    #expect(line("quota", "codex") == "You’re out of credits for Codex.")
+    #expect(line("rate_limited", "claude") == "Claude is busy. Try again in a moment.")
+    #expect(line("overloaded", "claude") == "Claude is busy. Try again in a moment.")
+    #expect(line("network", "codex") == "Couldn’t reach Codex.")
+    #expect(line("other", "acp") == "Something went wrong with the agent.")
+    // A kind a later daemon invents reads as other.
+    #expect(line("solar_flare", "claude") == "Something went wrong with Claude.")
+}
+
+@Test func aTurnThatEndedWellOrAgainstAnOldDaemonDrawsNoFailure() throws {
+    var t = Transcript()
+    t.apply([
+        Sequenced(seq: 0, event: try AgentEvent.decode(from: #"{"TurnEnded":{"reason":"EndTurn"}}"#)),
+    ])
+    #expect(t.rows.isEmpty)
+    // A `Failed` with no `failure` beside it is still a failure.
+    t.apply([
+        Sequenced(seq: 1, event: try AgentEvent.decode(from: #"{"TurnEnded":{"reason":"Failed"}}"#)),
+    ])
+    #expect(t.rows.count == 1)
+}

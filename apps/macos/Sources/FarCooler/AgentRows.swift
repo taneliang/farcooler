@@ -650,7 +650,7 @@ private struct GapRow: View {
         // is the only way that drift ever shows itself.
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Image(systemName: reason.isInformational ? "info.circle" : "scissors")
+                Image(systemName: reason.symbol)
                     .font(.system(size: 11))
                 Text(reason.sentence)
                     .font(.system(size: 11.5, weight: .medium))

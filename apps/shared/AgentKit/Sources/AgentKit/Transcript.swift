@@ -580,7 +580,14 @@ public struct Transcript: Sendable {
             }
             unconfirmedEchoes.removeAll()
 
-        case .turnEnded:
+        case let .turnEnded(reason, failure):
+            // A failed turn says so, in this app's words. Before ov-140 the
+            // adapter's raw sentence was drawn as the agent speaking; after it
+            // and before this, nothing at all was, and the chat went silent
+            // on a refused key.
+            if reason == "Failed" {
+                append(.gap(.turnFailed(kind: failure?.kind ?? "other", backend: backend)))
+            }
             // Nothing to DRAW, but it is a seam: the next message begins a new
             // turn and must not be glued onto the tail of this one.
             breakBeforeNextMessage = true

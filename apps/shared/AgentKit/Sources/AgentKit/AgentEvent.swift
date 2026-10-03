@@ -66,6 +66,25 @@ public enum GapReason: Sendable, Equatable {
     /// other than "nothing recorded yet". Carries the adapter's own message.
     case loadFailed(detail: String)
     case unparsed
+    /// The turn ended `Failed`. Never on the wire as a gap: `Transcript` adds
+    /// it from a `TurnEnded`'s `failure`, so the chat says what the row's
+    /// "Failed" means. `kind` is the daemon's word; `backend` names the agent.
+    case turnFailed(kind: String, backend: String)
+}
+
+/// Why a turn failed, as the daemon classified it.
+///
+/// `kind` stays a string so a word a later daemon invents still decodes, and
+/// reads as `other`. `detail` is the backend's own text, kept for logs and
+/// never shown.
+public struct TurnFailure: Decodable, Sendable, Equatable {
+    public let kind: String
+    public let detail: String?
+
+    public init(kind: String, detail: String? = nil) {
+        self.kind = kind
+        self.detail = detail
+    }
 }
 
 extension GapReason: Decodable {
@@ -143,6 +162,37 @@ extension GapReason {
             return "This session couldn’t be reopened from where it left off."
         case .unparsed:
             return "Something happened here that this version can’t show."
+        case let .turnFailed(kind, backend):
+            return Self.failureSentence(kind: kind, backend: backend)
+        }
+    }
+
+    /// One plain line per failure kind, naming the agent. Never the
+    /// backend's own text: that is for the log.
+    static func failureSentence(kind: String, backend: String) -> String {
+        let (subject, object): (String, String) =
+            switch backend {
+            case "claude": ("Claude", "Claude")
+            case "codex": ("Codex", "Codex")
+            // ACP carries any agent, and the transcript is not told which.
+            default: ("The agent", "the agent")
+            }
+        switch kind {
+        case "auth": return "\(subject) couldn’t sign in."
+        case "quota": return "You’re out of credits for \(object)."
+        case "rate_limited", "overloaded": return "\(subject) is busy. Try again in a moment."
+        case "network": return "Couldn’t reach \(object)."
+        default: return "Something went wrong with \(object)."
+        }
+    }
+
+    /// The SF Symbol a row draws beside the sentence. A failed turn is not a
+    /// cut in history, so it does not get the scissors.
+    public var symbol: String {
+        switch self {
+        case .loadEmpty: "info.circle"
+        case .turnFailed: "exclamationmark.triangle"
+        case .ringTrimmed, .loadUnsupported, .loadFailed, .unparsed: "scissors"
         }
     }
 
@@ -162,7 +212,7 @@ extension GapReason {
         case .loadFailed(let detail):
             return detail
         // Listed rather than defaulted, so a case added later has to say.
-        case .ringTrimmed, .loadUnsupported, .loadEmpty, .unparsed:
+        case .ringTrimmed, .loadUnsupported, .loadEmpty, .unparsed, .turnFailed:
             return nil
         }
     }
@@ -177,6 +227,15 @@ extension GapReason {
     public var isInformational: Bool {
         if case .loadEmpty = self { return true }
         return false
+    }
+
+    /// Whether words are missing here. Not for `loadEmpty`, where nothing was
+    /// ever recorded, nor for `turnFailed`, which says how a turn ended.
+    public var isLoss: Bool {
+        switch self {
+        case .loadEmpty, .turnFailed: false
+        case .ringTrimmed, .loadUnsupported, .loadFailed, .unparsed: true
+        }
     }
 }
 
@@ -343,7 +402,10 @@ public enum AgentEvent: Sendable, Equatable {
     case sessionInfo(title: String)
     /// The slash-command menu, resent once per turn. Feeds the `/` picker.
     case commandsAvailable(commands: [AgentChoice])
-    case turnEnded(reason: String)
+    /// `failure` is present only when `reason` is `Failed`, and absent from
+    /// every daemon older than ov-140 — so it is optional, and a turn that
+    /// failed against an old daemon still ends.
+    case turnEnded(reason: String, failure: TurnFailure? = nil)
     /// Everything written but not yet sent, in order. Sent whole on any change.
     case promptQueue(items: [QueuedPrompt])
     case gap(GapReason)
@@ -475,7 +537,7 @@ extension AgentEvent {
                 event = .promptQueue(items: p.items)
             case "TurnEnded":
                 let p = try outer.decode(TurnEndedPayload.self, forKey: key)
-                event = .turnEnded(reason: p.reason)
+                event = .turnEnded(reason: p.reason, failure: p.failure)
             case "Gap":
                 let p = try outer.decode(GapPayload.self, forKey: key)
                 event = .gap(p.reason)
@@ -546,7 +608,7 @@ extension AgentEvent {
         let agentMode: String
         enum CodingKeys: String, CodingKey { case agentMode = "agent_mode" }
     }
-    private struct TurnEndedPayload: Decodable { let reason: String }
+    private struct TurnEndedPayload: Decodable { let reason: String; let failure: TurnFailure? }
     private struct PromptQueuePayload: Decodable { let items: [QueuedPrompt] }
     private struct GapPayload: Decodable { let reason: GapReason }
 }

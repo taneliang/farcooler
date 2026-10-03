@@ -617,7 +617,9 @@ final class WatchLinkHost: NSObject {
                     // and somebody who came looking for words that are not
                     // there is better served by finding out why than by a watch
                     // that quietly presents a fragment as the whole thing.
-                    if reason != .loadEmpty { whole = false }
+                    // `turnFailed` is not one either: it is this app's
+                    // sentence about how a turn ended, and nothing is missing.
+                    if reason.isLoss { whole = false }
                 case .tool, .subagent:
                     continue
                 }

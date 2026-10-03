@@ -1578,7 +1578,7 @@ private struct GapRow: View {
         // this app's own, which is the part that should differ.
         VStack(alignment: .leading, spacing: PaneMetrics.step) {
             HStack(spacing: PaneMetrics.step) {
-                Image(systemName: reason.isInformational ? "info.circle" : "scissors")
+                Image(systemName: reason.symbol)
                     .font(.caption)
                 Text(reason.sentence)
                     .font(.footnote.weight(.medium))
