@@ -184,6 +184,23 @@ impl AcpWriter {
         self.write(serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": result })).await
     }
 
+    /// Answer the adapter's request with a JSON-RPC error rather than a
+    /// result, so it knows the request failed instead of taking a placeholder
+    /// for the answer.
+    pub async fn respond_error(
+        &mut self,
+        id: serde_json::Value,
+        code: i64,
+        message: &str,
+    ) -> Result<(), AcpError> {
+        self.write(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": { "code": code, "message": message },
+        }))
+        .await
+    }
+
     /// Send a request without waiting for its answer. See the identical
     /// method on `AcpConnection` for why `session/prompt` has to go this way.
     pub async fn request_no_wait(

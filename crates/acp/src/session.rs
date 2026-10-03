@@ -17,7 +17,7 @@ use farcooler_agent_core::event::{
     PromptImage, Role, ToolStatus,
 };
 use farcooler_agent_core::backend::BackendKind;
-use farcooler_agent_core::fs_guard::confine;
+use farcooler_agent_core::fs_guard::{open_confined, Access, OpenError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
@@ -25,22 +25,72 @@ pub enum SessionError {
     Acp(#[from] AcpError),
     #[error("refused: the path is outside the worktree")]
     Refused,
+    /// The path was allowed, and the filesystem said no: missing, not
+    /// readable, not a regular file, a disk that is full.
+    #[error(transparent)]
+    Fs(std::io::Error),
     #[error("the agent did not accept the session")]
     Rejected,
 }
 
+/// JSON-RPC's code for a request whose parameters are wrong: here, a path
+/// outside the worktree.
+pub const INVALID_PARAMS: i64 = -32602;
+/// JSON-RPC's code for a failure on this side.
+pub const INTERNAL_ERROR: i64 = -32603;
+/// ACP's code for a resource that does not exist.
+pub const RESOURCE_NOT_FOUND: i64 = -32002;
+
+impl From<OpenError> for SessionError {
+    fn from(e: OpenError) -> Self {
+        match e {
+            OpenError::Refused(_) => SessionError::Refused,
+            OpenError::Io(e) => SessionError::Fs(e),
+        }
+    }
+}
+
+impl SessionError {
+    /// How a failed `fs/*` request is answered: a JSON-RPC error, with the
+    /// code saying which kind, and the message read by the agent, not a
+    /// person.
+    pub fn fs_answer(&self, requested: &str) -> (i64, String) {
+        match self {
+            SessionError::Refused => {
+                (INVALID_PARAMS, format!("{requested} is outside the worktree"))
+            }
+            SessionError::Fs(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                (RESOURCE_NOT_FOUND, format!("{requested}: {e}"))
+            }
+            e => (INTERNAL_ERROR, format!("{requested}: {e}")),
+        }
+    }
+}
+
 /// Perform a confined write and describe it as a diff.
+///
+/// The file is opened once, by `open_confined`, and both the text it held and
+/// the new text go through that one descriptor, so the diff's before is what
+/// was actually replaced.
 pub fn handle_fs_write(
     worktree: &Path,
     requested: &str,
     contents: &str,
 ) -> Result<AgentEvent, SessionError> {
-    let path = confine(worktree, Path::new(requested)).map_err(|_| SessionError::Refused)?;
-    let old_text = std::fs::read_to_string(&path).ok();
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    std::fs::write(&path, contents).map_err(|_| SessionError::Refused)?;
+    use std::io::{Read, Seek, Write};
+    let opened = open_confined(worktree, Path::new(requested), Access::Write)?;
+    let (mut file, path) = (opened.file, opened.path);
+    let old_text = if opened.created {
+        None
+    } else {
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).map_err(SessionError::Fs)?;
+        // Not text: the write still goes ahead, the diff just has no before.
+        String::from_utf8(bytes).ok()
+    };
+    file.set_len(0).map_err(SessionError::Fs)?;
+    file.rewind().map_err(SessionError::Fs)?;
+    file.write_all(contents.as_bytes()).map_err(SessionError::Fs)?;
     Ok(AgentEvent::ToolUpdate {
         id: path.display().to_string(),
         status: ToolStatus::Completed,
@@ -62,8 +112,11 @@ pub fn handle_fs_write(
 
 /// Read a confined file for the agent.
 pub fn handle_fs_read(worktree: &Path, requested: &str) -> Result<String, SessionError> {
-    let path = confine(worktree, Path::new(requested)).map_err(|_| SessionError::Refused)?;
-    std::fs::read_to_string(&path).map_err(|_| SessionError::Refused)
+    use std::io::Read;
+    let mut file = open_confined(worktree, Path::new(requested), Access::Read)?.file;
+    let mut text = String::new();
+    file.read_to_string(&mut text).map_err(SessionError::Fs)?;
+    Ok(text)
 }
 
 /// A `session/request_permission` as the event that blocks a fleet row.
@@ -819,10 +872,14 @@ impl RunningSession {
                     Ok(content) => {
                         self.writer.respond(id, serde_json::json!({ "content": content })).await?
                     }
-                    // Answered rather than left hanging: an unanswered request
-                    // stalls the agent forever, and a refusal it can see is
-                    // better than a turn that never ends.
-                    Err(_) => self.writer.respond(id, serde_json::json!({ "content": "" })).await?,
+                    // Answered rather than left hanging, because an unanswered
+                    // request stalls the agent forever. Answered as an error,
+                    // because `{"content": ""}` told it the file was empty,
+                    // and it could overwrite it on that basis.
+                    Err(e) => {
+                        let (code, message) = e.fs_answer(path);
+                        self.writer.respond_error(id, code, &message).await?
+                    }
                 }
                 Ok(Vec::new())
             }
@@ -838,11 +895,19 @@ impl RunningSession {
                 // gone now: this call is only reachable from `next_events`,
                 // which nothing but a daemon command can preempt, and that is
                 // orders of magnitude rarer than "the daemon sent a byte".
-                let outcome = handle_fs_write(&worktree, path, content);
-                self.writer.respond(id, serde_json::json!({})).await?;
-                match outcome {
-                    Ok(event) => Ok(vec![event]),
-                    Err(_) => Ok(vec![AgentEvent::Gap { reason: AgentGapReason::Unparsed }]),
+                match handle_fs_write(&worktree, path, content) {
+                    Ok(event) => {
+                        self.writer.respond(id, serde_json::json!({})).await?;
+                        Ok(vec![event])
+                    }
+                    // The agent hears it failed, and says so in its own turn.
+                    // Nothing goes to the transcript from here: no write
+                    // happened, so there is no diff, and nothing was unparsed.
+                    Err(e) => {
+                        let (code, message) = e.fs_answer(path);
+                        self.writer.respond_error(id, code, &message).await?;
+                        Ok(Vec::new())
+                    }
                 }
             }
             ("session/request_permission", Some(id)) => {
@@ -1098,6 +1163,126 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("farcooler-sess2-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         assert!(handle_fs_write(&dir, "/etc/passwd", "x").is_err());
+    }
+
+    #[test]
+    fn a_shorter_write_leaves_nothing_of_the_old_text_and_a_new_file_has_no_before() {
+        let (wt, _) = worktree_and_outside("shorter");
+        std::fs::write(wt.join("a.txt"), "a much longer line\n").unwrap();
+        handle_fs_write(&wt, "a.txt", "short\n").expect("allowed");
+        assert_eq!(std::fs::read_to_string(wt.join("a.txt")).unwrap(), "short\n");
+        let event = handle_fs_write(&wt, "new/b.txt", "b\n").expect("allowed");
+        let AgentEvent::ToolUpdate { diff: Some(d), .. } = event else { panic!("expected a diff") };
+        assert_eq!(d.old_text, None, "the file did not exist");
+    }
+
+    /// A fresh worktree, and a directory beside it that is not in it.
+    fn worktree_and_outside(name: &str) -> (PathBuf, PathBuf) {
+        let base = std::env::temp_dir()
+            .join(format!("farcooler-sess-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let wt = base.join("wt");
+        std::fs::create_dir_all(&wt).unwrap();
+        let base = std::fs::canonicalize(&base).unwrap();
+        (base.join("wt"), base.join("outside"))
+    }
+
+    #[test]
+    fn a_write_through_a_dangling_symlink_lands_nowhere() {
+        // The escape end to end: the link ships in the repository, its target
+        // does not exist, and the write used to create it outside.
+        let (wt, away) = worktree_and_outside("dangling");
+        std::fs::create_dir_all(&away).unwrap();
+        std::os::unix::fs::symlink(away.join("planted"), wt.join("link")).unwrap();
+        assert!(handle_fs_write(&wt, "link", "x").is_err());
+        assert!(!away.join("planted").exists(), "nothing may be written outside");
+    }
+
+    #[test]
+    fn a_write_under_a_dangling_directory_symlink_makes_no_directories_outside() {
+        let (wt, away) = worktree_and_outside("dir");
+        std::fs::create_dir_all(&away).unwrap();
+        std::os::unix::fs::symlink(away.join("sub"), wt.join("dir")).unwrap();
+        assert!(handle_fs_write(&wt, "dir/new/file.rs", "x").is_err());
+        assert!(!away.join("sub").exists(), "not even the parent directories");
+    }
+
+    /// A running session on an adapter that records every frame it is sent.
+    async fn recorded_session(wt: &Path, record: &Path) -> RunningSession {
+        let launch = farcooler_agent_core::backend::Launch {
+            program: "/bin/sh".into(),
+            args: vec!["-c".to_string(), format!("cat > '{}'", record.display())],
+            env: Default::default(),
+        };
+        let conn = AcpConnection::spawn(&launch, wt).await.expect("spawn");
+        let worktree = conn.worktree.clone();
+        let (writer, incoming) = conn.split();
+        RunningSession { writer, incoming, session_id: "s".to_string(), pending_prompt: None, worktree }
+    }
+
+    /// The frame the adapter received, once it has arrived.
+    async fn received(record: &Path) -> serde_json::Value {
+        for _ in 0..500 {
+            if let Some(line) = std::fs::read_to_string(record).unwrap_or_default().lines().next() {
+                return serde_json::from_str(line).expect("one JSON frame");
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("the adapter was never answered");
+    }
+
+    fn fs_request(method: &str, params: serde_json::Value) -> Incoming {
+        Incoming::Request { id: serde_json::json!(7), method: method.to_string(), params }
+    }
+
+    #[tokio::test]
+    async fn a_failed_read_reaches_the_agent_as_an_error() {
+        // It used to be answered `{"content": ""}`: the agent took the file
+        // for empty, and could overwrite it on that basis.
+        let (wt, _) = worktree_and_outside("read-fails");
+        let record = wt.with_file_name("record");
+        let mut session = recorded_session(&wt, &record).await;
+        let request = fs_request("fs/read_text_file", serde_json::json!({ "path": "missing.rs" }));
+        session.handle(request).await.expect("handled");
+        let frame = received(&record).await;
+        assert_eq!(frame["id"], 7);
+        assert!(frame.get("result").is_none(), "a failure is not a result: {frame}");
+        assert_eq!(frame["error"]["code"], RESOURCE_NOT_FOUND, "{frame}");
+    }
+
+    #[tokio::test]
+    async fn a_refused_read_reaches_the_agent_as_an_error() {
+        let (wt, _) = worktree_and_outside("read-refused");
+        let record = wt.with_file_name("record");
+        let mut session = recorded_session(&wt, &record).await;
+        let request = fs_request("fs/read_text_file", serde_json::json!({ "path": "/etc/hosts" }));
+        session.handle(request).await.expect("handled");
+        let frame = received(&record).await;
+        assert!(frame.get("result").is_none(), "a refusal is not a result: {frame}");
+        assert_eq!(frame["error"]["code"], INVALID_PARAMS, "{frame}");
+    }
+
+    #[tokio::test]
+    async fn a_failed_write_reaches_the_agent_as_an_error() {
+        // It used to be answered `{}` whatever happened, so the agent went on
+        // believing a write had landed that had not.
+        let (wt, away) = worktree_and_outside("write-fails");
+        std::fs::create_dir_all(&away).unwrap();
+        std::os::unix::fs::symlink(away.join("planted"), wt.join("link")).unwrap();
+        let record = wt.with_file_name("record");
+        let mut session = recorded_session(&wt, &record).await;
+        let request = fs_request(
+            "fs/write_text_file",
+            serde_json::json!({ "path": "link", "content": "x" }),
+        );
+        let events = session.handle(request).await.expect("handled");
+        let frame = received(&record).await;
+        assert!(frame.get("result").is_none(), "a failed write is not a result: {frame}");
+        assert!(frame["error"]["code"].is_i64(), "{frame}");
+        assert!(
+            !events.iter().any(|e| matches!(e, AgentEvent::Gap { reason: AgentGapReason::Unparsed })),
+            "nothing failed to parse: {events:?}"
+        );
     }
 
     #[test]

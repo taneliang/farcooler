@@ -52,6 +52,10 @@ impl From<SessionError> for BackendError {
             SessionError::Rejected => {
                 BackendError::Refused("the agent did not accept the session".into())
             }
+            // In practice never reached: `handle` answers a failed `fs/*`
+            // request to the agent and carries on, and that is the only place
+            // this variant is made.
+            SessionError::Fs(e) => BackendError::Refused(e.to_string()),
         }
     }
 }
