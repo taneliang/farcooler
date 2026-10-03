@@ -41,6 +41,7 @@
 		628AFBD4A96C5EE385233135 /* NeedsYouScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0CB9D9FF7935B02B74AA453; };
 		E3763DC57F845868BFD5611D /* WorkspaceScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22BC9A8E84FA5814B11CAD5A; };
 		1EB44A68546253D799F467BE /* TaskScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EE80D199E965C9DBD89B354; };
+		DFA3102921A35DFE8D5F3B57 /* TaskUsageSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4975067EB054571EAE4FEF0A; };
 		DB7DD0767AD156FBAC3595DB /* NewTaskSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 569D38F70C8B53259BB58E2B; };
 		CA994DCD72065DA7AFD2ABF5 /* PhoneHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9BCC126D70758278242837F; };
 		25877588360854AC87D9BB37 /* ShellHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90B7569A5F745E6B85EC796E; };
@@ -131,6 +132,7 @@
 		D79A359A02EA5A59B926AC81 /* PermissionAnswering.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37CC6E8D2E535D51AD6904A0; };
 		E8052914E2C95A1D8C38A3F1 /* TaskBoardModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA1A7FEE33435A79A9B20ADF; };
 		F7B496A5B1995BAF902ED257 /* TaskNoteFeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0609EA5E6B815DA5B28DCB6F; };
+		ABC4EE3252D75551BA32ED39 /* TaskUsage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F63E285D111A5268BB7D477F; };
 		5E88F5B7D4E35B1787938B7D /* TaskBoardAgents.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBE27674E334533B8BE7C7BD; };
 		3AEDDF986DE55B539988F40C /* RunnerBoards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BBD929AC34859148CDFEB80; };
 		0D650BC429815BE5A56B05BA /* WorkspaceGroups.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB159548D52F5D658261D46D; };
@@ -247,6 +249,7 @@
 		E0CB9D9FF7935B02B74AA453 /* NeedsYouScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeedsYouScreen.swift; sourceTree = "<group>"; };
 		22BC9A8E84FA5814B11CAD5A /* WorkspaceScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceScreen.swift; sourceTree = "<group>"; };
 		4EE80D199E965C9DBD89B354 /* TaskScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskScreen.swift; sourceTree = "<group>"; };
+		4975067EB054571EAE4FEF0A /* TaskUsageSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskUsageSection.swift; sourceTree = "<group>"; };
 		569D38F70C8B53259BB58E2B /* NewTaskSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewTaskSheet.swift; sourceTree = "<group>"; };
 		B9BCC126D70758278242837F /* PhoneHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneHarness.swift; sourceTree = "<group>"; };
 		90B7569A5F745E6B85EC796E /* ShellHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellHarness.swift; sourceTree = "<group>"; };
@@ -337,6 +340,7 @@
 		37CC6E8D2E535D51AD6904A0 /* PermissionAnswering.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionAnswering.swift; sourceTree = "<group>"; };
 		EA1A7FEE33435A79A9B20ADF /* TaskBoardModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskBoardModel.swift; sourceTree = "<group>"; };
 		0609EA5E6B815DA5B28DCB6F /* TaskNoteFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskNoteFeed.swift; sourceTree = "<group>"; };
+		F63E285D111A5268BB7D477F /* TaskUsage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskUsage.swift; sourceTree = "<group>"; };
 		CBE27674E334533B8BE7C7BD /* TaskBoardAgents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskBoardAgents.swift; sourceTree = "<group>"; };
 		3BBD929AC34859148CDFEB80 /* RunnerBoards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerBoards.swift; sourceTree = "<group>"; };
 		DB159548D52F5D658261D46D /* WorkspaceGroups.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceGroups.swift; sourceTree = "<group>"; };
@@ -460,6 +464,7 @@
 				E0CB9D9FF7935B02B74AA453 /* NeedsYouScreen.swift */,
 				22BC9A8E84FA5814B11CAD5A /* WorkspaceScreen.swift */,
 				4EE80D199E965C9DBD89B354 /* TaskScreen.swift */,
+				4975067EB054571EAE4FEF0A /* TaskUsageSection.swift */,
 				569D38F70C8B53259BB58E2B /* NewTaskSheet.swift */,
 				B9BCC126D70758278242837F /* PhoneHarness.swift */,
 				90B7569A5F745E6B85EC796E /* ShellHarness.swift */,
@@ -642,6 +647,7 @@
 				37CC6E8D2E535D51AD6904A0 /* PermissionAnswering.swift */,
 				EA1A7FEE33435A79A9B20ADF /* TaskBoardModel.swift */,
 				0609EA5E6B815DA5B28DCB6F /* TaskNoteFeed.swift */,
+				F63E285D111A5268BB7D477F /* TaskUsage.swift */,
 				CBE27674E334533B8BE7C7BD /* TaskBoardAgents.swift */,
 				3BBD929AC34859148CDFEB80 /* RunnerBoards.swift */,
 				DB159548D52F5D658261D46D /* WorkspaceGroups.swift */,
@@ -962,6 +968,7 @@
 				628AFBD4A96C5EE385233135 /* NeedsYouScreen.swift in Sources */,
 				E3763DC57F845868BFD5611D /* WorkspaceScreen.swift in Sources */,
 				1EB44A68546253D799F467BE /* TaskScreen.swift in Sources */,
+				DFA3102921A35DFE8D5F3B57 /* TaskUsageSection.swift in Sources */,
 				DB7DD0767AD156FBAC3595DB /* NewTaskSheet.swift in Sources */,
 				CA994DCD72065DA7AFD2ABF5 /* PhoneHarness.swift in Sources */,
 				25877588360854AC87D9BB37 /* ShellHarness.swift in Sources */,
@@ -1052,6 +1059,7 @@
 				D79A359A02EA5A59B926AC81 /* PermissionAnswering.swift in Sources */,
 				E8052914E2C95A1D8C38A3F1 /* TaskBoardModel.swift in Sources */,
 				F7B496A5B1995BAF902ED257 /* TaskNoteFeed.swift in Sources */,
+				ABC4EE3252D75551BA32ED39 /* TaskUsage.swift in Sources */,
 				5E88F5B7D4E35B1787938B7D /* TaskBoardAgents.swift in Sources */,
 				3AEDDF986DE55B539988F40C /* RunnerBoards.swift in Sources */,
 				0D650BC429815BE5A56B05BA /* WorkspaceGroups.swift in Sources */,
