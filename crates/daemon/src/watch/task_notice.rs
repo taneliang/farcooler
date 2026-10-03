@@ -457,6 +457,7 @@ impl Watcher {
                 runner_id: runner,
                 options: composed.options.clone(),
                 workspace: workspace.clone().unwrap_or_default(),
+                repository_id: crate::wire::id_bytes(task.repository_id),
             })),
         });
         let Some(pairing) = self.audience() else { return };

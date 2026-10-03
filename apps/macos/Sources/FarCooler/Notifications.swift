@@ -100,7 +100,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         let typed = (response as? UNTextInputNotificationResponse)?.userText
         guard let notice = TaskNotice(userInfo: info) else { return }
         await respond(
-            to: notice, target: info["target"] as? String, action: response.actionIdentifier, typed: typed)
+            to: notice, target: info["target"] as? String, repository: info["repository"] as? String,
+            action: response.actionIdentifier, typed: typed)
     }
 
     /// What a task notice's button or click does.
@@ -111,12 +112,18 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// opens the task, as choosing it in its workspace's navigator does
     /// (`TaskNoticeOpener`, ov-106), once its runner is connected. Any other
     /// notification's click just brings the app forward, as it always has.
-    func respond(to notice: TaskNotice, target: String?, action: String, typed: String?, now: Date = Date()) async {
+    func respond(
+        to notice: TaskNotice, target: String?, repository: String? = nil, action: String, typed: String?,
+        now: Date = Date()
+    ) async {
         if let answer = TaskDecisionActions.answer(action: action, options: notice.options, typed: typed) {
-            await send(answer, to: notice, target: target)
+            await send(answer, to: notice, target: target, repository: repository)
             return
         }
-        guard let open = TaskNoticeOpen(notice: notice, target: target, action: action, now: now) else { return }
+        guard
+            let open = TaskNoticeOpen(
+                notice: notice, target: target, repository: repository, action: action, now: now)
+        else { return }
         TaskNoticeOpener.shared.request(open)
     }
 
@@ -129,11 +136,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     /// Send `answer` to `notice`'s task, or say it wasn't sent.
-    private func send(_ answer: String, to notice: TaskNotice, target: String?) async {
+    private func send(_ answer: String, to notice: TaskNotice, target: String?, repository: String?) async {
         let client = target.flatMap { answerers[$0]?.client }
         let refusal: String? =
             if let client {
-                await client.answerTask(key: notice.key, body: answer)
+                await client.answerTask(key: notice.key, body: answer, repository: repository)
             } else {
                 "No runner to send it through."
             }
@@ -146,6 +153,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         var info = notice.userInfo
         // So a click on it opens the task on the runner it came from.
         if let target { info["target"] = target }
+        if let repository { info["repository"] = repository }
         content.userInfo = info
         // Under the task's own id, so it replaces the decision whose buttons
         // didn't work rather than sitting beside it.
@@ -203,6 +211,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             noticeId: notice.noticeId, options: notice.event == "decision" ? notice.options : [])
         var info = task.userInfo
         info["target"] = target
+        // Which board the key is on, for a click's `task show` and an
+        // answer's `task note` (ov-106).
+        if let repository = notice.repository { info["repository"] = repository }
         content.userInfo = info
         switch notice.level {
         case "time-sensitive": content.interruptionLevel = .timeSensitive

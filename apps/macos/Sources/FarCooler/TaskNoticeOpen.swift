@@ -19,6 +19,9 @@ struct TaskNoticeOpen: Equatable, Sendable {
     /// The runner as this app reaches it (`DaemonClient.target`), when the
     /// notice was posted here and says which: `""` is this Mac.
     var host: String?
+    /// The task's repository, when the notice says: a key is only unique
+    /// within one, so `task show` is asked for it there.
+    var repository: String?
     /// When the click came, for `waitsAtMost`.
     var since: Date
     /// Tells two clicks on the same notice apart, so the second is opened
@@ -34,11 +37,12 @@ struct TaskNoticeOpen: Equatable, Sendable {
     /// The open a response asks for: a plain click on a task notice. Nil for
     /// an answer button, "Answer…" and a dismissal, and for a notice about no
     /// task. `target` is the local post's `DaemonClient.target`.
-    init?(notice: TaskNotice, target: String?, action: String, now: Date) {
+    init?(notice: TaskNotice, target: String?, repository: String? = nil, action: String, now: Date) {
         guard action == UNNotificationDefaultActionIdentifier else { return nil }
         self.key = notice.key
         self.runner = notice.runner ?? notice.noticeId.flatMap(Self.parse(noticeId:))?.runner
         self.host = target
+        self.repository = repository
         self.since = now
     }
 
@@ -104,11 +108,13 @@ struct TaskNoticeOpen: Equatable, Sendable {
             self.workspace = workspace
         }
 
-        /// Nil for a read that names no task, or one under another key.
-        init?(show data: Data, key: String) {
+        /// Nil for a read that names no task, or one under another key or,
+        /// when `repository` is said, in another repository.
+        init?(show data: Data, key: String, repository: String? = nil) {
             guard let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                 let task = body["task"] as? [String: Any],
                 task["key"] as? String == key,
+                repository == nil || (task["repository_id"] as? String)?.lowercased() == repository?.lowercased(),
                 let id = task["id"] as? String, !id.isEmpty
             else { return nil }
             let workspace = (task["workspace"] as? String).flatMap { $0.isEmpty ? nil : $0 }
@@ -165,7 +171,8 @@ final class TaskNoticeOpener: ObservableObject {
     ) async {
         await drive(
             open, window: window, isKey: isKey, seats: { clients().values.map { TaskNoticeOpen.Seat($0) } },
-            read: { host, key in await clients()[host]?.taskByKey(key).data }, land: land, pause: pause)
+            read: { host, open in await clients()[host]?.taskByKey(open.key, repository: open.repository).data },
+            land: land, pause: pause)
     }
 
     /// A window's half: wait until `open`'s runner is ready, read the task
@@ -177,7 +184,7 @@ final class TaskNoticeOpener: ObservableObject {
     /// own schedules; `pause` is the wait between passes.
     func drive(
         _ open: TaskNoticeOpen, window: UUID, isKey: () -> Bool, seats: () -> [TaskNoticeOpen.Seat],
-        read: (_ host: String, _ key: String) async -> Data?,
+        read: (_ host: String, _ open: TaskNoticeOpen) async -> Data?,
         land: (_ host: String, _ place: TaskNoticeOpen.Place) -> Void,
         now: () -> Date = { Date() },
         pause: () async -> Void = { try? await Task.sleep(for: .milliseconds(250)) }
@@ -195,13 +202,13 @@ final class TaskNoticeOpener: ObservableObject {
                 NSLog("Far Cooler: a notice about %@ found no runner to open it on.", open.key)
                 finish(open)
             case .read(let host):
-                let data = await read(host, open.key)
+                let data = await read(host, open)
                 guard pending?.id == open.id else { return }
                 // The deadline holds for the read too: a task that turns up
                 // after it would move a window somebody has gone on using.
                 if now().timeIntervalSince(open.since) >= TaskNoticeOpen.waitsAtMost {
                     NSLog("Far Cooler: a notice's task %@ was read too late to open.", open.key)
-                } else if let data, let place = TaskNoticeOpen.Place(show: data, key: open.key) {
+                } else if let data, let place = TaskNoticeOpen.Place(show: data, key: open.key, repository: open.repository) {
                     land(host, place)
                 } else {
                     NSLog("Far Cooler: a notice's task %@ couldn't be read.", open.key)

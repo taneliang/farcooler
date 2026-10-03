@@ -3797,6 +3797,9 @@ fn notice_json(n: &farcooler_protocol::v1::Notice) -> serde_json::Value {
         "runner": n.runner_id,
         "workspace": n.workspace,
         "options": n.options,
+        // The task's repository, which a key is unique within (ov-106).
+        // Null from a runner too old to say.
+        "repository": (!n.repository_id.is_empty()).then(|| uuid_of(&n.repository_id).to_string()),
     })
 }
 
@@ -4822,8 +4825,10 @@ mod tests {
             task_key: "ov-90".into(),
             runner_id: "r-1".into(),
             options: vec!["pdfkit".into()],
+            repository_id: bytes::Bytes::copy_from_slice(uuid::Uuid::from_u128(7).as_bytes()),
             ..Default::default()
         });
+        assert_eq!(line["repository"], uuid::Uuid::from_u128(7).to_string());
         assert_eq!(line["kind"], "notice");
         assert_eq!(line["notice_id"], "t:r-1:ov-90");
         assert_eq!(line["event"], "decision");

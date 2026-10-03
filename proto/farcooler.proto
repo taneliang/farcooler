@@ -540,6 +540,9 @@ message Notice {
   repeated string options = 9;
   // The task's workspace, by name.
   string workspace = 10;
+  // The task's repository: a key is only unique within one, so a client
+  // opening the task names it too (ov-106).
+  bytes repository_id = 11;
 }
 
 message SnapshotChunk {

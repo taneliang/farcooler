@@ -386,6 +386,9 @@ async fn the_notice_event_reaches_every_client_paired_or_not() {
     assert_eq!(notice.task_key, task.key);
     assert!(notice.notice_id.starts_with("t:"));
     assert_eq!(notice.title, format!("{} Heard", task.key));
+    // Which board the key is on, so a click on it opens this task and not
+    // another repository's under the same key (ov-106).
+    assert_eq!(notice.repository_id.as_ref(), task.repository_id.as_bytes());
 }
 
 #[tokio::test]

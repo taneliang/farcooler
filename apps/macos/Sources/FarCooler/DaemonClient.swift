@@ -1157,10 +1157,11 @@ final class DaemonClient: ObservableObject {
             background: true)
     }
 
-    /// The task under `key`, on whichever of this runner's boards has it: a
-    /// task notice names its task by key and runner only (ov-106).
-    func taskByKey(_ key: String) async -> (data: Data?, message: String?) {
-        await runRaw(["task", "show", key, "--json"], background: true)
+    /// The task under `key`: in `repository` when the notice says which,
+    /// since a key is only unique within one; else on whichever of this
+    /// runner's boards has it (ov-106).
+    func taskByKey(_ key: String, repository: String? = nil) async -> (data: Data?, message: String?) {
+        await runRaw(["task", "show", key] + (repository.map { ["--repo", $0] } ?? []) + ["--json"], background: true)
     }
 
     /// One task's card with its record and what it waits on, in one call.

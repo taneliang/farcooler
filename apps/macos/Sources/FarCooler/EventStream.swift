@@ -172,10 +172,12 @@ struct NoticeEvent: Sendable, Decodable, Equatable {
     var runner: String?
     /// A decision's answer options, for its buttons.
     var options: [String]
+    /// The task's repository: a key is only unique within one (ov-106).
+    var repository: String?
 
     init(
         noticeId: String, event: String, level: String, title: String, body: String, task: String,
-        runner: String?, options: [String]
+        runner: String?, options: [String], repository: String? = nil
     ) {
         self.noticeId = noticeId
         self.event = event
@@ -185,10 +187,11 @@ struct NoticeEvent: Sendable, Decodable, Equatable {
         self.task = task
         self.runner = runner
         self.options = options
+        self.repository = repository
     }
 
     enum CodingKeys: String, CodingKey {
-        case event, level, title, body, task, runner, options
+        case event, level, title, body, task, runner, options, repository
         case noticeId = "notice_id"
     }
 
@@ -202,6 +205,7 @@ struct NoticeEvent: Sendable, Decodable, Equatable {
         task = try c.decode(String.self, forKey: .task)
         runner = try c.decodeIfPresent(String.self, forKey: .runner)
         options = try c.decodeIfPresent([String].self, forKey: .options) ?? []
+        repository = try c.decodeIfPresent(String.self, forKey: .repository).flatMap { $0.isEmpty ? nil : $0 }
     }
 }
 
