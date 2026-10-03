@@ -1196,6 +1196,7 @@ private struct TaskListSection: View {
     let rows: Namespace.ID
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.boardMotionSlowdown) private var slowdown
 
     /// Needs Decision is the one status waiting on the person reading, and
     /// the only one drawn in the accent color.
@@ -1232,7 +1233,7 @@ private struct TaskListSection: View {
                         },
                         onChoose: { onChoose(row) })
                     .matchedGeometryEffect(id: row.id, in: rows, isSource: true)
-                    .transition(BoardMotion.rowTransition(reduceMotion: reduceMotion))
+                    .transition(BoardMotion.rowTransition(reduceMotion: reduceMotion, slowedBy: slowdown))
                     .id(row.id)
                 }
                 if cut.hidden > 0 {
@@ -1249,7 +1250,7 @@ private struct TaskListSection: View {
                     HistoryRow(status: section.status, total: total) { onHistory(section.status) }
                 }
             }
-            .animation(BoardMotion.list(reduceMotion: reduceMotion), value: cut.rows.map(\.id))
+            .animation(BoardMotion.list(reduceMotion: reduceMotion, slowedBy: slowdown), value: cut.rows.map(\.id))
         }
     }
 }
@@ -1257,22 +1258,35 @@ private struct TaskListSection: View {
 /// The list's motion (ov-104): insertions, removals and moves on the shared
 /// spring, a cross-fade alone under Reduce Motion.
 enum BoardMotion {
-    static func list(reduceMotion: Bool) -> Animation {
-        reduceMotion ? .easeInOut(duration: 0.2) : WorkspaceMotion.spring
+    /// The shared spring, or a cross-fade under Reduce Motion. `slowedBy`
+    /// stretches it for a frame test, which reads the frames of a slowed
+    /// insertion (`\.boardMotionSlowdown`); it's 1 everywhere in the app.
+    static func list(reduceMotion: Bool, slowedBy: Double = 1) -> Animation {
+        reduceMotion
+            ? .easeInOut(duration: 0.2 * slowedBy)
+            : slowedBy == 1 ? WorkspaceMotion.spring : WorkspaceMotion.spring.speed(1 / slowedBy)
     }
 
-    /// A row comes in fading and sliding down into its place, and fades as
-    /// the rows under it close up; only fading under Reduce Motion.
-    static func rowTransition(reduceMotion: Bool) -> AnyTransition {
-        reduceMotion
-            ? .opacity
-            : .asymmetric(
-                insertion: .opacity.combined(with: .offset(y: -ColumnGrid.rhythm)),
-                removal: .opacity)
+    /// A row, or a group, comes in fading and sliding down into its place
+    /// once the rows under it have begun to make room, and goes out fading
+    /// fast, before the rows under it close up over it: read in slowed frames
+    /// (ov-104 review), a fade as long as the spring drew the two over each
+    /// other. Only fading under Reduce Motion.
+    static func rowTransition(reduceMotion: Bool, slowedBy: Double = 1) -> AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        return .asymmetric(
+            insertion: .opacity.combined(with: .offset(y: -ColumnGrid.rhythm))
+                .animation(.easeOut(duration: 0.2 * slowedBy).delay(0.1 * slowedBy)),
+            removal: .opacity.animation(.easeOut(duration: 0.08 * slowedBy)))
     }
 
     /// How long a new arrival's accent wash takes to fade.
     static let highlightFade: TimeInterval = 1.5
+}
+
+extension EnvironmentValues {
+    /// How much slower the board's lists move: 1, except in a frame test.
+    @Entry var boardMotionSlowdown: Double = 1
 }
 
 /// "Show 4 More" at the foot of a long section, at column B.

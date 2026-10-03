@@ -24,6 +24,7 @@ struct BoardSummaryStrip: View {
     /// The arrivals still washed in the accent.
     @State private var arrived: Set<String> = []
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.boardMotionSlowdown) private var slowdown
 
     init(store: TaskBoardStore, defaults: UserDefaults = .standard, filter: String = "") {
         self.store = store
@@ -73,7 +74,7 @@ struct BoardSummaryStrip: View {
                         activity(summary.activity, now: now)
                     }
                 }
-                .animation(BoardMotion.list(reduceMotion: reduceMotion), value: Self.identities(summary))
+                .animation(BoardMotion.list(reduceMotion: reduceMotion, slowedBy: slowdown), value: Self.identities(summary))
             }
             // Measured from the board column's edge, as the list below is:
             // the disclosure at column A, everything else at B.
@@ -121,7 +122,7 @@ struct BoardSummaryStrip: View {
         guard !new.isEmpty else { return }
         arrived.formUnion(new)
         DispatchQueue.main.async {
-            withAnimation(.easeOut(duration: BoardMotion.highlightFade)) { arrived.subtract(new) }
+            withAnimation(.easeOut(duration: BoardMotion.highlightFade * slowdown)) { arrived.subtract(new) }
         }
     }
 
@@ -207,14 +208,14 @@ struct BoardSummaryStrip: View {
                     }
                     .contentShape(Rectangle())
                     .onTapGesture { open(item.taskID) }
-                    .transition(BoardMotion.rowTransition(reduceMotion: reduceMotion))
+                    .transition(BoardMotion.rowTransition(reduceMotion: reduceMotion, slowedBy: slowdown))
                     .accessibilityElement(children: .combine)
                     .accessibilityAddTraits(.isButton)
                     .accessibilityIdentifier("board-summary-item-\(item.id)")
                 }
                 more(capped.more)
             }
-            .transition(.opacity)
+            .transition(BoardMotion.rowTransition(reduceMotion: reduceMotion, slowedBy: slowdown))
         }
     }
 
@@ -237,14 +238,14 @@ struct BoardSummaryStrip: View {
                     }
                     .contentShape(Rectangle())
                     .onTapGesture { open(entry.taskID) }
-                    .transition(BoardMotion.rowTransition(reduceMotion: reduceMotion))
+                    .transition(BoardMotion.rowTransition(reduceMotion: reduceMotion, slowedBy: slowdown))
                     .accessibilityElement(children: .combine)
                     .accessibilityAddTraits(.isButton)
                     .accessibilityIdentifier("board-summary-activity-\(entry.key)")
                 }
                 more(capped.more)
             }
-            .transition(.opacity)
+            .transition(BoardMotion.rowTransition(reduceMotion: reduceMotion, slowedBy: slowdown))
         }
     }
 
