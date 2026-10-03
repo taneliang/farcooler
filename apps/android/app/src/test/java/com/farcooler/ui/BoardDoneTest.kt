@@ -1,60 +1,107 @@
 package com.farcooler.ui
 
 import com.farcooler.model.BoardDone
+import com.farcooler.model.BoardHistory
+import com.farcooler.model.BoardReads
+import com.farcooler.model.BoardSectionCut
 import com.farcooler.model.TaskBoard
 import com.farcooler.model.TaskBoardColumn
 import com.farcooler.model.TaskRow
 import com.farcooler.model.TaskStatus
+import java.time.ZoneOffset
+import java.time.temporal.WeekFields
+import java.util.Locale
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Done shows the work finished lately, newest first (ov-80); AgentKit's BoardDoneTests, in Kotlin. */
+/**
+ * Done shows the unread and today's with a floor of three (ov-103), a long
+ * section ten, and the History page groups and searches: AgentKit's
+ * BoardDoneTests and BoardUnreadTests, in Kotlin.
+ */
 class BoardDoneTest {
+    // 2027-01-15 08:00 UTC, a Friday.
     private val now = 1_800_000_000_000L
-    private val day = 24L * 60 * 60 * 1000
+    private val hour = 60L * 60 * 1000
+    private val day = 24 * hour
+    private val utc = ZoneOffset.UTC
 
-    private fun done(key: String, agoMs: Long, status: TaskStatus = TaskStatus.DONE) =
-        TaskRow(key, key, "Task $key", status, now - agoMs)
-
-    private fun board(vararg rows: TaskRow) =
-        TaskBoard(listOf(TaskBoardColumn(TaskStatus.DONE, rows.toList())))
+    private fun row(key: String, agoMs: Long, status: TaskStatus = TaskStatus.DONE, title: String = "Task $key") =
+        TaskRow("id-$key", key, title, status, now - agoMs, updatedAt = now - agoMs)
 
     @Test
-    fun `done keeps the last seven days and at least ten, newest first`() {
-        val recent = (0 until 12).map { done("r$it", it * 3_600_000L) }
-        val old = (0 until 5).map { done("o$it", 30 * day + it) }
-        val shown = BoardDone.visible((old + recent).reversed(), showingAll = false, nowMs = now)
-        assertEquals((0 until 12).map { "r$it" }, shown.map { it.key })
+    fun `done keeps the unread and today's, newest first, with a floor of three`() {
+        val reads = BoardReads(now - 2 * day)
+        val today = (0 until 3).map { row("t$it", (it + 1) * 600_000L) }
+        val unread = (0 until 2).map { row("u$it", 20 * hour + it) }
+        val old = (0 until 10).map { row("o$it", 30 * day + it) }
+        val shown = BoardDone.shown((old + unread + today).reversed(), reads, now, utc)
+        assertEquals(listOf("t0", "t1", "t2", "u0", "u1"), shown.map { it.key })
 
-        val quiet = listOf(done("a", 3_600_000L)) + (0 until 20).map { done("o$it", 30 * day + it) }
-        val topped = BoardDone.visible(quiet, showingAll = false, nowMs = now)
-        assertEquals(10, topped.size)
-        assertEquals("a", topped.first().key)
-        assertEquals("o8", topped.last().key)
-        assertEquals(21, BoardDone.visible(quiet, showingAll = true, nowMs = now).size)
-        assertEquals("Show All Done (21)", BoardDone.showAllTitle(21))
+        val opened = reads.open(unread[0], now)
+        assertEquals(listOf("t0", "t1", "t2", "u1"), BoardDone.shown(today + unread + old, opened, now, utc).map { it.key })
+        assertEquals(listOf("o0", "o1", "o2"), BoardDone.shown(old, reads, now, utc).map { it.key })
+        assertEquals("All Done", BoardDone.historyTitle(TaskStatus.DONE))
+        assertEquals("All Canceled", BoardDone.historyTitle(TaskStatus.CANCELLED))
     }
 
     @Test
-    fun `the list offers show all under an open done that hides work`() {
-        val rows = (0 until 15).map { done("d$it", 40 * day + it) }
-        val toggled = setOf(TaskStatus.DONE)
-        val short = BoardList.entries(board(*rows.toTypedArray()), toggled, nowMs = now)
-        assertEquals(10, short.filterIsInstance<BoardListEntry.Card>().size)
-        val button = short.filterIsInstance<BoardListEntry.ShowAllDone>().single()
-        assertEquals("Show All Done (15)", button.title)
+    fun `opening reads a ticket, and a runner clock ahead can't leave it unread`() {
+        val reads = BoardReads(now - day)
+        val fin = row("f", hour)
+        assertTrue(reads.finishedUnread(fin))
+        assertFalse(reads.open(fin, now).finishedUnread(fin))
+        assertTrue(reads.open(fin, now).finishedUnread(row("g", hour)))
+        val ahead = row("a", -10 * 60_000L)
+        assertFalse(reads.open(ahead, now).finishedUnread(ahead))
+        assertEquals(emptyMap<String, Long>(), BoardReads(now, mapOf("x" to now - 1)).pruned().opened)
+    }
 
-        val all = BoardList.entries(board(*rows.toTypedArray()), toggled, nowMs = now, showAllDone = true)
-        assertEquals(15, all.filterIsInstance<BoardListEntry.Card>().size)
-        assertEquals("Show Recent Done Only", all.filterIsInstance<BoardListEntry.ShowAllDone>().single().title)
+    @Test
+    fun `the list cuts Done by its rule, a long section at ten, and offers History`() {
+        val reads = BoardReads(now - 2 * day)
+        val done = (0 until 15).map { row("d$it", 40 * day + it) }
+        val todo = (0 until 14).map { row("t$it", hour, TaskStatus.TODO) }
+        val board = TaskBoard(listOf(TaskBoardColumn(TaskStatus.TODO, todo), TaskBoardColumn(TaskStatus.DONE, done)))
+        val open = setOf(TaskStatus.DONE)
+        val entries = BoardList.entries(board, open, now, reads)
+        assertEquals(13, entries.filterIsInstance<BoardListEntry.Card>().size)
+        assertEquals("Show 4 More", entries.filterIsInstance<BoardListEntry.ShowMore>().single().title)
+        val history = entries.filterIsInstance<BoardListEntry.History>().single()
+        assertEquals(15, history.total)
+        assertEquals("All Done", history.title)
+        val more = BoardList.entries(board, open, now, reads, showingMore = setOf(TaskStatus.TODO))
+        assertEquals(17, more.filterIsInstance<BoardListEntry.Card>().size)
+        assertTrue(more.none { it is BoardListEntry.ShowMore })
+        assertNull(BoardSectionCut.cut(TaskBoardColumn(TaskStatus.DONE, emptyList()), reads, now).history)
+        // No count in parentheses anywhere.
+        assertFalse(BoardSectionCut.showMoreTitle(4).contains("("))
+        assertFalse(history.title.contains("("))
+    }
 
-        val few = BoardList.entries(board(done("x", 40 * day)), toggled, nowMs = now)
-        assertTrue(few.none { it is BoardListEntry.ShowAllDone })
-        val canceled = TaskBoard(
-            listOf(TaskBoardColumn(TaskStatus.CANCELLED, rows.map { it.copy(status = TaskStatus.CANCELLED) }))
+    @Test
+    fun `history groups by when it landed, and searches and filters by area`() {
+        val rows = listOf(
+            row("old", 40 * day, title = "Mac: an old one"),
+            row("tue", 3 * day, title = "Daemon: tuesday"),
+            row("yday", day, title = "Mac: yesterday"),
+            row("now", hour, title = "Phones: just now"),
         )
-        val c = BoardList.entries(canceled, setOf(TaskStatus.CANCELLED), nowMs = now)
-        assertEquals(15, c.filterIsInstance<BoardListEntry.Card>().size)
+        val groups = BoardHistory.groups(rows, now, utc, WeekFields.ISO)
+        assertEquals(
+            listOf(BoardHistory.Period.TODAY, BoardHistory.Period.YESTERDAY, BoardHistory.Period.THIS_WEEK, BoardHistory.Period.EARLIER),
+            groups.map { it.period },
+        )
+        assertEquals(listOf("Today", "Yesterday", "This Week", "Earlier"), groups.map { it.period.title })
+        assertEquals("Mac", BoardHistory.area("Mac: x"))
+        assertNull(BoardHistory.area("No area here"))
+        assertEquals(listOf("Mac", "Daemon", "Phones"), BoardHistory.areas(rows))
+        assertEquals(listOf("old", "yday"), BoardHistory.filter(rows, "", "Mac").map { it.key })
+        assertEquals(listOf("tue"), BoardHistory.filter(rows, "TUESDAY daemon").map { it.key })
+        assertEquals("7:00 AM", BoardHistory.landed(rows[3], now, utc, Locale.US, WeekFields.ISO))
+        assertEquals("Dec 6, 2026", BoardHistory.landed(rows[0], now, utc, Locale.US, WeekFields.ISO))
     }
 }

@@ -51,6 +51,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -138,6 +139,8 @@ fun BoardTab(
     onOpenTask: (taskId: String) -> Unit,
     onJump: (TerminalRef) -> Unit,
     modifier: Modifier = Modifier,
+    /** A finished status's History page (ov-103). */
+    onOpenHistory: (TaskStatus) -> Unit = {},
 ) {
     val boards by connection.boards.collectAsStateWithLifecycle()
     val unread by connection.unreadBoards.collectAsStateWithLifecycle()
@@ -151,8 +154,14 @@ fun BoardTab(
     // The statuses flipped from their first state, per workspace, for as long
     // as the screen's saved state is kept.
     var toggled by rememberSaveable(workspace.id) { mutableStateOf(emptyList<String>()) }
-    // Done draws its recent cards until this is asked for (BoardDone).
-    var showAllDone by rememberSaveable(workspace.id) { mutableStateOf(false) }
+    // The long sections showing every task, not just ten.
+    var showingMore by rememberSaveable(workspace.id) { mutableStateOf(emptyList<String>()) }
+    // What's been read on this board on this phone (ov-104): what Done keeps.
+    val context = LocalContext.current
+    val readsStore = remember { PrefsBoardReads.of(context) }
+    var reads by remember(workspace.id) {
+        mutableStateOf(readsStore.load(connection.host.id, workspace.id, System.currentTimeMillis()))
+    }
 
     // Read on opening, whatever was last read: the row that opened this may
     // be showing a count from before the last reconnect. While it is open, a
@@ -223,7 +232,8 @@ fun BoardTab(
                             )
                         }
                     }
-                    for (entry in BoardList.entries(board, flipped, showAllDone = showAllDone)) {
+                    val more = showingMore.mapNotNull(TaskStatus::parse).toSet()
+                    for (entry in BoardList.entries(board, flipped, reads = reads, showingMore = more)) {
                         when (entry) {
                             is BoardListEntry.Header -> item(key = entry.key) {
                                 SectionHeader(entry) {
@@ -231,11 +241,14 @@ fun BoardTab(
                                     toggled = if (word in toggled) toggled - word else toggled + word
                                 }
                             }
-                            is BoardListEntry.ShowAllDone -> item(key = entry.key) {
+                            is BoardListEntry.ShowMore -> item(key = entry.key) {
                                 TextButton(
-                                    onClick = { showAllDone = !showAllDone },
-                                    modifier = Modifier.padding(start = 8.dp).testTag("board-show-all-done"),
+                                    onClick = { showingMore = showingMore + entry.status.wire },
+                                    modifier = Modifier.padding(start = 8.dp).testTag("board-show-more-${entry.status.wire}"),
                                 ) { Text(entry.title) }
+                            }
+                            is BoardListEntry.History -> item(key = entry.key) {
+                                HistoryRow(entry) { onOpenHistory(entry.status) }
                             }
                             is BoardListEntry.Card -> item(key = entry.key) {
                                 val row = entry.row
@@ -244,7 +257,10 @@ fun BoardTab(
                                     row = row,
                                     agents = agents,
                                     presence = row.agentPresence(agents.size, speaks),
-                                    onOpen = { onOpenTask(row.id) },
+                                    onOpen = {
+                                        reads = readsStore.open(row, connection.host.id, workspace.id)
+                                        onOpenTask(row.id)
+                                    },
                                     onJump = jump,
                                 )
                                 HorizontalDivider()
@@ -409,14 +425,14 @@ private fun SectionHeader(header: BoardListEntry.Header, onToggle: () -> Unit) {
             color = if (header.count > 0) MaterialTheme.colorScheme.primary
             else MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.weight(1f))
+        // Trailing, quiet, in tabular digits, as the Mac's headers count (ov-104).
         Text(
             "${header.count}",
-            style = MaterialTheme.typography.labelMedium,
-            fontFamily = FontFamily.Monospace,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+            color = MaterialTheme.colorScheme.outline,
         )
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.width(8.dp))
         if (header.expandable) {
             Icon(
                 if (header.expanded) Icons.Outlined.KeyboardArrowDown
@@ -426,6 +442,36 @@ private fun SectionHeader(header: BoardListEntry.Header, onToggle: () -> Unit) {
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+}
+
+/** "All Done  94 ›" under Done or Canceled: the History page (ov-103). */
+@Composable
+private fun HistoryRow(entry: BoardListEntry.History, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .heightIn(min = 48.dp)
+            .padding(horizontal = 16.dp)
+            .testTag("board-history-${entry.status.wire}")
+            .semantics(mergeDescendants = true) { contentDescription = "${entry.title}, ${entry.total}" },
+    ) {
+        Text(entry.title, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.weight(1f))
+        Text(
+            "${entry.total}",
+            style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+            color = MaterialTheme.colorScheme.outline,
+        )
+        Spacer(Modifier.width(8.dp))
+        Icon(
+            Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+            tint = MaterialTheme.colorScheme.outline,
+        )
     }
 }
 
@@ -629,6 +675,11 @@ fun TaskDetailScreen(
     }
 
     val row = boards[workspaceId]?.row(taskId)
+    // Opened: read (ov-104), so its finish no longer keeps it in Done's short list.
+    val context = LocalContext.current
+    LaunchedEffect(row?.id) {
+        row?.let { PrefsBoardReads.of(context).open(it, connection.host.id, workspaceId) }
+    }
     // What this task asks of you, as the runner put it: a decision with its
     // options, a review, or an ask its agent holds. Answered here as on Needs
     // You, by the same row.

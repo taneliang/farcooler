@@ -245,6 +245,9 @@ fun WorkspaceScreen(
                     connection = connection,
                     workspace = workspace,
                     onOpenTask = { model.navigate(Route.BoardTask(route.hostId, route.workspaceId, it)) },
+                    onOpenHistory = { status ->
+                        model.navigate(Route.BoardHistory(route.hostId, route.workspaceId, status.wire))
+                    },
                     onJump = { model.openFromBoard(it) },
                 )
                 WorkspaceTab.WORKTREES -> WorktreeList(

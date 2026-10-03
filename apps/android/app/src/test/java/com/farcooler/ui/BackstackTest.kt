@@ -61,6 +61,7 @@ class BackstackTest {
             Route.Join,
             Route.AddDevice,
             Route.Devices,
+            Route.BoardHistory("h", "w", "done"),
         )) {
             assertEquals(listOf(route), Backstack.decodeStack(Backstack.encodeStack(listOf(route))))
         }

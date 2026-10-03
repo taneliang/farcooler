@@ -633,26 +633,165 @@ fun landingWorktree(terminalId: String, worktrees: List<Worktree>): String? =
     worktrees.firstOrNull { worktree -> worktree.terminals.any { it.id == terminalId } }?.id
 
 /**
- * What the Done section shows: the work finished lately, newest first.
- * AgentKit's `BoardDone`, rule for rule: everything finished in the last
- * seven days, or the newest ten, whichever is more. Canceled is its own
- * status and is not shortened.
+ * What this person has read on one board (ov-104): AgentKit's `BoardReads`,
+ * rule for rule. Each ticket's read mark is when it was last opened; an item
+ * is unread while it's newer than that and newer than [floorMs], before which
+ * everything counts read. Kept per device for now ([BoardReadsStore]).
+ */
+data class BoardReads(val floorMs: Long, val opened: Map<String, Long> = emptyMap()) {
+    /** Everything on [taskId] at or before this counts read. */
+    fun mark(taskId: String): Long = maxOf(floorMs, opened[taskId] ?: Long.MIN_VALUE)
+
+    fun isUnread(taskId: String, atMs: Long): Boolean = atMs > mark(taskId)
+
+    /** Whether [row] finished and nobody has opened it since. */
+    fun finishedUnread(row: TaskRow): Boolean = row.status.isFinished && isUnread(row.id, row.statusSince)
+
+    /**
+     * [row] was opened: everything on it so far is read. The later of this
+     * phone's clock and the runner's own last word on it, so a runner whose
+     * clock runs ahead can't leave it unread.
+     */
+    fun open(row: TaskRow, nowMs: Long, latestMs: Long? = null): BoardReads =
+        copy(opened = opened + (row.id to maxOf(nowMs, row.lastMovedMs, latestMs ?: Long.MIN_VALUE)))
+
+    /** Without the marks the floor has passed. */
+    fun pruned(): BoardReads = copy(opened = opened.filterValues { it > floorMs })
+
+    companion object {
+        /** Before anything was read: the last day counts unread. */
+        fun firstLook(nowMs: Long): BoardReads = BoardReads(nowMs - 24L * 60 * 60 * 1000)
+    }
+}
+
+/** Where a board's read state is kept: this phone's preferences, until a runner keeps it. */
+interface BoardReadsStore {
+    fun load(host: String, workspace: String, nowMs: Long): BoardReads
+    fun save(reads: BoardReads, host: String, workspace: String)
+}
+
+/**
+ * What the Done and Canceled sections show (ov-103), AgentKit's `BoardDone`
+ * rule for rule: every task finished and still unread, plus everything
+ * finished today, with a floor of the latest three. The rest are on the
+ * History page, behind the "All Done" row.
  */
 object BoardDone {
-    const val RECENT_WINDOW_MS = 7L * 24 * 60 * 60 * 1000
-    const val MINIMUM_SHOWN = 10
+    const val FLOOR = 3
 
-    /** The button that reveals the rest; [total] is every done task. */
-    fun showAllTitle(total: Int): String = "Show All Done ($total)"
+    /** The row to the History page: "All Done". Its count is drawn beside it, never in parentheses. */
+    fun historyTitle(status: TaskStatus): String = "All ${status.title}"
 
-    /** Done tasks, newest finished first; a tie keeps the runner's order. */
+    /** Finished tasks, newest finished first; a tie keeps the runner's order. */
     fun newestFirst(rows: List<TaskRow>): List<TaskRow> = rows.sortedByDescending { it.statusSince }
 
-    /** The rows to draw: [newestFirst], cut to the recent ones unless [showingAll]. */
-    fun visible(rows: List<TaskRow>, showingAll: Boolean, nowMs: Long): List<TaskRow> {
-        val sorted = newestFirst(rows)
-        if (showingAll) return sorted
-        val recent = sorted.takeWhile { it.statusSince >= nowMs - RECENT_WINDOW_MS }.size
-        return sorted.take(maxOf(recent, MINIMUM_SHOWN))
+    fun shown(rows: List<TaskRow>, reads: BoardReads, nowMs: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): List<TaskRow> {
+        val today = java.time.Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
+        return newestFirst(rows).filterIndexed { index, row ->
+            index < FLOOR || reads.finishedUnread(row) ||
+                java.time.Instant.ofEpochMilli(row.statusSince).atZone(zone).toLocalDate() == today
+        }
+    }
+}
+
+/** How a section is cut (ov-103): ten, then "Show N More". */
+object BoardSectionCut {
+    const val LIMIT = 10
+
+    fun showMoreTitle(hidden: Int): String = "Show $hidden More"
+
+    data class Cut(val rows: List<TaskRow>, val hidden: Int, val history: Int?)
+
+    fun cut(
+        column: TaskBoardColumn,
+        reads: BoardReads,
+        nowMs: Long,
+        showingAll: Boolean = false,
+        zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
+    ): Cut {
+        if (column.status.isFinished) {
+            return Cut(BoardDone.shown(column.rows, reads, nowMs, zone), 0, column.rows.size.takeIf { it > 0 })
+        }
+        if (showingAll || column.rows.size <= LIMIT) return Cut(column.rows, 0, null)
+        return Cut(column.rows.take(LIMIT), column.rows.size - LIMIT, null)
+    }
+}
+
+/**
+ * The History page (ov-103), AgentKit's `BoardHistory`: every task finished
+ * in a status, grouped by when it landed, searchable by key and title, and
+ * narrowed by the area its title names.
+ */
+object BoardHistory {
+    enum class Period(val title: String) { TODAY("Today"), YESTERDAY("Yesterday"), THIS_WEEK("This Week"), EARLIER("Earlier") }
+
+    data class Group(val period: Period, val rows: List<TaskRow>)
+
+    fun period(
+        atMs: Long,
+        nowMs: Long,
+        zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
+        week: java.time.temporal.WeekFields = java.time.temporal.WeekFields.of(java.util.Locale.getDefault()),
+    ): Period {
+        val day = java.time.Instant.ofEpochMilli(atMs).atZone(zone).toLocalDate()
+        val today = java.time.Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
+        if (day == today) return Period.TODAY
+        if (day == today.minusDays(1)) return Period.YESTERDAY
+        val start = today.with(week.dayOfWeek(), 1)
+        return if (!day.isBefore(start) && day.isBefore(start.plusWeeks(1))) Period.THIS_WEEK else Period.EARLIER
+    }
+
+    fun groups(
+        rows: List<TaskRow>,
+        nowMs: Long,
+        zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
+        week: java.time.temporal.WeekFields = java.time.temporal.WeekFields.of(java.util.Locale.getDefault()),
+    ): List<Group> {
+        val sorted = BoardDone.newestFirst(rows)
+        return Period.entries.mapNotNull { period ->
+            sorted.filter { period(it.statusSince, nowMs, zone, week) == period }
+                .takeIf { it.isNotEmpty() }?.let { Group(period, it) }
+        }
+    }
+
+    /** "Mac" of "Mac: diff viewer…"; null for a title with no area. */
+    fun area(title: String): String? {
+        val colon = title.indexOf(": ")
+        if (colon <= 0) return null
+        val area = title.substring(0, colon).trim()
+        return area.takeIf { it.isNotEmpty() && it.length <= 16 && it.none { c -> c in ".,;!?()" } }
+    }
+
+    /** The areas, most used first, then by name: the chips. */
+    fun areas(rows: List<TaskRow>): List<String> =
+        rows.mapNotNull { area(it.title) }.groupingBy { it }.eachCount().entries
+            .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+            .map { it.key }
+
+    /** When [row] landed, under its period: the time today and yesterday, weekday and time this week, else the date. */
+    fun landed(
+        row: TaskRow,
+        nowMs: Long,
+        zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
+        locale: java.util.Locale = java.util.Locale.getDefault(),
+        week: java.time.temporal.WeekFields = java.time.temporal.WeekFields.of(locale),
+    ): String {
+        val at = java.time.Instant.ofEpochMilli(row.statusSince).atZone(zone)
+        val pattern = when (period(row.statusSince, nowMs, zone, week)) {
+            Period.TODAY, Period.YESTERDAY -> "h:mm a"
+            Period.THIS_WEEK -> "EEE h:mm a"
+            Period.EARLIER ->
+                if (at.year == java.time.Instant.ofEpochMilli(nowMs).atZone(zone).year) "MMM d" else "MMM d, yyyy"
+        }
+        return java.time.format.DateTimeFormatter.ofPattern(pattern, locale).format(at)
+    }
+
+    /** Rows in [area] (null for any) whose key or title carries every word of [query]. */
+    fun filter(rows: List<TaskRow>, query: String, area: String? = null): List<TaskRow> {
+        val words = query.split(Regex("\\s+")).filter { it.isNotEmpty() }
+        return rows.filter { row ->
+            (area == null || area(row.title) == area) &&
+                words.all { w -> "${row.key} ${row.title}".contains(w, ignoreCase = true) }
+        }
     }
 }

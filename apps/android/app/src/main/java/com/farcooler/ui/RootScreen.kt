@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.farcooler.model.TaskStatus
 import com.farcooler.model.WorktreeScope
 import com.farcooler.net.Connection
 import kotlinx.coroutines.CancellationException
@@ -312,6 +313,22 @@ private fun OverlayScreen(model: AppModel, route: Route, connections: List<Conne
                     onOpenWorktree = { worktree, changes ->
                         model.openWorktreeFromTask(route.hostId, worktree, changes)
                     },
+                    onBack = { model.back() },
+                )
+            }
+        }
+
+        is Route.BoardHistory -> {
+            val live = connections.firstOrNull { it.host.id == route.hostId }
+            val status = TaskStatus.parse(route.status)
+            if (live == null || status == null) {
+                model.back()
+            } else {
+                BoardHistoryScreen(
+                    connection = live,
+                    workspaceId = route.workspaceId,
+                    status = status,
+                    onOpenTask = { model.navigate(Route.BoardTask(route.hostId, route.workspaceId, it)) },
                     onBack = { model.back() },
                 )
             }

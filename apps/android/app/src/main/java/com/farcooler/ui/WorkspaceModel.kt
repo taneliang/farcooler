@@ -1,6 +1,8 @@
 package com.farcooler.ui
 
 import com.farcooler.model.BoardDone
+import com.farcooler.model.BoardReads
+import com.farcooler.model.BoardSectionCut
 import com.farcooler.model.Fleet
 import com.farcooler.model.Repository
 import com.farcooler.model.StateKind
@@ -33,10 +35,16 @@ sealed interface BoardListEntry {
         override val key: String get() = "task/${row.id}"
     }
 
-    /** Under an open Done that is hiding older work: reveals it, or puts it away again. */
-    data class ShowAllDone(val total: Int, val showingAll: Boolean) : BoardListEntry {
-        override val key: String get() = "show-all-done"
-        val title: String get() = if (showingAll) "Show Recent Done Only" else BoardDone.showAllTitle(total)
+    /** Under a long section showing ten: shows the rest. */
+    data class ShowMore(val status: TaskStatus, val hidden: Int) : BoardListEntry {
+        override val key: String get() = "show-more/${status.wire}"
+        val title: String get() = BoardSectionCut.showMoreTitle(hidden)
+    }
+
+    /** Under Done or Canceled: "All Done  94 ›", the History page (ov-103). */
+    data class History(val status: TaskStatus, val total: Int) : BoardListEntry {
+        override val key: String get() = "history/${status.wire}"
+        val title: String get() = BoardDone.historyTitle(status)
     }
 }
 
@@ -54,22 +62,22 @@ object BoardList {
         board: TaskBoard,
         toggled: Set<TaskStatus>,
         nowMs: Long = System.currentTimeMillis(),
-        showAllDone: Boolean = false,
+        reads: BoardReads = BoardReads.firstLook(nowMs),
+        showingMore: Set<TaskStatus> = emptySet(),
     ): List<BoardListEntry> =
         board.sections.flatMap { section ->
             val count = section.rows.size
             val expanded = count > 0 && ((section.status !in COLLAPSED_AT_FIRST) != (section.status in toggled))
-            // Done draws the recent work, newest first; the rest is a tap away.
-            val rows = if (section.status == TaskStatus.DONE) {
-                BoardDone.visible(section.rows, showAllDone, nowMs)
-            } else {
-                section.rows
-            }
-            val more = section.status == TaskStatus.DONE && (showAllDone || rows.size < count)
+            // Done and Canceled draw the unread and today's, newest first,
+            // with the rest on the History page; a long section draws ten.
+            val cut = BoardSectionCut.cut(section, reads, nowMs, showingAll = section.status in showingMore)
             listOf(BoardListEntry.Header(section.status, count, expanded)) +
                 if (expanded) {
-                    rows.map(BoardListEntry::Card) +
-                        if (more) listOf(BoardListEntry.ShowAllDone(count, showAllDone)) else emptyList()
+                    cut.rows.map(BoardListEntry::Card) +
+                        listOfNotNull(
+                            cut.hidden.takeIf { it > 0 }?.let { BoardListEntry.ShowMore(section.status, it) },
+                            cut.history?.let { BoardListEntry.History(section.status, it) },
+                        )
                 } else {
                     emptyList()
                 }

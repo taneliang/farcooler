@@ -203,6 +203,15 @@ sealed interface Route {
         val taskId: String,
     ) : Route
 
+    /** A finished status's History page on that board (ov-103): `done` or `cancelled`. */
+    @Serializable
+    @SerialName("board-history")
+    data class BoardHistory(
+        val hostId: String,
+        val workspaceId: String,
+        val status: String,
+    ) : Route
+
     /**
      * Whether this route is drawn OVER the worktree rather than instead of it.
      *
@@ -216,7 +225,7 @@ sealed interface Route {
     val isOverlay: Boolean
         get() = when (this) {
             is Settings, is RunnerSettings, is Authorize, is Join, is AddDevice, is Devices,
-            is Worktrees, is BoardTask -> true
+            is Worktrees, is BoardTask, is BoardHistory -> true
             is Board -> true
             // The three GROUND routes. A terminal is one of them and not an
             // overlay, even though it is now pushed onto the front door rather
