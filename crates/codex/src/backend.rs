@@ -36,6 +36,25 @@ pub struct CodexBackend {
     /// JSON-RPC error, `classify` returned `None` for it, and the frame never
     /// reached `handle` at all. The field was set and nothing ever cleared it.
     pending_turn: Option<u64>,
+    /// The id of the turn that is running, as codex names it.
+    ///
+    /// `turn/interrupt` requires it and `turn/steer` requires it as
+    /// `expectedTurnId` (`TurnInterruptParams` and `TurnSteerParams` in the
+    /// vendored schema). Neither was sent, so Stop went out as a notification
+    /// codex had no method for and Send Now went out missing a required field.
+    /// Learned from the `turn/start` reply or `turn/started`, whichever lands
+    /// first, and forgotten on that turn's `turn/completed`.
+    turn_id: Option<String>,
+    /// Stop was pressed after `turn/start` went out but before codex named
+    /// the turn. The interrupt goes out the moment the id arrives, rather than
+    /// being dropped for want of one.
+    interrupt_wanted: bool,
+    /// Requests sent without waiting whose refusal someone has to hear about.
+    ///
+    /// `turn/start` has `pending_turn`; these are the others. Before this, an
+    /// error answering a steer was matched against `pending_turn`, found not
+    /// to be it, and dropped, so a Send Now codex refused looked delivered.
+    awaiting: std::collections::HashMap<u64, Awaiting>,
     /// Chosen per turn rather than held by the server: `turn/start` takes
     /// `model` and `effort` overrides, so a selector change applies to the next
     /// turn instead of needing a new thread.
@@ -149,7 +168,9 @@ impl CodexBackend {
         // Frames seen while the startup requests were in flight. Bookkeeping,
         // mostly — the conversation is NOT among them, which is the thing that
         // is easy to assume and wrong.
+        let mut turn_id = None;
         for (method, params) in conn.take_pending() {
+            track_turn(&mut turn_id, &method, &params);
             prelude.extend(frame_to_events(&method, &params, Origin::Replay));
         }
 
@@ -199,6 +220,9 @@ impl CodexBackend {
                 incoming,
                 thread_id,
                 pending_turn: None,
+                turn_id,
+                interrupt_wanted: false,
+                awaiting: std::collections::HashMap::new(),
                 model,
                 effort,
                 approval,
@@ -221,6 +245,12 @@ impl CodexBackend {
     pub async fn handle(&mut self, incoming: Incoming) -> Result<Vec<AgentEvent>, BackendError> {
         match incoming {
             Incoming::Notification { method, params } => {
+                track_turn(&mut self.turn_id, &method, &params);
+                // A turn that ended before codex named it to us needs no Stop.
+                if method == "turn/completed" && self.pending_turn.is_none() {
+                    self.interrupt_wanted = false;
+                }
+                self.send_wanted_interrupt().await?;
                 Ok(frame_to_events(&method, &params, Origin::Live))
             }
             Incoming::Request { id, method, params } => {
@@ -230,9 +260,18 @@ impl CodexBackend {
                 let request_id = serde_json::to_string(&id).unwrap_or_default();
                 Ok(vec![approval_event(&request_id, &method, &params)])
             }
-            Incoming::Response { id, .. } => {
+            Incoming::Response { id, result } => {
                 if id.as_u64() == self.pending_turn {
                     self.pending_turn = None;
+                    // `TurnStartResponse.turn.id`. Usually ahead of
+                    // `turn/started`, and Stop pressed in between is waiting
+                    // on exactly this.
+                    if self.turn_id.is_none() {
+                        self.turn_id = result["turn"]["id"].as_str().map(str::to_string);
+                    }
+                    self.send_wanted_interrupt().await?;
+                } else if let Some(id) = id.as_u64() {
+                    self.awaiting.remove(&id);
                 }
                 Ok(Vec::new())
             }
@@ -243,14 +282,27 @@ impl CodexBackend {
                 // `classify` until recently, which left the pane reporting an
                 // agent that had stopped as still working.
                 if id.as_u64() != self.pending_turn {
-                    // `turn/start` and `turn/interrupt` are the only requests
-                    // sent without waiting, and an id that is neither's is one
-                    // nothing is waiting on. Reported as the agent speaking it
-                    // would move the pane to Working with no turn left to end
-                    // it — the very shape this arm exists to close.
-                    return Ok(Vec::new());
+                    // A refused Stop or Send Now. Said in plain words and
+                    // WITHOUT a `TurnEnded`: the turn they were aimed at is
+                    // still running, and its own `turn/completed` is what ends
+                    // it. An id nothing is waiting on is still dropped.
+                    let said = match id.as_u64().and_then(|id| self.awaiting.remove(&id)) {
+                        Some(Awaiting::Interrupt) => {
+                            format!("Codex couldn’t stop this turn: {message}")
+                        }
+                        Some(Awaiting::Steer) => format!(
+                            "Codex couldn’t add your message to this turn, so it wasn’t sent: {message}"
+                        ),
+                        None => return Ok(Vec::new()),
+                    };
+                    return Ok(vec![AgentEvent::Message {
+                        role: farcooler_agent_core::event::Role::Agent,
+                        text: said,
+                        parent: None,
+                    }]);
                 }
                 self.pending_turn = None;
+                self.interrupt_wanted = false;
                 // The server's own sentence, because it is the only thing that
                 // can tell a user what to do about it — "unauthorized: run
                 // `codex login`" is actionable and "the turn ended" is not.
@@ -269,6 +321,47 @@ impl CodexBackend {
             }
         }
     }
+
+    /// Send the interrupt Stop asked for, once there is a turn id to send.
+    async fn send_wanted_interrupt(&mut self) -> Result<(), BackendError> {
+        if !self.interrupt_wanted {
+            return Ok(());
+        }
+        let Some(turn_id) = self.turn_id.clone() else { return Ok(()) };
+        self.interrupt_wanted = false;
+        let id = self
+            .writer
+            .request_no_wait("turn/interrupt", interrupt_params(&self.thread_id, &turn_id))
+            .await?;
+        self.awaiting.insert(id, Awaiting::Interrupt);
+        Ok(())
+    }
+}
+
+/// What a request sent without waiting was, so its refusal can be told.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Awaiting {
+    Steer,
+    Interrupt,
+}
+
+/// Follow which turn is running from the notifications that say so.
+///
+/// `turn/started` names it and `turn/completed` ends it. A `turn/completed`
+/// for some other turn leaves the current one alone.
+fn track_turn(turn_id: &mut Option<String>, method: &str, params: &serde_json::Value) {
+    let named = params["turn"]["id"].as_str();
+    match (method, named) {
+        ("turn/started", Some(id)) => *turn_id = Some(id.to_string()),
+        ("turn/completed", None) => *turn_id = None,
+        ("turn/completed", named) if named == turn_id.as_deref() => *turn_id = None,
+        _ => {}
+    }
+}
+
+/// `TurnInterruptParams`: both fields are required.
+fn interrupt_params(thread_id: &str, turn_id: &str) -> serde_json::Value {
+    serde_json::json!({ "threadId": thread_id, "turnId": turn_id })
 }
 
 /// One model the agent offers, and the reasoning depths it supports.
@@ -626,15 +719,28 @@ impl AgentBackend for CodexBackend {
     async fn steer(&mut self, text: &str, images: &[PromptImage]) -> Result<(), BackendError> {
         // Deliberately does NOT touch `pending_turn`: a steering prompt joins
         // the running turn rather than starting its own.
-        self.writer
+        //
+        // `expectedTurnId` is required, and is how codex refuses a steer aimed
+        // at a turn that has since ended. With no turn named yet there is
+        // nothing to aim at, so this refuses and `ChatSession` puts the
+        // message back in the queue, where the turn's end sends it.
+        let Some(turn_id) = self.turn_id.clone() else {
+            return Err(BackendError::Refused(
+                "Codex hasn’t started the turn yet, so the message is still queued.".into(),
+            ));
+        };
+        let id = self
+            .writer
             .request_no_wait(
                 "turn/steer",
                 serde_json::json!({
                     "threadId": self.thread_id,
+                    "expectedTurnId": turn_id,
                     "input": input_for(text, images),
                 }),
             )
             .await?;
+        self.awaiting.insert(id, Awaiting::Steer);
         Ok(())
     }
 
@@ -660,10 +766,17 @@ impl AgentBackend for CodexBackend {
     }
 
     async fn cancel(&mut self) -> Result<(), BackendError> {
-        self.writer
-            .notify("turn/interrupt", serde_json::json!({ "threadId": self.thread_id }))
-            .await?;
-        Ok(())
+        // A request, not a notification: `turn/interrupt` is in the schema's
+        // `ClientRequest` union with `id`, `threadId` and `turnId` required.
+        // Sent as a notification without a turn id, Stop did nothing.
+        //
+        // With `turn/start` out and no id back yet, the interrupt waits for
+        // the id. With no turn at all there is nothing to stop.
+        if self.turn_id.is_none() && self.pending_turn.is_none() {
+            return Ok(());
+        }
+        self.interrupt_wanted = true;
+        self.send_wanted_interrupt().await
     }
 
     async fn next_events(&mut self) -> Result<Vec<AgentEvent>, BackendError> {
@@ -675,6 +788,257 @@ impl AgentBackend for CodexBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn on(conn: CodexConnection, thread_id: &str) -> CodexBackend {
+        let (writer, incoming) = conn.split();
+        CodexBackend {
+            writer,
+            incoming,
+            thread_id: thread_id.to_string(),
+            pending_turn: None,
+            turn_id: None,
+            interrupt_wanted: false,
+            awaiting: std::collections::HashMap::new(),
+            model: None,
+            effort: None,
+            approval: None,
+        }
+    }
+
+    /// The thread and turn of the recorded session in `turn_basic.jsonl`.
+    const THREAD: &str = "019fe879-59c8-71c2-bdff-6399e868d62f";
+    const TURN: &str = "019fe879-657e-7b90-a8e8-007dfeec7a4a";
+
+    /// A fake app-server: `/bin/sh` running `script`, with every line it reads
+    /// copied to a capture file so a test can hold the exact frames sent.
+    ///
+    /// `$FIX` is the recorded session from a real codex, so the frames this
+    /// server answers with are codex's own: `fix 9 1` replays line 9 (the
+    /// `turn/start` reply) renumbered to answer request 1, `fix 11` replays
+    /// line 11 (`turn/started`). `take` reads one frame and captures it.
+    async fn fake_app_server(script: &str) -> (CodexBackend, std::path::PathBuf) {
+        let capture = std::env::temp_dir().join(format!(
+            "codex-fake-{}-{}.jsonl",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("a clock after 1970")
+                .as_nanos()
+        ));
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/turn_basic.jsonl");
+        // `printf '%s\n'`, not `echo`: dash's echo rewrites backslashes, and
+        // JSON is full of them.
+        let prelude = r#"take() { IFS= read -r line; printf '%s\n' "$line" >> "$CAP"; }
+fix() { if [ -n "$2" ]; then sed -n "$1p" "$FIX" | sed "s/^{\"id\":[0-9]*,/{\"id\":$2,/"; else sed -n "$1p" "$FIX"; fi; }
+"#;
+        let env = std::collections::BTreeMap::from([
+            ("CAP".to_string(), capture.display().to_string()),
+            ("FIX".to_string(), fixture.display().to_string()),
+        ]);
+        let conn = CodexConnection::spawn(
+            std::path::Path::new("/bin/sh"),
+            &["-c".to_string(), format!("{prelude}{script}")],
+            &env,
+            std::env::temp_dir(),
+        )
+        .await
+        .expect("spawn a fake app-server");
+        (on(conn, THREAD), capture)
+    }
+
+    /// Every frame the fake server read, in order.
+    fn captured(path: &std::path::Path) -> Vec<serde_json::Value> {
+        std::fs::read_to_string(path)
+            .unwrap_or_default()
+            .lines()
+            .map(|l| serde_json::from_str(l).expect("a frame is JSON"))
+            .collect()
+    }
+
+    async fn next(backend: &mut CodexBackend) -> Vec<AgentEvent> {
+        tokio::time::timeout(std::time::Duration::from_secs(5), backend.next_events())
+            .await
+            .expect("the fake server answered")
+            .expect("a frame, not a closed connection")
+    }
+
+    /// A frame is a `ClientRequest` the pinned codex accepts: the method's
+    /// variant in the vendored union, with `id` and every required param.
+    fn assert_schema_accepts(frame: &serde_json::Value) {
+        let schema: serde_json::Value =
+            serde_json::from_str(include_str!("../../../vendor/codex-app-server.schema.json"))
+                .expect("the vendored schema is JSON");
+        let method = frame["method"].as_str().expect("a method");
+        let variant = schema["definitions"]["ClientRequest"]["oneOf"]
+            .as_array()
+            .expect("ClientRequest is a union")
+            .iter()
+            .find(|v| v["properties"]["method"]["enum"][0] == method)
+            .unwrap_or_else(|| panic!("{method} is not a request codex takes"));
+        for key in variant["required"].as_array().expect("required members") {
+            let key = key.as_str().expect("a name");
+            assert!(frame.get(key).is_some(), "{method} needs `{key}`: {frame}");
+        }
+        let params = variant["properties"]["params"]["$ref"]
+            .as_str()
+            .and_then(|r| r.strip_prefix("#/definitions/"))
+            .expect("params by reference");
+        for key in schema["definitions"][params]["required"].as_array().expect("required params") {
+            let key = key.as_str().expect("a name");
+            assert!(frame["params"].get(key).is_some(), "{params} needs `{key}`: {frame}");
+        }
+    }
+
+    #[tokio::test]
+    async fn stop_sends_turn_interrupt_as_a_request_naming_the_running_turn() {
+        // It went out as a notification carrying only `threadId`, which the
+        // pinned schema has no notification for and whose request form
+        // requires `turnId`. Stop did nothing on a codex pane.
+        let (mut backend, capture) = fake_app_server(
+            r#"take; fix 9 1; fix 11; take; printf '{"id":2,"result":{}}\n'; read -r done"#,
+        )
+        .await;
+        backend.prompt("hello", &[]).await.expect("the turn goes out");
+        next(&mut backend).await; // the `turn/start` reply
+        next(&mut backend).await; // `turn/started`
+        backend.cancel().await.expect("Stop goes out");
+        let events = next(&mut backend).await; // the interrupt's reply
+        assert!(events.is_empty(), "an accepted Stop says nothing; turn/completed ends the turn");
+
+        let frames = captured(&capture);
+        let _ = std::fs::remove_file(&capture);
+        assert_eq!(frames.len(), 2, "{frames:?}");
+        assert_eq!(
+            frames[1],
+            serde_json::json!({
+                "id": 2,
+                "method": "turn/interrupt",
+                "params": { "threadId": THREAD, "turnId": TURN },
+            })
+        );
+        assert_schema_accepts(&frames[1]);
+        assert!(backend.awaiting.is_empty(), "its reply was matched to it");
+    }
+
+    #[tokio::test]
+    async fn stop_pressed_before_codex_names_the_turn_goes_out_once_it_does() {
+        // The gap between sending `turn/start` and hearing its id back. Stop
+        // there has no turn to name; it waits for one rather than vanishing.
+        let (mut backend, capture) = fake_app_server(
+            r#"take; fix 9 1; take; printf '{"id":2,"result":{}}\n'; read -r done"#,
+        )
+        .await;
+        backend.prompt("hello", &[]).await.expect("the turn goes out");
+        backend.cancel().await.expect("Stop is held, not refused");
+        next(&mut backend).await; // the `turn/start` reply, which names the turn
+        next(&mut backend).await; // the interrupt's reply
+
+        let frames = captured(&capture);
+        let _ = std::fs::remove_file(&capture);
+        assert_eq!(frames.len(), 2, "exactly one interrupt: {frames:?}");
+        assert_eq!(frames[1]["method"], "turn/interrupt");
+        assert_eq!(frames[1]["params"]["turnId"], TURN);
+        assert_schema_accepts(&frames[1]);
+    }
+
+    #[tokio::test]
+    async fn a_refused_stop_is_told_to_the_user_and_the_turn_keeps_running() {
+        let (mut backend, capture) = fake_app_server(
+            r#"take; fix 9 1; fix 11; take; printf '{"id":2,"error":{"code":-32600,"message":"no active turn to interrupt"}}\n'; read -r done"#,
+        )
+        .await;
+        backend.prompt("hello", &[]).await.expect("the turn goes out");
+        next(&mut backend).await;
+        next(&mut backend).await;
+        backend.cancel().await.expect("Stop goes out");
+        let events = next(&mut backend).await;
+        let _ = std::fs::remove_file(&capture);
+
+        assert_eq!(
+            events,
+            vec![AgentEvent::Message {
+                role: farcooler_agent_core::event::Role::Agent,
+                text: "Codex couldn’t stop this turn: no active turn to interrupt".into(),
+                parent: None,
+            }],
+            "a Stop that did nothing has to say so, and must not end the turn itself"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_now_steers_the_named_turn_and_a_refusal_reaches_the_user() {
+        // `turn/steer` went out without `expectedTurnId`, which the schema
+        // requires, and the error answering it was dropped because its id was
+        // not `pending_turn`. The message looked sent and never was.
+        let (mut backend, capture) = fake_app_server(
+            r#"take; fix 9 1; fix 11; take; printf '{"id":2,"error":{"code":-32000,"message":"this turn can’t be steered"}}\n'; read -r done"#,
+        )
+        .await;
+        backend.prompt("hello", &[]).await.expect("the turn goes out");
+        next(&mut backend).await;
+        next(&mut backend).await;
+        backend.steer("also this", &[]).await.expect("the steer goes out");
+        let events = next(&mut backend).await;
+
+        let frames = captured(&capture);
+        let _ = std::fs::remove_file(&capture);
+        assert_eq!(
+            frames[1],
+            serde_json::json!({
+                "id": 2,
+                "method": "turn/steer",
+                "params": {
+                    "threadId": THREAD,
+                    "expectedTurnId": TURN,
+                    "input": [{ "type": "text", "text": "also this" }],
+                },
+            })
+        );
+        assert_schema_accepts(&frames[1]);
+        assert_eq!(
+            events,
+            vec![AgentEvent::Message {
+                role: farcooler_agent_core::event::Role::Agent,
+                text: "Codex couldn’t add your message to this turn, so it wasn’t sent: \
+                       this turn can’t be steered"
+                    .into(),
+                parent: None,
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn send_now_before_codex_names_the_turn_leaves_the_message_queued() {
+        // Nothing to aim `expectedTurnId` at yet. Refusing here is what makes
+        // `ChatSession::steer_queued` put the message back in the queue.
+        let (mut backend, capture) = fake_app_server(r#"take; read -r done"#).await;
+        backend.prompt("hello", &[]).await.expect("the turn goes out");
+        let refused = backend.steer("also this", &[]).await;
+        assert!(matches!(refused, Err(BackendError::Refused(_))), "{refused:?}");
+        // The fake reads the `turn/start` before the capture can be trusted.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let frames = captured(&capture);
+        let _ = std::fs::remove_file(&capture);
+        assert_eq!(frames.len(), 1, "nothing but the turn went out: {frames:?}");
+    }
+
+    #[test]
+    fn the_running_turn_is_followed_through_the_recorded_session() {
+        // Replayed from a real codex: named by `turn/started`, forgotten by
+        // its own `turn/completed`.
+        let mut turn = None;
+        for line in include_str!("../tests/fixtures/turn_basic.jsonl").lines() {
+            let frame: serde_json::Value = serde_json::from_str(line).expect("JSON");
+            if let Some(method) = frame["method"].as_str() {
+                track_turn(&mut turn, method, &frame["params"]);
+                if method == "turn/started" {
+                    assert_eq!(turn.as_deref(), Some(TURN));
+                }
+            }
+        }
+        assert_eq!(turn, None, "the recorded turn completed");
+    }
 
     #[tokio::test]
     async fn a_turn_the_server_refuses_ends_instead_of_working_forever() {
@@ -704,16 +1068,7 @@ mod tests {
         )
         .await
         .expect("spawn a fake app-server");
-        let (writer, incoming) = conn.split();
-        let mut backend = CodexBackend {
-            writer,
-            incoming,
-            thread_id: "t".to_string(),
-            pending_turn: None,
-            model: None,
-            effort: None,
-            approval: None,
-        };
+        let mut backend = on(conn, "t");
         backend.prompt("hello", &[]).await.expect("the turn goes out");
         assert_eq!(backend.pending_turn, Some(1));
 
