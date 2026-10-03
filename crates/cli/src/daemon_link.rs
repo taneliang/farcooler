@@ -214,6 +214,24 @@ pub async fn ensure_local() -> Result<(Ensured, String), Box<dyn std::error::Err
             let started = wait_for(&socket).await?;
             return Ok((Ensured::Started, started.daemon_build().to_string()));
         }
+        // Up, but refusing every session (`farcooler_daemon::refusal`): most
+        // likely an older build than this one, held on a database a newer
+        // one wrote, which is exactly what installing this build was meant
+        // to fix. Its build is unknowable, since no session gets as far as
+        // the hello that carries it, so it's replaced on sight. If this
+        // build refuses too, `wait_for` says so in the daemon's own words;
+        // the cost of having replaced a refusing daemon of this same build
+        // is one process start and one read of the database's version.
+        Err(ClientError::Daemon { .. }) => {
+            let Some(pid) = peer_of(&socket).await else {
+                return Err("the daemon on this runner is refusing every session and did not identify itself".into());
+            };
+            terminate(pid)?;
+            wait_until_gone(&socket).await?;
+            spawn_daemon()?;
+            let started = wait_for(&socket).await?;
+            return Ok((Ensured::Replaced, started.daemon_build().to_string()));
+        }
         Err(other) => return Err(Box::new(other)),
     };
 
@@ -260,12 +278,23 @@ pub async fn stop(link: &mut Link) -> Result<(), Box<dyn std::error::Error>> {
     let Some(pid) = peer else {
         return Err("the daemon is too old to stop on request and did not identify itself".into());
     };
-    // SAFETY: a pid the kernel gave us for this socket's peer, and SIGTERM,
-    // which this daemon handles as a clean shutdown.
+    terminate(pid)
+}
+
+/// SIGTERM, which every daemon build handles as a clean shutdown: the socket
+/// is unlinked and nothing is killed.
+fn terminate(pid: i32) -> Result<(), Box<dyn std::error::Error>> {
+    // SAFETY: a pid the kernel gave us for this socket's peer, and SIGTERM.
     if unsafe { libc::kill(pid, libc::SIGTERM) } != 0 {
         return Err(format!("could not signal the daemon (pid {pid})").into());
     }
     Ok(())
+}
+
+/// Which process holds `socket`, asked of the kernel without a handshake.
+async fn peer_of(socket: &std::path::Path) -> Option<i32> {
+    let stream = tokio::net::UnixStream::connect(socket).await.ok()?;
+    peer_pid(&stream)
 }
 
 /// Poll until nothing answers the socket.
@@ -352,6 +381,10 @@ async fn wait_for(socket: &std::path::Path) -> Result<Link, Box<dyn std::error::
         tokio::time::sleep(Duration::from_millis(40)).await;
         match dial(socket).await {
             Ok(link) => return Ok(link),
+            // Up, and refusing with a reason (`farcooler_daemon::refusal`).
+            // Waiting out the deadline would bury the one sentence that says
+            // what to do under "did not come up within 5s".
+            Err(refused @ ClientError::Daemon { .. }) => return Err(Box::new(refused)),
             Err(e) => last = Some(e),
         }
     }
@@ -445,5 +478,40 @@ mod tests {
         if CHANNEL != Channel::Stable {
             assert_ne!(resolve_daemon_binary(None), PathBuf::from("farcoolerd"));
         }
+    }
+
+    /// A daemon that is up and refusing is an answer, not a daemon still
+    /// starting: waiting for it used to run out the five seconds and report
+    /// "did not come up", burying the sentence that says what to do. That
+    /// sentence is what the Mac's runner status shows, through
+    /// `daemon ensure`.
+    #[tokio::test]
+    async fn a_refusing_daemon_is_reported_at_once_in_its_own_words() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket = dir.path().join("farcooler.sock");
+        let stop = std::sync::Arc::new(tokio::sync::Notify::new());
+        let held = {
+            let socket = socket.clone();
+            let stop = stop.clone();
+            tokio::spawn(async move {
+                farcooler_daemon::refusal::hold(
+                    &socket,
+                    farcooler_core::DomainError::NewerData,
+                    stop.notified(),
+                )
+                .await
+            })
+        };
+
+        let started = std::time::Instant::now();
+        let err = wait_for(&socket).await.err().expect("refused");
+        assert_eq!(
+            err.to_string(),
+            "This runner's data was written by a newer Far Cooler. Update Far Cooler to use it."
+        );
+        assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
+
+        stop.notify_one();
+        held.await.expect("join").expect("held");
     }
 }
