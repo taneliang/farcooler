@@ -34,6 +34,10 @@ pub struct TmuxServer {
     /// Remembered so `list_tagged_panes` waits for each such pane once, not on
     /// every read for as long as it stays that way. See `EXIT_SETTLE`.
     pub(crate) unsettled_exits: Arc<Mutex<HashSet<String>>>,
+    /// The tmux binary, named outright. `None` everywhere but a test, which is
+    /// how one puts a deliberately slow tmux in front of a real server without
+    /// touching the process-wide lookup every other test shares.
+    program: Option<PathBuf>,
 }
 
 /// Far Cooler's own minimal tmux configuration.
@@ -79,8 +83,60 @@ impl Output {
     }
 }
 
-/// How long any one tmux command may take before it is abandoned. See `run`.
+/// How long an ordinary tmux command may take before it is abandoned. See
+/// `run` and `deadline_for`.
 const TMUX_COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// How long a command that opens, tags or closes a pane may take. See
+/// `deadline_for`.
+const TMUX_LIFECYCLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The commands that get `TMUX_LIFECYCLE_TIMEOUT` rather than a second.
+const LIFECYCLE_COMMANDS: &[&str] = &[
+    // Whether the session exists, which decides `new-session` or `new-window`:
+    // a `has-session` abandoned on a session that does exist reads as "not
+    // running", and the `new-session` that follows fails as a duplicate.
+    "has-session",
+    "new-session",
+    "new-window",
+    "split-window",
+    "respawn-pane",
+    "break-pane",
+    "join-pane",
+    // The tags. A pane whose tags never landed is a process the inventory
+    // cannot name.
+    "set-option",
+    "kill-window",
+    "kill-pane",
+];
+
+/// The deadline for one tmux command, by its verb.
+///
+/// A second is right for the commands that run all the time, and wrong for
+/// the ones that bring a pane into being. The second exists for `send-keys`
+/// into a pane nobody reads (see `run`), and it is short so that a wedged pane
+/// costs one request rather than the session. Opening a terminal is a
+/// different command: it happens once, it is what the person asked for, and
+/// the first one starts the tmux server, which is the slowest thing tmux does.
+///
+/// A loaded machine takes more than a second over it. Under disk writeback
+/// on a four-core Linux VM, a cold `new-session` took up to 4.2 s and a
+/// `set-option` 1.1 s, against 5 to 15 ms at rest. Cut off at a second, the
+/// open failed as "tmux is unavailable" with tmux working (ov-176, from a CI
+/// run whose rerun was green), and worse than failed: in the reproduction it
+/// was the session's tag that ran out, after `new-session` had made the
+/// window, so the pane was left running untagged while its terminal record
+/// was marked failed.
+///
+/// So the commands that open, tag or close a pane get ten seconds, which is
+/// still a bound on a server that really is wedged, and everything else
+/// keeps its second.
+fn deadline_for(args: &[&str]) -> std::time::Duration {
+    match args.first() {
+        Some(verb) if LIFECYCLE_COMMANDS.contains(verb) => TMUX_LIFECYCLE_TIMEOUT,
+        _ => TMUX_COMMAND_TIMEOUT,
+    }
+}
 
 impl TmuxServer {
     pub fn new(install_id: &str, daemon_id: Uuid) -> Self {
@@ -94,7 +150,16 @@ impl TmuxServer {
             daemon_id,
             config_path,
             unsettled_exits: Arc::default(),
+            program: None,
         }
+    }
+
+    /// This server, run through `program` instead of the tmux `find_tmux`
+    /// finds. For a test that needs a tmux slower than the real one.
+    #[cfg(test)]
+    pub(crate) fn with_program(mut self, program: PathBuf) -> Self {
+        self.program = Some(program);
+        self
     }
 
     /// Write the managed config if what is on disk is not what we want.
@@ -147,10 +212,13 @@ impl TmuxServer {
         // app: the inventory becomes unusable, `derive_terminal` reports every
         // terminal as `Lost`, and the whole product looks broken because of a
         // missing directory. See `farcooler_core::programs`.
-        let tmux = find_tmux().await.ok_or_else(|| {
-            tracing::warn!("tmux is not installed anywhere this daemon can find");
-            DomainError::TmuxUnavailable
-        })?;
+        let tmux = match &self.program {
+            Some(program) => program.clone(),
+            None => find_tmux().await.ok_or_else(|| {
+                tracing::warn!("tmux is not installed anywhere this daemon can find");
+                DomainError::TmuxUnavailable
+            })?,
+        };
 
         let mut cmd = Command::new(&tmux);
         // Give tmux a UTF-8 locale when the daemon inherited none.
@@ -196,14 +264,16 @@ impl TmuxServer {
         //
         // Local commands answer in milliseconds, so a second is already far
         // outside normal and still short enough that a wedged pane costs one
-        // request rather than the session.
-        let out = match tokio::time::timeout(TMUX_COMMAND_TIMEOUT, child.wait_with_output()).await {
+        // request rather than the session. Opening a pane is the exception, and
+        // gets longer: see `deadline_for`.
+        let deadline = deadline_for(args);
+        let out = match tokio::time::timeout(deadline, child.wait_with_output()).await {
             Ok(result) => result.map_err(|e| {
                 tracing::warn!(error = %e, "tmux failed");
                 DomainError::TmuxUnavailable
             })?,
             Err(_) => {
-                tracing::warn!(command = ?args, "tmux did not answer in time");
+                tracing::warn!(command = ?args, ?deadline, "tmux did not answer in time");
                 return Err(DomainError::TmuxUnavailable);
             }
         };
@@ -409,6 +479,93 @@ mod tests {
         assert_eq!(found, Some(PathBuf::from("/slow/tmux")));
         let ticks = ticks.load(std::sync::atomic::Ordering::Relaxed);
         assert!(ticks >= 20, "the runtime ticked {ticks} times in 500 ms; the lookup blocked it");
+    }
+
+    /// A private server whose every command goes through a wrapper that
+    /// sleeps 1.5 s before `new-session` and `send-keys` and then runs the real
+    /// tmux: a machine too loaded to start a server in a second, made to order.
+    /// Its server, its wrapper and its config go with it.
+    struct SlowTmux {
+        server: TmuxServer,
+        real: PathBuf,
+        wrapper: PathBuf,
+    }
+
+    impl SlowTmux {
+        /// `None` off CI when there is no tmux to wrap; on CI, which installs
+        /// tmux for this job, a missing one is a failure, never a skip.
+        fn start(test: &str) -> Option<SlowTmux> {
+            use std::os::unix::fs::PermissionsExt;
+            let Some(real) = farcooler_core::programs::find("tmux") else {
+                assert!(std::env::var_os("CI").is_none(), "tmux is not installed, and CI must run {test}");
+                eprintln!("skipping {test}: no tmux");
+                return None;
+            };
+            let install = format!("test-slow-{}", Uuid::now_v7().simple());
+            let wrapper = std::env::temp_dir().join(format!("farcooler-{install}-tmux"));
+            // `-L <socket> -f <config> <verb> …`, so the verb is the fifth.
+            let script = format!(
+                "#!/bin/sh\ncase \"$5\" in new-session|send-keys) sleep 1.5 ;; esac\nexec '{}' \"$@\"\n",
+                real.display()
+            );
+            std::fs::write(&wrapper, script).unwrap();
+            std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let server = TmuxServer::new(&install, Uuid::now_v7()).with_program(wrapper.clone());
+            Some(SlowTmux { server, real, wrapper })
+        }
+    }
+
+    impl Drop for SlowTmux {
+        fn drop(&mut self) {
+            let _ = std::process::Command::new(&self.real)
+                .args(["-L", self.server.socket(), "kill-server"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            let _ = std::fs::remove_file(&self.wrapper);
+            let _ = std::fs::remove_file(&self.server.config_path);
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_server_slow_to_start_still_opens_the_first_pane() {
+        // ov-176: the first pane starts the server, and a loaded machine takes
+        // more than a second over that. This open used to be cut off at one
+        // second and reported as "tmux is unavailable".
+        let Some(slow) = SlowTmux::start("a_server_slow_to_start_still_opens_the_first_pane") else { return };
+        let terminal = Uuid::now_v7();
+        let dir = std::env::temp_dir();
+        let opened = slow
+            .server
+            .create_terminal_window(Uuid::now_v7(), terminal, "slow", &dir.to_string_lossy(), "sleep 30")
+            .await;
+        let window = opened.expect("a server that takes 1.5 s to start is slow, not unavailable");
+
+        let panes = slow.server.list_tagged_panes().await.expect("list the panes");
+        let pane = panes.iter().find(|p| p.pane_id == window.pane_id).expect("the pane is there");
+        assert_eq!(pane.terminal_id, terminal, "and tagged, so the inventory can name it");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_keystroke_tmux_will_not_take_still_gives_up_in_a_second() {
+        // The second the opening commands no longer get is still the bound on
+        // everything else: a `send-keys` into a pane that never reads must not
+        // hold the connection any longer than it did.
+        let Some(slow) = SlowTmux::start("a_keystroke_tmux_will_not_take_still_gives_up_in_a_second") else {
+            return;
+        };
+        let dir = std::env::temp_dir();
+        let window = slow
+            .server
+            .create_terminal_window(Uuid::now_v7(), Uuid::now_v7(), "slow", &dir.to_string_lossy(), "sleep 30")
+            .await
+            .expect("open a pane");
+
+        let started = std::time::Instant::now();
+        let sent = slow.server.send_keys(&window.pane_id, "x").await;
+        let took = started.elapsed();
+        assert!(matches!(sent, Err(DomainError::TmuxUnavailable)), "{sent:?}");
+        assert!(took < std::time::Duration::from_millis(1400), "send-keys waited {took:?}");
     }
 
     #[tokio::test(flavor = "current_thread")]
