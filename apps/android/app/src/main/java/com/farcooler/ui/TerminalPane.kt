@@ -66,6 +66,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.core.TerminalPalette
 import com.farcooler.core.Vt
+import com.farcooler.model.LostPane
+import com.farcooler.model.StateKind
 import com.farcooler.model.TaskBoard
 import com.farcooler.model.TaskLink
 import com.farcooler.model.TaskRef
@@ -346,6 +348,9 @@ fun TerminalPane(
                 TerminalSurface(
                     session = session,
                     name = name,
+                    gone = terminal?.let { LostPane.kind(StateKind.parse(it.state)) },
+                    preset = terminal?.preset.orEmpty(),
+                    onAct = { action -> terminal?.let { scope.launch { connection.act(action, it) } } },
                     fontFamily = TerminalFonts.family(fontChoice),
                     fontSize = fontSize,
                     onTap = { focusRequest += 1 },
@@ -664,6 +669,10 @@ private fun TaskChip(task: TaskRef, onOpen: (() -> Unit)?) {
 private fun TerminalSurface(
     session: TerminalSession,
     name: String,
+    /** Its kind when the runner says it has no running pane (ov-191), else null. */
+    gone: LostPane.Kind?,
+    preset: String,
+    onAct: (Connection.Action) -> Unit,
     fontFamily: FontFamily,
     fontSize: Float,
     onTap: () -> Unit,
@@ -675,7 +684,20 @@ private fun TerminalSurface(
     when (val current = phase) {
         is TerminalSession.Phase.Connecting -> Status(spinner = true, title = "Loading $name…")
 
-        is TerminalSession.Phase.NotLive -> Status(
+        // Lost, ended or failed: why, what Restart brings back, and Restart
+        // and, for a lost one, Dismiss, in the Mac's and the iPhone's words.
+        // It used to say "Not live" and offer nothing (ov-191).
+        is TerminalSession.Phase.NotLive -> if (gone != null) {
+            val offers = LostPane.actions(gone)
+            Status(
+                title = LostPane.title(gone),
+                message = LostPane.explanation(gone) + " " + LostPane.restartNote(preset),
+                actions = buildList {
+                    add("Restart" to { onAct(Connection.Action.RESTART) })
+                    if (LostPane.Action.DISMISS in offers) add("Dismiss" to { onAct(Connection.Action.DISMISS_LOST) })
+                },
+            )
+        } else Status(
             title = "Not live",
             message = "$name has no running pane right now.",
         )
@@ -723,6 +745,8 @@ private fun Status(
     title: String,
     message: String? = null,
     transcript: String? = null,
+    /** Buttons under the sentence, by title: a lost pane's Restart and Dismiss. */
+    actions: List<Pair<String, () -> Unit>> = emptyList(),
 ) {
     Box(
         Modifier.fillMaxSize().background(Color(TerminalPalette.BACKGROUND)),
@@ -753,6 +777,14 @@ private fun Status(
                     transcript,
                     modifier = Modifier.padding(horizontal = 32.dp).widthIn(max = 360.dp),
                 )
+            }
+            if (actions.isNotEmpty()) {
+                Spacer(Modifier.height(16.dp))
+                Row {
+                    for ((label, onClick) in actions) {
+                        TextButton(onClick = onClick) { Text(label) }
+                    }
+                }
             }
         }
     }
