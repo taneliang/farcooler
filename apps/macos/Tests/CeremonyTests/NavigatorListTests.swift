@@ -105,7 +105,7 @@ struct NavigatorListTests {
     func noParenthesizedCounts() throws {
         // Any interpolation alone in parentheses: "(\(n))", "(\(items.count))".
         let pattern = try Regex(#"\(\\\([^()]*\)\)"#)
-        for file in ["TaskBoard.swift", "BoardSummaryStrip.swift", "BoardHistoryView.swift", "Navigator.swift", "BoardWorktreesSection.swift"] {
+        for file in ["TaskBoard.swift", "TaskListSection.swift", "BoardSummaryStrip.swift", "BoardHistoryView.swift", "Navigator.swift", "BoardWorktreesSection.swift"] {
             var text = try String(contentsOf: Self.sources.appendingPathComponent(file), encoding: .utf8)
             if let cut = text.range(of: "struct TaskCard: View") { text = String(text[..<cut.lowerBound]) }
             for (index, line) in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated()

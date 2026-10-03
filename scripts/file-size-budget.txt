@@ -25,8 +25,8 @@
 2115 apps/android/app/src/main/java/com/farcooler/ui/ChangesScreen.kt
 1957 crates/core/src/feed.rs
 1949 crates/core/src/activity.rs
-1907 apps/macos/Sources/FarCooler/TaskBoard.swift
 1896 apps/macos/Sources/FarCooler/SidebarViews.swift
+1881 apps/macos/Sources/FarCooler/TaskBoard.swift
 1856 apps/shared/AgentKit/Sources/AgentKit/FleetSnapshot.swift
 1837 crates/fence/src/lib.rs
 1808 crates/store/src/store.rs

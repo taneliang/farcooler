@@ -83,7 +83,7 @@ struct CollapsibleSectionTests {
     /// component draws those.
     @Test("No navigator file draws a disclosure of its own")
     func noFileRollsItsOwn() throws {
-        for file in ["TaskBoard.swift", "BoardSummaryStrip.swift", "BoardWorktreesSection.swift", "Navigator.swift"] {
+        for file in ["TaskBoard.swift", "TaskListSection.swift", "BoardSummaryStrip.swift", "BoardWorktreesSection.swift", "Navigator.swift"] {
             var text = try String(contentsOf: Self.sources.appendingPathComponent(file), encoding: .utf8)
             // TaskBoard.swift's task detail, from `struct TaskCard` on, isn't
             // the navigator.

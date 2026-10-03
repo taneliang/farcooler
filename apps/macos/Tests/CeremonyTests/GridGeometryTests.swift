@@ -306,7 +306,7 @@ struct GridGeometryTests {
     private static let rowFiles: [(name: String, until: String?)] = [
         ("SidebarViews.swift", nil), ("SidebarLayout.swift", nil), ("WorkspaceSidebar.swift", nil),
         ("BoardHeader.swift", nil), ("BoardSummaryStrip.swift", nil),
-        ("TaskBoard.swift", "struct TaskCard: View"), ("Navigator.swift", nil), ("BoardWorktreesSection.swift", nil),
+        ("TaskBoard.swift", "struct TaskCard: View"), ("TaskListSection.swift", nil), ("Navigator.swift", nil), ("BoardWorktreesSection.swift", nil),
     ]
 
     /// Every numeric horizontal padding or x offset in `source`, with its
