@@ -136,7 +136,15 @@ struct PlanThemePage: View {
     let plan: PlanModel
     let record: PlanRecord?
     let context: PlanPageContext
-    @State private var showingChange = false
+    @State private var showingChange: Bool
+
+    init(theme: PlanTheme, plan: PlanModel, record: PlanRecord?, context: PlanPageContext, showingChange: Bool = false) {
+        self.theme = theme
+        self.plan = plan
+        self.record = record
+        self.context = context
+        _showingChange = State(initialValue: showingChange)
+    }
 
     var body: some View {
         PlanDocument(id: "plan-theme-page") {
