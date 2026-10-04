@@ -948,9 +948,9 @@ struct TaskBoardView: View {
                         keyed: hasKeyboard)
                     .id(NavigatorItem.orchestrator)
                     .padding(.horizontal, NavigatorGrid.edge)
-                    // Space, not a rule, between the orchestrator and the panes.
                     if ruleUnderOrchestrator {
-                        Color.clear.frame(height: Spacing.group)
+                        Divider().probed("navigator-divider")  // style-exempt: the owner's rule under the orchestrator (ov-258)
+                            .padding(.vertical, NavigatorRhythm.rule)
                     }
                 }
                 NavigatorSplitView(panes: panes(
