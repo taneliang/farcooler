@@ -35,6 +35,7 @@ mod clients;
 mod draft_prompt;
 mod board_reads;
 mod event_lines;
+mod tell;
 mod report;
 mod task_usage;
 mod tasks;
@@ -875,6 +876,10 @@ enum TerminalCmd {
     },
     /// Paste text into a TUI pane's box, never Enter; refused unless safe.
     DraftPrompt { terminal: String, text: String },
+    /// Type a message into an orchestrator's TUI and submit it; refused,
+    /// typing nothing, unless safe. Put `--` before a message that starts
+    /// with a dash.
+    Tell { terminal: String, text: String },
     /// Answer a pending agent question, carrying the ids back exactly as the
     /// adapter sent them — inventing one here would make the answer
     /// unroutable and hang the agent on its own question.
@@ -3031,6 +3036,7 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
         }
 
         TerminalCmd::DraftPrompt { terminal, text } => draft_prompt::run(runner, &terminal, text).await?,
+        TerminalCmd::Tell { terminal, text } => tell::run(runner, &terminal, text).await?,
         TerminalCmd::AgentAnswer { terminal, request_id, option_id } => {
             let (mut link, id) = terminal_by_record(runner, &terminal).await?;
             answer_agent(&mut link, id, request_id, option_id).await?;

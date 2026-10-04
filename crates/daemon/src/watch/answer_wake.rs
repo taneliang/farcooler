@@ -822,5 +822,6 @@ fn spoken_name(t: &Terminal) -> String {
     if title.is_empty() { "the agent".into() } else { title }
 }
 
+mod tell;
 #[cfg(test)]
 mod tests;

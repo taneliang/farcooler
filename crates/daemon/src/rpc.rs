@@ -413,6 +413,9 @@ fn scope_of(method: Method) -> Scope {
         // Types into a TUI pane like `terminal.write`, but never Enter, and
         // only past the answer wake's gate (`Watcher::draft_into`).
         | Method::TerminalDraftPrompt
+        // Types into the orchestrator's TUI and presses Enter, past the same
+        // gate (`Watcher::tell_into`, ov-214).
+        | Method::TerminalTell
         | Method::TerminalAgentAnswer
         | Method::TerminalAgentSetMode | Method::TerminalAgentSetModel | Method::TerminalAgentSetConfig
         | Method::TerminalAgentCancel
@@ -1845,6 +1848,19 @@ impl Rpc {
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
                 self.watcher.draft_into(id, &wire::prompt_text(&p.blocks)).await?;
+                self.terminal_result(id).await
+            }
+
+            // The Mac title bar's field (ov-214): a message to a terminal
+            // orchestrator, typed and submitted, past the answer wake's
+            // whole gate, else refused with nothing typed
+            // (`Watcher::tell_into`).
+            "terminal.tell" => {
+                let Some(request::Payload::AgentPrompt(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
+                self.watcher.tell_into(id, &wire::prompt_text(&p.blocks)).await?;
                 self.terminal_result(id).await
             }
 
