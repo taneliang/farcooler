@@ -120,11 +120,11 @@ subagent end; for codex, or one you stop using, run `--done` (it ends every
 subagent open on the task, or only the one `--subagent` names). A task you
 won't start now says why: `task line <key>…` for the order (the whole line each
 time), `task line --build` for the build slot, `task block` for another task,
-`task wait --until "2026-10-05 09:00"` or `--after release|recurrence|clear-board`
-for a time or an event, `task wait --park` for work nobody plans to do.
+`task wait --until "2026-10-05 09:00"` or `--after release|recurrence|clear-board` for a time or an event, `task wait --park` for work nobody plans to do.
 
 ```
-{{cli}} task dispatch <key> --repo <repo> (--new <name> --branch <branch> | --worktree <name>) --actor manager
+{{cli}} task dispatch <key> --repo <repo> --new <name> --branch <branch> --actor manager
+{{cli}} task dispatch <key> --repo <repo> --worktree <name> --preset codex --actor manager
 {{cli}} task worker <key> --repo <repo> --subagent <agentId> --actor manager
 ```
 

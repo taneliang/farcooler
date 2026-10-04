@@ -17,6 +17,8 @@ struct TaskNoteStyleTests {
             .comment: ("Comment", "bubble.left", .secondary, .standard),
             .statusChange: ("Status Change", "arrow.right.circle", .secondary, .quiet),
             .created: ("Created", "plus.circle", .secondary, .quiet),
+            .wait: ("Start", "clock", .secondary, .quiet),
+            .worker: ("Subagent", "person.2", .secondary, .quiet),
         ]
         #expect(expected.count == TaskNoteKind.allCases.count)
         for kind in TaskNoteKind.allCases {
