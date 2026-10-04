@@ -14,7 +14,7 @@ apps/ios/FarCooler/Connection.swift :: readBoard :: try? await rpc("task.list", 
 apps/ios/FarCooler/Connection.swift :: loadInbox :: try? await core.call("changes.inbox") :: poll read: keeps the last inbox; the comment says one dropped packet mustn't blank the fleet
 apps/ios/FarCooler/Connection.swift :: loadNeedsYou :: try? await rpc("needs_you") :: poll read: keeps the last list; derived Needs You fills in
 apps/ios/FarCooler/Connection.swift :: loadThemes :: try? await core.call("themes") :: poll read of runner themes; the built-ins stay
-apps/ios/FarCooler/Connection.swift :: close :: _ = try? await core.call("terminal.stop", ["terminal": terminal.id]) :: closing is the remove that follows, which is shown: a refused stop is followed by a remove that says why, or by a tab that is gone
+apps/ios/FarCooler/ConnectionActions.swift :: close :: _ = try? await core.call("terminal.stop", ["terminal": terminal.id]) :: closing is the remove that follows, which is shown: a refused stop is followed by a remove that says why, or by a tab that is gone
 apps/ios/FarCooler/Connection.swift :: refreshPullRequests :: try? await core.call("pr.refresh", ["repository": repository]) :: the caller keeps the last answer (?? response); a PR refresh that fails changes nothing
 apps/ios/FarCooler/Connection.swift :: health :: try? await core.call("host.health") :: nil is the designed answer for a runner too old for host.health (RunnerSettingsModel.health), and the same screen's other reads report a dropped link
 apps/ios/FarCooler/Connection.swift :: setBranchPrefix :: try? await core.call( "settings.set_branch_prefix", ["prefix": prefix]) :: nil is shown: RunnerSettingsModel.setBranchPrefix sets failure
