@@ -13,6 +13,8 @@ use farcooler_transport::{Connection, HandshakeConfig, Handler, Peer, serve_conn
 
 use super::*;
 
+mod not_sent_tests;
+
 /// What the stand-in runner is holding back, and what it has seen.
 #[derive(Default)]
 struct Stalls {
@@ -80,14 +82,14 @@ impl Handler for Stalling {
 
 /// A handle connected to a `Stalling` runner. Aborting `runner` drops the
 /// connection, as a runner that went away does.
-struct Rig {
-    handle: *mut c_void,
+pub(super) struct Rig {
+    pub(super) handle: *mut c_void,
     stalls: Arc<Stalls>,
-    runner: tokio::task::JoinHandle<()>,
+    pub(super) runner: tokio::task::JoinHandle<()>,
     _dir: tempfile::TempDir,
 }
 
-fn rig() -> Rig {
+pub(super) fn rig() -> Rig {
     let handle = farcooler_client_new();
     let dir = tempfile::tempdir().unwrap();
     let socket = dir.path().join("runner.sock");
@@ -118,7 +120,7 @@ fn until(flag: &std::sync::atomic::AtomicBool) {
     }
 }
 
-fn call(handle: *mut c_void, method: &str, args: Value) -> u64 {
+pub(super) fn call(handle: *mut c_void, method: &str, args: Value) -> u64 {
     let method = std::ffi::CString::new(method).unwrap();
     let args = std::ffi::CString::new(args.to_string()).unwrap();
     unsafe { farcooler_client_call(handle, method.as_ptr(), args.as_ptr()) }
@@ -135,7 +137,7 @@ fn is_for(line: &str, ticket: u64) -> bool {
 }
 
 /// The first line on `handle`'s queue for `ticket`, or `None` by `deadline`.
-fn answer_for(handle: *mut c_void, ticket: u64, deadline: Instant) -> Option<String> {
+pub(super) fn answer_for(handle: *mut c_void, ticket: u64, deadline: Instant) -> Option<String> {
     while Instant::now() < deadline {
         if let Some(line) = unsafe { farcooler_client_poll(handle).as_ref() } {
             let line = unsafe { CStr::from_ptr(line) }.to_str().unwrap().to_string();

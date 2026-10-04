@@ -80,6 +80,12 @@ pub enum SessionError {
     /// sentence; `method` and `after` are for logs.
     #[error("The runner took too long to answer. Try again.")]
     TimedOut { method: String, after: std::time::Duration },
+    /// Input that was queued but never written: the link ended before any of
+    /// it reached the wire (ov-250). Still a dropped link, so it answers
+    /// `word` and `is_disconnect` as `Disconnected` does; the phones keep it
+    /// for Try Again because it provably did not arrive.
+    #[error(transparent)]
+    NotSent(Box<SessionError>),
 }
 
 impl SessionError {
@@ -97,6 +103,7 @@ impl SessionError {
             SessionError::Refused { .. } => "refused",
             SessionError::Disconnected(_) => "disconnected",
             SessionError::TimedOut { .. } => "timed_out",
+            SessionError::NotSent(inner) => inner.word(),
         }
     }
 
@@ -114,6 +121,7 @@ impl SessionError {
             SessionError::Ssh(_)
             | SessionError::Disconnected(_)
             | SessionError::DaemonMissing { .. } => true,
+            SessionError::NotSent(inner) => inner.is_disconnect(),
             SessionError::Protocol(_)
             | SessionError::Refused { .. }
             | SessionError::WrongResult { .. }
@@ -154,6 +162,7 @@ impl From<ClientError> for SessionError {
                 SessionError::Refused { code, retryable, message, what }
             }
             ClientError::TimedOut { method, after } => SessionError::TimedOut { method, after },
+            ClientError::NotWritten(cause) => SessionError::NotSent(Box::new((*cause).into())),
             other => SessionError::Protocol(other.to_string()),
         }
     }

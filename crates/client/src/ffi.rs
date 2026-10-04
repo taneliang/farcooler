@@ -2538,10 +2538,10 @@ fn push_call(
             if matches!(reason, Lost::Call(SessionError::TimedOut { .. })) {
                 line["timed_out"] = json!(true);
             }
-            // There was no session to put it on, so the call never left this
-            // phone (ov-238): the one failure where typed input is provably
-            // unsent. A link that dropped mid-call may have carried it.
-            if matches!(reason, Lost::Already) {
+            // The call never left this phone (ov-238): no session to put it
+            // on, or input the writer never began (ov-250). Typed input is
+            // provably unsent only then; a frame begun may have arrived.
+            if matches!(reason, Lost::Already | Lost::Call(SessionError::NotSent(_))) {
                 line["not_sent"] = json!(true);
             }
             line
@@ -2675,6 +2675,8 @@ mod tests {
                 // Not in the list: a connect makes no call with a deadline,
                 // so it can never fail this way. A call can (`deadlines`).
                 SessionError::TimedOut { .. } => {}
+                // Wraps a call's failure and says the same word as it.
+                SessionError::NotSent(_) => {}
             }
             produced.insert(e.word().to_string());
         }

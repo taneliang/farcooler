@@ -93,6 +93,14 @@ pub enum ClientError {
     /// notice if it is one.
     #[error("{method} got no answer within {after:?}")]
     TimedOut { method: String, after: Duration },
+    /// An urgent (input) call whose connection ended before the writer
+    /// began its frame, so no byte of it ever reached the wire. `cause` is
+    /// what the call would have failed with otherwise.
+    ///
+    /// Never built once the writer has started the frame, even if it
+    /// stopped partway: a partial frame may still have been read.
+    #[error(transparent)]
+    NotWritten(Box<ClientError>),
 }
 
 /// How one call is made. The default is how `call` always behaved: no
@@ -177,6 +185,10 @@ struct Outgoing {
     keep: bool,
     /// Told when the frame is on the wire, for a deadline that starts there.
     written: Option<oneshot::Sender<()>>,
+    /// Set by the writer, under the table lock that checks the connection
+    /// is still up, just before it writes any of this frame. See
+    /// `ClientError::NotWritten`.
+    begun: Arc<AtomicBool>,
 }
 
 /// Why the connection ended, kept in a form every waiting call can be handed
@@ -269,6 +281,9 @@ pub struct Answer {
     /// For an urgent call: fires once the request is on the wire, which is
     /// where its deadline starts.
     written: Option<oneshot::Receiver<()>>,
+    /// Whether the writer began this request's frame: see `Outgoing::begun`.
+    begun: Arc<AtomicBool>,
+    urgent: bool,
 }
 
 impl Answer {
@@ -280,7 +295,7 @@ impl Answer {
             // connection's end is what answers then.
             tokio::select! {
                 biased;
-                answered = &mut self.answer => return settle(answered),
+                answered = &mut self.answer => return self.settled(answered),
                 _ = written => {}
             }
         }
@@ -294,8 +309,29 @@ impl Answer {
                 }
             },
         };
-        settle(answered)
+        self.settled(answered)
     }
+
+    /// `settle`, except that input the writer never began is reported as
+    /// `NotWritten`. Read after the failure arrived: the writer sets `begun`
+    /// under the lock `end` takes, so a frame it began before the end is
+    /// always seen as begun here.
+    fn settled(
+        &self,
+        answered: Result<Result<Response, Gone>, oneshot::error::RecvError>,
+    ) -> Result<farcooler_protocol::v1::Result, ClientError> {
+        match settle(answered) {
+            Err(e) if self.urgent && failed_with_connection(&e) && !self.begun.load(Ordering::SeqCst) => {
+                Err(ClientError::NotWritten(Box::new(e)))
+            }
+            other => other,
+        }
+    }
+}
+
+/// The errors a connection's end produces, as opposed to an answer's.
+fn failed_with_connection(e: &ClientError) -> bool {
+    matches!(e, ClientError::Closed | ClientError::Codec(_))
 }
 
 fn settle(
@@ -505,7 +541,12 @@ impl<R, W> Client<R, W> {
         let request_id = {
             let mut table = self.shared.table();
             if let Some(gone) = &table.gone {
-                return Err(gone.error());
+                let error = gone.error();
+                // Nothing was queued, so nothing can have been written.
+                return Err(match how.urgent {
+                    true => ClientError::NotWritten(Box::new(error)),
+                    false => error,
+                });
             }
             // An id is what an answer is filed under, so two calls cannot
             // share one. A caller that built its own request and left it
@@ -520,6 +561,7 @@ impl<R, W> Client<R, W> {
         // A reader holding off for a full event backlog must read this
         // call's answer regardless. See `EVENT_BACKLOG`.
         self.shared.room.notify_one();
+        let begun = Arc::new(AtomicBool::new(false));
         let (written_tx, written) = match how.urgent {
             true => {
                 let (tx, rx) = oneshot::channel();
@@ -534,6 +576,8 @@ impl<R, W> Client<R, W> {
             deadline: how.deadline,
             answer,
             written,
+            begun: Arc::clone(&begun),
+            urgent: how.urgent,
         };
 
         // Encoded here rather than in the writer, so a request too large to
@@ -544,10 +588,14 @@ impl<R, W> Client<R, W> {
             body: Some(wire_envelope::Body::Request(request)),
         })?;
         let queue = if how.urgent { &self.urgent } else { &self.ordinary };
-        let outgoing = Outgoing { request_id, frame, keep: how.urgent, written: written_tx };
+        let outgoing = Outgoing { request_id, frame, keep: how.urgent, written: written_tx, begun };
         if queue.send(outgoing).is_err() {
             // The writer has stopped, and `end` has said why.
-            return Err(self.shared.table().gone.clone().unwrap_or(Gone::Closed).error());
+            let error = self.shared.table().gone.clone().unwrap_or(Gone::Closed).error();
+            return Err(match how.urgent {
+                true => ClientError::NotWritten(Box::new(error)),
+                false => error,
+            });
         }
         Ok(waiting)
     }
@@ -635,7 +683,12 @@ async fn write_requests<W: AsyncWrite + Unpin>(
         };
         let (ended, waited_for) = {
             let table = shared.table();
-            (table.gone.is_some(), table.waiting.contains_key(&next.request_id))
+            let ended = table.gone.is_some();
+            // Under the lock `end` takes: see `ClientError::NotWritten`.
+            if !ended {
+                next.begun.store(true, Ordering::SeqCst);
+            }
+            (ended, table.waiting.contains_key(&next.request_id))
         };
         // Every queued call was failed when the connection ended; writing one
         // now would deliver what its caller was told did not go.
