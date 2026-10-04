@@ -96,6 +96,24 @@ data class TaskRow(
      * null from a runner without `workstreams`.
      */
     val workspaceId: String? = null,
+    /**
+     * What it is waiting for before it starts (ov-212), or null: nothing said,
+     * a runner without `task_waits`, or a word this build cannot read. Read
+     * through [startLine], which knows which statuses it means something in.
+     */
+    val wait: TaskWait? = null,
+    /**
+     * The subagents recorded working it (ov-213): every open one, then the most
+     * recently closed. Empty from a runner without `task_workers`.
+     */
+    val workers: List<TaskWorker> = emptyList(),
+    /**
+     * The keys of the blockers still open, from the list's `waiting_on`
+     * (ov-212): a blocker that finished stops counting on its own. Only for
+     * Backlog, To Do and In Progress, the statuses a block holds back
+     * ([holdsBlocks]).
+     */
+    val blockedBy: List<String> = emptyList(),
 ) {
     /**
      * When anything last moved on the card: [updatedAt] (a move, a note or an
@@ -169,11 +187,23 @@ data class TaskRow(
      * What the card says about its agent. `runnerRecordsTasks` false is "can't
      * say": no control and no remark, never a guess.
      */
-    fun agentPresence(livePanes: Int, runnerRecordsTasks: Boolean): TaskAgentPresence = when {
-        !runnerRecordsTasks -> TaskAgentPresence.Unsaid
-        livePanes > 0 -> TaskAgentPresence.Agents(livePanes)
-        status == TaskStatus.IN_PROGRESS -> TaskAgentPresence.NoAgent
-        else -> TaskAgentPresence.Unsaid
+    fun agentPresence(livePanes: Int, runnerRecordsTasks: Boolean): TaskAgentPresence {
+        if (!runnerRecordsTasks) return TaskAgentPresence.Unsaid
+        val subagents = subagentPresence()
+        if (livePanes > 0) {
+            val working = subagents as? TaskAgentPresence.Subagents
+            return TaskAgentPresence.Agents(
+                if (working?.state == SubagentState.WORKING) livePanes + working.count else livePanes,
+            )
+        }
+        if (subagents != null) return subagents
+        if (status != TaskStatus.IN_PROGRESS) return TaskAgentPresence.Unsaid
+        // In progress with nobody on it is the alarm, unless the board says
+        // why: a card ranked in the build line stopped on purpose, and its
+        // line explains it. An unranked one says nothing, so it is no excuse.
+        val w = wait
+        if (w is TaskWait.InLine && w.line == TaskLine.BUILD && w.position > 0) return TaskAgentPresence.Unsaid
+        return TaskAgentPresence.NoAgent
     }
 
     companion object {
@@ -310,6 +340,9 @@ data class TaskBoard(
                     createdAt = t["created_at"]?.jsonPrimitive?.longOrNull?.takeIf { it > 0 },
                     updatedAt = t["updated_at"]?.jsonPrimitive?.longOrNull?.takeIf { it > 0 },
                     workspaceId = text("workspace"),
+                    wait = StartWire.wait(t["wait"]),
+                    workers = StartWire.workers(t["workers"]),
+                    blockedBy = if (holdsBlocks(status)) StartWire.waitingOn(t["waiting_on"]) else emptyList(),
                 )
             }
             return TaskBoard(
@@ -325,11 +358,24 @@ sealed interface TaskAgentPresence {
     /** Say nothing. */
     data object Unsaid : TaskAgentPresence
 
-    /** In progress, the runner records panes' tasks, and none is working it. */
+    /**
+     * In progress, the runner records panes' tasks, and none is working it:
+     * no pane, no subagent and no ranked build wait (ov-213).
+     */
     data object NoAgent : TaskAgentPresence
 
-    /** This many panes are working it. Never zero. */
+    /**
+     * This many panes are working it. Never zero. With subagents as well the
+     * count is both, and the control still goes to the panes.
+     */
     data class Agents(val count: Int) : TaskAgentPresence
+
+    /**
+     * This many subagents are working it, from inside another agent's session
+     * (ov-213), and no pane is. Never zero. The control goes to the
+     * orchestrator's pane, where they live.
+     */
+    data class Subagents(val count: Int, val state: SubagentState) : TaskAgentPresence
 
     /**
      * The control's words: "Agent" for one, "N agents", "No agent", or null.
@@ -341,6 +387,7 @@ sealed interface TaskAgentPresence {
             Unsaid -> null
             NoAgent -> "No agent"
             is Agents -> if (count == 1) "Agent" else "$count agents"
+            is Subagents -> if (count == 1) "Subagent" else "$count subagents"
         }
 }
 

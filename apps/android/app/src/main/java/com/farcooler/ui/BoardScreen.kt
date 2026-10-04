@@ -75,6 +75,9 @@ import com.farcooler.model.RunnerBoards
 import com.farcooler.model.TaskAcceptanceProgress
 import com.farcooler.model.TaskUsageState
 import com.farcooler.model.TaskAgentLink
+import com.farcooler.model.blockedSummary
+import com.farcooler.model.orchestratorTerminalId
+import com.farcooler.model.startLine
 import com.farcooler.model.TaskAgentPresence
 import com.farcooler.model.TaskBoard
 import com.farcooler.model.TaskRow
@@ -115,6 +118,21 @@ fun boardAgents(row: TaskRow, worktrees: List<Worktree>): List<Pair<Terminal, St
     }
     val titles = TaskAgentLink.menuTitles(found.map { it.second }, found.map { it.first.short })
     return found.map { it.first }.zip(titles)
+}
+
+/**
+ * The pane [row]'s subagents live in: the orchestrator's, which is where a
+ * Subagent control goes (ov-213). Null when the runner did not say which pane,
+ * or it has closed since, so the control is never a button that leads nowhere.
+ */
+fun boardOrchestrator(row: TaskRow, worktrees: List<Worktree>): Pair<Terminal, String>? {
+    val id = row.orchestratorTerminalId ?: return null
+    for (worktree in worktrees) {
+        val terminal = worktree.terminals.firstOrNull { it.id == id && it.state in TaskAgentLink.LIVE_STATES }
+            ?: continue
+        return terminal to "Orchestrator in ${worktree.task}"
+    }
+    return null
 }
 
 /**
@@ -254,6 +272,8 @@ fun BoardTab(
                                 TaskCardRow(
                                     row = row,
                                     agents = agents,
+                                    orchestrator = boardOrchestrator(row, fleet.worktrees),
+                                    speaks = speaks,
                                     presence = row.agentPresence(agents.size, speaks),
                                     onOpen = {
                                         reads = readsStore.open(row, connection.host.id, workspace.id)
@@ -391,6 +411,8 @@ private fun Empty(title: String, detail: String) {
 private fun TaskCardRow(
     row: TaskRow,
     agents: List<Pair<Terminal, String>>,
+    orchestrator: Pair<Terminal, String>?,
+    speaks: Boolean,
     presence: TaskAgentPresence,
     onOpen: () -> Unit,
     onJump: (Terminal) -> Unit,
@@ -407,8 +429,8 @@ private fun TaskCardRow(
             }
         },
         headlineContent = { Text(row.title, maxLines = 3, overflow = TextOverflow.Ellipsis) },
-        supportingContent = { CardDetails(row, now) },
-        trailingContent = { AgentControl(row.key, agents, presence, onJump) },
+        supportingContent = { CardDetails(row, now, speaks) },
+        trailingContent = { AgentControl(row.key, agents, orchestrator, presence, onJump) },
         modifier = Modifier
             .clickable(onClick = onOpen)
             .testTag("board-card-${row.key}"),
@@ -441,11 +463,31 @@ internal fun rememberMinuteClock(wallClock: () -> Long = System::currentTimeMill
 }
 
 @Composable
-private fun CardDetails(row: TaskRow, now: Long) {
+private fun CardDetails(row: TaskRow, now: Long, speaks: Boolean = true) {
     val amber = glanceColor(GlancePalette.amber)
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         row.callToAction?.let {
             Text(it, color = amber, style = MaterialTheme.typography.labelMedium)
+        }
+        // What holds the card back, in amber because a block is the one thing
+        // here that needs attention (ov-212), then when it starts and who is on
+        // it, quiet. AgentKit's sentences, so the iPhone and the Mac say the
+        // same ones.
+        row.blockedSummary?.let {
+            Text(
+                it,
+                color = amber,
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.testTag("board-blocked-${row.key}"),
+            )
+        }
+        row.startLine(now, speaks)?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag("board-start-${row.key}"),
+            )
         }
         row.stalenessNote(now)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         // "Updated 2h ago" or "Added 3d ago"; null on a stale card, whose
@@ -481,11 +523,15 @@ private fun AcceptanceLine(progress: TaskAcceptanceProgress) {
     }
 }
 
-/** A chip for one agent, a chip with a menu for several, a quiet "No agent", or nothing. */
+/**
+ * A chip for one agent, a chip with a menu for several, a "Subagent" chip into
+ * the orchestrator's pane, a quiet "No agent", or nothing.
+ */
 @Composable
 private fun AgentControl(
     key: String,
     agents: List<Pair<Terminal, String>>,
+    orchestrator: Pair<Terminal, String>?,
     presence: TaskAgentPresence,
     onJump: (Terminal) -> Unit,
 ) {
@@ -497,6 +543,30 @@ private fun AgentControl(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.testTag("board-no-agent-$key"),
         )
+        is TaskAgentPresence.Subagents ->
+            // The orchestrator's pane, where the subagents live. Plain text
+            // when that pane is not known: a chip that leads nowhere is worse.
+            if (orchestrator != null) {
+                AssistChip(
+                    onClick = { onJump(orchestrator.first) },
+                    label = { Text(presence.title.orEmpty()) },
+                    trailingIcon = {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    },
+                    modifier = Modifier.testTag("board-subagent-$key"),
+                )
+            } else {
+                Text(
+                    presence.title.orEmpty(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag("board-subagent-$key"),
+                )
+            }
         is TaskAgentPresence.Agents -> {
             var open by remember { mutableStateOf(false) }
             Box {
@@ -625,7 +695,7 @@ fun TaskDetailScreen(
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        CardDetails(row.copy(acceptance = emptyList()), rememberMinuteClock())
+                        CardDetails(row.copy(acceptance = emptyList()), rememberMinuteClock(), speaks)
                     }
                 }
                 if (asking != null) {
@@ -655,7 +725,9 @@ fun TaskDetailScreen(
                     item(key = "agent") {
                         ListItem(
                             headlineContent = { Text("Agent") },
-                            trailingContent = { AgentControl(row.key, agents, presence, jump) },
+                            trailingContent = {
+                                AgentControl(row.key, agents, boardOrchestrator(row, fleet.worktrees), presence, jump)
+                            },
                         )
                     }
                 }
