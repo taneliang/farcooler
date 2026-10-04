@@ -1,0 +1,1376 @@
+{
+ "_about": "One fixture for both phones. Whole-string parity: AgentKit's TaskStartLinesTests and Android's TaskStartLinesTest read this file. now is Unix ms; the zone is UTC and the locale en_US. Each task is a row as `task list --json` sends it (crates/client/src/tasks_json.rs); expect.chip is the Agent control's words per platform (null: no control), line is the quiet start line, blocked is the Waiting on sentence.",
+ "now": 1791046800000,
+ "time_zone": "UTC",
+ "locale": "en_US",
+ "cases": [
+  {
+   "name": "running subagent, observed",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "in_progress",
+    "wait": null,
+    "waiting_on": [],
+    "workers": [
+     {
+      "id": "0198f2c0-0000-7000-8000-00000000d495",
+      "harness": "claude",
+      "agent_id": "a3fd8fceef581c787",
+      "label": "",
+      "model": "opus",
+      "state": "running",
+      "started_at": 1791046080000,
+      "ended_at": null,
+      "last_activity_at": null,
+      "doing": "Running cargo test",
+      "linked_by_description": false,
+      "orchestrator_terminal": "0198f2c0-0000-7000-8000-00000000c001"
+     }
+    ]
+   },
+   "expect": {
+    "chip": {
+     "apple": "Subagent",
+     "android": "Subagent"
+    },
+    "line": "Claude subagent working, 12 min · Running cargo test",
+    "blocked": null
+   }
+  },
+  {
+   "name": "running subagent, nothing doing yet",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "in_progress",
+    "wait": null,
+    "waiting_on": [],
+    "workers": [
+     {
+      "id": "0198f2c0-0000-7000-8000-00000000d495",
+      "harness": "claude",
+      "agent_id": "a3fd8fceef581c787",
+      "label": "",
+      "model": "opus",
+      "state": "running",
+      "started_at": 1791046080000,
+      "ended_at": null,
+      "last_activity_at": null,
+      "doing": "",
+      "linked_by_description": false,
+      "orchestrator_terminal": "0198f2c0-0000-7000-8000-00000000c001"
+     }
+    ]
+   },
+   "expect": {
+    "chip": {
+     "apple": "Subagent",
+     "android": "Subagent"
+    },
+    "line": "Claude subagent working, 12 min",
+    "blocked": null
+   }
+  },
+  {
+   "name": "unobserved subagent",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "in_progress",
+    "wait": null,
+    "waiting_on": [],
+    "workers": [
+     {
+      "id": "0198f2c0-0000-7000-8000-00000000d432",
+      "harness": "claude",
+      "agent_id": "a3fd8fceef581c787",
+      "label": "",
+      "model": "opus",
+      "state": "unobserved",
+      "started_at": 1791046080000,
+      "ended_at": null,
+      "last_activity_at": null,
+      "doing": "",
+      "linked_by_description": false,
+      "orchestrator_terminal": "0198f2c0-0000-7000-8000-00000000c001"
+     }
+    ]
+   },
+   "expect": {
+    "chip": {
+     "apple": "Subagent",
+     "android": "Subagent"
+    },
+    "line": "Claude subagent, started 12 min ago",
+    "blocked": null
+   }
+  },
+  {
+   "name": "finished subagent, still in progress",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "in_progress",
+    "wait": null,
+    "waiting_on": [],
+    "workers": [
+     {
+      "id": "0198f2c0-0000-7000-8000-00000000d930",
+      "harness": "claude",
+      "agent_id": "a3fd8fceef581c787",
+      "label": "",
+      "model": "opus",
+      "state": "finished",
+      "started_at": 1791046080000,
+      "ended_at": 1791046560000,
+      "last_activity_at": null,
+      "doing": "",
+      "linked_by_description": false,
+      "orchestrator_terminal": "0198f2c0-0000-7000-8000-00000000c001"
+     }
+    ]
+   },
+   "expect": {
+    "chip": {
+     "apple": "Subagent",
+     "android": "Subagent"
+    },
+    "line": "Subagent finished 4 min ago",
+    "blocked": null
+   }
+  },
+  {
+   "name": "stopped subagent",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "in_progress",
+    "wait": null,
+    "waiting_on": [],
+    "workers": [
+     {
+      "id": "0198f2c0-0000-7000-8000-00000000d053",
+      "harness": "claude",
+      "agent_id": "a3fd8fceef581c787",
+      "label": "",
+      "model": "opus",
+      "state": "stopped",
+      "started_at": 1791046080000,
+      "ended_at": 1791046560000,
+      "last_activity_at": null,
+      "doing": "",
+      "linked_by_description": false,
+      "orchestrator_terminal": "0198f2c0-0000-7000-8000-00000000c001"
+     }
+    ]
+   },
+   "expect": {
+    "chip": {
+     "apple": "Subagent",
+     "android": "Subagent"
+    },
+    "line": "Subagent stopped 4 min ago",
+    "blocked": null
+   }
+  },
+  {
+   "name": "codex subagent",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "in_progress",
+    "wait": null,
+    "waiting_on": [],
+    "workers": [
+     {
+      "id": "0198f2c0-0000-7000-8000-00000000d407",
+      "harness": "codex",
+      "agent_id": "a3fd8fceef581c787",
+      "label": "",
+      "model": "opus",
+      "state": "unobserved",
+      "started_at": 1791046080000,
+      "ended_at": null,
+      "last_activity_at": null,
+      "doing": "",
+      "linked_by_description": false,
+      "orchestrator_terminal": "0198f2c0-0000-7000-8000-00000000c001"
+     }
+    ]
+   },
+   "expect": {
+    "chip": {
+     "apple": "Subagent",
+     "android": "Subagent"
+    },
+    "line": "Codex subagent, started 12 min ago",
+    "blocked": null
+   }
+  },
+  {
+   "name": "two subagents",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "in_progress",
+    "wait": null,
+    "waiting_on": [],
+    "workers": [
+     {
+      "id": "0198f2c0-0000-7000-8000-00000000d495",
+      "harness": "claude",
+      "agent_id": "a3fd8fceef581c787",
+      "label": "",
+      "model": "opus",
+      "state": "running",
+      "started_at": 1791046080000,
+      "ended_at": null,
+      "last_activity_at": null,
+      "doing": "",
+      "linked_by_description": false,
+      "orchestrator_terminal": "0198f2c0-0000-7000-8000-00000000c001"
+     },
+     {
+      "id": "0198f2c0-0000-7000-8000-00000000d025",
+      "harness": "claude",
+      "agent_id": "a3fd8fceef581c787",
+      "label": "",
+      "model": "opus",
+      "state": "running",
+      "started_at": 1791046500000,
+      "ended_at": null,
+      "last_activity_at": null,
+      "doing": "",
+      "linked_by_description": false,
+      "orchestrator_terminal": "0198f2c0-0000-7000-8000-00000000c001"
+     }
+    ]
+   },
+   "expect": {
+    "chip": {
+     "apple": "2 Subagents",
+     "android": "2 subagents"
+    },
+    "line": "2 subagents working",
+    "blocked": null
+   }
+  },
+  {
+   "name": "one running, one finished earlier",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "in_progress",
+    "wait": null,
+    "waiting_on": [],
+    "workers": [
+     {
+      "id": "0198f2c0-0000-7000-8000-00000000d025",
+      "harness": "claude",
+      "agent_id": "a3fd8fceef581c787",
+      "label": "",
+      "model": "opus",
+      "state": "running",
+      "started_at": 1791046500000,
+      "ended_at": null,
+      "last_activity_at": null,
+      "doing": "",
+      "linked_by_description": false,
+      "orchestrator_terminal": "0198f2c0-0000-7000-8000-00000000c001"
+     },
+     {
+      "id": "0198f2c0-0000-7000-8000-00000000d023",
+      "harness": "claude",
+      "agent_id": "a3fd8fceef581c787",
+      "label": "",
+      "model": "opus",
+      "state": "finished",
+      "started_at": 1791045000000,
+      "ended_at": 1791045600000,
+      "last_activity_at": null,
+      "doing": "",
+      "linked_by_description": false,
+      "orchestrator_terminal": "0198f2c0-0000-7000-8000-00000000c001"
+     }
+    ]
+   },
+   "expect": {
+    "chip": {
+     "apple": "Subagent",
+     "android": "Subagent"
+    },
+    "line": "Claude subagent working, 5 min",
+    "blocked": null
+   }
+  },
+  {
+   "name": "running subagent in the build line",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "in_progress",
+    "wait": {
+     "kind": "in_line",
+     "line": "build",
+     "position": 2,
+     "ahead": [
+      "ov-177"
+     ],
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": [
+     {
+      "id": "0198f2c0-0000-7000-8000-00000000d495",
+      "harness": "claude",
+      "agent_id": "a3fd8fceef581c787",
+      "label": "",
+      "model": "opus",
+      "state": "running",
+      "started_at": 1791046080000,
+      "ended_at": null,
+      "last_activity_at": null,
+      "doing": "",
+      "linked_by_description": false,
+      "orchestrator_terminal": "0198f2c0-0000-7000-8000-00000000c001"
+     }
+    ]
+   },
+   "expect": {
+    "chip": {
+     "apple": "Subagent",
+     "android": "Subagent"
+    },
+    "line": "Waiting to build, 2nd in line",
+    "blocked": null
+   }
+  },
+  {
+   "name": "finished subagent in the build line",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "in_progress",
+    "wait": {
+     "kind": "in_line",
+     "line": "build",
+     "position": 2,
+     "ahead": [
+      "ov-177"
+     ],
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": [
+     {
+      "id": "0198f2c0-0000-7000-8000-00000000d930",
+      "harness": "claude",
+      "agent_id": "a3fd8fceef581c787",
+      "label": "",
+      "model": "opus",
+      "state": "finished",
+      "started_at": 1791046080000,
+      "ended_at": 1791046560000,
+      "last_activity_at": null,
+      "doing": "",
+      "linked_by_description": false,
+      "orchestrator_terminal": "0198f2c0-0000-7000-8000-00000000c001"
+     }
+    ]
+   },
+   "expect": {
+    "chip": {
+     "apple": "Subagent",
+     "android": "Subagent"
+    },
+    "line": "Waiting to build, 2nd in line · Subagent finished 4 min ago",
+    "blocked": null
+   }
+  },
+  {
+   "name": "build line, no worker",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "in_progress",
+    "wait": {
+     "kind": "in_line",
+     "line": "build",
+     "position": 2,
+     "ahead": [
+      "ov-177"
+     ],
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": "Waiting to build, 2nd in line",
+    "blocked": null
+   }
+  },
+  {
+   "name": "build line, first",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "in_progress",
+    "wait": {
+     "kind": "in_line",
+     "line": "build",
+     "position": 1,
+     "ahead": [],
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": "Builds next",
+    "blocked": null
+   }
+  },
+  {
+   "name": "build line, eleventh",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "in_review",
+    "wait": {
+     "kind": "in_line",
+     "line": "build",
+     "position": 11,
+     "ahead": [],
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": "Waiting to build, 11th in line",
+    "blocked": null
+   }
+  },
+  {
+   "name": "build line, unranked",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "in_progress",
+    "wait": {
+     "kind": "in_line",
+     "line": "build",
+     "position": 0,
+     "ahead": [],
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": {
+     "apple": "No Agent",
+     "android": "No agent"
+    },
+    "line": null,
+    "blocked": null
+   }
+  },
+  {
+   "name": "in progress, nobody",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "in_progress",
+    "wait": null,
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": {
+     "apple": "No Agent",
+     "android": "No agent"
+    },
+    "line": null,
+    "blocked": null
+   }
+  },
+  {
+   "name": "an old runner's row",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "in_progress"
+   },
+   "expect": {
+    "chip": {
+     "apple": "No Agent",
+     "android": "No agent"
+    },
+    "line": null,
+    "blocked": null
+   }
+  },
+  {
+   "name": "a pane and a subagent",
+   "panes": 1,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "in_progress",
+    "wait": null,
+    "waiting_on": [],
+    "workers": [
+     {
+      "id": "0198f2c0-0000-7000-8000-00000000d495",
+      "harness": "claude",
+      "agent_id": "a3fd8fceef581c787",
+      "label": "",
+      "model": "opus",
+      "state": "running",
+      "started_at": 1791046080000,
+      "ended_at": null,
+      "last_activity_at": null,
+      "doing": "",
+      "linked_by_description": false,
+      "orchestrator_terminal": "0198f2c0-0000-7000-8000-00000000c001"
+     }
+    ]
+   },
+   "expect": {
+    "chip": {
+     "apple": "2 Agents",
+     "android": "2 agents"
+    },
+    "line": "Claude subagent working, 12 min",
+    "blocked": null
+   }
+  },
+  {
+   "name": "a pane alone",
+   "panes": 1,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "in_progress",
+    "wait": null,
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": {
+     "apple": "Agent",
+     "android": "Agent"
+    },
+    "line": null,
+    "blocked": null
+   }
+  },
+  {
+   "name": "two panes",
+   "panes": 2,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "in_progress",
+    "wait": null,
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": {
+     "apple": "2 Agents",
+     "android": "2 agents"
+    },
+    "line": null,
+    "blocked": null
+   }
+  },
+  {
+   "name": "a runner that can't say",
+   "panes": 0,
+   "records_tasks": false,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "in_progress",
+    "wait": null,
+    "waiting_on": [],
+    "workers": [
+     {
+      "id": "0198f2c0-0000-7000-8000-00000000d495",
+      "harness": "claude",
+      "agent_id": "a3fd8fceef581c787",
+      "label": "",
+      "model": "opus",
+      "state": "running",
+      "started_at": 1791046080000,
+      "ended_at": null,
+      "last_activity_at": null,
+      "doing": "",
+      "linked_by_description": false,
+      "orchestrator_terminal": "0198f2c0-0000-7000-8000-00000000c001"
+     }
+    ]
+   },
+   "expect": {
+    "chip": null,
+    "line": null,
+    "blocked": null
+   }
+  },
+  {
+   "name": "a subagent on a backlog card",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "backlog",
+    "wait": null,
+    "waiting_on": [],
+    "workers": [
+     {
+      "id": "0198f2c0-0000-7000-8000-00000000d495",
+      "harness": "claude",
+      "agent_id": "a3fd8fceef581c787",
+      "label": "",
+      "model": "opus",
+      "state": "running",
+      "started_at": 1791046080000,
+      "ended_at": null,
+      "last_activity_at": null,
+      "doing": "",
+      "linked_by_description": false,
+      "orchestrator_terminal": "0198f2c0-0000-7000-8000-00000000c001"
+     }
+    ]
+   },
+   "expect": {
+    "chip": null,
+    "line": null,
+    "blocked": null
+   }
+  },
+  {
+   "name": "agent line, first",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "backlog",
+    "wait": {
+     "kind": "in_line",
+     "line": "agent",
+     "position": 1,
+     "ahead": [],
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": "Next to start",
+    "blocked": null
+   }
+  },
+  {
+   "name": "agent line, third",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "todo",
+    "wait": {
+     "kind": "in_line",
+     "line": "agent",
+     "position": 3,
+     "ahead": [
+      "ov-1",
+      "ov-2"
+     ],
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": "3rd in line",
+    "blocked": null
+   }
+  },
+  {
+   "name": "agent line, 2nd",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "backlog",
+    "wait": {
+     "kind": "in_line",
+     "line": "agent",
+     "position": 2,
+     "ahead": [],
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": "2nd in line",
+    "blocked": null
+   }
+  },
+  {
+   "name": "agent line, 4th",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "backlog",
+    "wait": {
+     "kind": "in_line",
+     "line": "agent",
+     "position": 4,
+     "ahead": [],
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": "4th in line",
+    "blocked": null
+   }
+  },
+  {
+   "name": "agent line, 12th",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "backlog",
+    "wait": {
+     "kind": "in_line",
+     "line": "agent",
+     "position": 12,
+     "ahead": [],
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": "12th in line",
+    "blocked": null
+   }
+  },
+  {
+   "name": "agent line, 21st",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "backlog",
+    "wait": {
+     "kind": "in_line",
+     "line": "agent",
+     "position": 21,
+     "ahead": [],
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": "21st in line",
+    "blocked": null
+   }
+  },
+  {
+   "name": "agent line, 22nd",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "backlog",
+    "wait": {
+     "kind": "in_line",
+     "line": "agent",
+     "position": 22,
+     "ahead": [],
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": "22nd in line",
+    "blocked": null
+   }
+  },
+  {
+   "name": "agent line, 103rd",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "backlog",
+    "wait": {
+     "kind": "in_line",
+     "line": "agent",
+     "position": 103,
+     "ahead": [],
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": "103rd in line",
+    "blocked": null
+   }
+  },
+  {
+   "name": "agent line, unranked",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "backlog",
+    "wait": {
+     "kind": "in_line",
+     "line": "agent",
+     "position": 0,
+     "ahead": [],
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": null,
+    "blocked": null
+   }
+  },
+  {
+   "name": "until later today",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "backlog",
+    "wait": {
+     "kind": "until",
+     "until": 1791061200000,
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": "Starts at 9:00 PM",
+    "blocked": null
+   }
+  },
+  {
+   "name": "until tomorrow",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "backlog",
+    "wait": {
+     "kind": "until",
+     "until": 1791104400000,
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": "Starts tomorrow at 9:00 AM",
+    "blocked": null
+   }
+  },
+  {
+   "name": "until Monday",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "backlog",
+    "wait": {
+     "kind": "until",
+     "until": 1791190800000,
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": "Starts Mon, Oct 5 at 9:00 AM",
+    "blocked": null
+   }
+  },
+  {
+   "name": "until a time that has passed",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "backlog",
+    "wait": {
+     "kind": "until",
+     "until": 1791046740000,
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": null,
+    "blocked": null
+   }
+  },
+  {
+   "name": "after release",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "backlog",
+    "wait": {
+     "kind": "after",
+     "event": "release",
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": "Starts after the next release",
+    "blocked": null
+   }
+  },
+  {
+   "name": "after recurrence",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "backlog",
+    "wait": {
+     "kind": "after",
+     "event": "recurrence",
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": "Starts if it happens again",
+    "blocked": null
+   }
+  },
+  {
+   "name": "after clear_board",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "backlog",
+    "wait": {
+     "kind": "after",
+     "event": "clear_board",
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": "Starts when nothing else is waiting",
+    "blocked": null
+   }
+  },
+  {
+   "name": "after something_new",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "backlog",
+    "wait": {
+     "kind": "after",
+     "event": "something_new",
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": null,
+    "blocked": null
+   }
+  },
+  {
+   "name": "parked",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "backlog",
+    "wait": {
+     "kind": "parked",
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": "Not planned",
+    "blocked": null
+   }
+  },
+  {
+   "name": "a word this build doesn't know",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "backlog",
+    "wait": {
+     "kind": "unknown",
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": null,
+    "blocked": null
+   }
+  },
+  {
+   "name": "todo, nothing said",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "todo",
+    "wait": null,
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": "Ready to start",
+    "blocked": null
+   }
+  },
+  {
+   "name": "backlog, nothing said",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "backlog",
+    "wait": null,
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": null,
+    "blocked": null
+   }
+  },
+  {
+   "name": "todo waiting on two tasks",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "todo",
+    "wait": null,
+    "waiting_on": [
+     "ov-191",
+     "ov-192"
+    ],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": null,
+    "blocked": "Waiting on ov-191 and ov-192"
+   }
+  },
+  {
+   "name": "backlog until a time and waiting on a task",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "backlog",
+    "wait": {
+     "kind": "until",
+     "until": 1791104400000,
+     "since": 1000
+    },
+    "waiting_on": [
+     "ov-191"
+    ],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": "Starts tomorrow at 9:00 AM",
+    "blocked": "Waiting on ov-191"
+   }
+  },
+  {
+   "name": "in progress waiting on three tasks",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "in_progress",
+    "wait": null,
+    "waiting_on": [
+     "ov-1",
+     "ov-2",
+     "ov-3"
+    ],
+    "workers": []
+   },
+   "expect": {
+    "chip": {
+     "apple": "No Agent",
+     "android": "No agent"
+    },
+    "line": null,
+    "blocked": "Waiting on ov-1, ov-2 and ov-3"
+   }
+  },
+  {
+   "name": "needs decision keeps no wait",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "needs_decision",
+    "wait": {
+     "kind": "parked",
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": null,
+    "blocked": null
+   }
+  },
+  {
+   "name": "a done card says no blocks",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "done",
+    "wait": null,
+    "waiting_on": [
+     "ov-191"
+    ],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": null,
+    "blocked": null
+   }
+  },
+  {
+   "name": "in review ignores a stale until",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "in_review",
+    "wait": {
+     "kind": "until",
+     "until": 1791104400000,
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": null,
+    "line": null,
+    "blocked": null
+   }
+  },
+  {
+   "name": "an until on a started card is not drawn",
+   "panes": 0,
+   "records_tasks": true,
+   "task": {
+    "id": "0198f2c0-0000-7000-8000-00000000a001",
+    "key": "ov-1",
+    "title": "A task",
+    "status": "in_progress",
+    "wait": {
+     "kind": "until",
+     "until": 1791104400000,
+     "since": 1000
+    },
+    "waiting_on": [],
+    "workers": []
+   },
+   "expect": {
+    "chip": {
+     "apple": "No Agent",
+     "android": "No agent"
+    },
+    "line": null,
+    "blocked": null
+   }
+  }
+ ]
+}

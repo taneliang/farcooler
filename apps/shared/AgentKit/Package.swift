@@ -40,6 +40,6 @@ let package = Package(
         .testTarget(
             name: "AgentKitTests",
             dependencies: ["AgentKit"],
-            resources: [.copy("live_events.jsonl")]),
+            resources: [.copy("live_events.jsonl"), .copy("task_start_lines.json")]),
     ]
 )

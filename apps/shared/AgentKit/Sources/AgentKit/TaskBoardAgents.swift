@@ -124,8 +124,13 @@ public enum TaskAgentPresence: Equatable, Sendable {
     /// flight" state the board exists to catch, but it is not a question for
     /// the person reading the board.
     case noAgent
-    /// This many panes are working it. Never zero.
+    /// This many panes are working it. Never zero. With subagents as well,
+    /// the count is both, and the control still goes to the panes.
     case agents(Int)
+    /// This many subagents are working it, from inside another agent's
+    /// session (ov-213), and no pane is. Never zero. The control goes to the
+    /// orchestrator's pane, where they live.
+    case subagents(Int, SubagentState)
 
     /// The pill's words, or nil for nothing drawn.
     ///
@@ -137,6 +142,7 @@ public enum TaskAgentPresence: Equatable, Sendable {
         case .unsaid: return nil
         case .noAgent: return "No Agent"
         case .agents(let n): return n == 1 ? "Agent" : "\(n) Agents"
+        case .subagents(let n, _): return n == 1 ? "Subagent" : "\(n) Subagents"
         }
     }
 }
@@ -180,14 +186,31 @@ extension TaskRow {
 
     /// What the card says about its agent.
     ///
+    /// A pane or a subagent is an agent. "No Agent" is only for a started
+    /// card with neither and nothing on the board explaining it: every lane
+    /// in a project run by an orchestrator is a subagent with no pane, and an
+    /// alarm that's always on tells you nothing (ov-213).
+    ///
     /// `runnerRecordsTasks` is whether the runner advertises `terminal_task`.
     /// Without it no pane carries a task id, so "no agent" would be a claim
     /// this app cannot back: an older runner gets no link and no remark, never
     /// a guess from the task's worktree.
     public func agentPresence(livePanes: Int, runnerRecordsTasks: Bool) -> TaskAgentPresence {
         guard runnerRecordsTasks else { return .unsaid }
-        if livePanes > 0 { return .agents(livePanes) }
-        return status == .inProgress ? .noAgent : .unsaid
+        let subagents = subagentPresence
+        if livePanes > 0 {
+            if case .subagents(let n, .working)? = subagents { return .agents(livePanes + n) }
+            return .agents(livePanes)
+        }
+        if let subagents { return subagents }
+        // In progress with nobody on it is the alarm, unless the board says
+        // why: a card ranked in the build line stopped on purpose, and its
+        // line explains it. An unranked one says nothing, so it's no excuse.
+        if status == .inProgress {
+            if case .inLine(.build, let position)? = wait, position > 0 { return .unsaid }
+            return .noAgent
+        }
+        return .unsaid
     }
 
     /// How far along its acceptance this task is, or nil when it has none.

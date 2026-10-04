@@ -153,11 +153,12 @@ public struct TaskRow: Equatable, Sendable, Hashable, Identifiable {
     public var worktreeID: String?
     /// What this task is waiting on.
     ///
-    /// Empty on a row that came from `task list`, which does not carry blocks
-    /// — one call for a whole board is what makes the board cheap. It is
-    /// filled from `task show` when a card is opened. Absent is therefore "not
-    /// asked", not "nothing", and the detail is the only place a block
-    /// summary is drawn.
+    /// From the list's `waiting_on` (ov-212): the keys of the blockers that
+    /// are neither done nor cancelled, so a blocker that finished stops
+    /// counting on its own and every row of the board can say it. That list
+    /// has no reasons, so they are empty here; `task show` fills them when a
+    /// card is opened (`resolvingBlocks`). Shown for Backlog, To Do and In
+    /// Progress only, the statuses a block holds back.
     public var blockedBy: [TaskBlockRef] = []
     /// When the task was filed, or nil from a runner too old to say.
     public var createdAt: Date?
@@ -168,6 +169,13 @@ public struct TaskRow: Equatable, Sendable, Hashable, Identifiable {
     /// The board this task is on: its workspace's id, or nil from a runner
     /// without `workstreams`, which has one board per repository.
     public var workspaceID: String?
+    /// What it is waiting for before it starts (ov-212), or nil: nothing
+    /// said, or a runner without `task_waits`. Read through `startLine`,
+    /// which also knows which statuses it means something in.
+    public var wait: TaskWait?
+    /// The subagents recorded working it (ov-213): every open one, then the
+    /// most recently closed. Empty from a runner without `task_workers`.
+    public var workers: [TaskWorker] = []
 
     public init(
         id: String,
@@ -183,7 +191,9 @@ public struct TaskRow: Equatable, Sendable, Hashable, Identifiable {
         blockedBy: [TaskBlockRef] = [],
         createdAt: Date? = nil,
         updatedAt: Date? = nil,
-        workspaceID: String? = nil
+        workspaceID: String? = nil,
+        wait: TaskWait? = nil,
+        workers: [TaskWorker] = []
     ) {
         self.id = id
         self.key = key
@@ -199,6 +209,8 @@ public struct TaskRow: Equatable, Sendable, Hashable, Identifiable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.workspaceID = workspaceID
+        self.wait = wait
+        self.workers = workers
     }
 
     /// When anything last moved on this card: `updatedAt` — a move, a note or
@@ -331,6 +343,12 @@ public struct TaskRow: Equatable, Sendable, Hashable, Identifiable {
     public var blockedSummary: String? {
         guard !blockedBy.isEmpty else { return nil }
         return "Waiting on " + TaskRow.listed(blockedBy.map(\.key))
+    }
+
+    /// Whether a block holds a task in this status back. A task that is
+    /// done, canceled, in review or waiting on a decision isn't held by one.
+    public static func holdsBlocks(_ status: TaskStatus) -> Bool {
+        status == .backlog || status == .todo || status == .inProgress
     }
 
     /// The one thing the board asks the person looking at it to do, or nil.
@@ -485,9 +503,15 @@ public struct TaskBoardModel: Equatable, Sendable {
     /// list of blockers than the task actually has would say it is ready to
     /// move when it is not. A short id is worse copy than a key and is still
     /// something you can type into `farcooler task show`.
+    ///
+    /// A blocker that is done or cancelled is dropped: the edge stays on the
+    /// task as history, and "Waiting on ov-36" over a finished ov-36 was the
+    /// card telling you it couldn't move when it could (ov-212).
     public func resolvingBlocks(_ raw: [RawTaskBlock]) -> [TaskBlockRef] {
-        raw.map { block in
-            TaskBlockRef(key: key(forTaskID: block.blockedBy) ?? block.short, reason: block.reason)
+        raw.compactMap { block in
+            let blocker = rows.first { $0.id == block.blockedBy }
+            if blocker?.status.isFinished == true { return nil }
+            return TaskBlockRef(key: blocker?.key ?? block.short, reason: block.reason)
         }
     }
 }
@@ -585,14 +609,21 @@ public struct WireTask: Decodable, Sendable {
     /// The board, as `workspace`: the key `tasks_json` writes for both
     /// producers. Nil from a runner without `workstreams`.
     public var workspaceID: String?
+    /// What it waits for before it starts; nil from a runner without
+    /// `task_waits`, or for a word this build can't read.
+    var wait: TaskWait?
+    /// The keys of the blockers still open.
+    var waitingOn: [String]
+    var workers: [TaskWorker]
 
     enum CodingKeys: String, CodingKey {
-        case id, key, title, status, intent, labels, constraints, acceptance
+        case id, key, title, status, intent, labels, constraints, acceptance, wait, workers
         case statusSince = "status_since"
         case worktreeID = "worktree_id"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case workspaceID = "workspace"
+        case waitingOn = "waiting_on"
     }
 
     public init(from decoder: Decoder) throws {
@@ -628,6 +659,13 @@ public struct WireTask: Decodable, Sendable {
         // `try?` for the reason the clocks use it: a malformed board id costs
         // the row its board, never the board its rows.
         workspaceID = (try? c.decodeIfPresent(String.self, forKey: .workspaceID)) ?? nil
+        // Each of the three `try?`, for the same reason: a runner that words
+        // one differently costs the row that piece, never the board.
+        wait = ((try? c.decodeIfPresent(WireWait.self, forKey: .wait)) ?? nil)?.wait
+        waitingOn = (try? c.decodeIfPresent([String].self, forKey: .waitingOn)) ?? []
+        workers =
+            ((try? c.decodeIfPresent([WireWorker].self, forKey: .workers)) ?? nil)?
+            .map(\.worker) ?? []
     }
 
     /// This wire row as a card, given the status it was placed under.
@@ -645,9 +683,10 @@ public struct WireTask: Decodable, Sendable {
             },
             constraints: constraints,
             worktreeID: worktreeID,
+            blockedBy: TaskRow.holdsBlocks(status) ? waitingOn.map { TaskBlockRef(key: $0, reason: "") } : [],
             createdAt: createdAt.map { Date(timeIntervalSince1970: Double($0) / 1000) },
             updatedAt: updatedAt.map { Date(timeIntervalSince1970: Double($0) / 1000) },
-            workspaceID: workspaceID)
+            workspaceID: workspaceID, wait: wait, workers: workers)
     }
 }
 
@@ -703,7 +742,7 @@ public enum TaskNoteKind: String, CaseIterable, Sendable, Hashable {
 
     /// Whether a person wrote this or a transaction did.
     ///
-    /// `status_change` and `created` are written by the store, in the same
+    /// `status_change`, `created`, `wait` and `worker` are written by the store, in the same
     /// transaction that moves or makes a task — the CLI refuses to let anybody
     /// append one. They read as history rather than as somebody's word, and
     /// the board draws them quieter for it.
