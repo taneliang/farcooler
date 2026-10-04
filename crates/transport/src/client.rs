@@ -103,19 +103,22 @@ pub struct CallOptions {
     pub urgent: bool,
 }
 
-/// How many events wait for `next_event` before the reader stops reading.
+/// How many events wait for `next_event` before the reader stops reading —
+/// while no call is waiting.
 ///
-/// A bound, not a buffer size anyone tuned: it is what keeps a client that has
-/// stopped reading events — a terminal stream whose viewer went away — pushing
-/// back on the daemon through the socket, as it did when nothing read the
-/// socket between calls, rather than holding the backlog in this process.
+/// The same pushback there always was. Before ov-147 nothing read the socket
+/// between calls, so a client that stopped reading events — a terminal stream
+/// whose viewer went away — left them in the socket, where the daemon's own
+/// limits see them; and during a call, the events read past on the way to its
+/// answer were kept, however many. So: past this many, the reader waits for
+/// `next_event` to take one, unless a call is waiting for an answer, which is
+/// never held up behind events nobody has read. A bound, not a tuned size.
 const EVENT_BACKLOG: usize = 1024;
 
 pub struct Client<R, W> {
     shared: Arc<Shared>,
     urgent: mpsc::UnboundedSender<Outgoing>,
     ordinary: mpsc::UnboundedSender<Outgoing>,
-    events: mpsc::Receiver<Event>,
     server: ServerHello,
     reader: tokio::task::JoinHandle<()>,
     /// The halves now belong to the tasks; the types stay in the signature so
@@ -130,6 +133,20 @@ struct Shared {
     strays: AtomicU64,
     /// Set by `ignore_events`.
     ignore_events: AtomicBool,
+    events: Mutex<Events>,
+    /// An event was queued, or the connection ended.
+    arrived: tokio::sync::Notify,
+    /// The backlog shrank, or a call started waiting: the reader re-checks
+    /// whether it may read again. See `EVENT_BACKLOG`.
+    room: tokio::sync::Notify,
+}
+
+/// Events waiting for `next_event`, oldest first.
+#[derive(Default)]
+struct Events {
+    queue: std::collections::VecDeque<Event>,
+    /// The reader has stopped; what is queued is all there will be.
+    ended: bool,
 }
 
 #[derive(Default)]
@@ -203,10 +220,7 @@ fn copy(f: &FramingError) -> FramingError {
 
 impl Shared {
     fn table(&self) -> MutexGuard<'_, Table> {
-        // A panic while holding this lock leaves a map of senders, which is
-        // still a correct map; refusing every later call over it would turn
-        // one bug into a dead connection.
-        self.table.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        lock(&self.table)
     }
 
     /// Fail every waiting call with `why`, and every later one before it is
@@ -344,18 +358,19 @@ where
             table: Mutex::new(Table::default()),
             strays: AtomicU64::new(0),
             ignore_events: AtomicBool::new(false),
+            events: Mutex::new(Events::default()),
+            arrived: tokio::sync::Notify::new(),
+            room: tokio::sync::Notify::new(),
         });
-        let (events_tx, events) = mpsc::channel(EVENT_BACKLOG);
         let (urgent, urgent_rx) = mpsc::unbounded_channel();
         let (ordinary, ordinary_rx) = mpsc::unbounded_channel();
-        let reader = tokio::spawn(read_replies(reader, Arc::clone(&shared), events_tx));
+        let reader = tokio::spawn(read_replies(reader, Arc::clone(&shared)));
         tokio::spawn(write_requests(writer, urgent_rx, ordinary_rx, Arc::clone(&shared)));
 
         Ok(Self {
             shared,
             urgent,
             ordinary,
-            events,
             server,
             reader,
             _halves: std::marker::PhantomData,
@@ -379,9 +394,9 @@ impl<R, W> Client<R, W> {
     /// Drop events instead of keeping them for `next_event`.
     ///
     /// For a connection that only makes calls — a phone's control connection,
-    /// whose events arrive on a channel of their own. Without this they would
-    /// fill `EVENT_BACKLOG`, and a full backlog stops the reader, which would
-    /// leave every call waiting on an answer nobody reads.
+    /// whose events arrive on a channel of their own. Without this they pile
+    /// up here while calls wait, and in the socket between calls once
+    /// `EVENT_BACKLOG` is reached, for as long as the connection lives.
     pub fn ignore_events(&self) {
         self.shared.ignore_events.store(true, Ordering::Relaxed);
     }
@@ -400,10 +415,23 @@ impl<R, W> Client<R, W> {
     /// order they arrived, so nothing is lost by having made a request at the
     /// wrong moment.
     pub async fn next_event(&mut self) -> Result<Event, ClientError> {
-        match self.events.recv().await {
-            Some(event) => Ok(event),
-            None => Err(self.shared.table().gone.clone().unwrap_or(Gone::Closed).error()),
+        let shared = &self.shared;
+        loop {
+            {
+                let mut events = lock(&shared.events);
+                if let Some(event) = events.queue.pop_front() {
+                    shared.room.notify_one();
+                    return Ok(event);
+                }
+                if events.ended {
+                    break;
+                }
+            }
+            // A permit is stored if the reader queued one between the check
+            // and here, so this cannot miss it.
+            shared.arrived.notified().await;
         }
+        Err(shared.table().gone.clone().unwrap_or(Gone::Closed).error())
     }
 
     /// Send a request and wait for the response that matches it, with no
@@ -452,6 +480,9 @@ impl<R, W> Client<R, W> {
             table.waiting.insert(request.request_id.clone(), answer_tx);
             request.request_id.clone()
         };
+        // A reader holding off for a full event backlog must read this
+        // call's answer regardless. See `EVENT_BACKLOG`.
+        self.shared.room.notify_one();
         let waiting = Answer {
             shared: Arc::clone(&self.shared),
             request_id: request_id.clone(),
@@ -478,11 +509,7 @@ impl<R, W> Client<R, W> {
 
 /// The read half, for the life of the connection: answers to their callers,
 /// events to `next_event`.
-async fn read_replies<R: AsyncRead + Unpin>(
-    mut reader: FrameReader<R>,
-    shared: Arc<Shared>,
-    events: mpsc::Sender<Event>,
-) {
+async fn read_replies<R: AsyncRead + Unpin>(mut reader: FrameReader<R>, shared: Arc<Shared>) {
     let why = loop {
         let envelope = match reader.read_frame().await {
             Ok(Some(envelope)) => envelope,
@@ -509,10 +536,16 @@ async fn read_replies<R: AsyncRead + Unpin>(
                 if shared.ignore_events.load(Ordering::Relaxed) {
                     continue;
                 }
-                // Waits while the backlog is full, which is the point: see
-                // `EVENT_BACKLOG`. A receiver that is gone takes nothing more.
-                if events.send(e).await.is_err() {
-                    shared.ignore_events.store(true, Ordering::Relaxed);
+                lock(&shared.events).queue.push_back(e);
+                shared.arrived.notify_one();
+                // Holds off reading while the backlog is full and no call is
+                // waiting: see `EVENT_BACKLOG`.
+                loop {
+                    let full = lock(&shared.events).queue.len() >= EVENT_BACKLOG;
+                    if !full || !shared.table().waiting.is_empty() {
+                        break;
+                    }
+                    shared.room.notified().await;
                 }
             }
             // Anything else has no business after the handshake, and never
@@ -521,6 +554,14 @@ async fn read_replies<R: AsyncRead + Unpin>(
         }
     };
     shared.end(why);
+    lock(&shared.events).ended = true;
+    shared.arrived.notify_one();
+}
+
+/// A lock whose holder panicking leaves data that is still correct — a map
+/// of senders, a queue of events — so poisoning is not a reason to fail.
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// The write half: urgent frames first, then ordinary ones, each queue in the

@@ -331,3 +331,65 @@ async fn many_calls_at_once_each_get_their_own_answer() {
     }
     assert_eq!(client.stray_replies(), 0);
 }
+
+fn an_event(i: u64) -> WireEnvelope {
+    envelope(wire_envelope::Body::Event(v1::Event { event_id: Bytes::from(i.to_be_bytes().to_vec()), ..Default::default() }))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn events_never_hold_up_an_answer() {
+    // More events than the backlog holds, all ahead of the answer, read by
+    // nobody until the call returns.
+    let mut client = scripted(|mut reader, mut writer| async move {
+        let Some(req) = next_request(&mut reader).await else { return };
+        for i in 0..3000 {
+            if writer.write_frame(&an_event(i)).await.is_err() {
+                return;
+            }
+        }
+        let reply = answer(req.request_id, &req.method);
+        let _ = writer.write_frame(&envelope(wire_envelope::Body::Response(reply))).await;
+        std::future::pending::<()>().await;
+    })
+    .await;
+
+    let outcome = tokio::time::timeout(Duration::from_secs(5), client.call_with(request("mine"), CallOptions::default()))
+        .await
+        .expect("the answer was held up behind unread events");
+    assert_eq!(answered_as(outcome), "mine");
+    // And none of them was lost, or reordered.
+    for i in 0..3000u64 {
+        let event = client.next_event().await.expect("an event");
+        assert_eq!(event.event_id, Bytes::from(i.to_be_bytes().to_vec()));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unread_events_push_back_on_the_runner_between_calls() {
+    // The pushback a terminal stream depends on: a viewer that stops reading
+    // leaves the backlog with the runner, where its limits see it, rather
+    // than growing here without bound.
+    let written = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let counted = written.clone();
+    let mut client = scripted(move |_reader, mut writer| async move {
+        for i in 0..20_000 {
+            if writer.write_frame(&an_event(i)).await.is_err() {
+                return;
+            }
+            counted.store(i + 1, std::sync::atomic::Ordering::SeqCst);
+        }
+    })
+    .await;
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let stalled_at = written.load(std::sync::atomic::Ordering::SeqCst);
+    assert!(stalled_at < 20_000, "nothing pushed back: the runner wrote all {stalled_at}");
+
+    for i in 0..20_000u64 {
+        let event = tokio::time::timeout(Duration::from_secs(5), client.next_event())
+            .await
+            .expect("the reader never resumed")
+            .expect("an event");
+        assert_eq!(event.event_id, Bytes::from(i.to_be_bytes().to_vec()));
+    }
+}
