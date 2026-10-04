@@ -20,12 +20,19 @@ struct MarkReadRequest: Equatable, Sendable {
     var filtering: Bool
     /// How many tasks it reads.
     var tasks: Int
+    /// Whether it reads on every device: the runner keeps this board's
+    /// state and this Mac's grant can write it (ov-254).
+    var everywhere = false
 
     /// "Mark All as Read?", or "Mark These as Read?" under a filter.
     var title: String { "\(MarkAllReadButton.title(filtering: filtering))?" }
 
-    /// "68 tasks will be marked as read.", "1 task …".
-    var message: String { tasks == 1 ? "1 task will be marked as read." : "\(tasks) tasks will be marked as read." }
+    /// "68 tasks will be marked as read on all your devices.", "1 task will
+    /// be marked as read on this Mac."
+    var message: String {
+        let what = tasks == 1 ? "1 task will be marked as read" : "\(tasks) tasks will be marked as read"
+        return "\(what) \(everywhere ? "on all your devices" : "on this Mac")."
+    }
 
     static let confirmTitle = "Mark as Read"
     static let cancelTitle = "Cancel"
@@ -110,12 +117,17 @@ extension EnvironmentValues {
 }
 
 extension TaskBoardStore {
+    /// Whether a Mark as Read here clears every device: the runner keeps
+    /// this board's state, and this Mac's grant isn't Read-only.
+    var readsEverywhere: Bool { runnerKeepsReads && offersWrites }
+
     /// Mark All as Read, once asked: everything on the board, however the
     /// navigator is filtered (Board ▸ Mark All as Read, ⇧⌘K), or Unread's
     /// header unfiltered. The count is the tasks Unread lists unfiltered.
     func askToMarkAllRead(_ confirmation: MarkReadConfirmation, animation: Animation? = nil) {
         let summary = BoardSummaryStrip.summary(store: self, reads: reads, filter: "")
-        let request = MarkReadRequest(filtering: false, tasks: MarkReadRequest.tasks(in: summary))
+        let request = MarkReadRequest(
+            filtering: false, tasks: MarkReadRequest.tasks(in: summary), everywhere: readsEverywhere)
         confirmation.confirm(request) { [weak self] grant in
             withAnimation(animation) { self?.markAllRead(grant) }
         }

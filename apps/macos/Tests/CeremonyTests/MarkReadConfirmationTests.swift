@@ -179,13 +179,46 @@ struct MarkReadConfirmationTests {
     func alertCopy() {
         let all = MarkReadConfirmation.makeAlert(MarkReadRequest(filtering: false, tasks: 68))
         #expect(all.messageText == "Mark All as Read?")
-        #expect(all.informativeText == "68 tasks will be marked as read.")
+        #expect(all.informativeText == "68 tasks will be marked as read on this Mac.")
         #expect(all.buttons.map(\.title) == ["Mark as Read", "Cancel"])
         #expect(all.buttons[0].keyEquivalent == "", "Return confirms")
         #expect(all.buttons[1].keyEquivalent == "\u{1b}", "Esc doesn't cancel")
         let one = MarkReadConfirmation.makeAlert(MarkReadRequest(filtering: true, tasks: 1))
         #expect(one.messageText == "Mark These as Read?")
-        #expect(one.informativeText == "1 task will be marked as read.")
+        #expect(one.informativeText == "1 task will be marked as read on this Mac.")
+    }
+
+    /// The alert says where it reads: every device when the runner keeps the
+    /// state and this Mac can write it, this Mac otherwise. (Fails with the
+    /// message ignoring `everywhere`.)
+    @Test("The alert says what it affects")
+    func alertSaysWhatItAffects() {
+        let all = MarkReadConfirmation.makeAlert(MarkReadRequest(filtering: false, tasks: 68, everywhere: true))
+        #expect(all.informativeText == "68 tasks will be marked as read on all your devices.")
+        let one = MarkReadConfirmation.makeAlert(MarkReadRequest(filtering: false, tasks: 1, everywhere: true))
+        #expect(one.informativeText == "1 task will be marked as read on all your devices.")
+        let here = MarkReadConfirmation.makeAlert(MarkReadRequest(filtering: false, tasks: 2))
+        #expect(here.informativeText == "2 tasks will be marked as read on this Mac.")
+    }
+
+    /// What the store asks: everywhere only on a runner that keeps reads and
+    /// a grant that isn't Read-only. (Fails with either half dropped.)
+    @Test("A store reads everywhere only when the runner keeps reads and the grant can write")
+    func storeReadsEverywhere() {
+        let workspace = WorkspaceSummary(
+            id: "0198f2c0-0000-7000-8000-00000000c002", name: "Evals", taskPrefix: "ev", isMain: false, ordinal: 1,
+            repository: "0198f2c0-0000-7000-8000-00000000c001")
+        let store = TaskBoardStore(
+            client: DaemonClient(target: "", notifications: NotificationCenter()), workspace: workspace,
+            readStore: DefaultsBoardReads(UserDefaults(suiteName: "ov254-\(UUID().uuidString)")!))
+        store.runnerKeepsReads = false
+        #expect(!store.readsEverywhere, "an old runner")
+        store.runnerKeepsReads = true
+        #expect(store.offersWrites)
+        #expect(store.readsEverywhere)
+        store.client.daemonBuild = DaemonBuild(
+            version: "1", matches: true, platform: "", capabilities: ["tasks"], grantedScope: "read")
+        #expect(!store.readsEverywhere, "without Control scope")
     }
 
     /// On the window, as the app shows it: Esc and Cancel close it reading

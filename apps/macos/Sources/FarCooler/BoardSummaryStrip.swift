@@ -233,7 +233,8 @@ struct BoardSummaryStrip: View {
     ) -> SectionHeaderAction {
         SectionHeaderAction(name: MarkAllReadButton.title(filtering: filtering)) {
             guard filtering else { return store.askToMarkAllRead(confirmation, animation: animation) }
-            let request = MarkReadRequest(filtering: true, tasks: MarkReadRequest.tasks(in: summary))
+            let request = MarkReadRequest(
+                filtering: true, tasks: MarkReadRequest.tasks(in: summary), everywhere: store.readsEverywhere)
             confirmation.confirm(request) { _ in
                 withAnimation(animation) { Self.markRead(summary, in: store) }
             }
