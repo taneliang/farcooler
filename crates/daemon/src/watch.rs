@@ -2852,7 +2852,7 @@ impl Watcher {
         quoted: Quoted<'_>,
         turn_failed: bool,
         started_at: Option<i64>,
-    ) {
+    ) -> Option<Uuid> {
         let task = self
             .service
             .store
@@ -2860,7 +2860,8 @@ impl Watcher {
             .ok()
             .and_then(|row| crate::task_link::notice_task(&self.service.store, &row));
         let Some(task) = task else {
-            return self.push_if_paired(terminal, activity, label, quoted, turn_failed, started_at);
+            self.push_if_paired(terminal, activity, label, quoted, turn_failed, started_at);
+            return None;
         };
         let who = self.who(terminal, label);
         let news = match activity {
@@ -2884,6 +2885,7 @@ impl Watcher {
         if let Some(news) = news {
             self.agent_event(&task, news);
         }
+        Some(task.id)
     }
 
     /// Refresh the live card of an agent that is still working, at most once
@@ -3664,7 +3666,7 @@ impl Watcher {
         drop(state);
         // A failed turn, seen, is no longer an item.
         self.announce_needs_you();
-        self.announce(terminal, snapshot).await;
+        self.announce(terminal, snapshot, None).await;
     }
 
     /// Push a worktree's tiling to every connected client.
@@ -5110,6 +5112,10 @@ impl Watcher {
             // overwrite it milliseconds later with the real one. The transition
             // is still unthrottled: `last_card_push` was just cleared above, so
             // the refresh in `announce` fires on this very tick.
+            // The task `announce_transition` folded this change into, so the
+            // event below says what the notice did, not a second reading a
+            // closing task could change in between (ov-112).
+            let mut noticed: Option<Option<Uuid>> = None;
             if let Some(next) = activity_moved.filter(|next| *next != AgentActivity::Working) {
                 // And whether the person is sitting there watching it happen.
                 //
@@ -5135,7 +5141,7 @@ impl Watcher {
                     // A watched agent asking a question. See `attention` for
                     // why this leaves the card alone rather than retiring it.
                     Attention::Hold => {}
-                    Attention::Announce => self.announce_transition(
+                    Attention::Announce => noticed = Some(self.announce_transition(
                         id,
                         next,
                         &command,
@@ -5159,7 +5165,7 @@ impl Watcher {
                         },
                         record.turn_failed,
                         record.turn_started_at,
-                    ),
+                    )),
                 }
             }
             // A command failing is a STATE transition, not an activity one —
@@ -5178,7 +5184,7 @@ impl Watcher {
                 command = %command,
                 "terminal changed"
             );
-            self.announce(id, record).await;
+            self.announce(id, record, noticed).await;
         }
 
         // Last, and together. A sweep on the first tick after a restart can
@@ -5193,7 +5199,7 @@ impl Watcher {
     /// The whole `Terminal` goes out, not a diff. A client that missed an event
     /// then converges on the next one instead of applying a delta to a state it
     /// may not have.
-    async fn announce(&self, terminal: Uuid, observed: Observed) {
+    async fn announce(&self, terminal: Uuid, observed: Observed, noticed: Option<Option<Uuid>>) {
         let Ok(fleet) = self.service.fleet().await else { return };
         for worktree in &fleet {
             let Some(view) = worktree.terminals.iter().find(|t| t.terminal.id == terminal) else {
@@ -5219,7 +5225,12 @@ impl Watcher {
             }
 
             let mut message = wire::terminal_with_agent_state(view, self.service.agents());
-            crate::task_link::stamp_notice_task(&self.service.store, &view.terminal, &mut message);
+            // One reading with the notice when this event is that notice's
+            // transition; a fresh one otherwise.
+            match noticed {
+                Some(task) => message.notice_task_id = task.map(|id| bytes::Bytes::copy_from_slice(id.as_bytes())),
+                None => crate::task_link::stamp_notice_task(&self.service.store, &view.terminal, &mut message),
+            }
             message.activity = observed.activity as i32;
             message.activity_changed_at = Some(wire::timestamp(observed.state_since));
             message.turn_started_at = observed.turn_started_at.map(wire::timestamp);

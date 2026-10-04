@@ -524,6 +524,11 @@ async fn the_list_and_the_event_agree_on_the_notice_task() {
         worktree_id: Some(lane),
     };
     let task = svc.store.update_task(task.id, task.resource_version, &update).unwrap();
+    // The main checkout has an open task of its own, so only the guard keeps
+    // the bystander from taking it.
+    let there = svc.store.create_task(workspace, "On the checkout", Actor::User).unwrap();
+    let update = TaskUpdate { title: there.title.clone(), worktree_id: Some(checkout), ..update };
+    svc.store.update_task(there.id, there.resource_version, &update).unwrap();
     let pane = svc.store.create_terminal_for_test(lane, workspace);
     let bystander = svc.store.create_terminal_for_test(checkout, workspace);
     let watcher = Watcher::new(svc.clone());
@@ -554,9 +559,44 @@ async fn the_list_and_the_event_agree_on_the_notice_task() {
 
     // The event.
     let mut events = watcher.subscribe();
-    watcher.announce(pane, Observed::begin(AgentActivity::Working, 0)).await;
+    watcher.announce(pane, Observed::begin(AgentActivity::Working, 0), None).await;
     let Some(pb::event::Payload::TerminalChanged(changed)) = events.recv().await.unwrap().payload else {
         panic!("a terminal event")
     };
     assert_eq!(changed.notice_task_id, want, "the event");
+}
+
+/// An event announced for a transition says what that transition's notice did,
+/// not a second reading of the board: a task closing between the two reads
+/// would otherwise leave the runner folding and the Mac's event saying
+/// nothing, or the reverse, which is silence.
+#[tokio::test]
+async fn an_event_for_a_transition_carries_the_notice_that_was_sent() {
+    let (_dir, svc, workspace, checkout, _) = a_runner().await;
+    let repo = svc.store.get_worktree(checkout).unwrap().repository_id;
+    let lane = svc.store.create_worktree(repo, "lane", "/tmp/fc-t/ov-112-lane", false).unwrap().id;
+    let task = svc.store.create_task(workspace, "On the lane", Actor::User).unwrap();
+    let update = TaskUpdate {
+        title: task.title.clone(),
+        intent: String::new(),
+        acceptance: Vec::new(),
+        constraints: Vec::new(),
+        labels: Vec::new(),
+        worktree_id: Some(lane),
+    };
+    let task = svc.store.update_task(task.id, task.resource_version, &update).unwrap();
+    let pane = svc.store.create_terminal_for_test(lane, workspace);
+    let watcher = Watcher::new(svc.clone());
+    let mut events = watcher.subscribe();
+    // A fresh reading would say the task; the transition folded nothing.
+    watcher.announce(pane, Observed::begin(AgentActivity::Blocked, 0), Some(None)).await;
+    let Some(pb::event::Payload::TerminalChanged(changed)) = events.recv().await.unwrap().payload else {
+        panic!("a terminal event")
+    };
+    assert_eq!(changed.notice_task_id, None, "the transition's own answer");
+    watcher.announce(pane, Observed::begin(AgentActivity::Blocked, 0), Some(Some(task.id))).await;
+    let Some(pb::event::Payload::TerminalChanged(changed)) = events.recv().await.unwrap().payload else {
+        panic!("a terminal event")
+    };
+    assert_eq!(changed.notice_task_id, Some(bytes::Bytes::copy_from_slice(task.id.as_bytes())));
 }

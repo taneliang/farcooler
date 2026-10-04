@@ -92,6 +92,7 @@ struct FleetDecodeTests {
               "availableAgentModes": ["plan", "edit"],
               "agentFailure": "not-authenticated",
               "taskId": "0198f2c0-0000-7000-8000-00000000a001",
+              "noticeTaskId": "0198f2c0-0000-7000-8000-00000000a002",
               "workspace": "0198f2c0-0000-7000-8000-0000000000cc",
               "role": "orchestrator"
             }
@@ -260,6 +261,7 @@ struct FleetDecodeTests {
         // What takes a board card to the agent on it. Absent from a pane
         // nobody dispatched; see `anOlderDaemonSendingOnlyTheOriginalKeysStillDecodes`.
         #expect(terminal.taskId == "0198f2c0-0000-7000-8000-00000000a001")
+        #expect(terminal.noticeTaskId == "0198f2c0-0000-7000-8000-00000000a002")
     }
 
     /// The derivations the two screens actually draw, off the decoded fields.
@@ -340,6 +342,7 @@ struct FleetDecodeTests {
         #expect(terminal.lastSaid == nil)
         // No task, and a shell: nothing a board could take anyone to.
         #expect(terminal.taskId == nil)
+        #expect(terminal.noticeTaskId == nil)
         #expect(!terminal.runsAgent)
         // A runner without `workstreams`: no list, no owner, no role — and
         // the fleet groups as today's layout.

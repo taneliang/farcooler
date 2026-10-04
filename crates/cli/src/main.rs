@@ -3622,10 +3622,10 @@ fn worktree_list_terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_js
         // the agent working it. The daemon has recorded it since
         // `terminal_task`; this is the hop that used to drop it.
         "taskId": task_of(t),
+        "noticeTaskId": notice_task::notice_task_of(t),
         // The pane this one was split from, if a split made it: what keeps a
         // pane somebody split beside the orchestrator out of its Move to Its
         // Own Window notice. Null when not known to be a split.
-        "noticeTaskId": notice_task::notice_task_of(t),
         "splitOf": split_of(t),
         // Whether that pane was the orchestrator when the split was made, so
         // a shell split beside a claude later made the orchestrator still
@@ -3901,10 +3901,10 @@ fn terminal_event_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Valu
         // the agent working it. The daemon has recorded it since
         // `terminal_task`; this is the hop that used to drop it.
         "taskId": task_of(t),
+        "noticeTaskId": notice_task::notice_task_of(t),
         // The pane this one was split from, if a split made it: what keeps a
         // pane somebody split beside the orchestrator out of its Move to Its
         // Own Window notice. Null when not known to be a split.
-        "noticeTaskId": notice_task::notice_task_of(t),
         "splitOf": split_of(t),
         // Whether that pane was the orchestrator when the split was made, so
         // a shell split beside a claude later made the orchestrator still

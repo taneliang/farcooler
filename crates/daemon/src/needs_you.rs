@@ -700,6 +700,11 @@ mod tests {
             worktree_id: Some(lane),
         };
         let task = svc.store.update_task(task.id, task.resource_version, &update).unwrap();
+        // The main checkout has one open task of its own, so only the guard
+        // keeps its hand-opened agent from taking it.
+        let dispatched = svc.store.create_task(main.id, "On the checkout", Actor::User).unwrap();
+        let there = farcooler_store::models::TaskUpdate { worktree_id: Some(checkout), ..update.clone() };
+        svc.store.update_task(dispatched.id, dispatched.resource_version, &there).unwrap();
         let in_lane = svc.store.create_terminal_for_test(lane, main.id);
         let in_checkout = svc.store.create_terminal_for_test(checkout, main.id);
         let watcher = crate::watch::Watcher::new(svc.clone());

@@ -81,6 +81,7 @@ class FleetDecodeTest {
                   "availableAgentModes": ["plan", "edit"],
                   "agentFailure": "not-authenticated",
                   "taskId": "0198f2c0-0000-7000-8000-00000000a001",
+                  "noticeTaskId": "0198f2c0-0000-7000-8000-00000000a002",
                   "workspace": "0198f2c0-0000-7000-8000-0000000000cc",
                   "role": "orchestrator"
                 }
@@ -146,6 +147,7 @@ class FleetDecodeTest {
         assertEquals("not-authenticated", t.agentFailure)
         // What takes a board card to the agent on it.
         assertEquals("0198f2c0-0000-7000-8000-00000000a001", t.taskId)
+        assertEquals("0198f2c0-0000-7000-8000-00000000a002", t.noticeTaskId)
     }
 
     @Test
@@ -249,6 +251,7 @@ class FleetDecodeTest {
         assertEquals(Long.MAX_VALUE, t.sortRank)
         // No task: nothing a board could take anyone to.
         assertNull(t.taskId)
+        assertNull(t.noticeTaskId)
         // And nothing about the row it draws is a claim: absent is not zero and
         // not false-as-an-answer.
         assertEquals(emptyList<String>(), t.recentSteps)

@@ -167,6 +167,21 @@ struct TaskNoticeTests {
         Notifier.shared.forget("ov107-c1")
     }
 
+    /// `worktree list --json` carries the runner's answer under `noticeTaskId`,
+    /// and the Mac's `Terminal` reads it from there (ov-112). A runner that
+    /// sends none decodes to nil.
+    @Test("The Mac's worktree list decodes noticeTaskId")
+    func theWorktreeListDecodesNoticeTaskId() throws {
+        let json = #"""
+            {"id":"w-1","short":"w","task":"lane","branch":"b","worktree":"/tmp/w","state":"active","terminals":[
+              {"id":"a","short":"a","title":"c","preset":"claude","state":"running","epoch":0,"noticeTaskId":"t-9"},
+              {"id":"b","short":"b","title":"c","preset":"claude","state":"running","epoch":0}]}
+            """#
+        let worktree = try JSONDecoder().decode(Worktree.self, from: Data(json.utf8))
+        #expect(worktree.terminals[0].noticeTaskId == "t-9")
+        #expect(worktree.terminals[1].noticeTaskId == nil)
+    }
+
     /// The same call site from a runner that sends `notice_task`: the event
     /// carries the runner's answer, and the Mac believes it over its mirror.
     /// The pane is in a lane with one open task, which the mirror would fold,
