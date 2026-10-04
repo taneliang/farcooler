@@ -270,13 +270,20 @@ struct NavigatorRhythmTests {
         ("SidebarLayout.swift", nil), ("BoardSummaryStrip.swift", nil),
         ("TaskBoard.swift", "struct TaskCard: View"), ("TaskListSection.swift", nil), ("Navigator.swift", nil),
         ("BoardWorktreesSection.swift", nil), ("ProjectTerminalsSection.swift", nil),
-        ("Components/CompactTaskRow.swift", nil),
+        ("Components/CompactTaskRow.swift", nil), ("Components/CollapsibleSection.swift", nil),
+        ("NavigatorSplit.swift", nil),
     ]
 
-    /// Every vertical padding or stack spacing in `source` set by a number
-    /// of its own, with its line, that no `// rhythm-exempt:` explains.
+    /// Every vertical gap in `source` (a stack's spacing, a top, bottom,
+    /// vertical or all-round padding, a least height) set by anything but a
+    /// `NavigatorRhythm` name or 0, with its line, that no
+    /// `// rhythm-exempt:` explains. An `HStack`'s spacing and a `Spacer`'s
+    /// length are left alone: in a row they're horizontal.
     static func strays(in source: String) -> [(line: Int, text: String)] {
-        let pattern = try! Regex(#"\.padding\(\.(top|bottom|vertical),\s*-?[0-9]|VStack\([^)]*spacing:\s*[1-9]"#)
+        let named = #"(?!\s*-?(?:NavigatorRhythm\.|0(?![.\d])))"#
+        let pattern = try! Regex(
+            #"(?:\b(?:VStack|LazyVStack)\([^)]*spacing:"# + named + #"|\.padding\(\.(?:top|bottom|vertical),"#
+                + named + #"|\.padding\((?!\.)"# + named + #"|\.frame\([^)]*minHeight:"# + named + ")")
         return source.split(separator: "\n", omittingEmptySubsequences: false).enumerated()
             .filter { $0.element.contains(pattern) && !$0.element.contains("rhythm-exempt:") }
             .map { ($0.offset + 1, $0.element.trimmingCharacters(in: .whitespaces)) }
@@ -305,8 +312,16 @@ struct NavigatorRhythmTests {
     }
 
     // MARK: - Captures
+        #expect(Self.strays(in: "LazyVStack(spacing: 0.5) {").count == 1)
+        #expect(Self.strays(in: "VStack(spacing: ColumnGrid.rhythm / 2) {").count == 1)
+        #expect(Self.strays(in: ".padding(.vertical, ColumnGrid.rhythm)").count == 1)
+        #expect(Self.strays(in: ".padding(12)").count == 1)
+        #expect(Self.strays(in: ".frame(maxWidth: .infinity, minHeight: 6 * ColumnGrid.rhythm)").count == 1)
 
+        #expect(Self.strays(in: "HStack(spacing: 6) {").isEmpty)
+        #expect(Self.strays(in: ".padding(.horizontal, NavigatorGrid.edge)").isEmpty)
     /// Write the captures and the measured gaps, when asked to
+        #expect(Self.strays(in: ".padding(.top, -NavigatorRhythm.air)").isEmpty)
     /// (`FARCOOLER_RHYTHM_OUT`). Not a check: the checks are below.
     @Test("Write the navigator's rhythm captures")
     func writeCaptures() async throws {

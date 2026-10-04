@@ -306,7 +306,7 @@ struct OrchestratorRowView: View {
             // navigator can be as narrow as 240 pt.
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: SidebarGrid.gap) { startMenu(starts); useMenu }
-                VStack(alignment: .leading, spacing: ColumnGrid.rhythm / 2) { startMenu(starts); useMenu }
+                VStack(alignment: .leading, spacing: NavigatorRhythm.air) { startMenu(starts); useMenu }
             }
             .controlSize(.small)
             .padding(.top, NavigatorRhythm.lineGap)

@@ -323,7 +323,7 @@ struct CollapsibleSection<Label: View, Accessory: View, Content: View>: View {
             VStack(alignment: .leading, spacing: 0) {
                 if expanded {
                     content()
-                        .padding(.top, metrics.spacing)
+                        .padding(.top, metrics.spacing)  // rhythm-exempt: the navigator's is NavigatorRhythm.row
                         .transition(Self.contentTransition(reduceMotion: reduceMotion, slowedBy: slowdown))
                 }
             }
@@ -378,7 +378,7 @@ struct CollapsibleSection<Label: View, Accessory: View, Content: View>: View {
             if !fillsRow { Spacer(minLength: 0) }
             if let count { SectionCount(count: count).accessibilityHidden(true) }
         }
-        .padding(metrics.headerInsets)
+        .padding(metrics.headerInsets)  // rhythm-exempt: none in the navigator; a card's own
         .contentShape(Rectangle())
         .onHover { headerHovered = $0 }
         .probed("section-header-\(id)")
@@ -387,8 +387,8 @@ struct CollapsibleSection<Label: View, Accessory: View, Content: View>: View {
     private func toggleButton<Face: View>(@ViewBuilder _ face: () -> Face) -> some View {
         Button { set(!expanded) } label: {
             face()
-                .padding(.vertical, metrics.headerAir)
-                .frame(minHeight: metrics.minHeight)
+                .padding(.vertical, metrics.headerAir)  // rhythm-exempt: the navigator's is NavigatorRhythm.air
+                .frame(minHeight: metrics.minHeight)  // rhythm-exempt: 0 in the navigator
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -518,7 +518,7 @@ struct GroupHeader: View {
             if let count { SectionCount(count: count) }
         }
         .padding(.vertical, NavigatorRhythm.air)
-        .padding(.top, follows ? Self.above : 0)
+        .padding(.top, follows ? Self.above : 0)  // rhythm-exempt: Self.above is NavigatorRhythm.subgroup
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(count.map { "\(title), \($0)" } ?? title)
         .accessibilityAddTraits(.isHeader)
@@ -610,7 +610,7 @@ struct NavigatorRowStyle: ViewModifier {
             .padding(.leading, leading)
             .padding(.trailing, trailing)
             .padding(.vertical, NavigatorRhythm.air)
-            .frame(minHeight: minHeight)
+            .frame(minHeight: minHeight)  // rhythm-exempt: 0 in the navigator, a caller's own elsewhere
             .background {
                 ZStack {
                     if selected { RoundedRectangle.control.fill(Self.fill(keyed: keyed)) }

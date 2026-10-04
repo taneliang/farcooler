@@ -122,6 +122,12 @@ enum NavigatorRhythm {
     /// The top band's margin: over the filter, and between the filter's box
     /// and the orchestrator's row.
     static let band: CGFloat = Spacing.group
+    /// Inside a card in the list (a task this version can't show), over and
+    /// under its text.
+    static let card: CGFloat = Spacing.group
+    /// The least height of what stands in for the tasks while there are
+    /// none to show: the spinner while the board is read, or why it can't be.
+    static let placeholder: CGFloat = 6 * ColumnGrid.rhythm
 
     /// What the eye reads between two lines whose slots are `slotGap` apart.
     static func visible(_ slotGap: CGFloat) -> CGFloat { slotGap + 2 * air }

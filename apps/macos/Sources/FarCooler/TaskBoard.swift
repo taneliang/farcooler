@@ -817,7 +817,7 @@ struct TaskBoardView: View {
     }
 
     private func centered<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        VStack { content() }.frame(maxWidth: .infinity, minHeight: 6 * ColumnGrid.rhythm)
+        VStack { content() }.frame(maxWidth: .infinity, minHeight: NavigatorRhythm.placeholder)
     }
 
     // MARK: - The top band
@@ -1322,7 +1322,7 @@ private struct UnreadableColumnView: View {
     /// A section like the statuses above it: its heading at column B, and
     /// its rows as cards with their edges at A and their text at B.
     var body: some View {
-        VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
+        VStack(alignment: .leading, spacing: NavigatorRhythm.group) {
             VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
                 Text("Not On This Version").font(WorkspaceStyle.sectionTitle)
                     .gridMark("unreadable", .text)
@@ -1346,7 +1346,7 @@ private struct UnreadableColumnView: View {
                         .foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, NavigatorGrid.textInset)
-                .padding(.vertical, ColumnGrid.rhythm)
+                .padding(.vertical, NavigatorRhythm.card)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(RoundedRectangle(cornerRadius: 8).fill(WorkspaceStyle.paneChrome))
             }
