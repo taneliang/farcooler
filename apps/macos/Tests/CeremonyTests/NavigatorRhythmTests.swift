@@ -124,15 +124,28 @@ struct NavigatorRhythmTests {
         window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         window.contentView = host
         defer { window.close() }
-        for _ in 0..<15 {
-            host.layoutSubtreeIfNeeded()
-            try? await Task.sleep(for: .milliseconds(20))
-        }
+        await settle(host) { "\(box.marks.map(\.1)) \(box.probes.map(\.1))" }
         if let capture, let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
             host.cacheDisplay(in: host.bounds, to: rep)
             try? rep.representation(using: .png, properties: [:])?.write(to: capture)
         }
         return classify(marks: box.marks, probes: box.probes)
+    }
+
+    /// Lay `host` out until what `reading` reads has held still for five
+    /// passes in a row: the navigator's panes take a pass or two to measure
+    /// their rows (`NavigatorSplitView`), more on a busy machine running the
+    /// whole suite at once. At least ten passes, at most 150 (3 s).
+    static func settle(_ host: NSView, reading: () -> String) async {
+        var last = "", still = 0
+        for pass in 0..<150 {
+            host.layoutSubtreeIfNeeded()
+            try? await Task.sleep(for: .milliseconds(20))
+            let now = reading()
+            still = now == last ? still + 1 : 0
+            last = now
+            if pass >= 10, still >= 5 { return }
+        }
     }
 
     /// A row's text sits this far inside its box (`NavigatorRowStyle`).

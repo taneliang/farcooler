@@ -162,6 +162,8 @@ struct ContentView: View {
     /// The navigator's width, as its trailing edge was last dropped, on
     /// this Mac (ov-92).
     @AppStorage("workspace.navigatorWidth") private var navigatorWidth = Double(WorkspaceColumns.navigatorDefault)
+    /// The navigator's pane heights a drag chose, this window's (ov-244).
+    @SceneStorage("navigator.split") private var navigatorSplit = ""
     /// Asks the navigator for the keyboard: bumped by ⌥⌘2, and by a click
     /// on a row, so ↑ and ↓ walk it from there.
     @State var boardFocusRequest = 0
@@ -2481,7 +2483,8 @@ struct ContentView: View {
                 onStep: { item in step(to: item, host: host, workspace: workspace) },
                 onHistory: { status in openHistory(status, host: host, workspace: workspace.id) },
                 filterRequest: boardFilterRequest,
-                ask: askOrchestrator(host: host, workspace: workspace)
+                ask: askOrchestrator(host: host, workspace: workspace),
+                split: $navigatorSplit
             )
         } else {
             // Said, rather than the generic "Select a worktree": this

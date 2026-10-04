@@ -665,6 +665,11 @@ struct TaskBoardView: View {
     let filterRequest: Int
     /// Ask the Orchestrator, on each row's menu.
     let ask: AskOrchestrator.Action
+    /// The pane heights a drag chose (`NavigatorSplit.encode`): the
+    /// window's, kept with it; else this view's own.
+    private let splitBinding: Binding<String>?
+    @State private var ownSplit = ""
+    private var split: Binding<String> { splitBinding ?? $ownSplit }
 
     /// The list's collapsed sections: read from `defaults` in `init`, and
     /// again when the view is handed another board.
@@ -744,7 +749,7 @@ struct TaskBoardView: View {
         worktrees: @escaping (TaskBoardModel) -> BoardWorktrees = { _ in .none },
         orchestrator: NavigatorOrchestrator? = nil, current: NavigatorItem? = nil,
         onStep: ((NavigatorItem) -> Void)? = nil, onHistory: @escaping (TaskStatus) -> Void = { _ in },
-        filterRequest: Int = 0, ask: AskOrchestrator.Action = .unavailable
+        filterRequest: Int = 0, ask: AskOrchestrator.Action = .unavailable, split: Binding<String>? = nil
     ) {
         self.store = store
         self.client = client
@@ -763,6 +768,7 @@ struct TaskBoardView: View {
         self.onHistory = onHistory
         self.filterRequest = filterRequest
         self.ask = ask
+        self.splitBinding = split
         _collapsed = State(
             initialValue: BoardForm.collapsed(
                 host: store.hostKey, workspace: store.workspace.id, from: defaults))
@@ -918,64 +924,36 @@ struct TaskBoardView: View {
         let terminals = worktrees.terminals.narrowed(by: filter)
         let inProgress = store.board.columns.first { $0.status == .inProgress }?.rows.count ?? 0
         let unreadable = !shown.unreadable.isEmpty
-        // The sections' slots touch: each one's room over it is its own
-        // (`NavigatorRhythm`, ov-243), a rule's half the section gap on
-        // either side, and a section that follows another with no rule
-        // between them the whole section gap.
         let showsTasks = plan.showsTasks(unreadable: unreadable)
         let ruleUnderOrchestrator = orchestrator != nil && plan.showsOrchestrator
             && (showsTasks || terminals.isShown || plan.showsWorktrees)
-        let ruleUnderTasks = showsTasks && (terminals.isShown || plan.showsWorktrees)
         return ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    if plan.isEmpty(unreadable: unreadable) && !terminals.isShown {
-                        NavigatorNoResults(filter: filter)
-                    }
-                    if let orchestrator, plan.showsOrchestrator {
-                        OrchestratorRowView(
-                            model: orchestrator, inProgress: inProgress, selected: place == .orchestrator,
-                            keyed: hasKeyboard)
-                        .id(NavigatorItem.orchestrator)
-                        .padding(.horizontal, NavigatorGrid.edge)
-                        if ruleUnderOrchestrator {
-                            Divider().probed("navigator-divider")
-                                .padding(.vertical, NavigatorRhythm.rule)
-                        }
-                    }
-                    if showsTasks {
-                        section("Tasks", id: "tasks") {
-                            tasks(plan, shown: shown, worktrees: worktrees)
-                        }
-                    }
-                    // One rule under the tasks, before whatever follows
-                    // them; Terminals and Worktrees, the two lists that
-                    // aren't tasks, are set apart by space (ov-216's
-                    // `Spacing.section`), not by another line.
-                    if ruleUnderTasks {
+            // The orchestrator's row stays put over the panes; each pane
+            // scrolls on its own under its header (`NavigatorSplitView`,
+            // ov-244). Slots touch, each keeping its own room
+            // (`NavigatorRhythm`, ov-243), a rule's half a section gap on
+            // either side.
+            VStack(alignment: .leading, spacing: 0) {
+                if plan.isEmpty(unreadable: unreadable) && !terminals.isShown {
+                    NavigatorNoResults(filter: filter)
+                }
+                if let orchestrator, plan.showsOrchestrator {
+                    OrchestratorRowView(
+                        model: orchestrator, inProgress: inProgress, selected: place == .orchestrator,
+                        keyed: hasKeyboard)
+                    .id(NavigatorItem.orchestrator)
+                    .padding(.horizontal, NavigatorGrid.edge)
+                    if ruleUnderOrchestrator {
                         Divider().probed("navigator-divider")
                             .padding(.vertical, NavigatorRhythm.rule)
                     }
-                    if terminals.isShown {
-                        // No count when it only offers New Terminal: "0"
-                        // would read as something to look at.
-                        section(
-                            "Terminals", id: "terminals",
-                            count: terminals.terminals.isEmpty ? nil : terminals.terminals.count
-                        ) {
-                            ProjectTerminalsSection(terminals: terminals, keyed: hasKeyboard)
-                        }
-                    }
-                    if plan.showsWorktrees {
-                        section("Worktrees", id: "worktrees", count: worktrees.shown.count) {
-                            BoardWorktreesSection(worktrees: worktrees, keyed: hasKeyboard)
-                        }
-                        .padding(.top, terminals.isShown ? NavigatorRhythm.section : 0)
-                    }
                 }
-                .padding(.vertical, NavigatorRhythm.band)
-                .unanimatedWhenFiltering(filter)
+                NavigatorSplitView(panes: panes(
+                    showsTasks: showsTasks, plan: plan, shown: shown, worktrees: worktrees, terminals: terminals),
+                    kept: split)
             }
+            .padding(.top, NavigatorRhythm.band)
+            .unanimatedWhenFiltering(filter)
             // The row selected stays in sight as ↑ and ↓ step past the edge,
             // scrolled by as little as that takes.
             .onChange(of: place) { _, item in
@@ -1136,11 +1114,10 @@ struct TaskBoardView: View {
     /// (ov-177), whose closed state, kept from before, is no longer read.
     static let navigatorSections = ["tasks", "terminals", "worktrees"]
 
-    /// A navigator section (ov-92): the one collapsible section, in the
-    /// navigator's style, its open state kept per board on this Mac.
-    private func section<Content: View>(
-        _ title: String, id: String, count: Int? = nil, @ViewBuilder _ content: @escaping () -> Content
-    ) -> some View {
+    /// A navigator section's header (ov-92): the one collapsible section,
+    /// in the navigator's style, its open state kept per board on this Mac.
+    /// Its rows are its pane's, under it (`NavigatorSplitView`, ov-244).
+    private func sectionHeader(_ title: String, id: String, count: Int? = nil) -> some View {
         CollapsibleSection(
             title, id: id, style: .navigator,
             isExpanded: Binding(
@@ -1149,8 +1126,38 @@ struct TaskBoardView: View {
                     if open { closedSections.remove(id) } else { closedSections.insert(id) }
                     defaults.set(!open, forKey: Self.closedKey(id, store: store))
                 }),
-            count: count, content: content)
+            count: count) { EmptyView() }
         .padding(.horizontal, NavigatorGrid.edge)
+    }
+
+    /// The navigator's panes, Tasks, Terminals and Worktrees, those shown.
+    private func panes(
+        showsTasks: Bool, plan: NavigatorFiltering, shown: TaskBoardModel, worktrees: BoardWorktrees,
+        terminals: ProjectTerminals
+    ) -> [NavigatorSplitPane] {
+        var panes: [NavigatorSplitPane] = []
+        func pane(_ id: String, fills: Bool = false, header: some View, content: some View) {
+            panes.append(NavigatorSplitPane(
+                id: id, fills: fills, expanded: !closedSections.contains(id), header: AnyView(header),
+                content: AnyView(content.padding(.horizontal, NavigatorGrid.edge))))
+        }
+        if showsTasks {
+            pane("tasks", fills: true, header: sectionHeader("Tasks", id: "tasks"),
+                content: tasks(plan, shown: shown, worktrees: worktrees))
+        }
+        if terminals.isShown {
+            // No count when it only offers New Terminal: "0" would read as
+            // something to look at.
+            pane("terminals",
+                header: sectionHeader(
+                    "Terminals", id: "terminals", count: terminals.terminals.isEmpty ? nil : terminals.terminals.count),
+                content: ProjectTerminalsSection(terminals: terminals, keyed: hasKeyboard))
+        }
+        if plan.showsWorktrees {
+            pane("worktrees", header: sectionHeader("Worktrees", id: "worktrees", count: worktrees.shown.count),
+                content: BoardWorktreesSection(worktrees: worktrees, keyed: hasKeyboard))
+        }
+        return panes
     }
 
     /// Listen for ↑ and ↓, repeats included, in this board's window while

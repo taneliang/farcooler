@@ -96,7 +96,7 @@ enum NavigatorGrid {
 /// | Group header: Unread, a task status     |  16   |   8   |
 /// | Subgroup header: Finished, New          |  12   |   8   |
 /// | Row, "and 2 more", New Terminal         |   8   |   —   |
-/// | Rule under the orchestrator             |  12   |  12   |
+/// | Rule: under the orchestrator, between panes | 12 | 12 |
 ///
 /// A rule stands in the middle of the section gap it replaces. The slot
 /// gaps below are what a view adds between slots to get those: the gap

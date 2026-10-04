@@ -65,10 +65,7 @@ struct GridGeometryTests {
         window.isReleasedWhenClosed = false
         window.contentView = host
         defer { window.close() }
-        for _ in 0..<10 {
-            host.layoutSubtreeIfNeeded()
-            try? await Task.sleep(for: .milliseconds(20))
-        }
+        await NavigatorRhythmTests.settle(host) { "\(box.marks.map(\.description))" }
         return box.marks
     }
 
