@@ -174,7 +174,7 @@ class BoardReadsKeeperTest {
         k.adopt(runner.board())  // a board read, while the send is out: it doesn't wait
         k.open(row("b"))
         runCurrent()
-        assertEquals("one send at a time, the rest wait their turn", 1, runner.sent.size - 1)
+        assertEquals("one send at a time, the rest wait their turn", 1, runner.sent.size)
         gate.complete(Unit)
         k.flush()
         assertEquals(moved, runner.marks[task])

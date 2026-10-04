@@ -51,7 +51,7 @@ class BoardSummaryTest {
         assertFalse(BoardReads(now - day).open(future, now).finishedUnread(future))
 
         // Mark All as Read.
-        val all = reads.markAllReadSeenThrough(listOf(fin, new), null)
+        val all = reads.markAllReadOnDeviceClock(listOf(fin, new), now)
         assertTrue(BoardSummary.make(listOf(fin, new), notes, all).isEmpty)
         assertTrue(all.opened.isEmpty())
     }

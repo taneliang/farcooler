@@ -533,7 +533,7 @@ class Connection(
             attempt { core.call("task.list", BoardReads.request(workspace)) }
                 .getOrNull()
                 ?.let { text ->
-                    runCatching { TaskBoard.decode(text) }.getOrNull()?.also { readsSync.adopt(workspace.id, text) }
+                    runCatching { TaskBoard.decode(text) }.getOrNull()?.also { readsSync.adopt(workspace.id, text.toString()) }
                 }
         },
     )
@@ -545,7 +545,7 @@ class Connection(
         scope = scope,
         markRead = { workspace, raise ->
             if (daemonBuild.current.value?.can(Capability.BOARD_READS) != true) null
-            else attempt { core.call("workspace.mark_read", raise.arguments(workspace)) }.getOrNull()
+            else attempt { core.call("workspace.mark_read", raise.arguments(workspace)) }.getOrNull()?.toString()
         },
     )
     val readState: StateFlow<Map<String, com.farcooler.model.BoardReads>> = readsSync.reads
