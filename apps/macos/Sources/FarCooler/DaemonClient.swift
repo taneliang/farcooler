@@ -657,6 +657,12 @@ final class DaemonClient: ObservableObject {
             // whole-window updates per event, and an event that changed nothing
             // still cost all of them (ov-229).
             var updated = fleet.worktrees[w].terminals[t]
+            // What the pane is called, and the handle the CLI addresses it by.
+            // Neither was applied, which `EventResyncTests` found by listing
+            // every field the event carries: a pane renamed on the runner kept
+            // its old name here until a full read happened to replace it.
+            updated.title = event.title
+            updated.short = event.short
             updated.state = event.state
             updated.activity = event.activity
             // What is RUNNING, which is also what the terminal is CALLED.

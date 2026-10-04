@@ -1,5 +1,6 @@
 import AgentKit
 import Foundation
+import os
 
 /// Changes pushed from the daemon, one JSON object per line.
 ///
@@ -304,7 +305,8 @@ final class EventStream {
 
         let out = Pipe()
         p.standardOutput = out
-        p.standardError = Pipe()
+        // Nothing reads it, and a child that fills a pipe nobody drains stops.
+        p.standardError = FileHandle.nullDevice
 
         // Lines can arrive split across reads, so a partial one is held until
         // its newline shows up. Parsing half an object would be worse than
@@ -366,15 +368,22 @@ final class EventStream {
         // Guessing worked while there was one shape; with two, a layout
         // line that happened to decode as a terminal would have been
         // applied as one.
-        guard let kind = try? decoder.decode(EventKind.self, from: line) else { return }
+        guard let kind = try? decoder.decode(EventKind.self, from: line) else {
+            missed("a line with no kind", line, onMissed)
+            return
+        }
         switch kind.kind {
         case "terminal":
             if let event = try? decoder.decode(TerminalEvent.self, from: line) {
                 onEvent(event)
+            } else {
+                missed("a terminal event", line, onMissed)
             }
         case "layout":
             if let event = try? decoder.decode(LayoutEvent.self, from: line) {
                 onLayout(event)
+            } else {
+                missed("a layout event", line, onMissed)
             }
         case "fleet":
             onFleet()
@@ -383,6 +392,8 @@ final class EventStream {
         case "task":
             if let event = try? decoder.decode(TaskEvent.self, from: line) {
                 onTask(event)
+            } else {
+                missed("a task event", line, onMissed)
             }
         // Not a resource: news that some of the lines above never came. It
         // used to fall into `default` below, which is how a Mac that fell
@@ -396,15 +407,35 @@ final class EventStream {
         case "notice":
             if let notice = try? decoder.decode(NoticeEvent.self, from: line) {
                 onNotice(notice)
+            } else {
+                missed("a notice", line, onMissed)
             }
         // A board's read state, whole, from another device (ov-113).
         case "reads":
             if let reads = try? decoder.decode(WireBoardReads.self, from: line) {
                 onReads(reads)
+            } else {
+                missed("a board's reads", line, onMissed)
             }
         // Resources this app does not track yet are skipped, not an error.
         default: return
         }
+    }
+
+    private static let log = Logger(subsystem: "com.farcooler.FarCooler", category: "events")
+
+    /// A line of a kind this app tracks that did not decode.
+    ///
+    /// Dropping it left the window on a stale picture while it still said
+    /// Connected: a field the daemon added or retyped would silence every
+    /// event of that kind, with no error anywhere. It counts as an event that
+    /// never arrived, so the answer is the same one `events_missed` gets: read
+    /// everything again.
+    private static func missed(_ what: String, _ line: Data, _ onMissed: () -> Void) {
+        // Names the kind and the size, never the line: it can carry an agent's
+        // words.
+        log.error("Couldn't decode \(what, privacy: .public) (\(line.count, privacy: .public) bytes); re-reading")
+        onMissed()
     }
 
     func stop() {
