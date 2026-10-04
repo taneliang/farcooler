@@ -105,10 +105,13 @@ extension Connection {
         case .theme(let id): subject = ["theme": id]
         case .lane(let id): subject = ["lane": id]
         }
-        guard keepsPlan, let data = try? await rpc("plan.events", subject),
-            let record = try? PlanRecord.decode(data)
-        else { return }
-        plans.set(record, for: page)
+        guard keepsPlan else { return }
+        do {
+            plans.set(try PlanRecord.decode(try await rpc("plan.events", subject)), for: page)
+        } catch {
+            // The page has its theme or lane without a timeline; the next
+            // plan notice reads the record again.
+        }
     }
 
     /// News that a plan moved: `notice` is the client core's line. Boards

@@ -262,8 +262,9 @@ struct PlanLaneRow: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        // What VoiceOver reads is what's drawn: the rank, the name, the theme,
+        // the reason or state, and a warning, in that order.
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibility)
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("plan-lane-\(lane.name)")
     }
@@ -304,12 +305,6 @@ struct PlanLaneRow: View {
                 .foregroundStyle(warning == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(GlancePalette.amber(scheme)))
                 .accessibilityHidden(true)
         }
-    }
-
-    private var accessibility: String {
-        var parts = [rank.map { "\(PlanWords.ordinal($0)) up" }, lane.name, theme?.name, second, warning]
-        parts.removeAll { $0 == nil }
-        return parts.compactMap { $0 }.joined(separator: ", ")
     }
 }
 

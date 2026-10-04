@@ -59,6 +59,15 @@ final class PlanUITests: XCTestCase {
         XCTAssertFalse(element(app, "plan-next-up").exists)
     }
 
+    /// Plan was chosen, and then the runner stopped keeping a plan: the board
+    /// is its tasks, and nothing of the plan is left.
+    func testARunnerThatLostBoardPlanDrawsTasksWhateverWasChosen() {
+        let app = openBoard(["-phone-plan-was-chosen"])
+        XCTAssertTrue(element(app, "board-section-needs_decision").waitForExistence(timeout: 10), "no tasks")
+        XCTAssertFalse(app.segmentedControls["plan-switch"].exists)
+        XCTAssertFalse(element(app, "plan-next-up").exists, "the plan is up on a runner that keeps none")
+    }
+
     func testTasksIsTheDefaultAndPlanSwitchesOnlyTheTaskList() {
         let app = openBoard()
         let control = app.segmentedControls["plan-switch"]
@@ -69,7 +78,12 @@ final class PlanUITests: XCTestCase {
 
         control.buttons["Plan"].tap()
         XCTAssertTrue(element(app, "plan-next-up").waitForExistence(timeout: 10), "no Next Up: \(app.debugDescription)")
-        XCTAssertFalse(element(app, "board-section-needs_decision").exists, "the task list stayed under the plan")
+        // The list is lazy: look down the whole of the plan for a task section.
+        for _ in 0..<12 { app.swipeUp() }
+        XCTAssertEqual(
+            app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'board-section-'")).count, 0,
+            "the task list stayed under the plan")
+        for _ in 0..<12 { app.swipeDown() }
         XCTAssertTrue(element(app, "board-unread").exists, "the Unread strip went with the tasks")
         XCTAssertTrue(control.exists, "the control went")
         keep(app, "plan-overview")
@@ -85,8 +99,15 @@ final class PlanUITests: XCTestCase {
         XCTAssertTrue(element(app, "plan-next-up").waitForExistence(timeout: 10))
         let lane = element(app, "plan-lane-plan-phones")
         XCTAssertTrue(lane.waitForExistence(timeout: 5), "no plan-phones in Next Up")
+        // What the row says is what it draws, so a theme that isn't drawn isn't here.
         XCTAssertTrue(lane.label.contains("Plan layer"), "the lane doesn't name its theme: \(lane.label)")
-        XCTAssertTrue(lane.label.hasPrefix("1st up"), lane.label)
+        XCTAssertTrue(lane.label.contains("Unblocked once the store"), lane.label)
+        let now = element(app, "plan-now")
+        for _ in 0..<8 where !now.exists { app.swipeUp() }
+        XCTAssertTrue(now.exists, "no Now section")
+        let working = element(app, "plan-lane-mac-vis")
+        for _ in 0..<4 where !working.exists { app.swipeUp() }
+        XCTAssertTrue(working.exists && working.label.contains("Visual language"), "a lane in Now doesn't name its theme")
 
         let theme = element(app, "plan-theme-Visual language")
         for _ in 0..<8 where !(theme.exists && theme.isHittable) { app.swipeUp() }

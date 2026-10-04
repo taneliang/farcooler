@@ -51,6 +51,7 @@ import SwiftUI
 //   -phone-plan, -phone-plan-fails, -phone-plan-hangs, -phone-plan-timeout N,
 //                            -phone-plan-file <path>: the plan layer (ov-274), see
 //                            PhonePlanHarness.swift
+//   -phone-plan-was-chosen   Plan was chosen on Billing's board before this runner lost board_plan
 //   -phone-board-first       Billing opens on its Board segment, for a capture that sends no input
 //   -phone-terminal-key      the shell terminal (d003) opens with a line naming bil-9, a task on
 //                            Billing's board, for a long press to land on (ov-215)
@@ -129,6 +130,11 @@ struct PhoneHarness: View {
             || key.hasPrefix("board.read.") || key.hasPrefix("board.plan.")
         {
             UserDefaults.standard.removeObject(forKey: key)
+        }
+        if CommandLine.arguments.contains("-phone-plan-was-chosen") {
+            // Plan was chosen on Billing's board before this runner lost the layer.
+            PlanChoice.set(
+                true, host: HarnessRunner.host.id.uuidString, workspace: HarnessRunner.billing)
         }
         if CommandLine.arguments.contains("-phone-board-first") {
             WorkspaceSegment.board.remember(
