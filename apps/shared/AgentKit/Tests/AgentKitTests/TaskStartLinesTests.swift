@@ -81,8 +81,16 @@ private enum JSONValue: Decodable {
     }
 }
 
+/// Read from the source tree, never from the copy SwiftPM puts in the build
+/// directory. A build that overlaps a test run (a second `swift test` in the
+/// same checkout, or the Mac package building beside it) re-copies that
+/// resource bundle, and a test that reads it in that moment finds the file
+/// missing or half written and fails once in a few runs, then passes on the
+/// rerun (ov-237). The Mac and Android tests read this same path.
 private func fixture() throws -> Fixture {
-    let url = try #require(Bundle.module.url(forResource: "task_start_lines", withExtension: "json"))
+    let url = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .appendingPathComponent("task_start_lines.json")
     return try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: url))
 }
 

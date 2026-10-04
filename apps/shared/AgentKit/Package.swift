@@ -40,6 +40,7 @@ let package = Package(
         .testTarget(
             name: "AgentKitTests",
             dependencies: ["AgentKit"],
-            resources: [.copy("live_events.jsonl"), .copy("task_start_lines.json")]),
+            exclude: ["task_start_lines.json"],  // read from the source tree, not the bundle (ov-237)
+            resources: [.copy("live_events.jsonl")]),
     ]
 )
