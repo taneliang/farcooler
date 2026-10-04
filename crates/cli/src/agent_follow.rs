@@ -42,8 +42,13 @@ pub(crate) fn advance(from_seq: u64, epoch: u64, first: bool, batch: &AgentEvent
     (next, batch.epoch, first || moved || !batch.events.is_empty())
 }
 
-/// The JSON line for a batch. Kept in step with the one-shot command, whose
-/// keys `AgentStream.swift` decodes: `events`, `seq`, `payloadJson`, `epoch`.
+/// The JSON line for a batch, for `--follow` and the one-shot command alike.
+///
+/// `AgentStream.swift`'s `Batch`/`EventFrame` decode with the stock
+/// `JSONDecoder`, with no snake_case conversion configured, so these keys
+/// must be exactly `events`/`seq`/`payloadJson`/`epoch`. Renaming any of them
+/// here does not fail to compile; it makes the Mac app silently drop every
+/// batch it receives.
 pub(crate) fn line(batch: &AgentEventBatch) -> String {
     serde_json::json!({
         "epoch": batch.epoch,

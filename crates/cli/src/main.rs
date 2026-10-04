@@ -2952,21 +2952,9 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
                 return Err(crate::daemon_link::UNREADABLE.into());
             };
             if json {
-                // `AgentStream.swift`'s `Batch`/`EventFrame` decode with the
-                // stock `JSONDecoder` — no snake_case conversion configured —
-                // so these keys must be exactly `events`/`seq`/`payloadJson`.
-                // Renaming any of them here does not fail to compile, it just
-                // makes the Mac app silently drop every batch it receives.
-                println!(
-                    "{}",
-                    serde_json::json!({
-                        "epoch": batch.epoch,
-                        "events": batch.events.iter().map(|e| serde_json::json!({
-                            "seq": e.seq,
-                            "payloadJson": e.payload_json,
-                        })).collect::<Vec<_>>(),
-                    })
-                );
+                // The same line `--follow` prints, so one decoder reads both:
+                // see `agent_follow::line` on why its keys can't change.
+                println!("{}", agent_follow::line(&batch));
             } else if batch.events.is_empty() {
                 println!("no new agent events");
             } else {
