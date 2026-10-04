@@ -68,3 +68,40 @@ enum ReviewMemory {
         }
     }
 }
+
+extension ChangesStore {
+    /// Write down where the review is, when it's changed and it's the
+    /// reader's own (`positionApplied`).
+    func remember() {
+        guard positionApplied else { return }
+        let place = ReviewPlace(
+            scope: ReviewPlace.scope(scope, commit: selectedCommit), file: selectedFile, topFile: nil, savedAt: 0)
+        guard place != lastKept else { return }
+        lastKept = place
+        var stamped = place
+        stamped.savedAt = Date().timeIntervalSince1970
+        ReviewMemory.write(stamped, host: worktree.host ?? "", worktree: worktree.id, in: defaults)
+    }
+
+    /// The first time the change set is read: put the kept comparison and file
+    /// back, quietly. A commit that's gone is the whole branch again; a file
+    /// that's gone leaves the top of it. Nothing is said either way.
+    func applyKeptPosition() async {
+        positionApplied = true
+        guard let kept = ReviewMemory.read(host: worktree.host ?? "", worktree: worktree.id, in: defaults),
+            selectedFile == nil, scope == .branch
+        else { return }
+        let landing = ReviewMemory.landing(kept, in: changeSet)
+        if let sha = landing.commit {
+            await select(commit: sha)
+        } else if landing.scope != scope {
+            scope = landing.scope
+        }
+        if let file = landing.file, files.contains(where: { $0.path == file }) {
+            selectedFile = file
+            restoreTarget = file
+        }
+        lastKept = nil
+        remember()
+    }
+}
