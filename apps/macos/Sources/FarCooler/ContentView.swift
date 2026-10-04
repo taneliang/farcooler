@@ -2264,10 +2264,9 @@ struct ContentView: View {
         let ask = askOrchestrator(host: host, workspace: board.workspace)
         // Open Terminal in This Task's Worktree, where there is one and its
         // runner answers.
-        let newTerminalHere: (() -> Void)? = {
-            guard let lane, store.refusal(for: host) == nil else { return nil }
-            return { newTerminalInTaskWorktree(lane, openWorktree: openWorktree) }
-        }()
+        let newTerminalHere = TaskColumnModel.newTerminalAction(
+            in: lane, refused: store.refusal(for: host) != nil,
+            openWorktree: openWorktree, newTerminal: { newTerminal(in: $0) })
         let start = TaskStartPanel(
             sentence: TaskColumnModel.sentence(agent) ?? "", row: row, ask: ask)
         return VStack(spacing: 0) {
@@ -2350,14 +2349,6 @@ struct ContentView: View {
         .task(id: settled ? row.id : nil) {
             if settled { await board.open(row) }
         }
-    }
-
-    /// Open Terminal in This Task's Worktree (ov-234): the worktree open whole,
-    /// as Open Worktree opens it, so Back returns to the task, and a plain
-    /// shell in it. Nothing is typed into it.
-    private func newTerminalInTaskWorktree(_ lane: Worktree, openWorktree: () -> Void) {
-        openWorktree()
-        newTerminal(in: lane)
     }
 
     /// Move to Its Own Window: `terminal`, sharing the orchestrator's

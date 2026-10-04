@@ -96,6 +96,22 @@ enum TaskColumnModel {
         }
     }
 
+    /// What the task view's New Terminal button does (ov-234): open the
+    /// task's worktree whole first, so Back returns to the task, then make a
+    /// plain shell in it. Nil, so no button, when the task has no worktree or
+    /// its runner can't answer.
+    static func newTerminalAction(
+        in lane: Worktree?, refused: Bool,
+        openWorktree: @escaping () -> Void,
+        newTerminal: @escaping (Worktree) -> Void
+    ) -> (() -> Void)? {
+        guard let lane, !refused else { return nil }
+        return {
+            openWorktree()
+            newTerminal(lane)
+        }
+    }
+
     /// The agent's state in the header, "claude working", or nil with no
     /// agent: its name and the navigator's own state word
     /// (`OrchestratorRow`), so the two can't come to say it differently.
