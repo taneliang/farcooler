@@ -81,6 +81,13 @@ extension TaskBoardStore {
     /// What the runner said about this board's read state: merged into
     /// `reads`, which can only rise.
     func adopt(runner state: BoardReads) {
+        if !runnerKeepsReads, (readsBeforeLaunch?.floor ?? .distantPast) <= .distantPast {
+            // The floor `load` made up on this Mac's first look hid nothing
+            // from the runner and must not hide what the runner shows (ov-254):
+            // the runner's state stands in for it, with this Mac's marks and
+            // what it owes. A floor somebody set stays, and merges by max.
+            reads = pendingReads.applied(to: BoardReads(floor: .distantPast, opened: reads.opened))
+        }
         runnerKeepsReads = true
         let known = runnerReads.map { $0.merged(with: state) } ?? state
         runnerReads = known

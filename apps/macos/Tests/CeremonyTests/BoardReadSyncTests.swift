@@ -238,6 +238,35 @@ struct BoardReadSyncTests {
         #expect(runner.state() == Self.state(floor: Self.moved - 9_000_000))
     }
 
+    /// A Mac first opened after the runner's own first look made up its own
+    /// floor (a day back), which hid what the runner shows unread elsewhere
+    /// (ov-254). Once the runner answers, its floor stands in.
+    @Test func aFirstLookTheMacMadeUpDoesNotHideWhatTheRunnerShows() async {
+        let runner = Runner()
+        runner.reads = Self.state(floor: Self.moved - 9_000_000)
+        let store = store(runner, defaults: UserDefaults(suiteName: "ov254-\(UUID().uuidString)")!)
+        await load(store)
+        #expect(store.runnerKeepsReads)
+        #expect(unread(store), "the runner says it is unread")
+        #expect(store.reads.floor == Date(timeIntervalSince1970: Double(Self.moved - 9_000_000) / 1000))
+    }
+
+    /// A floor somebody set (Mark All as Read) is not made up, and still
+    /// stands when the runner's is lower, even before the runner has taken it.
+    @Test func aFloorTheMacKeptStillStandsOnARunnerThatKeepsState() async {
+        let defaults = UserDefaults(suiteName: "ov254-\(UUID().uuidString)")!
+        DefaultsBoardReads(defaults).save(
+            BoardReads(floor: Date(timeIntervalSince1970: Double(Self.moved + 3_600_000) / 1000)),
+            host: "local", workspace: Self.ws)
+        let runner = Runner()
+        runner.reads = Self.state(floor: Self.moved - 9_000_000)
+        runner.failMarks = true
+        let store = store(runner, defaults: defaults)
+        await load(store)
+        #expect(store.runnerKeepsReads)
+        #expect(!unread(store), "the floor this Mac kept holds")
+    }
+
     /// A real Mark All as Read made offline, on an old runner, goes up at
     /// the next launch on one that keeps reads.
     @Test func aRealMarkAllAsReadOfflineIsUploadedLater() async throws {
