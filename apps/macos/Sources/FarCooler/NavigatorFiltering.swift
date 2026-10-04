@@ -8,7 +8,8 @@ import SwiftUI
 /// navigator says so once (`NavigatorNoResults`).
 ///
 /// Unfiltered, everything shows, as before: every status's header, empty or
-/// not, and Unread with its sentence when it has nothing.
+/// not, and Unread with its sentence when a board with tasks has nothing
+/// unread. A board with no task at all says what tasks are for instead.
 struct NavigatorFiltering {
     /// Whether a filter is narrowing the navigator at all.
     let filtering: Bool
@@ -24,6 +25,11 @@ struct NavigatorFiltering {
     /// The Worktrees section's, filtered: the matching ones, without the
     /// hidden ones or New Worktree….
     let worktrees: BoardWorktrees
+
+    /// An unfiltered board with nothing on it: no task in any status. It
+    /// draws `BoardBlankState` in place of Unread and seven empty headers,
+    /// since there is nothing to be caught up on (ov-205).
+    let isBlank: Bool
 
     /// Whether the Tasks section is drawn: unfiltered, always.
     func showsTasks(unreadable: Bool) -> Bool {
@@ -49,8 +55,8 @@ struct NavigatorFiltering {
     ) -> NavigatorFiltering {
         guard !BoardFilter.isEmpty(filter) else {
             return NavigatorFiltering(
-                filtering: false, showsOrchestrator: hasOrchestrator, showsUnread: true, sections: board.sections,
-                worktrees: worktrees)
+                filtering: false, showsOrchestrator: hasOrchestrator, showsUnread: !BoardForm.isBlank(board),
+                sections: board.sections, worktrees: worktrees, isBlank: BoardForm.isBlank(board))
         }
         var narrowed = worktrees
         narrowed.shown = worktrees.shown.filter { BoardFilter.matches(key: $0.task, title: $0.branch, filter) }
@@ -62,7 +68,7 @@ struct NavigatorFiltering {
                 && BoardFilter.matches(key: "Orchestrator", title: agent ?? "", filter),
             showsUnread: unreadMatches,
             sections: board.sections.filter { !$0.rows.isEmpty },
-            worktrees: narrowed)
+            worktrees: narrowed, isBlank: false)
     }
 }
 

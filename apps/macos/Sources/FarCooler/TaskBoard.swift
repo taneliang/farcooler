@@ -1062,6 +1062,8 @@ struct TaskBoardView: View {
                         Button("Try Again") { Task { await store.reload() } }
                     }
                 }
+            } else if plan.isBlank {
+                BoardBlankState()
             } else {
                 ForEach(plan.sections) { section in
                     TaskListSection(
@@ -1088,9 +1090,7 @@ struct TaskBoardView: View {
                         ask: ask,
                         rows: rowSpace)
                 }
-                if !shown.unreadable.isEmpty {
-                    UnreadableColumnView(rows: shown.unreadable)
-                }
+                if !shown.unreadable.isEmpty { UnreadableColumnView(rows: shown.unreadable) }
             }
         }
     }
