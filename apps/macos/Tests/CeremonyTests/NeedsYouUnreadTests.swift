@@ -47,9 +47,13 @@ struct NeedsYouUnreadTests {
         #expect(shown.count == 1, "the blocked agent is shown, not 'Nothing Needs You'")
         #expect(shown.first?.terminal?.id == "t-159")
         #expect(client.needsYouUnanswered)
+        // Through the view's own wiring, not the phone's helper alone: the
+        // name opens the sentence, so it is capitalized, and it is the runner.
+        let names = FleetStore.unansweredNames([""], ["": client])
+        #expect(names == ["This Mac’s runner"])
         #expect(
-            PhoneInbox.caveat(unanswered: ["this Mac"])
-                == "this Mac isn’t answering, so this may not be everything.")
+            PhoneInbox.caveat(unanswered: names)
+                == "This Mac’s runner isn’t answering, so this may not be everything.")
     }
 
     @Test func aReadListReplacesTheDerivedItemsAndDropsTheCaveat() async throws {

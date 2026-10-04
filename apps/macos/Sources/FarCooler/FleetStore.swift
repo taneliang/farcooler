@@ -302,8 +302,7 @@ final class FleetStore: ObservableObject {
         if reading != merged.reading { reading = merged.reading }
         let items = Self.shownNeedsYou(clients)
         if items != needsYou { needsYou = items }
-        let unanswered = hosts.filter { clients[$0]?.needsYouUnanswered == true }
-            .map { $0.isEmpty ? "this Mac" : $0 }
+        let unanswered = Self.unansweredNames(hosts, clients)
         if unanswered != needsYouUnanswered { needsYouUnanswered = unanswered }
         let settled = Self.settled(clients.values.map { ($0.state, $0.needsYouKnown) })
         if settled != needsYouSettled { needsYouSettled = settled }
@@ -323,6 +322,17 @@ final class FleetStore: ObservableObject {
             }
         }
         return PhoneInbox.shown(lists: lists, unread: unread)
+    }
+
+    /// What the caveat calls this Mac's own runner. The runner is the word, and
+    /// it opens the sentence, so it is capitalized: "This Mac’s runner isn’t
+    /// answering, so this may not be everything."
+    static let localRunnerName = "This Mac’s runner"
+
+    /// The runners that haven't answered, by the name the caveat uses.
+    static func unansweredNames(_ hosts: [String], _ clients: [String: DaemonClient]) -> [String] {
+        hosts.filter { clients[$0]?.needsYouUnanswered == true }
+            .map { $0.isEmpty ? localRunnerName : $0 }
     }
 
     /// The runners that haven't said what needs a person, by name, for the
