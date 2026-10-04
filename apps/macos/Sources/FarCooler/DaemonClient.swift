@@ -1488,10 +1488,11 @@ final class DaemonClient: ObservableObject {
     /// Touches nothing on disk, same as the CLI's own `root remove` promises.
     @discardableResult
     func removeRoot(_ id: String, confirm: String) async -> RemoveRootResult {
-        let (data, failure) = await runRaw(["root", "remove", id, "--confirm", confirm])
+        // `--json` for the `code:` line the refusal is told apart by.
+        let (data, failure) = await runRaw(["root", "remove", id, "--confirm", confirm, "--json"])
         guard data != nil else {
             let message = failure ?? "command failed"
-            if message.localizedCaseInsensitiveContains("confirmation") {
+            if TaskFailure.isConfirmationRequired(message) {
                 return .confirmationRequired
             }
             return .failed(message)
@@ -2316,15 +2317,13 @@ final class DaemonClient: ObservableObject {
         if let data {
             return (try? JSONDecoder().decode(WorkspaceSummary.self, from: data), nil)
         }
+        let context = "Couldn’t make \(name)."
         switch TaskFailure.code(in: message) {
         case "invalid-argument":
+            // Specific to this call: the one argument a person types.
             return (nil, "That prefix is taken or isn’t valid. Use a letter and up to seven letters or digits.")
-        case "capability-unsupported":
-            return (nil, "This runner’s Far Cooler is too old to make workspaces. Update it there, then try again.")
-        case "scope-denied":
-            return (nil, "This runner lets Far Cooler see its workspaces but not change them.")
         case .some:
-            return (nil, "This runner couldn’t make \(name). That’s a problem in the app, not in anything you did.")
+            return (nil, RefusalCopy.sentence(after: context, message) ?? "\(context) Try again.")
         case nil:
             // Refused before it reached the runner, in the CLI's own words.
             return (nil, Self.saidByCLI(message) ?? "Couldn’t make \(name). Check that the runner is reachable, then try again.")
@@ -2352,19 +2351,12 @@ final class DaemonClient: ObservableObject {
         _ message: String?, worktree: Worktree, workspace: WorkspaceSummary
     ) -> String {
         let name = "“\(WorktreeName.display(worktree.task))”"
+        let context = "Couldn’t move \(name) to \(workspace.name)."
         switch TaskFailure.code(in: message) {
-        case "not-found":
-            return "\(name) or \(workspace.name) isn’t on this runner anymore."
-        case "capability-unsupported":
-            return "This runner’s Far Cooler is too old to move worktrees between workspaces. Update it there, then try again."
-        case "scope-denied":
-            return "This runner lets Far Cooler see its workspaces but not change them."
-        case "resource-conflict":
-            return "\(workspace.name) changed while \(name) was moving. Try again."
         case .some:
-            return "This runner couldn’t move \(name) to \(workspace.name) as Far Cooler asked. That’s a problem in the app, not in anything you did."
+            return RefusalCopy.sentence(after: context, message) ?? "\(context) Try again."
         case nil:
-            return "Couldn’t move \(name) to \(workspace.name). Check that the runner is reachable, then try again."
+            return "\(context) Check that the runner is reachable, then try again."
         }
     }
 
@@ -2401,13 +2393,15 @@ final class DaemonClient: ObservableObject {
     func removeWorktree(_ worktree: String, confirm: String) async -> RemoveWorktreeResult {
         var args = ["worktree", "remove", worktree]
         if !confirm.isEmpty { args += ["--confirm", confirm] }
+        // `--json` for the `code:` line the refusal is told apart by.
+        args.append("--json")
 
         // `runRaw`: both refusals are the sheet's to show, beside the field,
         // not a banner's behind it.
         let (data, failure) = await runRaw(args)
         guard data != nil else {
             let message = failure ?? "command failed"
-            if message.localizedCaseInsensitiveContains("confirmation") {
+            if TaskFailure.isConfirmationRequired(message) {
                 return .confirmationRequired
             }
             return .failed(message)
@@ -2479,25 +2473,18 @@ final class DaemonClient: ObservableObject {
 
     /// Switch a pane between showing its terminal and showing its agent chat.
     ///
-    /// DEVIATION, from when `crates/cli` had no `terminal set-pane-mode`
-    /// subcommand (it has one now). This was written against the
-    /// daemon's own contract for it — a plain success, or a refusal naming
-    /// what is in flight — so the confirmation flow above it (`ContentView`)
-    /// can be built and reviewed now rather than after the CLI catches up.
-    /// The exact wording the daemon will use for a refusal is not settled
-    /// either, so the detection here is a case-insensitive substring match
-    /// against "confirmation" — a best guess against an undefined wire
-    /// format, not a parsed error code, and worth tightening once the real
-    /// shape exists.
+    /// A turn in flight is refused with `confirmation-required`, read off the
+    /// `code:` line `--json` adds, and not from the CLI's English.
     @discardableResult
     func setPaneMode(_ terminal: String, mode: String, force: Bool = false) async -> PaneModeResult {
         var args = ["terminal", "set-pane-mode", terminal, mode]
         if force { args.append("--force") }
+        args.append("--json")
 
         let (data, failure) = await runRaw(args)
         guard data != nil else {
             let message = failure ?? "command failed"
-            if message.localizedCaseInsensitiveContains("confirmation") {
+            if TaskFailure.isConfirmationRequired(message) {
                 // This refusal becomes a sheet, not a banner, in
                 // `ContentView`.
                 return .confirmationRequired(message)

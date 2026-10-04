@@ -108,23 +108,18 @@ extension DaemonClient {
     static func wakeOnAnswerRefusal(_ message: String?, workspace: WorkspaceSummary) -> String {
         let name = workspace.name
         let said = (message ?? "").lowercased()
+        let context = "Couldn’t change \(name)’s setting."
         switch TaskFailure.code(in: message) {
-        case "not-found":
-            return "\(name) isn’t on this runner anymore."
-        case "capability-unsupported":
-            return "This runner’s Far Cooler is too old to wake an agent when you answer. Update it there, then try again."
-        case "scope-denied":
-            return "This runner lets Far Cooler see its workspaces but not change them."
-        case "resource-conflict":
-            return "\(name) changed just now. Try again."
         case .some:
-            return "This runner couldn’t change \(name)’s setting. That’s a problem in the app, not in anything you did."
+            return RefusalCopy.sentence(after: context, message) ?? "\(context) Try again."
+        // The CLI's own refusals, before it asks the daemon, so there is no
+        // word to read. Matched on their sentences in crates/cli/src/main.rs.
         case nil where said.contains("no workspace matching"):
-            return "\(name) isn’t on this runner anymore."
+            return "\(context) \(RunnerRefusal.notFound.sentence)"
         case nil where said.contains("update it first"):
-            return "This runner’s Far Cooler is too old to wake an agent when you answer. Update it there, then try again."
+            return "\(context) \(RunnerRefusal.capabilityUnsupported.sentence)"
         case nil:
-            return "Couldn’t change \(name)’s setting. Check that the runner is reachable, then try again."
+            return "\(context) Check that the runner is reachable, then try again."
         }
     }
 
@@ -144,16 +139,11 @@ extension DaemonClient {
             return "\(name) already has an orchestrator. Choose Replace Orchestrator to start a new one."
         case "invalid-argument" where said.contains("folder"):
             return "The runner couldn’t make \(name)’s folder, so no orchestrator started."
-        case "not-found":
-            return "\(name) isn’t on this runner anymore."
-        case "capability-unsupported":
-            return "This runner’s Far Cooler is too old to start an orchestrator. Update it there, then try again."
-        case "scope-denied":
-            return "This runner lets Far Cooler see its workspaces but not change them."
-        case "resource-conflict":
-            return "\(name) changed while its orchestrator was starting. Try again."
         case .some:
-            return "This runner couldn’t start an orchestrator for \(name). That’s a problem in the app, not in anything you did."
+            let context = replace
+                ? "Couldn’t replace \(name)’s orchestrator."
+                : "Couldn’t start an orchestrator for \(name)."
+            return RefusalCopy.sentence(after: context, message) ?? "\(context) Try again."
         // A workspace deleted since the sidebar drew it: the CLI can't find
         // its id, so it never asks the daemon and there's no code to read.
         // Matched on `resolve`'s sentence in crates/cli/src/main.rs.
@@ -351,16 +341,9 @@ enum OrchestratorAdoption {
             return "\(workspace) has another orchestrator now. Try again to replace it."
         case ("invalid-argument", "workspace"):
             return "\(terminal) isn’t in a workspace, so it can’t be an orchestrator."
-        case ("not-found", _):
-            return "\(terminal) isn’t on this runner anymore."
-        case ("capability-unsupported", _):
-            return "This runner’s Far Cooler is too old to make a running terminal the orchestrator. Update it there, then try again."
-        case ("scope-denied", _):
-            return "This runner lets Far Cooler see its terminals but not change them."
-        case ("resource-conflict", _):
-            return "\(workspace) changed while you were choosing. Try again."
         case (.some, _):
-            return "This runner couldn’t change what \(terminal) is. That’s a problem in the app, not in anything you did."
+            let context = "Couldn’t change what \(terminal) is."
+            return RefusalCopy.sentence(after: context, message) ?? "\(context) Try again."
         case (nil, _):
             return "Couldn’t change what \(terminal) is. Check that the runner is reachable, then try again."
         }

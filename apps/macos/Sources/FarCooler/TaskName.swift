@@ -316,19 +316,17 @@ enum TaskFailure {
     }
 
     static func sentence(for message: String?) -> String {
-        switch code(in: message) {
-        case "branch-exists", "worktree-exists":
-            "This runner already has a branch or folder with that name. Start again to use a different one."
-        case "tmux-unavailable":
-            "The runner can’t reach tmux. Far Cooler runs every agent inside it, so install tmux there and try again."
-        case "tmux-timed-out":
-            "The runner took too long to start the agent. Try again in a moment."
-        case "capability-unsupported":
-            "This runner’s Far Cooler is too old for this. Update it there, then try again."
-        case "invalid-argument":
-            "This runner couldn’t take the request as Far Cooler sent it. That’s a problem in the app, not in anything you typed."
-        default:
-            "Couldn’t start the agent on this runner. Check that it’s reachable, then try again."
+        let context = "Couldn’t start the agent on this runner."
+        // The one word with a sentence of its own: the start panel picks the
+        // name itself, so "pick another name" would send a person looking for
+        // a field that isn't there, and starting again takes the next one.
+        if ["branch-exists", "worktree-exists"].contains(code(in: message)) {
+            return "This runner already has a branch or folder with that name. Start again to use a different one."
         }
+        if let shared = RefusalCopy.sentence(after: context, message) { return shared }
+        // A word this build has no sentence for is a newer runner's: it
+        // answered, so it is not said to be unreachable.
+        if code(in: message) != nil { return "\(context) Try again." }
+        return "\(context) Check that it’s reachable, then try again."
     }
 }

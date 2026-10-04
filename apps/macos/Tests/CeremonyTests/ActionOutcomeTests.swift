@@ -1,3 +1,4 @@
+import AgentKit
 import Foundation
 import Testing
 
@@ -67,7 +68,7 @@ struct ActionOutcomeTests {
             outcomes.shown == [
                 ActionFailure(
                     key: Self.key(.stop, "t-1"),
-                    sentence: "Couldn’t stop “agent”. This runner lets Far Cooler see it but not change it.")
+                    sentence: "Couldn’t stop “agent”. \(RunnerRefusal.scopeDenied.sentence)")
             ])
     }
 
@@ -136,7 +137,7 @@ struct ActionOutcomeTests {
         }
 
         let shown = outcomes.shown.map(\.sentence)
-        #expect(shown == ["Couldn’t stop “agent”. The runner can’t reach tmux. Install tmux there, then try again."])
+        #expect(shown == ["Couldn’t stop “agent”. \(RunnerRefusal.tmuxUnavailable.sentence)"])
         #expect(!shown.contains { $0.contains("error:") || $0.contains("tmux server exited") || $0.contains("code:") })
     }
 
@@ -148,29 +149,29 @@ struct ActionOutcomeTests {
         let reach = "Check that the runner is reachable, then try again."
         let neutral = "Something went wrong. Try again."
         let cases: [(String, String)] = [
-            ("code: not-found", "It isn’t on this runner anymore."),
-            ("code: running-processes", "Something is still running in it. Stop it first, then try again."),
+            ("code: not-found", RunnerRefusal.notFound.sentence),
+            ("code: running-processes", RunnerRefusal.runningProcesses.sentence),
             ("code: dirty-worktree", "It has changes that aren’t committed. Commit or discard them, then try again."),
-            ("code: branch-exists", "A branch with that name already exists on this runner."),
-            ("code: worktree-exists", "A worktree with that name already exists on this runner."),
+            ("code: branch-exists", RunnerRefusal.branchExists.sentence),
+            ("code: worktree-exists", RunnerRefusal.worktreeExists.sentence),
             ("code: repository-locked", "Git is busy with something else in this repository. Try again when it’s done."),
-            ("code: workspaces-exist", "It still has worktrees. Remove them first, then try again."),
-            ("code: path-not-allowed", "That folder isn’t one this runner lets Far Cooler use."),
-            ("code: sensitive-root", "Far Cooler won’t use that folder because it holds personal or system files."),
-            ("code: base-unresolvable", "The runner couldn’t find the branch to start from."),
+            ("code: workspaces-exist", RunnerRefusal.worktreesExist.sentence),
+            ("code: path-not-allowed", RunnerRefusal.pathNotAllowed.sentence),
+            ("code: sensitive-root", RunnerRefusal.sensitiveRoot.sentence),
+            ("code: base-unresolvable", RunnerRefusal.baseUnresolvable.sentence),
             ("code: confirmation-required", "The runner needs you to confirm this first."),
-            ("code: tmux-unavailable", "The runner can’t reach tmux. Install tmux there, then try again."),
-            ("code: capability-unsupported", "This runner’s Far Cooler is too old for this. Update it there, then try again."),
+            ("code: tmux-unavailable", RunnerRefusal.tmuxUnavailable.sentence),
+            ("code: capability-unsupported", RunnerRefusal.capabilityUnsupported.sentence),
             (
                 "code: version-incompatible",
                 "This runner’s Far Cooler and this app are different versions. Update the older one, then try again."
             ),
-            ("code: scope-denied", "This runner lets Far Cooler see it but not change it."),
-            ("code: auth-required", "This runner didn’t accept Far Cooler’s sign-in."),
-            ("code: resource-conflict\nwhat: not_held", "It changed while you were doing that. Try again."),
+            ("code: scope-denied", RunnerRefusal.scopeDenied.sentence),
+            ("code: auth-required", RunnerRefusal.authRequired.sentence),
+            ("code: resource-conflict\nwhat: not_held", RunnerRefusal.resourceConflict.sentence),
             ("code: host-offline", "The runner is offline."),
-            ("code: agent-not-connected", "Its agent isn’t connected right now."),
-            ("code: agent-stopped", "Its agent stopped. Restart it, then try again."),
+            ("code: agent-not-connected", RunnerRefusal.agentNotConnected.sentence),
+            ("code: agent-stopped", RunnerRefusal.agentStopped.sentence),
             ("code: attachment-limit", "That’s more than the runner takes at once."),
             ("code: diff-too-large", "The changes are too large to show."),
             ("code: diff-unsupported", "The runner can’t show these changes."),
@@ -179,7 +180,8 @@ struct ActionOutcomeTests {
             ("code: output-gap", "The runner fell behind. Try again."),
             ("code: client-too-slow", "The runner fell behind. Try again."),
             ("code: operation-failed", "The runner tried and it didn’t work. Try again."),
-            ("code: invalid-argument", app),
+            ("code: invalid-argument", RunnerRefusal.invalidArgument.sentence),
+            ("code: tmux-timed-out", RunnerRefusal.tmuxTimedOut.sentence),
             ("code: idempotency-mismatch", app),
             ("code: unspecified", neutral),
             ("code: unrecognized", neutral),
@@ -211,7 +213,7 @@ struct ActionOutcomeTests {
         // Any other conflict keeps its own sentence.
         #expect(
             ActionCopy.reason("error: stale\ncode: resource-conflict")
-                == "It changed while you were doing that. Try again.")
+                == RunnerRefusal.resourceConflict.sentence)
     }
 
     /// A Close whose stop worked, where the refresh after the stop reaped

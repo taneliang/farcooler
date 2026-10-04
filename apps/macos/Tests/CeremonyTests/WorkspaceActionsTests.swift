@@ -83,7 +83,7 @@ struct WorkspaceActionsTests {
         #expect(DaemonClient.wakeOnAnswerArguments(Self.billing, on: true)[4] == "on")
         #expect(
             DaemonClient.wakeOnAnswerRefusal("code: not-found", workspace: Self.billing)
-                == "Billing isn’t on this runner anymore.")
+                == "Couldn’t change Billing’s setting. \(RunnerRefusal.notFound.sentence)")
         #expect(
             DaemonClient.wakeOnAnswerRefusal(
                 "this runner's Far Cooler can't wake an agent when you answer yet. update it first",
@@ -191,17 +191,15 @@ struct WorkspaceActionsTests {
         // `code: not-found` (ov-135).
         #expect(said("error: \(Self.cliNoMatch("workspace", Self.billing.id))") == "Billing isn’t on this runner anymore.")
         #expect(said("error: \(Self.cliNoMatch("workspace", Self.billing.id))", replace: true) == "Billing isn’t on this runner anymore.")
-        #expect(said("error: gone\ncode: not-found") == "Billing isn’t on this runner anymore.")
+        let start = "Couldn’t start an orchestrator for Billing."
+        #expect(said("error: gone\ncode: not-found") == "\(start) \(RunnerRefusal.notFound.sentence)")
         #expect(
             said("error: x\ncode: capability-unsupported")
-                == "This runner’s Far Cooler is too old to start an orchestrator. Update it there, then try again.")
-        #expect(
-            said("error: x\ncode: scope-denied")
-                == "This runner lets Far Cooler see its workspaces but not change them.")
-        #expect(said("error: x\ncode: resource-conflict") == "Billing changed while its orchestrator was starting. Try again.")
-        #expect(
-            said("error: x\ncode: internal")
-                == "This runner couldn’t start an orchestrator for Billing. That’s a problem in the app, not in anything you did.")
+                == "\(start) \(RunnerRefusal.capabilityUnsupported.sentence)")
+        #expect(said("error: x\ncode: scope-denied") == "\(start) \(RunnerRefusal.scopeDenied.sentence)")
+        #expect(said("error: x\ncode: resource-conflict") == "\(start) \(RunnerRefusal.resourceConflict.sentence)")
+        // A word nothing here knows is a newer runner's; it answered.
+        #expect(said("error: x\ncode: internal") == "\(start) Try again.")
         #expect(
             said("ssh: connect to host build-box port 22: Connection refused")
                 == "Couldn’t start an orchestrator for Billing. Check that the runner is reachable, then try again.")

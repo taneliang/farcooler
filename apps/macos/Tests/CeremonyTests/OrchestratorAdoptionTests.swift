@@ -107,8 +107,8 @@ struct OrchestratorAdoptionTests {
         #expect(OrchestratorAdoption.refusal(taken, terminal: "claude", workspace: "Main") == "Main has another orchestrator now. Try again to replace it.")
         let loose = "error: x\ncode: invalid-argument\nwhat: workspace"
         #expect(OrchestratorAdoption.refusal(loose, terminal: "claude", workspace: "Main") == "claude isn’t in a workspace, so it can’t be an orchestrator.")
-        #expect(OrchestratorAdoption.refusal("code: not-found", terminal: "claude", workspace: "Main") == "claude isn’t on this runner anymore.")
-        #expect(OrchestratorAdoption.refusal("code: resource-conflict", terminal: "claude", workspace: "Main") == "Main changed while you were choosing. Try again.")
+        #expect(OrchestratorAdoption.refusal("code: not-found", terminal: "claude", workspace: "Main") == "Couldn’t change what claude is. \(RunnerRefusal.notFound.sentence)")
+        #expect(OrchestratorAdoption.refusal("code: resource-conflict", terminal: "claude", workspace: "Main") == "Couldn’t change what claude is. \(RunnerRefusal.resourceConflict.sentence)")
         #expect(OrchestratorAdoption.refusal(nil, terminal: "claude", workspace: "Main").hasPrefix("Couldn’t change what claude is."))
         for message in [taken, loose, "code: internal"] {
             let said = OrchestratorAdoption.refusal(message, terminal: "claude", workspace: "Main")

@@ -252,51 +252,26 @@ enum ActionCopy {
     /// No word at all is the CLI or ssh failing before the daemon answered,
     /// and only a connection failure is said to be one (`isConnection`).
     static func reason(_ message: String) -> String {
-        switch TaskFailure.code(in: message) {
-        case "not-found":
-            "It isn’t on this runner anymore."
-        case "running-processes":
-            "Something is still running in it. Stop it first, then try again."
+        // The words `RunnerRefusal` has a sentence for are said by it, once
+        // (ov-160). A Dismiss that came after the terminal stopped being lost
+        // is a conflict the runner named: retrying is no help.
+        if TaskFailure.code(in: message) == "resource-conflict",
+            TaskFailure.what(in: message) == "not_lost"
+        {
+            return "It was already restarted or dismissed."
+        }
+        if let shared = RefusalCopy.refusal(in: message) { return shared.sentence }
+        return switch TaskFailure.code(in: message) {
         case "dirty-worktree":
             "It has changes that aren’t committed. Commit or discard them, then try again."
-        case "branch-exists":
-            "A branch with that name already exists on this runner."
-        case "worktree-exists":
-            "A worktree with that name already exists on this runner."
         case "repository-locked":
             "Git is busy with something else in this repository. Try again when it’s done."
-        case "workspaces-exist":
-            "It still has worktrees. Remove them first, then try again."
-        case "path-not-allowed":
-            "That folder isn’t one this runner lets Far Cooler use."
-        case "sensitive-root":
-            "Far Cooler won’t use that folder because it holds personal or system files."
-        case "base-unresolvable":
-            "The runner couldn’t find the branch to start from."
         case "confirmation-required":
             "The runner needs you to confirm this first."
-        case "tmux-unavailable":
-            "The runner can’t reach tmux. Install tmux there, then try again."
-        case "capability-unsupported":
-            "This runner’s Far Cooler is too old for this. Update it there, then try again."
         case "version-incompatible":
             "This runner’s Far Cooler and this app are different versions. Update the older one, then try again."
-        case "scope-denied":
-            "This runner lets Far Cooler see it but not change it."
-        case "auth-required":
-            "This runner didn’t accept Far Cooler’s sign-in."
-        case "resource-conflict":
-            // `not_lost` is a Dismiss that came after the terminal stopped
-            // being lost: the runner named it, so retrying is no help.
-            TaskFailure.what(in: message) == "not_lost"
-                ? "It was already restarted or dismissed."
-                : "It changed while you were doing that. Try again."
         case "host-offline":
             "The runner is offline."
-        case "agent-not-connected":
-            "Its agent isn’t connected right now."
-        case "agent-stopped":
-            "Its agent stopped. Restart it, then try again."
         case "attachment-limit":
             "That’s more than the runner takes at once."
         case "diff-too-large":
@@ -311,7 +286,7 @@ enum ActionCopy {
             "The runner fell behind. Try again."
         case "operation-failed":
             "The runner tried and it didn’t work. Try again."
-        case "invalid-argument", "idempotency-mismatch":
+        case "idempotency-mismatch":
             "The runner couldn’t take the request as Far Cooler sent it. That’s a problem in the app, not in anything you did."
         case .some:
             neutral

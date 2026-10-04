@@ -137,10 +137,10 @@ struct WorktreeCallsTests {
         }
         await record("hide", ["worktree", "hide", "w1", "--json"]) { await $0.hideWorktree("w1") }
         await record("unhide", ["worktree", "unhide", "w1", "--json"]) { await $0.unhideWorktree("w1") }
-        await record("remove", ["worktree", "remove", "w1"]) {
+        await record("remove", ["worktree", "remove", "w1", "--json"]) {
             _ = await $0.removeWorktree("w1", confirm: "")
         }
-        await record("remove, confirmed", ["worktree", "remove", "w1", "--confirm", "fix-it"]) {
+        await record("remove, confirmed", ["worktree", "remove", "w1", "--confirm", "fix-it", "--json"]) {
             _ = await $0.removeWorktree("w1", confirm: "fix-it")
         }
         await record("searchFiles", ["worktree", "file-search", "w1", "mai", "--json"]) {
@@ -422,20 +422,13 @@ struct WorktreeCallsTests {
         #expect(taken.calls.contains { $0.prefix(2) == ["worktree", "list"] }, "no re-read: \(taken.calls)")
 
         let gone = await refusal("error: that worktree or workspace isn't on this runner any more\ncode: not-found")
-        #expect(gone.said == "“fix it” or Billing isn’t on this runner anymore.")
+        let context = "Couldn’t move “fix it” to Billing."
+        #expect(gone.said == "\(context) \(RunnerRefusal.notFound.sentence)")
         #expect(gone.calls.contains { $0.prefix(2) == ["worktree", "list"] }, "no re-read: \(gone.calls)")
-        #expect(
-            await refusal("error: no\ncode: capability-unsupported").said
-                == "This runner’s Far Cooler is too old to move worktrees between workspaces. Update it there, then try again.")
-        #expect(
-            await refusal("error: no\ncode: scope-denied").said
-                == "This runner lets Far Cooler see its workspaces but not change them.")
-        #expect(
-            await refusal("error: no\ncode: resource-conflict").said
-                == "Billing changed while “fix it” was moving. Try again.")
-        #expect(
-            await refusal("error: no\ncode: invalid-argument").said
-                == "This runner couldn’t move “fix it” to Billing as Far Cooler asked. That’s a problem in the app, not in anything you did.")
+        for word in ["capability-unsupported", "scope-denied", "resource-conflict", "invalid-argument"] {
+            let shared = RunnerRefusal(rawValue: word)!
+            #expect(await refusal("error: no\ncode: \(word)").said == "\(context) \(shared.sentence)", "\(word)")
+        }
         #expect(
             await refusal("error: no workspace matching \"0198f2c0\"").said
                 == "Couldn’t move “fix it” to Billing. Check that the runner is reachable, then try again.")
