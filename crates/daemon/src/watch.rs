@@ -36,6 +36,7 @@ use crate::wire;
 
 pub(crate) mod answer_wake;
 mod board_reads;
+mod pages;
 mod plan_layer;
 mod failure_observation;
 mod holds;

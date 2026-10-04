@@ -69,6 +69,12 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     // their worktree by cascade, whichever build deletes it. An older build
     // never reads or writes which large files weren't downloaded.
     (crate::lfs_pointers::migration_0024_lfs_pointers, Older::Welcome),
+    // Two new tables (ov-269) only pages.rs touches, whose rows go with their
+    // workspace by cascade, whichever build deletes it. No column on a table
+    // old code writes, no trigger, and no key into the plan layer. An older
+    // build never reads them, so a rollback past the experiment keeps a
+    // working database.
+    (crate::pages::migration_0025_pages, Older::Welcome),
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;

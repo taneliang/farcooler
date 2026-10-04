@@ -83,3 +83,10 @@ pub fn drop_plan_layer(store: &crate::Store) {
         )
         .unwrap();
 }
+
+/// Remove the pages from a database: both tables, children first. What
+/// deleting their migration would leave behind (ov-269), for the drill that
+/// checks the board and the plan read the same without them.
+pub fn drop_pages(store: &crate::Store) {
+    store.conn().execute_batch("DROP TABLE page_events; DROP TABLE board_pages;").unwrap();
+}

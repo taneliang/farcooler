@@ -58,5 +58,9 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::Lane(_) => "lane",
         result::Value::Plan(_) => "plan",
         result::Value::PlanEventList(_) => "plan_event_list",
+        result::Value::BoardPageList(_) => "board_page_list",
+        result::Value::BoardPage(_) => "board_page",
+        result::Value::PageSetResult(_) => "page_set_result",
+        result::Value::PageStatsList(_) => "page_stats_list",
     }
 }

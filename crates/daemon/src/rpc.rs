@@ -498,6 +498,11 @@ fn scope_of(method: Method) -> Scope {
         | Method::LaneUpdate
         | Method::LaneCards
         | Method::LaneAgent => Scope::Control,
+        // Orchestrator pages (ov-269): free text the runner can't redact, so
+        // everyone who can read the board reads them, as with a task note. The
+        // orchestrator writes its own pages, and they touch no git data.
+        Method::PageList | Method::PageGet | Method::PageStats => Scope::Read,
+        Method::PageSet | Method::PageRemove => Scope::Control,
         // Workspaces: the list is the shape of the fleet, like
         // `worktree.list`; paths in it are redacted below `host_admin` by the
         // converter, as everywhere.
@@ -2050,6 +2055,11 @@ impl Rpc {
             "plan.get" | "plan.set" | "plan.events" | "board_theme.create" | "board_theme.update"
             | "board_theme.cards" | "lane.create" | "lane.update" | "lane.cards" | "lane.agent" => {
                 crate::rpc_plan::dispatch(svc, &self.watcher, self.peer.scope, req).await
+            }
+
+            // Orchestrator pages (ov-269); the arms live in `rpc_pages`.
+            "page.list" | "page.get" | "page.set" | "page.remove" | "page.stats" => {
+                crate::rpc_pages::dispatch(svc, &self.watcher, req).await
             }
 
             // ---- workspaces ----

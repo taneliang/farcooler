@@ -109,6 +109,15 @@ jobs:
         run: |
           ./scripts/plan-layer-lint.py --self-test
           ./scripts/plan-layer-lint.py
+      # Orchestrator pages are removable too (ov-269): nothing the board or the
+      # plan layer runs on names them. Its rule against planted references
+      # first, then the tree. The drills that drop the pages' tables from a
+      # populated database are `pages_tests.rs` and
+      # `pages_over_the_socket.rs`, in the Rust job.
+      - name: Page layer references
+        run: |
+          ./scripts/page-layer-lint.py --self-test
+          ./scripts/page-layer-lint.py
       # No new swallowed call to the host (ov-167): a `try?` on core.call or
       # runCLI, or an ignored runCatching/attempt or empty catch in the Android
       # app's Kotlin. Existing ones are listed, each with its reason,

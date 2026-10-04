@@ -85,7 +85,11 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         | Method::UsageTask
         // The plan layer's two reads (ov-274), behind `board_plan`.
         | Method::PlanGet
-        | Method::PlanEvents => Some(method.name()),
+        | Method::PlanEvents
+        // Orchestrator pages (ov-269) are read-only on a phone: the list and
+        // one page. The orchestrator is their one writer.
+        | Method::PageList
+        | Method::PageGet => Some(method.name()),
         Method::AdapterList => Some("adapters"),
         Method::ThemeList => Some("themes"),
         Method::RepositoryList => Some("repositories"),
@@ -153,7 +157,11 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         | Method::LaneCreate
         | Method::LaneUpdate
         | Method::LaneCards
-        | Method::LaneAgent => None,
+        | Method::LaneAgent
+        // A phone neither writes a page nor reads how often one is published.
+        | Method::PageSet
+        | Method::PageRemove
+        | Method::PageStats => None,
         // The CLI reads it today; the Summary page (ov-188 phase 3) will
         // route it here.
         Method::ReportGet => None,

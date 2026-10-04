@@ -20,6 +20,7 @@ mod compat;
 mod error;
 pub mod lfs_pointers;
 mod migrate;
+pub mod pages;
 pub mod plan;
 pub mod plan_read;
 pub mod review;

@@ -45,5 +45,6 @@ enum class Capability(val wire: String) {
     READ_ONLY_FOLDERS("read_only_folders"),
     AGENT_QUEUE("agent_queue"),
     BOARD_PLAN("board_plan"),
-    LFS_POINTERS("lfs_pointers");
+    LFS_POINTERS("lfs_pointers"),
+    BOARD_PAGES("board_pages");
 }

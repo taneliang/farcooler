@@ -528,6 +528,19 @@ pub mod capability {
     /// by an older daemon without a word, and the method refused as an unknown
     /// one. A client that reads it absent shows no notice and no button.
     pub const LFS_POINTERS: &str = "lfs_pointers";
+    /// Orchestrator pages (ov-269): `page.list`, `page.get`, `page.set`,
+    /// `page.remove`, `page.stats` and the `pages_changed` event.
+    ///
+    /// **Experimental, and it may be withdrawn.** A page is a document of typed
+    /// blocks an orchestrator publishes and the apps draw natively. Pages sit
+    /// beside the board, never in it: no task and nothing in the plan layer
+    /// refers to one, and a page names cards, lanes and themes by text, so it
+    /// needs `workstreams` (a board here is a workspace's) and nothing else. In
+    /// particular it doesn't need `board_plan`: with the plan layer removed a
+    /// page still draws, its lane and theme references as plain text. A client
+    /// that reads it absent hides pages, and a CLI refuses before sending,
+    /// saying the runner needs an update to show pages.
+    pub const BOARD_PAGES: &str = "board_pages";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -541,7 +554,7 @@ pub mod capability {
             NEEDS_YOU, WAKE_ON_ANSWER, STREAM_SIZE_MARKERS, TASK_NOTICES, REPORT, AGENT_USAGE,
             AGENTS_FOUND,
             TASK_WAITS, TASK_WORKERS, NOTICE_TASK, BOARD_READS, WORKTREE_FILES, TERMINAL_NAMES, TERMINAL_PORTS,
-            READ_ONLY_FOLDERS, AGENT_QUEUE, BOARD_PLAN, LFS_POINTERS,
+            READ_ONLY_FOLDERS, AGENT_QUEUE, BOARD_PLAN, LFS_POINTERS, BOARD_PAGES,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
@@ -728,6 +741,11 @@ pub mod method {
         LaneUpdate = "lane.update" => BOARD_PLAN,
         LaneCards = "lane.cards" => BOARD_PLAN,
         LaneAgent = "lane.agent" => BOARD_PLAN,
+        PageList = "page.list" => BOARD_PAGES,
+        PageGet = "page.get" => BOARD_PAGES,
+        PageSet = "page.set" => BOARD_PAGES,
+        PageRemove = "page.remove" => BOARD_PAGES,
+        PageStats = "page.stats" => BOARD_PAGES,
     }
 }
 
@@ -777,6 +795,8 @@ pub const MAX_ROWS: u32 = 200;
 
 #[cfg(test)]
 mod board_reads_tests;
+#[cfg(test)]
+mod page_wire_tests;
 #[cfg(test)]
 mod plan_layer_tests;
 #[cfg(test)]

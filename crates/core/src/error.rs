@@ -177,6 +177,20 @@ pub enum DomainError {
     /// phone's connect screen, all of which show a runner's own words.
     #[error("This runner's data was written by a newer Far Cooler. Update Far Cooler to use it.")]
     NewerData,
+
+    /// A page (ov-269) the runner refused, in the sentence that says where and
+    /// why: `blocks[3].rows[50]: a table has at most 50 rows.`
+    ///
+    /// The one variant that carries text, because the whole value of the
+    /// refusal is the JSON path and the limit, and the reader is a language
+    /// model fixing one line of a document. The text is built from the page's
+    /// own words and this runner's own limits, never from a path, a terminal
+    /// or a session. `InvalidArgument`'s code, with `what` `page`.
+    #[error("{said}")]
+    PageRefused {
+        /// The refusal, as a sentence.
+        said: String,
+    },
 }
 
 impl DomainError {
@@ -225,6 +239,7 @@ impl DomainError {
             // `Conflict` shares `ResourceConflict`'s: the two sides disagree
             // about versions, and only installing something fixes it.
             DomainError::NewerData => (ErrorCode::VersionIncompatible, false),
+            DomainError::PageRefused { .. } => (ErrorCode::InvalidArgument, false),
         }
     }
 
@@ -252,6 +267,7 @@ impl DomainError {
         match self {
             DomainError::InvalidArgument { what } | DomainError::Conflict { what } => what,
             DomainError::NewerData => "newer_data",
+            DomainError::PageRefused { .. } => "page",
             DomainError::AuthRequired
             | DomainError::ScopeDenied { .. }
             | DomainError::VersionIncompatible
@@ -475,6 +491,7 @@ mod tests {
             DomainError::AgentStopped,
             DomainError::Conflict { what: "not_held" },
             DomainError::NewerData,
+            DomainError::PageRefused { said: "blocks[0].type: there's no block called x.".into() },
         ]
     }
 
@@ -506,10 +523,11 @@ mod tests {
         let mut seen = std::collections::HashSet::new();
         // `Conflict` is `ResourceConflict`'s code on purpose, naming which in
         // `what`; `a_named_conflict_keeps_the_conflict_code_and_says_which`.
-        // `NewerData` is `VersionIncompatible`'s the same way.
+        // `NewerData` is `VersionIncompatible`'s the same way, and
+        // `PageRefused` is `InvalidArgument`'s.
         for e in all_variants()
             .into_iter()
-            .filter(|e| !matches!(e, DomainError::Conflict { .. } | DomainError::NewerData))
+            .filter(|e| !matches!(e, DomainError::Conflict { .. } | DomainError::NewerData | DomainError::PageRefused { .. }))
         {
             assert!(seen.insert(e.code() as i32), "{e:?} reuses a wire code");
         }
@@ -539,7 +557,7 @@ mod tests {
             assert_ne!(w, UNRECOGNIZED_WORD, "{e:?} has no word");
             // `Conflict` shares `resource-conflict` by design, and `NewerData`
             // `version-incompatible`; see above.
-            if matches!(e, DomainError::Conflict { .. } | DomainError::NewerData) {
+            if matches!(e, DomainError::Conflict { .. } | DomainError::NewerData | DomainError::PageRefused { .. }) {
                 continue;
             }
             assert!(seen.insert(w), "{e:?} reuses the word {w}");
@@ -597,7 +615,10 @@ mod tests {
         for e in all_variants() {
             if matches!(
                 e,
-                DomainError::InvalidArgument { .. } | DomainError::Conflict { .. } | DomainError::NewerData
+                DomainError::InvalidArgument { .. }
+                    | DomainError::Conflict { .. }
+                    | DomainError::NewerData
+                    | DomainError::PageRefused { .. }
             ) {
                 continue;
             }
