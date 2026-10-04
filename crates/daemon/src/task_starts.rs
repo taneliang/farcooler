@@ -15,6 +15,7 @@ use uuid::Uuid;
 use crate::service::Service;
 use crate::task_ops::{actor_from_wire, pb_task, required_id};
 use crate::watch::Watcher;
+use crate::worker_seen::WorkerSeen;
 use crate::wire::id_bytes;
 
 // ---------------------------------------------------------------------------
@@ -25,7 +26,7 @@ use crate::wire::id_bytes;
 /// unfinished tasks it's blocked on, and its subagents.
 pub(crate) fn pb_tasks(svc: &Service, tasks: &[Task]) -> Result<Vec<pb::Task>> {
     let facts = svc.store.task_facts(tasks)?;
-    Ok(tasks.iter().zip(facts).map(|(task, facts)| with_facts(task, facts)).collect())
+    Ok(tasks.iter().zip(facts).map(|(task, facts)| with_facts(task, facts, &svc.worker_seen)).collect())
 }
 
 /// One task, as `pb_tasks` sends it.
@@ -33,11 +34,11 @@ pub(crate) fn pb_one(svc: &Service, task: &Task) -> Result<pb::Task> {
     Ok(pb_tasks(svc, std::slice::from_ref(task))?.remove(0))
 }
 
-fn with_facts(task: &Task, facts: TaskFacts) -> pb::Task {
+fn with_facts(task: &Task, facts: TaskFacts, seen: &WorkerSeen) -> pb::Task {
     pb::Task {
         wait: task.wait.map(|w| pb_wait(w, &facts)),
         waiting_on: facts.waiting_on,
-        workers: facts.workers.iter().map(pb_worker).collect(),
+        workers: facts.workers.iter().map(|w| pb_worker(w, seen)).collect(),
         ..pb_task(task)
     }
 }
@@ -79,11 +80,15 @@ fn pb_wait(wait: TaskWait, facts: &TaskFacts) -> pb::TaskWait {
     out
 }
 
-/// A subagent as recorded. Whether it's running, and what it's doing, are
-/// observed by ov-213's lane B; until then an open one is `UNOBSERVED`, and
-/// a closed one says how it closed.
-fn pb_worker(worker: &TaskWorker) -> pb::TaskWorker {
+/// A subagent as recorded, and as the runner sees it. An open one is
+/// `RUNNING` while the runner reads the session it's in, whose transcript
+/// says when it last moved and what it's doing; where it can't (codex, a
+/// session it can't find) it's `UNOBSERVED`. A closed one says how it closed.
+fn pb_worker(worker: &TaskWorker, seen: &WorkerSeen) -> pb::TaskWorker {
+    let observed = worker.harness == "claude" && seen.is_observed(&worker.agent_id);
+    let seen = if observed { seen.get(&worker.agent_id).unwrap_or_default() } else { Default::default() };
     let state = match worker.end_reason {
+        None if observed => pb::TaskWorkerState::Running,
         None => pb::TaskWorkerState::Unobserved,
         Some(EndReason::Finished | EndReason::HandedBack) => pb::TaskWorkerState::Finished,
         Some(EndReason::Failed | EndReason::Stopped | EndReason::TaskClosed | EndReason::Relinked) => {
@@ -95,12 +100,12 @@ fn pb_worker(worker: &TaskWorker) -> pb::TaskWorker {
         harness: worker.harness.clone(),
         agent_id: worker.agent_id.clone(),
         label: worker.label.clone(),
-        model: worker.model.clone(),
+        model: if worker.model.is_empty() { seen.model.clone() } else { worker.model.clone() },
         started_at: worker.started_at,
         ended_at: worker.ended_at.unwrap_or(0),
         state: state as i32,
-        last_activity_at: 0,
-        doing: String::new(),
+        last_activity_at: seen.last_activity_at,
+        doing: seen.doing,
         linked_by_description: worker.linked_by == LinkedBy::Description,
         orchestrator_terminal: worker.orchestrator_terminal.map(id_bytes),
     }

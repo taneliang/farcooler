@@ -119,20 +119,26 @@ pub(crate) fn record_log(store: &Store, terminal: Uuid, harness: &str, turns: Ve
     if turns.is_empty() {
         return;
     }
-    let p = place(store, terminal);
+    record_placed(store, place(store, terminal), harness, turns);
+}
+
+fn record_placed(store: &Store, p: Place, harness: &str, turns: Vec<LoggedTurn>) {
     for t in turns {
         let models = t
             .models
             .into_iter()
             .map(|(model, tokens)| TurnModel::priced(model, tokens, None))
             .collect();
+        // A subagent's spend is filed to the task it was recorded on, which
+        // is the orchestrator's pane's task only by accident (none, usually).
+        let task_id = subagent_task(store, &t.key).or(p.task);
         let turn = NewTurn {
             key: t.key,
             terminal_id: p.terminal,
             worktree_id: p.worktree,
             repository_id: p.repository,
             workspace_id: p.workspace,
-            task_id: p.task,
+            task_id,
             harness: harness.to_string(),
             surface: Surface::Terminal,
             started_at: t.started_at_ms,
@@ -143,6 +149,26 @@ pub(crate) fn record_log(store: &Store, terminal: Uuid, harness: &str, turns: Ve
             kind: if t.subagent { TurnKind::Subagent } else { TurnKind::Turn },
         };
         write(store, &turn);
+    }
+}
+
+/// The task a subagent's `claude-log:agent:<agentId>` key is recorded on.
+fn subagent_task(store: &Store, key: &str) -> Option<Uuid> {
+    let agent = key.strip_prefix("claude-log:agent:")?;
+    store.task_of_subagent("claude", agent).ok().flatten()
+}
+
+/// Subagent runs the worker follower read (`watch::workers`), on their own
+/// and not through any pane's log: each is filed to the task it's recorded
+/// on, and to the pane its orchestrator runs in when that's known.
+pub(crate) fn record_subagents(store: &Store, turns: Vec<LoggedTurn>) {
+    for t in turns {
+        let Some(agent) = t.key.strip_prefix("claude-log:agent:") else { continue };
+        let Some(worker) = store.workers_of_agent("claude", agent).ok().and_then(|w| w.into_iter().next()) else {
+            continue;
+        };
+        let p = worker.orchestrator_terminal.map_or_else(Place::default, |pane| place(store, pane));
+        record_placed(store, p, "claude", vec![t]);
     }
 }
 

@@ -36,6 +36,7 @@ use crate::wire;
 
 pub(crate) mod answer_wake;
 mod holds;
+mod workers;
 pub(crate) mod task_notice;
 mod reap;
 
@@ -901,6 +902,8 @@ pub struct Watcher {
     told: std::sync::Mutex<HashMap<Uuid, i64>>,
     /// Why each waiting answer last waited, for its "Not delivered" note.
     wake_holds: std::sync::Mutex<HashMap<Uuid, answer_wake::Held>>,
+    /// The sessions of recorded subagents being read (`workers`).
+    worker_follow: std::sync::Mutex<workers::Follower>,
     /// Make the next paste fail as a send would (`answer_wake`'s tests).
     #[cfg(test)]
     fail_sends: std::sync::atomic::AtomicBool,
@@ -2039,9 +2042,14 @@ impl Signals {
             // a stale one. See `fold_log_events`, which folds the same pair
             // into the pane's turn.
             TurnEvent::BackgroundAgents(count) => self.background_agents = *count,
+            // A subagent's own life is `watch::workers`', read from the
+            // session the orchestrator recorded it in, not from a pane's.
             TurnEvent::Asked { .. }
             | TurnEvent::Answered { .. }
             | TurnEvent::Said { .. }
+            | TurnEvent::SubagentLaunched { .. }
+            | TurnEvent::SubagentResumed { .. }
+            | TurnEvent::SubagentEnded { .. }
             | TurnEvent::Title(_) => {}
         }
     }
@@ -2752,6 +2760,9 @@ impl Watcher {
             wakes_hint: std::sync::atomic::AtomicBool::new(true),
             told: std::sync::Mutex::new(HashMap::new()),
             wake_holds: std::sync::Mutex::new(HashMap::new()),
+            worker_follow: std::sync::Mutex::new(workers::Follower::new(
+                std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default(),
+            )),
             #[cfg(test)]
             fail_sends: std::sync::atomic::AtomicBool::new(false),
             clears_pending: std::sync::Mutex::new(HashSet::new()),
@@ -4321,11 +4332,15 @@ impl Watcher {
             tokio::select! {
                 _ = ticker.tick() => {
                     self.sample().await;
+                    // A held task whose time came (ov-212): an indexed probe.
+                    // Before the pump, so its orchestrator is told on this
+                    // tick and not the next.
+                    self.release_due_holds(now_millis());
+                    // The subagents recorded on tasks (ov-213).
+                    self.follow_workers(now_millis()).await;
                     // After the sample, so an agent that just went idle is
                     // told on the tick that saw it.
                     self.spawn_wake_pump();
-                    // A held task whose time came (ov-212): an indexed probe.
-                    self.release_due_holds(now_millis());
                     // Gated: a drained set lookup per repository, and a git
                     // process only for repositories the filesystem says
                     // actually gained or lost a worktree. The separate forced

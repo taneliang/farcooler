@@ -2139,6 +2139,9 @@ pub struct Service {
     /// Each followed agent pane's bracketed-paste record, for a tmux too old
     /// to report it (`paste_mode`).
     paste_modes: Arc<crate::paste_mode::Following>,
+    /// What the runner has seen subagents do (ov-213): the half of a task's
+    /// workers the store doesn't keep.
+    pub worker_seen: crate::worker_seen::WorkerSeen,
 }
 
 /// A worktree plus its derived state and terminals.
@@ -2213,6 +2216,7 @@ impl Service {
             repo_urls: std::sync::Mutex::new(std::collections::HashMap::new()),
             repo_locks: std::sync::Mutex::new(std::collections::HashMap::new()),
             paste_modes: Arc::default(),
+            worker_seen: Default::default(),
         };
         Ok(service)
     }
