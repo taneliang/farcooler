@@ -354,7 +354,7 @@ extension ContentView {
     var detailOpeningNotices: some View {
         detail
             .task(id: noticeOpener.pending?.id) { await openNoticedTask() }
-            .task(id: restoring?.id) { await restoreWhereYouWere() }
+            .modifier(windowRestore)
             // Files beside a worktree opened whole (ov-189). A task has its
             // own Files tab instead.
             .inspector(

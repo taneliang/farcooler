@@ -6,21 +6,15 @@ import Foundation
 // `ContentView` is over its line budget.
 
 extension ContentView {
-    /// Go back to `restoring`: resolved as the runners come up, with what the
-    /// fleet doesn't hold read from them, and opened where the window was or,
-    /// when that's gone, at its nearest level that isn't. A window somebody
-    /// has already moved is left alone.
-    func restoreWhereYouWere() async {
-        guard let open = restoring else { return }
-        _ = await DestinationOpener.run(
-            open, isCurrent: { restoring?.id == open.id }, interrupted: { selection != nil },
-            world: { MacDestination.world(of: store) },
+    /// Go back to `restoring` (`WindowRestore`): resolved as the runners come
+    /// up, with what the fleet doesn't hold read from them, and opened where
+    /// the window was or, when that's gone, at its nearest level that isn't.
+    /// A window somebody has already moved is left alone.
+    var windowRestore: WindowRestore {
+        WindowRestore(
+            restoring: $restoring, interrupted: { selection != nil }, world: { MacDestination.world(of: store) },
             read: { await DestinationReads.read($1, from: store.clients[$0], fleet: store.fleet) },
-            land: { land($0, arrival: .restore) })
-        if restoring?.id == open.id {
-            restoring = nil
-            restoreFocus()
-        }
+            land: { land($0, arrival: .restore) }, landed: { restoreFocus() })
     }
 
     /// Open a resolved destination here: a relaunch sets the selection and leaves

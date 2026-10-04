@@ -122,7 +122,8 @@ struct WindowSession: Equatable {
 /// Every window's record, and which of them a live window holds.
 @MainActor
 final class WindowSessions {
-    static let shared = WindowSessions()
+    /// The app's. A test puts its own in, to quit and relaunch with it.
+    static var shared = WindowSessions()
 
     /// Where the records are kept.
     static let key = "window.sessions.v1"

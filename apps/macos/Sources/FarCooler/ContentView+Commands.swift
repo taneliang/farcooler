@@ -35,7 +35,7 @@ extension ContentView {
     /// `SelectionMemory.launch`.
     ///
     /// A place kept is held for its runner, which comes up on its own
-    /// schedule, and opened when it has (`restoreWhereYouWere`), or at the
+    /// schedule, and opened when it has (`WindowRestore`), or at the
     /// nearest level of it that's still there when it's gone. Asked on every
     /// fleet and Needs You change until it has an answer, and never again
     /// after: a window that has opened somewhere, or where somebody already

@@ -8,7 +8,7 @@ import SwiftUI
 extension ContentView {
     /// A window opening: take a record, put back what it kept, and open the
     /// windows the launch had more of. The place itself is put back by
-    /// `restoreWhereYouWere`, as the runners come up.
+    /// `WindowRestore`, as the runners come up.
     func adoptSession() {
         guard kept == nil else { return }
         let adoption = WindowSessions.shared.adopt(holding: kept?.id)
