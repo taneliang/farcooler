@@ -33,6 +33,8 @@ use clap::{Parser, Subcommand};
 mod changes;
 mod clients;
 mod draft_prompt;
+mod board_reads;
+mod event_lines;
 mod report;
 mod task_usage;
 mod tasks;
@@ -143,6 +145,9 @@ enum Command {
     /// that names no task means that one. See `tasks::TASK_ENV`.
     #[command(subcommand)]
     Task(tasks::TaskCmd),
+    /// What is read on a board, shared by every device on this runner.
+    #[command(subcommand)]
+    Board(board_reads::BoardCmd),
     /// Arrange terminals on screen: tile, zoom, focus, switch groups.
     ///
     /// Everything the Mac app's tiling does, because it is the same calls. An
@@ -1216,6 +1221,7 @@ async fn run() -> Fallible {
         Command::Layout(c) => layout(runner, c, cli.json).await,
         Command::NeedsYou => needs_you(runner, cli.json).await,
         Command::Report(args) => report::report(runner, args, cli.json).await,
+        Command::Board(c) => board_reads::board(runner, c, cli.json).await,
         Command::Attach { worktree } => attach(runner, &worktree).await,
         Command::Events => events(runner).await,
         Command::Push(c) => push(runner, c).await,
@@ -3806,32 +3812,14 @@ fn event_json(payload: farcooler_protocol::v1::event::Payload) -> Option<serde_j
         }),
         // A task notice the runner composed (ov-94): what the Mac posts when
         // the relay won't, under `notice_id`. See `notice_json`.
-        farcooler_protocol::v1::event::Payload::Notice(n) => notice_json(&n),
+        farcooler_protocol::v1::event::Payload::Notice(n) => event_lines::notice_json(&n),
+        farcooler_protocol::v1::event::Payload::BoardReadsChanged(r) => event_lines::reads_event_json(&r),
         // Other resources have no events yet. `None` is right: a client that
         // reacted to a line it cannot read would be worse. What is NOT right
         // is a resource that HAS a reader landing here by omission, which is
         // the bug the board arm above was, and which is what this function
         // exists to make testable.
         _ => return None,
-    })
-}
-
-/// A task notice, as the Mac's `NoticeEvent` reads it (ov-94).
-fn notice_json(n: &farcooler_protocol::v1::Notice) -> serde_json::Value {
-    serde_json::json!({
-        "kind": "notice",
-        "notice_id": n.notice_id,
-        "event": n.event,
-        "level": n.level,
-        "title": n.title,
-        "body": n.body,
-        "task": n.task_key,
-        "runner": n.runner_id,
-        "workspace": n.workspace,
-        "options": n.options,
-        // The task's repository, which a key is unique within (ov-106).
-        // Null from a runner too old to say.
-        "repository": (!n.repository_id.is_empty()).then(|| uuid_of(&n.repository_id).to_string()),
     })
 }
 
@@ -4889,6 +4877,7 @@ mod tests {
             (Payload::EventsMissed(farcooler_protocol::v1::Empty {}), "events_missed"),
             (Payload::NeedsYouChanged(farcooler_protocol::v1::Empty {}), "needs_you"),
             (Payload::Notice(Default::default()), "notice"),
+            (Payload::BoardReadsChanged(Default::default()), "reads"),
         ];
         for (payload, kind) in kinds {
             let line = event_json(payload)
@@ -4902,7 +4891,7 @@ mod tests {
     /// these keys, and a key renamed here is a notice the Mac never posts.
     #[test]
     fn a_notice_line_carries_what_the_mac_posts() {
-        let line = notice_json(&farcooler_protocol::v1::Notice {
+        let line = event_lines::notice_json(&farcooler_protocol::v1::Notice {
             notice_id: "t:r-1:ov-90".into(),
             event: "decision".into(),
             level: "time-sensitive".into(),

@@ -441,12 +441,15 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
             let board =
                 board_for(&mut link, repo.as_deref(), workspace.as_deref(), std::env::var(WORKSPACE_ENV).ok())
                     .await?;
-            let items = tasks_in(&mut link, &board, status, stale).await?;
+            let list = board_in(&mut link, &board, status, stale).await?;
 
             if json {
-                println!("{}", render_list_json(&items));
+                // `reads` beside `tasks` (ov-113): additive, so a reader of
+                // `tasks` alone never sees it.
+                println!("{}", render_board_json(&list));
                 return Ok(());
             }
+            let items = list.items;
             if items.is_empty() {
                 println!("nothing on this board");
                 return Ok(());
@@ -1015,6 +1018,12 @@ fn wants(fields: &[&str], section: &str) -> bool {
     fields.is_empty() || fields.iter().any(|f| f.eq_ignore_ascii_case(section))
 }
 
+/// The board with its read state beside the rows (ov-113): `render_list_json`,
+/// and `reads` when the runner sent it.
+pub(crate) fn render_board_json(list: &pb::TaskList) -> String {
+    tasks_json::board_json(list, now_millis()).to_string()
+}
+
 /// The board, as a shape a program can hold on to.
 ///
 /// Keys and types, never a rendered table. An agent parses this, and a
@@ -1347,12 +1356,12 @@ fn actor_for(given: Option<&str>) -> Result<Actor, String> {
 /// A board a command reads or writes: one workspace's, or, with no
 /// workspace, every board in the repository at once.
 #[derive(Debug, Clone, PartialEq)]
-struct Board {
-    repository: Uuid,
-    workspace: Option<pb::Workspace>,
+pub(crate) struct Board {
+    pub(crate) repository: Uuid,
+    pub(crate) workspace: Option<pb::Workspace>,
     /// Whether the runner has workspaces at all. Without them its one board
     /// is the repository's, and no row names a workspace.
-    has_workspaces: bool,
+    pub(crate) has_workspaces: bool,
 }
 
 impl Board {
@@ -1374,7 +1383,7 @@ impl Board {
 /// A pane whose workspace this runner doesn't have is refused rather than
 /// widened to the repository: a board read as the whole repository would be
 /// read as that workspace's, and a task created there would land on Main.
-async fn board_for<L: DispatchLink>(
+pub(crate) async fn board_for<L: DispatchLink>(
     link: &mut L,
     repo: Option<&str>,
     workspace: Option<&str>,
@@ -1510,6 +1519,17 @@ async fn tasks_in<L: DispatchLink>(
     status: Option<TaskStatus>,
     stale_after: Option<Duration>,
 ) -> Result<Vec<pb::Task>, Box<dyn std::error::Error>> {
+    Ok(board_in(link, board, status, stale_after).await?.items)
+}
+
+/// `tasks_in`, with the board's read state the runner sent beside the rows
+/// (ov-113), for the one caller that prints it.
+pub(crate) async fn board_in<L: DispatchLink>(
+    link: &mut L,
+    board: &Board,
+    status: Option<TaskStatus>,
+    stale_after: Option<Duration>,
+) -> Result<pb::TaskList, Box<dyn std::error::Error>> {
     let r = link
         .call(task_list_request(board, status, stale_after))
         .await
@@ -1517,7 +1537,7 @@ async fn tasks_in<L: DispatchLink>(
     let result::Value::TaskList(l) = expect_value(r.value)? else {
         return Err(crate::daemon_link::UNREADABLE.into());
     };
-    Ok(l.items)
+    Ok(l)
 }
 
 /// `task.list` for `board`. A workspace's board names `workstreams`: a runner
