@@ -312,7 +312,7 @@ async fn a_client_connects_and_learns_the_daemon_version() {
 #[tokio::test]
 async fn a_runner_says_when_its_agents_run_a_stand_in() {
     let daemon = start_with_a_stand_in_agent().await;
-    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+    let session = Session::connect_local(&daemon.socket).await.expect("connect");
     let host = session.host().await.expect("host");
     assert!(host.stand_in_agent.starts_with('/'), "no stand-in named: {:?}", host.stand_in_agent);
     // And every agent reads as one it can start (ov-205): the stand-in answers
@@ -321,7 +321,7 @@ async fn a_runner_says_when_its_agents_run_a_stand_in() {
     assert_eq!(host.agents_found, ["claude", "codex", "cursor-agent"]);
 
     let plain = start().await;
-    let mut session = Session::connect_local(&plain.socket).await.expect("connect");
+    let session = Session::connect_local(&plain.socket).await.expect("connect");
     let host = session.host().await.expect("host");
     assert_eq!(host.stand_in_agent, "", "a daemon with no stand-in named one");
 }
@@ -345,7 +345,7 @@ async fn the_fleet_shape_is_the_one_a_phone_decodes() {
     // cannot be updated at the same moment, which is the whole hazard of having
     // a phone in the picture.
     let daemon = start().await;
-    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+    let session = Session::connect_local(&daemon.socket).await.expect("connect");
 
     let fleet = session.fleet().await.expect("fleet");
     assert!(fleet.get("runtime_healthy").is_some_and(|v| v.is_boolean()));
@@ -360,7 +360,7 @@ async fn a_daemon_that_goes_away_mid_session_reads_as_a_dropped_link() {
     // daemon refusing a request, because one of those is fixed by
     // reconnecting and the other is fixed by not sending it again.
     let mut daemon = start().await;
-    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+    let session = Session::connect_local(&daemon.socket).await.expect("connect");
     session.fleet().await.expect("the session works before the daemon goes away");
 
     daemon.process.kill().expect("kill");
@@ -376,7 +376,7 @@ async fn a_daemon_that_goes_away_mid_session_reads_as_a_dropped_link() {
 #[tokio::test]
 async fn a_worktree_created_through_the_client_comes_back_in_the_fleet() {
     let daemon = start().await;
-    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+    let session = Session::connect_local(&daemon.socket).await.expect("connect");
 
     // A real repository, because worktree creation makes a real worktree.
     let dir = tempfile::tempdir().unwrap();
@@ -431,7 +431,7 @@ async fn a_worktree_created_through_the_client_comes_back_in_the_fleet() {
 #[tokio::test]
 async fn hiding_and_unhiding_round_trips_through_the_client() {
     let daemon = start().await;
-    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+    let session = Session::connect_local(&daemon.socket).await.expect("connect");
 
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().join("demo");
@@ -483,7 +483,7 @@ async fn hiding_and_unhiding_round_trips_through_the_client() {
 #[tokio::test]
 async fn fleet_news_reaches_a_subscriber_in_a_round_trip_not_a_poll_interval() {
     let daemon = start().await;
-    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+    let session = Session::connect_local(&daemon.socket).await.expect("connect");
 
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().join("demo");
@@ -549,7 +549,7 @@ async fn subscribing_to_a_terminal_with_no_agent_session_is_empty_not_an_error()
     // been in agent mode must answer "nothing yet" rather than fail, or the
     // UI cannot open a chat view before the first turn.
     let daemon = start().await;
-    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+    let session = Session::connect_local(&daemon.socket).await.expect("connect");
 
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().join("demo");
@@ -588,7 +588,7 @@ async fn a_failed_call_arrives_as_an_error_not_a_dropped_session() {
     // A phone on a train needs the session to survive a refusal; reconnecting
     // over SSH for every rejected request would be unusable.
     let daemon = start().await;
-    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+    let session = Session::connect_local(&daemon.socket).await.expect("connect");
 
     let missing = uuid::Uuid::now_v7();
     assert!(session.hide_worktree(missing).await.is_err());
@@ -625,7 +625,7 @@ async fn a_refusal_keeps_the_reason_the_runner_named_it_by() {
     };
 
     let daemon = start().await;
-    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+    let session = Session::connect_local(&daemon.socket).await.expect("connect");
 
     // Nothing by that id. "Refresh, it's gone" — not "try again".
     let missing = uuid::Uuid::now_v7();
@@ -672,7 +672,7 @@ async fn a_refusal_keeps_the_reason_the_runner_named_it_by() {
 #[tokio::test]
 async fn removing_a_clean_worktree_needs_no_typed_name() {
     let daemon = start().await;
-    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+    let session = Session::connect_local(&daemon.socket).await.expect("connect");
 
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().join("demo");
@@ -704,7 +704,7 @@ async fn removing_a_clean_worktree_needs_no_typed_name() {
 #[tokio::test]
 async fn removing_a_dirty_worktree_needs_the_task_name_typed() {
     let daemon = start().await;
-    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+    let session = Session::connect_local(&daemon.socket).await.expect("connect");
 
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().join("demo");
@@ -750,7 +750,7 @@ async fn removing_a_dirty_worktree_needs_the_task_name_typed() {
 #[tokio::test]
 async fn adding_a_root_and_registering_a_repository_round_trips() {
     let daemon = start().await;
-    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+    let session = Session::connect_local(&daemon.socket).await.expect("connect");
 
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().join("demo");
@@ -799,7 +799,7 @@ async fn a_root_removed_through_the_client_is_actually_removed() {
     use farcooler_client::actions::RemoveRootOutcome;
 
     let daemon = start().await;
-    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+    let session = Session::connect_local(&daemon.socket).await.expect("connect");
 
     let dir = tempfile::tempdir().unwrap();
     let watched = dir.path().join("watched");
@@ -1143,7 +1143,7 @@ async fn a_board_and_the_pane_working_it_come_back_through_the_client() {
     use farcooler_protocol::v1::request::Payload;
 
     let daemon = start_with_a_stand_in_agent().await;
-    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+    let session = Session::connect_local(&daemon.socket).await.expect("connect");
     assert!(session.can(farcooler_protocol::capability::TASKS), "this daemon keeps a board");
 
     let dir = tempfile::tempdir().unwrap();
@@ -1307,7 +1307,7 @@ async fn a_decision_answered_from_a_phone_leaves_needs_you() {
     use farcooler_protocol::v1::{TaskNoteKind, result::Value};
 
     let daemon = start().await;
-    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+    let session = Session::connect_local(&daemon.socket).await.expect("connect");
     assert!(session.can(farcooler_protocol::capability::NEEDS_YOU), "this daemon has the rollup");
 
     let dir = tempfile::tempdir().unwrap();
@@ -1444,7 +1444,7 @@ async fn a_daemon_under_the_stub_switch_never_starts_claude() {
         "the trap is not first for a bare claude, so launching one could start the real agent"
     );
 
-    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+    let session = Session::connect_local(&daemon.socket).await.expect("connect");
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().join("demo");
     std::fs::create_dir(&repo).unwrap();
@@ -1551,7 +1551,7 @@ async fn two_workspaces_in_one_repository_come_back_apart_through_the_client() {
     use farcooler_protocol::v1::result::Value;
 
     let daemon = start().await;
-    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+    let session = Session::connect_local(&daemon.socket).await.expect("connect");
     assert!(session.can(WORKSTREAMS), "this daemon keeps workstreams");
 
     let dir = tempfile::tempdir().unwrap();
@@ -1875,7 +1875,7 @@ async fn a_claude_asking() -> Asking {
         stand_in.trap_dir.join("claude").display().to_string(),
         "the trap is not first for a bare claude, so its silence would prove nothing"
     );
-    let mut session = Session::connect_local(&daemon.socket).await.expect("connect");
+    let session = Session::connect_local(&daemon.socket).await.expect("connect");
 
     let repo_dir = tempfile::tempdir().unwrap();
     let repo = repo_dir.path().join("demo");
@@ -1948,7 +1948,7 @@ async fn a_permission_answered_from_a_phone_reaches_the_held_hook() {
 /// decoders are pinned to what a daemon writes, not to what a test imagined.
 #[tokio::test]
 async fn a_held_ask_reaches_needs_you_as_the_shared_fixture_spells_it() {
-    let mut asking = a_claude_asking().await;
+    let asking = a_claude_asking().await;
     let (terminal, id) = (asking.terminal, asking.id.clone());
     let fixture: serde_json::Value =
         serde_json::from_str(include_str!("../../../test/fixtures/needs-you.json")).expect("the fixture");

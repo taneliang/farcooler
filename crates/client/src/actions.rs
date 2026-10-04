@@ -11,7 +11,7 @@
 use farcooler_protocol::v1::{
     Repository, RepositoryRegister, RepositoryRoot, RepositoryRootAdd, request, result,
 };
-use farcooler_transport::{Client, ClientError};
+use farcooler_transport::{CallOptions, Client, ClientError};
 use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
 
@@ -44,7 +44,7 @@ pub enum RemoveRootOutcome {
 }
 
 async fn call<R, W>(
-    client: &mut Client<R, W>,
+    client: &Client<R, W>,
     method: &str,
     target: Uuid,
     payload: Option<request::Payload>,
@@ -58,11 +58,11 @@ where
     if let Some(p) = payload {
         request.payload = Some(p);
     }
-    Ok(client.call(request).await?.value)
+    Ok(client.call_with(request, CallOptions::default()).await?.value)
 }
 
 pub async fn hide_worktree<R, W>(
-    client: &mut Client<R, W>,
+    client: &Client<R, W>,
     worktree: Uuid,
 ) -> Result<(), ClientError>
 where
@@ -73,7 +73,7 @@ where
 }
 
 pub async fn unhide_worktree<R, W>(
-    client: &mut Client<R, W>,
+    client: &Client<R, W>,
     worktree: Uuid,
 ) -> Result<(), ClientError>
 where
@@ -94,7 +94,7 @@ where
 /// `CAPABILITY_UNSUPPORTED`, which is a refusal a client can act on — but the
 /// client should not have offered the drag in the first place.
 pub async fn reorder_worktrees<R, W>(
-    client: &mut Client<R, W>,
+    client: &Client<R, W>,
     ordered: &[Uuid],
 ) -> Result<(), ClientError>
 where
@@ -109,7 +109,7 @@ where
     });
     let mut request = farcooler_transport::request("worktree.reorder");
     request.payload = Some(payload);
-    client.call(request).await?;
+    client.call_with(request, CallOptions::default()).await?;
     Ok(())
 }
 
@@ -120,7 +120,7 @@ where
 /// so this is a courtesy and the daemon's own check is what actually
 /// protects the files.
 pub async fn remove_worktree<R, W>(
-    client: &mut Client<R, W>,
+    client: &Client<R, W>,
     worktree: Uuid,
     confirm: &str,
 ) -> Result<RemoveWorktreeOutcome, ClientError>
@@ -152,7 +152,7 @@ where
 /// `progress` is called after each chunk with (sent, total) — enough to draw a
 /// ring, and nothing here depends on what it does with it.
 pub async fn paste_file<R, W>(
-    client: &mut Client<R, W>,
+    client: &Client<R, W>,
     terminal: Uuid,
     name: &str,
     mime: &str,
@@ -243,7 +243,7 @@ where
 
 /// Allowlist a folder Far Cooler may operate under. Returns the new root.
 pub async fn add_repository_root<R, W>(
-    client: &mut Client<R, W>,
+    client: &Client<R, W>,
     absolute_path: &str,
 ) -> Result<RepositoryRoot, ClientError>
 where
@@ -255,7 +255,7 @@ where
         absolute_path: absolute_path.to_string(),
         typed_confirmation: String::new(),
     }));
-    match client.call(request).await?.value {
+    match client.call_with(request, CallOptions::default()).await?.value {
         Some(result::Value::RepositoryRoot(root)) => Ok(root),
         _ => Err(ClientError::WrongResult { expected: "repository_root", got: "something else" }),
     }
@@ -278,7 +278,7 @@ where
 /// "payload" }` — a control that could never once have succeeded, on iOS since
 /// the day it shipped.
 pub async fn remove_repository_root<R, W>(
-    client: &mut Client<R, W>,
+    client: &Client<R, W>,
     root: Uuid,
     confirm: &str,
 ) -> Result<RemoveRootOutcome, ClientError>
@@ -305,7 +305,7 @@ where
 /// it against whichever registered root covers it, same as the CLI's own
 /// `repo register` has always done.
 pub async fn register_repository<R, W>(
-    client: &mut Client<R, W>,
+    client: &Client<R, W>,
     relative_path: &str,
 ) -> Result<Repository, ClientError>
 where
@@ -316,7 +316,7 @@ where
     request.payload = Some(request::Payload::RepositoryRegister(RepositoryRegister {
         relative_path: relative_path.to_string(),
     }));
-    match client.call(request).await?.value {
+    match client.call_with(request, CallOptions::default()).await?.value {
         Some(result::Value::Repository(repo)) => Ok(repo),
         _ => Err(ClientError::WrongResult { expected: "repository", got: "something else" }),
     }

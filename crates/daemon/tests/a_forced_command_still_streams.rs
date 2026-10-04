@@ -203,7 +203,7 @@ async fn the_stream_command_still_streams_on_a_key_that_forces_nothing() {
 /// made that decision itself would be testing its own opinion.
 async fn first_byte(runner: &Runner, key: &Path, terminal: uuid::Uuid) -> Duration {
     let started = Instant::now();
-    let mut session = Session::connect_ssh(&destination(runner, key))
+    let session = Session::connect_ssh(&destination(runner, key))
         .await
         .expect("connect the product's client over a real sshd");
     let mut stream = session.open_stream(terminal).await.expect("open a stream");
@@ -224,7 +224,7 @@ async fn first_byte(runner: &Runner, key: &Path, terminal: uuid::Uuid) -> Durati
 
 /// Everything the stream sends in its first moment, through this key.
 async fn replay_over(runner: &Runner, key: &Path, terminal: uuid::Uuid) -> Vec<u8> {
-    let mut session = Session::connect_ssh(&destination(runner, key))
+    let session = Session::connect_ssh(&destination(runner, key))
         .await
         .expect("connect the product's client over a real sshd");
     let mut stream = session.open_stream(terminal).await.expect("open a stream");

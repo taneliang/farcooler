@@ -9,7 +9,7 @@
 4813 crates/cli/src/tasks.rs
 4029 apps/macos/Sources/FarCooler/ContentView.swift
 3751 apps/ios/FarCooler/AgentView.swift
-3617 crates/client/src/ffi.rs
+3544 crates/client/src/ffi.rs
 3380 services/relay/src/index.ts
 3343 crates/client/src/session.rs
 3274 apps/macos/Sources/FarCooler/DaemonClient.swift

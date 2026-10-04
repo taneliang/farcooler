@@ -88,7 +88,7 @@ async fn a_worktree_is_made_unclaimed_when_the_workspace_list_fails() {
     let dir = tempfile::tempdir().unwrap();
     let socket = dir.path().join("runner.sock");
     let created = a_runner_that_cannot_list(&socket).await;
-    let mut session = Session::connect_local(&socket).await.expect("connect");
+    let session = Session::connect_local(&socket).await.expect("connect");
 
     let made = session
         .create_worktree(uuid::Uuid::now_v7(), "phone task", "feat/phone", "HEAD", "", false)

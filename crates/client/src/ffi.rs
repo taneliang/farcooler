@@ -49,7 +49,9 @@ use crate::ssh::{Destination, HostKeyPolicy, Reach};
 /// A client handle: a runtime, a session, and a queue of finished work.
 pub struct ClientHandle {
     runtime: tokio::runtime::Runtime,
-    session: Arc<tokio::sync::Mutex<Option<Session>>>,
+    /// The session calls are made on, or none. Held only long enough to clone
+    /// the `Arc` out: see `calls`.
+    session: Arc<Mutex<Option<Arc<Session>>>>,
     /// Finished results, oldest first.
     finished: Arc<Mutex<VecDeque<String>>>,
     next_ticket: Arc<Mutex<u64>>,
@@ -264,7 +266,7 @@ pub extern "C" fn farcooler_client_new() -> *mut c_void {
 
         let handle = Box::new(ClientHandle {
             runtime,
-            session: Arc::new(tokio::sync::Mutex::new(None)),
+            session: Arc::new(Mutex::new(None)),
             finished: Arc::new(Mutex::new(VecDeque::new())),
             next_ticket: Arc::new(Mutex::new(1)),
             scratch: None,
@@ -319,7 +321,7 @@ pub unsafe extern "C" fn farcooler_client_connect(
         h.runtime.spawn(async move {
             let outcome = match parse_destination(&config) {
                 Ok(destination) => match Session::connect_ssh(&destination).await {
-                    Ok(mut open) => {
+                    Ok(open) => {
                         let version = open.daemon_version().to_string();
                         // What that runner can do, so the app can dim what it
                         // cannot serve rather than offering a control that fails.
@@ -330,8 +332,8 @@ pub unsafe extern "C" fn farcooler_client_connect(
                             .filter(|c| open.can(c))
                             .map(|c| (*c).to_string())
                             .collect();
-                        subscribe(&mut open, &events).await;
-                        *session.lock().await = Some(open);
+                        subscribe(&open, &events).await;
+                        *locked(&session) = Some(Arc::new(open));
                         Ok(json!({ "daemon_version": version, "capabilities": capabilities }))
                     }
                     Err(e) => Err(connect_failure(&e)),
@@ -363,15 +365,18 @@ pub unsafe extern "C" fn farcooler_client_call(
         let args = unsafe { read_str(args) }.unwrap_or_else(|| "{}".into());
 
         let ticket = h.take_ticket();
-        let session = Arc::clone(&h.session);
+        let slot = Arc::clone(&h.session);
         let finished = Arc::clone(&h.finished);
+        let current = locked(&slot).clone();
+        let parsed: Value = serde_json::from_str(&args).unwrap_or(json!({}));
+        // Input goes on the wire here, before this returns. See `calls::queue`.
+        let queued = current.as_deref().and_then(|s| calls::queue(s, &method, &parsed));
 
         h.runtime.spawn(async move {
-            let parsed: Value = serde_json::from_str(&args).unwrap_or(json!({}));
-            let mut guard = session.lock().await;
-            let outcome = match guard.as_mut() {
-                None => Err(Lost::Already),
-                Some(session) => dispatch(session, &method, &parsed).await.map_err(Lost::Call),
+            let outcome = match (current.as_deref(), queued) {
+                (None, _) => Err(Lost::Already),
+                (Some(_), Some(queued)) => calls::answered(queued).await.map_err(Lost::Call),
+                (Some(session), None) => dispatch(session, &method, &parsed).await.map_err(Lost::Call),
             };
 
             // A transport failure is not this request's problem; it is every
@@ -400,12 +405,8 @@ pub unsafe extern "C" fn farcooler_client_call(
                 Ok(_) => false,
             };
             if lost {
-                *guard = None;
+                calls::forget(&slot, current.as_ref());
             }
-            // Released before pushing, so a client that reconnects the instant it
-            // reads this answer is not queued behind this call's own lock.
-            drop(guard);
-
             push_call(&finished, ticket, outcome, lost);
         });
 
@@ -449,12 +450,12 @@ pub unsafe extern "C" fn farcooler_client_paste_file(
         let image = unsafe { std::slice::from_raw_parts(data, len) }.to_vec();
 
         let ticket = h.take_ticket();
-        let session = Arc::clone(&h.session);
+        let slot = Arc::clone(&h.session);
         let finished = Arc::clone(&h.finished);
+        let current = locked(&slot).clone();
 
         h.runtime.spawn(async move {
-            let mut guard = session.lock().await;
-            let outcome = match (guard.as_mut(), terminal.parse::<uuid::Uuid>().ok()) {
+            let outcome = match (current.as_deref(), terminal.parse::<uuid::Uuid>().ok()) {
                 (None, _) => Err(Lost::Already),
                 (Some(_), None) => {
                     Err(Lost::Call(SessionError::Protocol("that is not a terminal id".into())))
@@ -482,10 +483,8 @@ pub unsafe extern "C" fn farcooler_client_paste_file(
                 Ok(_) => false,
             };
             if lost {
-                *guard = None;
+                calls::forget(&slot, current.as_ref());
             }
-            drop(guard);
-
             push_call(&finished, ticket, outcome, lost);
         });
 
@@ -695,11 +694,11 @@ fn minted(outcome: Result<farcooler_tailcat::NodeKeyPair, farcooler_tailcat::Tun
 /// an ssh failure empties it (see `farcooler_client_call`), so every stream
 /// started between that call and a reconnect starts against nothing.
 ///
-/// `try_lock` rather than blocking, for the reason `farcooler_client_connected`
-/// gives: this is called from a UI thread and a call in flight holds the
-/// session for as long as the runner takes to answer. A slot that is merely
-/// busy is treated as connected — the task below is the one that finds out for
-/// certain, and it now says so.
+/// The session is taken from the slot here, on the caller's thread, so the
+/// answer is about the slot as it is now. A slot no longer has a "busy"
+/// reading — it is not held across calls (ov-147) — and the task below opens
+/// the stream on the session this saw, reporting any failure as the stream's
+/// end.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_client_stream_start(
     handle: *mut c_void,
@@ -709,11 +708,7 @@ pub unsafe extern "C" fn farcooler_client_stream_start(
         let Some(h) = (unsafe { as_handle(handle) }) else { return false };
         let Some(terminal) = (unsafe { read_str(terminal) }) else { return false };
         let Ok(id) = terminal.parse::<uuid::Uuid>() else { return false };
-        if h.session.try_lock().map(|guard| guard.is_none()).unwrap_or(false) {
-            return false;
-        }
-
-        let session = h.session.clone();
+        let Some(session) = locked(&h.session).clone() else { return false };
         let finished = h.finished.clone();
         let streams = h.streams.clone();
         let key = terminal.clone();
@@ -721,42 +716,16 @@ pub unsafe extern "C" fn farcooler_client_stream_start(
         let task = h.runtime.spawn(async move {
             use tokio::io::AsyncReadExt;
 
-            let reader = {
-                let mut guard = session.lock().await;
-                let Some(session) = guard.as_mut() else {
-                    // The slot emptied between the check above and this lock —
-                    // it was busy with the very call that found the link dead,
-                    // which is the likeliest way to arrive here rather than an
-                    // unlucky one.
-                    //
-                    // Saying so costs one line and is the difference between a
-                    // pane that recovers and a pane that does not: this is the
-                    // only end signal a stream has, `deliver` treats any
-                    // non-chunk line as the end, and without it the client's
-                    // `onEnd` never fires and `streamEnded` never falls back to
-                    // polling. The message matches `Lost::Already` deliberately
-                    // — one empty slot, one wording, whichever entry point
-                    // happens to notice it.
-                    push_line(
-                        &finished,
-                        json!({ "stream": key, "error": NOT_CONNECTED }).to_string(),
-                    );
+            let reader = match session.open_stream(id).await {
+                Ok(reader) => reader,
+                Err(e) => {
+                    push_line(&finished, json!({ "stream": key, "error": e.to_string() }).to_string());
                     return;
-                };
-                match session.open_stream(id).await {
-                    Ok(reader) => reader,
-                    Err(e) => {
-                        push_line(
-                            &finished,
-                            json!({ "stream": key, "error": e.to_string() }).to_string(),
-                        );
-                        return;
-                    }
                 }
-                // The lock is released here, deliberately: the stream reads for as
-                // long as the pane lives, and holding the session for that long
-                // would block every other call on this client forever.
             };
+            // Not kept for the stream's life: the slot is what decides whether
+            // this session lives, and a stream outliving it reads to its end.
+            drop(session);
 
             let mut reader = reader;
             let mut buf = vec![0u8; 16 * 1024];
@@ -1362,7 +1331,7 @@ pub unsafe extern "C" fn farcooler_client_builtin_themes(out: *mut u8, capacity:
 /// too old, an sshd out of channels, or a transport that is not ssh at all —
 /// each of those is a runner the client polls the way it always did, and
 /// refusing to connect over it would turn a slower app into no app.
-async fn subscribe(open: &mut Session, events: &Arc<Mutex<EventQueue>>) {
+async fn subscribe(open: &Session, events: &Arc<Mutex<EventQueue>>) {
     let generation = locked(events).opening();
 
     // The sink. It runs on the runtime thread reading the daemon's socket, so
@@ -1479,9 +1448,8 @@ pub unsafe extern "C" fn farcooler_client_poll(handle: *mut c_void) -> *const c_
 pub unsafe extern "C" fn farcooler_client_connected(handle: *mut c_void) -> bool {
     guarded(false, || {
         let Some(h) = (unsafe { as_handle(handle) }) else { return false };
-        // try_lock rather than blocking: this is called from a UI thread, and a
-        // call in flight holds the session for as long as the runner takes to answer.
-        h.session.try_lock().map(|guard| guard.is_some()).unwrap_or(true)
+        // Never held across a call (ov-147), so this never waits on one.
+        locked(&h.session).is_some()
     })
 }
 
@@ -1554,7 +1522,7 @@ fn start_orchestrator_of(
 }
 
 async fn dispatch(
-    session: &mut Session,
+    session: &Session,
     method: &str,
     args: &Value,
 ) -> Result<Value, SessionError> {
@@ -2143,24 +2111,11 @@ async fn dispatch(
             }))
         }
 
-        // Input, as hex. A key is not always a character — arrows, Ctrl-C and a
-        // bracketed paste are byte sequences — so nothing here re-encodes.
-        "terminal.write" => {
-            let hex = text("hex");
-            let bytes = decode_hex(&hex)
-                .ok_or_else(|| SessionError::Protocol("input must be hex".into()))?;
-            session.write(id("terminal")?, bytes).await?;
-            Ok(json!({}))
-        }
-
-        "terminal.resize" => {
-            let columns = args.get("columns").and_then(|v| v.as_u64()).unwrap_or(80) as u32;
-            let rows = args.get("rows").and_then(|v| v.as_u64()).unwrap_or(24) as u32;
-            session
-                .resize_terminal(id("terminal")?, columns, rows)
-                .await?;
-            Ok(json!({}))
-        }
+        // Input: `calls::queue`, which `farcooler_client_call` reaches first.
+        "terminal.write" | "terminal.resize" => match calls::queue(session, method, args) {
+            Some(queued) => calls::answered(queued).await,
+            None => Err(SessionError::Protocol(format!("{method} is not input"))),
+        },
 
         // ---- agent channel ----
         //
@@ -2533,6 +2488,12 @@ fn push_call(
 }
 
 impl ClientHandle {
+    /// Fill the slot with a session a test opened itself.
+    #[cfg(test)]
+    fn put_session(&self, session: Session) {
+        *locked(&self.session) = Some(Arc::new(session));
+    }
+
     fn take_ticket(&self) -> u64 {
         let mut next = locked(&self.next_ticket);
         let ticket = *next;
@@ -2648,6 +2609,9 @@ mod tests {
                 | SessionError::VersionMismatch { .. }
                 | SessionError::Refused { .. }
                 | SessionError::Disconnected(_) => {}
+                // Not in the list: a connect makes no call with a deadline,
+                // so it can never fail this way. A call can (`deadlines`).
+                SessionError::TimedOut { .. } => {}
             }
             produced.insert(e.word().to_string());
         }
@@ -3046,51 +3010,6 @@ mod tests {
     }
 
     #[test]
-    fn a_stream_that_finds_the_slot_empty_says_so_instead_of_going_quiet() {
-        // The same hole from the other side, and the side that actually bites.
-        //
-        // Whether the empty slot is seen by the check before the spawn or by
-        // the lock inside it is a race nothing here can control — and the
-        // likeliest way to lose it is the ONE that matters, because the call
-        // holding the session is usually the very call that just found the link
-        // dead and is about to empty it. So the check is arranged to lose here:
-        // the lock is held across `stream_start`, `try_lock` cannot see the
-        // slot, and the task behind it is left to be honest on its own.
-        //
-        // It has to be. One non-chunk line is the only end signal a stream has
-        // — `ClientCore.deliver` turns exactly that into `onEnd`, which is what
-        // `streamEnded` needs to fall back to polling. Before this, that line
-        // was never pushed and the pane simply stopped.
-        let handle = farcooler_client_new();
-
-        // The Arc alone, not a borrow of the handle held across the call below.
-        let session = {
-            let h = unsafe { as_handle(handle) }.unwrap();
-            Arc::clone(&h.session)
-        };
-        let held = session.blocking_lock();
-
-        let id = c"9f1c7d2e-0b4a-4f3d-9c11-2a6b8e5d4c30";
-        assert!(
-            unsafe { farcooler_client_stream_start(handle, id.as_ptr()) },
-            "a busy slot is not a known-empty one, so this cannot answer false"
-        );
-        drop(held);
-
-        // Answered on the runtime's thread, so wait for it rather than assuming
-        // it has landed by now.
-        let line = loop {
-            if let Some(line) = unsafe { farcooler_client_poll(handle).as_ref() } {
-                break unsafe { CStr::from_ptr(line) }.to_str().unwrap().to_string();
-            }
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        };
-        assert!(line.contains("\"error\":\"not connected\""), "got {line}");
-
-        unsafe { farcooler_client_free(handle) };
-    }
-
-    #[test]
     fn a_missing_fingerprint_means_ask_rather_than_trust() {
         // The default has to be the safe one: silently accepting an unknown key
         // is what makes an interception invisible.
@@ -3248,6 +3167,9 @@ mod tests {
 /// The agent screen's controls against a real daemon, as a phone sends them.
 #[cfg(test)]
 mod phone_path_tests;
+mod calls;
+#[cfg(test)]
+mod concurrency_tests;
 
 fn decode_hex(text: &str) -> Option<Vec<u8>> {
     if text.len() % 2 != 0 {

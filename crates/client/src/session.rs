@@ -67,6 +67,11 @@ pub enum SessionError {
     /// over a bug.
     #[error("the connection to the runner was lost: {0}")]
     Disconnected(String),
+    /// No answer by the call's deadline (see `deadlines`). Not a disconnect:
+    /// one slow answer is not a dead link, and the ssh keepalive is what
+    /// decides that one.
+    #[error("the runner took longer than {after:?} to answer {method}")]
+    TimedOut { method: String, after: std::time::Duration },
 }
 
 impl SessionError {
@@ -83,6 +88,7 @@ impl SessionError {
             SessionError::VersionMismatch { .. } => "version_mismatch",
             SessionError::Refused { .. } => "refused",
             SessionError::Disconnected(_) => "disconnected",
+            SessionError::TimedOut { .. } => "timed_out",
         }
     }
 
@@ -103,7 +109,8 @@ impl SessionError {
             SessionError::Protocol(_)
             | SessionError::Refused { .. }
             | SessionError::WrongResult { .. }
-            | SessionError::VersionMismatch { .. } => false,
+            | SessionError::VersionMismatch { .. }
+            | SessionError::TimedOut { .. } => false,
         }
     }
 }
@@ -138,6 +145,7 @@ impl From<ClientError> for SessionError {
             ClientError::Daemon { code, retryable, message, what } => {
                 SessionError::Refused { code, retryable, message, what }
             }
+            ClientError::TimedOut { method, after } => SessionError::TimedOut { method, after },
             other => SessionError::Protocol(other.to_string()),
         }
     }
@@ -169,7 +177,10 @@ impl AsyncRead for StreamReader {
 pub struct Session {
     client: Client<Reader, Writer>,
     /// Held so the SSH connection lives as long as the session does.
-    _ssh: Option<ssh::Session>,
+    ///
+    /// Behind a lock of its own, and only for the moment a channel is
+    /// opened, so opening a stream needs `&self` like every call does.
+    _ssh: Option<tokio::sync::Mutex<ssh::Session>>,
     /// Where fleet news goes, once somebody has asked for it.
     ///
     /// `None` until `subscribe` is called, which is the honest default: this
@@ -178,7 +189,7 @@ pub struct Session {
     /// channel, so a runner where the dedicated channel could not be opened
     /// still forwards whatever fleet news arrives on a terminal attachment —
     /// see `attach_stream`, which is subscribed to the same broadcast for free.
-    events: Option<EventSink>,
+    events: std::sync::Mutex<Option<EventSink>>,
     /// The socket this session was opened on, when it was opened on one.
     ///
     /// Only `subscribe` reads it, and only so the push path can be proven
@@ -403,17 +414,24 @@ impl Session {
         )
         .await?;
 
-        Ok(Self { client, _ssh: Some(transport), events: None, socket: None })
+        // This connection's own events are dropped: fleet news comes on the
+        // channel `subscribe` opens, and nothing reads them here.
+        client.ignore_events();
+        Ok(Self {
+            client,
+            _ssh: Some(tokio::sync::Mutex::new(transport)),
+            events: std::sync::Mutex::new(None),
+            socket: None,
+        })
     }
 
     /// Open a second ssh channel carrying nothing but one terminal's bytes.
     ///
     /// The data plane, kept off the control connection on purpose. That
-    /// connection answers one request at a time — `Client::call` reads frames
-    /// until it sees its own response — so a stream sharing it would sit behind
-    /// every fleet refresh and every refresh behind a scrollback replay. ssh
-    /// already multiplexes channels; letting it do that is both simpler and
-    /// faster than teaching the client to interleave.
+    /// connection carries calls, whose answers it holds no more than it must,
+    /// and a pane's bytes would be pushback on all of them: a viewer that
+    /// stops reading would stall every call's answer behind its backlog. ssh
+    /// already multiplexes channels, each with its own window.
     ///
     /// The latency floor becomes the network round trip. Measured at 19ms over a
     /// loopback ssh connection, against a second of polling before it — and the
@@ -434,7 +452,7 @@ impl Session {
     /// line, and `main.rs` matches it before `--stream` on a plain one — so
     /// which line this device holds stops being something the stream depends on.
     pub async fn open_stream(
-        &mut self,
+        &self,
         terminal: Uuid,
     ) -> Result<Box<dyn AsyncRead + Unpin + Send>, SessionError> {
         if self.capabilities().iter().any(|c| c == farcooler_protocol::capability::TERMINAL_STREAM)
@@ -449,12 +467,9 @@ impl Session {
         // Not an error: a runner that cannot stream is not a runner that cannot
         // show a terminal, and refusing here would take the poll fallback's
         // trigger away from it.
-        let ssh = self._ssh.as_mut().ok_or_else(|| {
-            SessionError::Protocol("streaming needs an ssh session".into())
-        })?;
         // Named by tilde, not bare: see connect_ssh above.
         let streams =
-            ssh.exec(&format!("~/.local/bin/{} --stream {terminal}", daemon_binary())).await?;
+            self.exec(&format!("~/.local/bin/{} --stream {terminal}", daemon_binary())).await?;
         // The write half is kept, though nothing is ever written to it.
         //
         // Dropping it closes that side of the channel, and ssh reports a closed
@@ -486,14 +501,11 @@ impl Session {
     /// that opens and immediately ends looking exactly like a pane that
     /// finished.
     async fn attach_stream(
-        &mut self,
+        &self,
         terminal: Uuid,
     ) -> Result<Box<dyn AsyncRead + Unpin + Send>, SessionError> {
-        let ssh = self._ssh.as_mut().ok_or_else(|| {
-            SessionError::Protocol("streaming needs an ssh session".into())
-        })?;
         // The same command the control connection runs, and deliberately so.
-        let streams = ssh.exec(&format!("~/.local/bin/{} --stdio", daemon_binary())).await?;
+        let streams = self.exec(&format!("~/.local/bin/{} --stdio", daemon_binary())).await?;
         let mut client = Client::over(
             Box::new(streams.reader) as Reader,
             Box::new(streams.writer) as Writer,
@@ -550,7 +562,7 @@ impl Session {
         // Duplicates with the dedicated channel are expected and are exactly
         // what the boundary's coalescing is for — two "re-read the fleet"
         // notices a millisecond apart are one notice.
-        let news = self.events.clone();
+        let news = self.events.lock().unwrap_or_else(|p| p.into_inner()).clone();
         let (mine, theirs) = tokio::io::duplex(64 * 1024);
         tokio::spawn(async move {
             use tokio::io::AsyncWriteExt;
@@ -591,16 +603,11 @@ impl Session {
     /// Receive fleet news on a channel of its own, for as long as this session
     /// lives.
     ///
-    /// **Why a third channel and not the control connection.** `Client::call`
-    /// owns the reader for the length of a request — it reads frames until it
-    /// sees its own response — so nothing reads the control socket between
-    /// calls, and events sit in the kernel buffer until the next request
-    /// happens to drain them. That is the shape that produced polling: the only
-    /// way to learn something changed was to ask. Teaching the control client
-    /// to demultiplex responses from a background reader is a transport rewrite
-    /// with a correlation table and a lock in it; ssh already multiplexes
-    /// channels, and letting it do that is the same trade `open_stream` made
-    /// one layer down and for the same reason.
+    /// **Why a third channel and not the control connection.** Chosen when
+    /// `Client::call` owned the reader for the length of a request, so nothing
+    /// read the control socket between calls. It has a reader of its own now
+    /// (ov-147), but the control connection still ignores its events: a
+    /// channel of their own keeps fleet news and its pushback apart from calls.
     ///
     /// The cost is one sshd channel and one handshake, paid once per
     /// connection, against a round trip and a radio wake every three seconds
@@ -620,19 +627,19 @@ impl Session {
     /// channel closed, the daemon stopped, or this session was dropped. A
     /// caller that shows "live" anywhere should await it and stop saying so.
     pub async fn subscribe(
-        &mut self,
+        &self,
         sink: EventSink,
     ) -> Result<tokio::task::JoinHandle<()>, SessionError> {
         // Kept even if the channel below cannot be opened. See the field: a
         // terminal attachment carries the same broadcast, so a session that
         // failed to get its own channel is not a session with no push at all.
-        self.events = Some(std::sync::Arc::clone(&sink));
+        *self.events.lock().unwrap_or_else(|p| p.into_inner()) = Some(std::sync::Arc::clone(&sink));
 
-        let mut client = match self._ssh.as_mut() {
-            Some(ssh) => {
+        let mut client = match &self._ssh {
+            Some(_) => {
                 // Named by tilde, not bare: see `connect_ssh` above.
                 let streams =
-                    ssh.exec(&format!("~/.local/bin/{} --stdio", daemon_binary())).await?;
+                    self.exec(&format!("~/.local/bin/{} --stdio", daemon_binary())).await?;
                 Client::over(
                     Box::new(streams.reader) as Reader,
                     Box::new(streams.writer) as Writer,
@@ -691,7 +698,21 @@ impl Session {
             env!("CARGO_PKG_VERSION"),
         )
         .await?;
-        Ok(Self { client, _ssh: None, events: None, socket: Some(socket.to_path_buf()) })
+        client.ignore_events();
+        Ok(Self {
+            client,
+            _ssh: None,
+            events: std::sync::Mutex::new(None),
+            socket: Some(socket.to_path_buf()),
+        })
+    }
+
+    /// Run `command` on a channel of this session's ssh connection.
+    async fn exec(&self, command: &str) -> Result<ssh::Streams, SessionError> {
+        let ssh = self._ssh.as_ref().ok_or_else(|| {
+            SessionError::Protocol("streaming needs an ssh session".into())
+        })?;
+        Ok(ssh.lock().await.exec(command).await?)
     }
 
     pub fn daemon_version(&self) -> &str {
@@ -757,7 +778,7 @@ impl Session {
     ///
     /// Shaped identically to the CLI's `worktree list --json`, so a client
     /// decodes one set of types no matter which one it is talking to.
-    pub async fn fleet(&mut self) -> Result<serde_json::Value, SessionError> {
+    pub async fn fleet(&self) -> Result<serde_json::Value, SessionError> {
         let worktrees = self.worktrees().await?;
         // The whole list, not `self.terminals()`, because the FLEET's trace
         // hangs off the wrapper rather than off any one terminal — and
@@ -943,7 +964,7 @@ impl Session {
     /// `workstreams`, for `tasks`' reason: an old runner answers
     /// `workspace.list` with `CAPABILITY_UNSUPPORTED` anyway.
     pub async fn workspaces(
-        &mut self,
+        &self,
     ) -> Result<Vec<farcooler_protocol::v1::Workspace>, SessionError> {
         require(self.capabilities(), farcooler_protocol::capability::WORKSTREAMS, "workspace.list")?;
         match self.value("workspace.list", None, None).await? {
@@ -952,21 +973,21 @@ impl Session {
         }
     }
 
-    pub async fn host(&mut self) -> Result<farcooler_protocol::v1::Host, SessionError> {
+    pub async fn host(&self) -> Result<farcooler_protocol::v1::Host, SessionError> {
         match self.value("host.health", None, None).await? {
             result::Value::Host(h) => Ok(h),
             other => Err(wrong("host", &other)),
         }
     }
 
-    pub async fn worktrees(&mut self) -> Result<Vec<Worktree>, SessionError> {
+    pub async fn worktrees(&self) -> Result<Vec<Worktree>, SessionError> {
         match self.value("worktree.list", None, None).await? {
             result::Value::WorktreeList(l) => Ok(l.items),
             other => Err(wrong("worktrees", &other)),
         }
     }
 
-    pub async fn terminals(&mut self) -> Result<Vec<Terminal>, SessionError> {
+    pub async fn terminals(&self) -> Result<Vec<Terminal>, SessionError> {
         Ok(self.terminal_list().await?.items)
     }
 
@@ -977,7 +998,7 @@ impl Session {
     /// pane in it: `fleet_trace`. `fleet` needs both, so it asks for both here
     /// rather than making a second round trip for one field.
     async fn terminal_list(
-        &mut self,
+        &self,
     ) -> Result<farcooler_protocol::v1::TerminalList, SessionError> {
         match self.value("terminal.list", None, None).await? {
             result::Value::TerminalList(l) => Ok(l),
@@ -985,14 +1006,14 @@ impl Session {
         }
     }
 
-    pub async fn repositories(&mut self) -> Result<Vec<Repository>, SessionError> {
+    pub async fn repositories(&self) -> Result<Vec<Repository>, SessionError> {
         match self.value("repository.list", None, None).await? {
             result::Value::RepositoryList(l) => Ok(l.items),
             other => Err(wrong("repositories", &other)),
         }
     }
 
-    pub async fn roots(&mut self) -> Result<Vec<RepositoryRoot>, SessionError> {
+    pub async fn roots(&self) -> Result<Vec<RepositoryRoot>, SessionError> {
         match self.value("repository_root.list", None, None).await? {
             result::Value::RepositoryRootList(l) => Ok(l.items),
             other => Err(wrong("roots", &other)),
@@ -1004,7 +1025,7 @@ impl Session {
     /// Only the runner's own — the built-ins are compiled into every client, so
     /// sending eleven fixed palettes down an ssh link on every connection
     /// would be a round trip spent to be told what the client already knows.
-    pub async fn themes(&mut self) -> Result<Vec<farcooler_protocol::v1::Theme>, SessionError> {
+    pub async fn themes(&self) -> Result<Vec<farcooler_protocol::v1::Theme>, SessionError> {
         match self.value("theme.list", None, None).await? {
             result::Value::ThemeList(l) => Ok(l.items),
             other => Err(wrong("themes", &other)),
@@ -1023,7 +1044,7 @@ impl Session {
     /// machine, handed over, or produced by a cloud agent. Creating is still
     /// the default, because it is still the common case.
     pub async fn create_worktree(
-        &mut self,
+        &self,
         repository: Uuid,
         task: &str,
         branch: &str,
@@ -1043,7 +1064,7 @@ impl Session {
     /// drops it.
     #[allow(clippy::too_many_arguments)]
     pub async fn create_worktree_in(
-        &mut self,
+        &self,
         repository: Uuid,
         task: &str,
         branch: &str,
@@ -1091,7 +1112,7 @@ impl Session {
     }
 
     pub async fn create_terminal(
-        &mut self,
+        &self,
         worktree: Uuid,
         title: &str,
         preset: &str,
@@ -1110,41 +1131,41 @@ impl Session {
         }
     }
 
-    pub async fn hide_worktree(&mut self, worktree: Uuid) -> Result<(), SessionError> {
-        Ok(crate::actions::hide_worktree(&mut self.client, worktree).await?)
+    pub async fn hide_worktree(&self, worktree: Uuid) -> Result<(), SessionError> {
+        Ok(crate::actions::hide_worktree(&self.client, worktree).await?)
     }
 
-    pub async fn unhide_worktree(&mut self, worktree: Uuid) -> Result<(), SessionError> {
-        Ok(crate::actions::unhide_worktree(&mut self.client, worktree).await?)
+    pub async fn unhide_worktree(&self, worktree: Uuid) -> Result<(), SessionError> {
+        Ok(crate::actions::unhide_worktree(&self.client, worktree).await?)
     }
 
     /// Put the worktrees in this order, first on screen first.
-    pub async fn reorder_worktrees(&mut self, ordered: &[Uuid]) -> Result<(), SessionError> {
-        Ok(crate::actions::reorder_worktrees(&mut self.client, ordered).await?)
+    pub async fn reorder_worktrees(&self, ordered: &[Uuid]) -> Result<(), SessionError> {
+        Ok(crate::actions::reorder_worktrees(&self.client, ordered).await?)
     }
 
     /// Remove a worktree, or find out it needs the task name typed first —
     /// see `actions::remove_worktree` for what `confirm` means.
     pub async fn remove_worktree(
-        &mut self,
+        &self,
         worktree: Uuid,
         confirm: &str,
     ) -> Result<crate::actions::RemoveWorktreeOutcome, SessionError> {
-        Ok(crate::actions::remove_worktree(&mut self.client, worktree, confirm).await?)
+        Ok(crate::actions::remove_worktree(&self.client, worktree, confirm).await?)
     }
 
     pub async fn add_repository_root(
-        &mut self,
+        &self,
         absolute_path: &str,
     ) -> Result<RepositoryRoot, SessionError> {
-        Ok(crate::actions::add_repository_root(&mut self.client, absolute_path).await?)
+        Ok(crate::actions::add_repository_root(&self.client, absolute_path).await?)
     }
 
     pub async fn register_repository(
-        &mut self,
+        &self,
         relative_path: &str,
     ) -> Result<Repository, SessionError> {
-        Ok(crate::actions::register_repository(&mut self.client, relative_path).await?)
+        Ok(crate::actions::register_repository(&self.client, relative_path).await?)
     }
 
     // ---- runner settings ----
@@ -1154,7 +1175,7 @@ impl Session {
     // what the caller ends up holding.
 
     pub async fn set_branch_prefix(
-        &mut self,
+        &self,
         prefix: &str,
     ) -> Result<farcooler_protocol::v1::Host, SessionError> {
         let payload =
@@ -1168,7 +1189,7 @@ impl Session {
     }
 
     pub async fn upsert_theme(
-        &mut self,
+        &self,
         theme: farcooler_protocol::v1::Theme,
     ) -> Result<Vec<farcooler_protocol::v1::Theme>, SessionError> {
         let payload = request::Payload::Theme(theme);
@@ -1179,7 +1200,7 @@ impl Session {
     }
 
     pub async fn delete_theme(
-        &mut self,
+        &self,
         name: &str,
     ) -> Result<Vec<farcooler_protocol::v1::Theme>, SessionError> {
         // The name travels in `TypedConfirmation`, which carries exactly one
@@ -1195,7 +1216,7 @@ impl Session {
     }
 
     pub async fn adapters(
-        &mut self,
+        &self,
     ) -> Result<Vec<farcooler_protocol::v1::Adapter>, SessionError> {
         match self.value("adapter.list", None, None).await? {
             result::Value::AdapterList(l) => Ok(l.items),
@@ -1204,7 +1225,7 @@ impl Session {
     }
 
     pub async fn upsert_adapter(
-        &mut self,
+        &self,
         adapter: farcooler_protocol::v1::Adapter,
     ) -> Result<Vec<farcooler_protocol::v1::Adapter>, SessionError> {
         let payload = request::Payload::Adapter(adapter);
@@ -1215,7 +1236,7 @@ impl Session {
     }
 
     pub async fn delete_adapter(
-        &mut self,
+        &self,
         preset: &str,
     ) -> Result<Vec<farcooler_protocol::v1::Adapter>, SessionError> {
         let payload = request::Payload::TypedConfirmation(
@@ -1232,7 +1253,7 @@ impl Session {
     /// Takes the adapter rather than a name on purpose: the point is to answer
     /// "will this work" about a form the user has not committed yet.
     pub async fn test_adapter(
-        &mut self,
+        &self,
         adapter: farcooler_protocol::v1::Adapter,
     ) -> Result<farcooler_protocol::v1::AdapterTestResult, SessionError> {
         let payload = request::Payload::Adapter(adapter);
@@ -1242,21 +1263,21 @@ impl Session {
         }
     }
 
-    pub async fn stop_terminal(&mut self, terminal: Uuid) -> Result<(), SessionError> {
+    pub async fn stop_terminal(&self, terminal: Uuid) -> Result<(), SessionError> {
         self.value("terminal.stop", Some(terminal), None).await.map(|_| ())
     }
 
-    pub async fn restart_terminal(&mut self, terminal: Uuid) -> Result<(), SessionError> {
+    pub async fn restart_terminal(&self, terminal: Uuid) -> Result<(), SessionError> {
         self.value("terminal.restart", Some(terminal), None).await.map(|_| ())
     }
 
-    pub async fn dismiss_lost(&mut self, terminal: Uuid) -> Result<(), SessionError> {
+    pub async fn dismiss_lost(&self, terminal: Uuid) -> Result<(), SessionError> {
         self.value("terminal.dismiss_lost", Some(terminal), None).await.map(|_| ())
     }
 
     /// Delete a terminal's record. The daemon refuses a `Running` or
     /// `Starting` one, so closing a live pane is `stop_terminal` first.
-    pub async fn remove_terminal(&mut self, terminal: Uuid) -> Result<(), SessionError> {
+    pub async fn remove_terminal(&self, terminal: Uuid) -> Result<(), SessionError> {
         self.value("terminal.remove", Some(terminal), None).await.map(|_| ())
     }
 
@@ -1266,7 +1287,7 @@ impl Session {
     /// able to say it showed one. Without this the phone could open a finished
     /// agent, read it, and leave it still announcing itself — on the phone, on
     /// the Mac, and in every push notification after.
-    pub async fn mark_seen(&mut self, terminal: Uuid) -> Result<(), SessionError> {
+    pub async fn mark_seen(&self, terminal: Uuid) -> Result<(), SessionError> {
         self.value("terminal.seen", Some(terminal), None).await.map(|_| ())
     }
 
@@ -1290,7 +1311,7 @@ impl Session {
     ///
     /// Several ids because one window can show a whole tiled layout, and a pane
     /// tiled beside the focused one is as much on screen as the focused one.
-    pub async fn report_watching(&mut self, terminals: &[Uuid]) -> Result<(), SessionError> {
+    pub async fn report_watching(&self, terminals: &[Uuid]) -> Result<(), SessionError> {
         let payload = request::Payload::TerminalsWatched(
             farcooler_protocol::v1::TerminalsWatched {
                 terminal_ids: terminals
@@ -1314,7 +1335,7 @@ impl Session {
     /// `history` even when the screen comes back `unchanged`: a client asking
     /// for scrollback is asking because it has none.
     pub async fn screen(
-        &mut self,
+        &self,
         terminal: Uuid,
         known_revision: u64,
         history_lines: u32,
@@ -1329,12 +1350,17 @@ impl Session {
     }
 
     /// Send exact bytes to a terminal.
-    pub async fn write(&mut self, terminal: Uuid, bytes: Vec<u8>) -> Result<(), SessionError> {
+    pub async fn write(&self, terminal: Uuid, bytes: Vec<u8>) -> Result<(), SessionError> {
+        self.start_write(terminal, bytes)?.value().await.map(|_| ())
+    }
+
+    /// `write`, queued for the wire before this returns. Keys sent this way
+    /// reach the runner in the order this was called, whichever task waits.
+    pub fn start_write(&self, terminal: Uuid, bytes: Vec<u8>) -> Result<Pending, SessionError> {
         let payload = request::Payload::TerminalWrite(farcooler_protocol::v1::TerminalWrite {
             payload: bytes.into(),
         });
-        self.value("terminal.write", Some(terminal), Some(payload)).await?;
-        Ok(())
+        self.start("terminal.write", Some(terminal), Some(payload), Vec::new())
     }
 
     /// Send a file into a terminal, and return the path it landed at.
@@ -1347,7 +1373,7 @@ impl Session {
     /// `progress` is called after each chunk with (sent, total). It is how a
     /// client draws a ring; nothing here depends on what it does.
     pub async fn paste_file(
-        &mut self,
+        &self,
         terminal: Uuid,
         name: &str,
         mime: &str,
@@ -1368,21 +1394,27 @@ impl Session {
                 farcooler_protocol::MAX_PASTE_FILE_BYTES / (1024 * 1024)
             )));
         }
-        Ok(crate::actions::paste_file(&mut self.client, terminal, name, mime, file, progress).await?)
+        Ok(crate::actions::paste_file(&self.client, terminal, name, mime, file, progress).await?)
     }
 
     pub async fn resize_terminal(
-        &mut self,
+        &self,
         terminal: Uuid,
         columns: u32,
         rows: u32,
     ) -> Result<(), SessionError> {
+        self.start_resize(terminal, columns, rows)?.value().await.map(|_| ())
+    }
+
+    /// `resize_terminal`, queued before this returns, in order with
+    /// `start_write`: a resize between two keys stays between them.
+    pub fn start_resize(&self, terminal: Uuid, columns: u32, rows: u32) -> Result<Pending, SessionError> {
         let payload = request::Payload::TerminalResize(farcooler_protocol::v1::TerminalResize {
             columns,
             rows,
             view_activity_id: 0,
         });
-        self.value("terminal.resize", Some(terminal), Some(payload)).await.map(|_| ())
+        self.start("terminal.resize", Some(terminal), Some(payload), Vec::new())
     }
 
     // ---- agent channel ----
@@ -1398,7 +1430,7 @@ impl Session {
     /// the daemon refuses a bare switch to TERMINAL mid-turn, because
     /// `claude --resume` cannot reattach to work that was never finished.
     pub async fn set_pane_mode(
-        &mut self,
+        &self,
         terminal: Uuid,
         mode: PaneMode,
         force: bool,
@@ -1421,7 +1453,7 @@ impl Session {
     /// the first turn — the daemon answers an empty batch rather than
     /// refusing, and this call must not turn that into a special case here.
     pub async fn agent_subscribe(
-        &mut self,
+        &self,
         terminal: Uuid,
         from_seq: u64,
         epoch: u64,
@@ -1447,7 +1479,7 @@ impl Session {
     /// machine and silently referred to nothing when they were not, which is
     /// every phone and every remote runner.
     pub async fn agent_prompt(
-        &mut self,
+        &self,
         terminal: Uuid,
         text: &str,
         images: &[(String, Vec<u8>)],
@@ -1479,7 +1511,7 @@ impl Session {
 
     /// Answer a pending permission request.
     pub async fn agent_answer(
-        &mut self,
+        &self,
         terminal: Uuid,
         request_id: &str,
         option_id: &str,
@@ -1496,7 +1528,7 @@ impl Session {
     }
 
     pub async fn agent_set_mode(
-        &mut self,
+        &self,
         terminal: Uuid,
         agent_mode: &str,
     ) -> Result<Terminal, SessionError> {
@@ -1511,7 +1543,7 @@ impl Session {
     }
 
     /// Switch the pane's agent to another model, as the model picker does.
-    pub async fn agent_set_model(&mut self, terminal: Uuid, model: &str) -> Result<Terminal, SessionError> {
+    pub async fn agent_set_model(&self, terminal: Uuid, model: &str) -> Result<Terminal, SessionError> {
         let payload = request::Payload::AgentSetModel(farcooler_protocol::v1::AgentSetModel {
             terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
             model: model.to_string(),
@@ -1525,7 +1557,7 @@ impl Session {
     /// Set one of the options the agent advertises, by its id, as a config
     /// picker does.
     pub async fn agent_set_config(
-        &mut self,
+        &self,
         terminal: Uuid,
         config_id: &str,
         value: &str,
@@ -1543,7 +1575,7 @@ impl Session {
 
     /// Rewrite a prompt that is still waiting for the current turn to end.
     pub async fn agent_edit_queued(
-        &mut self,
+        &self,
         terminal: Uuid,
         queued_id: &str,
         text: &str,
@@ -1561,7 +1593,7 @@ impl Session {
 
     /// Withdraw a prompt that is still waiting for the current turn to end.
     pub async fn agent_cancel_queued(
-        &mut self,
+        &self,
         terminal: Uuid,
         queued_id: &str,
     ) -> Result<Terminal, SessionError> {
@@ -1578,7 +1610,7 @@ impl Session {
 
     /// Send a queued prompt into the turn already running.
     pub async fn agent_steer_queued(
-        &mut self,
+        &self,
         terminal: Uuid,
         queued_id: &str,
     ) -> Result<Terminal, SessionError> {
@@ -1593,7 +1625,7 @@ impl Session {
         }
     }
 
-    pub async fn agent_cancel(&mut self, terminal: Uuid) -> Result<Terminal, SessionError> {
+    pub async fn agent_cancel(&self, terminal: Uuid) -> Result<Terminal, SessionError> {
         let payload = request::Payload::AgentCancel(farcooler_protocol::v1::AgentCancel {
             terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
         });
@@ -1608,7 +1640,7 @@ impl Session {
     /// Relative, never a runner path: the same redaction the rest of this
     /// protocol applies to everything below `host_admin`.
     pub async fn search_worktree_files(
-        &mut self,
+        &self,
         worktree: Uuid,
         query: &str,
         limit: u32,
@@ -1636,7 +1668,7 @@ impl Session {
 
     /// What a worktree changed, against its base.
     pub async fn change_set(
-        &mut self,
+        &self,
         worktree: Uuid,
         fresh: bool,
     ) -> Result<serde_json::Value, SessionError> {
@@ -1659,7 +1691,7 @@ impl Session {
     /// swallow it. See the Mac's `ChangesStore.open(gap:of:in:)` for why that is
     /// per-gap rather than per-file.
     pub async fn file_diff(
-        &mut self,
+        &self,
         worktree: Uuid,
         path: &str,
         scope: &str,
@@ -1690,7 +1722,7 @@ impl Session {
 
     /// The files one commit touched.
     pub async fn commit_files(
-        &mut self,
+        &self,
         worktree: Uuid,
         sha: &str,
     ) -> Result<serde_json::Value, SessionError> {
@@ -1719,7 +1751,7 @@ impl Session {
     /// Shared with `farcooler changes inbox --json` since the two shapes became
     /// one — see `changes_json::inbox_json` for what they used to be and why
     /// this half won.
-    pub async fn changes_inbox(&mut self) -> Result<serde_json::Value, SessionError> {
+    pub async fn changes_inbox(&self) -> Result<serde_json::Value, SessionError> {
         let payload =
             request::Payload::ChangesInbox(farcooler_protocol::v1::ChangesInboxRequest {});
         match self.value("changes.inbox", None, Some(payload)).await? {
@@ -1734,7 +1766,7 @@ impl Session {
     /// Refused here, without a round trip, on a runner that doesn't advertise
     /// `needs_you`: the app derives that runner's blocked items from the fleet
     /// instead, and the refusal's `capability-unsupported` is how it knows to.
-    pub async fn needs_you(&mut self) -> Result<serde_json::Value, SessionError> {
+    pub async fn needs_you(&self) -> Result<serde_json::Value, SessionError> {
         require(self.capabilities(), farcooler_protocol::capability::NEEDS_YOU, "needs_you.list")?;
         match self.value("needs_you.list", None, None).await? {
             result::Value::NeedsYouList(list) => Ok(crate::needs_you_json::needs_you_json(&list)),
@@ -1746,7 +1778,7 @@ impl Session {
     /// (`usage.report`, ov-194). Refused without a round trip on a runner
     /// that records none.
     pub async fn usage_report(
-        &mut self,
+        &self,
         query: farcooler_protocol::v1::UsageQuery,
     ) -> Result<farcooler_protocol::v1::UsageReport, SessionError> {
         require(self.capabilities(), farcooler_protocol::capability::AGENT_USAGE, "usage.report")?;
@@ -1757,7 +1789,7 @@ impl Session {
     }
 
     /// One task's spend, for its view (`usage.task`).
-    pub async fn task_usage(&mut self, task: Uuid) -> Result<farcooler_protocol::v1::TaskUsage, SessionError> {
+    pub async fn task_usage(&self, task: Uuid) -> Result<farcooler_protocol::v1::TaskUsage, SessionError> {
         require(self.capabilities(), farcooler_protocol::capability::AGENT_USAGE, "usage.task")?;
         let payload = request::Payload::UsageTask(farcooler_protocol::v1::TaskUsageRequest {
             task_id: bytes::Bytes::copy_from_slice(task.as_bytes()),
@@ -1769,7 +1801,7 @@ impl Session {
     }
 
     /// Mark a worktree as read, which is what clears its inbox badge.
-    pub async fn changes_mark_read(&mut self, worktree: Uuid) -> Result<(), SessionError> {
+    pub async fn changes_mark_read(&self, worktree: Uuid) -> Result<(), SessionError> {
         let payload =
             request::Payload::ChangesMarkRead(farcooler_protocol::v1::ChangesMarkRead {
                 worktree_id: bytes::Bytes::copy_from_slice(worktree.as_bytes()),
@@ -1784,7 +1816,7 @@ impl Session {
     /// The affordance that exists because a GUESSED base produces a wrong diff
     /// that looks exactly like a right one — see `BaseSource` in the protocol.
     pub async fn changes_set_base(
-        &mut self,
+        &self,
         worktree: Uuid,
         base_ref: &str,
     ) -> Result<serde_json::Value, SessionError> {
@@ -1799,7 +1831,7 @@ impl Session {
     }
 
     /// The branches in a repository, for resuming onto one that already exists.
-    pub async fn branches(&mut self, repository: Uuid) -> Result<serde_json::Value, SessionError> {
+    pub async fn branches(&self, repository: Uuid) -> Result<serde_json::Value, SessionError> {
         match self.value("branch.list", Some(repository), None).await? {
             result::Value::BranchList(l) => Ok(json!({
                 "branches": l.items.iter().map(|b| json!({
@@ -1819,7 +1851,7 @@ impl Session {
 
     /// A branch's parent chain and the PR state along it.
     pub async fn stack(
-        &mut self,
+        &self,
         repository: Uuid,
         branch: &str,
     ) -> Result<serde_json::Value, SessionError> {
@@ -1834,7 +1866,7 @@ impl Session {
     }
 
     /// Ask GitHub again, rather than answering from what was last read.
-    pub async fn pr_refresh(&mut self, repository: Uuid) -> Result<serde_json::Value, SessionError> {
+    pub async fn pr_refresh(&self, repository: Uuid) -> Result<serde_json::Value, SessionError> {
         let payload = request::Payload::PrRefresh(farcooler_protocol::v1::PrRefresh {
             repository_id: bytes::Bytes::copy_from_slice(repository.as_bytes()),
         });
@@ -1859,7 +1891,7 @@ impl Session {
     /// `task_list_request` for what it does on a runner without
     /// `workstreams`.
     pub async fn tasks(
-        &mut self,
+        &self,
         repository: Uuid,
         workspace: Option<Uuid>,
     ) -> Result<serde_json::Value, SessionError> {
@@ -1874,7 +1906,7 @@ impl Session {
 
     /// One task with its whole record, in the shape `farcooler task show
     /// --json` prints. Gated like `tasks`.
-    pub async fn task(&mut self, task: Uuid) -> Result<serde_json::Value, SessionError> {
+    pub async fn task(&self, task: Uuid) -> Result<serde_json::Value, SessionError> {
         require(self.capabilities(), farcooler_protocol::capability::TASKS, "task.get")?;
         let payload = request::Payload::TaskGet(farcooler_protocol::v1::TaskGetRequest {
             task_id: bytes::Bytes::copy_from_slice(task.as_bytes()),
@@ -1891,7 +1923,7 @@ impl Session {
     /// what takes the decision off Needs You. Gated like `tasks`.
     /// Answers with the entry, in `task show --json`'s note shape.
     pub async fn task_note(
-        &mut self,
+        &self,
         append: farcooler_protocol::v1::TaskNoteAppend,
     ) -> Result<serde_json::Value, SessionError> {
         require(self.capabilities(), farcooler_protocol::capability::TASKS, "task.note")?;
@@ -1906,7 +1938,7 @@ impl Session {
     /// dead end on the phone). Refused without a round trip on a runner
     /// without `workstreams`, which has no orchestrators.
     pub async fn start_orchestrator(
-        &mut self,
+        &self,
         workspace: Uuid,
         start: farcooler_protocol::v1::WorkspaceStartOrchestrator,
     ) -> Result<Terminal, SessionError> {
@@ -1928,7 +1960,7 @@ impl Session {
     /// the hello this session already exchanged and costs nothing. This one is a
     /// round trip and is worth it only for `capabilities`, which the hello does
     /// not carry.
-    pub async fn daemon_capabilities(&mut self) -> Result<serde_json::Value, SessionError> {
+    pub async fn daemon_capabilities(&self) -> Result<serde_json::Value, SessionError> {
         match self.value("daemon.version", None, None).await? {
             result::Value::DaemonVersion(v) => Ok(json!({
                 "daemonVersion": v.daemon_version,
@@ -1962,7 +1994,7 @@ impl Session {
     /// Foreign lines are included and marked, because a person looking at who
     /// may log in to their runner needs to see the key somebody added by hand as
     /// much as the ones Far Cooler wrote.
-    pub async fn enrolled_clients(&mut self) -> Result<serde_json::Value, SessionError> {
+    pub async fn enrolled_clients(&self) -> Result<serde_json::Value, SessionError> {
         match self.value("client.list", None, None).await? {
             result::Value::ClientList(l) => Ok(enrolled_json(&l.items)),
             other => Err(wrong("client_list", &other)),
@@ -1993,7 +2025,7 @@ impl Session {
     /// beside `shell_access`, because a plain line has no forced command to hold
     /// it — and, like the pairing rule above, that refusal is the daemon's.
     pub async fn enroll_client(
-        &mut self,
+        &self,
         public_key: &str,
         label: &str,
         client_id: &str,
@@ -2051,7 +2083,7 @@ impl Session {
     /// after writing it: what `authorized_keys` now says is the only claim worth
     /// making about who may log in.
     pub async fn revoke_client(
-        &mut self,
+        &self,
         client_id: &str,
     ) -> Result<serde_json::Value, SessionError> {
         let payload =
@@ -2076,15 +2108,15 @@ impl Session {
     /// built here was refused before the runner looked at the root — see
     /// `actions::remove_repository_root` for what that cost.
     pub async fn remove_repository_root(
-        &mut self,
+        &self,
         root: Uuid,
         confirm: &str,
     ) -> Result<crate::actions::RemoveRootOutcome, SessionError> {
-        Ok(crate::actions::remove_repository_root(&mut self.client, root, confirm).await?)
+        Ok(crate::actions::remove_repository_root(&self.client, root, confirm).await?)
     }
 
     async fn value(
-        &mut self,
+        &self,
         method: &str,
         target: Option<Uuid>,
         payload: Option<request::Payload>,
@@ -2098,12 +2130,24 @@ impl Session {
     /// workspace_id` is one — so that daemon refuses the request instead of
     /// answering a different question. See `Request.required_capabilities`.
     async fn value_requiring(
-        &mut self,
+        &self,
         method: &str,
         target: Option<Uuid>,
         payload: Option<request::Payload>,
         required: Vec<String>,
     ) -> Result<result::Value, SessionError> {
+        self.start(method, target, payload, required)?.value().await
+    }
+
+    /// Queue a call for the wire, with the deadline and priority `deadlines`
+    /// gives its method, and return what waits for its answer.
+    fn start(
+        &self,
+        method: &str,
+        target: Option<Uuid>,
+        payload: Option<request::Payload>,
+        required: Vec<String>,
+    ) -> Result<Pending, SessionError> {
         let mut request = farcooler_transport::request(method);
         request.required_capabilities = required;
         if let Some(id) = target {
@@ -2112,7 +2156,22 @@ impl Session {
         if let Some(p) = payload {
             request.payload = Some(p);
         }
-        let outcome = self.client.call(request).await?;
+        let answer = self.client.send(request, crate::deadlines::for_method(method))?;
+        Ok(Pending { answer, method: method.to_string() })
+    }
+}
+
+/// A call already queued for the wire, waiting for its answer. Dropping it
+/// gives the call up. See `farcooler_transport::Answer`.
+pub struct Pending {
+    answer: farcooler_transport::Answer,
+    method: String,
+}
+
+impl Pending {
+    pub async fn value(self) -> Result<result::Value, SessionError> {
+        let Pending { answer, method } = self;
+        let outcome = answer.answer().await?;
         outcome.value.ok_or_else(|| SessionError::Protocol(format!("{method} returned nothing")))
     }
 }
