@@ -398,6 +398,17 @@ pub async fn inbox(svc: &Service) -> Result<pb::ChangesInbox> {
     Ok(pb::ChangesInbox { items, elsewhere: 0 })
 }
 
+/// How many of this runner's worktrees have a diff that moved since anyone
+/// reviewed it: the `inbox` rows that are `changed_since_reviewed` and have a
+/// diff to show, which is what each app counts (`reviewsWaiting`) before it sums
+/// its runners, and what the relay's notices carry as `reviews` (ov-181).
+/// `None` when the inbox can't be read.
+pub async fn waiting(svc: &Service) -> Option<u32> {
+    let rows = inbox(svc).await.ok()?;
+    let waiting = rows.items.iter().filter(|w| w.changed_since_reviewed && (w.insertions > 0 || w.deletions > 0));
+    Some(waiting.count() as u32)
+}
+
 // ---------------------------------------------------------------------------
 // stacks and PR state
 // ---------------------------------------------------------------------------

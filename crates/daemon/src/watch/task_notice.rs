@@ -462,7 +462,7 @@ impl Watcher {
         });
         let Some(pairing) = self.audience() else { return };
         let count = self.needs_you_count().await;
-        let reviews = self.reviews_count().await;
+        let reviews = crate::review_ops::waiting(&self.service).await;
         let kind = wire_kind(&composed);
         self.tap(Tapped {
             kind: Some(kind),
