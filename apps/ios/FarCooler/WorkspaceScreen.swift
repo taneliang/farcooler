@@ -198,7 +198,7 @@ private struct SegmentBar: View {
                     .padding(.vertical, 6)
                     .background {
                         if chosen {
-                            Capsule().fill(Fill.selection(active: true))
+                            Capsule().fill(Color.primary.opacity(0.16))  // style-exempt: the chosen segment must read over its track in both schemes, and the accent wash of Fill.selection all but vanishes in dark
                         }
                     }
                     .contentShape(.capsule)
