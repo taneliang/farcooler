@@ -17,6 +17,7 @@
 //! Every state printed here is DERIVED at the moment you ask. Nothing reads a
 //! stored "running" flag, because none exists.
 
+mod agent_follow;
 mod agent_host;
 mod daemon_link;
 mod hook;
@@ -839,7 +840,7 @@ enum TerminalCmd {
         force: bool,
     },
     /// New agent-channel events since a cursor, as JSON. What the Mac app's
-    /// chat view polls every 200ms (`AgentStream.pump`).
+    /// chat view reads, with `--follow` (`AgentStream`).
     AgentSubscribe {
         terminal: String,
         #[arg(long, default_value_t = 0)]
@@ -851,6 +852,11 @@ enum TerminalCmd {
         /// batch reported; a mismatch returns the whole transcript.
         #[arg(long, default_value_t = 0)]
         epoch: u64,
+        /// Keep asking over one link, and print a JSON line for each batch
+        /// that holds something, until the reader goes away. See
+        /// `agent_follow`.
+        #[arg(long)]
+        follow: bool,
     },
     /// Send a chat message to the pane's agent.
     AgentPrompt {
@@ -2926,8 +2932,11 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
             println!("{} is now in {mode} mode", short(id));
         }
 
-        TerminalCmd::AgentSubscribe { terminal, from_seq, epoch } => {
+        TerminalCmd::AgentSubscribe { terminal, from_seq, epoch, follow } => {
             let (mut link, id) = terminal_by_record(runner, &terminal).await?;
+            if follow {
+                return agent_follow::follow(link, id, from_seq, epoch).await;
+            }
             let r = link
                 .call(with(
                     req("terminal.agent_subscribe"),

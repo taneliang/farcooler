@@ -74,6 +74,13 @@ final class AgentStream: ObservableObject {
     private var environment: [String: String] = [:]
     private var hostArguments: [String] = []
     private var pollTask: Task<Void, Never>?
+    /// The one `--follow` reader, while it runs. See `AgentFollow`.
+    private var follower: AgentFollow?
+    /// The reader's restart after it ended, while one is waiting.
+    private var restartTask: Task<Void, Never>?
+    /// Set when the CLI refused `--follow`: one older than this app, from
+    /// `FARCOOLER_BIN`. This stream polls from then on, as it always used to.
+    private var followRefused = false
     /// Why this session's runner cannot be acted on, or nil if it can —
     /// the same check `ContentView.act(on:)` runs for every terminal-pane
     /// mutation, reached here too.
@@ -91,10 +98,15 @@ final class AgentStream: ObservableObject {
         self.terminal = terminal
     }
 
-    /// Begin polling. Safe to call again: a second call replaces the first
-    /// poll loop rather than running two, the same rule `TerminalStream.start`
+    /// Begin reading. Safe to call again: a second call replaces the first
+    /// reader rather than running two, the same rule `TerminalStream.start`
     /// follows for the same reason — a pane can be reconfigured without first
     /// being told to stop.
+    ///
+    /// One `agent-subscribe --follow` process for the life of the view, which
+    /// prints only when there's news (ov-229). This was a fresh process every
+    /// 200 ms. Polling remains for the tests' runner and for a CLI that
+    /// predates the flag.
     func start(
         binary: String?, environment: [String: String], hostArguments: [String] = [],
         refusal: @escaping () -> String? = { nil }
@@ -105,6 +117,14 @@ final class AgentStream: ObservableObject {
         self.hostArguments = hostArguments
         self.refusal = refusal
 
+        if runnerForTesting == nil, binary != nil, !followRefused {
+            startFollowing()
+        } else {
+            startPolling()
+        }
+    }
+
+    private func startPolling() {
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.pump()
@@ -113,12 +133,67 @@ final class AgentStream: ObservableObject {
         }
     }
 
+    private func startFollowing() {
+        guard let binary else { return }
+        let reader = AgentFollow()
+        follower = reader
+        reader.start(
+            binary: binary,
+            arguments: hostArguments + [
+                "terminal", "agent-subscribe", terminal,
+                "--from-seq", "\(transcript.cursor)", "--epoch", "\(epoch)", "--json", "--follow",
+            ],
+            environment: environment,
+            onLine: { [weak self] line in
+                Task { @MainActor in
+                    guard let self, self.follower === reader else { return }
+                    if let batch = try? JSONDecoder().decode(Batch.self, from: line) {
+                        self.take(batch)
+                    }
+                }
+            },
+            onEnd: { [weak self] printed, said in
+                Task { @MainActor in
+                    guard let self, self.follower === reader else { return }
+                    self.followEnded(printed: printed, said: said)
+                }
+            })
+    }
+
+    /// The reader exited on its own: the link dropped, the runner went away,
+    /// or the CLI doesn't know `--follow`. Counted like a failed poll, and
+    /// tried again after a wait that grows, so a runner that's gone isn't
+    /// asked five times a second.
+    private func followEnded(printed: Bool, said: String) {
+        follower = nil
+        if !printed, said.contains("--follow") {
+            followRefused = true
+            startPolling()
+            return
+        }
+        noteFailure(StreamError.failed(said))
+        let wait = min(0.25 * pow(2, Double(max(failedPolls - 1, 0))), 5)
+        restartTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(wait))
+            guard let self, !Task.isCancelled, self.follower == nil, self.pollTask == nil else { return }
+            self.startFollowing()
+        }
+    }
+
     func stop() {
         pollTask?.cancel()
         pollTask = nil
+        restartTask?.cancel()
+        restartTask = nil
+        follower?.stop()
+        follower = nil
     }
 
-    deinit { pollTask?.cancel() }
+    deinit {
+        pollTask?.cancel()
+        restartTask?.cancel()
+        follower?.stop()
+    }
 
     /// Ask for everything after what we already hold.
     ///
@@ -127,47 +202,61 @@ final class AgentStream: ObservableObject {
     /// same reason `Transcript.cursor` exists rather than a second count.
     func pump() async {
         do {
-            let batch = try await agentSubscribe(fromSeq: transcript.cursor)
-
-            // A different epoch means the stream restarted — the pane was
-            // toggled, or the shim came back — and every number this holds
-            // counts positions in a conversation that no longer exists. The
-            // batch that comes back is the whole transcript, so it replaces
-            // rather than appends. Four separate bugs came from trying to
-            // reconcile the two numberings instead of admitting they are
-            // different streams.
-            if batch.epoch != epoch {
-                epoch = batch.epoch
-                transcript.resetForNewEpoch()
-            } else if batch.events.isEmpty {
-                // Cleared here too, not only after applying events. A steady
-                // poll that returns nothing is the healthy case, and leaving a
-                // previous failure's message up through it meant the banner
-                // stayed on screen forever once anything had ever gone wrong.
-                failedPolls = 0
-                connectionError = nil
-                return
-            }
-
-            let decoded = batch.events.map { frame -> Sequenced in
-                // A frame this client cannot read becomes a visible gap, never
-                // a dropped event. `try?` here meant a decoder that fell behind
-                // the daemon rendered a blank chat with no pickers and no sign
-                // anything was wrong — which is exactly the silence the whole
-                // Gap contract exists to forbid.
-                let event = (try? AgentEvent.decode(from: frame.payloadJson)) ?? .gap(.unparsed)
-                return Sequenced(seq: frame.seq, event: event)
-            }
-            transcript.apply(decoded)
-            failedPolls = 0
-            connectionError = nil
+            take(try await agentSubscribe(fromSeq: transcript.cursor))
         } catch {
-            // A sentence, never the error. This was `String(describing:)`,
-            // which would have drawn `failed("error: …")` had anything drawn it.
-            failedPolls += 1
-            if failedPolls >= Self.pollsBeforeSaying {
-                connectionError = Self.pollTrouble(error)
-            }
+            noteFailure(error)
+        }
+    }
+
+    /// Fold one batch into the transcript.
+    private func take(_ batch: Batch) {
+        // A different epoch means the stream restarted — the pane was
+        // toggled, or the shim came back — and every number this holds
+        // counts positions in a conversation that no longer exists. The
+        // batch that comes back is the whole transcript, so it replaces
+        // rather than appends. Four separate bugs came from trying to
+        // reconcile the two numberings instead of admitting they are
+        // different streams.
+        if batch.epoch != epoch {
+            epoch = batch.epoch
+            transcript.resetForNewEpoch()
+        } else if batch.events.isEmpty {
+            // Cleared here too, not only after applying events. A steady
+            // poll that returns nothing is the healthy case, and leaving a
+            // previous failure's message up through it meant the banner
+            // stayed on screen forever once anything had ever gone wrong.
+            recovered()
+            return
+        }
+
+        let decoded = batch.events.map { frame -> Sequenced in
+            // A frame this client cannot read becomes a visible gap, never
+            // a dropped event. `try?` here meant a decoder that fell behind
+            // the daemon rendered a blank chat with no pickers and no sign
+            // anything was wrong — which is exactly the silence the whole
+            // Gap contract exists to forbid.
+            let event = (try? AgentEvent.decode(from: frame.payloadJson)) ?? .gap(.unparsed)
+            return Sequenced(seq: frame.seq, event: event)
+        }
+        transcript.apply(decoded)
+        recovered()
+    }
+
+    /// A read worked. Written only when it changes anything: `@Published`
+    /// fires on every assignment, and this ran five times a second with
+    /// nothing to say, redrawing the chat each time (ov-229).
+    private func recovered() {
+        failedPolls = 0
+        if connectionError != nil { connectionError = nil }
+    }
+
+    private func noteFailure(_ error: Error) {
+        // A sentence, never the error. This was `String(describing:)`,
+        // which would have drawn `failed("error: …")` had anything drawn it.
+        failedPolls += 1
+        if failedPolls >= Self.pollsBeforeSaying {
+            let sentence = Self.pollTrouble(error)
+            if connectionError != sentence { connectionError = sentence }
         }
     }
 

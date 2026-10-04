@@ -411,7 +411,7 @@ final class EventStream {
 /// Foundation calls the read handler on its own queue, so this is locked rather
 /// than assumed single-threaded — the assumption would hold right up until it
 /// did not, and the failure would be a corrupted line rather than a crash.
-private final class LineBuffer: @unchecked Sendable {
+final class LineBuffer: @unchecked Sendable {
     private var data = Data()
     private let lock = NSLock()
 
