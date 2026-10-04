@@ -330,6 +330,7 @@ final class EventStream {
         // a queue Foundation owns; a captured `var` would be shared mutable
         // state across threads, which the compiler is right to refuse.
         let buffer = LineBuffer()
+        let limiter = DecodeMissLimiter()
         let handle = out.fileHandleForReading
         outputHandle = handle
         handle.readabilityHandler = {
@@ -341,7 +342,8 @@ final class EventStream {
                 Self.dispatch(
                     line, decoder: decoder, onEvent: onEvent, onLayout: onLayout,
                     onFleet: onFleet, onChangeSet: onChangeSet, onTask: onTask,
-                    onMissed: onMissed, onNeedsYou: onNeedsYou, onNotice: onNotice, onReads: onReads)
+                    onMissed: onMissed, onNeedsYou: onNeedsYou, onNotice: onNotice, onReads: onReads,
+                    onUndecodable: { if limiter.allow() { onMissed() } })
             }
         }
 
@@ -376,14 +378,21 @@ final class EventStream {
         onMissed: () -> Void = {},
         onNeedsYou: () -> Void = {},
         onNotice: (NoticeEvent) -> Void = { _ in },
-        onReads: (WireBoardReads) -> Void = { _ in }
+        onReads: (WireBoardReads) -> Void = { _ in },
+        // Where a line that will not decode goes, if not to `onMissed`: the stream
+        // rate-limits it (`DecodeMissLimiter`), since a full read never fixes a
+        // decode failure.
+        onUndecodable: (() -> Void)? = nil
     ) {
         // Dispatched on `kind` rather than by trying each shape in turn.
         // Guessing worked while there was one shape; with two, a layout
         // line that happened to decode as a terminal would have been
         // applied as one.
+        func miss(_ what: String) {
+            if let onUndecodable { missed(what, line, onUndecodable) } else { missed(what, line, onMissed) }
+        }
         guard let kind = try? decoder.decode(EventKind.self, from: line) else {
-            missed("a line with no kind", line, onMissed)
+            miss("a line with no kind")
             return
         }
         switch kind.kind {
@@ -391,13 +400,13 @@ final class EventStream {
             if let event = try? decoder.decode(TerminalEvent.self, from: line) {
                 onEvent(event)
             } else {
-                missed("a terminal event", line, onMissed)
+                miss("a terminal event")
             }
         case "layout":
             if let event = try? decoder.decode(LayoutEvent.self, from: line) {
                 onLayout(event)
             } else {
-                missed("a layout event", line, onMissed)
+                miss("a layout event")
             }
         case "fleet":
             onFleet()
@@ -407,7 +416,7 @@ final class EventStream {
             if let event = try? decoder.decode(TaskEvent.self, from: line) {
                 onTask(event)
             } else {
-                missed("a task event", line, onMissed)
+                miss("a task event")
             }
         // Not a resource: news that some of the lines above never came. It
         // used to fall into `default` below, which is how a Mac that fell
@@ -422,14 +431,14 @@ final class EventStream {
             if let notice = try? decoder.decode(NoticeEvent.self, from: line) {
                 onNotice(notice)
             } else {
-                missed("a notice", line, onMissed)
+                miss("a notice")
             }
         // A board's read state, whole, from another device (ov-113).
         case "reads":
             if let reads = try? decoder.decode(WireBoardReads.self, from: line) {
                 onReads(reads)
             } else {
-                missed("a board's reads", line, onMissed)
+                miss("a board's reads")
             }
         // Resources this app does not track yet are skipped, not an error.
         default: return
@@ -488,5 +497,41 @@ final class LineBuffer: @unchecked Sendable {
             if !line.isEmpty { lines.append(Data(line)) }
         }
         return lines
+    }
+}
+
+
+/// How often undecodable lines may ask for a full read (ov-156).
+///
+/// A runner whose terminal events this build can't decode (a retyped field)
+/// sends several a second during a turn, and a full read doesn't fix them: the
+/// first one is worth a read, in case the line was a one-off, and the rest are
+/// the same news. So the first is let through at once, and then each wait
+/// doubles from `first` to `ceiling`, forgotten after `quiet` without a miss.
+/// A real `events_missed` line is not subject to this.
+final class DecodeMissLimiter: @unchecked Sendable {
+    private let lock = NSLock()
+    private let first: TimeInterval, ceiling: TimeInterval, quiet: TimeInterval
+    private var lastAllowed: Date?
+    private var lastMiss: Date?
+    private var wait: TimeInterval
+
+    init(first: TimeInterval = 30, ceiling: TimeInterval = 600, quiet: TimeInterval = 1800) {
+        self.first = first
+        self.ceiling = ceiling
+        self.quiet = quiet
+        wait = first
+    }
+
+    /// Whether this miss, at `now`, may start a read.
+    func allow(at now: Date = Date()) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        defer { lastMiss = now }
+        if let lastMiss, now.timeIntervalSince(lastMiss) > quiet { lastAllowed = nil; wait = first }
+        if let lastAllowed, now.timeIntervalSince(lastAllowed) < wait { return false }
+        if lastAllowed != nil { wait = min(wait * 2, ceiling) }
+        lastAllowed = now
+        return true
     }
 }

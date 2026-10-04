@@ -118,4 +118,48 @@ struct EventResyncTests {
             #expect("\(child.value)" != "nil", "the fixture leaves \(child.label ?? "?") unset")
         }
     }
+
+    // MARK: - Resyncs are rate-limited
+
+    /// A burst of malformed events through the stream's own wiring is one read,
+    /// not one per line: a read can't fix a line this build can't decode.
+    @Test func aBurstOfMalformedEventsIsOneResync() {
+        let limiter = DecodeMissLimiter()
+        var reads = 0
+        let line = #"{"kind":"terminal","id":7}"#
+        for _ in 0..<50 {
+            EventStream.dispatch(
+                Data(line.utf8), decoder: JSONDecoder(), onMissed: { reads += 1 },
+                onUndecodable: { if limiter.allow() { reads += 1 } })
+        }
+        #expect(reads == 1, "\(reads) full reads for one burst")
+    }
+
+    @Test func theWaitBacksOffAndForgetsAfterQuiet() {
+        let limiter = DecodeMissLimiter(first: 30, ceiling: 120, quiet: 1000)
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        #expect(limiter.allow(at: t0))
+        #expect(!limiter.allow(at: t0.addingTimeInterval(29)))
+        #expect(limiter.allow(at: t0.addingTimeInterval(31)))
+        // The second wait is 60 s, not 30.
+        #expect(!limiter.allow(at: t0.addingTimeInterval(31 + 59)))
+        #expect(limiter.allow(at: t0.addingTimeInterval(31 + 61)))
+        // Then 120, which is the ceiling.
+        #expect(!limiter.allow(at: t0.addingTimeInterval(92 + 119)))
+        #expect(limiter.allow(at: t0.addingTimeInterval(92 + 121)))
+        // A quiet spell forgets it.
+        #expect(limiter.allow(at: t0.addingTimeInterval(5000)))
+        #expect(!limiter.allow(at: t0.addingTimeInterval(5029)))
+    }
+
+    /// `events_missed` is the runner saying it dropped lines: never limited.
+    @Test func aRealEventsMissedAlwaysGoesThrough() {
+        var reads = 0
+        for _ in 0..<5 {
+            EventStream.dispatch(
+                Data(#"{"kind":"events_missed"}"#.utf8), decoder: JSONDecoder(),
+                onMissed: { reads += 1 }, onUndecodable: {})
+        }
+        #expect(reads == 5)
+    }
 }
