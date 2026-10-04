@@ -646,15 +646,21 @@ async fn host(
             );
             {
                 let mut ring = ring.lock().expect("ring mutex");
-                // `Cancelled`: the turn stopped before the agent finished it,
-                // which is what that reason already means to every app. Only
-                // when one was running — a `TurnEnded` with no turn before it
+                // `Failed { Other }`: the turn ended because the agent's process
+                // did, which is the failed end every app already words and the
+                // daemon already counts, so the row turns up as Done and the
+                // chat says so. A bare `Cancelled` read as the person's own
+                // stop and sent no notice. The detail is for logs. Only when
+                // one was running — a `TurnEnded` with no turn before it
                 // would draw a seam under a conversation that was resting.
                 // Pushed straight to the ring rather than through `absorb`,
                 // which would hand the next queued prompt to the dead adapter.
                 if chat.turn_in_flight() {
                     ring.push(farcooler_agent::event::AgentEvent::TurnEnded {
-                        reason: farcooler_agent::event::EndReason::Cancelled,
+                        reason: farcooler_agent::event::EndReason::Failed {
+                            kind: farcooler_agent::event::FailureKind::Other,
+                            detail: error.to_string(),
+                        },
                     });
                 }
             }
@@ -1049,7 +1055,7 @@ read l
     /// handed to a task that no longer existed and answered as delivered.
     #[tokio::test]
     async fn an_adapter_that_dies_mid_turn_ends_the_turn_and_refuses_the_next_prompt() {
-        use farcooler_agent::event::{AgentEvent, EndReason};
+        use farcooler_agent::event::{AgentEvent, EndReason, FailureKind};
         use farcooler_protocol::v1::AgentActivity;
 
         let dir = tempfile::tempdir().expect("a runtime directory");
@@ -1074,11 +1080,17 @@ exit 1"#,
             "the daemon has to learn the adapter is gone"
         );
         assert!(
-            seen.lock().unwrap().contains(&AgentEvent::TurnEnded { reason: EndReason::Cancelled }),
+            seen.lock().unwrap().iter().any(|e| matches!(
+                e,
+                AgentEvent::TurnEnded { reason: EndReason::Failed { kind: FailureKind::Other, .. } }
+            )),
             "the turn the adapter took with it has to end: {:?}",
             seen.lock().unwrap()
         );
-        assert_ne!(supervisor.activity(terminal), AgentActivity::Working);
+        // Done, not merely not Working: Done is what the notice and the row
+        // are made from, and the supervisor's `Failed` arm used to wipe it.
+        assert_eq!(supervisor.activity(terminal), AgentActivity::Done);
+        assert_eq!(supervisor.failed_turns(terminal), 1);
         assert!(
             !supervisor.send(terminal, prompt()),
             "a prompt for a dead adapter must be refused, not answered as delivered"

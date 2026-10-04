@@ -652,7 +652,15 @@ impl AgentSupervisor {
                     // activity left over from the pane's last life would
                     // otherwise refuse the toggle that gets the user out of
                     // here — see `guard_toggle`.
-                    entry.activity = AgentActivity::Unspecified;
+                    //
+                    // Except `Done`: an adapter that died mid-turn ends that
+                    // turn `Failed` first, which folds to `Done`, the unseen
+                    // result the row and its notice are made from. `Done`
+                    // never refuses a toggle, and wiping it here sent no
+                    // failure notice at all.
+                    if entry.activity != AgentActivity::Done {
+                        entry.activity = AgentActivity::Unspecified;
+                    }
                 }
                 return;
             }
