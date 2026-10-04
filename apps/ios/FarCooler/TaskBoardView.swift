@@ -131,6 +131,10 @@ struct WorkspaceBoardList: View {
                         .accessibilityIdentifier("board-empty")
                 } description: {
                     VStack(spacing: 16) {
+                        PhoneEmptyRows(
+                            copy: BoardForm.blankCopy(
+                                ledByOrchestrator: ledByOrchestrator,
+                                orchestratorRunning: orchestratorRunning))
                         // The skeleton shows the shape of what will arrive; under
                         // rows that say to start an orchestrator first it only
                         // crowds them (ov-266).
@@ -139,10 +143,6 @@ struct WorkspaceBoardList: View {
                         {
                             TaskSkeleton().frame(maxWidth: 240)
                         }
-                        PhoneEmptyRows(
-                            copy: BoardForm.blankCopy(
-                                ledByOrchestrator: ledByOrchestrator,
-                                orchestratorRunning: orchestratorRunning))
                     }
                 } actions: {
                     if BoardForm.offersOrchestrator(
