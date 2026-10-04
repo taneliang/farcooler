@@ -703,6 +703,13 @@ jobs:
       # already built at the top of this job, so it costs a Swift compile and
       # nothing else. RenderBenchTests asserts nothing and stays silent unless
       # `FARCOOLER_RENDER_BENCH` is set, so this is not the slow benchmark.
+      #
+      # tmux, so `RealCLIConfirmationTests` runs here rather than reporting a
+      # skip: it starts the bundle's real daemon, which needs tmux, and feeds
+      # the Mac's parser what the real CLI prints (ov-160). The image has no
+      # tmux of its own. Outside the work tree, so the channel stays clean.
+      - name: Install tmux
+        run: brew install tmux
       - name: Test the Mac app
         run: ./apps/macos/test.sh
 
