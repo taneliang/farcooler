@@ -119,7 +119,9 @@ struct FleetListView<Client: FleetClient>: View {
     /// The rows, the items and the schedule for a snapshot, drawn with no
     /// working agent stated as now while a runner is quiet.
     private func adopt(_ snapshot: FleetSnapshot?) {
-        let shown = snapshot.map { $0.quietened(plan($0, at: .now).unstated) }
+        // The relay's word on how turns ended clears a failure the phone's last
+        // context still holds (`settled`, ov-239).
+        let shown = snapshot.map { $0.settled(by: plan($0, at: .now), at: .now) }
         schedule = refreshes(for: shown, from: .now)
         let list = shown.map(WatchList.init)
         rows = list?.agents ?? []
@@ -152,7 +154,7 @@ struct FleetListView<Client: FleetClient>: View {
         _ snapshot: FleetSnapshot, plan: RunnerPulse.Plan, at now: Date, unreachable: Bool
     ) -> some View {
         let quiet = plan.quiet
-        let snapshot = snapshot.quietened(plan.unstated)
+        let snapshot = snapshot.settled(by: plan, at: now)
         List {
             // Once, at the top, and only when the phone is out of reach. Not
             // keyed off how old the snapshot looks: a fresh fleet with no link

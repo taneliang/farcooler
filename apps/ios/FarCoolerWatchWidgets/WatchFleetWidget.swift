@@ -145,8 +145,7 @@ struct WatchFleetProvider: TimelineProvider {
             let policy: TimelineReloadPolicy = plan.nextLook.map { .after($0) } ?? .never
             completion(
                 Timeline(
-                    entries: Self.entries(
-                        snapshot, quiet: plan.quiet, unstated: plan.unstated, at: now),
+                    entries: Self.entries(snapshot, plan: plan, at: now),
                     policy: policy))
         }
     }
@@ -155,16 +154,17 @@ struct WatchFleetProvider: TimelineProvider {
     /// hour. See `getTimeline`.
     private static let lookEvery: TimeInterval = 60 * 60
 
-    /// One entry for now and one per staleness moment, each saying `quiet`,
-    /// over the snapshot with the quiet runners' working agents no longer
-    /// stated as now (`RunnerPulse.Plan.unstated`).
+    /// One entry for now and one per staleness moment, each saying what the
+    /// plan's `quiet` does, over the snapshot as the plan settles it: the quiet
+    /// runners' working agents no longer stated as now, and a failed mark the
+    /// relay says was resolved taken off (`FleetSnapshot.settled`, ov-239).
     private static func entries(
-        _ snapshot: FleetSnapshot, quiet: [String], unstated: Set<String>, at now: Date
+        _ snapshot: FleetSnapshot, plan: RunnerPulse.Plan, at now: Date
     ) -> [WatchFleetEntry] {
-        let snapshot = snapshot.quietened(unstated)
-        return [WatchFleetEntry(date: now, snapshot: snapshot, quiet: quiet)]
+        let snapshot = snapshot.settled(by: plan, at: now)
+        return [WatchFleetEntry(date: now, snapshot: snapshot, quiet: plan.quiet)]
             + wakes(for: snapshot, after: now).map {
-                WatchFleetEntry(date: $0, snapshot: snapshot, quiet: quiet)
+                WatchFleetEntry(date: $0, snapshot: snapshot, quiet: plan.quiet)
             }
     }
 

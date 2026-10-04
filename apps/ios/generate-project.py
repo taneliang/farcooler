@@ -445,6 +445,9 @@ AGENTKIT_SOURCES = [
     # the relay hands over, and the widget reads it to ask which runners are
     # still beating. In both, like `SnapshotStore.swift`, for the same reason.
     "RunnerPulse.swift",
+    # How finished agents' turns ended, from the pulse answer (ov-239). Beside
+    # `RunnerPulse.swift` in every list that has it: it extends the plan.
+    "PulseTurns.swift",
     # The markdown renderer, shared for the same reason the reducer is: the
     # phone drew agent replies as plain `Text`, so a table arrived as a wall of
     # pipes and a heading as a line beginning with a hash. Same conversation,
@@ -643,6 +646,9 @@ WATCH_AGENTKIT_SOURCES = [
     # the phone sends in its context, and asks the relay which runners went
     # quiet for the list's footer. Foundation and Security, both on watchOS.
     "RunnerPulse.swift",
+    # How finished agents' turns ended, from the pulse answer (ov-239). Beside
+    # `RunnerPulse.swift` in every list that has it: it extends the plan.
+    "PulseTurns.swift",
     # The color, the mark and the type scale, which the watch app's own detail
     # header draws at
     # the 22pt lone-indicator size. Measured to typecheck for
@@ -710,6 +716,9 @@ WATCH_WIDGET_AGENTKIT_SOURCES = [
     # The complication asks the relay itself, as the phone's widget does
     # (ov-71), with the credential the watch app filed in this container.
     "RunnerPulse.swift",
+    # How finished agents' turns ended, from the pulse answer (ov-239). Beside
+    # `RunnerPulse.swift` in every list that has it: it extends the plan.
+    "PulseTurns.swift",
     "GlancePalette.swift",
     "GlanceMark.swift",
     "GlanceType.swift",
@@ -905,6 +914,8 @@ activity_build_ids = {
         # Which runners the relay says are still beating, and the credential
         # to ask with. The widget's footer names a quiet one (ov-53).
         "RunnerPulse.swift",
+        # How finished agents' turns ended, from the pulse answer (ov-239).
+        "PulseTurns.swift",
         # The card's buttons. `AnswerPermissionIntent` is what a button is wired
         # to and `GlancePermissions` is where its labels come from — the
         # extension can reach no runner, so the agent's own option names arrive

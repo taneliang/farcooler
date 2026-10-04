@@ -104,7 +104,10 @@ struct FleetProvider: TimelineProvider {
             // (`plan.unstated`, ov-77), as on the watch and the Live Activity:
             // the timeline's moments come from the quietened snapshot, so an
             // agent the relay has already silenced schedules no wake-up.
-            let drawn = snapshot.quietened(plan.unstated)
+            //
+            // And a failed mark the relay says was resolved comes off (`settled`,
+            // ov-239): a quiet success sends this widget nothing else.
+            let drawn = snapshot.settled(by: plan, at: now)
             let entries =
                 [FleetEntry(date: now, snapshot: drawn, quiet: plan.quiet)]
                 + Self.wakes(for: drawn, after: now).map {

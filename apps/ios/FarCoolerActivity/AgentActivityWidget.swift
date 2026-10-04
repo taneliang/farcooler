@@ -154,7 +154,9 @@ struct AgentActivityWidget: Widget {
             let ask = LeaderAsk.current(for: context.state)
             // See the lock screen's `stale` and `failed` above.
             let stale = context.state.unvouched(stale: context.isStale)
-            let snapshot = SnapshotStore.read()
+            // Reconciled as the lock screen's render is, not read raw: the Island
+            // can draw before it, and `reconciled` is idempotent (ov-239).
+            let snapshot = Self.reconciled(SnapshotStore.read(), with: context.state)
             let leader = GlanceState(card: context.state, known: snapshot?.failedTurns ?? [])
             let tail =
                 ask.isPresent
