@@ -502,3 +502,67 @@ fn the_drill_goes_red_when_a_read_depends_on_the_layer() {
     let err = drill_with(&store, main, &tasks, &joined).unwrap_err();
     assert_eq!(err, "a board read changed when the layer went");
 }
+
+/// A lane that leaves queued loses its place in the same write. The read hides
+/// a stale rank from `order`, so this reads the lane itself: a building lane
+/// with a rank would go out on the wire as "2nd in the plan".
+#[test]
+fn a_lane_that_leaves_queued_loses_its_rank_in_the_same_write() {
+    let (store, main, _) = board(0);
+    let [a, b] = ["a", "b"].map(|n| lane(&store, main, n, &[]));
+    store.set_plan(main, &[a.id, b.id], Actor::Manager).unwrap();
+    assert_eq!(store.lane(b.id).unwrap().plan_rank, Some(2));
+    let moved = set_state(&store, &b, LaneState::Building).unwrap();
+    assert_eq!(moved.plan_rank, None, "the row handed back");
+    assert_eq!(store.lane(b.id).unwrap().plan_rank, None, "the column, not only the read's filter");
+    assert_eq!(store.lane(a.id).unwrap().plan_rank, Some(1), "the lane that stayed keeps its place");
+    // And a write that doesn't move it leaves the rank alone.
+    store.update_lane(a.id, &LaneUpdate { reason: Some("still next".into()), ..Default::default() }, Actor::Manager).unwrap();
+    assert_eq!(store.lane(a.id).unwrap().plan_rank, Some(1));
+}
+
+/// Every write that takes cards, or lanes, refuses one from another board, and
+/// writes nothing. The CLI resolves names within one board, so only the wire
+/// can send these.
+#[test]
+fn every_write_refuses_another_boards_cards_and_lanes() {
+    let (store, main, t) = board(1);
+    let repo = store.get_workspace(main).unwrap().repository_id;
+    let other = store.create_workspace(repo, "Other", "ot").unwrap();
+    let foreign = store.create_task(other.id, "foreign", Actor::Manager).unwrap();
+    let foreign_card = LaneCard { task_id: foreign.id, slice: String::new() };
+
+    // create_theme
+    let made = store.create_theme(main, &NewTheme { name: "T".into(), outcome: String::new() }, &[foreign.id], Actor::Manager);
+    assert_eq!(refused(made), "other_board");
+    let themes: i64 = store.conn().query_row("SELECT count(*) FROM board_themes", [], |r| r.get(0)).unwrap();
+    assert_eq!(themes, 0, "a refusal wrote nothing");
+
+    // lane_cards
+    let ours = lane(&store, main, "ours", &[&t[0]]);
+    assert_eq!(refused(store.lane_cards(ours.id, std::slice::from_ref(&foreign_card), &[], Actor::Manager)), "other_board");
+    assert_eq!(store.plan(main, 0).unwrap().lanes[0].cards.len(), 1);
+
+    // set_plan: another board's queued lane can't be ranked here.
+    let theirs = store
+        .create_lane(other.id, &NewLane { name: "theirs".into(), ..Default::default() }, &[], None, Actor::Manager)
+        .unwrap();
+    assert_eq!(refused(store.set_plan(main, &[theirs.id], Actor::Manager)), "other_board");
+    assert_eq!(store.lane(theirs.id).unwrap().plan_rank, None, "their plan gained nothing");
+}
+
+/// A reviewed lane lands in one write, through landing, and the timeline reads
+/// as it would for the two writes. From building it still can't.
+#[test]
+fn a_reviewed_lane_lands_in_one_write_through_landing() {
+    let (store, main, _) = board(0);
+    let l = lane(&store, main, "a", &[]);
+    set_state(&store, &l, LaneState::Building).unwrap();
+    assert_eq!(refused(set_state(&store, &l, LaneState::Landed)), "lane_state");
+    set_state(&store, &l, LaneState::Review).unwrap();
+    let landed = set_state(&store, &l, LaneState::Landed).unwrap();
+    assert_eq!(landed.state, LaneState::Landed);
+    let said = events(&store, Subject::Lane(l.id));
+    assert_eq!(&said[said.len() - 2..], ["Moved to landing.", "Landed."]);
+    assert_eq!(LaneState::Review.moves(), [LaneState::Fixing, LaneState::Landing, LaneState::Landed, LaneState::Dropped]);
+}

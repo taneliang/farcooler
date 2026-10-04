@@ -308,3 +308,41 @@ async fn the_boards_wire_reads_are_the_same_bytes_without_the_layer() {
     }));
     link.call(create).await.expect("task.create still works without the layer");
 }
+
+/// A lane that leaves queued goes out on the wire without its place in the
+/// plan, and a lane with an agent is the one write that moves a task (once).
+#[tokio::test]
+async fn a_lane_that_leaves_queued_is_sent_without_a_rank() {
+    let h = start(Scope::Control).await;
+    let repo = a_repository(&h);
+    let task = h.service.store.create_task(repo.workspace, "Mac: a jump", Actor::User).unwrap();
+    let mut a = connect(&h).await;
+    let mut listener = connect(&h).await;
+    let queued = make_lane(&mut a, repo.workspace, "mac-fu3", &[task.id], None).await;
+    let set = payload::Payload::PlanSet(pb::PlanSet {
+        workspace_id: id(repo.workspace),
+        lane_ids: vec![queued.id.clone()],
+        actor: "manager".into(),
+    });
+    call(&mut a, "plan.set", set).await.unwrap();
+    assert_eq!(plan(&mut a, repo.workspace).await.lanes[0].plan_rank, Some(1));
+
+    let p = payload::Payload::LaneUpdate(pb::LaneUpdate {
+        lane_id: queued.id.clone(),
+        state: Some(pb::LaneState::Building as i32),
+        agent: Some(pb::LaneAgentRecord {
+            harness: "claude".into(),
+            agent_id: "agent-1".into(),
+            role: pb::LaneAgentRole::Build as i32,
+            model: None,
+            ended: false,
+        }),
+        actor: "manager".into(),
+        ..Default::default()
+    });
+    let result::Value::Lane(moved) = call(&mut a, "lane.update", p).await.expect("lane.update") else { panic!() };
+    assert_eq!(moved.plan_rank, None, "a building lane isn't 2nd in the plan");
+    assert_eq!(plan(&mut a, repo.workspace).await.lanes[0].plan_rank, None);
+    let (_, tasks) = events(&mut listener, Duration::from_millis(600)).await;
+    assert_eq!(tasks, 1, "recording the agent as a worker is the one write that moves a card, and it moves it once");
+}

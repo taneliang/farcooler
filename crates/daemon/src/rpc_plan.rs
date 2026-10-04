@@ -1,9 +1,12 @@
 //! The plan layer's routes (ov-268): `plan.*`, `board_theme.*` and `lane.*`,
 //! behind `board_plan`.
 //!
-//! Experimental, and beside the board: nothing here touches `task_ops`, and no
-//! write here emits `task_changed`. Each write announces `plan_changed` once.
-//! The one write that reaches a task is `lane.agent`, which records the agent
+//! Experimental, and beside the board: nothing here touches `task_ops`. Each
+//! write announces `plan_changed` once, and none emits `task_changed` itself.
+//! The one write that reaches a task is a lane's agent (`lane.agent`, or an
+//! `agent` on `lane.create` or `lane.update`), which writes a `worker` note,
+//! moves a backlog card to in progress and announces `task_changed` once, all
+//! through ov-213's own path. It records the agent
 //! as a worker on the lane's first open card through the existing
 //! `task.worker` (ov-213), so the runner reads the agent's spend. That is valid
 //! without the layer, and stays valid after the layer is removed.

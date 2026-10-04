@@ -234,12 +234,23 @@ impl LaneState {
                 (Queued, Building)
                     | (Building, Review)
                     | (Review, Landing)
+                    | (Review, Landed)
                     | (Landing, Landed)
                     | (Review, Fixing)
                     | (Fixing, Review)
                     | (Landing, Fixing)
             )
             || (!self.is_closed() && to == Dropped)
+    }
+
+    /// The states a lane in `self` may move to, other than staying put, in the
+    /// order a person reads them. For a refusal that says where to go next.
+    pub fn moves(self) -> Vec<LaneState> {
+        use LaneState::*;
+        [Queued, Building, Review, Fixing, Landing, Landed, Dropped]
+            .into_iter()
+            .filter(|to| *to != self && self.can_move_to(*to))
+            .collect()
     }
 }
 
@@ -850,7 +861,16 @@ impl Store {
                 Some(why) => format!("{said} {why}"),
                 None => said,
             };
-            event(&tx, Subject::Lane(lane), "state", actor, &said, serde_json::json!({ "from": before.state.as_str(), "to": to.as_str() }))?;
+            // Landing from review is one write that passes through landing, and
+            // the timeline says so, as it would for the two writes.
+            let from = if before.state == LaneState::Review && to == LaneState::Landed {
+                let via = serde_json::json!({ "from": "review", "to": "landing" });
+                event(&tx, Subject::Lane(lane), "state", actor, "Moved to landing.", via)?;
+                LaneState::Landing
+            } else {
+                before.state
+            };
+            event(&tx, Subject::Lane(lane), "state", actor, &said, serde_json::json!({ "from": from.as_str(), "to": to.as_str() }))?;
         }
         if let Some(agent) = &update.agent {
             record_agent(&tx, lane, agent, actor)?;
