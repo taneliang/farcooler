@@ -1,6 +1,7 @@
 import AppKit
 import CoreGraphics
 import SwiftUI
+import AgentKit
 import Testing
 
 @testable import Far_Cooler
@@ -18,7 +19,8 @@ struct WorkspaceColumnsTests {
         func columns(_ width: CGFloat) -> Int { Int((width - Columns.chrome) / Columns.defaultCell) }
         #expect(columns(Columns.openedMinimum()) == 58)
         #expect(columns(Columns.openedMinimum() - 1) == 57)
-        #expect(Columns.openedMinimum() == 489)
+        // 40 pt of chrome beside a 10 pt gutter (macOS 26), 32 beside macOS 27's 6.
+        #expect(Columns.openedMinimum() == (Gutter.window == 10 ? 489 : 481))
         let thirteen: CGFloat = 8.0361328125
         #expect(Columns.openedMinimum(cell: thirteen) > Columns.openedMinimum())
     }

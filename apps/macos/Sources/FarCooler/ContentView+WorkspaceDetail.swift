@@ -205,6 +205,7 @@ extension ContentView {
             // Its last screen, dimmed, under what can be done about it.
             ZStack {
                 if let shown { tiled(shown, titled: false).opacity(0.35).allowsHitTesting(false) }
+                // style-exempt: a scrim over the lost terminal's dimmed last screen
                 placeholder.background(.regularMaterial.opacity(shown == nil ? 0 : 1))
             }
         case .none, .starting:
@@ -285,14 +286,19 @@ extension ContentView {
             taskView(
                 host: host, id: id, place: place,
                 shown: drawableLayouts(for: place).last { $0.column != .conversation }, keyboard: current,
-                settled: settled)
+                settled: settled
+            )
+            .background(WorkspaceStyle.document)
         case .workspace(let host, let id, .history(let status)?):
             if let client = store.clients[host], let workspace = board(host: host, id: id) {
                 BoardHistoryView(
                     store: boardStore(for: workspace, client: client, host: host), status: status,
-                    onOpen: { row in chooseTask(row.id, host: host, workspace: id, glance: false) })
+                    onOpen: { row in chooseTask(row.id, host: host, workspace: id, glance: false) }
+                )
+                .background(WorkspaceStyle.document)
             } else {
                 ContentUnavailableView("Board Not Found", systemImage: "checklist")
+                    .background(WorkspaceStyle.document)
             }
         case .workspace(let host, _, .worktree(let wt, _)?), .looseWorktree(let host, let wt, _):
             if !settled {
@@ -309,8 +315,10 @@ extension ContentView {
                 tiled(shown, titled: false, keyboard: current)
             } else if let ws = worktree(host: host, id: wt) {
                 worktreeDetail(ws)
+                    .background(WorkspaceStyle.document)
             } else {
                 ContentUnavailableView("Worktree Not Found", systemImage: "folder")
+                    .background(WorkspaceStyle.document)
             }
         default:
             EmptyView()

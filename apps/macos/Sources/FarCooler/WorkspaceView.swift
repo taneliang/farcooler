@@ -123,10 +123,11 @@ struct WorkspaceView<
                     navigator()
                         .frame(width: frames.navigator)
                         .frame(maxHeight: .infinity)
-                    Divider()
+                    // The plane shows between the navigator and the paper
+                    // beside it: the paper's edge is the boundary, not a rule.
+                    Color.clear.frame(width: WorkspaceColumns.divider)
                 }
                 .frame(height: height)
-                .background(WorkspaceStyle.canvas)
                 .offset(x: drawn.navigator ? 0 : -(frames.navigator + WorkspaceColumns.divider + WorkspaceMotion.overhang))
                 .allowsHitTesting(now.navigator)
                 .accessibilityHidden(!now.navigator)
@@ -139,7 +140,9 @@ struct WorkspaceView<
             .animation(motion, value: drawn)
             .clipShape(Rectangle())
             .contentShape(Rectangle())
-            .background(WorkspaceStyle.canvas)
+            // One frosted plane behind the navigator, the gutters and the
+            // headers; nothing drawn over it but the work's own paper.
+            .background { WindowPlane().ignoresSafeArea() }
             .preference(key: WorkspaceArrangementPreference.self, value: now)
             .preference(key: WorkspaceWidthPreference.self, value: width)
         }
@@ -170,7 +173,6 @@ struct WorkspaceView<
                 conversation()
                     .frame(width: kept)
                     .frame(maxHeight: .infinity)
-                    .background(WorkspaceStyle.canvas)
                     .opacity(drawn.conversation == .main ? 1 : 0)
                     .allowsHitTesting(shown)
                     .accessibilityHidden(!shown)
@@ -222,7 +224,6 @@ struct WorkspaceView<
                     detail(shown, settled == shown)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .background(WorkspaceStyle.canvas)
                 .id(shown)
                 .transition(.asymmetric(insertion: .opacity, removal: .opacity.animation(WorkspaceMotion.leave)))
                 // Leaving, nothing in it takes the keyboard or a click.
@@ -231,7 +232,6 @@ struct WorkspaceView<
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(WorkspaceStyle.canvas)
         .accessibilityIdentifier("workspace-opened")
     }
 

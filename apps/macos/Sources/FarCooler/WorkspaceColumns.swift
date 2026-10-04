@@ -21,10 +21,10 @@ enum WorkspaceColumns {
     static let defaultCell: CGFloat = 7.72705078125
 
     /// What a tile column spends on other than cells: the canvas inset
-    /// (`Pane.inset`, 10 each side) and the terminal's own padding
-    /// (`TerminalMetrics.padding`, 10 each side). `TileGeometry.viewport`
-    /// counts the same.
-    static let chrome: CGFloat = 40
+    /// (`Pane.inset`, 10 each side on macOS 26 and 6 on 27) and the terminal's
+    /// own padding (`TerminalMetrics.padding`, 10 each side).
+    /// `TileGeometry.viewport` counts the same.
+    static var chrome: CGFloat { 2 * Pane.inset + 20 }
 
     /// What the main area keeps, at the least, in terminal columns, as the
     /// navigator is dragged wider: the width at which no fixed line of any

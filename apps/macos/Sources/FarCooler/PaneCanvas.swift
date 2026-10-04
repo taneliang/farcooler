@@ -25,8 +25,10 @@ enum Pane {
     ///
     /// 6pt was less than that, which is exactly what "touching the corner"
     /// looked like: the card's own arc running into the window's, two mismatched
-    /// curves a couple of points apart.
-    static let inset: CGFloat = 10
+    /// curves a couple of points apart. That was macOS 26's corner. macOS 27's
+    /// is about 16, so its gutter is the corner minus the card's radius, 6, and
+    /// the card shares the corner's center (`Gutter.window`).
+    static var inset: CGFloat { Gutter.window }
 
     /// The cards' radius.
     ///
@@ -52,12 +54,10 @@ extension View {
     func paneCanvas() -> some View {
         padding(Pane.inset)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // `underPageBackgroundColor` is deliberately dark in BOTH appearances
-            // — it is the color behind a document page — which reads well against
-            // a dark terminal and far too heavy in light mode. The window's own
-            // background follows the appearance, which is what a backdrop should
-            // do.
-            .background(WorkspaceStyle.canvas)
+            // Nothing painted (ov-220): the window's frosted plane shows in the
+            // gutter around the cards. It used to be `canvas`, the window's own
+            // color blended 5% toward the terminal theme; the theme's hue now
+            // tints the cards only, and the wallpaper supplies the plane's.
     }
 
     /// One terminal, as a card on the canvas.

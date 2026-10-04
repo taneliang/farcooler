@@ -23,7 +23,7 @@ enum ColumnHeader {
 
 extension View {
     /// This view as a column header: `ColumnHeader.height` tall, on the
-    /// canvas, over the one divider. Every header is drawn through this, so
+    /// window's plane, over the one divider. Every header is drawn through this, so
     /// none can come to differ (`ColumnHeaderTests`).
     func columnHeader() -> some View {
         VStack(spacing: 0) {
@@ -31,7 +31,6 @@ extension View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .frame(height: ColumnHeader.height)
                 .clipped()
-                .background(WorkspaceStyle.canvas)
             Divider()
         }
     }

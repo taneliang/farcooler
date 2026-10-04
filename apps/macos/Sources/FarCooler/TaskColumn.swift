@@ -298,7 +298,6 @@ struct TaskViewHeader: View {
         .padding(.horizontal, TaskTypography.inset.leading)
         // Six rhythms: a title2 line with a rhythm and a half each side.
         .frame(maxWidth: .infinity, minHeight: 6 * ColumnGrid.rhythm, alignment: .leading)
-        .background(WorkspaceStyle.canvas)
     }
 }
 

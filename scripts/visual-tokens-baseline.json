@@ -46,7 +46,7 @@
   "apps/macos/Sources/FarCooler/ColumnHeader.swift": {"separator": 1},
   "apps/macos/Sources/FarCooler/Commands.swift": {"separator": 12},
   "apps/macos/Sources/FarCooler/Components/CompactTaskRow.swift": {"fill": 1},
-  "apps/macos/Sources/FarCooler/ContentView+WorkspaceDetail.swift": {"material": 1, "separator": 1},
+  "apps/macos/Sources/FarCooler/ContentView+WorkspaceDetail.swift": {"separator": 1},
   "apps/macos/Sources/FarCooler/DaemonSkew.swift": {"separator": 1},
   "apps/macos/Sources/FarCooler/DiffView.swift": {"fill": 1, "radius": 1},
   "apps/macos/Sources/FarCooler/GroupBar.swift": {"fill": 1, "radius": 1},
@@ -61,7 +61,6 @@
   "apps/macos/Sources/FarCooler/TerminalRenderView.swift": {"stroke": 1},
   "apps/macos/Sources/FarCooler/TileView.swift": {"fill": 5, "separator": 1, "stroke": 1},
   "apps/macos/Sources/FarCooler/WorkspaceSwitcher.swift": {"separator": 1},
-  "apps/macos/Sources/FarCooler/WorkspaceView.swift": {"separator": 1},
   "apps/shared/AgentKit/Sources/AgentKit/GlanceCard.swift": {"separator": 1},
   "apps/shared/AgentKit/Sources/AgentKit/GlanceMark.swift": {"stroke": 3},
   "apps/shared/AgentKit/Sources/AgentKit/MarkdownView.swift": {"radius": 3, "separator": 3, "stroke": 1}

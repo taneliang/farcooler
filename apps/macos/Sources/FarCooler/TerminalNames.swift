@@ -196,6 +196,5 @@ struct TaskTerminalsStrip: View {
             }
         }
         .padding(.vertical, ColumnGrid.rhythm)
-        .background(WorkspaceStyle.canvas)
     }
 }

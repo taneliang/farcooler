@@ -789,7 +789,7 @@ struct TaskBoardView: View {
         // One key column for the whole board, so every title starts at one x.
         .environment(\.taskKeyWidth, TaskKeyColumn.width(for: store.board.rows.map(\.key)))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(WorkspaceStyle.canvas)
+        // The board is the navigator's: it draws on the window's plane.
         // The board only moves when a runner says THIS board did. Polling a
         // board that nothing is touching would be the shape this app spent a
         // release removing.
