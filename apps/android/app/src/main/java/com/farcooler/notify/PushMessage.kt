@@ -18,7 +18,7 @@ sealed interface PushMessage {
 
     /**
      * An agent's card, or an old runner's decision. [terminal] is empty for a
-     * decision; [task] and [runner] are set for a decision only.
+     * decision; [task] is set for a decision only; [runner] rides with a pane too (ov-183).
      */
     data class Card(
         override val title: String,
@@ -50,7 +50,7 @@ sealed interface PushMessage {
                 channel = NotificationCopy.channelForPush(data),
                 kind = kind,
                 task = task,
-                runner = data[Notifier.PUSH_EXTRA_RUNNER]?.takeIf { task != null && it.isNotEmpty() },
+                runner = data[Notifier.PUSH_EXTRA_RUNNER]?.takeIf { it.isNotEmpty() },
             )
         }
     }
