@@ -327,3 +327,29 @@ fn a_firmlink_path_to_a_protected_directory_is_refused() {
         }
     }
 }
+
+/// A protected directory that doesn't exist yet (`~/.config/gcloud` before a
+/// first login) is guarded through its nearest existing ancestor, so a folder
+/// named by another path to that ancestor (here the APFS data volume's path
+/// to a temporary home's `.config`, which `canonicalize` leaves as written)
+/// can't hold the credentials created there later.
+#[test]
+fn a_missing_protected_directory_is_guarded_through_its_nearest_ancestor() {
+    let scene = Scene::new();
+    let home = std::fs::canonicalize(scene.top.join("home")).unwrap();
+    std::fs::create_dir_all(home.join(".config/other")).unwrap();
+    assert!(!home.join(".config/gcloud").exists());
+    let g = Guarded::new(Some(home.clone()), &[scene.top.join("runtime")], None).unwrap();
+    // By the same path: refused by the path check alone.
+    assert_eq!(admit("x", &home.join(".config").to_string_lossy(), &g), Err(Refused::TooBroad));
+    // A sibling beside the missing directory is still fine.
+    assert!(admit("x", &home.join(".config/other").to_string_lossy(), &g).is_ok());
+
+    let via_data = Path::new("/System/Volumes/Data").join(home.join(".config").strip_prefix("/").unwrap());
+    if !via_data.is_dir() || std::fs::canonicalize(&via_data).unwrap() == home.join(".config") {
+        eprintln!("skipped the alternate path: no APFS firmlink to {} here", home.display());
+        return;
+    }
+    assert_eq!(admit("x", &via_data.to_string_lossy(), &g), Err(Refused::TooBroad), "{}", via_data.display());
+    assert!(admit("x", &via_data.join("other").to_string_lossy(), &g).is_ok());
+}

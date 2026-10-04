@@ -12,8 +12,9 @@
 //!   or one of its ancestors', walked the same two ways; or the folder joined
 //!   with any tail of the protected path is the protected directory (which is
 //!   what catches `/System/Volumes/Data`, whose `..` chain doesn't run
-//!   through `/Users`). And by path, both ways, for a protected directory
-//!   that doesn't exist yet.
+//!   through `/Users`). A protected directory that doesn't exist yet is
+//!   compared by its nearest existing ancestor's identity instead.
+//! - And by path, both ways.
 
 use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
@@ -75,7 +76,12 @@ pub(super) fn holds(folder: &Path, protected: &Path) -> bool {
     if real.starts_with(folder) {
         return true;
     }
-    let Some(target) = id_of(&real) else { return false };
+    // Not there yet (`~/.config/gcloud` before a first login): its nearest
+    // existing ancestor stands in, so a folder that is or holds `~/.config`
+    // by another path can't hold what is created there later.
+    let Some((real, target)) = real.ancestors().find_map(|a| id_of(a).map(|id| (a.to_path_buf(), id))) else {
+        return false;
+    };
     if id_of(folder).is_some_and(|f| chain(&real).contains(&f)) {
         return true;
     }
