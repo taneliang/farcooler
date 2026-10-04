@@ -131,7 +131,7 @@ internal object ScanCopy {
             orPaste(canPaste)
 
     fun cameraOff(canPaste: Boolean) =
-        "The camera is turned off for Far Cooler. You can turn it on in Settings" +
+        "The camera is turned off for Far Cooler. You can turn it on in Settings" + // casing ok: Android's Settings app
             orPaste(canPaste)
 }
 

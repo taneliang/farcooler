@@ -777,7 +777,7 @@ class ChangesStore(
             else -> "This patch couldn’t be read"
         }
 
-        /** Why one file's patch isn't on screen, when reading it failed. The row's Try Again button is the way on. */
+        /** Why one file's patch isn't on screen, when reading it failed. The row's Try again button is the way on. */
         internal fun fileTrouble(e: Exception): String =
             if (e is DisconnectedException) {
                 "The connection to this runner dropped."

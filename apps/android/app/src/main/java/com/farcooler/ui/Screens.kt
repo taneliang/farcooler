@@ -380,7 +380,7 @@ fun SettingsScreen(
                     }
                 }
 
-                // "Settings › Devices", which the confirmation screen names as
+                // "This device > Devices and runners", which the confirmation screen names as
                 // where a grant can be changed later. It has to be here, or that
                 // sentence sends someone looking for a screen that does not
                 // exist.

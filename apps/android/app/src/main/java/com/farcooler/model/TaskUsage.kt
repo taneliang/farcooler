@@ -242,7 +242,7 @@ sealed interface TaskUsageState {
     data object Loading : TaskUsageState
     /** The runner is older than spend: [TaskUsageFormat.NEEDS_UPDATE]. */
     data object NeedsUpdate : TaskUsageState
-    /** The read didn't come back: [TaskUsageFormat.COULDNT_READ], with Try Again. */
+    /** The read didn't come back: [TaskUsageFormat.COULDNT_READ], with Try again. */
     data object Failed : TaskUsageState
     data class Loaded(val usage: TaskUsage) : TaskUsageState
 

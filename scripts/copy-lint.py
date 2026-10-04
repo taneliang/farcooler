@@ -65,10 +65,12 @@ ALLOWS = ("not a count", "not UI copy")
 
 # Android casing (ov-204): words that keep their capital mid-string.
 CASING_PROPER = {
-    "Far", "Cooler", "Claude", "Code", "Codex", "GitHub", "Android", "Git",
-    "Cursor", "Mac", "Keychain", "WorkOS", "Gemini", "Google", "Tailscale",
-    "Firebase", "Linux", "Settings", "I", "Opus", "Sonnet", "Haiku",
+    "GitHub", "Codex", "Android", "Git", "Cursor", "Mac", "Keychain", "WorkOS", "Gemini",
+    "Google", "Tailscale", "Firebase", "Linux", "I", "Opus", "Sonnet", "Haiku",
 }
+# Multi-word names match as whole phrases: "Claude Code" passes, "Review Code"
+# doesn't, and neither word passes alone.
+CASING_PHRASES = ("Far Cooler", "Claude Code")
 CASING_ALLOW = "casing ok"
 _LITERAL = re.compile(r'"((?:[^"\\\n]|\\.)*)"')
 _WORD = re.compile(r"[A-Z][a-z]+(?:\u2019[a-z]+)?")
@@ -77,6 +79,8 @@ _WORD = re.compile(r"[A-Z][a-z]+(?:\u2019[a-z]+)?")
 def title_case_words(text: str) -> list[str]:
     """Capitalized words in a string that sentence case wouldn't capitalize."""
     text = re.sub(r"\$\{[^{}]*\}|\$\w+", "\0", text)
+    for phrase in CASING_PHRASES:
+        text = re.sub(r"\b" + phrase + r"\b", "\1", text)
     words = text.split()
     out = []
     for i, word in enumerate(words):
@@ -165,7 +169,7 @@ def scan() -> int:
         print(
             f"\n{casing} title-case Android string(s). Material uses sentence case "
             "everywhere, buttons included: \"Try again\", never \"Try Again\". "
-            "A proper noun goes in CASING_PROPER; a name or wire value says "
+            "A proper noun goes in CASING_PROPER (a phrase in CASING_PHRASES); a name or wire value says "
             f"`{CASING_ALLOW}` in a comment on its line.")
     if found:
         print(
@@ -218,6 +222,12 @@ def self_test() -> int:
         ('"Show $hidden More"', True),
         ('"$workspace Orchestrator"', True),
         ('"Moved to In Review"', True),
+        ('"Review Code"', True),
+        ('"Ask Far"', True),
+        ('"Open Settings"', True),
+        ('"Update Cooler now"', True),
+        ('"Ask Claude Code"', False),
+        ('"Update Far Cooler now"', False),
         ('Text("Try again")', False),
         ('Text("Needs you")', False),
         ('Text("Open on GitHub")', False),
