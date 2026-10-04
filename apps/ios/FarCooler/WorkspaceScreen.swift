@@ -109,7 +109,14 @@ struct WorkspaceScreen: View {
                         .contains(.orchestrator),
                     orchestratorRunning: Self.orchestratorIsUp(in: connection, summary: summary),
                     onShowOrchestrator: { segment = .orchestrator },
-                    onHistory: { status in navigator?.open(.history(place, status: status.rawValue)) })
+                    onHistory: { status in navigator?.open(.history(place, status: status.rawValue)) },
+                    reads: connection.boardReads[summary.id] ?? .firstLook(now: Date()),
+                    readNotes: { row in await connection.taskRecord(row.id)?.detail.notes },
+                    readsAreShared: { connection.readsAreShared(workspace: summary.id) },
+                    onMarkAllRead: { latest in
+                        guard let rows = connection.boards[summary.id]?.rows else { return }
+                        connection.markAllRead(rows: rows, latest: latest, workspace: summary.id)
+                    })
                 .task { await connection.readBoard(summary) }
             case .worktrees:
                 WorkspaceWorktrees(connection: connection, summary: summary, place: place)

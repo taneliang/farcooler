@@ -24,6 +24,9 @@ SOURCES = [
     "AddFlow.swift",
     "ClientCore.swift",
     "Connection.swift",
+    # A connection's board read state (ov-113): one keeper per board, the
+    # runner's state when it keeps it and this phone's when it can't.
+    "ConnectionBoardReads.swift",
     "FleetSnapshotWriter.swift",
     # What is left of the app's navigation: the connection, the four phases,
     # and the deep link. `NeedsYou.swift` was here beside it — the inbox that
@@ -102,6 +105,8 @@ SOURCES = [
     "NeedsYouScreen.swift",
     "WorkspaceScreen.swift",
     "TaskScreen.swift",
+    # Unread, the board's first section (ov-113).
+    "BoardUnreadSection.swift",
     # A task's Usage section: what its agents spent (ov-195).
     "TaskUsageSection.swift",
     # Task keys in a runner's text as links, pushing the task (ov-196).
@@ -392,6 +397,9 @@ AGENTKIT_SOURCES = [
     "BoardReads.swift",
     # Sending marks to the runner and folding its answers in (ov-113).
     "BoardReadsSync.swift",
+    # What a phone's board keeps and owes of it, and the Unread lines' words.
+    "BoardReadsKeeper.swift",
+    "BoardSummaryLines.swift",
     "BoardHistory.swift",
     "TaskQuestion.swift",
     # In this list AND in `WATCH_AGENTKIT_SOURCES` below: the phone and the
@@ -734,6 +742,9 @@ UI_TEST_SOURCES = [
     # its worktrees that every live-runner suite starts with.
     "LiveRunner.swift",
     "WorkspaceScreenTests.swift",
+    # The board's Unread section over the canned runner that keeps read state
+    # (ov-113): listing, opening a ticket, and Mark All as Read asking first.
+    "BoardUnreadUITests.swift",
     # First run and the empty states over the same canned runner (ov-205): no
     # runner, a runner with no repository, blank boards, a missing agent.
     "FirstRunUITests.swift",

@@ -44,6 +44,9 @@ import SwiftUI
 //   -phone-usage-fails       the runner doesn't answer usage.task
 //   -phone-task-fails        the runner refuses task.get, so a task has no record
 //   -phone-hide-fails        the runner refuses worktree.hide and worktree.unhide
+//   -phone-board-reads       the runner keeps read state (`board_reads`): Billing's floor is
+//                            25 hours back, so bil-5 (done a day ago) and bil-7 (moved
+//                            ten minutes ago) are unread, and `workspace.mark_read` raises it
 //
 // A Darwin notification from the test stands in for a notification tapped
 // while the app is open: `com.farcooler.harness.agent`, the blocked
@@ -99,7 +102,9 @@ struct PhoneHarness: View {
             UserDefaults.standard.removeObject(forKey: PhoneLaunch.stackKey)
         }
         for key in UserDefaults.standard.dictionaryRepresentation().keys
-        where key.hasPrefix("workspace.segment.") || key.hasPrefix("board.collapsed.") {
+        where key.hasPrefix("workspace.segment.") || key.hasPrefix("board.collapsed.")
+            || key.hasPrefix("board.read.")
+        {
             UserDefaults.standard.removeObject(forKey: key)
         }
     }()
@@ -254,6 +259,12 @@ final class HarnessRunner {
     /// Every write the screens made, as `harness-sent` shows it:
     /// `task.note <task> <body>`, `start <workspace> <harness> replace=<b>`.
     private(set) var sent: [String] = []
+    /// Billing's read state, as a runner that keeps it does (`-phone-board-reads`):
+    /// a floor and each opened task's mark, only ever raised.
+    private let standUpAt = Int64(Date().timeIntervalSince1970 * 1000)
+    private lazy var readFloor = standUpAt - 25 * 3_600_000
+    private var readMarks: [String: Int64] = [:]
+    private static var keepsReads: Bool { CommandLine.arguments.contains("-phone-board-reads") }
 
     init(connection: Connection) {
         self.connection = connection
@@ -279,6 +290,7 @@ final class HarnessRunner {
                 version: "harness", matches: true, platform: "harness",
                 capabilities: Set(
                     ["tasks", "needs_you", "workstreams", "terminal_task"]
+                        + (Self.keepsReads ? ["board_reads"] : [])
                         + (CommandLine.arguments.contains("-phone-usage-old") ? [] : ["agent_usage"])),
                 grantedScope: Self.readOnly ? "read" : "control",
                 agentsFound: Self.agentsFound))
@@ -379,7 +391,26 @@ final class HarnessRunner {
             }
             return try json(["items": items()])
         case "task.list":
-            return try json(["tasks": tasks(args["workspace"] as? String)])
+            let workspace = args["workspace"] as? String
+            var list: [String: Any] = ["tasks": tasks(workspace)]
+            if Self.keepsReads, workspace == Self.billing { list["reads"] = readState() }
+            return try json(list)
+        case "workspace.mark_read" where Self.keepsReads:
+            // Raises the floor and the marks, as the runner does, and refuses a
+            // write that isn't Billing's.
+            guard args["workspace"] as? String == Self.billing else {
+                throw ClientCore.CoreError.rejected("bad workspace", word: "invalid-argument")
+            }
+            if let floor = args["floor_ms"] as? Int64 { readFloor = max(readFloor, floor) }
+            let marks = args["opened"] as? [[String: Any]] ?? []
+            for mark in marks {
+                guard let task = mark["task_id"] as? String, let at = mark["opened_ms"] as? Int64 else {
+                    throw ClientCore.CoreError.rejected("bad mark", word: "invalid-argument")
+                }
+                readMarks[task] = max(readMarks[task] ?? 0, at)
+            }
+            sent.append("workspace.mark_read floor=\(args["floor_ms"] as? Int64 ?? 0) marks=\(marks.count)")
+            return try json(readState())
         case "task.get" where CommandLine.arguments.contains("-phone-task-fails"):
             throw ClientCore.CoreError.rejected("unavailable", word: "unavailable")
         case "task.get":
@@ -559,10 +590,20 @@ final class HarnessRunner {
         }
     }
 
+    private func readState() -> [String: Any] {
+        [
+            "workspace_id": Self.billing, "floor_ms": readFloor,
+            "opened": readMarks.filter { $0.value > readFloor }.map { ["task_id": $0.key, "opened_ms": $0.value] },
+        ]
+    }
+
     private func tasks(_ workspace: String?) -> [[String: Any]] {
         guard workspace == Self.billing, !CommandLine.arguments.contains("-phone-billing-blank")
         else { return [] }
-        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        // The moment the harness stood up, not the moment of each read: a task
+        // that finished a day ago finished then, however often it's read, and a
+        // read mark above it has to stay above it.
+        let now = standUpAt
         func startStates() -> [[String: Any]] {
             guard Self.startStates else { return [] }
             return [

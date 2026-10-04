@@ -68,11 +68,18 @@ struct WorkspaceBoardList: View {
     let onShowOrchestrator: (() -> Void)?
     /// A finished status's History page, pushed (ov-103).
     let onHistory: (TaskStatus) -> Void
+    /// What's been read on this board (ov-104, ov-113): the runner's state
+    /// when it keeps it, this phone's own when it can't. What Unread lists
+    /// and Done keeps (`BoardDone`).
+    let reads: BoardReads
+    /// A ticket's notes, for Unread's Activity.
+    let readNotes: (TaskRow) async -> [TaskNoteRow]?
+    /// Whether Mark All as Read reaches every device.
+    let readsAreShared: () -> Bool
+    /// Mark All as Read, once asked, through the newest note read.
+    let onMarkAllRead: (Date?) -> Void
 
     @State private var collapsed: Set<TaskStatus>
-    /// What's been read on this board, on this phone (ov-104): what Done
-    /// keeps (`BoardDone`). Read again whenever the list comes back.
-    @State private var reads: BoardReads
     /// The long sections showing every task, not just ten.
     @State private var showingMore: Set<TaskStatus> = []
 
@@ -83,7 +90,9 @@ struct WorkspaceBoardList: View {
         onOpen: @escaping (TaskRow) -> Void,
         onJump: @escaping (BoardAgent) -> Void, onRefresh: @escaping () async -> Void,
         ledByOrchestrator: Bool = false, orchestratorRunning: Bool = true,
-        onShowOrchestrator: (() -> Void)? = nil, onHistory: @escaping (TaskStatus) -> Void = { _ in }
+        onShowOrchestrator: (() -> Void)? = nil, onHistory: @escaping (TaskStatus) -> Void = { _ in },
+        reads: BoardReads = .firstLook(now: Date()), readNotes: @escaping (TaskRow) async -> [TaskNoteRow]? = { _ in nil },
+        readsAreShared: @escaping () -> Bool = { false }, onMarkAllRead: @escaping (Date?) -> Void = { _ in }
     ) {
         self.board = board
         self.unread = unread
@@ -99,9 +108,12 @@ struct WorkspaceBoardList: View {
         self.orchestratorRunning = orchestratorRunning
         self.onShowOrchestrator = onShowOrchestrator
         self.onHistory = onHistory
+        self.reads = reads
+        self.readNotes = readNotes
+        self.readsAreShared = readsAreShared
+        self.onMarkAllRead = onMarkAllRead
         _collapsed = State(
             initialValue: BoardForm.collapsed(host: place.runner, workspace: place.workspace))
-        _reads = State(initialValue: PhoneReads.load(place))
     }
 
     var body: some View {
@@ -149,7 +161,6 @@ struct WorkspaceBoardList: View {
             }
         }
         .refreshable { await onRefresh() }
-        .onAppear { reads = PhoneReads.load(place) }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("board")
     }
@@ -176,6 +187,11 @@ struct WorkspaceBoardList: View {
                     .foregroundStyle(.secondary)
                 }
             }
+            // What's new to this person comes first, as the Mac's does
+            // (ov-113): it's what they opened the board to see.
+            BoardUnreadSection(
+                board: board, reads: reads, readNotes: readNotes, readsAreShared: readsAreShared,
+                onOpen: onOpen, onMarkAllRead: onMarkAllRead)
             // The one count worth putting above a board, in the Mac's words
             // (`TaskBoardModel.waitingSentence`), and nothing at zero: a
             // badge reading zero teaches people to ignore it. One line
@@ -327,21 +343,6 @@ struct WorkspaceBoardList: View {
         .accessibilityLabel("\(section.title) \(section.count)")
         .accessibilityValue(expandable ? (open ? "Expanded" : "Collapsed") : "Empty")
         .accessibilityIdentifier("board-section-\(section.id)")
-    }
-}
-
-/// What's been read on a workspace's board on this phone (ov-104): the Mac's
-/// rule (`BoardReads`), kept in this phone's defaults by runner and
-/// workspace. A task opened is read (`TaskScreen`).
-enum PhoneReads {
-    static func load(_ place: PhoneWorkspace, now: Date = Date()) -> BoardReads {
-        DefaultsBoardReads().load(host: place.runner, workspace: place.workspace, now: now)
-    }
-
-    static func open(_ row: TaskRow, latest: Date?, place: PhoneWorkspace, now: Date = Date()) {
-        var reads = load(place, now: now)
-        reads.open(row, latest: latest, now: now)
-        DefaultsBoardReads().save(reads, host: place.runner, workspace: place.workspace)
     }
 }
 

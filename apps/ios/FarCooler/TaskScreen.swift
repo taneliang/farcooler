@@ -66,6 +66,10 @@ struct TaskScreen: View {
     }
 
     private func load() async {
+        // Opened is read, at once and not when its record has come back, so
+        // going straight back leaves it read (ov-113). Its notes, once read,
+        // raise the mark through the newest of them.
+        if let row { connection.markRead(row, latest: nil, workspace: place.workspace) }
         if let summary = connection.workspace(place.workspace) {
             await connection.readBoard(summary)
         }
@@ -76,7 +80,9 @@ struct TaskScreen: View {
             question = read.question
             // Opened and read: its finish no longer keeps it in Done's short
             // list (ov-103).
-            if let row { PhoneReads.open(row, latest: read.detail.notes.map(\.at).max(), place: place) }
+            if let row {
+                connection.markRead(row, latest: read.detail.notes.map(\.at).max(), workspace: place.workspace)
+            }
         }
         await readUsage()
     }

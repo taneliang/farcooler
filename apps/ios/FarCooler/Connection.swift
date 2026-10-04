@@ -444,6 +444,12 @@ final class Connection: ObservableObject {
             // notice moves is `RunnerBoards.touched`'s to say.
             let event = notice["event"] as? String
             let moved = BoardNotice(notice: notice)
+            // Another device read something: this board's whole read state,
+            // which the fleet needn't be read again for (ov-113).
+            if event == "reads" {
+                Task { @MainActor in self?.hearReads(notice) }
+                return
+            }
             //
             // The fleet first, and never behind a board: `fleetNewsArrived`
             // only arms a refresh, and the board read after it runs on its
@@ -1300,6 +1306,12 @@ final class Connection: ObservableObject {
     /// keeps the last good board; the board itself says it could not read.
     @Published private(set) var unreadBoards: Set<String> = []
 
+    /// What's been read on each board read, by workspace id (ov-113): the
+    /// runner's state when it keeps it, this phone's own when it can't. Kept
+    /// by `readsKeepers`, in Connection+BoardReads.swift.
+    @Published var boardReads: [String: BoardReads] = [:]
+    var readsKeepers: [String: BoardReadsKeeper] = [:]
+
     /// Every board this runner keeps, in the order the screens draw them:
     /// each repository's workspaces, or its one implicit board on a runner
     /// that names none. What a sweep reads; see `RunnerBoards.boards`.
@@ -1417,6 +1429,7 @@ final class Connection: ObservableObject {
             if let data = try? await rpc("task.list", args),
                 let board = try? TaskBoardModel.decode(data)
             {
+                adoptReads(from: data, workspace: key)
                 boards[key] = board
                 unreadBoards.remove(key)
                 read = true
@@ -1592,6 +1605,9 @@ final class Connection: ObservableObject {
             return .failed
         }
     }
+
+    /// The runner's build as far as it's known, a harness's included.
+    var knownBuild: DaemonBuild? { daemon ?? standInBuild }
 
     /// One call on this runner, through a harness's stand-in when there is
     /// one. What the phone's workspace screens call through, so a UI test can
