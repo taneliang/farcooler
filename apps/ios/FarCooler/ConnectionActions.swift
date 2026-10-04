@@ -31,16 +31,10 @@ extension Connection {
     /// state off the phone entirely: what a person sees is the pane, and then
     /// no pane.
     ///
-    /// Failures are swallowed for the reason `act`'s are, and the reason is
-    /// stronger here than there: what comes back from a refused remove is
-    /// `RunningProcesses`, a Rust enum's name, and no raw runner error reaches
-    /// a screen in this app. What a person sees instead is the tab still
-    /// there — which is the truth, and which is the same thing they would see
-    /// if the connection had dropped.
-    ///
-    /// **Said, now (ov-179).** The sentence above is why the runner's raw word
-    /// never reaches a screen, and it's still true: what the caller gets back is
-    /// `ActionFailure`, whose sentence is the refusal table's. The stop's own
+    /// **A refused remove is said (ov-179).** It used to be swallowed, because
+    /// what comes back is `RunningProcesses`, a Rust enum's name, and no raw
+    /// runner error reaches a screen in this app. What the caller gets back now
+    /// is `ActionFailure`, whose sentence is the refusal table's. The stop's own
     /// answer is dropped on purpose: closing is the remove that follows, so a
     /// stop that was refused is either followed by a remove that says why or
     /// by a tab that is gone.
@@ -88,12 +82,6 @@ extension Connection {
         return failure
     }
 
-    /// The terminal a Quick Task just created, read back out of the fleet.
-    ///
-    /// `terminal.create`'s reply is only an id — the daemon's answer to
-    /// `fleet` is the one place `activity` lives, which is what the waiting
-    /// loop polls. Looked up rather than cached, because each poll needs the
-    /// freshest copy.
     /// Switch a pane between its terminal and its chat.
     ///
     /// Refreshes afterwards rather than guessing: the daemon respawns the pane,

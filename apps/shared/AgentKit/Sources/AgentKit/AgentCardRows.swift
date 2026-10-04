@@ -963,7 +963,8 @@ extension FleetSnapshot {
     /// app next polls. The Live Activity card does hear it, as a `done` row
     /// whose `failed` the relay set to `false` (migration 0018). Only a row
     /// that says so outright counts: an older relay sends no word, and absent
-    /// is not "finished well".
+    /// is not "finished well". And it has to be dated after the failure it
+    /// clears: a row with no `updatedAt`, or an older one, is last turn's news.
     ///
     /// Folded in with `merging`, so the agent is stamped as freshly heard from,
     /// which a relay's word is. The glyph goes with the mark: a cleared turn
@@ -974,7 +975,13 @@ extension FleetSnapshot {
         var changed = false
         for row in rows where row.status == "done" && row.failed == false {
             guard var agent = next.agents.first(where: { $0.id == row.terminal }),
-                agent.turnFailed
+                agent.turnFailed,
+                // Only a success NEWER than the failure. The card can hold the
+                // previous turn's success row while this turn's failure is
+                // already on disk, and clearing on that would erase a real
+                // failure that nothing writes again until the app polls.
+                let said = row.updatedAt,
+                said > (agent.observedAt ?? agent.activityChangedAt ?? .distantPast)
             else { continue }
             agent.turnFailed = false
             if agent.glyph == "✗" { agent.glyph = "✓" }

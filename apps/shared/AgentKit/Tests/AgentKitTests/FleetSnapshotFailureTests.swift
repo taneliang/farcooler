@@ -25,7 +25,7 @@ struct FleetSnapshotFailureTests {
     @Test func aQuietSuccessTheRelayVouchesForClearsTheFailedMark() throws {
         let before = snapshot([failedAgent("t1")])
         #expect(before.failing == 1)
-        let rows = [AgentCardRow(terminal: "t1", status: "done", failed: false)]
+        let rows = [AgentCardRow(terminal: "t1", status: "done", updatedAt: now, failed: false)]
         let after = try #require(before.clearingFailures(vouchedBy: rows, at: now))
         #expect(after.failing == 0)
         #expect(after.agents[0].turnFailed == false)
@@ -49,9 +49,23 @@ struct FleetSnapshotFailureTests {
         #expect(before.clearingFailures(vouchedBy: rows, at: now) == nil)
     }
 
+    /// The card still holds turn N's success while turn N+1's failure is on
+    /// disk; the old row must not erase the new failure.
+    @Test func anOlderSuccessDoesNotClearANewerFailure() {
+        let before = snapshot([failedAgent("t1")])
+        let older = [
+            AgentCardRow(
+                terminal: "t1", status: "done", updatedAt: now.addingTimeInterval(-3_600),
+                failed: false)
+        ]
+        #expect(before.clearingFailures(vouchedBy: older, at: now) == nil)
+        let undated = [AgentCardRow(terminal: "t1", status: "done", failed: false)]
+        #expect(before.clearingFailures(vouchedBy: undated, at: now) == nil)
+    }
+
     @Test func onlyTheAgentTheRowIsAboutIsCleared() throws {
         let before = snapshot([failedAgent("t1"), failedAgent("t2")])
-        let rows = [AgentCardRow(terminal: "t2", status: "done", failed: false)]
+        let rows = [AgentCardRow(terminal: "t2", status: "done", updatedAt: now, failed: false)]
         let after = try #require(before.clearingFailures(vouchedBy: rows, at: now))
         #expect(after.failedTurns == ["t1"])
     }

@@ -19,7 +19,13 @@ struct ActionFailure: Identifiable, Equatable {
     /// sentence; anything else gets `otherwise`.
     init(_ error: Error, title: String, otherwise: String) {
         self.title = title
-        self.sentence = ClientCore.trouble(error, otherwise: otherwise).sentence
+        // A dropped link has no refusal word, and blaming the runner for it
+        // would be wrong: say the connection is gone, and what that leaves open.
+        if let core = error as? ClientCore.CoreError, case .disconnected = core {
+            self.sentence = "Far Cooler lost the connection to this runner. Try again once it’s back."
+        } else {
+            self.sentence = ClientCore.trouble(error, otherwise: otherwise).sentence
+        }
     }
 }
 

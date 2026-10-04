@@ -534,7 +534,7 @@ struct AgentView: View {
                 // RED, not amber. A message that did not send is a failure,
                 // and amber in this app means one thing — an agent is waiting
                 // on you — which is the opposite of what this row reports.
-                if let failure = stream.sendFailure {
+                ForEach(stream.banners.all) { failure in
                     HStack(spacing: PaneMetrics.step) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundStyle(.red)
@@ -559,7 +559,7 @@ struct AgentView: View {
                         // the composer and `af7d229` made again on the fleet's
                         // `…` menu.
                         Button {
-                            stream.sendFailure = nil
+                            stream.banners.dismiss(failure.id)
                         } label: {
                             Image(systemName: "xmark")
                                 .frame(

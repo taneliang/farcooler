@@ -48,7 +48,14 @@ final class ChangesPatchNoticeTests: XCTestCase {
         for _ in 0..<60 where !more.exists { app.swipeUp(velocity: .fast) }
         XCTAssertTrue(more.exists, "a 700-line patch drew every line")
         XCTAssertEqual(more.label, "Show 100 More Lines")
+        // The budget's call site, not just its label: 600 lines are drawn.
+        let drawn = element(app, "changes-patch-drawn")
+        XCTAssertEqual(drawn.value as? String, "600", "the held-back lines were drawn")
         more.tap()
+        let all = NSPredicate { _, _ in (drawn.value as? String) == "700" }
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: all, object: nil)], timeout: 10),
+            .completed, "Show More showed nothing")
         XCTAssertTrue(more.waitForNonExistence(timeout: 10), "asking for the rest did not show it")
     }
 }

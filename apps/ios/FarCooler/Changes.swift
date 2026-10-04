@@ -1384,30 +1384,38 @@ final class ChangesStore: ObservableObject {
                 // The sha IS the scope for a commit — see `DiffScope.wire`,
                 // which is the only place that rule is spelled out.
                 ["worktree": worktree, "path": path, "scope": scope.wire])
-            let diff = try JSONDecoder().decode(ChangesFileDiff.self, from: data)
             // What was being compared changed while this was in flight, so
             // these lines answer a question nobody is asking any more. Stored
             // anyway they would file perfectly, under a heading that is now
             // showing a different commit — a wrong diff that looks exactly like
             // a right one.
+            let diff = try JSONDecoder().decode(ChangesFileDiff.self, from: data)
             guard asked == generation else { return }
-            // Recorded whichever way the patch went: they are about the patch,
-            // not about whether there is one, so a merge the daemon also
-            // declined to render is still a merge shown against its first
-            // parent.
-            if !diff.notices.isEmpty { fileNotices[path] = diff.notices }
-            if let why = diff.unsupported {
-                unsupported[path] = Self.reason(why)
-                fileDiffs[path] = []
-            } else {
-                fileDiffs[path] = diff.lines()
-            }
+            record(diff, for: path)
             prefetchAfter(path)
         } catch {
             // Left unread rather than recorded as empty, so pulling to refresh
             // tries it again instead of showing a permanent blank.
             guard asked == generation else { return }
             fileDiffs[path] = nil
+        }
+    }
+
+    /// File one file's answer: its lines, why it has none, and what to say
+    /// above it. The harness calls this with the wire's bytes decoded, so the
+    /// notices' path from the daemon's JSON to the screen is exercised
+    /// (ov-149).
+    func record(_ diff: ChangesFileDiff, for path: String) {
+        // Recorded whichever way the patch went: they are about the patch,
+        // not about whether there is one, so a merge the daemon also
+        // declined to render is still a merge shown against its first
+        // parent.
+        if !diff.notices.isEmpty { fileNotices[path] = diff.notices }
+        if let why = diff.unsupported {
+            unsupported[path] = Self.reason(why)
+            fileDiffs[path] = []
+        } else {
+            fileDiffs[path] = diff.lines()
         }
     }
 

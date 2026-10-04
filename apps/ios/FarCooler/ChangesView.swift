@@ -1864,15 +1864,27 @@ private struct DiffHunks: View {
     /// The reader asked for every line, past `PatchBudget.lines`.
     @State private var whole = false
 
+    private var hunks: [DiffLayout.Hunk] {
+        DiffLayout.hunks(PatchBudget.visible(lines, whole: whole))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(DiffLayout.hunks(PatchBudget.visible(lines, whole: whole))) { hunk in
+            ForEach(hunks) { hunk in
                 HunkView(hunk: hunk, file: file, commit: commit, onComment: onComment)
             }
             // Said rather than silently done: a patch that stops early
             // without saying so is one somebody can draw the wrong
             // conclusion from. Fires on a lockfile or a generated client, and
             // on almost nothing a person wrote.
+            #if DEBUG
+            // How many lines are drawn, for the UI suite: rows past the screen
+            // are not in the accessibility tree, so no row can say it.
+            Color.clear.frame(width: 1, height: 1)
+                .accessibilityElement()
+                .accessibilityIdentifier("changes-patch-drawn")
+                .accessibilityValue("\(hunks.reduce(0) { $0 + $1.lines.count })")
+            #endif
             if let more = PatchBudget.moreLabel(total: lines.count, whole: whole) {
                 ShowMoreLinesButton(title: more) { whole = true }
             }
@@ -2767,9 +2779,13 @@ struct ChangesLayoutHarness: View {
             on: Self.changeSet,
             scope: CommandLine.arguments.contains("-commit") ? .commit(commit.sha) : .branch,
             diffs: Self.diffs,
-            notices: Self.notices,
             expanded: CommandLine.arguments.contains("-commit")
                 ? nil : "crates/daemon/src/file_diff.rs")
+        // The daemon's answer for the open file, decoded the way `ensure`
+        // decodes it and filed the way it files it.
+        if let wire = Self.wireDiff {
+            store.record(wire, for: "crates/daemon/src/file_diff.rs")
+        }
     }
 
     var body: some View {
@@ -2837,20 +2853,18 @@ struct ChangesLayoutHarness: View {
         return nil
     }
 
-    /// `-diff-truncated` and `-diff-merge`: the notices above the patch, from
-    /// the same decode the store uses, so a fixture of the wire's bytes is
-    /// what is on screen.
-    private static var notices: [String: [String]] {
+    /// `-diff-truncated` and `-diff-merge`: the daemon's bytes for the open
+    /// file, with the flags set, decoded as the store decodes them. Nil when
+    /// neither is asked for, so the canned diff stands.
+    private static var wireDiff: ChangesFileDiff? {
         let args = CommandLine.arguments
+        guard args.contains("-diff-truncated") || args.contains("-diff-merge") else { return nil }
         let json = """
             {"unsupported":null,"truncated":\(args.contains("-diff-truncated")),\
-            "firstParentOfMerge":\(args.contains("-diff-merge")),"hunks":[]}
+            "firstParentOfMerge":\(args.contains("-diff-merge")),\
+            "hunks":[{"lines":[{"kind":"added","oldNumber":null,"newNumber":1,"text":"wire"}]}]}
             """
-        guard
-            let diff = try? JSONDecoder().decode(ChangesFileDiff.self, from: Data(json.utf8)),
-            !diff.notices.isEmpty
-        else { return [:] }
-        return ["crates/daemon/src/file_diff.rs": diff.notices]
+        return try? JSONDecoder().decode(ChangesFileDiff.self, from: Data(json.utf8))
     }
 
     private static let changeSet = ChangeSet(

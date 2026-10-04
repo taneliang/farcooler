@@ -426,7 +426,14 @@ final class AgentStream: ObservableObject {
         let retry: () async -> Void
     }
 
-    @Published var sendFailure: SendFailure?
+    /// The banners beside the composer. `sendFailure` is the unsent message's
+    /// and a refused control has its own slot, so neither drops the other.
+    @Published var banners = PaneFailureBanners<SendFailure>()
+
+    var sendFailure: SendFailure? {
+        get { banners.send }
+        set { banners.send = newValue }
+    }
 
     /// The core's answer, as something worth putting on a phone screen.
     private static func message(for error: Error) -> String {
@@ -453,18 +460,31 @@ final class AgentStream: ObservableObject {
     /// banner, which already sits on the thing a person looks at after
     /// tapping one, and its Retry runs the same call again. `failed` is the
     /// sentence for what didn't happen; a runner's own reason follows it.
+    ///
+    /// True when the runner took it. A success clears that control's own
+    /// banner, so a Retry that works doesn't leave its complaint up. `retry`
+    /// is what the banner's Retry runs, for a control that has more to redo
+    /// than the call.
+    @discardableResult
     private func perform(
-        _ method: String, _ arguments: [String: Any], failed: String
-    ) async {
+        _ method: String, _ arguments: [String: Any], failed: String,
+        retry: (@MainActor () async -> Void)? = nil
+    ) async -> Bool {
         var args = arguments
         args["terminal"] = terminal
         do {
             _ = try await core.call(method, args)
+            banners.controlSucceeded(key: method)
+            return true
         } catch {
-            sendFailure = SendFailure(message: ClientCore.trouble(error, after: failed).sentence) {
-                [weak self] in
-                await self?.perform(method, arguments, failed: failed)
-            }
+            banners.controlFailed(
+                SendFailure(message: ClientCore.trouble(error, after: failed).sentence) {
+                    [weak self] in
+                    if let retry { await retry() } else {
+                        await self?.perform(method, arguments, failed: failed)
+                    }
+                }, key: method)
+            return false
         }
     }
 
@@ -501,10 +521,15 @@ final class AgentStream: ObservableObject {
         // so a picker that waited for an echo snapped to its old value and read
         // as a control that does nothing. That was found and fixed on the Mac
         // and never ported; the phone has had the bug ever since.
+        let previous = transcript.configOptions.first { $0.id == id }?.currentValue
         transcript.selectConfigOptionLocally(id: id, value: value)
-        await perform(
+        let took = await perform(
             "terminal.agent_set_config", ["configId": id, "value": value],
-            failed: "Couldn’t change that setting.")
+            failed: "Couldn’t change that setting.",
+            retry: { [weak self] in await self?.setConfig(id, value) })
+        // A refused setting goes back to what it was, so the picker doesn't
+        // show a value the runner never took.
+        if !took, let previous { transcript.selectConfigOptionLocally(id: id, value: previous) }
     }
 
     func answer(_ requestID: String, _ optionID: String) async {

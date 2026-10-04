@@ -392,22 +392,21 @@ final class ShellGestureTests: XCTestCase {
     /// first responder and goes on drawing its composer over whatever is on
     /// top. Two visible panes is two composers fighting over one keyboard.
     ///
-    /// Checked with a finger DOWN as well as up, because mid-gesture is the
-    /// only time two panes are both on screen and therefore the only time the
-    /// wrong answer is reachable.
+    /// Checked at rest and after a half-page drag is released. The finger is
+    /// UP for the second check: `press(thenDragTo:)` lifts it before the
+    /// count runs, so no finger-down state is checked here.
     func testExactlyOnePaneIsVisible() throws {
         let app = launch()
 
         // ONE snapshot of the whole tree, not one query per probe (ov-236).
-        // `probes.element(boundBy:).value` re-resolves the element on every
-        // call, so a count built from several of them reads the panes at
-        // different instants. After a release the track re-seats, and the
-        // old pane stops being the pane in the same frame the new one
-        // becomes it; a read of the first probe before that frame and the
-        // second after it counts both. CI's slower simulator is still
-        // settling when the test looks, which is how "2" appeared there and
-        // never here. A snapshot is a single instant, so "exactly one" is
-        // asked of one frame, which is the claim.
+        // The old count asked for each probe with `element(boundBy:).value`,
+        // which runs the query again on every call, so the panes were read at
+        // different instants and, if the order of matches changed between
+        // them, one pane could be read twice. CI's run 37170080245 counted
+        // two `visible=1` panes after the app had gone idle; the log does not
+        // say which of those it was, and this is unproven on CI until the
+        // shell shard runs. A snapshot is one instant, so "exactly one" is
+        // asked of one frame, and two visible panes in one frame still fail.
         func visibleCount() throws -> Int {
             try Self.visiblePaneCount(in: try app.snapshot())
         }

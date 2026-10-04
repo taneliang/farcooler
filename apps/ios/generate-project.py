@@ -386,6 +386,9 @@ AGENTKIT_SOURCES = [
     # and a first-parent merge owe the reader, and the 600-line budget (ov-149).
     # In AgentKit so `swift test` can decode a fixture of the wire's bytes.
     "ChangesFileDiff.swift",
+    # The banners beside an agent pane's composer: an unsent message's and a
+    # refused control's, kept apart (ov-179).
+    "PaneFailureBanners.swift",
     # Which changed files a tool wrote. Only in THIS list: the watch and the
     # two extensions show a count and a status, never a file list, so nothing
     # there has a reading order to put a lockfile at the end of. It is here
