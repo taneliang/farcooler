@@ -621,11 +621,13 @@ struct AgentView: View {
                             .font(.footnote)
                             .accessibilityIdentifier("agent-stopped")
                         Spacer(minLength: PaneMetrics.step)
-                        Button(AgentFailureCopy.restart, action: restart)
-                            .font(.footnote.weight(.semibold))
-                            .frame(minHeight: PaneMetrics.target)
-                            .contentShape(.rect)
-                            .accessibilityIdentifier("agent-restart")
+                        if AgentFailureCopy.offersRestart(paneTerminal?.agentFailure) {
+                            Button(AgentFailureCopy.restart, action: restart)
+                                .font(.footnote.weight(.semibold))
+                                .frame(minHeight: PaneMetrics.target)
+                                .contentShape(.rect)
+                                .accessibilityIdentifier("agent-restart")
+                        }
                     }
                     .padding(.horizontal, PaneMetrics.edge)
                     .padding(.vertical, PaneMetrics.tight)
@@ -1113,10 +1115,13 @@ struct AgentView: View {
             title: failure.title, message: failure.message)
         if let terminal = paneTerminal {
             // Restart first: it's the one that brings the chat back (ov-174).
-            Button(AgentFailureCopy.restart, action: restart)
-                .buttonStyle(.borderedProminent)
-                .padding(.top, 18)
-                .accessibilityIdentifier("agent-restart")
+            // Not with no adapter, which a restart can't fix.
+            if AgentFailureCopy.offersRestart(terminal.agentFailure) {
+                Button(AgentFailureCopy.restart, action: restart)
+                    .buttonStyle(.borderedProminent)
+                    .padding(.top, 18)
+                    .accessibilityIdentifier("agent-restart")
+            }
             Button(failure.action) {
                 Task { switchFailure = await connection.setPaneMode(terminal, to: "terminal") }
             }
@@ -3543,10 +3548,13 @@ struct AgentLayoutHarness: View {
     private static var agentPane: Terminal {
         Terminal(
             id: "harness", short: "harness", title: "claude", preset: "claude", state: "running",
-            activity: emptyState == nil && !isEnded && !isStopped ? "working" : "idle",
+            activity: emptyState == nil && !isEnded && !isStopped && !hasNoAdapter ? "working" : "idle",
             epoch: 1, paneMode: "agent", chatCapable: true,
-            agentFailure: isStopped ? "adapter-failed" : nil)
+            agentFailure: isStopped ? "adapter-failed" : (hasNoAdapter ? "no-adapter" : nil))
     }
+
+    /// The conversation on a pane whose runner has no adapter for its agent.
+    private static var hasNoAdapter: Bool { CommandLine.arguments.contains("-no-adapter") }
 
     /// The conversation whose agent died under it (ov-174).
     private static var isStopped: Bool { CommandLine.arguments.contains("-stopped") }

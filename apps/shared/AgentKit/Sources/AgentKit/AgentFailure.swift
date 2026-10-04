@@ -140,6 +140,17 @@ public struct AgentFailureCopy: Equatable, Sendable {
     /// Title case, because it is a button.
     public static let restart = "Restart"
 
+    /// Whether Restart is offered for this word.
+    ///
+    /// Not for `no-adapter`: nothing on the runner can talk to the agent, so a
+    /// restart fails the same way again. Its sentence, which names the fix, is
+    /// shown alone. Every other failure word, a word from the future included,
+    /// can be cleared by one.
+    public static func offersRestart(_ word: String?) -> Bool {
+        guard let word, !word.isEmpty else { return false }
+        return AgentFailure(rawValue: word) != .noAdapter
+    }
+
     /// One label for one action, spelled once.
     ///
     /// Byte for byte the overflow item in `ShellPaneBar.paneModeItem` and in

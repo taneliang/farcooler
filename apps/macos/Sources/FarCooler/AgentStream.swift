@@ -502,6 +502,11 @@ final class AgentStream: ObservableObject {
         terminal.chatFailure?.sentence(started: !transcript.rows.isEmpty)
     }
 
+    /// Whether that line offers Restart (not with no adapter).
+    func restartOffered(for terminal: Terminal) -> Bool {
+        terminal.chatFailure?.offersRestart == true
+    }
+
     /// One mutating call other than a send or an answer, said if it fails.
     private func perform(_ action: AgentAction) async {
         guard !refusedHere() else {

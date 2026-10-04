@@ -44,6 +44,16 @@ struct AgentStoppedTests {
         #expect(empty.stoppedLine(for: try terminal(failure: "adapter-failed")) == "The agent could not start")
     }
 
+    /// No adapter says so on its own; Restart is offered for the rest.
+    @Test func restartIsNotOfferedWithNoAdapter() async throws {
+        let stream = await stream(AgentSendFailureTests.Runner(), events: [Self.said])
+        #expect(!stream.restartOffered(for: try terminal(failure: "no-adapter")))
+        #expect(stream.stoppedLine(for: try terminal(failure: "no-adapter")) == "No chat adapter is set up for this agent")
+        #expect(stream.restartOffered(for: try terminal(failure: "adapter-failed")))
+        #expect(stream.restartOffered(for: try terminal(failure: "not-authenticated")))
+        #expect(!stream.restartOffered(for: try terminal(failure: nil)))
+    }
+
     /// Restart asks the runner for agent mode again, on this pane.
     @Test func restartAsksForAgentModeAgain() async {
         let runner = AgentSendFailureTests.Runner()

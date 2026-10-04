@@ -155,3 +155,14 @@ import Testing
     #expect(AgentFailureCopy.forWord(nil, started: true) == nil)
     #expect(AgentFailureCopy.restart == "Restart")
 }
+
+/// No adapter is not offered a Restart, which would fail the same way again;
+/// every other failure is (ov-174 review).
+@Test func restartIsNotOfferedWithNoAdapter() {
+    #expect(!AgentFailureCopy.offersRestart("no-adapter"))
+    for word in ["adapter-failed", "adapter-silent", "not-authenticated", "from-the-future"] {
+        #expect(AgentFailureCopy.offersRestart(word), "\(word)")
+    }
+    #expect(!AgentFailureCopy.offersRestart(nil))
+    #expect(!AgentFailureCopy.offersRestart(""))
+}

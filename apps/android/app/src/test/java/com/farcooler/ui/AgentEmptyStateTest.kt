@@ -390,4 +390,15 @@ class AgentEmptyStateTest {
         assertEquals("The agent couldn’t start", agentFailureState("adapter-failed")?.title)
         assertEquals("Restart", RESTART)
     }
+
+    /** No adapter isn't offered a Restart, which would fail the same way again. */
+    @Test
+    fun restartIsNotOfferedWithNoAdapter() {
+        assertFalse(offersRestart("no-adapter"))
+        for (word in listOf("adapter-failed", "adapter-silent", "not-authenticated", "from-the-future")) {
+            assertTrue(word, offersRestart(word))
+        }
+        assertFalse(offersRestart(null))
+        assertEquals("No chat adapter for this agent", agentStoppedLine("no-adapter", hasRows = true))
+    }
 }

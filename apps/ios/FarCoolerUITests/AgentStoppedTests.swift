@@ -21,4 +21,18 @@ final class AgentStoppedTests: XCTestCase {
         XCTAssertTrue(app.buttons["agent-restart"].exists, "and offered no way to start it again")
         XCTAssertFalse(app.staticTexts["The agent couldn’t start"].exists)
     }
+
+    /// No adapter says so beside the composer, without a Restart that would
+    /// fail the same way again.
+    func testNoAdapterIsSaidWithoutRestart() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-agent-layout-harness", "-plain", "-no-adapter"]
+        app.launchDrawn()
+
+        let line = app.staticTexts["agent-stopped"]
+        XCTAssertTrue(line.waitForExistence(timeout: 30), "no adapter said nothing under the conversation")
+        XCTAssertEqual(line.label, "No chat adapter for this agent")
+        XCTAssertFalse(app.buttons["agent-restart"].exists, "Restart can't fix a missing adapter")
+    }
 }

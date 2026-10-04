@@ -703,7 +703,10 @@ struct AgentComposer: View {
             // an empty one, so an agent that died mid-conversation left a turn
             // that stopped and nothing saying why. Restart starts it again in
             // place; the header's switch to the terminal is still there.
-            AgentFailureLine(sentence: line, onRetry: { Task { await stream.restart() } }, retryLabel: "Restart")
+            AgentFailureLine(
+                sentence: line,
+                onRetry: stream.restartOffered(for: terminal) ? { Task { await stream.restart() } } : nil,
+                retryLabel: "Restart")
                 .help(terminal.chatFailure?.advice ?? "Switch this pane back to the terminal to see what it printed")
         } else if stream.transcript.configOptions.isEmpty && stream.transcript.rows.isEmpty {
             HStack(spacing: 5) {

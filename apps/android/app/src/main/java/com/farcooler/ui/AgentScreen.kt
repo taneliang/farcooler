@@ -245,7 +245,7 @@ fun AgentScreen(
                         onShowTerminal = terminal?.let { pane ->
                             { scope.launch { connection.setPaneMode(pane, "terminal") } }
                         },
-                        onRestart = terminal?.let { pane ->
+                        onRestart = terminal?.takeIf { offersRestart(it.agentFailure) }?.let { pane ->
                             { scope.launch { connection.setPaneMode(pane, "agent") } }
                         },
                     )
@@ -339,7 +339,14 @@ fun AgentScreen(
                 // what was queued is sent once it's back.
                 agentStoppedLine(terminal?.agentFailure, transcript.rows.isNotEmpty())?.let { line ->
                     terminal?.let { pane ->
-                        StoppedRow(line) { scope.launch { connection.setPaneMode(pane, "agent") } }
+                        StoppedRow(
+                            line,
+                            onRestart = if (offersRestart(pane.agentFailure)) {
+                                { scope.launch { connection.setPaneMode(pane, "agent") } }
+                            } else {
+                                null
+                            },
+                        )
                     }
                 }
 
@@ -417,7 +424,7 @@ private fun SendFailureRow(message: String, onRetry: () -> Unit, onDismiss: () -
 
 /** A pane whose agent stopped under its conversation, and Restart. */
 @Composable
-private fun StoppedRow(line: String, onRestart: () -> Unit) {
+private fun StoppedRow(line: String, onRestart: (() -> Unit)?) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -439,7 +446,7 @@ private fun StoppedRow(line: String, onRestart: () -> Unit) {
             color = MaterialTheme.colorScheme.onErrorContainer,
             modifier = Modifier.weight(1f),
         )
-        TextButton(onClick = onRestart) { Text(RESTART) }
+        onRestart?.let { TextButton(onClick = it) { Text(RESTART) } }
     }
 }
 
@@ -609,6 +616,13 @@ internal fun agentFailureState(word: String?, started: Boolean = false): AgentEm
 
 /** The label on the button that starts a pane's agent again, in place. */
 internal const val RESTART = "Restart"
+
+/**
+ * Whether Restart is offered for this failure word. Not for no adapter, which
+ * a restart can't fix: its sentence names the fix and stands alone.
+ */
+internal fun offersRestart(failure: String?): Boolean =
+    !failure.isNullOrEmpty() && AgentFailure.of(failure) != AgentFailure.NO_ADAPTER
 
 /**
  * The one line a pane whose agent stopped shows under its conversation, or

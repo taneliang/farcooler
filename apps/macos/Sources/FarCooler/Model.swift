@@ -824,6 +824,10 @@ enum AgentFailure: String, CaseIterable {
         return "The agent stopped"
     }
 
+    /// Whether Restart is offered. Not with no adapter, which a restart can't
+    /// fix: the sentence names the fix, and is shown alone.
+    var offersRestart: Bool { self != .noAdapter }
+
     /// What to do about it, when there is something specific to do.
     ///
     /// Nil where the honest answer is "nobody here knows" — inventing advice
