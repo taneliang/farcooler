@@ -45,6 +45,22 @@ struct AgentFollowTests {
         ((try? String(contentsOf: log, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
     }
 
+    /// The call log once `enough` holds of it, or as it stands when `timeout`
+    /// runs out. Waiting on the log rather than a fixed sleep (ov-242): a
+    /// loaded runner can take well over a second to start three processes,
+    /// and the old 1.2 s and 1.5 s sleeps lost that race. The timeout is
+    /// generous because a passing run returns as soon as the log is long
+    /// enough; only a failing one waits it out.
+    private static func calls(_ log: URL, within timeout: Duration = .seconds(15), until enough: ([String]) -> Bool) async throws -> [String] {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            let calls = Self.calls(log)
+            if enough(calls) { return calls }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        return Self.calls(log)
+    }
+
     @Test func aChatReadsThroughOneProcess() async throws {
         let (binary, log) = try Self.standIn()
         let stream = AgentStream(terminal: "t1")
@@ -62,9 +78,8 @@ struct AgentFollowTests {
         let stream = AgentStream(terminal: "t1")
         stream.start(binary: binary, environment: [:])
         defer { stream.stop() }
-        try await Task.sleep(for: .milliseconds(1200))
 
-        let calls = Self.calls(log)
+        let calls = try await Self.calls(log) { $0.count >= 3 }
         #expect(calls.first?.contains("--follow") == true, "\(calls)")
         #expect(calls.dropFirst().count >= 2, "a CLI that refused --follow wasn't polled: \(calls)")
         #expect(calls.dropFirst().allSatisfy { !$0.contains("--follow") }, "\(calls)")
@@ -78,9 +93,8 @@ struct AgentFollowTests {
         let stream = AgentStream(terminal: "t1")
         stream.start(binary: binary, environment: [:])
         defer { stream.stop() }
-        try await Task.sleep(for: .milliseconds(1500))
 
-        let calls = Self.calls(log)
+        let calls = try await Self.calls(log) { $0.filter { !$0.contains("--follow") }.count >= 2 }
         #expect(calls.filter { $0.contains("--follow") }.count == 1, "the follow was retried: \(calls)")
         #expect(calls.filter { !$0.contains("--follow") }.count >= 2, "it wasn't polled: \(calls)")
     }
