@@ -53,6 +53,7 @@ struct FilesModelTests {
         runner.files = [
             "src/main.rs": Self.text("src/main.rs", "fn main() {\n    let token = 1;\n    print(token);\n}\n"),
             ".env": Self.text(".env", "TOKEN=plain\n"),
+            "windows.txt": Self.text("windows.txt", "first\r\nsecond line\r\n\r\nfourth\r\n"),
             "big.log": FileRead(path: "big.log", state: .tooLarge, size: 9_000_000, text: "", linkTarget: ""),
             "latest": FileRead(path: "latest", state: .link, size: 0, text: "", linkTarget: "src/main.rs"),
         ]
@@ -90,6 +91,18 @@ struct FilesModelTests {
         await model.open(".env", line: nil)
         #expect(model.lines == ["TOKEN=plain"])
         #expect(model.selection == nil, "a new file starts with nothing chosen")
+    }
+
+    /// integ-8 found a CRLF file drawn as one line: Swift reads `\r\n` as one
+    /// character, so a split on `"\n"` never split it.
+    @Test("A Windows file opens as its lines, with no return shown")
+    func aCRLFFileOpensAsItsLines() async {
+        let model = FilesModel(worktree: Self.worktree, source: runner().source)
+        await model.open("windows.txt", line: 4)
+        #expect(model.lines == ["first", "second line", "", "fourth"])
+        #expect(!model.lines.contains { $0.unicodeScalars.contains("\r") })
+        #expect(model.widest == "second line".count)
+        #expect(model.selection == 3...3)
     }
 
     @Test("A file too large, a link, and a missing one each say what they are")

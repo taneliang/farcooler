@@ -393,10 +393,9 @@ private struct TreeRowLabel: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Image(systemName: "chevron.right")
-                .font(.system(size: 8, weight: .semibold))
-                .rotationEffect(.degrees(row.expanded ? 90 : 0))
-                .opacity(row.kind == .directory ? 1 : 0)
+            // The app's one disclosure chevron (`CollapsibleSection`), drawn
+            // for a folder only; the whole row is the toggle.
+            DisclosureChevron(expanded: row.expanded, visible: row.kind == .directory)
                 .frame(width: 10)
             Image(systemName: symbol)
                 .font(.system(size: WorkspaceStyle.PaneText.secondary))

@@ -57,6 +57,10 @@ struct CodeLineRow: View {
                 Text(marker.glyph)
                     .foregroundStyle(marker.color)
                     .frame(width: 12)
+            } else {
+                // A file's line has no marker, and its text would sit against
+                // the gutter's rule: the same room a diff's marker takes.
+                Color.clear.frame(width: 8)
             }
             if clipsLongLines {
                 text

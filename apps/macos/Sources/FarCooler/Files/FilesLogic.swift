@@ -108,14 +108,31 @@ enum FilesLogic {
 
     // MARK: - Text
 
-    /// A file's lines, as the viewer numbers them: split on `\n`, a `\r`
-    /// before it dropped, and no phantom empty line after a final newline.
+    /// A file's lines, as the viewer numbers them: broken at `\n`, `\r\n`
+    /// and a bare `\r` (an old Mac file), none of them shown, and no phantom
+    /// empty line after a final break.
+    ///
+    /// By scalar, not by `Character`: Swift reads `\r\n` as ONE character,
+    /// so splitting on `"\n"` never split a Windows file at all, and it drew
+    /// as one line.
     static func lines(of text: String) -> [String] {
-        guard !text.isEmpty else { return [] }
-        var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map { line in
-            line.hasSuffix("\r") ? String(line.dropLast()) : String(line)
+        var lines: [String] = []
+        var current = String.UnicodeScalarView()
+        var afterReturn = false
+        for scalar in text.unicodeScalars {
+            if afterReturn {
+                afterReturn = false
+                if scalar == "\n" { continue }
+            }
+            if scalar == "\n" || scalar == "\r" {
+                lines.append(String(current))
+                current = String.UnicodeScalarView()
+                afterReturn = scalar == "\r"
+            } else {
+                current.append(scalar)
+            }
         }
-        if text.hasSuffix("\n") { lines.removeLast() }
+        if !current.isEmpty { lines.append(String(current)) }
         return lines
     }
 

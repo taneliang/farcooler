@@ -63,6 +63,9 @@ struct FilesLogicTests {
         #expect(FilesLogic.lines(of: "one") == ["one"])
         #expect(FilesLogic.lines(of: "one\n") == ["one"])
         #expect(FilesLogic.lines(of: "one\r\ntwo\r\n") == ["one", "two"])
+        #expect(FilesLogic.lines(of: "one\r\n\r\nthree") == ["one", "", "three"])
+        #expect(FilesLogic.lines(of: "one\rtwo\r") == ["one", "two"], "a bare return breaks a line too")
+        #expect(FilesLogic.lines(of: "mixed\r\nends\nhere\r") == ["mixed", "ends", "here"])
         #expect(FilesLogic.lines(of: "one\n\nthree\n") == ["one", "", "three"])
         #expect(FilesLogic.lines(of: "\n") == [""])
     }
