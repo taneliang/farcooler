@@ -18,9 +18,9 @@ import SwiftUI
 // here would compile, ship, and fail at runtime in front of a user.
 //
 // So the record below is drawn from `TaskDetailModel` and offers nothing at
-// all, and every write this board makes goes through `BoardAction`, whose
-// `rewritesTheRecord` is asserted over in `TaskBoardModelTests`. A new write
-// belongs in that list, not in a `Button` written by hand here.
+// all. The orchestrator owns the task list (ov-184): the only task write this
+// app makes is an answer to an agent's question, and
+// `TaskManagementRemovedTests` scans every view for any other.
 
 /// One workspace's board, as this window last read it.
 ///
@@ -166,10 +166,6 @@ final class TaskBoardStore: ObservableObject {
     /// answer: a repository with no tasks on it should say so, and one that
     /// has not been read yet must not.
     @Published private(set) var hasRead = false
-    /// Tasks an agent is being started for, by id. A start makes a worktree and
-    /// an agent over several runner calls, and a second one made meanwhile
-    /// would make `name-2` beside it for the same task.
-    @Published private(set) var starting: Set<String> = []
     @Published private(set) var reading = false
     /// What to say when a read or a move did not work.
     ///
@@ -411,26 +407,6 @@ final class TaskBoardStore: ObservableObject {
         opened = row.with(blocks: board.resolvingBlocks(read.blocks))
     }
 
-    /// Move a task to another column.
-    ///
-    /// Re-reads on the way back rather than moving the row locally. The runner
-    /// writes the move and its `status_change` note in one transaction, and a
-    /// board that moved the card itself would be showing a state it decided
-    /// rather than one the record holds.
-    func move(_ row: TaskRow, to status: TaskStatus) async {
-        if let refused = await client.moveTask(
-            key: row.key, to: status.rawValue, repository: repositoryID)
-        {
-            // The runner's own words are not drawn — see `trouble`. What is
-            // worth saying is which task did not move, because a board full of
-            // cards makes "it didn't work" useless.
-            _ = refused
-            trouble = "\(row.key) didn’t move."
-            return
-        }
-        await reload()
-    }
-
     /// The open card's question, when its record has one still waiting:
     /// what the card draws as Answer buttons. Read from the same `task show`
     /// as `detail`.
@@ -452,8 +428,7 @@ final class TaskBoardStore: ObservableObject {
     /// or `local` for this Mac.
     var hostKey: String { client.target.isEmpty ? "local" : client.target }
 
-    /// Whether this board offers its writes: New Task…, and a question's
-    /// Answer buttons. `TaskBoardWrites.offered`'s rule over this runner's
+    /// Whether this board offers its one write: a question's Answer buttons. `TaskBoardWrites.offered`'s rule over this runner's
     /// build.
     var offersWrites: Bool { TaskBoardWrites.offered(by: client.daemonBuild) }
 
@@ -462,50 +437,6 @@ final class TaskBoardStore: ObservableObject {
     /// a task leaving under the next, or one reopened until its read lands)
     /// is drawn read-only, since its question may have been answered since.
     func canAnswer(_ id: String) -> Bool { offersWrites && readID == id }
-
-    /// File a task on this board: New Task…. True when it went on.
-    ///
-    /// Re-reads on the way back, as a move does, rather than drawing a card
-    /// this window made up: the runner gives it its key.
-    func createTask(title: String) async -> Bool {
-        if let refused = await client.createTask(
-            title: title, workspace: workspace.boardWorkspace, repository: repositoryID)
-        {
-            // The runner's words stay off the board; see `trouble`.
-            _ = refused
-            return false
-        }
-        await reload()
-        return true
-    }
-
-    /// Start an agent for `row`, which has no worktree: New Task's own start
-    /// path, then the task is put on the new lane and the board read again.
-    /// Nil when it went; else a sentence for the window.
-    func startAgent(for row: TaskRow, agent: String, undelivered: (@MainActor (String) -> Void)? = nil)
-        async -> String?
-    {
-        guard !starting.contains(row.id) else { return nil }
-        starting.insert(row.id)
-        defer { starting.remove(row.id) }
-        let outcome = await client.startAgent(
-            for: row, repository: repositoryID, workspace: workspace.boardWorkspace, agent: agent,
-            undelivered: undelivered)
-        await reload()
-        if opened?.id == row.id { await refreshOpened() }
-        if case .failed(let sentence, _) = outcome { return sentence }
-        return nil
-    }
-
-    /// Put `row` on an existing worktree. Nil when it went.
-    func attach(_ row: TaskRow, toWorktree worktree: String) async -> String? {
-        if await client.linkTask(key: row.key, worktree: worktree, repository: repositoryID) != nil {
-            return "Far Cooler couldn’t attach that worktree to the task. Check that the runner is reachable, then try Open Worktree… again."
-        }
-        await reload()
-        if opened?.id == row.id { await refreshOpened() }
-        return nil
-    }
 
     /// Answer a task's question with `body`: an option's text, or what was
     /// typed. True when it was written. The card is read again, so the
@@ -652,9 +583,10 @@ struct BoardAgents {
 
 /// Which of the board's writes this connection may make.
 ///
-/// New Task… and a question's Answer buttons are Control-scope writes
-/// (`task.create`, `task.note`). A connection granted only Read sees the
-/// board without them, which is the rule Needs You follows too (spec §2.5).
+/// A question's Answer buttons are a Control-scope write (`task.note`), the
+/// only task write this app makes: the orchestrator owns the rest of the task
+/// list (ov-184). A connection granted only Read sees the board without them,
+/// which is the rule Needs You follows too (spec §2.5).
 /// Anything but `read` offers them, `unspecified` included: that is what a
 /// runner newer than this build answers for a grant it has no word for, and
 /// what the Mac's own shell key reads as (`DaemonBuild.mayAdministerRunner`).
@@ -667,20 +599,6 @@ struct BoardAgents {
 enum TaskBoardWrites {
     static func offered(by build: DaemonBuild?) -> Bool {
         build?.grantedScope != "read"
-    }
-
-    /// The most a task's title may hold, in Unicode scalars: the daemon's
-    /// limit (`checked_title`, `crates/daemon/src/task_ops.rs:163`).
-    static let titleLimit = 200
-
-    /// Whether the daemon will take `title`, measured as it measures it:
-    /// trimmed, not empty, and at most `titleLimit` scalars. Scalars rather
-    /// than characters, because a flag or a family emoji is one character and
-    /// several scalars, and counting characters let through titles the runner
-    /// then refused.
-    static func titleFits(_ title: String) -> Bool {
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !trimmed.isEmpty && trimmed.unicodeScalars.count <= titleLimit
     }
 }
 
@@ -738,6 +656,8 @@ struct TaskBoardView: View {
     let onHistory: (TaskStatus) -> Void
     /// Bumped by ⌘F: the filter field takes the keyboard.
     let filterRequest: Int
+    /// Ask the Orchestrator, on each row's menu.
+    let ask: AskOrchestrator.Action
 
     /// The list's collapsed sections: read from `defaults` in `init`, and
     /// again when the view is handed another board.
@@ -745,7 +665,6 @@ struct TaskBoardView: View {
     /// The navigator's sections closed on this Mac: Orchestrator, Tasks,
     /// Worktrees. Their rows leave ↑ and ↓'s walk while closed.
     @State private var closedSections: Set<String>
-    @State private var newTaskOpen = false
     /// The long sections showing all of their tasks, not just ten: kept
     /// here, not in each section, since ↑ and ↓ walk the rows they show.
     @State private var showingMore: Set<TaskStatus> = []
@@ -818,7 +737,7 @@ struct TaskBoardView: View {
         worktrees: @escaping (TaskBoardModel) -> BoardWorktrees = { _ in .none },
         orchestrator: NavigatorOrchestrator? = nil, current: NavigatorItem? = nil,
         onStep: ((NavigatorItem) -> Void)? = nil, onHistory: @escaping (TaskStatus) -> Void = { _ in },
-        filterRequest: Int = 0
+        filterRequest: Int = 0, ask: AskOrchestrator.Action = .unavailable
     ) {
         self.store = store
         self.client = client
@@ -836,6 +755,7 @@ struct TaskBoardView: View {
         self.onStep = onStep
         self.onHistory = onHistory
         self.filterRequest = filterRequest
+        self.ask = ask
         _collapsed = State(
             initialValue: BoardForm.collapsed(
                 host: store.hostKey, workspace: store.workspace.id, from: defaults))
@@ -890,7 +810,7 @@ struct TaskBoardView: View {
     // MARK: - The top band
 
     /// The navigator's top band (ov-214): the filter, then the board's own
-    /// state and its one write at the trailing edge. It took the place of a
+    /// state. (Its one write, New Task, went when the orchestrator took the task list, ov-184.) It took the place of a
     /// header row that named the board ("Main", which the title bar's
     /// switcher names) and counted what's waiting (which the title bar's
     /// status area counts); Refresh is ⌘R, as it was.
@@ -909,23 +829,6 @@ struct TaskBoardView: View {
                     .frame(width: SidebarGrid.control, height: SidebarGrid.control)
                     .help(trouble)
                     .accessibilityLabel(trouble)
-            }
-            if store.offersWrites {
-                Button { newTaskOpen = true } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .medium))
-                        .frame(width: SidebarGrid.control, height: SidebarGrid.control)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.borderless)
-                .help("New Task…")
-                .accessibilityLabel("New Task…")
-                .accessibilityIdentifier("board-new-task")
-                .popover(isPresented: $newTaskOpen, arrowEdge: .bottom) {
-                    NewTaskForm(
-                        onCreate: { title in await store.createTask(title: title) },
-                        onClose: { newTaskOpen = false })
-                }
             }
         }
         // On the list's grid (ov-177): the filter's box from the grid's
@@ -1165,6 +1068,7 @@ struct TaskBoardView: View {
                         filtering: filtering,
                         onHistory: onHistory,
                         onChoose: { chooseRow($0) },
+                        ask: ask,
                         rows: rowSpace)
                 }
                 if !shown.unreadable.isEmpty {
@@ -1256,64 +1160,6 @@ struct TaskBoardView: View {
     }
 }
 
-/// New Task…: a title, and the button that files it on this board.
-///
-/// Only the title, which is all `task create` needs and all a board card
-/// shows; the intent and acceptance are the orchestrator's to write, or the
-/// CLI's for anyone who wants them now.
-struct NewTaskForm: View {
-    let onCreate: (String) async -> Bool
-    let onClose: () -> Void
-
-    @State private var title = ""
-    @State private var sending = false
-    @State private var failed = false
-
-    private var trimmed: String { title.trimmingCharacters(in: .whitespacesAndNewlines) }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("New Task").font(.headline)
-            TextField("Title", text: $title)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 320)
-                .onSubmit(send)
-            if !trimmed.isEmpty && !TaskBoardWrites.titleFits(trimmed) {
-                Text("That title is too long. Shorten it to add the task.")
-                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .foregroundStyle(.secondary)
-            } else if failed {
-                Text("Far Cooler couldn’t put that task on the board. Try again.")
-                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .foregroundStyle(.secondary)
-            }
-            HStack {
-                if sending { ProgressView().controlSize(.small) }
-                Spacer()
-                Button("Cancel", action: onClose).keyboardShortcut(.cancelAction)
-                Button("Add Task", action: send)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!canSend)
-            }
-        }
-        .padding(14)  // grid-exempt: the New Task popover's margin
-    }
-
-    private var canSend: Bool { !sending && TaskBoardWrites.titleFits(trimmed) }
-
-    private func send() {
-        guard canSend else { return }
-        sending = true
-        failed = false
-        let text = trimmed
-        Task {
-            let filed = await onCreate(text)
-            sending = false
-            if filed { onClose() } else { failed = true }
-        }
-    }
-}
-
 /// One task in the navigator (ov-104): a compact row, its key and title,
 /// and under the title one quiet line saying what the status header doesn't
 /// (`TaskRowMeta`): what it waits on, who's on it, how much of it holds.
@@ -1340,6 +1186,8 @@ struct TaskListRow: View {
     var worktreeMenu: [WorktreeMenu.Item] = []
     var performOnWorktree: (WorktreeMenu.Item) -> Void = { _ in }
     var onChoose: (() -> Void)?
+    /// Ask the Orchestrator about it, in the context menu.
+    var ask: AskOrchestrator.Action = .unavailable
 
     var body: some View {
         CompactTaskRow(key: row.key, title: row.title, emphasized: prominent, selected: selected, keyed: keyed) {
@@ -1352,7 +1200,7 @@ struct TaskListRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
         .contextMenu {
-            TaskRowMenu(row: row, live: live, orchestrator: orchestrator, store: store, onGoTo: onGoTo)
+            TaskRowMenu(row: row, live: live, orchestrator: orchestrator, onGoTo: onGoTo, ask: ask)
             if let worktree, !worktreeMenu.isEmpty {
                 Divider()
                 Menu("Worktree \(worktree.task)") {
@@ -1364,33 +1212,22 @@ struct TaskListRow: View {
     }
 }
 
-/// A card's context menu: the way to its agent, and the moves the model
-/// offers.
+/// A card's context menu: the way to its agent, and Ask the Orchestrator.
 private struct TaskRowMenu: View {
     let row: TaskRow
     let live: [BoardPane]
     var orchestrator: BoardPane?
-    @ObservedObject var store: TaskBoardStore
     let onGoTo: (BoardPane) -> Void
+    let ask: AskOrchestrator.Action
 
     var body: some View {
-        // Going somewhere writes nothing, so it is not a `BoardAction`:
-        // that list is for writes, and `rewritesTheRecord` walks it.
         GoToAgentItems(live: live, onGoTo: onGoTo)
         // Where its subagents live, when no pane of its own is on it.
         if live.isEmpty, let orchestrator {
             Button("Go to Orchestrator") { onGoTo(orchestrator) }
         }
         if !live.isEmpty || orchestrator != nil { Divider() }
-        // Built from the model's list rather than written out here, which
-        // is what makes `nothingTheBoardOffersRewritesTheRecord` a guard
-        // over what actually ships. A new write goes in `TaskBoardModel`,
-        // beside the rule that checks it.
-        Section("Move To") {
-            ForEach(TaskBoardModel.moves(for: row)) { move in
-                Button(move.action.title) { Task { await store.move(row, to: move.status) } }
-            }
-        }
+        AskOrchestratorButton(row: row, action: ask)
     }
 }
 

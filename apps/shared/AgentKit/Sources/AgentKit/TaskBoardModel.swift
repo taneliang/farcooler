@@ -28,10 +28,9 @@ import Foundation
 // `supersedes`; both stay readable forever.
 //
 // The store enforces it — `task_notes` has a `BEFORE UPDATE` trigger that
-// refuses unconditionally — which means a board offering an "Edit" on a note
-// would compile, ship, and fail at runtime in front of a user. `BoardAction`
-// at the bottom of this file is the guard, and `TaskBoardModelTests` is what
-// makes it a guard rather than a comment.
+// refuses unconditionally — and no app offers a write that could reach it: the
+// orchestrator owns the task list (ov-184), and the one task write an app
+// makes is an answer, which appends a note.
 
 /// Where a task sits, in the vocabulary the wire uses.
 ///
@@ -701,7 +700,7 @@ public struct WireAcceptance: Decodable, Sendable {
 //
 // Read-only here, and that is not a stage this will grow out of. A note is
 // what was understood at a moment; the board renders it and never offers to
-// change it. See `BoardAction.rewritesTheRecord`.
+// change it.
 // ---------------------------------------------------------------------------
 
 /// What one entry in the record is.
@@ -896,129 +895,5 @@ public struct WireTaskDetail: Decodable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         notes = try c.decodeIfPresent([WireTaskNote].self, forKey: .notes) ?? []
         blocks = try c.decodeIfPresent([RawTaskBlock].self, forKey: .blocks) ?? []
-    }
-}
-
-// ---------------------------------------------------------------------------
-// What the board is allowed to do
-//
-// The board is the one surface where a person could quietly undo the design's
-// load-bearing idea: current understanding is mutable and lives on the task
-// row, while the record of how you got there is append-only and lives in
-// typed notes that can be superseded but never edited.
-//
-// So every write the board offers is a value here, carrying the daemon method
-// it would call, and the view builds its menus out of these rather than out of
-// buttons written by hand. That is what makes `rewritesTheRecord` a guard
-// instead of a comment: a future "Edit Note…" would have to arrive as a
-// `BoardAction`, and the suite iterates every one of them.
-// ---------------------------------------------------------------------------
-
-/// One thing the board offers to do.
-public struct BoardAction: Equatable, Sendable, Hashable, Identifiable {
-    /// Title case, because these are buttons and menu items.
-    public var title: String
-    /// The daemon method this would call, or nil for an action that writes
-    /// nothing at all.
-    public var method: String?
-
-    public var id: String { title }
-
-    public init(title: String, method: String?) {
-        self.title = title
-        self.method = method
-    }
-
-    /// Whether a method would change or remove something already written to
-    /// the record.
-    ///
-    /// `task.note` — the append — is the ONLY note method the protocol has,
-    /// and a correction is that same append carrying `supersedes`. So any
-    /// other method naming a note is by construction one that edits or deletes
-    /// one, and there must never be an affordance for it: `task_notes` has a
-    /// `BEFORE UPDATE` trigger that refuses unconditionally, so such a button
-    /// would compile, ship, and fail at runtime in front of a user.
-    ///
-    /// Deliberately a rule over the method WORD rather than a list of the
-    /// actions that exist today. A guard written as "none of the four actions
-    /// we currently have is an edit" stays green until somebody adds a fifth,
-    /// which is precisely when it needed to speak.
-    public static func rewritesTheRecord(_ method: String) -> Bool {
-        method.contains("note") && method != "task.note"
-    }
-
-    /// Whether this action would rewrite the record. Nil methods write
-    /// nothing, so they cannot.
-    public var rewritesTheRecord: Bool {
-        guard let method else { return false }
-        return BoardAction.rewritesTheRecord(method)
-    }
-}
-
-/// One menu item that moves a task, and the status it moves it to.
-///
-/// The status is carried rather than looked back up from the title. A view
-/// that matched a menu item to a status by its label would be one rename away
-/// from moving a task to the wrong column, and the label is copy — the thing
-/// most likely to be rewritten.
-public struct BoardMove: Equatable, Sendable, Identifiable {
-    public var status: TaskStatus
-    public var action: BoardAction
-
-    public var id: String { status.rawValue }
-
-    public init(status: TaskStatus, action: BoardAction) {
-        self.status = status
-        self.action = action
-    }
-}
-
-extension TaskBoardModel {
-    /// Where this task may be moved to, as menu items.
-    ///
-    /// The status it is already in is left out — a menu item that does nothing
-    /// is a menu item somebody clicks twice to check. In board order, so the
-    /// menu reads the way the columns do.
-    public static func moves(for row: TaskRow) -> [BoardMove] {
-        order
-            .filter { $0 != row.status }
-            .map {
-                BoardMove(
-                    status: $0, action: BoardAction(title: $0.title, method: "task.set_status"))
-            }
-    }
-
-    /// What the board would offer to do with a note that is already written.
-    ///
-    /// **No view draws this today, and that is stated rather than implied.**
-    /// The record on `TaskCard` is text with `.textSelection` and nothing
-    /// else: no menu, no gesture, no field. So the shipped board is stricter
-    /// than this list, and a reader must not take the list for a description
-    /// of what is on screen.
-    ///
-    /// It is here for two reasons. It is the declared place a note affordance
-    /// goes when one is wanted, so that it arrives as a `BoardAction` the
-    /// suite walks rather than as a `Button` written by hand in a view where
-    /// nothing checks it. And it keeps `allActions` covering the note axis at
-    /// all, so the rule below is exercised over a note action and not only
-    /// over status moves.
-    ///
-    /// One item, and the short list is the design rather than an unfinished
-    /// menu. A note is a fact about what was understood at a moment; the only
-    /// thing a reader legitimately wants from one is to take its text
-    /// somewhere else. Revising the understanding is a new note — which the
-    /// CLI writes with `farcooler task note --supersedes`, and which this
-    /// board does not compose.
-    public static func noteActions() -> [BoardAction] {
-        [BoardAction(title: "Copy", method: nil)]
-    }
-
-    /// Every write this board can make, for the suite to walk.
-    ///
-    /// A row is needed because `moves(for:)` depends on where the task
-    /// currently sits — so the caller supplies one per status to cover them
-    /// all.
-    public static func allActions(for rows: [TaskRow]) -> [BoardAction] {
-        rows.flatMap { moves(for: $0).map(\.action) } + noteActions()
     }
 }

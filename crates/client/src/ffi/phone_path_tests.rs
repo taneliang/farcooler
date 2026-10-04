@@ -317,12 +317,10 @@ fn agentkit_the_phones_compile(generator: &str, sources: &std::path::Path) -> Ve
 }
 
 /// Wire methods the phones compile in and never send, each where it is
-/// named, until the Mac's half of ov-184 takes it out.
-///
-/// `TaskBoardModel.swift` is phone-compiled for its rows and sections; its
-/// move menu (`TaskBoardModel.moves`) is the Mac board's, and no phone screen
-/// calls it. Each entry must still be found, so it goes when its use does.
-const NAMED_BUT_NOT_SENT: [(&str, Method); 1] = [("TaskBoardModel.swift", Method::TaskSetStatus)];
+/// named. None now: the Mac's half of ov-184 took out the last, the move menu
+/// in `TaskBoardModel.swift`. An entry added here must still be found, so it
+/// goes when its use does.
+const NAMED_BUT_NOT_SENT: [(&str, Method); 0] = [];
 
 /// Each wire method a string literal in `files` names, with the first file
 /// that names it, leaving out `NAMED_BUT_NOT_SENT`.

@@ -34,7 +34,7 @@ final class ComposerHandoff: ObservableObject {
     /// identifier `AgentStream` and `ReviewAgentTarget` use on this platform.
     @Published private(set) var waiting: [String: String] = [:]
 
-    private init() {}
+    init() {}
 
     /// Leave text for a pane. Two batches offered before either is taken are
     /// joined rather than replaced, on the same rule the composer itself

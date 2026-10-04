@@ -147,7 +147,7 @@ struct TaskWorktreeCrumbTests {
 
     /// **A task whose agent exited says so** (ov-185 review, point 5): the
     /// crumb offers the worktree it ran in, so the Overview mustn't say
-    /// nothing has started. Start Agent… is still offered. Not for an
+    /// nothing has started. Not for an
     /// orchestrator carrying the task's id, nor a task never started.
     @Test("A task whose only agent exited says its agent stopped, not that nothing started")
     func anExitedAgentSaysItStopped() {
@@ -160,7 +160,6 @@ struct TaskWorktreeCrumbTests {
         let stopped = TaskColumnModel.agent(hasAgent: false, worktree: nil, stopped: true)
         #expect(stopped == .stopped)
         #expect(TaskColumnModel.sentence(stopped) == "This task’s agent has stopped.")
-        #expect(TaskColumnModel.offersStart(status: .inProgress, worktree: false, agent: stopped, offersWrites: true))
         // A worktree of its own still wins: Open Worktree, as before.
         #expect(TaskColumnModel.agent(hasAgent: false, worktree: "w", stopped: true) == .none(openWorktree: true))
         #expect(TaskColumnModel.agent(hasAgent: true, worktree: nil, stopped: true) == .live)

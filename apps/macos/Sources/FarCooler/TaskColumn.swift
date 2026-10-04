@@ -2,10 +2,11 @@ import AgentKit
 import SwiftUI
 
 // A task, opened beside the navigator (spec §4.4, ov-98): a compact header
-// that stays put (key, title, the agent's state, the status pop-up), and
+// that stays put (key, title, the agent's state, its status), and
 // under it three full-height tabs, Overview (the task itself, whole), Agent
 // (its terminal) and Changes (its diff). A task need not have a worktree or
-// a terminal at all; then Agent and Changes offer to start one.
+// a terminal at all; then Agent and Changes say so and offer Ask the
+// Orchestrator.
 //
 // The rules it draws by are values here, `TaskColumnModel` and
 // `TaskTabMemory`, so `TaskColumnTests` and `TaskTabsTests` pin them.
@@ -58,34 +59,9 @@ enum TaskColumnModel {
         row.worktreeID.flatMap { $0.isEmpty ? nil : $0 } ?? agent?.worktree.id
     }
 
-    /// Whether the Agent and Changes tabs offer Start Agent… and Open
-    /// Worktree…: nothing has started or its agent stopped, there's no
-    /// worktree to open instead, the task isn't finished, and the runner
-    /// takes writes.
-    static func offersStart(
-        status: TaskStatus, worktree: Bool, agent: Agent, offersWrites: Bool
-    ) -> Bool {
-        offersWrites && !status.isFinished && !worktree
-            && (agent == .none(openWorktree: false) || agent == .stopped)
-    }
-
-    /// The worktrees a task with none can be put on: this repository's own
-    /// linked worktrees on `host` that no other task is using, and that are
-    /// not hidden or gone from disk. Never the main checkout, which is where
-    /// the person works rather than a lane.
-    static func attachable(
-        _ worktrees: [Worktree], host: String, repository: String, taken: [TaskRow]
-    ) -> [Worktree] {
-        let used = Set(taken.compactMap(\.worktreeID))
-        return worktrees.filter {
-            ($0.host ?? "") == host && $0.repositoryID == repository && !$0.isMainCheckout
-                && !$0.isHidden && !$0.worktreeMissing && !used.contains($0.id)
-        }
-    }
-
     /// What the Agent tab draws.
     enum AgentView: Equatable {
-        /// No agent: Start Agent… and Open Worktree…, or why not.
+        /// No agent: why not, and Ask the Orchestrator.
         case start
         /// A task passed on the way, glancing: nothing mounted until it
         /// settles.
@@ -254,10 +230,10 @@ extension TaskColumnCard where Card == TaskCard {
 }
 
 /// A task's header, which never scrolls away: key and title, the agent's
-/// state, and the status pop-up.
+/// state, its status, and Ask the Orchestrator.
 struct TaskViewHeader: View {
     let row: TaskRow
-    @ObservedObject var store: TaskBoardStore
+    var ask: AskOrchestrator.Action = .unavailable
     /// The agent working it, if any (`TaskColumnModel.agentLine`).
     var agent: BoardPane?
 
@@ -291,17 +267,14 @@ struct TaskViewHeader: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("task-agent-state")
             }
-            // The card's Move To, in the header: the status is the task's.
-            Menu(row.status.title) {
-                ForEach(TaskStatus.allCases, id: \.self) { status in
-                    Button(status.title) { Task { await store.move(row, to: status) } }
-                        .disabled(status == row.status)
-                }
-            }
-            .controlSize(.small)
-            .fixedSize()
-            .help("Move this task")
-            .disabled(!store.offersWrites)
+            // The status is the orchestrator's to change: read here, not set.
+            Text(row.status.title)
+                .font(TaskTypography.meta)
+                .foregroundStyle(.secondary)
+                .fixedSize()
+                .accessibilityIdentifier("task-status")
+            AskOrchestratorButton(row: row, action: ask, small: true)
+                .fixedSize()
         }
         // The overview's own margin, so the key sits over its text.
         .padding(.horizontal, TaskTypography.inset.leading)
@@ -374,18 +347,15 @@ struct TaskTabBar: View {
 }
 
 /// What the Agent and Changes tabs show with nothing to draw: why, in a
-/// sentence, and for a task with no worktree the two ways to begin, Start
-/// Agent… on a worktree made for it, or Open Worktree… onto one that exists.
-/// Compact, near the top: never a placeholder the height of the view.
+/// sentence. Compact, near the top: never a placeholder the height of the
+/// view. Starting an agent is the orchestrator's, so there's nothing to press
+/// but Ask the Orchestrator.
 struct TaskStartPanel: View {
     let sentence: String
-    /// Whether to offer the two actions (`TaskColumnModel.offersStart`).
-    var offersStart = false
-    /// An agent is being started: both menus show it and do nothing.
-    var starting = false
-    var onStartAgent: (String) -> Void = { _ in }
-    var attachable: [Worktree] = []
-    var onAttach: (Worktree) -> Void = { _ in }
+    /// The task the sentence is about, for Ask the Orchestrator; nil beside a
+    /// sentence that isn't about starting (an old runner's).
+    var row: TaskRow?
+    var ask: AskOrchestrator.Action = .unavailable
 
     var body: some View {
         VStack(spacing: 2 * ColumnGrid.rhythm) {
@@ -393,31 +363,9 @@ struct TaskStartPanel: View {
                 .font(TaskTypography.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            if offersStart {
-                HStack(spacing: ColumnGrid.rhythm) {
-                    Menu(starting ? "Starting…" : "Start Agent…") {
-                        ForEach(Agents.all) { agent in
-                            Button(agent.name) { onStartAgent(agent.id) }
-                        }
-                    }
+            if let row {
+                AskOrchestratorButton(row: row, action: ask, small: true)
                     .fixedSize()
-                    .disabled(starting)
-                    .help("Make a worktree for this task and start an agent in it")
-                    .accessibilityIdentifier("task-start-agent")
-                    Menu("Open Worktree…") {
-                        if attachable.isEmpty {
-                            Text("No Free Worktrees")
-                        }
-                        ForEach(attachable) { worktree in
-                            Button(worktree.task) { onAttach(worktree) }
-                        }
-                    }
-                    .fixedSize()
-                    .disabled(starting)
-                    .help("Put this task on a worktree that already exists")
-                    .accessibilityIdentifier("task-attach-worktree")
-                }
-                .controlSize(.small)
             }
         }
         .padding(3 * ColumnGrid.rhythm)

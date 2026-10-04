@@ -237,10 +237,10 @@ enum PhoneSources {
     /// The task writes the orchestrator owns, which no phone names.
     static let writes = ["task.create", "task.update", "task.set_status", "task.move", "task.block"]
 
-    /// Named in phone-compiled code and never sent, until the Mac's half of
-    /// ov-184 removes it: `TaskBoardModel.moves` is the Mac board's menu. The
-    /// same entry as `NAMED_BUT_NOT_SENT` in `crates/client`.
-    static let namedButNotSent: Set<String> = ["task.set_status in TaskBoardModel.swift"]
+    /// Named in phone-compiled code and never sent. None now: the Mac's half
+    /// of ov-184 removed the last, `TaskBoardModel.moves`. The same list as
+    /// `NAMED_BUT_NOT_SENT` in `crates/client`.
+    static let namedButNotSent: Set<String> = []
 
     /// Each task write a source in `texts` names, as "method in file", but
     /// for `exempt`.

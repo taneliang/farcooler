@@ -1875,7 +1875,12 @@ struct ContentView: View {
         host: String, workspace: WorkspaceSummary?, shown: ShownLayout?, onScreen: Bool = true
     ) -> some View {
         if let workspace {
-            let seat = WorkspaceScreen.orchestrator(of: workspace, host: host, in: store.fleet)
+            // As the runner lists it now: the board's own copy is kept across an
+        // orchestrator starting or stopping.
+        let live = WorkspaceScreen.workspace(
+            workspace.id, host: host, in: store.fleet,
+            repositories: store.clients[host]?.repositories.map(\.id) ?? []) ?? workspace
+        let seat = WorkspaceScreen.orchestrator(of: live, host: host, in: store.fleet)
             let key = "\(host)|\(workspace.id)"
             let canAct = store.refusal(for: host) == nil
             // No header row (ov-214): the orchestrator's state, its harness
@@ -2172,6 +2177,19 @@ struct ContentView: View {
         }
     }
 
+    /// Ask the Orchestrator for `workspace`'s tasks: on while it has an
+    /// orchestrator running, which it reads from the fleet as it is now. It
+    /// leaves the draft in that composer and goes there; it starts nothing.
+    private func askOrchestrator(host: String, workspace: WorkspaceSummary) -> AskOrchestrator.Action {
+        let seat = WorkspaceScreen.orchestrator(of: workspace, host: host, in: store.fleet)
+        return AskOrchestrator.Action(
+            available: seat != nil,
+            perform: { row in
+                guard AskOrchestrator.ask(about: row, of: seat) else { return }
+                selection = .workspace(host: host, workspace: workspace.id, focus: nil)
+            })
+    }
+
     private func taskView(
         row: TaskRow, board: TaskBoardStore, client: DaemonClient, host: String, shown: ShownLayout?,
         keyboard: Bool = true, settled: Bool = true
@@ -2193,33 +2211,11 @@ struct ContentView: View {
             trailWorktree = lane.id
             selection = opened.next
         }
+        let ask = askOrchestrator(host: host, workspace: board.workspace)
         let start = TaskStartPanel(
-            sentence: TaskColumnModel.sentence(agent) ?? "",
-            offersStart: TaskColumnModel.offersStart(
-                status: row.status, worktree: lane != nil, agent: agent, offersWrites: board.offersWrites),
-            starting: board.starting.contains(row.id),
-            onStartAgent: { preset in
-                taskTabs.choose(.agent, for: row.id)
-                Task {
-                    if let sentence = await board.startAgent(
-                        for: row, agent: preset,
-                        undelivered: { errorBanner = $0 })
-                    {
-                        errorBanner = sentence
-                    }
-                }
-            },
-            attachable: TaskColumnModel.attachable(
-                store.fleet.worktrees, host: host, repository: board.repositoryID, taken: board.board.rows),
-            onAttach: { target in
-                Task {
-                    if let sentence = await board.attach(row, toWorktree: target.id) {
-                        errorBanner = sentence
-                    }
-                }
-            })
+            sentence: TaskColumnModel.sentence(agent) ?? "", row: row, ask: ask)
         return VStack(spacing: 0) {
-            TaskViewHeader(row: row, store: board, agent: chosen)
+            TaskViewHeader(row: row, ask: ask, agent: chosen)
             TaskTabBar(
                 tab: tab, onChoose: { choose($0, for: row.id) },
                 worktree: lane.map { WorkspaceScreen.ownTerminals(of: $0, fleet: store.fleet) },
@@ -2403,7 +2399,8 @@ struct ContentView: View {
                 current: Navigator.current(selection, trail: trail, board: id),
                 onStep: { item in step(to: item, host: host, workspace: workspace) },
                 onHistory: { status in openHistory(status, host: host, workspace: workspace.id) },
-                filterRequest: boardFilterRequest
+                filterRequest: boardFilterRequest,
+                ask: askOrchestrator(host: host, workspace: workspace)
             )
         } else {
             // Said, rather than the generic "Select a worktree": this

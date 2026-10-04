@@ -160,9 +160,11 @@ of it holds. Done and Canceled start collapsed. They show what finished since
 you last opened it and what finished today, and at least the latest three.
 When some are left out, **All Done** opens the History page, which you can
 search and filter by area.
-A long section shows ten tasks, then **Show N More**. The
-**+** button beside the filter (**New Task…**) files a task by hand. It's
-there when the runner lets this Mac write to the board. ⌘R re-reads it.
+A long section shows ten tasks, then **Show N More**. ⌘R re-reads the board.
+The orchestrator owns the task list: it files tasks, moves them and closes them,
+so the app has no New Task… and no way to change a task's status. To change
+one, ask the orchestrator (below). Answering an agent's question still works
+from the task.
 
 ## Following a task to its changes
 
@@ -187,8 +189,12 @@ otherwise; once you pick a tab for a task, it opens on that one. ⌃⌘] and ⌃
 terminal stays put behind the other tabs, so coming back to it never redraws or
 re-wraps it, and only the tab in front counts as being watched. The bar over
 the tabs names the task's worktree and how many terminals it has, with a picker
-when several agents are on the task. A task with nothing started shows Start
-Agent… and Open Worktree… on its Agent and Changes tabs.
+when several agents are on the task. A task with nothing started says so on its Agent and Changes tabs.
+**Ask the Orchestrator**, in the task's header, on its row's menu and on those
+tabs, puts a line naming the task in the orchestrator's message box and takes
+you there, so you can say what you want done. It's dimmed, with "Start an
+orchestrator to ask about this task," when the workspace has none running
+(Main never does). It never starts one.
 
 - **Open Worktree** shows the worktree itself, full size, with all its terminals
   and layouts. The breadcrumb leads back to the task.

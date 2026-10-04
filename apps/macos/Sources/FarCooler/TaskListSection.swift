@@ -33,6 +33,7 @@ struct TaskListSection: View {
     /// The History row: its status's page in the main area.
     let onHistory: (TaskStatus) -> Void
     let onChoose: (TaskRow) -> Void
+    let ask: AskOrchestrator.Action
     /// Where a row moving between statuses is matched, so it moves rather
     /// than leaving one section and appearing in another.
     let rows: Namespace.ID
@@ -74,7 +75,7 @@ struct TaskListSection: View {
                         performOnWorktree: { item in
                             if let worktree = worktrees.byTask[row.id] { worktrees.perform(item, worktree) }
                         },
-                        onChoose: { onChoose(row) })
+                        onChoose: { onChoose(row) }, ask: ask)
                     .matchedGeometryEffect(id: row.id, in: rows, isSource: true)
                     .transition(BoardMotion.rowTransition(reduceMotion: reduceMotion, slowedBy: slowdown))
                     .id(row.id)
