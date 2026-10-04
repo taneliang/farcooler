@@ -583,7 +583,7 @@ pub fn note(svc: &Service, watcher: &Watcher, req: &pb::TaskNoteAppend) -> Resul
     let actor = actor_from_wire(&req.actor)?;
     let kind =
         note_kind_from_wire(req.kind).ok_or(DomainError::InvalidArgument { what: "kind" })?;
-    let extra = extra_from_wire(&req.extra_json)?;
+    let mut extra = extra_from_wire(&req.extra_json)?;
     // `rejected` belongs to a decision. On an answer it is another card's
     // options drawn under the owner's words, so it is refused, not stored.
     if kind != NoteKind::Decision && extra.get("rejected").is_some() {
@@ -591,6 +591,14 @@ pub fn note(svc: &Service, watcher: &Watcher, req: &pb::TaskNoteAppend) -> Resul
     }
     if req.body.trim().is_empty() {
         return Err(DomainError::InvalidArgument { what: "body" });
+    }
+    // An answer's `rejected` is derived here, from the question it answers,
+    // never taken from the caller (refused above).
+    if kind == NoteKind::Answer
+        && let Some(rejected) = rejected_by_answer(svc, id, &req.body)?
+        && let Some(map) = extra.as_object_mut()
+    {
+        map.insert("rejected".into(), serde_json::json!(rejected));
     }
 
     // A person's answer is queued to wake its agent in the same write
@@ -616,6 +624,31 @@ pub fn note(svc: &Service, watcher: &Watcher, req: &pb::TaskNoteAppend) -> Resul
         watcher.task_event(&task, TaskEvent::Asked, actor);
     }
     Ok(pb_note(&written))
+}
+
+/// The options of the task's latest question that `answer` did not pick.
+///
+/// `None` when there is no question with options, or when the answer is not
+/// one of them: a free-text answer picked nothing from the list, so naming
+/// the list's members as rejected would be a guess. Matched on trimmed,
+/// case-insensitive text, which is what `farcooler task answer <option>` and
+/// the apps' option buttons send.
+fn rejected_by_answer(svc: &Service, task: Uuid, answer: &str) -> Result<Option<Vec<String>>> {
+    let questions = svc.store.notes_for(task, Some(NoteKind::Question))?;
+    let Some(options) = questions
+        .last()
+        .and_then(|q| q.extra.get("options"))
+        .and_then(|o| o.as_array())
+        .map(|o| o.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect::<Vec<_>>())
+    else {
+        return Ok(None);
+    };
+    let same = |a: &str, b: &str| a.trim().eq_ignore_ascii_case(b.trim());
+    if !options.iter().any(|o| same(o, answer)) {
+        return Ok(None);
+    }
+    let rest: Vec<String> = options.into_iter().filter(|o| !same(o, answer)).collect();
+    Ok((!rest.is_empty()).then_some(rest))
 }
 
 /// `task.block`: record that a task is waiting on another, or clear that.
@@ -930,5 +963,42 @@ mod tests {
             Err(DomainError::InvalidArgument { what: "extra_json" })
         ));
         assert!(write(pb::TaskNoteKind::Decision).is_ok());
+    }
+
+    /// An answer records the OTHER options of the question it answers as its
+    /// `rejected`, and only those: a question's options, nobody else's, and
+    /// nothing at all for words that picked none of them.
+    #[tokio::test]
+    async fn an_answer_records_only_its_own_questions_other_options() {
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
+        let watcher = Watcher::new(svc.clone());
+        let actor = farcooler_store::models::Actor::User;
+        let task = svc.store.create_task(workspace, "Pick", actor).unwrap();
+        // Another card's decision, the source of the stray text on ov-122.
+        let other = svc.store.create_task(workspace, "Other", actor).unwrap();
+        svc.store
+            .add_note(other.id, NoteKind::Decision, actor, "Elsewhere", serde_json::json!({"rejected": ["Build read sync now"]}))
+            .unwrap();
+        svc.store
+            .add_note(task.id, NoteKind::Question, actor, "Which?", serde_json::json!({"options": ["Deploy now", "Wait", "Drop it"]}))
+            .unwrap();
+        let answer = |body: &str| {
+            let written = note(
+                &svc,
+                &watcher,
+                &pb::TaskNoteAppend {
+                    task_id: crate::wire::id_bytes(task.id),
+                    kind: pb::TaskNoteKind::Answer as i32,
+                    actor: "user".into(),
+                    body: body.into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            serde_json::from_str::<serde_json::Value>(&written.extra_json).unwrap_or_default()
+        };
+        assert_eq!(answer(" deploy now ")["rejected"], serde_json::json!(["Wait", "Drop it"]));
+        assert!(answer("Deploy relay-local now; stable later").get("rejected").is_none());
     }
 }
