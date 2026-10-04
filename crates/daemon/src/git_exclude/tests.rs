@@ -11,10 +11,10 @@ use std::path::{Path, PathBuf};
 
 use super::exclude_locally;
 
-const LINE: &str = ".agents/skills/farcooler-manager/SKILL.md";
+pub(super) const LINE: &str = ".agents/skills/farcooler-manager/SKILL.md";
 const PRECIOUS: &str = "[user]\n\tname = precious\n";
 
-fn git_in(dir: &Path, args: &[&str]) {
+pub(super) fn git_in(dir: &Path, args: &[&str]) {
     let out = std::process::Command::new("git")
         .arg("-C")
         .arg(dir)
@@ -26,7 +26,7 @@ fn git_in(dir: &Path, args: &[&str]) {
 }
 
 /// A repository with one commit, so a worktree can be added.
-fn repo(path: &Path) -> PathBuf {
+pub(super) fn repo(path: &Path) -> PathBuf {
     std::fs::create_dir_all(path).unwrap();
     git_in(path, &["init", "-q", "-b", "main"]);
     git_in(path, &["commit", "-q", "--allow-empty", "-m", "first"]);
@@ -50,7 +50,7 @@ fn victim(base: &Path) -> PathBuf {
     file
 }
 
-async fn exclude(worktree: &Path) -> bool {
+pub(super) async fn exclude(worktree: &Path) -> bool {
     exclude_locally(worktree, LINE, tokio::time::Instant::now() + std::time::Duration::from_secs(10)).await
 }
 
@@ -58,7 +58,7 @@ fn untouched(file: &Path) {
     assert_eq!(std::fs::read_to_string(file).unwrap(), PRECIOUS, "{} was written", file.display());
 }
 
-fn ours(text: &str) -> usize {
+pub(super) fn ours(text: &str) -> usize {
     text.lines().filter(|l| *l == format!("/{LINE}")).count()
 }
 

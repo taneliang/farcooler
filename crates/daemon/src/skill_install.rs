@@ -72,6 +72,10 @@ pub enum Installed {
     Unchanged,
     /// A file is there that isn't an unedited copy of ours, so it's somebody's.
     LeftAlone(&'static str),
+    /// A link, or something that isn't a directory or a regular file, is on
+    /// the way to the file or is the file, so nothing was opened or written.
+    /// Not somebody's skill: a refusal to follow.
+    Refused(&'static str),
     /// It should have been written and the write failed.
     Failed,
 }
@@ -344,7 +348,7 @@ fn install_file_between(root: &Path, relative: impl AsRef<Path>, contents: &str,
     let path = root.join(relative.as_ref());
     let opened = crate::beneath::split(relative.as_ref())
         .and_then(|(dirs, name)| Ok((crate::beneath::open_dir_beneath(root, dirs, true)?, name)));
-    let Ok((dir, name)) = opened else { return Installed::LeftAlone("unreadable") };
+    let Ok((dir, name)) = opened else { return Installed::Refused("a link or an unopenable directory is on the way") };
     let before = match read_at(&dir, name) {
         Ok(Some(existing)) => {
             if existing == contents.as_bytes() {
@@ -358,7 +362,7 @@ fn install_file_between(root: &Path, relative: impl AsRef<Path>, contents: &str,
             Some(existing)
         }
         Ok(None) => None,
-        Err(_) => return Installed::LeftAlone("unreadable"),
+        Err(_) => return Installed::Refused("the file is a link or isn't a regular file"),
     };
     let unmoved = || {
         between();
@@ -505,7 +509,7 @@ mod tests {
         let v1 = signed("# v1\n");
         let installed = install_file_beneath(worktree.path(), PROJECT_SKILL, &v1);
         if names_agents {
-            assert_ne!(installed, Installed::Wrote, "{spelling}: written through the link");
+            assert!(matches!(installed, Installed::Refused(_)), "{spelling}: {installed:?}, not a refusal");
         } else {
             assert_eq!(installed, Installed::Wrote, "{spelling}: the real .agents beside the link was not written");
             let real = std::fs::symlink_metadata(worktree.path().join(".agents")).unwrap();
@@ -514,6 +518,22 @@ mod tests {
         }
         assert!(std::fs::symlink_metadata(&link).unwrap().is_symlink(), "{spelling}: the link was replaced");
         assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0, "{spelling}: something was made outside");
+    }
+
+    /// The skill file itself swapped for a link to a file outside: refused,
+    /// and not called somebody's skill (ov-202). The outside file is untouched.
+    #[test]
+    fn a_skill_file_swapped_for_a_link_is_refused() {
+        let worktree = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let precious = outside.path().join("precious");
+        std::fs::write(&precious, "mine\n").unwrap();
+        let path = worktree.path().join(PROJECT_SKILL);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&precious, &path).unwrap();
+        let installed = install_file_beneath(worktree.path(), PROJECT_SKILL, &signed("# v1\n"));
+        assert!(matches!(installed, Installed::Refused(_)), "{installed:?}");
+        assert_eq!(std::fs::read_to_string(&precious).unwrap(), "mine\n");
     }
 
     /// A file of ours with `body` above the marker, the shape `render` gives

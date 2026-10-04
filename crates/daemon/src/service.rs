@@ -1373,8 +1373,14 @@ async fn install_project_skill(
             );
             continue;
         }
-        if let Installed::LeftAlone(why) = install_file_beneath(worktree, file.relative, &file.contents) {
-            tracing::info!(path = %path.display(), why, "leaving somebody's skill file alone");
+        match install_file_beneath(worktree, file.relative, &file.contents) {
+            Installed::LeftAlone(why) => {
+                tracing::info!(path = %path.display(), why, "leaving somebody's skill file alone");
+            }
+            Installed::Refused(why) => {
+                tracing::warn!(path = %path.display(), why, "refused to write the manager skill");
+            }
+            Installed::Wrote | Installed::Unchanged | Installed::Failed => {}
         }
     }
 }
@@ -12607,3 +12613,7 @@ mod launch_prompt_tests {
 #[cfg(test)]
 #[path = "service_lost_tests.rs"]
 mod lost_terminal_tests;
+
+#[cfg(test)]
+#[path = "service_submodule_tests.rs"]
+mod submodule_skill_tests;

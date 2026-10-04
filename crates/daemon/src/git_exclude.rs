@@ -14,7 +14,9 @@
 //!   worktree's git dir must be `<common>/worktrees/<name>`, and its `gitdir`
 //!   file must point back at this worktree's `.git`. That file is git's, in
 //!   the common dir, so a `.git` rewritten to name another repository fails
-//!   the check.
+//!   the check. A submodule or `--separate-git-dir` checkout has a `.git`
+//!   file instead, which proves nothing (it is the agent's to rewrite), so
+//!   its git dir's own `core.worktree` must name this worktree (`points_back`).
 //! - **Every directory is opened without following a link.** The common dir is
 //!   resolved once, then opened one component at a time from `/` with
 //!   `O_NOFOLLOW`, and `info` and `exclude` are opened from its descriptor. A
@@ -148,8 +150,14 @@ fn belongs_to(worktree: &Path, git_dir: &Path, common: &OwnedFd) -> std::io::Res
     if same(&git_fd, common)? {
         // A main checkout: its `.git` is the common dir, as a directory and
         // not a link to one.
-        let dot_git = rustix::fs::openat(&tree, ".git", dir_flags(), Mode::empty())?;
-        return if same(&dot_git, common)? { Ok(()) } else { Err(refused("this .git is not the repository git names")) };
+        return match rustix::fs::openat(&tree, ".git", dir_flags(), Mode::empty()) {
+            Ok(dot_git) if same(&dot_git, common)? => Ok(()),
+            Ok(_) => Err(refused("this .git is not the repository git names")),
+            // A submodule or a `--separate-git-dir` checkout: `.git` is a
+            // file, and its own git dir is its common dir.
+            Err(rustix::io::Errno::NOTDIR) => points_back(&tree, &git_fd, &git_dir),
+            Err(e) => Err(e.into()),
+        };
     }
     // A linked worktree: `<common>/worktrees/<name>`, opened from the common
     // dir, and its `gitdir` names this worktree's `.git`.
@@ -175,6 +183,69 @@ fn belongs_to(worktree: &Path, git_dir: &Path, common: &OwnedFd) -> std::io::Res
     let named_tree = named.parent().ok_or_else(|| refused("gitdir names no worktree"))?;
     let named_tree = rustix::fs::open(named_tree, OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC, Mode::empty())?;
     if same(&named_tree, &tree)? { Ok(()) } else { Err(refused("the repository records another worktree here")) }
+}
+
+/// For a worktree whose `.git` is a file: refuse unless the git dir's own
+/// config makes this worktree its own.
+///
+/// The `.git` file is the agent's to rewrite, so it proves nothing: git
+/// followed it to `git_dir`, and an agent could have named any repository's.
+/// The git dir's `config` is git's own and sits outside the worktree. A
+/// submodule's records `core.worktree`, which must name this directory. A
+/// `--separate-git-dir` checkout records nothing, so it is accepted only when
+/// its git dir is a non-bare repository that isn't some checkout's own `.git`
+/// directory: the two shapes an agent could borrow are a bare repository and
+/// a plain `.git`. The file, the config and every directory on the way are
+/// opened without following a link.
+fn points_back(tree: &OwnedFd, git_fd: &OwnedFd, git_dir: &Path) -> std::io::Result<()> {
+    let flags = OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK;
+    let dot_git = rustix::fs::openat(tree, ".git", flags, Mode::empty())?;
+    if FileType::from_raw_mode(rustix::fs::fstat(&dot_git)?.st_mode) != FileType::RegularFile {
+        return Err(refused("this .git is neither a directory nor a regular file"));
+    }
+    let config = rustix::fs::openat(git_fd, "config", flags, Mode::empty())?;
+    if FileType::from_raw_mode(rustix::fs::fstat(&config)?.st_mode) != FileType::RegularFile {
+        return Err(refused("the git dir's config is not a regular file"));
+    }
+    let mut bytes = Vec::new();
+    std::fs::File::from(config).take(MAX_READ).read_to_end(&mut bytes)?;
+    let (worktree, bare) = core_settings(&String::from_utf8_lossy(&bytes))?;
+    let Some(named) = worktree else {
+        if bare || git_dir.file_name() == Some(OsStr::new(".git")) {
+            return Err(refused("the git dir records no worktree and isn't a separate git dir"));
+        }
+        return Ok(());
+    };
+    // Relative to the git dir, as git reads it. Resolved only to compare
+    // which directory it is, never to write there.
+    let named = std::fs::canonicalize(git_dir.join(named))?;
+    let named = rustix::fs::open(&named, OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC, Mode::empty())?;
+    if same(&named, tree)? { Ok(()) } else { Err(refused("the git dir records another worktree")) }
+}
+
+/// `core.worktree` (unquoted) and `core.bare` from the text of a git config.
+/// Only a `[core]` section's own lines; git's escapes and includes are not
+/// read, so a value with a backslash or a quote is a refusal.
+fn core_settings(config: &str) -> std::io::Result<(Option<String>, bool)> {
+    let (mut in_core, mut worktree, mut bare) = (false, None, false);
+    for line in config.lines() {
+        let line = line.trim();
+        if let Some(header) = line.strip_prefix('[') {
+            in_core = header.trim_end_matches(']').trim().eq_ignore_ascii_case("core");
+        } else if in_core && let Some((key, value)) = line.split_once('=') {
+            let (key, value) = (key.trim(), value.trim());
+            let value = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')).unwrap_or(value);
+            if value.contains(['\\', '"']) {
+                return Err(refused("the git dir's config has a value this doesn't read"));
+            }
+            if key.eq_ignore_ascii_case("worktree") {
+                worktree = Some(value.to_string());
+            } else if key.eq_ignore_ascii_case("bare") {
+                bare = value.eq_ignore_ascii_case("true");
+            }
+        }
+    }
+    Ok((worktree, bare))
 }
 
 /// Open an absolute, resolved directory one component at a time from `/`,
@@ -208,3 +279,5 @@ fn refused(why: &str) -> std::io::Error {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod gitfile_tests;
