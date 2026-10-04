@@ -19,7 +19,6 @@ import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -225,7 +224,6 @@ fun PlanThemePage(
             lanes.forEach { lane ->
                 item(key = "lane/${lane.id}") {
                     PageLaneRow(lane) { onOpenPage(PlanPage.Lane(lane.id)) }
-                    HorizontalDivider()
                 }
             }
         }
@@ -270,7 +268,6 @@ private fun LazyListScope.cardRows(refs: List<PlanCardRef>, plan: Plan, rows: Ma
                 modifier = (if (row != null) Modifier.clickable { onOpenTask(row.id) } else Modifier)
                     .testTag("plan-card-${row?.key ?: ref.key}").semantics(mergeDescendants = true) {},
             )
-            HorizontalDivider()
         }
     }
 }

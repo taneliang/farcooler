@@ -27,7 +27,6 @@ import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VerticalAlignBottom
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
@@ -151,7 +150,6 @@ private fun LazyListScope.loaded(
         for (theme in themes) {
             item(key = "plan/theme/${theme.id}") {
                 PlanThemeRow(theme) { onOpen(PlanPage.Theme(theme.id)) }
-                HorizontalDivider()
             }
         }
     }
@@ -178,7 +176,6 @@ private fun LazyListScope.itemsIndexedLanes(
     lanes.forEachIndexed { index, lane ->
         item(key = "plan/$group/${lane.id}") {
             row(index, lane)
-            HorizontalDivider()
         }
     }
 }
