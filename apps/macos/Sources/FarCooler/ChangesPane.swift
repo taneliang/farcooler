@@ -1420,6 +1420,8 @@ struct ChangesPane: View {
                 out.append(note(f, FileDiff.binaryNote))
             } else if let diff = changes.fileDiffs[f.path] {
                 out.append(contentsOf: rows(of: f, diff: diff))
+            } else if changes.fileFailures.contains(f.path) {
+                out.append(DiffRow(id: "\(f.path)!failed", kind: .failed, path: f.path))
             } else {
                 out.append(note(f, changes.loadingFiles.contains(f.path) ? "Reading…" : "…"))
             }
@@ -1584,6 +1586,8 @@ struct ChangesPane: View {
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
+        case .failed:
+            DiffReadFailureRow(font: codeFont) { Task { await changes.retry(r.path) } }
         case .line(let line):
             lineRow(line, in: r.path)
         case .gap(let path, let index, let count):
@@ -1612,7 +1616,8 @@ struct ChangesPane: View {
             count: count,
             gutter: gutter,
             font: codeFont,
-            refused: refused
+            refused: refused,
+            failed: changes.gapFailures.contains("\(path)#\(index)")
         ) {
             Task { await changes.open(gap: index, of: count, in: path) }
         }
@@ -2009,6 +2014,8 @@ private struct DiffGapControl: View {
     let gutter: CGFloat
     let font: Font
     let refused: Bool
+    /// The lines could not be read; the row says so and a click tries again.
+    var failed = false
     let action: () -> Void
 
     @State private var hovering = false
@@ -2018,12 +2025,14 @@ private struct DiffGapControl: View {
             HStack(spacing: 0) {
                 Color.clear.frame(width: gutter * 2 + 12)
                 HStack(spacing: 6) {
-                    Image(systemName: refused ? "exclamationmark.triangle" : "ellipsis")
+                    Image(systemName: refused || failed ? "exclamationmark.triangle" : "ellipsis")
                         .font(.system(size: 9, weight: .medium))
                     Text(
                         refused
                             ? "\(count) unchanged lines — too many to show"
-                            : (count == 1 ? "1 unchanged line" : "\(count) unchanged lines")
+                            : failed
+                                ? "Couldn’t read these lines. Try Again"
+                                : (count == 1 ? "1 unchanged line" : "\(count) unchanged lines")
                     )
                     .font(font)
                     if !refused {
@@ -2498,6 +2507,8 @@ struct DiffRow: Identifiable {
         /// The unchanged lines a diff left out: which file, which gap, and how
         /// many lines are hiding in it.
         case gap(String, Int, Int)
+        /// The file's diff could not be read. Drawn as a failure with Try Again.
+        case failed
     }
 
     let id: String

@@ -3008,7 +3008,7 @@ final class DaemonClient: ObservableObject {
     func changesDiff(
         worktree: String, path: String, scope: DiffScope, context: Int = 0,
         commit: String? = nil
-    ) async -> FileDiff {
+    ) async -> Result<FileDiff, DiffReadFailure> {
         var args = ["changes", "diff", worktree, path]
         // `--local`, not `--unstaged`: everything uncommitted. Asking for the
         // unstaged half alone meant a file went blank the moment it was staged,
@@ -3019,10 +3019,16 @@ final class DaemonClient: ObservableObject {
         if let commit, scope == .commit { args += ["--commit", commit] }
         if context > 0 { args += ["--context", "\(context)"] }
         args.append("--json")
-        guard let data = await runRaw(args, background: true).data else { return FileDiff() }
-        if let diff = try? JSONDecoder().decode(FileDiff.self, from: data) { return diff }
-        guard let text = String(data: data, encoding: .utf8) else { return FileDiff() }
-        return FileDiff(lines: Self.parseUnified(text))
+        // A read that failed is not a diff with nothing in it: the pane draws
+        // the first as a failure with Try Again and the second as "No textual
+        // changes", and both used to be `FileDiff()`.
+        let (maybe, message) = await runRaw(args, background: true)
+        guard let data = maybe else { return .failure(DiffReadFailure(message: message)) }
+        if let diff = try? JSONDecoder().decode(FileDiff.self, from: data) { return .success(diff) }
+        guard let text = String(data: data, encoding: .utf8) else {
+            return .failure(DiffReadFailure(message: nil))
+        }
+        return .success(FileDiff(lines: Self.parseUnified(text)))
     }
 
     /// The CLI's human patch, read back into lines.

@@ -1095,9 +1095,15 @@ final class ChangesStore: ObservableObject {
         var args = ["changes", "status", worktree.short, "--json"]
         if fresh { args.append("--fresh") }
         if let data = await client.changesJSON(args) {
-            changeSet = ((try? JSONDecoder().decode(ChangeSet.self, from: data)) ?? .empty)
-                .keepingBase(from: changeSet)
-            error = nil
+            if let decoded = try? JSONDecoder().decode(ChangeSet.self, from: data) {
+                changeSet = decoded.keepingBase(from: changeSet)
+                error = nil
+            } else {
+                // A reply this app cannot read is a failure, not a worktree
+                // with nothing changed.
+                changeSet = .empty
+                error = Self.unreadableReply
+            }
         } else {
             // A failure is NOT an empty diff. Saying so was a real bug once: a
             // runner whose daemon predates this answered NOT_FOUND to every
@@ -1141,6 +1147,8 @@ final class ChangesStore: ObservableObject {
         fullContext = [:]
         openGaps = []
         tooWide = []
+        fileFailures = []
+        gapFailures = []
         widestLine = 0
         generation &+= 1
     }
@@ -1361,7 +1369,7 @@ final class ChangesStore: ObservableObject {
     }
 
     /// Where a test answers a file's diff from, in place of the daemon.
-    var diffSource: ((String) async -> FileDiff)?
+    var diffSource: ((String) async -> Result<FileDiff, DiffReadFailure>)?
 
     /// What a file with no lines says: a new empty file is not "unchanged".
     func emptyNote(_ path: String) -> String {
@@ -1373,21 +1381,27 @@ final class ChangesStore: ObservableObject {
     /// Idempotent and safe to call from `onAppear` on every section, which is
     /// exactly how it is called: the scroll decides what gets read.
     func ensure(_ path: String) async {
-        guard fileDiffs[path] == nil, !loadingFiles.contains(path) else { return }
+        guard fileDiffs[path] == nil, !loadingFiles.contains(path), !fileFailures.contains(path)
+        else { return }
         await read(path)
     }
 
-    private func read(_ path: String) async {
+    func read(_ path: String) async {
         let asked = generation
         loadingFiles.insert(path)
-        let answer = await diff(path)
-        let lines = answer.lines
+        let result = await diff(path)
         loadingFiles.remove(path)
         // What was being compared changed while this was in flight, so these
         // lines answer a question nobody is asking any more. Keyed on the path
         // alone they would file perfectly, under a heading now showing a
         // different commit — a wrong diff that looks exactly like a right one.
         guard asked == generation else { return }
+        guard case .success(let answer) = result else {
+            noteFailedRead(of: path)
+            return
+        }
+        let lines = answer.lines
+        fileFailures.remove(path)
         fileDiffs[path] = answer
         // The expanded copy described the file as it was a moment ago, and its
         // line numbers no longer line up with the hunks around them. Dropped
@@ -1397,6 +1411,7 @@ final class ChangesStore: ObservableObject {
         fullContext.removeValue(forKey: path)
         openGaps = openGaps.filter { !$0.hasPrefix("\(path)#") }
         tooWide = tooWide.filter { !$0.hasPrefix("\(path)#") }
+        gapFailures = gapFailures.filter { !$0.hasPrefix("\(path)#") }
         widestLine = max(widestLine, lines.map(\.text.count).max() ?? 0)
     }
 
@@ -1411,7 +1426,7 @@ final class ChangesStore: ObservableObject {
     /// `changesJSON`, which republishes the client's error state as a side
     /// effect of asking for a patch — so a per-file read inside a commit
     /// repainted rather more than the file it was for.
-    private func diff(_ path: String, context: Int = 0) async -> FileDiff {
+    func diff(_ path: String, context: Int = 0) async -> Result<FileDiff, DiffReadFailure> {
         if let diffSource { return await diffSource(path) }
         return await client.changesDiff(
             worktree: worktree.short, path: path, scope: scope, context: context,
@@ -1439,11 +1454,19 @@ final class ChangesStore: ObservableObject {
             // hunks left out, and the three notices belong to the file — they
             // were answered once, by `read`, and re-filing them from a
             // wide-context re-read would say them twice.
-            let lines = await diff(path, context: need).lines
+            let result = await diff(path, context: need)
             // The same in-flight check `read` makes, for the same reason: these
             // are the unchanged lines of a file as some OTHER comparison saw
             // it, and they would slot into the gap without looking wrong.
             guard asked == generation else { return }
+            // A read that failed is not a gap that is too wide: it can be
+            // tried again, and the row says so.
+            guard case .success(let diff) = result else {
+                gapFailures.insert("\(path)#\(gap)")
+                return
+            }
+            gapFailures.remove("\(path)#\(gap)")
+            let lines = diff.lines
             guard !lines.isEmpty else {
                 // The daemon refused to render a diff that wide. Recorded, so
                 // the row can say so rather than being a control that does
@@ -1464,6 +1487,11 @@ final class ChangesStore: ObservableObject {
 
     /// Gaps the daemon would not render, so their rows can say why.
     @Published var tooWide: Set<String> = []
+
+    /// Files whose diff could not be read, and gaps whose lines could not be.
+    /// See `ChangesModel+Failures.swift`.
+    @Published var fileFailures: Set<String> = []
+    @Published var gapFailures: Set<String> = []
 
     /// The unchanged lines between two line numbers of a file, once it has been
     /// read with full context. Empty until then, which is the same as the gap

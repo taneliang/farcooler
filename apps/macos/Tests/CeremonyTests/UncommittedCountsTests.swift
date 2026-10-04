@@ -62,10 +62,10 @@ struct UncommittedCountsTests {
         var asked: [String] = []
         s.diffSource = { path in
             asked.append(path)
-            return FileDiff(lines: [
+            return .success(FileDiff(lines: [
                 DiffComputation.Line(id: 0, kind: .added, oldNumber: nil, newNumber: 1, text: "alpha"),
                 DiffComputation.Line(id: 1, kind: .added, oldNumber: nil, newNumber: 2, text: "beta"),
-            ])
+            ]))
         }
         #expect(s.untrackedLabel("new.txt") == "Untracked")
         #expect(s.untrackedLabel("README.md") == nil)
