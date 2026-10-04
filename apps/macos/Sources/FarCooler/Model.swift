@@ -682,6 +682,18 @@ struct Terminal: Decodable, Identifiable, Hashable {
         status == .working ? turnDuration(at: now) : statusDuration(at: now)
     }
 
+    /// When the clock `displayDuration` reads started, so a row can wake only
+    /// when its text changes. See `Ticking`.
+    var displayDurationSince: Date? {
+        let millis: Double? =
+            switch status {
+            case .working: turnStartedAt
+            case .blocked: activitySince
+            default: nil
+            }
+        return millis.map { Date(timeIntervalSince1970: $0 / 1000) }
+    }
+
     /// The one line that says where this agent is.
     ///
     /// The question it is blocked on, its position in its own task list, or

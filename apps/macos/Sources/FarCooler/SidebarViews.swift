@@ -257,7 +257,7 @@ struct WorktreeDetail: View {
 
                 Spacer()
 
-                Ticking(paused: t.status != .working && t.status != .blocked) { now in
+                Ticking(paused: t.status != .working && t.status != .blocked, since: t.displayDurationSince) { now in
                     Text(t.displayDuration(at: now).map { "\(t.status.label) \($0)" } ?? t.status.label)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)

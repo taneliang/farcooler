@@ -115,6 +115,31 @@ struct IdleCostTests {
         #expect(Self.damaged(after: "", on: core, &damage) == nil, "a resize must draw everything")
     }
 
+    // MARK: - Duration labels
+
+    /// `Working 42s`, `12m`, `3h`: woken when the text can change, not every
+    /// second for good.
+    @Test func aDurationLabelWakesOnlyWhenItsTextCanChange() {
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        func wake(_ elapsed: TimeInterval) -> TimeInterval {
+            ElapsedSchedule.wake(after: start.addingTimeInterval(elapsed), since: start).timeIntervalSince(start)
+        }
+        #expect(wake(2) == 5)
+        #expect(wake(30.2) == 31)
+        #expect(wake(90.5) == 120)
+        #expect(wake(4000) == 7200)
+
+        var entries = ElapsedSchedule(since: start).entries(from: start.addingTimeInterval(60), mode: .normal)
+        var wakes = 0
+        while let next = entries.next(), next < start.addingTimeInterval(3600) { wakes += 1 }
+        #expect(wakes == 59, "a row woke \(wakes) times between its first minute and its first hour")
+    }
+
+    @Test func noLabelTicksEverySecond() throws {
+        let found = try Self.offenders { $0.contains(".periodic(from:") && $0.contains("by: 1)") }
+        #expect(found.isEmpty, "Use `ElapsedSchedule` (see `Ticking`):\n\(found.joined(separator: "\n"))")
+    }
+
     // MARK: - The sources
 
     /// Every view file the Mac draws with, AgentKit's included.

@@ -476,23 +476,29 @@ struct AttentionBadge: View {
 /// of characters. `WorkingRow` in `AgentRows` already draws the same
 /// distinction, for the same reason.
 ///
-/// One second, because that is as often as the string can change: a redraw at
-/// the display's refresh rate would be sixty of them to move a number sixty
-/// times less often.
+/// Woken only when the string can change (ov-229): every second for the first
+/// minute, when it reads `42s`, then once a minute, then once an hour. It used
+/// to wake every second for good, so fifty-nine wake-ups in sixty moved
+/// nothing, for every working row. See `ElapsedSchedule`. `since` is when the
+/// row's clock started; without it the row wakes on the wall clock's minutes.
+///
+/// Not at all while the window can't be seen (`windowVisible`). The text is
+/// recomputed the moment it can be.
 ///
 /// `paused` is for a row whose clock is not running at all — an idle or
 /// finished terminal has no duration to show, and scheduling a wake-up per
-/// second per resting row would be the sidebar paying for a number that is not
-/// there.
+/// resting row would be the sidebar paying for a number that is not there.
 struct Ticking<Content: View>: View {
     var paused: Bool = false
+    var since: Date?
     @ViewBuilder let content: (Date) -> Content
+    @Environment(\.windowVisible) private var windowVisible
 
     var body: some View {
-        if paused {
+        if paused || !windowVisible {
             content(.now)
         } else {
-            TimelineView(.periodic(from: .now, by: 1)) { context in content(context.date) }
+            TimelineView(ElapsedSchedule(since: since)) { context in content(context.date) }
         }
     }
 }
