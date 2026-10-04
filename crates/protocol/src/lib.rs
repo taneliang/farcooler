@@ -476,6 +476,21 @@ pub mod capability {
     /// either: a client that reads it absent says the runner needs an update
     /// to show files, rather than an empty tree.
     pub const WORKTREE_FILES: &str = "worktree_files";
+    /// Naming a terminal (ov-234): `terminal.rename`.
+    ///
+    /// Its own capability because an older runner has no such method: a
+    /// client that reads it absent hides Rename rather than offering a menu
+    /// item that can only fail.
+    pub const TERMINAL_NAMES: &str = "terminal_names";
+    /// `Terminal.ports` (ov-234): the TCP ports a terminal is listening on, as
+    /// a field rather than text inside its name.
+    ///
+    /// Apart from `TERMINAL_NAMES` so either half can ship alone. Its own
+    /// capability because an older runner drops the field, and its absent list
+    /// would read as "nothing is listening" on a runner that may well be
+    /// serving: a client that reads it absent keeps the `web :PORT` text the
+    /// name already carried and offers no Open in Browser.
+    pub const TERMINAL_PORTS: &str = "terminal_ports";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -488,7 +503,7 @@ pub mod capability {
             LAUNCH_PROMPT, TERMINAL_TASK, WORKTREE_FORK_ONLY, WORKSTREAMS, ORCHESTRATOR_HANDOFF,
             NEEDS_YOU, WAKE_ON_ANSWER, STREAM_SIZE_MARKERS, TASK_NOTICES, REPORT, AGENT_USAGE,
             AGENTS_FOUND,
-            TASK_WAITS, TASK_WORKERS, NOTICE_TASK, BOARD_READS, WORKTREE_FILES,
+            TASK_WAITS, TASK_WORKERS, NOTICE_TASK, BOARD_READS, WORKTREE_FILES, TERMINAL_NAMES, TERMINAL_PORTS,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
@@ -663,6 +678,7 @@ pub mod method {
         WorkspaceMarkRead = "workspace.mark_read" => BOARD_READS,
         WorktreeListDir = "worktree.list_dir" => WORKTREE_FILES,
         WorktreeReadFile = "worktree.read_file" => WORKTREE_FILES,
+        TerminalRename = "terminal.rename" => TERMINAL_NAMES,
     }
 }
 
@@ -1059,6 +1075,37 @@ mod tests {
             capability::ALL.contains(&capability::STREAM_SIZE_MARKERS),
             "the daemon would not advertise it"
         );
+    }
+
+    /// Terminal names and ports (ov-234) take tags nothing held before, each
+    /// behind a capability of its own that the daemon advertises.
+    #[test]
+    fn terminal_names_and_ports_take_fresh_tags() {
+        use prost::Message;
+        use prost_types::FileDescriptorSet;
+
+        let set = FileDescriptorSet::decode(
+            &include_bytes!(concat!(env!("OUT_DIR"), "/farcooler_descriptor.bin"))[..],
+        )
+        .expect("the build writes a descriptor");
+        let file = set.file.iter().find(|f| f.package() == "farcooler.v1").expect("farcooler.v1");
+        let number = |m: &str, f: &str| {
+            file.message_type
+                .iter()
+                .find(|x| x.name() == m)
+                .and_then(|x| x.field.iter().find(|x| x.name() == f))
+                .unwrap_or_else(|| panic!("{m} has no field {f}"))
+                .number()
+        };
+        assert_eq!(number("Request", "terminal_rename"), 140);
+        assert_eq!(number("Terminal", "ports"), 44);
+        // The last field each carried before, still where it was.
+        assert_eq!(number("Request", "task_worker_set"), 132);
+        assert_eq!(number("Terminal", "split_of_orchestrator"), 42);
+        assert_eq!(capability::for_method("terminal.rename"), Some(capability::TERMINAL_NAMES));
+        for word in [capability::TERMINAL_NAMES, capability::TERMINAL_PORTS] {
+            assert!(capability::ALL.contains(&word), "the daemon would not advertise {word}");
+        }
     }
 
     /// `workspaces` already means worktrees and is frozen; workspaces as

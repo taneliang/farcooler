@@ -367,6 +367,8 @@ pub fn terminal(view: &TerminalView) -> wire::Terminal {
         turn_started_at: None,
         blocked_question: None,
         current_command: String::new(),
+        // The watcher's too, off the same `lsof` as `current_command`'s label.
+        ports: Vec::new(),
         pane_mode: pane_mode(t.pane_mode),
         agent_session_id: t.agent_session_id.clone(),
         // The record's own, so this converter is the one that knows it.

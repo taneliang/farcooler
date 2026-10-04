@@ -40,9 +40,11 @@ mod images;
 mod tell;
 use images::mime_for;
 mod report;
+mod terminal_requests;
 mod task_usage;
 mod tasks;
 mod workspaces;
+use terminal_requests::terminal_create_request;
 pub(crate) use daemon_link::{Link, connect_to, expect_value, req, req_for, with};
 use farcooler_client::actions::RemoveRootOutcome;
 use farcooler_client::workspaces_json::{self, workspace_json};
@@ -795,6 +797,8 @@ enum TerminalCmd {
     Restart { terminal: String },
     /// Delete a terminal's record. Refused while it is still running.
     Remove { terminal: String },
+    /// Name a terminal, or clear its name with an empty one.
+    Rename { terminal: String, name: String },
     /// Say what a terminal is for: its workspace's orchestrator, an agent, or
     /// a person's shell.
     ///
@@ -2800,40 +2804,6 @@ fn layout_json(
 // Terminals: records through the daemon, bytes through tmux
 // ---------------------------------------------------------------------------
 
-/// `terminal.create`, with each optional field's capability named when it is
-/// sent: a daemon too old to know the field then refuses the request, rather
-/// than dropping it in silence (opening the agent on an empty composer, or a
-/// pane that knows no task). See `capability::LAUNCH_PROMPT` and
-/// `capability::TERMINAL_TASK`.
-pub(crate) fn terminal_create_request(
-    worktree: uuid::Uuid,
-    title: String,
-    preset: String,
-    tile: bool,
-    prompt: Option<String>,
-    task: Option<String>,
-) -> farcooler_protocol::v1::Request {
-    let prompt = prompt.filter(|p| !p.trim().is_empty());
-    let task = task.map(|k| k.trim().to_string()).filter(|k| !k.is_empty());
-    let mut req = with(
-        req_for("terminal.create", worktree),
-        request::Payload::TerminalCreate(farcooler_protocol::v1::TerminalCreate {
-            title,
-            command_preset: preset,
-            join_active_group: tile,
-            prompt: prompt.clone(),
-            task_key: task.clone(),
-        }),
-    );
-    if prompt.is_some() {
-        req.required_capabilities.push(farcooler_protocol::capability::LAUNCH_PROMPT.to_string());
-    }
-    if task.is_some() {
-        req.required_capabilities.push(farcooler_protocol::capability::TERMINAL_TASK.to_string());
-    }
-    req
-}
-
 async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallible {
     match cmd {
         // Record changes. These write durable intent, so they go to the daemon.
@@ -2874,6 +2844,8 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
             link.call(req_for("terminal.remove", id)).await?;
             println!("removed {}", short(id));
         }
+
+        TerminalCmd::Rename { terminal, name } => terminal_requests::rename(runner, &terminal, &name, json).await?,
 
         TerminalCmd::SetRole { terminal, role } => {
             workspaces::set_role(runner, &terminal, role, json).await?;
@@ -3621,6 +3593,7 @@ fn worktree_list_terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_js
         "short": short_bytes(&t.id),
         "title": t.title,
         "preset": label(t),
+        "ports": t.ports,
         // Which board task this pane was opened for, so a board card can go to
         // the agent working it. The daemon has recorded it since
         // `terminal_task`; this is the hop that used to drop it.
@@ -3882,6 +3855,7 @@ fn terminal_event_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Valu
         "worktree": uuid_of(&t.worktree_id).to_string(),
         "title": t.title,
         "preset": label(t),
+        "ports": t.ports,
         // Which board task this pane was opened for, so a board card can go to
         // the agent working it. The daemon has recorded it since
         // `terminal_task`; this is the hop that used to drop it.
@@ -5299,9 +5273,21 @@ mod tests {
             "role",
             "splitOf",
             "splitOfOrchestrator",
+            "ports",
         ] {
             assert!(event.contains(field), "{field} is in neither projection");
         }
+    }
+
+    /// The ports a terminal serves cross both projections, as numbers, so the
+    /// Mac shows `:5173` without reading the label.
+    #[test]
+    fn a_terminals_ports_cross_both_projections() {
+        let t = farcooler_protocol::v1::Terminal { ports: vec![5173, 9229], ..Default::default() };
+        assert_eq!(worktree_list_terminal_json(&t)["ports"], serde_json::json!([5173, 9229]));
+        assert_eq!(terminal_event_json(&t)["ports"], serde_json::json!([5173, 9229]));
+        let none = farcooler_protocol::v1::Terminal::default();
+        assert_eq!(worktree_list_terminal_json(&none)["ports"], serde_json::json!([]));
     }
 
     /// The board task a pane was opened for crosses both projections.

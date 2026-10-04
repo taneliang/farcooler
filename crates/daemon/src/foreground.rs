@@ -28,6 +28,19 @@ pub struct Running {
     pub command: String,
 }
 
+/// The ports a pane serves, as the wire carries them (`Terminal.ports`).
+///
+/// `by_group` is `Foreground::ports_by_group`'s answer and `running` the pane's
+/// foreground process: the same join the pane's `web :PORT` purpose is read
+/// through, so the structured field and the text can't disagree. A pane with
+/// nothing in the foreground, or nothing listening, serves none.
+pub fn pane_ports(running: Option<&Running>, by_group: &HashMap<i32, Vec<u16>>) -> Vec<u32> {
+    running
+        .and_then(|r| by_group.get(&r.pgid))
+        .map(|open| farcooler_core::ports::field(open))
+        .unwrap_or_default()
+}
+
 /// One `ps` walk, read for the two things a pane needs from it.
 #[derive(Debug, Default)]
 pub struct Foreground {
@@ -846,6 +859,23 @@ mod tests {
         // A server started directly still resolves, through a group of one.
         let direct = f.pane("ttys003").expect("a server is a foreground process");
         assert_eq!(by_group.get(&direct.pgid), Some(&vec![8099]));
+    }
+
+    /// **The structured field, from fixtures.** `lsof` output and a `ps` walk
+    /// go in, and a pane's `Terminal.ports` comes out: the wrapped server's
+    /// socket is held by a child (pid 60063 here, in the pane's group), a debugger
+    /// port rides along, and a pane whose process holds nothing serves nothing.
+    /// Reading the pid instead of the group makes the first assertion fail.
+    #[test]
+    fn a_panes_ports_reach_the_wire_field_through_its_group() {
+        let f = parse(PS);
+        let lsof = "p60063\nn*:18299\nn127.0.0.1:9229\np22910\nn[::1]:8099\n";
+        let by_group = f.ports_by_group(&farcooler_core::ports::parse_lsof(lsof));
+
+        assert_eq!(pane_ports(f.pane("ttys009"), &by_group), vec![9229, 18299], "lowest first");
+        assert_eq!(pane_ports(f.pane("ttys003"), &by_group), vec![8099]);
+        assert!(pane_ports(None, &by_group).is_empty(), "no foreground process, no ports");
+        assert!(pane_ports(f.pane("ttys009"), &HashMap::new()).is_empty(), "nothing listening");
     }
 
     /// A pane `task dispatch` opened reads as its agent, not as the fish that

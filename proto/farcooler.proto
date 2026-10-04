@@ -204,6 +204,9 @@ message Request {
     // from 150, for 120's reason.
     WorktreeDirRequest worktree_dir = 150;
     WorktreeFileRequest worktree_file = 151;
+    // `terminal.rename` (ov-234), behind `terminal_names`. Tags from 140, so a
+    // lane adding methods beside the 130s cannot collide.
+    TerminalRename terminal_rename = 140;
   }
 }
 
@@ -1373,6 +1376,18 @@ message Terminal {
   // the capability, never by the field. Computed when the message is built, so
   // a terminal event carries the answer as of that event.
   optional bytes notice_task_id = 43;
+
+  // The TCP ports this terminal's foreground process group is listening on,
+  // lowest first (ov-234). Read from the kernel by the runner's one `lsof` per
+  // tick, never from what the program printed, so `pnpm dev` counts although a
+  // child process holds the socket.
+  //
+  // Empty means nothing is listening, and also a runner too old to say: a
+  // client asks `terminal_ports` first, so an older runner reads as "unknown"
+  // and the client falls back to the `web :PORT` text in the label. A client
+  // opens `http://localhost:<port>` only when this runner is the machine it is
+  // running on; nothing here is forwarded.
+  repeated uint32 ports = 44;
 }
 
 // What a terminal is for. At most one live orchestrator per workspace.
@@ -3469,6 +3484,13 @@ message WorktreeAssign { bytes workspace_id = 1; }
 
 // `terminal.set_role`. `target_resource_id` is the terminal.
 message TerminalSetRole { TerminalRole role = 1; }
+
+// `terminal.rename` (ov-234), behind `terminal_names`. `target_resource_id`
+// is the terminal; answers with it. The name is kept in the runner's store, so
+// it survives a restart. Empty clears it, and the terminal goes back to being
+// named for what runs in it. Longer than 80 characters, or holding a control
+// character, is refused as `name`.
+message TerminalRename { string name = 1; }
 
 // `workspace.start_orchestrator`: open the workspace's orchestrator, a pane
 // with role ORCHESTRATOR in the repository's main checkout, launched from

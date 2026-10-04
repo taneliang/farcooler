@@ -509,7 +509,9 @@ fn scope_of(method: Method) -> Scope {
         // is shared by every device, so a read-scoped client that could write
         // it could silence Unread on the owner's others.
         | Method::WorkspaceMarkRead
-        | Method::TerminalSetRole => Scope::Control,
+        | Method::TerminalSetRole
+        // A label, kept in the runner's store: the weight of `terminal.set_role`.
+        | Method::TerminalRename => Scope::Control,
         // Tiling is `control`, not `host_admin`. It touches no files and stops
         // no process — the worst a wrong one does is show you the wrong pane —
         // and it has to be reachable by an agent for any of this to be
@@ -2122,6 +2124,19 @@ impl Rpc {
                 ))
             }
 
+            "terminal.rename" => {
+                let terminal = Self::target(&req)?;
+                let Some(request::Payload::TerminalRename(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                svc.rename_terminal(terminal, &p.name)?;
+                // A rename changes nothing the watcher observes, so no tick
+                // would announce it: without this every other client kept the
+                // old name until something unrelated moved the pane.
+                self.watcher.announce_fleet_changed();
+                self.terminal_result(terminal).await
+            }
+
             "terminal.set_role" => {
                 let terminal = Self::target(&req)?;
                 let Some(request::Payload::TerminalSetRole(p)) = req.payload else {
@@ -2454,6 +2469,7 @@ impl Rpc {
         if let Some(command) = self.watcher.command(view.terminal.id).await {
             message.current_command = command;
         }
+        message.ports = self.watcher.ports(view.terminal.id).await;
         message.chat_capable = self.watcher.chat_capable(view.terminal.id).await;
         // The same lines the broadcast path sends, off the same `Observed`. A
         // client that reads a list and then watches events must not see the

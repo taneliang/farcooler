@@ -526,7 +526,9 @@ fn route(method: Method) -> Option<&'static str> {
         | Method::WorkspaceSetSettings
         | Method::WorkspaceDelete
         | Method::WorktreeAssign
-        | Method::TerminalSetRole => None,
+        | Method::TerminalSetRole
+        // Naming a terminal (ov-234): the phones show the name and do not set it.
+        | Method::TerminalRename => None,
         // The CLI reads it today; the Summary page (ov-188 phase 3) will
         // route it here.
         Method::ReportGet => None,

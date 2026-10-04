@@ -12639,3 +12639,6 @@ mod lost_terminal_tests;
 #[cfg(test)]
 #[path = "service_submodule_tests.rs"]
 mod submodule_skill_tests;
+
+#[path = "service_terminal_names.rs"]
+mod terminal_names;

@@ -945,6 +945,8 @@ struct Sampled {
     title: String,
     /// What the pane serves, if it holds a listening socket.
     purpose: Option<String>,
+    /// The same ports as `purpose` is read from, for `Terminal.ports`.
+    ports: Vec<u32>,
     /// The pane's foreground process, which is the only handle codex's session
     /// log can be found by — it holds its rollout file open, so `lsof -p` names
     /// it. `None` for a pane `ps` had nothing to say about.
@@ -1011,6 +1013,8 @@ struct Observed {
     /// What is running in the pane, so a shell someone typed `claude` into
     /// announces itself the moment it becomes an agent.
     command: String,
+    /// The TCP ports the pane is listening on, lowest first (`Terminal.ports`).
+    ports: Vec<u32>,
     /// Whether this pane can be rendered as a chat.
     ///
     /// Decided here because deciding it needs the screen, and the screen is
@@ -2276,6 +2280,7 @@ impl Observed {
             turn_started_at: (activity == AgentActivity::Working).then_some(now),
             state: TerminalState::Running,
             command: String::new(),
+            ports: Vec::new(),
             chat_capable: false,
             blocked_question: None,
             last_card_push: None,
@@ -3577,6 +3582,13 @@ impl Watcher {
         self.state.lock().await.get(&terminal).and_then(|o| o.blocked_question.clone())
     }
 
+    /// The TCP ports a terminal's foreground process group is listening on,
+    /// lowest first. Empty for a terminal not yet sampled, which a client
+    /// can't tell from one serving nothing: the next tick says.
+    pub async fn ports(&self, terminal: Uuid) -> Vec<u32> {
+        self.state.lock().await.get(&terminal).map(|o| o.ports.clone()).unwrap_or_default()
+    }
+
     /// What is running in a terminal, as the pane reports it.
     pub async fn command(&self, terminal: Uuid) -> Option<String> {
         self.state.lock().await.get(&terminal).map(|o| o.command.clone())
@@ -4620,6 +4632,7 @@ impl Watcher {
                     command,
                     title,
                     purpose,
+                    ports: crate::foreground::pane_ports(running, &ports),
                     pid: running.map(|r| r.pid),
                     cwd: view.worktree.worktree_path.clone(),
                     // The same string `wire::worktree` puts on the wire as
@@ -4712,6 +4725,7 @@ impl Watcher {
             command,
             title,
             purpose,
+            ports: open_ports,
             pid,
             cwd,
             worktree,
@@ -5078,12 +5092,15 @@ impl Watcher {
             // refused, folds Done -> Done: the activity never moves, and
             // without this the row went on showing the success.
             let outcome_moved = entry.turn_failed != turn_failed;
+            // A port opening or closing is news even when the row's name holds
+            // still: a pane named by its OSC title never gains `web :PORT`.
+            let ports_moved = entry.ports != open_ports;
             let changed = entry.should_announce(
                 activity_moved.is_some(),
                 terminal_state,
                 &command,
                 &blocked_question,
-                signals_moved || outcome_moved,
+                signals_moved || outcome_moved || ports_moved,
             );
             if !changed {
                 continue;
@@ -5091,6 +5108,7 @@ impl Watcher {
 
             entry.state = terminal_state;
             entry.command = command.clone();
+            entry.ports = open_ports;
             entry.chat_capable = chat_capable;
             entry.blocked_question = blocked_question;
             entry.turn_failed = turn_failed;
@@ -5250,6 +5268,7 @@ impl Watcher {
             message.turn_started_at = observed.turn_started_at.map(wire::timestamp);
             message.blocked_question = observed.blocked_question.clone();
             message.current_command = observed.command.clone();
+            message.ports = observed.ports.clone();
             message.chat_capable = observed.chat_capable;
             // Finished lines, already redacted and already cut to a row's
             // width. See `farcooler_core::feed` for why both happen here and
