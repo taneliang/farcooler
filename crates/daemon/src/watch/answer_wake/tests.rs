@@ -152,10 +152,15 @@ impl Board {
     /// pane afresh. Waits for the subscription where production makes one.
     async fn refollow(&self, terminal: Uuid) {
         self.svc.streamed_bracketed_paste(terminal).await;
-        if self.follows(terminal) {
-            assert!(self.sample_until_followed(terminal).await, "the sample never followed the pane");
-        } else {
-            self.watcher.sample().await;
+        if !self.follows(terminal) {
+            return self.watcher.sample().await;
+        }
+        if !self.sample_until_followed(terminal).await {
+            // What the pane shows says why: a program that never started
+            // leaves its shell's error on a dead pane, which no sample follows.
+            let alive = self.svc.inventory_snapshot().claimants(terminal).iter().any(|p| p.proves_life());
+            let screen = self.svc.screen(terminal).await.map(|s| s.0).unwrap_or_default();
+            panic!("the sample never followed the pane (alive: {alive}): {screen}");
         }
     }
 
@@ -230,7 +235,7 @@ impl Board {
         let dir = self.dir.path().join(format!("si-{}", terminal.id.simple()));
         std::fs::create_dir_all(&dir).unwrap();
         let program = dir.join(as_name);
-        std::fs::copy(farcooler_core::programs::find("perl").expect("perl"), &program).unwrap();
+        copy_program(&farcooler_core::programs::find("perl").expect("perl"), &program);
         std::fs::write(dir.join("stand_in.pl"), STAND_IN).unwrap();
         let si = StandIn { control: dir.join("control"), log: dir.join("log") };
         std::fs::write(&si.control, "idle").unwrap();
@@ -267,7 +272,7 @@ impl Board {
         let dir = self.dir.path().join(format!("si-{}", terminal.id.simple()));
         std::fs::create_dir_all(dir.join("bin")).unwrap();
         let node = dir.join("node");
-        std::fs::copy(farcooler_core::programs::find("perl").expect("perl"), &node).unwrap();
+        copy_program(&farcooler_core::programs::find("perl").expect("perl"), &node);
         let file = dir.join("bin").join(script);
         std::fs::write(&file, STAND_IN).unwrap();
         let si = StandIn { control: dir.join("control"), log: dir.join("log") };
@@ -983,6 +988,16 @@ async fn a_tmux_that_reports_bracketing_starts_no_fanout() {
     let piped = b.svc.tmux.run(&["display-message", "-p", "-t", &pane, "#{pane_pipe}"]).await.unwrap();
     assert_eq!(piped.stdout.trim(), "0", "the pane is being piped");
     assert!(!b.svc.paste_mode_followed(agent.id).await);
+}
+
+/// Copy the executable `from` to `to` in a `cp`, never a file this process
+/// opens: on Linux, exec fails with ETXTBSY while any process holds the file
+/// open to write, and a child another test thread forked mid-copy holds it
+/// until it execs. The stand-in then never starts and its dead pane is never
+/// followed (ov-251, only on CI's Linux).
+fn copy_program(from: &std::path::Path, to: &std::path::Path) {
+    let status = std::process::Command::new("cp").arg(from).arg(to).status().expect("cp");
+    assert!(status.success(), "cp {} {}: {status}", from.display(), to.display());
 }
 
 /// The command `stand_in` put in `agent`'s pane, to run it again.
