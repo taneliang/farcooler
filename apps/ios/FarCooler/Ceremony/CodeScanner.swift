@@ -177,7 +177,7 @@ struct ScanScreen: View {
                 )
             } else {
                 CameraPreview(session: scanner.session)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .clipShape(.card)
                     .frame(maxWidth: .infinity)
                     .frame(height: 360)
 

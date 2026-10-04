@@ -14,7 +14,7 @@ import SwiftUI
 // learned the difference between a surface and a boundary — `glassEffect(in:)`
 // draws behind its content without constraining it, so the shape has to be
 // CLIPPED as well as backed, or a row scrolling out of the column carries on
-// straight through the corner. Same radius-22 pair every floating surface here
+// straight through the corner. Same Radius.large (16) pair every floating surface here
 // uses, and one `GlassSurface` (`AgentView.swift:2973`) around the whole
 // column-plus-bar rather than one apiece: two pieces of glass composite
 // independently and read as two objects, which is exactly what "the column is
@@ -697,7 +697,7 @@ struct ShellBar: View {
             // surface behind its content and does not constrain it, so a row
             // at the top of the column carried on straight through the rounded
             // corner. A background is not a boundary.
-            .clipShape(RoundedRectangle(cornerRadius: PaneMetrics.surfaceRadius))
+            .clipShape(RoundedRectangle.floating)
             // INTERACTIVE glass, because this surface is the control.
             //
             // The bar is the one thing on this screen you put a finger ON and

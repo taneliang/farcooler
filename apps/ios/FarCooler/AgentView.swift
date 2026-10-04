@@ -1287,7 +1287,7 @@ private struct MessageRow: View {
                     .textSelection(.enabled)
                     .padding(.horizontal, PaneMetrics.card)
                     .padding(.vertical, PaneMetrics.step)
-                    .background(TranscriptFill.speaker, in: RoundedRectangle(cornerRadius: 14))
+                    .background(TranscriptFill.speaker, in: .card)
             }
 
         case .agent:
@@ -1378,10 +1378,10 @@ private struct ToolRowView: View {
                     .padding(PaneMetrics.card)
             }
         }
-        .background(TranscriptFill.container, in: RoundedRectangle(cornerRadius: 8))
+        .background(TranscriptFill.container, in: .card)
         .overlay {
             if pending != nil {
-                RoundedRectangle(cornerRadius: 8).strokeBorder(TranscriptFill.attentionRing)
+                RoundedRectangle.card.strokeBorder(TranscriptFill.attentionRing)
             }
         }
         // Driven by the model rather than a timer, exactly as the thought row
@@ -1559,7 +1559,7 @@ private struct SubagentBlockView: View {
         // below it, which is what 0.07 and 0.035 were reaching for.
         .background(
             running || pending != nil ? TranscriptFill.container : TranscriptFill.recessed,
-            in: RoundedRectangle(cornerRadius: 8))
+            in: .card)
         .animation(Self.motion, value: showing)
         // Children arrive one at a time while the subagent works, and a block
         // that grew by a row per frame with no animation flickered its way down
@@ -1662,7 +1662,7 @@ private struct GapRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             reason.isInformational ? TranscriptFill.container : TranscriptFill.alarm,
-            in: RoundedRectangle(cornerRadius: 8))
+            in: .card)
     }
 }
 
@@ -1729,14 +1729,14 @@ private struct PlanPanel: View {
         // overlay let the conversation through, and expanding the list turned
         // both into one unreadable overlap.
         //
-        // Radius 22 and no inset of its own: it is one of the surfaces in
+        // Radius.large (16) and no inset of its own: it is one of the surfaces in
         // `composerStack`, and that stack now says the edge once.
         .padding(.horizontal, PaneMetrics.edge)
         .padding(.vertical, PaneMetrics.card)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             .regularMaterial,
-            in: RoundedRectangle(cornerRadius: PaneMetrics.surfaceRadius))
+            in: .floating)
     }
 
 
@@ -1922,15 +1922,15 @@ struct ApprovalCard: View {
                     .accessibilityIdentifier("approval-failure")
             }
         }
-        // Radius 22 and no inset of its own — one of `composerStack`'s
+        // Radius.large (16) and no inset of its own — one of `composerStack`'s
         // surfaces, and that stack draws the edge now. This was 12, curving at
         // half the rate of the composer directly beneath it.
         .padding(PaneMetrics.edge)
         .background(
             TranscriptFill.attention,
-            in: RoundedRectangle(cornerRadius: PaneMetrics.surfaceRadius))
+            in: .floating)
         .overlay(
-            RoundedRectangle(cornerRadius: PaneMetrics.surfaceRadius)
+            RoundedRectangle.floating
                 .strokeBorder(TranscriptFill.attentionEdge))
     }
 
@@ -2058,7 +2058,7 @@ struct DiffView: View {
         .textSelection(.enabled)
         // A ground inside a ground: this box is already inside a tool card, so
         // it takes the tier below the one that card is drawn at.
-        .background(TranscriptFill.recessed, in: RoundedRectangle(cornerRadius: 6))
+        .background(TranscriptFill.recessed, in: .control)
     }
 }
 
@@ -2359,7 +2359,7 @@ private struct AgentComposer: View {
                 .contentShape(Rectangle())
                 .onTapGesture {}
         )
-        // Radius 22, and no horizontal inset here: `composerStack` hoisted it,
+        // Radius.large (16), and no horizontal inset here: `composerStack` hoisted it,
         // so this card and everything stacked above it share one left edge.
         .modifier(GlassSurface())
         .padding(.bottom, PaneMetrics.step)
@@ -2703,7 +2703,7 @@ private struct AgentComposer: View {
                                 .resizable()
                                 .scaledToFill()
                                 .frame(width: 56, height: 56)
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .clipShape(.control)
                             Button {
                                 attachments.removeAll { $0.id == attachment.id }
                             } label: {
@@ -2996,7 +2996,7 @@ enum KeyboardDismissal {
 /// the day the view was written. Four values, and the reason each exists.
 ///
 /// The two surface constants are the phone's, not this screen's: `ShellBar`
-/// and `TerminalKeyRow` already draw at 22 and 10, and a composer floating two
+/// and `TerminalKeyRow` already draw at 16 and 10, and a composer floating two
 /// points inside a glass bar with corners curving at half the rate is what made
 /// three surfaces on one screen read as three different objects.
 enum PaneMetrics {
@@ -3007,8 +3007,8 @@ enum PaneMetrics {
     static let step: CGFloat = 8
     /// A transcript card's inner edge, and the gap between cards.
     static let card: CGFloat = 12
-    /// A radius-22 surface's inner edge. Larger than a card's because the
-    /// corner is: text run to 12 points of a 22-point curve reads as text
+    /// A Radius.large (16) surface's inner edge. Larger than a card's because the
+    /// corner is: text run to 12 points of a 16-point curve reads as text
     /// falling out of the rounding.
     static let edge: CGFloat = 16
 
@@ -3018,7 +3018,7 @@ enum PaneMetrics {
     /// The inset is deliberately not a step on the scale above. It is where
     /// this platform's floating bars sit, and matching the strip 44 points
     /// below the composer matters more than matching the padding inside it.
-    static let surfaceRadius: CGFloat = 22
+    static let surfaceRadius: CGFloat = Radius.large
     static let surfaceInset: CGFloat = 10
 
     /// The smallest a thing you tap is allowed to be, which is the

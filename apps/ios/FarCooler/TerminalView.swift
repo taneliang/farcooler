@@ -1657,10 +1657,10 @@ private struct TerminalKeyRow: View {
         // No Return key. The software keyboard already has one, and the row's
         // whole job is the keys a phone keyboard does not have.
         //
-        // Radius 22, inset 10 — the tab strip's pair and the composer's, so the
+        // Radius.large (16), inset 10 — the tab strip's pair and the composer's, so the
         // three floating surfaces on this screen share one edge and one corner
         // instead of three of each.
-        .modifier(GlassSurface(radius: 22))
+        .modifier(GlassSurface(radius: Radius.large))
         .padding(.horizontal, 10)
         // Clear of the keyboard, not resting on it.
         //
@@ -1721,7 +1721,7 @@ private struct TerminalKeyStyle: ButtonStyle {
         configuration.label
             .frame(maxWidth: .infinity, minHeight: height)
             .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle.control
                     .fill(fill(pressed: configuration.isPressed))
             )
             // White on an opaque accent fill, which is the one place on this

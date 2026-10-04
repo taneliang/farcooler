@@ -238,7 +238,7 @@ private struct ImagePasteChip: View {
                     .resizable()
                     .aspectRatio(contentMode: .fill)
                     .frame(width: PaneMetrics.chip, height: PaneMetrics.chip)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .clipShape(.control)
             }
 
             if let failure = job.failure {
@@ -271,7 +271,7 @@ private struct ImagePasteChip: View {
         .frame(minHeight: PaneMetrics.target)
         .padding(.horizontal, PaneMetrics.edge)
         .padding(.vertical, PaneMetrics.tight)
-        // Radius 22 and inset 10 — the tab strip's pair, the terminal key
+        // Radius.large (16) and inset 10 — the tab strip's pair, the terminal key
         // row's, and the composer's. This chip floats over the same pane those
         // do and was drawing at 16 and 12, so it sat two points inside a bar
         // whose corners curved half again as hard.

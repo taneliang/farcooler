@@ -177,6 +177,11 @@ CEREMONY_SOURCES = [
 # gives them a group of their own instead, the same way `fontsGroup` does for
 # `Fonts/`.
 AGENTKIT_SOURCES = [
+    # The corner steps, `Radius.small`, `.medium` and `.large`, and the shapes
+    # drawn from them (ov-226). The phone's views name a step by its job
+    # instead of spelling a number, as the Mac's do. It reads `GlancePalette`,
+    # below.
+    "DesignTokens.swift",
     # Typed input a terminal could not send: what is held, in what order, and
     # the one line it says about it. Here for `ShellNavigation.swift`'s reason:
     # the iOS target has no unit tests. See `InputHoldTests`.

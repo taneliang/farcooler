@@ -1124,7 +1124,7 @@ private struct StaleFooter: View {
                         .environment(\.widgetRenderingMode, mode)
                         .grayscale(mode == .fullColor ? 0 : 1)
                         .padding(10)
-                        .background(Color.black, in: RoundedRectangle(cornerRadius: 8))
+                        .background(Color.black, in: Rectangle())
                 }
             }
         }

@@ -138,15 +138,15 @@ struct QueuedRow: View {
             }
             .padding(.horizontal, PaneMetrics.edge)
             .padding(.vertical, PaneMetrics.card)
-            // Radius 22, the corner every surface in `composerStack` draws.
+            // Radius.large (16), the corner every surface in `composerStack` draws.
             // The dashed edge is what says "not sent yet"; the rounding was
             // never carrying that and only made this bubble a different object
             // from the composer it is attached to.
             .background {
-                RoundedRectangle(cornerRadius: PaneMetrics.surfaceRadius)
+                RoundedRectangle.floating
                     .fill(.regularMaterial)
                     .overlay {
-                        RoundedRectangle(cornerRadius: PaneMetrics.surfaceRadius)
+                        RoundedRectangle.floating
                             .strokeBorder(
                                 Color.secondary.opacity(0.4),
                                 style: StrokeStyle(lineWidth: 1, dash: [4, 3]))

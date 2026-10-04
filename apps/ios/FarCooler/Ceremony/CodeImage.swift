@@ -43,7 +43,7 @@ struct CodeImageView: View {
                 // A dark ground under a dark-on-clear code is not a styling
                 // problem, it is a code no camera can read.
                 .background(Color.white)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipShape(.card)
                 .accessibilityLabel("A code for another device to scan")
         } else {
             // No raw error, and nothing pretending a code is on screen.

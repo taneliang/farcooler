@@ -594,8 +594,8 @@ struct ThemeStrip: View {
                 Rectangle().fill(Color(packed: packed)).frame(width: 5, height: 18)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 3))
-        .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Color.primary.opacity(0.12)))
+        .clipShape(.control)
+        .overlay(RoundedRectangle.control.strokeBorder(Color.primary.opacity(0.12)))
     }
 
     private var preview: [UInt32] {

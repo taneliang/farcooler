@@ -63,7 +63,7 @@ struct TerminalPermissionBar: View {
                 // terminal text it needs an opaque ground of its own to be read.
                 .background(
                     Color(uiColor: .systemBackground),
-                    in: RoundedRectangle(cornerRadius: PaneMetrics.surfaceRadius)
+                    in: RoundedRectangle.floating
                 )
                 .shadow(color: .black.opacity(0.25), radius: 12, y: 4)
                 .padding(PaneMetrics.edge)

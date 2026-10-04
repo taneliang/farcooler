@@ -384,7 +384,7 @@ struct AuthorizeView: View {
                         .textSelection(.enabled)
                         .padding(12)
                         .background(Color(.secondarySystemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .clipShape(.card)
 
                     Button {
                         UIPasteboard.general.string = publicKey
@@ -401,7 +401,7 @@ struct AuthorizeView: View {
                         .textSelection(.enabled)
                         .padding(12)
                         .background(Color(.secondarySystemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .clipShape(.card)
                 } else {
                     // No cause and no promised retry, deliberately: this side
                     // knows only that key derivation returned nothing. Plain

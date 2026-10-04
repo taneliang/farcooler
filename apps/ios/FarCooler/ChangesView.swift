@@ -411,7 +411,7 @@ struct ChangesView: View {
             .controlSize(.small)
         }
         .padding(12)
-        .background(ChangesSurface.card, in: .rect(cornerRadius: 12))
+        .background(ChangesSurface.card, in: .card)
     }
 
     /// Where the bookmark says you were, said the way the branch says it.
@@ -468,7 +468,7 @@ struct ChangesView: View {
             }
         }
         .padding(12)
-        .background(ChangesSurface.card, in: .rect(cornerRadius: 14))
+        .background(ChangesSurface.card, in: .card)
     }
 
     /// What is being compared, its counts, the control, and the ways into the
@@ -1428,10 +1428,10 @@ private struct ChangesFileHeading: View {
     /// changes.
     private var cardShape: UnevenRoundedRectangle {
         .rect(
-            topLeadingRadius: 12,
-            bottomLeadingRadius: expanded ? 0 : 12,
-            bottomTrailingRadius: expanded ? 0 : 12,
-            topTrailingRadius: 12)
+            topLeadingRadius: Radius.medium,
+            bottomLeadingRadius: expanded ? 0 : Radius.medium,
+            bottomTrailingRadius: expanded ? 0 : Radius.medium,
+            topTrailingRadius: Radius.medium)
     }
 
     var body: some View {
@@ -1641,8 +1641,8 @@ private struct ChangesFileBody: View {
     private var bodyShape: UnevenRoundedRectangle {
         .rect(
             topLeadingRadius: 0,
-            bottomLeadingRadius: 12,
-            bottomTrailingRadius: 12,
+            bottomLeadingRadius: Radius.medium,
+            bottomTrailingRadius: Radius.medium,
             topTrailingRadius: 0)
     }
 
@@ -2233,7 +2233,7 @@ private struct ChangesNotice: View {
             }
         }
         .padding(12)
-        .background(ChangesSurface.card, in: .rect(cornerRadius: 12))
+        .background(ChangesSurface.card, in: .card)
     }
 }
 
