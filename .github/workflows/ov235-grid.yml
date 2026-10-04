@@ -22,5 +22,5 @@ jobs:
         run: |
           for i in 1 2 3; do
             echo "=== run $i"
-            swift test --package-path apps/macos --filter TitleStatusWidth 2>&1 | tail -80
+            swift test --package-path apps/macos --filter TitleStatusWidth --filter GridGeometry 2>&1 | grep -E "✘|Test run|issue" | cut -c1-300 | tail -40; echo "exit ${PIPESTATUS[0]}"
           done
