@@ -10,7 +10,6 @@
   "apps/macos/Sources/FarCooler/Ceremony/JoinView.swift": {"radius": 1},
   "apps/macos/Sources/FarCooler/ChangesPane.swift": {"fill": 4, "radius": 8, "separator": 19, "stroke": 1},
   "apps/macos/Sources/FarCooler/ColumnHeader.swift": {"separator": 1},
-  "apps/macos/Sources/FarCooler/CommandPalette.swift": {"fill": 4, "radius": 5, "separator": 2, "stroke": 1},
   "apps/macos/Sources/FarCooler/Commands.swift": {"separator": 13},
   "apps/macos/Sources/FarCooler/Components/CompactTaskRow.swift": {"fill": 1},
   "apps/macos/Sources/FarCooler/ContentView.swift": {"fill": 1, "material": 1, "separator": 1},

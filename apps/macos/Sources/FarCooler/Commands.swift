@@ -24,6 +24,9 @@ enum AppCommand: String {
     /// Board ▸ Mark All as Read: the navigator's Unread, read (ov-104).
     case markAllRead
     case commandPalette
+    /// ⌘K: the title bar's field, to ask the orchestrator or see what's
+    /// happening (ov-214).
+    case askOrchestrator
     case toggleSidebar
     case diffNextHunk
     case diffPreviousHunk
@@ -463,11 +466,17 @@ struct FarCoolerCommands: Commands {
             CommandGroup(after: .toolbar) {
                 // ⌘P, the shortcut everyone arriving here already has in their
                 // fingers from an editor, for the thing it means there: show me
-                // everything, I will type the part I remember. It is a switcher when
-                // the field is empty and a command list when it is not, which is one
-                // key for the two questions this app is always being asked.
+                // everything, I will type the part I remember. Since ov-214 it
+                // opens the title bar's field with "/" typed, the field's find.
                 Button("Go to Anything…") { AppCommand.commandPalette.post() }
                     .keyboardShortcut("p", modifiers: .command)
+                    .disabled(!MainWindowFocus.isKey(mainWindow))
+                // ⌘K, the command bar's key in most apps that have one. Free
+                // here: no menu item held it and a terminal pane hands every
+                // ⌘ chord to the menu (`TerminalRenderView.keyDown`), so it
+                // was never Clear in a pane.
+                Button("Ask the Orchestrator…") { AppCommand.askOrchestrator.post() }
+                    .keyboardShortcut("k", modifiers: .command)
                     .disabled(!MainWindowFocus.isKey(mainWindow))
                 // ⌘R, which is Reload everywhere else. ⌘0 is Actual Size.
                 Button("Reload Fleet") { AppCommand.reload.post() }

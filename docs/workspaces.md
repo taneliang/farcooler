@@ -100,6 +100,17 @@ and, when any agent failed, failed each open a menu of those tasks or agents. A 
 glyph and a number, then only the state's word, then only the orchestrator's
 mark and the need-you count.
 
+**The title bar's field.** Press ⌘K, or click what the orchestrator is doing,
+and the status area becomes a field. Type a message and press Return to send
+it to this workspace's orchestrator, from anywhere in the workspace, a task
+included; it arrives as if typed into the orchestrator's own composer. Only
+Return sends, an empty message isn't sent, and Esc puts the field away,
+keeping what you'd written for the next ⌘K. With nothing typed, the panel
+under the field shows the activity. Type `/` first, or press ⌘P, to find a
+workspace, task, worktree or terminal instead: ↑ and ↓ move through the
+results and Return opens one. This is Go to Anything; there's no separate
+palette. In a narrow window the field opens in the panel under the title bar.
+
 Back and Forward sit after the switcher when the window is wide enough
 for them and the status area's longer form; ⌃⌘← and ⌃⌘→ do the same at any
 width.

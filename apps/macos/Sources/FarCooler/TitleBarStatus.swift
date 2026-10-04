@@ -228,6 +228,9 @@ struct TitleStatusActions {
     var openLine: (ActivityLine) -> Void = { _ in }
     /// Today's spend, read when the activity panel opens.
     var readSpend: () async -> ActivitySpend = { .nothing }
+    /// The title bar's field (slice 4), where the window has one.
+    var console: TitleConsoleModel?
+    var consoleActions = TitleConsoleActions()
 }
 
 /// The status area drawn: `form` decides what's said, `model` what it says.
@@ -241,14 +244,23 @@ struct TitleStatusView: View {
     @Environment(\.colorScheme) private var scheme
     @State private var showingActivity = false
 
+    /// Whether the field is open in the status area's place (slice 4): at
+    /// the medium form and wider; narrower, it opens in the panel under the
+    /// bar instead, so the item never changes width.
+    private var fieldOpen: Bool { form >= .medium && actions.console?.console.isOpen == true }
+
     var body: some View {
         HStack(spacing: form >= .medium ? 14 : 8) {
-            if model.orchestrator != nil { orchestrator }
-            if form >= .medium { activityButton }
-            Spacer(minLength: 0)
+            if fieldOpen, let console = actions.console {
+                TitleConsoleField(model: console, actions: actions.consoleActions)
+            } else {
+                if model.orchestrator != nil { orchestrator }
+                if form >= .medium { activityButton }
+                Spacer(minLength: 0)
+            }
             needYou
             if form >= .short { failed }
-            if form >= .medium {
+            if form >= .medium, !fieldOpen {
                 taskMenu(
                     model.running, symbol: "circle.dotted",
                     words: [TitleStatus.runningWords(model.running.count), TitleStatus.queuedWords(model.queued)]
@@ -286,7 +298,7 @@ struct TitleStatusView: View {
             }
         }
         Menu {
-            Button("Show Activity") { showingActivity = true }
+            Button("Show Activity") { showActivity() }
             if let menu = actions.orchestratorMenu {
                 Divider()  // style-exempt: menu
                 menu
@@ -303,18 +315,38 @@ struct TitleStatusView: View {
         .accessibilityIdentifier("title-status-orchestrator")
     }
 
+    /// The activity panel: under the field, empty, where there is one
+    /// (slice 4), else in a popover (slice 2).
+    private func showActivity() {
+        if let console = actions.console {
+            console.console.open(finding: false)
+        } else {
+            showingActivity = true
+        }
+    }
+
     /// What it's doing, or "Activity" with nothing to say: a click opens
-    /// the activity panel.
+    /// the activity panel, which is the field's, empty. With no workspace,
+    /// "Go to Anything", which opens it to find.
     private var activityButton: some View {
         Button {
-            showingActivity.toggle()
+            if let console = actions.console, model.orchestrator == nil, model.nowDoing == nil {
+                console.console.open(finding: true)
+            } else {
+                showActivity()
+            }
         } label: {
-            Text(model.nowDoing.map { "— \($0)" } ?? "Activity")
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+            HStack(spacing: 6) {
+                Text(model.nowDoing.map { "— \($0)" } ?? (model.orchestrator == nil ? "Go to Anything" : "Activity"))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if actions.console != nil {
+                    Text(model.orchestrator == nil ? "⌘P" : "⌘K").foregroundStyle(.tertiary).fixedSize()
+                }
+            }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
         .layoutPriority(-1)

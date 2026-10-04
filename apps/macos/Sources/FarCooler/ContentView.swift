@@ -100,7 +100,9 @@ struct ContentView: View {
     @State private var removeWorktree: Worktree?
     @State private var removeRepository: RepositoryToRemove?
     @State private var showResumeBranch = false
-    @State var showPalette = false
+    /// The title bar's field (ov-214): ⌘K to ask the orchestrator, ⌘P to
+    /// find. It took the floating palette's place.
+    @State var console = TitleConsoleModel()
     /// Quick-create's draft, reachable from here so that what was typed into
     /// the palette arrives in the panel that acts on it. See `perform`.
     @AppStorage("tasks.draft") var taskDraft = ""
@@ -242,7 +244,7 @@ struct ContentView: View {
                 editor: detailWorktree, onEditorError: { editorError = $0 },
                 changes: changesToolbarState, onChanges: { ws in toggleChangesPane(in: ws) })
         }
-        .titleBarStatus(titleStatusSource, room: titleStatusRoom, actions: titleStatusActions, width: $windowWidth)
+        .titleBarStatus(titleStatusSource ?? Self.noWorkspaceSource, room: titleStatusRoom, actions: titleStatusActions, width: $windowWidth)
         // The title would repeat the switcher or the breadcrumb
         // (`TitleBar`); the window keeps it for the Window menu.
         .toolbar(removing: TitleBar.showsTitle(for: selection) ? nil : .title)
@@ -315,7 +317,7 @@ struct ContentView: View {
             escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 guard event.keyCode == 53, event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
                     let window = event.window, window === windowBox.window, window.attachedSheet == nil,
-                    !showPalette, !showQuickCreate, !jumpBar.active,
+                    !console.console.isOpen, !showQuickCreate, !jumpBar.active,
                     EscapeBack.goesBack(
                         responder: window.firstResponder, selection: selection,
                         focusColumn: focusColumn,
@@ -562,38 +564,20 @@ struct ContentView: View {
             }
         }
         .animation(.snappy(duration: 0.16), value: editorError)
-        // Centered and over everything, unlike quick-create. This one is not
-        // something you work alongside — it is a switcher, it is on screen for
-        // about a second, and while it is there every keystroke belongs to it.
-        // The scrim is what makes that true for the mouse as well: a panel this
-        // large with a live terminal showing round the edges invites a click
-        // that lands somewhere surprising.
-        .overlay {
-            if showPalette {
-                ZStack {
-                    // 0.25, not the 0.12 this shipped with. A scrim's job is
-                    // stated one comment up — read as modal — and 0.12 black
-                    // over a terminal on a dark theme is under the threshold
-                    // where anything looks different, so the panel floated over
-                    // a window that still looked live and clickable.
-                    Color.black.opacity(0.25)
-                        .ignoresSafeArea()
-                        .onTapGesture { showPalette = false }
-                    CommandPalette(
-                        worktrees: store.fleet.worktrees,
-                        workspaces: paletteWorkspaces,
-                        tasks: paletteTasks,
-                        offersNewWorkspace: !workspaceRepositories.isEmpty,
-                        current: selectedPane,
-                        screen: { short in await screen(forTerminalShort: short) },
-                        onRun: { perform($0) },
-                        onClose: { showPalette = false }
-                    )
-                }
-                .transition(.opacity)
+        // Under the title bar's field (ov-214): the activity, the message's
+        // one action, or the results; and the field itself where the status
+        // area is too narrow to hold it.
+        .overlay(alignment: .top) {
+            if console.console.isOpen {
+                TitleConsoleDropdown(
+                    model: console, actions: titleConsoleActions, status: titleStatusActions,
+                    source: titleStatusSource ?? Self.noWorkspaceSource,
+                    showsField: titleStatusRoom.form(window: windowWidth) < .medium)
+                    .padding(.top, Spacing.tight)
+                    .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .animation(.snappy(duration: 0.14), value: showPalette)
+        .animation(.snappy(duration: 0.12), value: console.console.isOpen)
         .onReceive(
             NotificationCenter.default.publisher(
                 for: NSApplication.didBecomeActiveNotification)
@@ -1281,6 +1265,39 @@ struct ContentView: View {
             seat: WorkspaceScreen.orchestrator(of: summary, host: host, in: store.fleet)?.terminal, panes: panes)
     }
 
+    /// The status area with no workspace on screen: no orchestrator and no
+    /// board, so just the field, for Go to Anything.
+    static let noWorkspaceSource = TitleStatusSource(orchestrator: nil, status: nil, nowDoing: nil)
+
+    /// What the title bar's field does (slice 4): finds with the palette's
+    /// index and runs what's chosen as the palette did; sends to this
+    /// workspace's orchestrator, by its composer's route.
+    private var titleConsoleActions: TitleConsoleActions {
+        let scene = selection.flatMap(workspaceScene)
+        let seat = scene.flatMap { s in
+            s.summary.flatMap { WorkspaceScreen.orchestrator(of: $0, host: s.host, in: store.fleet) }
+        }
+        let worktrees = store.fleet.worktrees
+        return TitleConsoleActions(
+            find: { [paletteWorkspaces, paletteTasks, selectedPane] query in
+                query.isEmpty
+                    ? PaletteIndex.recent(in: worktrees)
+                    : PaletteIndex.matching(
+                        query, in: worktrees, current: selectedPane?.worktree,
+                        currentTerminal: selectedPane.flatMap { pane in
+                            worktrees.lazy.flatMap(\.terminals).first { $0.id == pane.terminal }
+                        },
+                        workspaces: paletteWorkspaces, tasks: paletteTasks,
+                        offersNewWorkspace: !workspaceRepositories.isEmpty)
+            },
+            run: { perform($0) },
+            send: { text in
+                guard let seat, let client = store.client(for: seat.worktree) else { return TitleConsoleRecipient.noOrchestrator }
+                return await client.agentPrompt(terminal: seat.terminal.short, text: text)
+            },
+            refusal: { TitleConsoleRecipient.refusal(seat: seat?.terminal) })
+    }
+
     /// What the status area sizes itself around (`TitleStatusRoom`).
     private var titleStatusRoom: TitleStatusRoom {
         let switcher = workspaceSwitcher
@@ -1295,7 +1312,7 @@ struct ContentView: View {
     /// has: the orchestrator's row, ⌃⌘N within this workspace, a task's row.
     private var titleStatusActions: TitleStatusActions {
         guard let scene = selection.flatMap(workspaceScene), let summary = scene.summary, let board = scene.board
-        else { return TitleStatusActions() }
+        else { return TitleStatusActions(console: console, consoleActions: titleConsoleActions) }
         let host = scene.host
         return TitleStatusActions(
             goToOrchestrator: { selectOrchestrator(keyboard: .conversation) },
@@ -1314,7 +1331,8 @@ struct ContentView: View {
                 guard let client = store.clients[host] else { return .couldntRead }
                 let read = await client.spendToday(repository: summary.repository ?? summary.id)
                 return ActivitySpend.read(data: read.data, message: read.message)
-            })
+            },
+            console: console, consoleActions: titleConsoleActions)
     }
 
     /// A row of the activity panel or the failed menu, opened: its pane, or
@@ -1395,7 +1413,7 @@ struct ContentView: View {
         case .newWorktree: run(.newWorktree)
         case .addRepository: showAddRepository = true
         case .addRunner: showAdd = true
-        case .find: showPalette = true
+        case .find: console.console.open(finding: true)
         case .runners:
             preferences.settingsTab = "machines"
             openSettings()
@@ -2391,27 +2409,6 @@ struct ContentView: View {
             ?? store.repositories.first?.repository.id
     }
 
-    /// A terminal's rendered screen, for the palette's preview tiles.
-    ///
-    /// `short` is what `ScreenPreviews` keys everything by, and short ids can
-    /// collide across runners — the reason `Selection` carries a host at all.
-    /// This is the one place left that has to work backwards from a bare short
-    /// id with no host of its own to check against, because that is the whole
-    /// interface `ScreenPreviews` and `CommandPalette` were built around. Local
-    /// runner first, then the rest in the fleet's order:
-    /// with one runner, or with short ids that do not collide, this finds the
-    /// right terminal every time; a genuine collision costs a preview tile
-    /// showing the wrong screen, never an action landing on the wrong runner.
-    private func screen(forTerminalShort short: String) async -> String {
-        for host in store.hosts {
-            guard let client = store.clients[host] else { continue }
-            if client.fleet.worktrees.contains(where: { $0.terminals.contains { $0.short == short } }) {
-                return await client.screen(terminal: short)
-            }
-        }
-        return ""
-    }
-
     // MARK: - Behavior
 
     func worktree(host: String, id: String) -> Worktree? {
@@ -2596,7 +2593,7 @@ struct ContentView: View {
         let scene = selection.flatMap(workspaceScene)
         let terminals = allTerminals
         var focus = MainWindowFocus(
-            overlayOpen: showQuickCreate || showPalette, taskOpen: Self.taskOpen(selection),
+            overlayOpen: showQuickCreate || console.console.isOpen, taskOpen: Self.taskOpen(selection),
             hasNavigator: scene?.board != nil)
         focus.sidebarShown = !navigatorHidden
         focus.hasWorktree = currentWorktree != nil
@@ -2773,7 +2770,7 @@ struct ContentView: View {
                 navigatorHidden = false
                 boardFilterRequest += 1
             } else {
-                showPalette = true
+                console.console.open(finding: true)
             }
 
         case .markAllRead:
@@ -2784,7 +2781,9 @@ struct ContentView: View {
         // Toggles rather than opens. ⌘P on an open palette is what a hand
         // reaches for when it changed its mind, and every switcher on this
         // machine closes that way.
-        case .commandPalette: showPalette.toggle()
+        case .commandPalette: console.console.toggle(finding: true)
+        // ⌘K: ask the orchestrator, or see what's happening (ov-214).
+        case .askOrchestrator: console.console.toggle(finding: false)
 
         // The window's one sidebar is the navigator (ov-178).
         case .toggleSidebar: toggleNavigator()
@@ -2811,7 +2810,7 @@ struct ContentView: View {
     /// and nothing about what picking it means, so opening a terminal from the
     /// panel and clicking it in the window cannot drift apart.
     func perform(_ action: PaletteAction) {
-        showPalette = false
+        console.console.opened()
         switch action {
         case .openTerminal(let worktree, let terminal):
             let host = store.fleet.worktrees.first { $0.id == worktree }?.host ?? ""

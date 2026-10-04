@@ -34,6 +34,8 @@ enum TitleBarHarness {
         var trayCount = 11
         /// Whether the window offers Back and Forward (slice 3).
         var backForward = false
+        /// The title bar's field (slice 4), where a test opens it.
+        var console: TitleConsoleModel? = nil
         let content: Content
 
         @State private var width: CGFloat = 0
@@ -62,7 +64,7 @@ enum TitleBarHarness {
                     TitleStatusSource(
                         orchestrator: .working, status: .working, nowDoing: words.nowDoing,
                         waiting: { [needYou = words.needYou] _ in needYou }),
-                    room: room, actions: TitleStatusActions(), width: $width)
+                    room: room, actions: TitleStatusActions(console: console), width: $width)
                 .toolbar(removing: .title)
                 .toolbar {
                     LeadingToolbar(

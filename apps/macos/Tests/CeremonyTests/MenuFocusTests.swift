@@ -248,6 +248,7 @@ struct MenuWiringTests {
         "Mark as Reviewed": "DiffMenuFocus.allows(\\.marksReviewed, diff",
         "MainWindowFocus.sidebarTitle(mainWindow)": "MainWindowFocus.togglesSidebar(",
         "Go to Anything…": "MainWindowFocus.isKey(",
+        "Ask the Orchestrator…": "MainWindowFocus.isKey(",
         "Reload Fleet": "MainWindowFocus.isKey(",
         "MainWindowFocus.findTitle(mainWindow)": "MainWindowFocus.isKey(",
         "Keyboard Shortcuts": "MainWindowFocus.isKey(",

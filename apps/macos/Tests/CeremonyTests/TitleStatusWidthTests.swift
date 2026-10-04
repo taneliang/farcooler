@@ -123,3 +123,33 @@ struct TitleStatusWidthTests {
         #expect(Harness.itemsShown(in: window) == everything)
     }
 }
+
+/// The field opens in the status area's own width (slice 4), so the toolbar
+/// never has to measure it again; too narrow for a field, it opens in the
+/// panel under the bar instead, and the item stays as it was.
+@MainActor
+@Suite(.serialized)
+struct TitleConsoleWidthTests {
+    typealias Harness = TitleBarHarness
+
+    @Test(
+        "Opening and closing the field leaves the status item's width alone",
+        arguments: [(CGFloat(1790), TitleStatus.Form.wide), (900, .medium), (600, .ring)])
+    func openingKeepsTheWidth(width: CGFloat, form: TitleStatus.Form) async throws {
+        let console = TitleConsoleModel()
+        let window = try await Harness.window(
+            Harness.Root(words: Harness.Words(), console: console, content: Color.clear), width: width)
+        defer { window.close() }
+        let closed = try #require(Harness.status(in: window))
+        #expect(closed.width == form.width)
+        for finding in [false, true] {
+            console.console.open(finding: finding)
+            try await Harness.settle(window)
+            let open = try #require(Harness.status(in: window), "the status item left the toolbar")
+            #expect(open.width == closed.width && open.item == closed.item, "open (finding \(finding)): \(open)")
+            console.console.close()
+            try await Harness.settle(window)
+        }
+        #expect(Harness.status(in: window) == closed)
+    }
+}

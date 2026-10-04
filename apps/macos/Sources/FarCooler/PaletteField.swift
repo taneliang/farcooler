@@ -28,9 +28,15 @@ struct PaletteField: NSViewRepresentable {
     /// axis is the whole point of a grid; false in the list, where the caret is
     /// the only thing they could reasonably mean.
     var horizontalMoves: Bool
+    /// The text's size: the palette's 14, the title bar's field the
+    /// toolbar's 13.
+    var fontSize: CGFloat = 14
     let onMove: (PaletteMove) -> Void
     let onSubmit: () -> Void
     let onCancel: () -> Void
+    /// The field lost the keyboard and didn't get it back within a moment:
+    /// long enough for a click on one of its own results to land first.
+    var onEndEditing: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -40,7 +46,7 @@ struct PaletteField: NSViewRepresentable {
         view.isRichText = false
         FieldUndo.enable(view)
         view.drawsBackground = false
-        view.font = .systemFont(ofSize: 14)
+        view.font = .systemFont(ofSize: fontSize)
         view.textContainerInset = NSSize(width: 0, height: 2)
         view.isAutomaticQuoteSubstitutionEnabled = false
         view.isAutomaticDashSubstitutionEnabled = false
@@ -105,6 +111,14 @@ struct PaletteField: NSViewRepresentable {
             guard let view = notification.object as? NSTextView else { return }
             parent.text = view.string
         }
+
+        func textDidEndEditing(_ notification: Notification) {
+            guard let view = notification.object as? NSTextView, let end = parent.onEndEditing else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak view] in
+                guard let view, view.window?.firstResponder !== view else { return }
+                end()
+            }
+        }
     }
 }
 
@@ -118,7 +132,10 @@ final class PaletteTextView: NSTextView {
 
     override func keyDown(with event: NSEvent) {
         switch Int(event.keyCode) {
-        case 36, 76:  // Return, keypad Enter
+        // Return, keypad Enter. Not while an input method is composing:
+        // there, Return confirms the composition, and a field that sends on
+        // Return mustn't send half a word.
+        case 36 where !hasMarkedText(), 76 where !hasMarkedText():
             onSubmit?()
         case 53:  // Esc
             onCancel?()
@@ -134,6 +151,7 @@ final class PaletteTextView: NSTextView {
 
     /// Return never inserts a line here, whatever route it arrives by.
     override func insertNewline(_ sender: Any?) {
+        guard !hasMarkedText() else { return }
         onSubmit?()
     }
 
