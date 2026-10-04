@@ -421,7 +421,7 @@ impl Following {
         let turn = self.turns.lock().unwrap_or_else(|e| e.into_inner()).entry(pane.clone()).or_default().clone();
         let _turn = turn.lock().await;
         // The pid first: a respawn between this and the subscription leaves
-        // a record about the program before it, which is never used.
+        // a record about the program before it, which is dropped below.
         let Ok(pid) = runtime.tmux.pane_pid(&pane).await else { return self.failed(&pane) };
         let record = Record::new(pid);
         {
@@ -439,6 +439,16 @@ impl Following {
             Ok(stream) => {
                 record.read(stream);
                 self.retry.lock().unwrap_or_else(|e| e.into_inner()).remove(&pane);
+                // Respawned since the pid was read: the record is about the
+                // program before, and while it lives `wants` says the pane is
+                // covered, so no sample would follow the new one. The pipe
+                // outlives a respawn, so it would live until an answer's
+                // check dropped it, and a check that ran before this record
+                // was in place never sees it. Drop it now: the next sample
+                // follows afresh.
+                if runtime.tmux.pane_pid(&pane).await.ok() != Some(pid) {
+                    self.forget(&pane, &record);
+                }
             }
             Err(_) => {
                 record.end();
