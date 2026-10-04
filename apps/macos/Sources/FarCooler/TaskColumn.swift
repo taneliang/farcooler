@@ -298,6 +298,9 @@ struct TaskTabBar: View {
     let chosen: BoardPane?
     var onChooseAgent: (BoardPane) -> Void = { _ in }
     var onOpenWorktree: () -> Void = {}
+    /// A shell in the task's worktree (ov-234); nil where the runner can't
+    /// take one.
+    var onNewTerminal: (() -> Void)?
 
     var body: some View {
         HStack(spacing: ColumnGrid.rhythm) {
@@ -335,6 +338,14 @@ struct TaskTabBar: View {
                 .controlSize(.small)
                 .fixedSize()
                 .help("Choose which agent to show")
+            }
+            if worktree != nil, let onNewTerminal {
+                Button("New Terminal", action: onNewTerminal)
+                    .controlSize(.small)
+                    .fixedSize()
+                    .help("Open a terminal in this task’s worktree")
+                    .accessibilityLabel("Open Terminal in This Task’s Worktree")
+                    .accessibilityIdentifier("task-new-terminal")
             }
             if worktree != nil {
                 Button("Open Worktree", action: onOpenWorktree)
@@ -471,10 +482,15 @@ enum WorkspaceNavigation {
     /// The breadcrumb for `selection`: Workspace › Task, Workspace › Task ›
     /// Worktree for one opened from its task (`trail`), or Workspace ›
     /// Worktree. Empty at the workspace's own level. `task` and `worktree`
-    /// name one by its id.
+    /// name one by its id. A project terminal open names itself instead
+    /// (`projectTerminal`, its name by worktree and terminal id, or nil for
+    /// any other): Workspace › Terminal, in every workspace of the
+    /// repository, because it belongs to the project and not to the main
+    /// checkout's worktree, which most workspaces don't own (ov-234).
     static func crumbs(
         _ selection: Selection?, trail: Selection?, workspace: String,
-        task: (String) -> String, worktree: (String) -> String
+        task: (String) -> String, worktree: (String) -> String,
+        projectTerminal: (_ worktree: String, _ terminal: String) -> String? = { _, _ in nil }
     ) -> [Crumb] {
         guard case .workspace(let host, let id, let focus?)? = selection else { return [] }
         let top = Crumb(title: workspace, target: .workspace(host: host, workspace: id, focus: nil))
@@ -483,7 +499,10 @@ enum WorkspaceNavigation {
             return [top, Crumb(title: task(t), target: nil)]
         case .history(let status):
             return [top, Crumb(title: BoardHistory.title(status), target: nil)]
-        case .worktree(let wt, _):
+        case .worktree(let wt, let terminal):
+            if let terminal, let name = projectTerminal(wt, terminal) {
+                return [top, Crumb(title: name, target: nil)]
+            }
             let here = Crumb(title: worktree(wt), target: nil)
             if case .workspace(host, id, .task(let t)?)? = back(from: selection, trail: trail) {
                 return [top, Crumb(title: task(t), target: trail), here]

@@ -1104,6 +1104,10 @@ struct TaskBoardView: View {
                     shown, collapsed: collapsed, reads: store.reads, keeping: selected, showingMore: showingMore,
                     filtering: filtering, now: Date())
                 : [],
+            // The Terminals section's rows, as `list` draws them: none when
+            // it's closed, and what the filter leaves otherwise (ov-234).
+            terminals: closedSections.contains("terminals")
+                ? [] : plan.worktrees.terminals.narrowed(by: filter).terminals.map(\.id),
             worktrees: closedSections.contains("worktrees") || !plan.showsWorktrees
                 ? [] : BoardWorktreesSection.rows(plan.worktrees).map(\.id))
     }

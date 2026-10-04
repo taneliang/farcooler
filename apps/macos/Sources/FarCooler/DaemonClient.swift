@@ -2520,6 +2520,14 @@ final class DaemonClient: ObservableObject {
         await refresh()
     }
 
+    /// Give a terminal a name the runner keeps (`terminal.rename`, ov-234), or
+    /// clear it with an empty one. Whether it was taken is `lastError`'s to say,
+    /// as for every call here; the caller reads it through `act`.
+    func rename(terminal: String, to name: String) async {
+        _ = await run(["terminal", "rename", terminal, name, "--json"])
+        await refresh()
+    }
+
     func restart(terminal: String) async {
         _ = await run(["terminal", "restart", terminal, "--json"])
         await refresh()

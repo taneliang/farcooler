@@ -69,6 +69,21 @@ extension ContentView {
             await act(.stop, on: worktree, target: term.id, subject: Self.quoted(term)) { c in
                 await c.stop(terminal: term.short)
             }
+        case .close:
+            // As ⌘W: stop it, then remove the record, which is one action. The
+            // layout is read again because the runner publishes none when a
+            // pane closes (checklist O1).
+            await act(.close, on: worktree, target: term.id, subject: Self.quoted(term)) { c in
+                await c.stop(terminal: term.short)
+                await c.removeTerminal(term.short)
+            }
+            await store.client(for: worktree)?.refreshLayout(worktree)
+        case .rename:
+            renaming = RenamingTerminal(terminal: term, worktree: worktree)
+        case .openInBrowser:
+            if let url = TerminalPorts.browserURL(for: term, host: worktree.host ?? "") {
+                NSWorkspace.shared.open(url)
+            }
         case .useAsOrchestrator: useAsOrchestrator(BoardPane(terminal: term, worktree: worktree))
         case .stopBeingOrchestrator: await stepDown(BoardPane(terminal: term, worktree: worktree))
         }

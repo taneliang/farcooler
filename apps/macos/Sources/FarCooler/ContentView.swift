@@ -142,6 +142,8 @@ struct ContentView: View {
     @State private var orchestratorReplacement: OrchestratorReplacement?
     /// Use as Orchestrator on a workspace that has one, until confirmed.
     @State var adoptionPending: OrchestratorAdoptionPending?
+    /// The terminal the Rename Terminal sheet is asking a name for (ov-234).
+    @State var renaming: RenamingTerminal?
 
     /// The pane last clicked or focused, which the keyboard acts on while
     /// it's on screen. See `WorkspaceScreen.keyPane`: with a task open, the
@@ -739,6 +741,16 @@ struct ContentView: View {
                     if next != selection { selection = next }
                 }
                 return result
+            }
+        }
+        .sheet(item: $renaming) { target in
+            RenameTerminalSheet(terminal: target.terminal) { typed in
+                await act(
+                    .rename, on: target.worktree, target: target.terminal.id,
+                    subject: Self.quoted(target.terminal)
+                ) { c in
+                    await c.rename(terminal: target.terminal.short, to: typed)
+                }
             }
         }
         .sheet(item: $removeRepository) { target in
@@ -1655,12 +1667,28 @@ struct ContentView: View {
                 trail = nil
                 focusColumn = false
                 keyboardOnBoard = false
-                navigate(
-                    to: .workspace(host: host, workspace: workspace.id, focus: .worktree(checkout.id, terminal: terminal.id)),
-                    key: PaneRef(host: host, worktree: checkout.id, terminal: terminal.id))
+                openProjectTerminal(terminal, in: checkout, host: host, workspace: workspace)
             },
             onAction: { action, terminal in Task { await run(action, on: terminal, in: checkout) } },
-            onNew: usable ? { Task { await openShell(besideOrchestratorIn: checkout, workspace: workspace.id) } } : nil)
+            onNew: usable ? { Task { await openShell(besideOrchestratorIn: checkout, workspace: workspace.id) } } : nil,
+            canRename: store.clients[host]?.daemonBuild?.can("terminal_names") == true,
+            onThisMac: host.isEmpty)
+    }
+
+    /// Show one of the project's terminals beside `workspace`'s board.
+    private func openProjectTerminal(
+        _ terminal: Terminal, in checkout: Worktree, host: String, workspace: WorkspaceSummary
+    ) {
+        navigate(
+            to: .workspace(host: host, workspace: workspace.id, focus: .worktree(checkout.id, terminal: terminal.id)),
+            key: PaneRef(host: host, worktree: checkout.id, terminal: terminal.id))
+    }
+
+    /// The ids of `workspace`'s repository's project terminals: what lights a
+    /// Terminals row rather than the checkout's.
+    private func projectTerminalIDs(host: String, workspace: WorkspaceSummary) -> Set<String> {
+        guard let checkout = ProjectTerminals.checkout(for: workspace, host: host, in: store.fleet) else { return [] }
+        return Set(ProjectTerminals.terminals(in: checkout, fleet: store.fleet).map(\.id))
     }
 
     /// ↑ or ↓ in the navigator onto `item`: it's selected, and the
@@ -1675,6 +1703,18 @@ struct ContentView: View {
             chooseTask(BoardSummaryStrip.task(ofLine: line), host: host, workspace: workspace.id, glance: true)
         case .worktree(let id):
             if let found = worktree(host: host, id: id) { glance(at: found) }
+        case .terminal(let id):
+            // ↑ or ↓ onto a project terminal: shown, and the navigator keeps
+            // the keyboard to go on, as a worktree row does.
+            guard let checkout = ProjectTerminals.checkout(for: workspace, host: host, in: store.fleet),
+                let terminal = ProjectTerminals.terminals(in: checkout, fleet: store.fleet).first(where: { $0.id == id })
+            else { return }
+            trail = nil
+            let kept = WorkspaceNavigation.boardStep(.choose(glance: true), from: boardState)
+            if kept.keyboard == .board { boardKeyboardPending = true }
+            focusColumn = kept.focus
+            openProjectTerminal(terminal, in: checkout, host: host, workspace: workspace)
+            key(kept.keyboard)
         }
     }
 
@@ -1695,6 +1735,13 @@ struct ContentView: View {
     /// (`WorkspaceWorktrees.segment`).
     private func worktreeCrumb(for place: Selection, scene: WorkspaceScene) -> WorktreeCrumb? {
         guard let board = scene.board else { return nil }
+        // A project terminal is the breadcrumb's last crumb by its own name,
+        // not a worktree with a menu of the workspace's (ov-234).
+        if case .workspace(let host, _, .worktree(let id, let terminal?)?) = place,
+            ProjectTerminals.name(of: terminal, in: worktree(host: host, id: id), fleet: store.fleet) != nil
+        {
+            return nil
+        }
         let entries = worktreeEntries(scene)
         let current = WorkspaceSelection.samePlace(place, selection) ? selection : place
         let rows = scene.summary.flatMap { summary in
@@ -1980,7 +2027,10 @@ struct ContentView: View {
             task: { id in
                 taskRow(host: host, workspace: workspace, id: id).map { "\($0.key) \($0.title)" } ?? "Task"
             },
-            worktree: { id in worktree(host: host, id: id)?.task ?? "Worktree" })
+            worktree: { id in worktree(host: host, id: id)?.task ?? "Worktree" },
+            projectTerminal: { id, terminal in
+                ProjectTerminals.name(of: terminal, in: worktree(host: host, id: id), fleet: store.fleet)
+            })
     }
 
     /// What's opened beside the board: a task, or a worktree opened whole.
@@ -2209,6 +2259,12 @@ struct ContentView: View {
             selection = opened.next
         }
         let ask = askOrchestrator(host: host, workspace: board.workspace)
+        // Open Terminal in This Task's Worktree, where there is one and its
+        // runner answers.
+        let newTerminalHere: (() -> Void)? = {
+            guard let lane, store.refusal(for: host) == nil else { return nil }
+            return { newTerminalInTaskWorktree(lane, openWorktree: openWorktree) }
+        }()
         let start = TaskStartPanel(
             sentence: TaskColumnModel.sentence(agent) ?? "", row: row, ask: ask)
         return VStack(spacing: 0) {
@@ -2218,7 +2274,23 @@ struct ContentView: View {
                 worktree: lane.map { WorkspaceScreen.ownTerminals(of: $0, fleet: store.fleet) },
                 agents: agents, chosen: chosen,
                 onChooseAgent: { pane in chosenAgents[row.id] = pane.terminal.id },
-                onOpenWorktree: openWorktree)
+                onOpenWorktree: openWorktree,
+                onNewTerminal: newTerminalHere)
+            // The task's own terminals, a dev server among them: in view over
+            // every tab, each with Close. Nothing here closes on its own.
+            let terminals = TaskTerminals.terminals(of: row, host: host, in: store.fleet)
+            if let lane, !terminals.isEmpty {
+                TaskTerminalsStrip(
+                    terminals: terminals, onThisMac: host.isEmpty,
+                    onOpen: { terminal in
+                        openWorktree()
+                        open(lane, terminal: terminal.id)
+                    },
+                    onOpenInBrowser: { terminal in Task { await run(.openInBrowser, on: terminal, in: lane) } },
+                    onRename: store.clients[host]?.daemonBuild?.can("terminal_names") == true
+                        ? { terminal in Task { await run(.rename, on: terminal, in: lane) } } : nil,
+                    onClose: { terminal in Task { await run(.close, on: terminal, in: lane) } })
+            }
             TaskTabs(tab: tab) {
                 ScrollView {
                     TaskColumnCard(
@@ -2277,6 +2349,14 @@ struct ContentView: View {
         }
     }
 
+    /// Open Terminal in This Task's Worktree (ov-234): the worktree open whole,
+    /// as Open Worktree opens it, so Back returns to the task, and a plain
+    /// shell in it. Nothing is typed into it.
+    private func newTerminalInTaskWorktree(_ lane: Worktree, openWorktree: () -> Void) {
+        openWorktree()
+        newTerminal(in: lane)
+    }
+
     /// Move to Its Own Window: `terminal`, sharing the orchestrator's
     /// window, gets a window of its own (`layout break`, tmux's
     /// `break-pane -d`), so the orchestrator keeps its window and focus.
@@ -2310,6 +2390,8 @@ struct ContentView: View {
             onRemove: { removeWorktree = ws },
             onOpenTerminal: { t in open(ws, terminal: t.id) },
             onTerminalAction: { action, t in Task { await run(action, on: t, in: ws) } },
+            canRename: store.clients[host]?.daemonBuild?.can("terminal_names") == true,
+            onThisMac: host.isEmpty,
             onShowChanges: showChangesAction(for: ws, usable: store.refusal(for: host) == nil)
         )
     }
@@ -2406,7 +2488,9 @@ struct ContentView: View {
                 hasKeyboard: keyboardOnBoard,
                 worktrees: { board in boardWorktrees(host: host, workspace: workspace, client: client, board: board) },
                 orchestrator: orchestrator,
-                current: Navigator.current(selection, trail: trail, board: id),
+                current: Navigator.current(
+                    selection, trail: trail, board: id,
+                    terminals: projectTerminalIDs(host: host, workspace: workspace)),
                 onStep: { item in step(to: item, host: host, workspace: workspace) },
                 onHistory: { status in openHistory(status, host: host, workspace: workspace.id) },
                 filterRequest: boardFilterRequest,
@@ -3034,7 +3118,15 @@ enum SearchEscape {
     }
 }
 
-enum TerminalAction { case restart, dismissLost, stop, useAsOrchestrator, stopBeingOrchestrator }
+enum TerminalAction {
+    case restart, dismissLost, stop, useAsOrchestrator, stopBeingOrchestrator
+    /// Stop it and remove its record (ov-234): the Close on a task's terminals.
+    case close
+    /// Ask for a new name (`RenameTerminalSheet`).
+    case rename
+    /// Open its listening port in this Mac's browser.
+    case openInBrowser
+}
 
 /// The banners over the detail pane: the latest few results, and a row for
 /// the rest when there are more (`ActionOutcomes.visibleLimit`).

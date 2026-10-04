@@ -13,6 +13,8 @@ enum ActionVerb: Hashable {
     /// Stop, then remove the record: closing a terminal.
     case close
     case dismissLost
+    /// Name a terminal.
+    case rename
     case hide
     case unhide
     case reorder
@@ -42,6 +44,7 @@ enum ActionVerb: Hashable {
         case .restart: "Couldn’t restart \(subject)."
         case .close: "Couldn’t close \(subject)."
         case .dismissLost: "Couldn’t dismiss \(subject)."
+        case .rename: "Couldn’t rename \(subject)."
         case .hide: "Couldn’t hide \(subject)."
         case .unhide: "Couldn’t show \(subject) again."
         case .reorder: "Couldn’t reorder the worktrees beside \(subject)."
@@ -65,7 +68,7 @@ enum ActionVerb: Hashable {
 
     var target: Target {
         switch self {
-        case .stop, .restart, .close, .dismissLost, .switchMode, .setRole: .terminal
+        case .stop, .restart, .close, .dismissLost, .rename, .switchMode, .setRole: .terminal
         case .hide, .unhide, .reorder, .removeWorktree, .arrange, .newTerminal, .openChanges, .move: .worktree
         case .startOrchestrator, .wakeOnAnswer: .workspace
         case .resumeBranch, .notice: .other

@@ -25,6 +25,11 @@ struct ProjectTerminals {
     /// New Terminal, the section's trailing row. Nil where the runner can't
     /// take one.
     var onNew: (() -> Void)?
+    /// Whether the runner can name a terminal (`terminal_names`): Rename… is
+    /// offered only where it can.
+    var canRename = false
+    /// The runner is this Mac, so a port opens in its browser.
+    var onThisMac = false
 
     static var none: ProjectTerminals { ProjectTerminals() }
 
@@ -50,6 +55,14 @@ struct ProjectTerminals {
         WorkspaceScreen.ownTerminals(of: checkout, fleet: fleet).terminals.filter {
             !$0.isOrchestrator && $0.taskId == nil && !$0.isChangesPane
         }
+    }
+
+    /// The name of `terminal` when it's one of `worktree`'s project terminals
+    /// (`terminals(in:fleet:)`) and `worktree` is a main checkout, else nil.
+    /// What the breadcrumb says for one open (ov-234).
+    static func name(of terminal: String, in worktree: Worktree?, fleet: Fleet) -> String? {
+        guard let worktree, worktree.isMainCheckout else { return nil }
+        return terminals(in: worktree, fleet: fleet).first { $0.id == terminal }?.label
     }
 
     /// What the section draws while the navigator's filter holds `filter`:
@@ -81,7 +94,9 @@ struct ProjectTerminalsSection: View {
             ForEach(terminals.terminals) { terminal in
                 ProjectTerminalRow(
                     terminal: terminal, selected: terminal.id == terminals.selected, keyed: keyed,
+                    canRename: terminals.canRename, onThisMac: terminals.onThisMac,
                     onOpen: { terminals.onOpen(terminal) }, onAction: { terminals.onAction($0, terminal) })
+                .id(NavigatorItem.terminal(terminal.id))
             }
             if let onNew = terminals.onNew {
                 Button(action: onNew) {
@@ -116,6 +131,8 @@ private struct ProjectTerminalRow: View {
     let terminal: Terminal
     let selected: Bool
     let keyed: Bool
+    var canRename = false
+    var onThisMac = false
     let onOpen: () -> Void
     let onAction: (TerminalAction) -> Void
 
@@ -134,6 +151,14 @@ private struct ProjectTerminalRow: View {
                     .truncationMode(.middle)
                     .gridMark("projectTerminal", .text)
                 Spacer(minLength: SidebarGrid.gap)
+                // What it serves, as the kernel says: `:5173`.
+                if let port = terminal.portLabel {
+                    Text(port)
+                        .font(.system(size: WorkspaceStyle.PaneText.body))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
                 StatusGlyph(status: terminal.status)
                     .help(terminal.status.label)
             }
@@ -147,11 +172,21 @@ private struct ProjectTerminalRow: View {
         .accessibilityIdentifier("navigator-terminal-\(terminal.id)")
     }
 
-    /// Open, and for a terminal with no running pane the lost page's own
-    /// answers (ov-191), as `WorktreeDetail`'s cards have them.
+    /// Open, with its port Open in Browser on this Mac, Rename… and Close, and
+    /// for a terminal with no running pane the lost page's own answers
+    /// (ov-191), as `WorktreeDetail`'s cards have them.
     @ViewBuilder
     private var menu: some View {
         Button("Open", action: onOpen)
+        if onThisMac, terminal.portLabel != nil {
+            Button("Open in Browser") { onAction(.openInBrowser) }
+        }
+        if canRename {
+            Button("Rename…") { onAction(.rename) }
+        }
+        if LostPane.Kind(state: terminal.state) == nil {
+            Button("Close") { onAction(.close) }
+        }
         if let kind = LostPane.Kind(state: terminal.state) {
             Divider()  // style-exempt: menu section break
             ForEach(LostPane.actions(for: kind), id: \.title) { action in

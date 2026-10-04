@@ -440,6 +440,10 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// derive an older runner's Needs You items (`NeedsYou.derived`); nil
     /// from a CLI older than the key.
     var rank: UInt32?
+    /// The TCP ports it is listening on (`Terminal.ports`, ov-234), lowest
+    /// first from a runner that says; nil from one too old to, and from a CLI
+    /// older than the key. Read through `servedPorts`.
+    var ports: [Int]?
 
     var agent: AgentActivity { AgentActivity.parse(activity) }
 

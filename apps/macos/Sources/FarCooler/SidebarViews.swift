@@ -107,6 +107,10 @@ struct WorktreeDetail: View {
     let onOpenTerminal: (Terminal) -> Void
     /// Restart or Dismiss, from a card's context menu (ov-191).
     var onTerminalAction: (TerminalAction, Terminal) -> Void = { _, _ in }
+    /// Whether the runner can name a terminal, so a card offers Rename… (ov-234).
+    var canRename = false
+    /// The runner is this Mac, so a card with a port offers Open in Browser.
+    var onThisMac = false
     /// Show Changes, which opens its changes pane on its own when it has no
     /// terminal (ov-78); nil when its runner can't read changes.
     var onShowChanges: (() -> Void)?
@@ -284,6 +288,15 @@ struct WorktreeDetail: View {
     @ViewBuilder
     private func cardMenu(_ t: Terminal) -> some View {
         Button("Open") { onOpenTerminal(t) }
+        if onThisMac, t.portLabel != nil {
+            Button("Open in Browser") { onTerminalAction(.openInBrowser, t) }
+        }
+        if canRename {
+            Button("Rename…") { onTerminalAction(.rename, t) }
+        }
+        if LostPane.Kind(state: t.state) == nil, !t.isChangesPane {
+            Button("Close") { onTerminalAction(.close, t) }
+        }
         if let kind = LostPane.Kind(state: t.state) {
             Divider() // style-exempt: a context menu's section break
             ForEach(LostPane.actions(for: kind), id: \.title) { action in

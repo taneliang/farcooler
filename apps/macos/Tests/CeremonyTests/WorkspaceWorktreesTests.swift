@@ -227,7 +227,7 @@ struct WorkspaceWorktreesTests {
             #expect(items.first == .orchestrator && items.filter { $0 == .orchestrator }.count == 1)
             for item in items {
                 switch item {
-                case .orchestrator, .unread: break
+                case .orchestrator, .unread, .terminal: break
                 case .task(let id): #expect(board.rows.contains { $0.id == id }, "\(id) isn't a task")
                 case .worktree(let id): #expect(!tasked.contains(id), "\(id) is a task's, in Worktrees")
                 }

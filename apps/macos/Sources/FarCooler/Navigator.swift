@@ -18,6 +18,9 @@ enum NavigatorItem: Hashable {
     /// chosen there (ov-177).
     case unread(String)
     case task(String)
+    /// One of the project's own terminals, by its id (ov-234): a row of the
+    /// Terminals section, between the tasks and the worktrees.
+    case terminal(String)
     case worktree(String)
 
     /// The task it opens: a task row's, or an Unread line's.
@@ -25,7 +28,7 @@ enum NavigatorItem: Hashable {
         switch self {
         case .task(let id): id
         case .unread(let line): BoardSummaryStrip.task(ofLine: line)
-        case .orchestrator, .worktree: nil
+        case .orchestrator, .worktree, .terminal: nil
         }
     }
 }
@@ -34,14 +37,16 @@ enum Navigator {
     typealias Selection = ContentView.Selection
 
     /// The rows top to bottom, section by section: the orchestrator's,
-    /// Unread's lines, the tasks the list shows, then the Worktrees section's. Only the
-    /// loose worktrees are rows of their own, a task's being named on its
-    /// task's row; and the orchestrator is never a worktree, nor its task.
+    /// Unread's lines, the tasks the list shows, the project's terminals,
+    /// then the Worktrees section's. Only the loose worktrees are rows of
+    /// their own, a task's being named on its task's row; and the
+    /// orchestrator is never a worktree, nor its task.
     static func items(
-        orchestrator: Bool, unread: [String] = [], tasks: [String], worktrees: [String]
+        orchestrator: Bool, unread: [String] = [], tasks: [String], terminals: [String] = [],
+        worktrees: [String]
     ) -> [NavigatorItem] {
         (orchestrator ? [.orchestrator] : []) + unread.map(NavigatorItem.unread) + tasks.map(NavigatorItem.task)
-            + worktrees.map(NavigatorItem.worktree)
+            + terminals.map(NavigatorItem.terminal) + worktrees.map(NavigatorItem.worktree)
     }
 
     /// The row lit for `current`, given the Unread line the selection was
@@ -56,8 +61,15 @@ enum Navigator {
     /// The row `selection` lights in board `board`'s navigator: the task
     /// open, or the one a worktree open was opened from (`trail`); a
     /// worktree open whole; else, at the workspace's own level, the
-    /// orchestrator. Nil for another board's, or Needs You.
-    static func current(_ selection: Selection?, trail: Selection?, board: String) -> NavigatorItem? {
+    /// orchestrator. A project terminal open (one of `terminals`, by id)
+    /// lights its own row, not the checkout's. Nil for another board's, or
+    /// Needs You.
+    static func current(
+        _ selection: Selection?, trail: Selection?, board: String, terminals: Set<String> = []
+    ) -> NavigatorItem? {
+        if case .workspace(_, board, .worktree(_, let open?)?)? = selection, terminals.contains(open) {
+            return .terminal(open)
+        }
         if let task = WorkspaceNavigation.selectedTask(selection, trail: trail, board: board) { return .task(task) }
         switch selection {
         case .workspace(_, board, nil)?: return .orchestrator
