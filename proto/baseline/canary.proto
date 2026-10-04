@@ -1,4 +1,4 @@
-// Shipped by Canary at 8d71bcc387e84f89ef23e70b149a85e1a17f6020. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 2e60292ed10403a15428a1ecde61fd730bfba6a8. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -2116,6 +2116,17 @@ enum ErrorCode {
   // Distinct from TMUX_UNAVAILABLE, whose advice is to install tmux, which is
   // wrong for a runner that only answered slowly. Retryable.
   ERROR_CODE_TMUX_TIMED_OUT = 30;
+  // "The agent stopped. Restart it, then try again." The pane is in agent
+  // mode and its shim said the agent in it has stopped or never started
+  // (Terminal.agent_failure), so nothing will take a prompt until the pane is
+  // restarted.
+  //
+  // Distinct from AGENT_NOT_CONNECTED, which is retryable: that one is a shim
+  // still dialing and resolves on its own, and a client that retried this one
+  // would retry forever. Never retryable. A client too old to know this code
+  // shows its generic failure, with Error.message (the sentence above) under
+  // it.
+  ERROR_CODE_AGENT_STOPPED = 31;
 }
 
 // ---------------------------------------------------------------------------
