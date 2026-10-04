@@ -68,7 +68,11 @@ actor ClientCore {
         ///
         /// Answered by the core rather than worked out from the message here:
         /// Rust still has the error's type at the moment it is produced.
-        case disconnected(String)
+        ///
+        /// `notSent` is the line's `not_sent`, which only a call that found no
+        /// session carries: it never left this phone, so typed input is safe to
+        /// send again (ov-238). A link that dropped mid-call may have carried it.
+        case disconnected(String, notSent: Bool = false)
         /// A connect that failed, with the core's stable word for why.
         ///
         /// `trouble` is the connect line's `trouble` (`SessionError::word`),
@@ -83,7 +87,7 @@ actor ClientCore {
             switch self {
             case .notStarted: return "The client core could not be started."
             case .rejected(let message, _, _): return message
-            case .disconnected(let message): return message
+            case .disconnected(let message, _): return message
             case .unreached(let message, _, _, _): return message
             case .malformed: return "The client core returned something unreadable."
             }
@@ -349,7 +353,9 @@ actor ClientCore {
             } else {
                 let message = object["error"] as? String ?? "the host refused the request"
                 if object["disconnected"] as? Bool == true {
-                    continuation.resume(throwing: CoreError.disconnected(message))
+                    continuation.resume(
+                        throwing: CoreError.disconnected(
+                            message, notSent: object["not_sent"] as? Bool == true))
                 } else if let trouble = object["trouble"] as? String {
                     // Only a connect's answer carries `trouble`.
                     continuation.resume(

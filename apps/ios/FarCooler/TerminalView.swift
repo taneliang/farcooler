@@ -970,10 +970,8 @@ struct TerminalView: View {
                             blocked: live.agent == .blocked, isVisible: isVisible)
                             .id(terminal.id)
                         // Typed input the runner didn't take (ov-238).
-                        if let unsent = session.unsent {
-                            UnsentInputLine(unsent: unsent) {
-                                Task { await session.retryUnsent() }
-                            }
+                        InputHoldLine(hold: session.hold) {
+                            Task { await session.retryUnsent() }
                         }
                     }
                 }

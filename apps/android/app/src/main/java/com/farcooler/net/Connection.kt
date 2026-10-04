@@ -2032,12 +2032,15 @@ class Connection(
 
     /**
      * Ask the runner to paste [text] into a terminal orchestrator's box, pressing
-     * no Enter (Ask the orchestrator, ov-241). False when it declined or couldn't
-     * be reached, in which case nothing was typed.
+     * no Enter (Ask the orchestrator, ov-241). DECLINED means nothing was typed;
+     * UNKNOWN that no answer came in time, so it may have been.
      */
-    suspend fun draftPrompt(terminal: String, text: String): Boolean =
+    suspend fun draftPrompt(terminal: String, text: String): com.farcooler.model.AskAboutTask.DraftResult =
         attempt { core.call("terminal.draft_prompt", args("terminal" to terminal, "text" to text)) }
-            .isSuccess
+            .fold(
+                onSuccess = { com.farcooler.model.AskAboutTask.DraftResult.PASTED },
+                onFailure = { com.farcooler.model.AskAboutTask.DraftResult.of(it) },
+            )
 
     /**
      * Every ref in a repository, for the sheet that pins a review's base.

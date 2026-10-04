@@ -1065,6 +1065,9 @@ class TerminalSession(
         // stream end, which is a bare JSON string with no code left on it.
         if (error.refusalWord == RunnerRefusal.NOT_FOUND.word || message == "resource not found") {
             _phase.value = Phase.NotLive
+            // The pane is gone: nothing held or queued is typed into whatever
+            // comes next (ov-238).
+            hold.paneClosed()
             return
         }
         if (message == "not connected") {
@@ -1148,33 +1151,22 @@ class TerminalSession(
         }
     }
 
-    private val _unsent = MutableStateFlow<UnsentInput?>(null)
-
     /**
-     * Typed input the runner did not take, held until it is sent again. Null
-     * when nothing is waiting. The terminal draws one quiet line while it
-     * isn't, with Try again (ov-238).
+     * Typed input the runner did not take, and the order it goes in (ov-238). A
+     * write used to be `attempt { … }` with the result thrown away, so a
+     * keystroke the runner never answered was gone. See [InputHold] for what is
+     * held, what is never sent again, and why.
      */
-    val unsent: StateFlow<UnsentInput?> = _unsent.asStateFlow()
+    val hold = InputHold()
 
-    /**
-     * Typed bytes: whatever is already held goes first, so a retry and the next
-     * keystroke arrive in the order they were typed. Taken out of [unsent]
-     * before the call, so a second key typed while this one is in flight
-     * doesn't send the same held bytes twice.
-     */
+    /** Typed bytes, through the hold: one write at a time and in order. */
     private suspend fun type(bytes: ByteArray) {
-        val all = UnsentInput.bytesToSend(_unsent.value, bytes)
-        if (all.isEmpty()) return
-        _unsent.value = null
-        val why = write(all) ?: return
-        val current = _unsent.value ?: UnsentInput(ByteArray(0), why)
-        _unsent.value = current.holding(all, why)
+        hold.type(bytes) { write(it) }
     }
 
-    /** Try again on the line above: send what is held. */
+    /** Try again on the line under the terminal: send what is held. */
     fun retryUnsent() {
-        scope.launch { type(ByteArray(0)) }
+        scope.launch { hold.retry { write(it) } }
     }
 
     /**
@@ -1330,9 +1322,9 @@ class TerminalSession(
         history = decodedHistory(response)
     }
 
-    /** Why the runner did not take these bytes, or null when it did. */
-    private suspend fun write(bytes: ByteArray): UnsentInput.Why? {
-        if (bytes.isEmpty()) return null
+    /** What became of these bytes. */
+    private suspend fun write(bytes: ByteArray): WriteOutcome {
+        if (bytes.isEmpty()) return WriteOutcome.Written
         val hex = buildString(bytes.size * 2) {
             for (byte in bytes) {
                 append(HEX[(byte.toInt() shr 4) and 0xF])
@@ -1341,7 +1333,7 @@ class TerminalSession(
         }
         val failure = attempt {
             core.call("terminal.write", Connection.args("terminal" to terminalId, "hex" to hex))
-        }.exceptionOrNull()?.let { UnsentInput.whyOf(it) }
+        }.exceptionOrNull()?.let { WriteOutcome.of(it) } ?: WriteOutcome.Written
         // Nothing to prompt when streaming: the echo is already on its way back
         // down the same channel, and asking for a screen would only race it.
         // Polling has no such luxury — the moment a key is sent is the moment

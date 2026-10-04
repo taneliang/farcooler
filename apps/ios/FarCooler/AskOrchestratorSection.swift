@@ -33,6 +33,9 @@ struct AskOrchestratorSection: View {
                 if let seat { ask(seat) }
             } label: {
                 Label(AskAboutTask.title, systemImage: "text.bubble")
+                    // Grey as a whole when off: the icon stayed blue beside a
+                    // grey title.
+                    .foregroundStyle(seat == nil ? Color.secondary : Color.accentColor)
             }
             .disabled(seat == nil || asking)
             .accessibilityIdentifier("ask-orchestrator")
@@ -57,6 +60,7 @@ struct AskOrchestratorSection: View {
                 paste: { await connection.draftPrompt(terminal: seat.id, text: $0) },
                 copy: { UIPasteboard.general.string = $0 })
             asking = false
+            // A paste that may have landed is not copied as well, and needs no notice.
             if delivery == .copied {
                 // Stays here: the reference is on the clipboard and the notice
                 // says so, where a person pasting it can read it.
@@ -74,14 +78,21 @@ struct AskOrchestratorSection: View {
 
 extension Connection {
     /// Ask the runner to paste `text` into a terminal orchestrator's box,
-    /// pressing no Enter. False when it declined or couldn't be reached, in
-    /// which case nothing was typed.
-    func draftPrompt(terminal: String, text: String) async -> Bool {
+    /// pressing no Enter. `.declined` means nothing was typed; `.unknown` that
+    /// no answer came in time, so it may have been.
+    func draftPrompt(terminal: String, text: String) async -> AskAboutTask.DraftResult {
         do {
             _ = try await rpc("terminal.draft_prompt", ["terminal": terminal, "text": text])
-            return true
+            return .pasted
         } catch {
-            return false
+            var lost = false
+            var notSent = false
+            if let core = error as? ClientCore.CoreError, case let .disconnected(_, never) = core {
+                lost = true
+                notSent = never
+            }
+            return .failed(
+                word: ClientCore.refusalWord(of: error), disconnected: lost, notSent: notSent)
         }
     }
 }

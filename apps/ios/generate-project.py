@@ -120,7 +120,7 @@ SOURCES = [
     # terminal. Reads the pane's ring through `AgentStream` and draws
     # `AgentView`'s `ApprovalCard`.
     "TerminalPermissionBar.swift",
-    "UnsentInputLine.swift",
+    "InputHoldLine.swift",
     # Ask the Orchestrator on a task's screen (ov-241).
     "AskOrchestratorSection.swift",
     # An empty state's lede and icon rows (ov-245).
@@ -170,10 +170,10 @@ CEREMONY_SOURCES = [
 # gives them a group of their own instead, the same way `fontsGroup` does for
 # `Fonts/`.
 AGENTKIT_SOURCES = [
-    # Typed input the runner did not take, held with the one line a terminal
-    # says about it. Here for `ShellNavigation.swift`'s reason: the iOS target
-    # has no unit tests. See `UnsentInputTests`.
-    "UnsentInput.swift",
+    # Typed input a terminal could not send: what is held, in what order, and
+    # the one line it says about it. Here for `ShellNavigation.swift`'s reason:
+    # the iOS target has no unit tests. See `InputHoldTests`.
+    "InputHold.swift",
     # Ask the Orchestrator's draft, how it is delivered, and the offers a
     # composer takes (ov-241). Here for the same reason. See `AskAboutTaskTests`.
     "AskAboutTask.swift",

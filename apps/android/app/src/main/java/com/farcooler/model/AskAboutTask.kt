@@ -76,6 +76,29 @@ object AskAboutTask {
         PASTED,
         /** Onto the clipboard: the runner couldn't prove the pane safe. */
         COPIED,
+        /**
+         * The runner never answered in time, so it may have pasted after all.
+         * Nothing is copied and nothing is claimed: copying as well would leave
+         * the reference in the box and on the clipboard under a notice that
+         * says the paste didn't happen.
+         */
+        MAYBE_PASTED,
+    }
+
+    /** What the runner said to a paste into a terminal orchestrator. */
+    enum class DraftResult {
+        PASTED,
+        /** It refused, or the call never left this phone: nothing was typed. */
+        DECLINED,
+        /** No answer in time, or the link dropped mid-call: it may have been typed. */
+        UNKNOWN;
+
+        companion object {
+            /** From a failed call, as [com.farcooler.net.WriteOutcome.of] reads one. */
+            fun of(error: Throwable): DraftResult =
+                if (com.farcooler.net.WriteOutcome.of(error) is com.farcooler.net.WriteOutcome.NeverSent) DECLINED
+                else UNKNOWN
+        }
     }
 
     /** What the screen says when the reference was copied instead of pasted. */
@@ -95,7 +118,7 @@ object AskAboutTask {
         title: String,
         isAgentPane: Boolean,
         offer: (String) -> Unit,
-        paste: suspend (String) -> Boolean,
+        paste: suspend (String) -> DraftResult,
         copy: suspend (String) -> Unit,
     ): Delivery {
         val text = draft(key, title)
@@ -103,9 +126,14 @@ object AskAboutTask {
             offer(text)
             return Delivery.COMPOSER
         }
-        if (paste(text)) return Delivery.PASTED
-        copy(text.trim(' '))
-        return Delivery.COPIED
+        return when (paste(text)) {
+            DraftResult.PASTED -> Delivery.PASTED
+            DraftResult.UNKNOWN -> Delivery.MAYBE_PASTED
+            DraftResult.DECLINED -> {
+                copy(text.trim(' '))
+                Delivery.COPIED
+            }
+        }
     }
 
     /**

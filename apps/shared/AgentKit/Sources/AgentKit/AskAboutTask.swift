@@ -76,6 +76,28 @@ public enum AskAboutTask {
         case pasted
         /// Onto the clipboard: the runner couldn't prove the pane safe.
         case copied
+        /// The runner never answered in time, so it may have pasted after all.
+        /// Nothing is copied and nothing is claimed: copying as well would leave
+        /// the reference in the box and on the clipboard under a notice that says
+        /// the paste didn't happen.
+        case maybePasted
+    }
+
+    /// What the runner said to a paste into a terminal orchestrator.
+    public enum DraftResult: Equatable, Sendable {
+        case pasted
+        /// It refused, or the call never left this phone: nothing was typed.
+        case declined
+        /// No answer in time, or the link dropped mid-call: it may have been typed.
+        case unknown
+
+        /// From a failed call's answer line, as `WriteOutcome.failed` reads one.
+        public static func failed(word: String?, disconnected: Bool, notSent: Bool) -> DraftResult {
+            if case .neverSent = WriteOutcome.failed(word: word, disconnected: disconnected, notSent: notSent) {
+                return .declined
+            }
+            return .unknown
+        }
     }
 
     /// What the screen says when the reference was copied instead of pasted.
@@ -95,7 +117,7 @@ public enum AskAboutTask {
     public static func deliver(
         key: String, title: String, isAgentPane: Bool,
         offer: (String) -> Void,
-        paste: (String) async -> Bool,
+        paste: (String) async -> DraftResult,
         copy: (String) -> Void
     ) async -> Delivery {
         let text = draft(key: key, title: title)
@@ -103,9 +125,13 @@ public enum AskAboutTask {
             offer(text)
             return .composer
         }
-        if await paste(text) { return .pasted }
-        copy(text.trimmingCharacters(in: .whitespaces))
-        return .copied
+        switch await paste(text) {
+        case .pasted: return .pasted
+        case .unknown: return .maybePasted
+        case .declined:
+            copy(text.trimmingCharacters(in: .whitespaces))
+            return .copied
+        }
     }
 }
 

@@ -2530,6 +2530,12 @@ fn push_call(
             if matches!(reason, Lost::Call(SessionError::TimedOut { .. })) {
                 line["timed_out"] = json!(true);
             }
+            // There was no session to put it on, so the call never left this
+            // phone (ov-238): the one failure where typed input is provably
+            // unsent. A link that dropped mid-call may have carried it.
+            if matches!(reason, Lost::Already) {
+                line["not_sent"] = json!(true);
+            }
             line
         }
     };

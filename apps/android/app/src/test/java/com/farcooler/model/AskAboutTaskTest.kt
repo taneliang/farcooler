@@ -1,5 +1,6 @@
 package com.farcooler.model
 
+import com.farcooler.model.RunnerRefusal
 import com.farcooler.ui.OrchestratorSeat
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -31,7 +32,7 @@ class AskAboutTaskTest {
         val copied = mutableListOf<String>()
         val delivery = AskAboutTask.deliver(
             "ov-9", "Move it", isAgentPane = true,
-            offer = { offered += it }, paste = { pasted++; true }, copy = { copied += it },
+            offer = { offered += it }, paste = { pasted++; AskAboutTask.DraftResult.PASTED }, copy = { copied += it },
         )
         assertEquals(AskAboutTask.Delivery.COMPOSER, delivery)
         assertEquals(listOf("About ov-9 (“Move it”): "), offered)
@@ -46,7 +47,7 @@ class AskAboutTaskTest {
         val copied = mutableListOf<String>()
         val pasted = AskAboutTask.deliver(
             "ov-9", "Move it", isAgentPane = false,
-            offer = { offered++ }, paste = { asked += it; true }, copy = { copied += it },
+            offer = { offered++ }, paste = { asked += it; AskAboutTask.DraftResult.PASTED }, copy = { copied += it },
         )
         assertEquals(AskAboutTask.Delivery.PASTED, pasted)
         assertEquals(listOf("About ov-9 (“Move it”): "), asked)
@@ -57,13 +58,38 @@ class AskAboutTaskTest {
         // clipboard without the trailing space.
         val refused = AskAboutTask.deliver(
             "ov-9", "Move it", isAgentPane = false,
-            offer = { offered++ }, paste = { false }, copy = { copied += it },
+            offer = { offered++ }, paste = { AskAboutTask.DraftResult.DECLINED }, copy = { copied += it },
         )
         assertEquals(AskAboutTask.Delivery.COPIED, refused)
         assertEquals(listOf("About ov-9 (“Move it”):"), copied)
         assertEquals(
             "Copied a reference to ov-9. Paste it into the orchestrator.",
             AskAboutTask.copiedNotice("ov-9"),
+        )
+    }
+
+    @Test
+    fun aPasteThatMayHaveLandedIsNotAlsoCopied() = runBlocking {
+        val copied = mutableListOf<String>()
+        val delivery = AskAboutTask.deliver(
+            "ov-9", "Move it", isAgentPane = false,
+            offer = {}, paste = { AskAboutTask.DraftResult.UNKNOWN }, copy = { copied += it },
+        )
+        assertEquals(AskAboutTask.Delivery.MAYBE_PASTED, delivery)
+        assertTrue("copied and pasted both", copied.isEmpty())
+        val slow = com.farcooler.core.CoreException("slow", RunnerRefusal.TIMED_OUT_WORD)
+        assertEquals(AskAboutTask.DraftResult.UNKNOWN, AskAboutTask.DraftResult.of(slow))
+        assertEquals(
+            AskAboutTask.DraftResult.UNKNOWN,
+            AskAboutTask.DraftResult.of(com.farcooler.core.DisconnectedException("gone")),
+        )
+        assertEquals(
+            AskAboutTask.DraftResult.DECLINED,
+            AskAboutTask.DraftResult.of(com.farcooler.core.DisconnectedException("not connected", notSent = true)),
+        )
+        assertEquals(
+            AskAboutTask.DraftResult.DECLINED,
+            AskAboutTask.DraftResult.of(com.farcooler.core.CoreException("no", "agent-not-connected")),
         )
     }
 

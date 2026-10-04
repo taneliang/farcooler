@@ -277,3 +277,16 @@ fn a_missed_deadline_crosses_as_its_own_flag_and_not_a_drop() {
     assert!(lines[0].get("code").is_none(), "no runner refused anything");
     assert!(lines[1].get("timed_out").is_none(), "absent unless true: {}", lines[1]);
 }
+
+#[test]
+fn only_a_call_with_no_session_says_it_was_never_sent() {
+    let queue = Arc::new(std::sync::Mutex::new(VecDeque::new()));
+    push_call(&queue, 1, Err(Lost::Already), true);
+    push_call(&queue, 2, Err(Lost::Call(SessionError::Disconnected("gone".into()))), true);
+    let late = SessionError::TimedOut { method: "terminal.write".into(), after: Duration::from_secs(15) };
+    push_call(&queue, 3, Err(Lost::Call(late)), false);
+    let lines: Vec<Value> = locked(&queue).iter().map(|l| serde_json::from_str(l).unwrap()).collect();
+    assert_eq!(lines[0]["not_sent"], true, "{}", lines[0]);
+    assert!(lines[1].get("not_sent").is_none(), "a dropped link may have carried it: {}", lines[1]);
+    assert!(lines[2].get("not_sent").is_none(), "a deadline cannot unsend it: {}", lines[2]);
+}

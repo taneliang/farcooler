@@ -36,7 +36,11 @@ final class TerminalSession: ObservableObject {
         case live
     }
 
-    @Published private(set) var phase: Phase = .connecting
+    @Published private(set) var phase: Phase = .connecting {
+        // The pane is gone: nothing held or queued is typed into whatever
+        // comes next (ov-238).
+        didSet { if phase == .notLive { hold.paneClosed() } }
+    }
     @Published private(set) var grid: TerminalGrid?
 
     private var terminalID: String
@@ -1778,30 +1782,21 @@ final class TerminalSession: ObservableObject {
         await type(vt.encode(key: key, modifiers: modifiers))
     }
 
-    /// Typed input the runner did not take, held until it is sent again.
-    ///
-    /// Nil when nothing is waiting. The terminal draws one quiet line while it
-    /// isn't, with Try Again (ov-238): a write used to be `try?`, so a keystroke
-    /// the runner never answered was gone and the screen looked as if it had
-    /// worked.
-    @Published private(set) var unsent: UnsentInput?
+    /// Typed input the runner did not take, and the order it goes in (ov-238).
+    /// A write used to be `try?`, so a keystroke the runner never answered was
+    /// gone and the screen looked as if it had worked. See `InputHold` for what
+    /// is held, what is never sent again, and why.
+    let hold = InputHold()
 
-    /// Typed bytes: whatever is already held goes first, so a retry and the next
-    /// keystroke arrive in the order they were typed. Taken out of `unsent`
-    /// before the call, so a second key typed while this one is in flight
-    /// doesn't send the same held bytes twice.
+    /// Typed bytes, through the hold: one write at a time and in order.
     private func type(_ bytes: [UInt8]) async {
-        let held = unsent
-        let all = UnsentInput.bytesToSend(after: held, adding: bytes)
-        guard !all.isEmpty else { return }
-        unsent = nil
-        if let why = await write(all) {
-            unsent = (unsent ?? UnsentInput(bytes: [], why: why)).holding(all, why: why)
-        }
+        await hold.type(bytes) { [weak self] in await self?.write($0) ?? .maybeSent }
     }
 
-    /// Try Again on the line above: send what is held.
-    func retryUnsent() async { await type([]) }
+    /// Try Again on the line over the terminal: send what is held.
+    func retryUnsent() async {
+        await hold.retry { [weak self] in await self?.write($0) ?? .maybeSent }
+    }
 
     /// Typing means "act on the live screen", so it always returns there
     /// first — the same rule the Mac's `keyDown` follows.
@@ -1982,21 +1977,25 @@ final class TerminalSession: ObservableObject {
         history = Self.decodedHistory(response)
     }
 
-    /// Why the runner did not take these bytes, or nil when it did. Wheel
-    /// events ignore it: a scroll that didn't land is not typing.
+    /// What became of these bytes. Wheel events ignore it: a scroll that didn't
+    /// land is not typing.
     @discardableResult
-    private func write(_ bytes: [UInt8]) async -> UnsentInput.Why? {
-        guard !bytes.isEmpty else { return nil }
+    private func write(_ bytes: [UInt8]) async -> WriteOutcome {
+        guard !bytes.isEmpty else { return .written }
         let hex = bytes.map { String(format: "%02x", $0) }.joined()
-        var failure: UnsentInput.Why?
+        var outcome = WriteOutcome.written
         do {
             _ = try await core.call("terminal.write", ["terminal": terminalID, "hex": hex])
         } catch {
-            if error is CancellationError { return nil }
             var lost = false
-            if let core = error as? ClientCore.CoreError, case .disconnected = core { lost = true }
-            failure = UnsentInput.why(
-                word: ClientCore.refusalWord(of: error), disconnected: lost)
+            var notSent = false
+            if let core = error as? ClientCore.CoreError, case let .disconnected(_, never) = core {
+                lost = true
+                notSent = never
+            }
+            // A cancelled call may have gone out: doubt, which is never resent.
+            outcome = .failed(
+                word: ClientCore.refusalWord(of: error), disconnected: lost, notSent: notSent)
         }
         // Nothing to prompt when streaming: the echo is already on its way
         // back down the same channel, and asking for a screen would only race
@@ -2005,7 +2004,7 @@ final class TerminalSession: ObservableObject {
         // interval rather than waiting out however long a quiet screen had
         // backed off to.
         if !streaming { wake() }
-        return failure
+        return outcome
     }
 }
 

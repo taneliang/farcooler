@@ -50,7 +50,7 @@ open class CoreException(
  * Answered by the core rather than worked out from the message here: Rust
  * still has the error's type at the moment it is produced.
  */
-class DisconnectedException(message: String) : CoreException(message)
+class DisconnectedException(message: String, val notSent: Boolean = false) : CoreException(message)
 
 /**
  * A connect that failed, with the core's stable word for why (ov-127).
@@ -363,7 +363,7 @@ class ClientCore : TerminalTransport {
                 val trouble = line["trouble"]?.jsonPrimitive?.contentOrNull
                 waiter.completeExceptionally(
                     when {
-                        lost -> DisconnectedException(message)
+                        lost -> DisconnectedException(message, line["not_sent"]?.jsonPrimitive?.booleanOrNull == true)
                         trouble != null -> UnreachedException(
                             message,
                             trouble,

@@ -23,7 +23,7 @@ import Testing
     var copied: [String] = []
     let delivery = await AskAboutTask.deliver(
         key: "ov-9", title: "Move it", isAgentPane: true,
-        offer: { offered.append($0) }, paste: { _ in pasted += 1; return true },
+        offer: { offered.append($0) }, paste: { _ in pasted += 1; return .pasted },
         copy: { copied.append($0) })
     #expect(delivery == .composer)
     #expect(offered == ["About ov-9 (“Move it”): "])
@@ -37,7 +37,7 @@ import Testing
     var copied: [String] = []
     let pasted = await AskAboutTask.deliver(
         key: "ov-9", title: "Move it", isAgentPane: false,
-        offer: { _ in offered += 1 }, paste: { asked.append($0); return true },
+        offer: { _ in offered += 1 }, paste: { asked.append($0); return .pasted },
         copy: { copied.append($0) })
     #expect(pasted == .pasted)
     #expect(asked == ["About ov-9 (“Move it”): "] && copied.isEmpty && offered == 0)
@@ -46,11 +46,25 @@ import Testing
     // clipboard without the trailing space.
     let refused = await AskAboutTask.deliver(
         key: "ov-9", title: "Move it", isAgentPane: false,
-        offer: { _ in offered += 1 }, paste: { _ in false },
+        offer: { _ in offered += 1 }, paste: { _ in .declined },
         copy: { copied.append($0) })
     #expect(refused == .copied)
     #expect(copied == ["About ov-9 (“Move it”):"])
     #expect(AskAboutTask.copiedNotice(key: "ov-9") == "Copied a reference to ov-9. Paste it into the orchestrator.")
+}
+
+@MainActor
+@Test func aPasteThatMayHaveLandedIsNotAlsoCopied() async {
+    var copied: [String] = []
+    let delivery = await AskAboutTask.deliver(
+        key: "ov-9", title: "Move it", isAgentPane: false,
+        offer: { _ in }, paste: { _ in .unknown }, copy: { copied.append($0) })
+    #expect(delivery == .maybePasted)
+    #expect(copied.isEmpty, "copied and pasted both")
+    #expect(AskAboutTask.DraftResult.failed(word: RunnerRefusal.timedOutWord, disconnected: false, notSent: false) == .unknown)
+    #expect(AskAboutTask.DraftResult.failed(word: nil, disconnected: true, notSent: false) == .unknown)
+    #expect(AskAboutTask.DraftResult.failed(word: nil, disconnected: true, notSent: true) == .declined)
+    #expect(AskAboutTask.DraftResult.failed(word: "agent-not-connected", disconnected: false, notSent: false) == .declined)
 }
 
 @MainActor
