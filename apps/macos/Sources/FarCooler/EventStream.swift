@@ -434,7 +434,7 @@ final class EventStream {
     private static func missed(_ what: String, _ line: Data, _ onMissed: () -> Void) {
         // Names the kind and the size, never the line: it can carry an agent's
         // words.
-        log.error("Couldn't decode \(what, privacy: .public) (\(line.count, privacy: .public) bytes); re-reading")
+        log.error("Couldn't decode \(what, privacy: .public) of \(line.count, privacy: .public) bytes; re-reading")
         onMissed()
     }
 
