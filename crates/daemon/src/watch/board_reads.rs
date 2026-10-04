@@ -12,12 +12,13 @@ impl Watcher {
     /// hundred bytes, and every part of it only rises, so a client merges it
     /// as it is and a re-read would cost a phone a round trip for nothing.
     ///
-    /// Not debounced, and the volume is bounded without it: a write that
-    /// changes nothing is never announced (`board_reads_ops::mark_read`), every
-    /// time is clamped to the runner's clock, so a device can only raise a
-    /// mark as fast as real time passes, and a person opens tickets at human
-    /// pace. A client that overran the event backlog anyway gets
-    /// `events_missed` and re-reads, which is correct.
+    /// Not debounced. A write that changes nothing is never announced
+    /// (`board_reads_ops::mark_read`), and a person opens tickets at human
+    /// pace. Real time doesn't bound a misbehaving client, though: marks
+    /// clamped to the runner's now still rise with each write. What bounds the
+    /// damage is the event backlog: a client that falls behind it gets
+    /// `events_missed` and re-reads every board, which is correct, and the
+    /// writer can't make the others miss more than that.
     pub fn announce_board_reads(&self, reads: farcooler_protocol::v1::BoardReads) {
         let _ = self.events.send(Event {
             event_id: bytes::Bytes::copy_from_slice(Uuid::now_v7().as_bytes()),

@@ -1878,7 +1878,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
 /// `said_about` answers the ones this build knows and `invalid` answers the
 /// rest — which is exactly the old behavior for a word this CLI is too old
 /// to have heard of.
-fn refused(err: ClientError, invalid: &str) -> Box<dyn std::error::Error> {
+pub(crate) fn refused(err: ClientError, invalid: &str) -> Box<dyn std::error::Error> {
     Box::new(refusal(err, invalid))
 }
 

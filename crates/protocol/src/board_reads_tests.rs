@@ -33,7 +33,10 @@ fn read_state_holds_its_tags() {
     assert_eq!(number("TaskList", "items"), 1);
     assert_eq!(number("TaskList", "reads"), 2);
     assert_eq!(number("WorkspaceMarkRead", "floor_ms"), 2);
-    assert_eq!(number("WorkspaceMarkRead", "seeds_floor"), 4);
+    // Tag 4 was `seeds_floor`, never shipped, and stays reserved.
+    let mark = file.message_type.iter().find(|m| m.name() == "WorkspaceMarkRead").expect("WorkspaceMarkRead");
+    assert!(mark.field.iter().all(|f| f.number() != 4), "tag 4 was reused");
+    assert!(mark.reserved_range.iter().any(|r| r.start() <= 4 && 4 < r.end()), "tag 4 is not reserved");
 }
 
 #[test]

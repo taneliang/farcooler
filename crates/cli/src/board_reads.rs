@@ -13,10 +13,9 @@
 use clap::Subcommand;
 use farcooler_client::session::reads_json;
 use farcooler_protocol::v1::{self as pb, request, result};
-use farcooler_transport::ClientError;
 use uuid::Uuid;
 
-use crate::tasks::{Board, DispatchLink, Refused, board_for, refusal};
+use crate::tasks::{Board, DispatchLink, Refused, board_for, refused};
 use crate::{Fallible, connect_to, expect_value, id_bytes, req_for, with};
 
 /// What a runner without `board_reads` is told.
@@ -29,9 +28,8 @@ pub enum BoardCmd {
     ///
     /// `--task ID:MS` says a ticket was opened, with the runner-clock time
     /// it was seen through. `--floor MS` is Mark All as Read: everything at or
-    /// before it counts as read. `--seed` marks a floor as this device's
-    /// pre-sync one, which replaces the runner's first-look default once. Every
-    /// time only ever rises, so a repeat is harmless.
+    /// before it counts as read. Every time only ever rises, so a repeat is
+    /// harmless.
     MarkRead {
         /// Which repository's board, when two have the workspace's name.
         #[arg(long)]
@@ -45,14 +43,11 @@ pub enum BoardCmd {
         /// Everything at or before this time counts as read.
         #[arg(long, value_name = "MS")]
         floor: Option<i64>,
-        /// The floor is this device's pre-sync one.
-        #[arg(long, requires = "floor")]
-        seed: bool,
     },
 }
 
 pub async fn board(runner: Option<&str>, cmd: BoardCmd, json: bool) -> Fallible {
-    let BoardCmd::MarkRead { repo, workspace, tasks, floor, seed } = cmd;
+    let BoardCmd::MarkRead { repo, workspace, tasks, floor } = cmd;
     let opened = tasks.iter().map(|t| parse_mark(t)).collect::<Result<Vec<_>, _>>()?;
     if opened.is_empty() && floor.is_none() {
         return Err("name what was read: a ticket with --task, or everything before a time with --floor".into());
@@ -60,7 +55,7 @@ pub async fn board(runner: Option<&str>, cmd: BoardCmd, json: bool) -> Fallible 
     let mut link = connect_to(runner).await?;
     let board = board_for(&mut link, repo.as_deref(), workspace.as_deref(), std::env::var(crate::workspaces::WORKSPACE_ENV).ok())
         .await?;
-    let reads = mark_read(&mut link, &board, floor, opened, seed).await?;
+    let reads = mark_read(&mut link, &board, floor, opened).await?;
     if json {
         println!("{}", reads_json(&reads));
     } else {
@@ -88,7 +83,6 @@ async fn mark_read<L: DispatchLink>(
     board: &Board,
     floor_ms: Option<i64>,
     opened: Vec<(Uuid, i64)>,
-    seeds_floor: bool,
 ) -> Result<pb::BoardReads, Box<dyn std::error::Error>> {
     if !link.capabilities().iter().any(|c| c == farcooler_protocol::capability::BOARD_READS) {
         return Err(Box::new(Refused::new(NO_READS.to_string(), Some(pb::ErrorCode::CapabilityUnsupported as i32))));
@@ -105,17 +99,10 @@ async fn mark_read<L: DispatchLink>(
                 .into_iter()
                 .map(|(task, opened_ms)| pb::TaskRead { task_id: id_bytes(task), opened_ms })
                 .collect(),
-            seeds_floor,
         }),
     );
     r.required_capabilities.push(farcooler_protocol::capability::BOARD_READS.to_string());
-    let answer = link.call(r).await.map_err(|e| match e {
-        // Not `other_board`'s sentence for a line: that one is about lines.
-        ClientError::Daemon { what, .. } if what == "other_board" => {
-            Box::new(Refused::new("those tickets aren't all on this board".to_string(), None)) as Box<dyn std::error::Error>
-        }
-        other => Box::new(refusal(other, "the runner couldn't record that. try again")),
-    })?;
+    let answer = link.call(r).await.map_err(|e| refused(e, "the runner couldn't record that. try again"))?;
     match expect_value(answer.value)? {
         result::Value::BoardReads(reads) => Ok(reads),
         _ => Err(crate::daemon_link::UNREADABLE.into()),

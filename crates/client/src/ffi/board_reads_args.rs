@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::session::{MarkRead, SessionError};
 
-/// `{workspace, floor_ms?, opened: [{task_id, opened_ms}], seeds_floor?}`.
+/// `{workspace, floor_ms?, opened: [{task_id, opened_ms}]}`.
 ///
 /// Refused here, before the round trip, for a missing or unreadable id or
 /// time: a mark with no time is not "now", because a device's clock is the one
@@ -27,8 +27,7 @@ pub(super) fn mark_read_of(args: &Value) -> Result<(Uuid, MarkRead), SessionErro
         let ms = mark.get("opened_ms").and_then(Value::as_i64).ok_or_else(|| needs("an opened_ms in each opened mark"))?;
         opened.push((task, ms));
     }
-    let seeds_floor = args.get("seeds_floor").and_then(Value::as_bool).unwrap_or(false);
-    Ok((workspace, MarkRead { floor_ms, opened, seeds_floor }))
+    Ok((workspace, MarkRead { floor_ms, opened }))
 }
 
 #[cfg(test)]
@@ -44,11 +43,10 @@ mod tests {
             "workspace": ws.to_string(),
             "floor_ms": 5,
             "opened": [{ "task_id": task.to_string(), "opened_ms": 9 }],
-            "seeds_floor": true,
         });
         assert_eq!(
             mark_read_of(&args).unwrap(),
-            (ws, MarkRead { floor_ms: Some(5), opened: vec![(task, 9)], seeds_floor: true })
+            (ws, MarkRead { floor_ms: Some(5), opened: vec![(task, 9)] })
         );
         let open = json!({ "workspace": ws.to_string(), "opened": [{ "task_id": task.to_string(), "opened_ms": 9 }] });
         assert_eq!(mark_read_of(&open).unwrap().1.floor_ms, None, "an open raises no floor");

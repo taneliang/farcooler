@@ -24,9 +24,6 @@ pub struct MarkRead {
     pub floor_ms: Option<i64>,
     /// Tickets opened: the task and the runner-clock time seen through.
     pub opened: Vec<(Uuid, i64)>,
-    /// The floor is this device's pre-sync one. The runner merges it by max
-    /// like any floor; see `WorkspaceMarkRead`.
-    pub seeds_floor: bool,
 }
 
 /// A board's read state as JSON, in the shape the apps and the CLI share:
@@ -55,7 +52,6 @@ impl MarkRead {
                     opened_ms: ms,
                 })
                 .collect(),
-            seeds_floor: self.seeds_floor,
         }
     }
 }
@@ -83,9 +79,8 @@ mod tests {
     #[test]
     fn a_boards_reads_are_json_with_uuid_strings() {
         let (ws, task) = (Uuid::now_v7(), Uuid::now_v7());
-        let wire = MarkRead { floor_ms: Some(5), opened: vec![(task, 9)], seeds_floor: true }.into_wire(ws);
+        let wire = MarkRead { floor_ms: Some(5), opened: vec![(task, 9)] }.into_wire(ws);
         assert_eq!(wire.floor_ms, Some(5));
-        assert!(wire.seeds_floor);
         let reads = pb::BoardReads { workspace_id: wire.workspace_id.clone(), floor_ms: 5, opened: wire.opened };
         assert_eq!(
             reads_json(&reads),

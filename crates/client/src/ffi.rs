@@ -92,9 +92,11 @@ const EVENT_QUEUE_LIMIT: usize = 64;
 ///
 /// That is affordable only because of what a notice says. Every `FleetEvent`
 /// means "re-read it" and carries no delta (see `FleetEvent` in `session.rs`),
-/// except `Reads`, a board's whole read state, which merges by max and so
-/// coalesces and collapses into a resync like the rest. So two identical notices are worth exactly one re-read, and any set of
-/// notices is covered by re-reading everything. Which gives three rules:
+/// except `Reads`, a board's whole read state. That merges by max, so it
+/// coalesces and collapses into a resync like the rest: a resync re-reads
+/// every board, and each re-read carries its reads. So two identical notices
+/// are worth exactly one re-read, and any set of notices is covered by
+/// re-reading everything. Which gives three rules:
 ///
 /// 1. **Never block.** `push` takes this lock, does O(n) over at most
 ///    `EVENT_QUEUE_LIMIT` short strings, and returns. It is called from the
@@ -1973,7 +1975,7 @@ async fn dispatch(
         "task.get" => Ok(session.task(id("task")?).await?),
 
         // Raise what is read on one board (ov-113): `{workspace, floor_ms?,
-        // opened: [{task_id, opened_ms}], seeds_floor?}`, answering with the
+        // opened: [{task_id, opened_ms}], answering with the
         // board's state after the merge. Refused on a runner without
         // `board_reads`; the app keeps its own store there.
         "workspace.mark_read" => {

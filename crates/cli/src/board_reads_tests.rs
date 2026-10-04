@@ -1,5 +1,7 @@
 use clap::Parser;
 
+use farcooler_transport::ClientError;
+
 use super::*;
 
 const REPO: Uuid = Uuid::from_u128(0x0101);
@@ -63,31 +65,23 @@ fn the_board() -> Board {
 #[tokio::test]
 async fn a_mark_is_sent_as_the_runner_clock_time_it_was_given() {
     let mut link = runner(&["workstreams", "board_reads"]);
-    let reads = mark_read(&mut link, &the_board(), Some(90), vec![(TASK, 250)], true).await.expect("marked");
+    let reads = mark_read(&mut link, &the_board(), Some(90), vec![(TASK, 250)]).await.expect("marked");
     assert_eq!(reads, state());
     let sent = &link.sent[0];
     assert_eq!(sent.method, "workspace.mark_read");
     assert_eq!(sent.required_capabilities, vec!["board_reads".to_string()], "an older runner must refuse, not drop it");
     let Some(request::Payload::WorkspaceMarkRead(p)) = &sent.payload else { panic!("{sent:?}") };
     assert_eq!(p.workspace_id, id_bytes(WORKSPACE));
-    assert_eq!((p.floor_ms, p.seeds_floor), (Some(90), true));
+    assert_eq!(p.floor_ms, Some(90));
     assert_eq!(p.opened, vec![pb::TaskRead { task_id: id_bytes(TASK), opened_ms: 250 }]);
 }
 
 #[tokio::test]
 async fn a_runner_without_shared_read_state_is_refused_before_the_wire() {
     let mut link = runner(&["workstreams"]);
-    let err = mark_read(&mut link, &the_board(), None, vec![(TASK, 5)], false).await.unwrap_err();
+    let err = mark_read(&mut link, &the_board(), None, vec![(TASK, 5)]).await.unwrap_err();
     assert_eq!(err.to_string(), NO_READS);
     assert!(link.sent.is_empty(), "nothing was sent");
-}
-
-#[tokio::test]
-async fn a_ticket_from_another_board_is_said_in_words_about_a_board() {
-    let mut link = runner(&["board_reads"]);
-    link.refuse = Some("other_board");
-    let err = mark_read(&mut link, &the_board(), None, vec![(TASK, 5)], false).await.unwrap_err();
-    assert_eq!(err.to_string(), "those tickets aren't all on this board");
 }
 
 /// `task list --json` prints `reads` beside `tasks`, and a reader of `tasks`
@@ -113,15 +107,12 @@ fn marks_are_an_id_and_a_time_and_nothing_else() {
 #[test]
 fn the_mac_s_argv_parses() {
     let argv = format!(
-        "farcooler board mark-read --repo overnight --workspace main --task {TASK}:250 --task {WORKSPACE}:9 --floor 100 --seed --json"
+        "farcooler board mark-read --repo overnight --workspace main --task {TASK}:250 --task {WORKSPACE}:9 --floor 100 --json"
     );
     let cli = crate::Cli::try_parse_from(argv.split_whitespace()).expect("parses");
     assert!(cli.json);
-    let crate::Command::Board(BoardCmd::MarkRead { tasks, floor, seed, workspace, .. }) = cli.command else { panic!() };
-    assert_eq!((tasks.len(), floor, seed, workspace.as_deref()), (2, Some(100), true, Some("main")));
-    // A seed without a floor is nothing to seed.
-    let alone = "farcooler board mark-read --workspace main --seed";
-    assert!(crate::Cli::try_parse_from(alone.split_whitespace()).is_err());
+    let crate::Command::Board(BoardCmd::MarkRead { tasks, floor, workspace, .. }) = cli.command else { panic!() };
+    assert_eq!((tasks.len(), floor, workspace.as_deref()), (2, Some(100), Some("main")));
 }
 
 /// The events stream says it, as its own kind: not `task`, which makes every

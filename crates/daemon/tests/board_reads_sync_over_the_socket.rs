@@ -25,7 +25,6 @@ fn mark(workspace: Uuid, opened: &[(Uuid, i64)], floor: Option<i64>) -> pb::Requ
         workspace_id: id(workspace),
         floor_ms: floor,
         opened: opened.iter().map(|(t, ms)| pb::TaskRead { task_id: id(*t), opened_ms: *ms }).collect(),
-        seeds_floor: false,
     }));
     r
 }
