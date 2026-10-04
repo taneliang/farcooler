@@ -194,14 +194,19 @@ struct StatusGlyph: View {
 /// that has settled.
 private struct Breathing: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.inLiveWindow) private var inLiveWindow
 
     func body(content: Content) -> some View {
         if reduceMotion {
             // The value that was on screen before this existed. Motion is the
             // part being asked for less of, not the dimming.
             content.opacity(0.85)
-        } else {
+        } else if inLiveWindow {
             BreathingLayer(content: content)
+        } else {
+            // An `ImageRenderer`, a preview or a test: no window to animate
+            // in, and an AppKit view would be drawn as a placeholder there.
+            content
         }
     }
 }

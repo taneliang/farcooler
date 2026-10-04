@@ -101,6 +101,12 @@ extension EnvironmentValues {
     /// otherwise — a preview, a test, an offscreen render — so the default
     /// never freezes something a person is looking at.
     @Entry var windowVisible: Bool = true
+
+    /// Whether this view is in an app window, rather than an `ImageRenderer`,
+    /// a preview or a test. Set by `WindowVisibilityReader`. Views that draw
+    /// through AppKit check it, because an `ImageRenderer` draws an AppKit view
+    /// as a placeholder.
+    @Entry var inLiveWindow: Bool = false
 }
 
 /// Puts the window's visibility into the environment, for views that animate.
@@ -110,6 +116,7 @@ struct WindowVisibilityReader: ViewModifier {
     func body(content: Content) -> some View {
         content
             .environment(\.windowVisible, visible)
+            .environment(\.inLiveWindow, true)
             .background(VisibilityProbe { visible = $0 })
     }
 }
