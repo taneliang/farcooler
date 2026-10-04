@@ -20,6 +20,8 @@ struct NeedsYouScreen: View {
     @State private var showAdd = false
     /// The runner whose Add Repository sheet is open (a runner with none).
     @State private var addingRepository: Runner?
+    /// The extra read-only folder open in Files, and the runner it's on (ov-259).
+    @State private var browsingFolder: BrowsedFolder?
     /// Whether this device is signed in: the push note shows until it is.
     @ObservedObject private var account = Account.shared
     /// The Unclaimed and Hidden groups open right now, by runner and title.
@@ -72,6 +74,11 @@ struct NeedsYouScreen: View {
             }
         }
         .sheet(isPresented: $showAdd) { AddView(runners: hosts) }
+        .sheet(item: $browsingFolder) { folder in
+            if let connection = fleet.connection(for: folder.runner) {
+                FilesSheet(connection: connection, root: FilesLocation(place: .folder(folder.name)))
+            }
+        }
         .sheet(item: $addingRepository) { runner in
             if let connection = fleet.connection(for: runner.id) {
                 AddRepositorySheet(connection: connection) { _ in }
@@ -314,6 +321,31 @@ struct NeedsYouScreen: View {
                 } header: {
                     Text(heading(section, runner: runner.host, sections: sections.count))
                 }
+            }
+            folders(of: runner.host, connection: connection)
+        }
+    }
+
+    /// One runner's extra read-only folders, by name (ov-232): the logs and
+    /// notes its owner chose to share, never addable from here (ov-259).
+    /// Nothing at all from a runner without any, or too old to have them.
+    @ViewBuilder
+    private func folders(of runner: Runner, connection: Connection) -> some View {
+        let names = connection.knownBuild?.sharedFolders ?? []
+        if !names.isEmpty {
+            Section {
+                ForEach(names, id: \.self) { name in
+                    Button {
+                        browsingFolder = BrowsedFolder(runner: runner.id, name: name)
+                    } label: {
+                        Label(name, systemImage: "folder")
+                            .frame(minHeight: PaneMetrics.target, alignment: .leading)
+                    }
+                    .foregroundStyle(.primary)
+                    .accessibilityIdentifier("folder-row-\(name)")
+                }
+            } header: {
+                Text(fleet.runners.count > 1 ? "Folders on \(runner.label)" : "Folders")
             }
         }
     }
@@ -727,4 +759,11 @@ struct NeedsYouRow: View {
             failure = refused
         }
     }
+}
+
+/// A folder a runner shares, picked from Needs You.
+private struct BrowsedFolder: Identifiable {
+    let runner: UUID
+    let name: String
+    var id: String { "\(runner)/\(name)" }
 }

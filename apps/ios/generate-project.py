@@ -33,6 +33,9 @@ SOURCES = [
     # used to be the front door — and is gone: the shell's overview is the
     # fleet screen, sorted by what needs you.
     "FleetView.swift",
+    # The read-only Files browser (ov-259): a worktree's files, or one of the
+    # runner's extra folders, a screen to a directory and a screen to a file.
+    "FilesScreen.swift",
     # One `Connection` per runner, keyed by runner id, and the merge across
     # them. Nothing constructs it yet — see its header for the three
     # process-wide slots that have to gain owners before anything can.
@@ -787,6 +790,9 @@ UI_TEST_SOURCES = [
     # The stack reopening where a relaunch left it, and a decision push
     # landing on its task (ov-66). Needs no runner, for the same reason.
     "PhoneReopenTests.swift",
+    # The read-only Files browser, from a pane's menu and from Needs You
+    # (ov-259). Needs no runner, for the same reason.
+    "FilesBrowserTests.swift",
     # A claude TUI pane's permission ask, answered from the phone and at the
     # keyboard, against the demo runner's asking stand-in.
     "TerminalPermissionTests.swift",

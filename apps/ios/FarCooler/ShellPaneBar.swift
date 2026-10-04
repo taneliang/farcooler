@@ -168,6 +168,8 @@ struct ShellPaneChromeModifier: ViewModifier {
     /// `RemoveWorktreeFlow`.
     @State private var removing: RemoveWorktreeRequest?
     @State private var newTerminalFailure: NewTerminalFailure?
+    /// The read-only Files browser, over this worktree (ov-259).
+    @State private var browsingFiles = false
     /// A refused switch between the chat and the terminal.
     @State private var paneModeFailure: ActionFailure?
 
@@ -247,6 +249,11 @@ struct ShellPaneChromeModifier: ViewModifier {
                 }
             }
             .removeWorktreeFlow($removing)
+            .sheet(isPresented: $browsingFiles) {
+                if let worktree {
+                    FilesSheet(connection: connection, root: FilesLocation(place: .worktree(worktree.id)))
+                }
+            }
             // Far Cooler's own two sentences, and nothing the runner wrote.
             //
             // An alert rather than the `SheetFailureSection` the remove flow
@@ -354,6 +361,7 @@ struct ShellPaneChromeModifier: ViewModifier {
         pickedImage = nil
         removing = nil
         newTerminalFailure = nil
+        browsingFiles = false
     }
 
     /// An image, sent by typing its path into the tty.
@@ -392,7 +400,12 @@ struct ShellPaneChromeModifier: ViewModifier {
 
     /// Whether the overflow has anything in it. A `Menu` that opens onto
     /// nothing is worse than one that is not there.
-    private var hasOverflow: Bool { canCreateTerminal || canSwitchMode || canRemove }
+    private var hasOverflow: Bool { canCreateTerminal || canSwitchMode || canRemove || canBrowseFiles }
+
+    /// Whether this worktree's files can be read from here: the runner serves
+    /// them and this phone's grant may read them (`DaemonBuild.offersFiles`).
+    /// Hidden otherwise, and until the runner has said what it can do.
+    private var canBrowseFiles: Bool { worktree != nil && (connection.knownBuild?.offersFiles ?? false) }
 
     /// Every worktree can take another terminal — including this one when the
     /// pane in front of you is the Diff, which has no terminal behind it and is
@@ -422,6 +435,14 @@ struct ShellPaneChromeModifier: ViewModifier {
         Menu {
             if canCreateTerminal, let worktree { newTerminalItem(worktree) }
             if canSwitchMode, let live { paneModeItem(live) }
+            if canBrowseFiles {
+                Button {
+                    browsingFiles = true
+                } label: {
+                    Label("Files", systemImage: "folder")
+                }
+                .accessibilityIdentifier("pane-files")
+            }
             if canRemove, let worktree {
                 Divider()
                 Button(role: .destructive) {

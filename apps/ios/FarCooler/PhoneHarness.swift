@@ -44,6 +44,7 @@ import SwiftUI
 //   -phone-usage-fails       the runner doesn't answer usage.task
 //   -phone-task-fails        the runner refuses task.get, so a task has no record
 //   -phone-hide-fails        the runner refuses worktree.hide and worktree.unhide
+//   -phone-files-old         the runner is older than Files: no worktree_files, no read_only_folders
 //   -phone-board-first       Billing opens on its Board segment, for a capture that sends no input
 //   -phone-board-reads       the runner keeps read state (`board_reads`): Billing's floor is
 //                            25 hours back, so bil-5 (done a day ago) and bil-7 (moved
@@ -296,10 +297,12 @@ final class HarnessRunner {
                 capabilities: Set(
                     ["tasks", "needs_you", "workstreams", "terminal_task"]
                         + (Self.keepsReads ? ["board_reads"] : [])
+                        + (CommandLine.arguments.contains("-phone-files-old") ? [] : ["worktree_files", "read_only_folders"])
                         + (CommandLine.arguments.contains("-phone-usage-old") ? [] : ["agent_usage"])
                         + (CommandLine.arguments.contains("-phone-queue-old") ? [] : ["agent_queue"])),
                 grantedScope: Self.readOnly ? "read" : "control",
-                agentsFound: Self.agentsFound))
+                agentsFound: Self.agentsFound,
+                readOnlyFolders: CommandLine.arguments.contains("-phone-files-old") ? nil : ["logs"]))
         // What a poll does with a fleet: the runner's projection for the
         // glances, which they need before they'll take a Needs You list.
         FleetSnapshotWriter.write(
@@ -505,6 +508,8 @@ final class HarnessRunner {
             }
             sent.append("draft billing \(text)")
             return try json([:])
+        case "worktree.list_dir", "worktree.read_file":
+            return try files(method, args)
         case "worktree.hide", "worktree.unhide":
             if CommandLine.arguments.contains("-phone-hide-fails") {
                 throw ClientCore.CoreError.rejected("unavailable", word: "unavailable")
@@ -518,6 +523,50 @@ final class HarnessRunner {
             return try json([:])
         default:
             throw ClientCore.CoreError.rejected("not in the harness", word: "unimplemented")
+        }
+    }
+
+    /// A small tree for Files (ov-259): a worktree's, and a folder named logs.
+    /// Refuses a call that names both places or neither, as the core does, and
+    /// a path that isn't there, as the runner does.
+    private func files(_ method: String, _ args: [String: Any]) throws -> Data {
+        let worktree = args["worktree"] as? String, folder = args["folder"] as? String
+        guard (worktree != nil) != (folder != nil), let path = args["path"] as? String else {
+            throw ClientCore.CoreError.rejected("bad files call", word: "invalid-argument")
+        }
+        func entry(_ name: String, _ kind: String, _ size: Int = 0, to target: String = "") -> [String: Any] {
+            ["name": name, "kind": kind, "size": size, "linkTarget": target]
+        }
+        func file(_ state: String, _ size: Int, _ text: String = "", to target: String = "") -> [String: Any] {
+            ["path": path, "state": state, "size": size, "text": text, "linkTarget": target]
+        }
+        let trees: [String: [String: [[String: Any]]]] = [
+            "worktree": [
+                "": [
+                    entry("src", "directory"), entry("README.md", "file", 1_200), entry("big.log", "file", 3_100_000),
+                    entry("logo.png", "file", 12_000_000), entry("latest", "link", to: "src/main.rs"),
+                ],
+                "src": [entry("main.rs", "file", 40)],
+            ],
+            "logs": ["": [entry("today.log", "file", 22)]],
+        ]
+        let place = worktree != nil ? "worktree" : "logs"
+        if folder != nil, folder != "logs" { throw ClientCore.CoreError.rejected("no folder", word: "not-found") }
+        if method == "worktree.list_dir" {
+            guard let entries = trees[place]?[path] else {
+                throw ClientCore.CoreError.rejected("not found", word: "not-found")
+            }
+            return try json(["path": path, "truncated": false, "entries": entries])
+        }
+        switch (place, path) {
+        case ("worktree", "src/main.rs"):
+            return try json(file("text", 40, "fn main() {\n    println!(\"hello\");\n}\n"))
+        case ("worktree", "README.md"): return try json(file("text", 1_200, "# Billing\r\nInvoices, in PDF.\r\n"))
+        case ("worktree", "big.log"): return try json(file("too_large", 3_100_000))
+        case ("worktree", "logo.png"): return try json(file("binary", 12_000_000))
+        case ("worktree", "latest"): return try json(file("link", 0, to: "src/main.rs"))
+        case ("logs", "today.log"): return try json(file("text", 22, "12:00 started\n12:01 ready\n"))
+        default: throw ClientCore.CoreError.rejected("not found", word: "not-found")
         }
     }
 

@@ -45,6 +45,7 @@ SHARDS = {
         "ReadScopeTests",  # -phone-harness (TaskScreenTests.swift)
         "TaskUsageUITests",  # -phone-harness (ov-195, landed after this lane branched)
         "PhoneReopenTests",  # -phone-harness
+        "FilesBrowserTests",  # -phone-harness (ov-259)
         "AgentDraftTests",  # -agent-layout-harness
         "ChangesPullRequestTests",  # -changes-layout-harness
         "ChangesPatchNoticeTests",  # -changes-layout-harness
