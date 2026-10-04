@@ -175,7 +175,12 @@ enum Enrollment {
         keyA: String, keyB: String?, label: String, clientID: String, scope: String,
         nodeKey: String, on runners: [CeremonyRunner],
         addressing: [String: RunnerFacts.Addressing] = [:],
-        using run: @escaping Writer = { await CLI.run($0) }
+        using run: @escaping Writer = {
+            let result = await CLI.run($0)
+            // The reply a caller reads a token from is stdout alone; a failure
+            // is shown in everything the CLI said.
+            return (result.ok, result.ok ? result.output : result.said)
+        }
     ) async -> Outcome {
         var outcome = Outcome()
         var failures: [String] = []

@@ -3141,42 +3141,16 @@ final class DaemonClient: ObservableObject {
             return (nil, message)
         }
 
-        let env = environment
-        let host = cliHostArguments
-        return await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: bin)
-                process.arguments = host + args
-                process.environment = env
-
-                let out = Pipe()
-                let err = Pipe()
-                process.standardOutput = out
-                process.standardError = err
-
-                do {
-                    try process.run()
-                } catch {
-                    continuation.resume(returning: (nil, error.localizedDescription))
-                    return
-                }
-
-                let stdout = out.fileHandleForReading.readDataToEndOfFile()
-                let stderr = err.fileHandleForReading.readDataToEndOfFile()
-                process.waitUntilExit()
-
-                if process.terminationStatus != 0 {
-                    let message =
-                        String(data: stderr, encoding: .utf8)?
-                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? "command failed"
-                    continuation.resume(returning: (nil, message))
-                    return
-                }
-
-                continuation.resume(returning: (stdout, nil))
-            }
+        let ran = await ProcessRunner.run(
+            bin, cliHostArguments + args, environment: environment)
+        if let why = ran.launchFailure { return (nil, why) }
+        if !ran.succeeded {
+            let message =
+                String(data: ran.stderr, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return (nil, message.isEmpty ? "command failed" : message)
         }
+        return (ran.stdout, nil)
     }
 
     /// Run a command and hand back its failure instead of banner-ing it.

@@ -145,7 +145,7 @@ final class RunnerSettingsStore: ObservableObject {
             // straight to `.failed` and the editor drew them in its own red,
             // which is the join `776d3e0` and `c42c352` took out everywhere
             // else.
-            return .failed(.noAnswer(Self.tidy(result.output)))
+            return .failed(.noAnswer(Self.tidy(result.said)))
         }
         if body["ok"] as? Bool == true {
             return .worked(body["reported"] as? String ?? "answered")
@@ -163,7 +163,7 @@ final class RunnerSettingsStore: ObservableObject {
         guard result.ok, let data = result.output.data(using: .utf8),
             let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
-            failure = Self.tidy(result.output)
+            failure = Self.tidy(result.said)
             return nil
         }
         return body
@@ -173,7 +173,7 @@ final class RunnerSettingsStore: ObservableObject {
     private func run(_ args: [String], stdin: String? = nil) async -> Bool {
         let result = await CLI.run(hostArguments + args, stdin: stdin)
         if !result.ok {
-            failure = Self.tidy(result.output)
+            failure = Self.tidy(result.said)
             return false
         }
         failure = nil

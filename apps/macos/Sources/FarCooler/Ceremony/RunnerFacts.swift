@@ -168,68 +168,15 @@ enum RunnerFacts {
     fileprivate static func run(
         _ binary: String, _ arguments: [String], timeout: TimeInterval? = nil
     ) async -> String {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: binary)
-                process.arguments = arguments
-                let pipe = Pipe()
-                process.standardOutput = pipe
-                // Swallowed on purpose: `ssh-keygen -F` on a host it does not
-                // know says so on stderr and exits non-zero, which is an
-                // ordinary answer here and not something to show anybody.
-                process.standardError = FileHandle.nullDevice
-                do { try process.run() } catch {
-                    continuation.resume(returning: "")
-                    return
-                }
-                // The lock is not paranoia about a lost signal — it is what
-                // keeps `terminate()` from ever running against a process this
-                // thread has already reaped. `waitUntilExit` sets `reaped`
-                // while holding the lock, so the watchdog either gets there
-                // first, on a process that is still alive, or finds the flag
-                // set and does nothing. Foundation raises an ObjC exception
-                // out of `terminate()` on a process it no longer has, and an
-                // ObjC exception through Swift is a crash with a stack that
-                // points at the language runtime rather than at here.
-                let watch = ProcessWatch(process)
-                var watchdog: DispatchWorkItem?
-                if let timeout {
-                    let item = DispatchWorkItem { watch.terminate() }
-                    watchdog = item
-                    DispatchQueue.global(qos: .userInitiated)
-                        .asyncAfter(deadline: .now() + timeout, execute: item)
-                }
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                process.waitUntilExit()
-                watch.reaped()
-                watchdog?.cancel()
-                continuation.resume(returning: String(decoding: data, as: UTF8.self))
-            }
-        }
+        // stderr is swallowed on purpose: `ssh-keygen -F` on a host it does
+        // not know says so there and exits non-zero, which is an ordinary
+        // answer here and not something to show anybody.
+        let ran = await ProcessRunner.run(
+            binary, arguments, deadline: timeout, discardStderr: true)
+        // A killed tool prints nothing a caller should read.
+        if ran.timedOut || ran.launchFailure != nil { return "" }
+        return String(decoding: ran.stdout, as: UTF8.self)
     }
-}
-
-/// A `Process` and the one question the watchdog is allowed to ask about it.
-///
-/// Lives outside ``RunnerFacts`` only because a `DispatchWorkItem` body is
-/// `@Sendable` and `Process` is not: holding it behind this class is the point
-/// where that is asserted, once, next to the lock that makes it true.
-private final class ProcessWatch: @unchecked Sendable {
-    private let lock = NSLock()
-    private let process: Process
-    private var isReaped = false
-
-    init(_ process: Process) { self.process = process }
-
-    func terminate() {
-        lock.withLock {
-            guard !isReaped, process.isRunning else { return }
-            process.terminate()
-        }
-    }
-
-    func reaped() { lock.withLock { isReaped = true } }
 }
 
 // MARK: - How far an address travels

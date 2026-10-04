@@ -146,7 +146,29 @@ enum CLI {
         return "/bin/sh"
     }
 
-    /// Run the CLI and hand back everything it said.
+    /// What the CLI said, with the two streams kept apart.
+    ///
+    /// The streams are separate because they mean different things. Stdout is
+    /// the answer a caller parses; stderr is commentary, and for a remote
+    /// runner it includes everything `ssh` says on the way (a first-contact
+    /// "Permanently added … to the list of known hosts", OpenSSH 10's
+    /// post-quantum warning). Joined, a successful call stopped decoding.
+    struct Result: Sendable {
+        var ok: Bool
+        /// Stdout only: the thing to decode.
+        var output: String
+        /// Stderr only.
+        var errors: String
+
+        /// Everything it said, for a failure the caller shows in the CLI's own
+        /// words (or a transcript of an install, where progress arrives on
+        /// stderr).
+        var said: String {
+            [output, errors].filter { !$0.isEmpty }.joined(separator: "\n")
+        }
+    }
+
+    /// Run the CLI and hand back what it said.
     ///
     /// Both streams, and the exit status, because the callers here are about
     /// INSTALLING software on someone else's runner: an installer that failed
@@ -154,60 +176,24 @@ enum CLI {
     /// - Parameter stdin: fed to the process and closed. For credentials: an
     ///   argument is visible in `ps` to every process on the machine, and a
     ///   pipe is not.
-    static func run(_ args: [String], stdin: String? = nil) async -> (ok: Bool, output: String) {
-        guard let binary else {
-            return (false, "The farcooler CLI was not found.")
+    /// - Parameter executable: a stand-in for the CLI, for tests.
+    static func run(
+        _ args: [String], stdin: String? = nil, executable: String? = nil,
+        deadline: TimeInterval? = nil
+    ) async -> Result {
+        guard let binary = executable ?? binary else {
+            return Result(ok: false, output: "The farcooler CLI was not found.", errors: "")
         }
-        return await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: binary)
-                process.arguments = args
-                process.environment = environment
-
-                let out = Pipe()
-                let err = Pipe()
-                process.standardOutput = out
-                process.standardError = err
-
-                let input = stdin.map { _ in Pipe() }
-                if let input { process.standardInput = input }
-
-                do {
-                    try process.run()
-                } catch {
-                    continuation.resume(returning: (false, error.localizedDescription))
-                    return
-                }
-
-                // Written and closed before reading stdout, because the child
-                // waits on EOF and we are about to wait on the child.
-                //
-                // The throwing spellings, not `write(_:)` and `closeFile()`.
-                // Those two report failure by raising an Objective-C exception,
-                // which Swift cannot catch — so an installer that exited early,
-                // leaving nothing on the other end of this pipe, would take the
-                // app down while we were writing its password to it. (The
-                // signal that used to do the same job is ignored process-wide;
-                // see `Entry.ignoreSIGPIPE`.) A child that is already gone is
-                // reported by `waitUntilExit` below, in its own words, which is
-                // what the caller is here for.
-                if let input, let stdin {
-                    try? input.fileHandleForWriting.write(contentsOf: Data(stdin.utf8))
-                    try? input.fileHandleForWriting.close()
-                }
-
-                let stdout = out.fileHandleForReading.readDataToEndOfFile()
-                let stderr = err.fileHandleForReading.readDataToEndOfFile()
-                process.waitUntilExit()
-
-                let text = [stdout, stderr]
-                    .compactMap { String(data: $0, encoding: .utf8) }
-                    .joined()
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                continuation.resume(returning: (process.terminationStatus == 0, text))
-            }
+        let ran = await ProcessRunner.run(
+            binary, args, environment: environment, stdin: stdin.map { Data($0.utf8) },
+            deadline: deadline)
+        if let why = ran.launchFailure {
+            return Result(ok: false, output: why, errors: "")
         }
+        func text(_ data: Data) -> String {
+            String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return Result(ok: ran.succeeded, output: text(ran.stdout), errors: text(ran.stderr))
     }
 }
 

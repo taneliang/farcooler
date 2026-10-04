@@ -80,7 +80,7 @@ final class LocalDaemon: ObservableObject {
             let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let build = body["daemonVersion"] as? String
         else {
-            state = .failed(result.output.isEmpty ? "The daemon did not start." : result.output)
+            state = .failed(result.said.isEmpty ? "The daemon did not start." : result.said)
             return state
         }
 

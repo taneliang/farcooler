@@ -94,7 +94,7 @@ final class Runners: ObservableObject {
             // The CLI's own words. It is the thing that talked to ssh, and its
             // message names what to fix — a refused connection, a missing key,
             // an unknown host — where anything written here would be a guess.
-            record(error: result.output.isEmpty ? "Couldn’t reach this runner." : result.output,
+            record(error: result.said.isEmpty ? "Couldn’t reach this runner." : result.said,
                    for: target)
             return
         }
@@ -116,7 +116,8 @@ final class Runners: ObservableObject {
     /// much like one that finished — and a caller that treated the two the
     /// same would report a runner updated when it is not.
     func install(_ target: String) async -> (ok: Bool, output: String) {
-        await CLI.run(["host", "install", target])
+        let result = await CLI.run(["host", "install", target])
+        return (result.ok, result.said)
     }
 
     // MARK: - Letting a runner reach you
@@ -168,7 +169,7 @@ final class Runners: ObservableObject {
             // The CLI's own words on failure, and a fixed sentence on success —
             // the success output would otherwise be the only place the token
             // could surface, and it must not.
-            return result.ok ? "This runner can now notify your devices." : result.output
+            return result.ok ? "This runner can now notify your devices." : result.said
         }
     }
 
@@ -177,7 +178,7 @@ final class Runners: ObservableObject {
         var arguments = target.isEmpty ? [] : ["--host", target]
         arguments += ["push", "forget"]
         let result = await CLI.run(arguments)
-        return result.ok ? "This runner will no longer notify you." : result.output
+        return result.ok ? "This runner will no longer notify you." : result.said
     }
 
     // MARK: - Persistence

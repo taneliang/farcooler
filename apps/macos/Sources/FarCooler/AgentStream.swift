@@ -587,43 +587,17 @@ final class AgentStream: ObservableObject {
     private func runCLI(_ args: [String]) async throws -> Data {
         if let stub = runnerForTesting { return try await stub(args) }
         guard let binary else { throw StreamError.cliMissing }
-        let env = environment
-        let command = hostArguments + args
-
-        return try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: binary)
-                process.arguments = command
-                process.environment = env
-
-                let out = Pipe()
-                let err = Pipe()
-                process.standardOutput = out
-                process.standardError = err
-
-                do {
-                    try process.run()
-                } catch {
-                    continuation.resume(throwing: StreamError.failed(error.localizedDescription))
-                    return
-                }
-
-                let stdout = out.fileHandleForReading.readDataToEndOfFile()
-                let stderr = err.fileHandleForReading.readDataToEndOfFile()
-                process.waitUntilExit()
-
-                if process.terminationStatus != 0 {
-                    let message =
-                        String(data: stderr, encoding: .utf8)?
-                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? "command failed"
-                    continuation.resume(throwing: StreamError.failed(message))
-                    return
-                }
-
-                continuation.resume(returning: stdout)
-            }
+        let ran = await ProcessRunner.run(
+            binary, hostArguments + args, environment: environment)
+        if let why = ran.launchFailure { throw StreamError.failed(why) }
+        if ran.cancelled { throw CancellationError() }
+        if !ran.succeeded {
+            let message =
+                String(data: ran.stderr, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            throw StreamError.failed(message.isEmpty ? "command failed" : message)
         }
+        return ran.stdout
     }
 }
 
