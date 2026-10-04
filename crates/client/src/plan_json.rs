@@ -118,6 +118,7 @@ fn lane_json(plan: &pb::Plan, l: &pb::Lane) -> Value {
             "input_tokens": spend.input_tokens, "output_tokens": spend.output_tokens,
             "cache_read_tokens": spend.cache_read_tokens, "cache_write_tokens": spend.cache_write_tokens,
             "cost_micros": spend.cost_micros, "runs": spend.runs, "unmeasured_agents": spend.unmeasured_agents,
+            "shared_agents": spend.shared_agents,
         },
     })
 }

@@ -119,7 +119,10 @@ class PlanTest {
     fun `spend is tokens first, a price is an estimate, and nothing measured is not reported`() {
         val review = Plan.decode(fixture).lanes[1]
         val dollars = TaskUsageFormat.dollars(31_000_000, java.util.Locale.US)
-        assertEquals("470K tokens · about $dollars estimated · 1 agent not reported", PlanWords.spend(review.spend, java.util.Locale.US))
+        assertEquals(
+            "470K tokens · about $dollars estimated · 1 agent not reported · 1 agent's spend split with other lanes",
+            PlanWords.spend(review.spend, java.util.Locale.US),
+        )
         assertEquals("Not reported", PlanWords.spend(PlanSpend()))
     }
 

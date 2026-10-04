@@ -42,6 +42,7 @@ fn the_plan() -> pb::Plan {
         cost_micros: Some(31_000_000),
         runs: 2,
         unmeasured_agents: 1,
+        shared_agents: 1,
         ..Default::default()
     });
     review.agents = vec![

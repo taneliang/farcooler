@@ -99,6 +99,8 @@ data class PlanSpend(
     val costMicros: Long? = null,
     val runs: Int = 0,
     val unmeasuredAgents: Int = 0,
+    /** Agents also on another lane, whose spend is split evenly across their lanes: the figures hold this lane's part. */
+    val sharedAgents: Int = 0,
 ) {
     val totalTokens: Long get() = inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens
 }
@@ -267,6 +269,7 @@ data class Plan(
                 spend = PlanSpend(
                     n("input_tokens"), n("output_tokens"), n("cache_read_tokens"), n("cache_write_tokens"),
                     s?.get("cost_micros")?.jsonPrimitive?.longOrNull, n("runs").toInt(), n("unmeasured_agents").toInt(),
+                    n("shared_agents").toInt(),
                 ),
             )
         }
@@ -470,6 +473,9 @@ object PlanWords {
         s.costMicros?.takeIf { it > 0 }?.let { parts += "about ${TaskUsageFormat.dollars(it, locale)} estimated" }
         if (s.unmeasuredAgents > 0) {
             parts += if (s.unmeasuredAgents == 1) "1 agent not reported" else "${s.unmeasuredAgents} agents not reported"
+        }
+        if (s.sharedAgents > 0) {
+            parts += if (s.sharedAgents == 1) "1 agent's spend split with other lanes" else "${s.sharedAgents} agents' spend split with other lanes"
         }
         return parts.joinToString(" · ")
     }
