@@ -25,6 +25,10 @@ enum TitleStatus {
     /// The area's height: the regular toolbar's control height (ov-214).
     static let height: CGFloat = 36
 
+    /// How far the area's parts sit in from its capsule's ends (ov-263):
+    /// the ring keeps its few points for the mark and the count.
+    static func capsuleInset(_ form: Form) -> CGFloat { form == .ring ? Spacing.group : Spacing.inset }
+
     /// What the area says, built from what the navigator and the board
     /// already work out.
     struct Model: Equatable {
@@ -290,6 +294,8 @@ struct TitleStatusView: View {
             }
         }
         .font(.system(size: NSFont.systemFontSize))
+        // Clear of the capsule's rounded ends.
+        .padding(.horizontal, TitleStatus.capsuleInset(form))
         // The regular bar's 36 pt control height, to hit; the field inside
         // is the 28 pt of Xcode's activity view.
         .frame(width: form.width, height: TitleStatus.height)
@@ -582,10 +588,10 @@ struct TitleStatusItem: ToolbarContent {
                 .environment(\.statusGlyphStill, true)
                 .id(form)
         }
-        // Plain text on the bar, as Xcode's activity view is: the HIG's
-        // "reduce the use of toolbar backgrounds", and ov-216's rule that
-        // glass is for controls that float, not for a status.
-        .sharedBackgroundVisibility(.hidden)
+        // In the bar's own glass capsule, as Xcode's activity area and
+        // Safari's address field sit in theirs (ov-263): bare text between
+        // the leading and trailing capsules read as floating, unanchored.
+        // The capsule is the toolbar's, not one drawn here.
     }
 }
 
