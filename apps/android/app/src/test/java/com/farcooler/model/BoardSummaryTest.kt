@@ -103,7 +103,7 @@ class BoardSummaryTest {
         )
         val summary = BoardSummary.make(rows, reads = unreadSince(now - day))
         assertEquals(listOf("dec", "rev"), summary.moved.map { it.key })
-        assertEquals(listOf("Needs Decision", "In Review"), summary.moved.map { it.detail })
+        assertEquals(listOf("Needs decision", "In review"), summary.moved.map { it.detail })
         assertEquals(listOf("new"), summary.created.map { it.key })
         assertTrue(summary.finished.isEmpty())
         assertEquals(3, summary.taskCount)
@@ -124,7 +124,7 @@ class BoardSummaryTest {
         val done = BoardSummary.Item("t/done", "t", "k", "T", null, now - 2 * hour - 100_000)
         assertEquals("Done 2h ago", done.whenSaid(now))
         assertEquals("Added 3m ago", BoardSummary.Item("t/created", "t", "k", "T", null, now - 200_000).whenSaid(now))
-        assertEquals("Needs Decision just now", BoardSummary.Item("t/needs_decision", "t", "k", "T", "Needs Decision", now - 10_000).whenSaid(now))
+        assertEquals("Needs decision just now", BoardSummary.Item("t/needs_decision", "t", "k", "T", "Needs decision", now - 10_000).whenSaid(now))
         val activity = BoardSummary.Activity("t", "k", "T", "n", TaskNoteKind.FINDING, "x", now - 12 * 60_000, 2)
         assertEquals("12m ago · +2 more", activity.foot(now))
     }

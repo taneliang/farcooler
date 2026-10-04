@@ -42,7 +42,7 @@ class ActionNotices {
         } catch (e: Exception) {
             e.rethrowIfCancellation()
             _sentences.tryEmit(
-                if (e is DisconnectedException) "$context The connection to this runner dropped."
+                if (e is DisconnectedException) "$context The connection to this runner dropped." // casing ok: sentence after $context
                 else if (e.refusalWord in because) "$context ${because.getValue(e.refusalWord!!)}"
                 else troubleAfter(e.refusalWord, e.message, context).sentence
             )

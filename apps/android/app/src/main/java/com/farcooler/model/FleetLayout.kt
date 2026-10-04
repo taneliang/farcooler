@@ -99,7 +99,7 @@ object FleetLayout {
     }
 
     /** An orchestrator's tab title: "Billing Orchestrator", as its row under Billing says. */
-    fun orchestratorTitle(workspace: String) = "$workspace Orchestrator"
+    fun orchestratorTitle(workspace: String) = "$workspace orchestrator"
 
     /**
      * What each orchestrator's tab is called, by terminal id. Its pane is a

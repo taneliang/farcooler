@@ -185,6 +185,6 @@ class ShellCloseTest {
      */
     @Test
     fun `the confirm button names what it closes`() {
-        assertEquals("Close Terminal", ShellClose.CONFIRM)
+        assertEquals("Close terminal", ShellClose.CONFIRM)
     }
 }

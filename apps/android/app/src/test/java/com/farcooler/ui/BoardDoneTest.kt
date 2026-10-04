@@ -69,13 +69,13 @@ class BoardDoneTest {
         val open = setOf(TaskStatus.DONE)
         val entries = BoardList.entries(board, open, now, reads)
         assertEquals(13, entries.filterIsInstance<BoardListEntry.Card>().size)
-        assertEquals("Show 4 More", entries.filterIsInstance<BoardListEntry.ShowMore>().single().title)
+        assertEquals("Show 4 more", entries.filterIsInstance<BoardListEntry.ShowMore>().single().title)
         val history = entries.filterIsInstance<BoardListEntry.History>().single()
         assertEquals(15, history.total)
         assertEquals("All Done", history.title)
         val more = BoardList.entries(board, open, now, reads, showingMore = setOf(TaskStatus.TODO))
         assertEquals(17, more.filterIsInstance<BoardListEntry.Card>().size)
-        assertEquals("Show Fewer", more.filterIsInstance<BoardListEntry.ShowMore>().single().title)
+        assertEquals("Show fewer", more.filterIsInstance<BoardListEntry.ShowMore>().single().title)
         // Every canceled task drawn: no History row.
         val few = TaskBoard(listOf(TaskBoardColumn(TaskStatus.CANCELLED, listOf(row("c", hour, TaskStatus.CANCELLED)))))
         assertTrue(BoardList.entries(few, setOf(TaskStatus.CANCELLED), now, reads).none { it is BoardListEntry.History })
@@ -98,7 +98,7 @@ class BoardDoneTest {
             listOf(BoardHistory.Period.TODAY, BoardHistory.Period.YESTERDAY, BoardHistory.Period.THIS_WEEK, BoardHistory.Period.EARLIER),
             groups.map { it.period },
         )
-        assertEquals(listOf("Today", "Yesterday", "This Week", "Earlier"), groups.map { it.period.title })
+        assertEquals(listOf("Today", "Yesterday", "This week", "Earlier"), groups.map { it.period.title })
         assertEquals("Mac", BoardHistory.area("Mac: x"))
         assertNull(BoardHistory.area("No area here"))
         assertEquals(listOf("Mac", "Daemon", "Phones"), BoardHistory.areas(rows))

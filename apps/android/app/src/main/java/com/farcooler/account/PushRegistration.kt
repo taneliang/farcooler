@@ -123,13 +123,13 @@ class PushRegistration(
         )
         _registered.value = ok
         _lastError.value =
-            if (ok) null else "Could not tell the relay how to reach this device."
+            if (ok) null else "Couldn’t turn on notifications for this device."
     }
 
     fun unavailable(reason: String?) {
         _registered.value = false
         _lastError.value =
-            "This build has no Firebase project, so notifications cannot reach this device " +
+            "This build has no Firebase project, so notifications can’t reach this device " +
                 "while the app is closed."
     }
 

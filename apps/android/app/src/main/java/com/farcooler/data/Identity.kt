@@ -83,7 +83,7 @@ object Identity {
         read()?.let { return it }
         val name = deviceName()
         val pair = ClientCore.generateKey(name) ?: run {
-            lastError = Trouble("This device could not generate an SSH key.")
+            lastError = Trouble("This device couldn’t make an SSH key.")
             return null
         }
         if (!write(pair.first)) return null
@@ -138,7 +138,7 @@ object Identity {
             // this device is authorized again. Saying so is what stops that
             // reading as a mysterious rejection.
             lastError =
-                Trouble("The stored SSH key could not be read; this device needs authorizing again.")
+                Trouble("This device’s SSH key couldn’t be read. Connect this device again.")
             preferences.edit().remove(CIPHERTEXT).remove(IV).apply()
             null
         }

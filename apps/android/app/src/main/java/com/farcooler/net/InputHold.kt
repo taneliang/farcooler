@@ -200,7 +200,7 @@ class InputHold {
                 } else {
                     "The runner didn’t take your typing."
                 }
-                Line(if (truncated) "$why Only the first 4 KB is kept." else why, holding = true)
+                Line(if (truncated) "$why Only the first 4 KB is kept." else why, holding = true) // casing ok: sentence after $why
             }
             maybeLost -> Line("Some typing may not have reached the runner.", holding = false)
             else -> null

@@ -659,7 +659,7 @@ private fun TaskChip(task: TaskRef, onOpen: (() -> Unit)?) {
                 else Modifier.clickable(
                     interactionSource = presses,
                     indication = null,
-                    onClickLabel = "Open Task",
+                    onClickLabel = "Open task",
                     role = Role.Button,
                     onClick = onOpen,
                 )

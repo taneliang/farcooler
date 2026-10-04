@@ -362,7 +362,7 @@ private fun OrchestratorActions(
         IconButton(onClick = { open = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More") }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(
-                text = { Text("Open Worktree") },
+                text = { Text("Open worktree") },
                 onClick = {
                     open = false
                     onOpenWorktree(TerminalRef(connection.host.id, live.worktreeId, terminal.id))
@@ -370,7 +370,7 @@ private fun OrchestratorActions(
             )
             if (SeatAction.REPLACE in seatActions(seat, mayControl)) {
                 DropdownMenuItem(
-                    text = { Text("Replace…") },
+                    text = { Text("Replace") },
                     onClick = {
                         open = false
                         replacing = true
@@ -497,7 +497,7 @@ private fun OrchestratorEmpty(
 private fun ReplaceButton(availability: HarnessAvailability, onReplace: (OrchestratorHarness) -> Unit) {
     var picking by remember { mutableStateOf(false) }
     Box {
-        OutlinedButton(onClick = { picking = true }) { Text("Replace…") }
+        OutlinedButton(onClick = { picking = true }) { Text("Replace") }
         HarnessMenu(expanded = picking, availability = availability, onDismiss = { picking = false }, onPick = onReplace)
     }
 }

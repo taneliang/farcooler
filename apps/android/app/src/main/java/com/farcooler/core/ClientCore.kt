@@ -175,7 +175,7 @@ class ClientCore : TerminalTransport {
         val result =
             submit(onProgress) { NativeClient.nativePasteFile(it, terminal, name, mime, data) }
         return result["path"]?.jsonPrimitive?.contentOrNull
-            ?: throw CoreException("The client core returned something unreadable.")
+            ?: throw CoreException("Far Cooler couldn’t read the reply.")
     }
 
     /**
@@ -265,7 +265,7 @@ class ClientCore : TerminalTransport {
         val h = ensureHandle()
         if (h == 0L) {
             throw CoreException(
-                if (NativeLibrary.loaded) "The client core could not be started."
+                if (NativeLibrary.loaded) "Far Cooler couldn’t start on this device."
                 else "This build has no Far Cooler core for this device’s processor."
             )
         }
@@ -286,7 +286,7 @@ class ClientCore : TerminalTransport {
             }
             ticket
         }
-        if (ticket == 0L) throw CoreException("The client core returned something unreadable.")
+        if (ticket == 0L) throw CoreException("Far Cooler couldn’t read the reply.")
         try {
             return result.await()
         } finally {
@@ -356,7 +356,7 @@ class ClientCore : TerminalTransport {
                 waiter.complete(result)
             } else {
                 val message =
-                    line["error"]?.jsonPrimitive?.contentOrNull ?: "the host refused the request"
+                    line["error"]?.jsonPrimitive?.contentOrNull ?: "the runner refused the request"
                 val lost = line["disconnected"]?.jsonPrimitive?.booleanOrNull == true
                 val word = com.farcooler.model.RunnerRefusal.wordInAnswerLine(line)
                 // Only a connect's answer carries `trouble`.

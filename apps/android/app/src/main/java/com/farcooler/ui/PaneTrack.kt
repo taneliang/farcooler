@@ -209,7 +209,7 @@ fun trackFleet(
 ): ShellFleet {
     val terminals = worktree?.terminals.orEmpty().filterNot { it.isChangesPane }
     val tabs = buildList {
-        add(ShellTab(id = Pane.CHANGES_ID, title = "Diff", mark = null))
+        add(ShellTab(id = Pane.CHANGES_ID, title = "Changes", mark = null))
         terminals.forEach {
             add(ShellTab(id = Pane.Terminal(it.id).id, title = titles[it.id] ?: it.label, mark = null))
         }

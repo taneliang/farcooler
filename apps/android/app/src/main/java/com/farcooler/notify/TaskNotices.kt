@@ -96,11 +96,11 @@ object TaskNotices {
 
     /** The switch's name in Settings. */
     fun title(event: String): String = when (event) {
-        "decision" -> "Needs a Decision"
-        "review" -> "Ready for Review"
+        "decision" -> "Needs a decision"
+        "review" -> "Ready for review"
         "blocked" -> "Blocked"
         "done" -> "Done"
-        "new" -> "New Task"
+        "new" -> "New task"
         else -> event
     }
 
@@ -164,7 +164,7 @@ object TaskNotices {
             }
             val input = RemoteInput.Builder(REMOTE_INPUT).setLabel("Your answer").build()
             builder.addAction(
-                answerAction("Answer…", answerIntent(context, notice, tag, ACTION_TEXT, -1, mutable = true), input)
+                answerAction("Answer", answerIntent(context, notice, tag, ACTION_TEXT, -1, mutable = true), input)
             )
         }
         runCatching { NotificationManagerCompat.from(context).notify(tag, 0, builder.build()) }
@@ -217,7 +217,7 @@ object TaskNotices {
         }
         val card = NotificationCompat.Builder(context, channelFor("decision"))
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Couldn’t Send Your Answer")
+            .setContentTitle("Couldn’t send your answer")
             .setContentText(why)
             .setStyle(NotificationCompat.BigTextStyle().bigText(why))
             .setAutoCancel(true)

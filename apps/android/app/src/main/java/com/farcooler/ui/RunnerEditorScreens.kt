@@ -303,7 +303,7 @@ private val PREVIEW_FIXTURE: String = buildString {
     append("$esc[H$esc[2J")
     append("$esc[1;32m~/project$esc[0m $esc[1;34mmain$esc[0m $ claude\r\n")
     append("$esc[2m? for shortcuts$esc[0m\r\n")
-    append("$esc[1;35m*$esc[0m Editing src/main.rs\r\n")
+    append("$esc[1;35m*$esc[0m Editing src/main.rs\r\n") // casing ok: sample terminal text
     append("  $esc[32m+ let theme = Theme::from(config);$esc[0m\r\n")
     append("  $esc[31m- let theme = Theme::default();$esc[0m\r\n")
     append("$esc[33m!$esc[0m $esc[1mDo you want to make this edit?$esc[0m\r\n")
@@ -414,7 +414,7 @@ fun AdapterEditorScreen(
             Multiline("Arguments", argsText) { argsText = it }
             Multiline("Environment (KEY=value)", envText) { envText = it }
             Text(
-                "One per line. This is the half Test can prove.",
+                "One per line. This is the half Test can prove.", // casing ok: the Test button
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -426,8 +426,8 @@ fun AdapterEditorScreen(
             Multiline("Waiting for you", blockedText) { blockedText = it }
             Multiline("Working", workingText) { workingText = it }
             Text(
-                "How Far Cooler recognizes this agent on a screen. Test cannot check these — a " +
-                    "wrong value does not fail, the agent simply stops being recognized and its " +
+                "How Far Cooler recognizes this agent on a screen. Test can’t check these. A " +
+                    "wrong value doesn’t fail. The agent simply stops being recognized and its " +
                     "notifications stop arriving.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,

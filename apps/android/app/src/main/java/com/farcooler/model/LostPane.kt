@@ -41,9 +41,9 @@ object LostPane {
     }
 
     fun title(kind: Kind): String = when (kind) {
-        Kind.LOST -> "Terminal Lost"
-        Kind.EXITED -> "Terminal Ended"
-        Kind.ERROR -> "Terminal Didn’t Start"
+        Kind.LOST -> "Terminal Lost" // casing ok: pinned to test/fixtures/lost-pane.json, shared with Apple
+        Kind.EXITED -> "Terminal Ended" // casing ok: pinned to the shared fixture
+        Kind.ERROR -> "Terminal Didn’t Start" // casing ok: pinned to the shared fixture
     }
 
     fun explanation(kind: Kind): String = when (kind) {

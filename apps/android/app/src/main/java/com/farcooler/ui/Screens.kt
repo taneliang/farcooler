@@ -184,7 +184,7 @@ fun AuthorizeScreen(onJoin: () -> Unit, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Connect This Device") },
+                title = { Text("Connect this device") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -245,7 +245,7 @@ fun AuthorizeScreen(onJoin: () -> Unit, onBack: () -> Unit) {
                 ) {
                     Icon(Icons.Filled.ContentCopy, contentDescription = null, Modifier.size(16.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Copy Public Key")
+                    Text("Copy public key")
                 }
                 Text("On the runner, run:")
                 Mono("echo '<paste>' >> ~/.ssh/authorized_keys")
@@ -376,7 +376,7 @@ fun SettingsScreen(
                         Text("Devices and runners")
                     }
                     TextButton(onClick = { scope.launch { model.account.signOut() } }) {
-                        Text("Sign Out")
+                        Text("Sign out")
                     }
                 }
 
@@ -386,7 +386,7 @@ fun SettingsScreen(
                 // exist.
                 HorizontalDivider()
                 SectionTitle("Devices")
-                Button(onClick = { model.navigate(Route.AddDevice) }) { Text("Add a Device") }
+                Button(onClick = { model.navigate(Route.AddDevice) }) { Text("Add a device") }
                 Text(
                     "Adding a device shows a code for it to scan, and grants only the runners " +
                         "you pick.",
@@ -430,7 +430,7 @@ fun SettingsScreen(
             )
 
             HorizontalDivider()
-            SectionTitle("Agents Without a Task")
+            SectionTitle("Agents without a task")
             SettingRow("When an agent needs you", onAttention) {
                 model.settings.setNotifyOnAttention(it)
                 // The relay hears the master switch as "no task classes".
@@ -779,7 +779,7 @@ internal const val RENDEZVOUS_RECONNECT = "Rendezvous changed. Reconnect your ru
  * held to that by [com.farcooler.ui.RendezvousCopyTest].
  */
 internal const val RENDEZVOUS_FOOTER =
-    "Leave this empty unless Far Cooler has told you to change it. Far Cooler Support will " +
+    "Leave this empty unless Far Cooler has told you to change it. Far Cooler support will " +
         "never ask you to change it."
 
 private fun diagnostics(model: AppModel, connections: List<Connection>): String = buildString {

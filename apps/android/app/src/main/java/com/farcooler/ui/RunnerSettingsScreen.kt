@@ -318,10 +318,10 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
             }
             OutlinedButton(enabled = mayAdminister, onClick = {
                 val taken = themes.map { it.name }.toSet()
-                var name = "${Themes.current.name} Copy"
+                var name = "${Themes.current.name} copy"
                 var n = 2
                 while (taken.contains(name)) {
-                    name = "${Themes.current.name} Copy $n"
+                    name = "${Themes.current.name} copy $n"
                     n += 1
                 }
                 editingTheme = Themes.current.copy(name = name)

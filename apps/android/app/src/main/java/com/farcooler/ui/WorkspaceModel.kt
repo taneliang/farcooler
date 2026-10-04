@@ -40,7 +40,7 @@ sealed interface BoardListEntry {
     /** Under a long section: shows the rest ([hidden] of them), or, showing all, puts them away again. */
     data class ShowMore(val status: TaskStatus, val hidden: Int, val showingAll: Boolean = false) : BoardListEntry {
         override val key: String get() = "show-more/${status.wire}"
-        val title: String get() = if (showingAll) "Show Fewer" else BoardSectionCut.showMoreTitle(hidden)
+        val title: String get() = if (showingAll) "Show fewer" else BoardSectionCut.showMoreTitle(hidden)
     }
 
     /** Under Done or Canceled: "All Done  94 ›", the History page (ov-103). */
@@ -181,7 +181,7 @@ sealed interface OrchestratorSeat {
 
     /**
      * Asked for and not yet confirmed: "Starting Orchestrator…", then after
-     * [SLOW_AFTER_MS] "This is taking longer than usual." with Replace…,
+     * [SLOW_AFTER_MS] "This is taking longer than usual." with Replace,
      * since the seat can stick.
      */
     data class Starting(val slow: Boolean) : OrchestratorSeat
@@ -189,7 +189,7 @@ sealed interface OrchestratorSeat {
     /** Running in [worktreeId]: the tab is its pane. */
     data class Live(val terminal: Terminal, val worktreeId: String) : OrchestratorSeat
 
-    /** Its pane was lost, or its process ended: Restart and Replace…. */
+    /** Its pane was lost, or its process ended: Restart and Replace. */
     data class Lost(val terminal: Terminal, val worktreeId: String) : OrchestratorSeat
 
     companion object {
@@ -219,7 +219,7 @@ sealed interface OrchestratorSeat {
             }
             // A seat the runner names with no pane in the fleet was never
             // confirmed. This phone can't say how long ago it was taken, so
-            // Replace… is offered at once; one it asked for itself waits its
+            // Replace is offered at once; one it asked for itself waits its
             // thirty seconds first.
             if (startedAt != null) return Starting(slow = now - startedAt >= SLOW_AFTER_MS)
             if (seated != null) return Starting(slow = true)
@@ -247,7 +247,7 @@ enum class OrchestratorHarness(val wire: String, val title: String) {
  * never a match on it.
  */
 fun orchestratorRefusal(word: String?, what: String?, name: String, replace: Boolean): String = when {
-    what == "orchestrator_taken" -> "$name already has an orchestrator. Choose Replace to start a new one."
+    what == "orchestrator_taken" -> "$name already has an orchestrator. Choose Replace to start a new one." // casing ok: the button's name
     what == "orchestrator_home" -> "The runner couldn’t make $name’s folder, so no orchestrator started."
     word == "not-found" -> "$name isn’t on this runner anymore."
     word == "capability-unsupported" ->

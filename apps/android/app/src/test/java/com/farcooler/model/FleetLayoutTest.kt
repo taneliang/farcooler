@@ -99,7 +99,7 @@ class FleetLayoutTest {
     @Test
     fun anOrchestratorsTabIsNamedForItsWorkspace() {
         val headings = FleetLayout.of(fleet, emptyMap())
-        assertEquals(mapOf("orch-b" to "Billing Orchestrator"), FleetLayout.orchestratorTitles(headings))
+        assertEquals(mapOf("orch-b" to "Billing orchestrator"), FleetLayout.orchestratorTitles(headings))
     }
 
     /**
@@ -112,7 +112,7 @@ class FleetLayoutTest {
         val checkout = fleet.worktrees.first { it.id == "checkout" }
         assertNull(FleetLayout.noTerminalsNote(checkout, titles))
         val managed = checkout.copy(terminals = checkout.terminals.filter { it.id == "orch-b" })
-        assertEquals("Billing Orchestrator runs here", FleetLayout.noTerminalsNote(managed, titles))
+        assertEquals("Billing orchestrator runs here", FleetLayout.noTerminalsNote(managed, titles))
         val two = managed.copy(terminals = managed.terminals + managed.terminals[0].copy(id = "orch-c"))
         assertEquals(
             "2 orchestrators run here",

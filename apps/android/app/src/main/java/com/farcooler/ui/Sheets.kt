@@ -728,7 +728,7 @@ fun NewWorktreeSheet(
                 TextButton(
                     enabled = !working,
                     onClick = { picking = true },
-                ) { Text("Resume an existing branch…") }
+                ) { Text("Resume an existing branch") }
             }
 
             Text(

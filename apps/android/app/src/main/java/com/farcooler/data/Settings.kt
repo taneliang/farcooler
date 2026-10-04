@@ -18,7 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 enum class TerminalFontChoice(val wire: String, val label: String) {
     IOSEVKA("iosevka", "Iosevka"),
-    SYSTEM("system", "System Monospaced");
+    SYSTEM("system", "System monospace");
 
     companion object {
         fun parse(raw: String?): TerminalFontChoice =

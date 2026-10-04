@@ -930,7 +930,7 @@ private fun SendControls(
         return
     }
 
-    val sendLabel = if (state.failure == null) "Send" else "Try Again"
+    val sendLabel = if (state.failure == null) "Send" else "Send again"
     // Only the panes with a composer on screen. A pane showing its raw terminal
     // is a perfectly good target for a SEND and has no field to put anything in
     // — see `ReviewAgentTarget.showsChat`.
@@ -948,7 +948,7 @@ private fun SendControls(
         if (composerTargets.isNotEmpty()) {
             AgentAction(
                 label = "Put in composer",
-                oneLabel = { "Put in ${it.name}" },
+                oneLabel = { "Put in ${it.name}’s composer" },
                 icon = Icons.Outlined.Edit,
                 targets = composerTargets,
                 prominent = false,

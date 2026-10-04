@@ -126,7 +126,7 @@ fun FleetDrawer(
             LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 8.dp)) {
                 item(key = "needs-you") {
                     ListItem(
-                        headlineContent = { Text("Needs You") },
+                        headlineContent = { Text("Needs you") },
                         trailingContent = {
                             if (rows.isNotEmpty()) {
                                 Text(
@@ -158,7 +158,7 @@ fun FleetDrawer(
                     Text("This device")
                 }
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = onAuthorize) { Text("Connect This Device") }
+                TextButton(onClick = onAuthorize) { Text("Connect this device") }
             }
         }
     }
@@ -309,7 +309,7 @@ internal fun WorktreeList(
                     TextButton(onClick = { showQuickTask = true }) {
                         Icon(Icons.Filled.AutoAwesome, null, Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("New Worktree…")
+                        Text("New worktree")
                     }
                     Spacer(Modifier.weight(1f))
                     IconButton(onClick = { showNewWorktree = true }) {
@@ -539,7 +539,7 @@ internal fun RunnerStatusRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Row {
-                    TextButton(onClick = onReconnectNow) { Text("Reconnect Now") }
+                    TextButton(onClick = onReconnectNow) { Text("Reconnect now") }
                     TextButton(onClick = onEdit) { Text("Edit") }
                 }
             }
@@ -556,7 +556,7 @@ internal fun RunnerStatusRow(
                     fontFamily = FontFamily.Monospace,
                 )
                 Text(
-                    "Check it on the host: " +
+                    "Check it on the runner: " +
                         "ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -636,7 +636,7 @@ internal fun RunnerStatusRow(
                         // works, which is this device asking to be added again.
                         Connection.Failure.NO_NODE_KEY -> Unit
 
-                        else -> TextButton(onClick = onRetry) { Text("Try Again") }
+                        else -> TextButton(onClick = onRetry) { Text("Try again") }
                     }
                     TextButton(onClick = onEdit) { Text("Edit") }
                 }
@@ -909,7 +909,7 @@ private fun WorktreeHeader(
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(
-                    text = { Text("New Terminal…") },
+                    text = { Text("New terminal") },
                     onClick = {
                         menu = false
                         onNewTerminal()
@@ -921,7 +921,7 @@ private fun WorktreeHeader(
                 // work is worse than one that is not there.
                 if (entry.worktree.repository != null && entry.worktree.branch.isNotBlank()) {
                     DropdownMenuItem(
-                        text = { Text("Stack & pull request") },
+                        text = { Text("Stack and pull request") },
                         onClick = {
                             menu = false
                             onStack()
@@ -948,7 +948,7 @@ private fun WorktreeHeader(
                     DropdownMenuItem(
                         text = {
                             Text(
-                                "Remove Worktree…",
+                                "Remove worktree",
                                 color = MaterialTheme.colorScheme.error,
                             )
                         },

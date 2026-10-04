@@ -342,7 +342,7 @@ class Connection(
              * without answering it. [KEY_NOT_TRUSTED].
              */
             fun declined(runner: String): String =
-                "The key $runner presented has not been trusted on this device. " +
+                "The key $runner presented hasn’t been trusted on this device. " +
                     "Far Cooler won’t connect until it is."
 
             /** Somebody stopped waiting out a dial. [STOPPED]. */
@@ -693,7 +693,7 @@ class Connection(
         )
         refresh()
         return data["id"]?.jsonPrimitive?.contentOrNull
-            ?: throw com.farcooler.core.CoreException("The runner started an orchestrator but did not name it.")
+            ?: throw com.farcooler.core.CoreException("The runner started an orchestrator but didn’t name it.")
     }
 
     /** A runner notice, on the core's thread. Boards and needs-you read these; see [ClientCore.onNotice]. */
@@ -871,7 +871,7 @@ class Connection(
                 // whose subject is a runner that never got asked anything.
                 _phase.value = Phase.Failed(
                     Identity.lastError?.sentence
-                        ?: "This device has no SSH key and one could not be generated.",
+                        ?: "This device has no SSH key and one couldn’t be made.",
                     Failure.NO_IDENTITY,
                 )
             }
@@ -968,7 +968,7 @@ class Connection(
         if (key == null) {
             _phase.value = Phase.Failed(
                 Identity.lastError?.sentence
-                    ?: "This device has no SSH key and one could not be generated.",
+                    ?: "This device has no SSH key and one couldn’t be made.",
                 Failure.NO_IDENTITY,
             )
             return
@@ -1933,7 +1933,7 @@ class Connection(
         if (workspace != null) pairs += "workspace" to workspace
         val data = core.call("worktree.create", args(*pairs.toTypedArray()))
         return data["id"]?.jsonPrimitive?.contentOrNull
-            ?: throw com.farcooler.core.CoreException("The host created a worktree but did not name it.")
+            ?: throw com.farcooler.core.CoreException("The runner created a worktree but didn’t name it.")
     }
 
     suspend fun createTerminal(worktree: String, title: String, preset: String): String {
@@ -1942,7 +1942,7 @@ class Connection(
             args("worktree" to worktree, "title" to title, "preset" to preset),
         )
         return data["id"]?.jsonPrimitive?.contentOrNull
-            ?: throw com.farcooler.core.CoreException("The host started a terminal but did not name it.")
+            ?: throw com.farcooler.core.CoreException("The runner started a terminal but didn’t name it.")
     }
 
     /**

@@ -130,7 +130,7 @@ class TaskBoardTest {
             TaskStatus.ORDER.map { it.wire },
         )
         assertEquals(
-            listOf("Needs Decision", "Backlog", "To Do", "In Progress", "In Review", "Done", "Canceled"),
+            listOf("Needs decision", "Backlog", "To do", "In progress", "In review", "Done", "Canceled"),
             TaskStatus.ORDER.map { it.title },
         )
         // A decoded board's columns come out in that order too.

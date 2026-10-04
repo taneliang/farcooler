@@ -118,7 +118,7 @@ fun AddDeviceScreen(model: AppModel, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Add a Device") },
+                title = { Text("Add a device") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -331,7 +331,7 @@ private fun ConfirmScreen(
 
         Text(
             "Far Cooler adds this key to ~/.ssh/authorized_keys on each runner you pick, and " +
-                "changes nothing else. You can add or remove runners later in Settings › Devices.",
+                "changes nothing else. You can add or remove runners later in This device > Devices and runners.", // casing ok: the screen's name
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

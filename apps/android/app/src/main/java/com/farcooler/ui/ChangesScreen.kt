@@ -761,7 +761,7 @@ private fun FileBody(
                 )
                 // `ensure` is the retry: a failure leaves the path unread.
                 TextButton(onClick = onRetry) {
-                    Text("Try Again")
+                    Text("Try again")
                 }
             }
 

@@ -131,7 +131,7 @@ fun NeedsYouScreen(model: AppModel, onOpenDrawer: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Needs You") },
+                title = { Text("Needs you") },
                 navigationIcon = {
                     IconButton(onClick = onOpenDrawer) {
                         Icon(Icons.Outlined.Menu, contentDescription = "Show workspaces")
@@ -314,7 +314,7 @@ internal fun NeedsYouItemRow(
     val scope = rememberCoroutineScope()
     val item = row.item
     val daemon = connection?.daemon?.collectAsStateWithLifecycle()?.value
-    // Below Control scope a runner sends no actions, and "Answer…" would be
+    // Below Control scope a runner sends no actions, and "Answer" would be
     // refused. Unknown is not "read": see `DaemonBuild.grantedScope`.
     val mayAnswer = daemon?.grantedScope != "read" && connection != null
     val buttons = NeedsYouAnswer.buttons(item, mayAnswer)
@@ -443,7 +443,7 @@ internal fun NeedsYouItemRow(
                             }
                         } else {
                             OutlinedButton(onClick = { writing = true }, enabled = sending == null) {
-                                Text("Answer…")
+                                Text("Answer")
                             }
                         }
                     is NeedsYouButton.Open -> TextButton(onClick = onOpen) { Text(button.title) }
@@ -495,10 +495,10 @@ private fun subject(row: NeedsYouRow): String? {
 
 private fun kindTitle(kind: NeedsYouKind): String = when (kind) {
     NeedsYouKind.ASK -> "Asking to use a tool"
-    NeedsYouKind.BLOCKED -> "Needs You"
+    NeedsYouKind.BLOCKED -> "Needs you"
     NeedsYouKind.DECISION -> "Needs a decision"
     NeedsYouKind.REVIEW -> "Ready for review"
-    NeedsYouKind.UNKNOWN -> "Needs You"
+    NeedsYouKind.UNKNOWN -> "Needs you"
 }
 
 /** Amber for what waits on you, the review ink for a review. */

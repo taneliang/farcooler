@@ -423,7 +423,7 @@ private fun SendFailureRow(message: String, onRetry: () -> Unit, onDismiss: () -
             color = MaterialTheme.colorScheme.onErrorContainer,
             modifier = Modifier.weight(1f),
         )
-        TextButton(onClick = onRetry) { Text("Try Again") }
+        TextButton(onClick = onRetry) { Text("Try again") }
         IconButton(onClick = onDismiss) {
             Icon(
                 Icons.Outlined.Close,
@@ -1290,7 +1290,7 @@ internal fun adapterBadgeLabel(backend: String?): String? = when {
 /** What a screen reader is told, since two words on their own explain nothing. */
 internal fun adapterBadgeDescription(backend: String?): String? = when (adapterBadgeLabel(backend)) {
     "Native" -> "Native: driven through $backend’s own protocol, with no adapter"
-    "ACP" -> "ACP: driven through an Agent Client Protocol adapter"
+    "ACP" -> "ACP: driven through an Agent Client Protocol adapter" // casing ok: a protocol's name
     else -> null
 }
 

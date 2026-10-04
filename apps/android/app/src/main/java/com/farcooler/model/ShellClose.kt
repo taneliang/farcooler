@@ -44,7 +44,7 @@ object ShellClose {
      * The button that does it. Title case, and it says the noun: a bare `Close`
      * in a dialog raised by a long press is a word with nothing attached to it.
      */
-    const val CONFIRM = "Close Terminal"
+    const val CONFIRM = "Close terminal"
 
     /**
      * Whether closing this pane must be confirmed first.
@@ -75,7 +75,7 @@ object ShellClose {
         if (!mustAsk(terminal)) return null
         return Question(
             title = "Close “${terminal.label}”?",
-            message = "${running(terminal, now)} Closing stops it and removes the tab. " +
+            message = "${running(terminal, now)} Closing stops it and removes the tab. " + // casing ok: sentence after a template
                 "There’s no undo.",
         )
     }

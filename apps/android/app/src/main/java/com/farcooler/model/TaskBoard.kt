@@ -31,11 +31,11 @@ import kotlinx.serialization.json.longOrNull
  * an eighth; see [UnreadableTaskRow].
  */
 enum class TaskStatus(val wire: String, val title: String) {
-    NEEDS_DECISION("needs_decision", "Needs Decision"),
+    NEEDS_DECISION("needs_decision", "Needs decision"),
     BACKLOG("backlog", "Backlog"),
-    TODO("todo", "To Do"),
-    IN_PROGRESS("in_progress", "In Progress"),
-    IN_REVIEW("in_review", "In Review"),
+    TODO("todo", "To do"),
+    IN_PROGRESS("in_progress", "In progress"),
+    IN_REVIEW("in_review", "In review"),
     DONE("done", "Done"),
     CANCELLED("cancelled", "Canceled");
 
@@ -806,7 +806,7 @@ object BoardDone {
 object BoardSectionCut {
     const val LIMIT = 10
 
-    fun showMoreTitle(hidden: Int): String = "Show $hidden More"
+    fun showMoreTitle(hidden: Int): String = "Show $hidden more"
 
     data class Cut(val rows: List<TaskRow>, val hidden: Int, val history: Int?)
 
@@ -833,7 +833,7 @@ object BoardSectionCut {
  * narrowed by the area its title names.
  */
 object BoardHistory {
-    enum class Period(val title: String) { TODAY("Today"), YESTERDAY("Yesterday"), THIS_WEEK("This Week"), EARLIER("Earlier") }
+    enum class Period(val title: String) { TODAY("Today"), YESTERDAY("Yesterday"), THIS_WEEK("This week"), EARLIER("Earlier") }
 
     data class Group(val period: Period, val rows: List<TaskRow>)
 

@@ -106,14 +106,14 @@ class Account(context: Context) {
     fun signIn(context: Context) {
         if (clientId.isEmpty()) {
             _lastError.value =
-                "This build has no WorkOS client id. Set farcooler.workosClientId when building."
+                "Sign-in isn’t available in this build."
             return
         }
         val verifier = randomVerifier()
         val challenge = verifier?.let(::challengeFor)
         val state = randomVerifier()
         if (verifier == null || challenge == null || state == null) {
-            _lastError.value = "Could not start sign-in."
+            _lastError.value = "Couldn’t start sign-in."
             return
         }
         pendingVerifier = verifier
@@ -165,11 +165,11 @@ class Account(context: Context) {
             // Someone closing the tab is someone changing their mind, and
             // telling them they failed at it is obnoxious. Only say something
             // when a code came back and could not be used.
-            if (code != null) _lastError.value = "Sign-in did not complete."
+            if (code != null) _lastError.value = "Sign-in didn’t finish."
             return true
         }
         if (state != expected) {
-            _lastError.value = "Sign-in did not complete."
+            _lastError.value = "Sign-in didn’t finish."
             return true
         }
 
@@ -178,7 +178,7 @@ class Account(context: Context) {
             put("verifier", JsonPrimitive(verifier))
         }).body
         if (body == null) {
-            _lastError.value = "The relay would not complete the sign-in."
+            _lastError.value = "Couldn’t finish signing in. Try again."
             return true
         }
         store(body)

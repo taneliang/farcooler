@@ -40,7 +40,7 @@ data class BoardSummary(
         val detail: String? = null,
         val atMs: Long,
     ) {
-        /** "Done 2h ago", "Needs Decision 5m ago", "Added 3h ago". */
+        /** "Done 2h ago", "Needs decision 5m ago", "Added 3h ago". */
         fun whenSaid(nowMs: Long): String =
             "${detail ?: if (id.endsWith("/done")) "Done" else "Added"} ${TaskRow.ago(nowMs - atMs)}"
     }

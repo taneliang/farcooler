@@ -57,7 +57,7 @@ class TaskNoticesTest {
         assertEquals(listOf("decision", "blocked", "done"), events(true))
         // The master switch off is no classes at all, at the relay too.
         assertEquals(emptyList<String>(), events(false))
-        assertEquals(listOf("Needs a Decision", "Ready for Review", "Blocked", "Done", "New Task"), TaskNotices.EVENTS.map(TaskNotices::title))
+        assertEquals(listOf("Needs a decision", "Ready for review", "Blocked", "Done", "New task"), TaskNotices.EVENTS.map(TaskNotices::title))
     }
 
     @Test
@@ -102,7 +102,7 @@ class TaskNoticesTest {
     @Test
     fun everyAnswerButtonNeedsTheDeviceUnlocked() {
         val option = TaskNotices.answerAction("pdfkit", null, null)
-        val typed = TaskNotices.answerAction("Answer…", null, null)
+        val typed = TaskNotices.answerAction("Answer", null, null)
         assertTrue(option.isAuthenticationRequired)
         assertTrue(typed.isAuthenticationRequired)
     }

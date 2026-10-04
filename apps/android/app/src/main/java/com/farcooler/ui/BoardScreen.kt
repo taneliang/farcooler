@@ -898,7 +898,7 @@ fun TaskDetailScreen(
 }
 
 /**
- * "Answer…" on a task in Needs Decision whose runner didn't list the
+ * "Answer" on a task in Needs Decision whose runner didn't list the
  * decision: a typed answer, sent as an `answer` note.
  */
 @Composable
@@ -911,7 +911,7 @@ private fun AnswerDecision(connection: Connection, row: TaskRow) {
         if (sending) {
             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
         } else {
-            OutlinedButton(onClick = { writing = true }) { Text("Answer…") }
+            OutlinedButton(onClick = { writing = true }) { Text("Answer") }
         }
         refusal?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
     }

@@ -261,7 +261,7 @@ sealed interface NeedsYouButton {
     /** A decision's options past the third, behind one "More" menu. */
     data class More(val actions: List<NeedsYouAction>) : NeedsYouButton
 
-    /** A decision with no options: the answer is typed. "Answer…" */
+    /** A decision with no options: the answer is typed. "Answer" */
     data object Write : NeedsYouButton
 
     /** Goes to it and sends nothing: "Open", or "Review" for a review. */
@@ -275,7 +275,7 @@ object NeedsYouAnswer {
     /**
      * An item's buttons. [mayAnswer] false is a reader below Control scope,
      * who sees the item and Open, and nothing that writes (spec §2.5) — the
-     * runner already sent it no actions, and "Answer…" would be refused.
+     * runner already sent it no actions, and "Answer" would be refused.
      *
      * A review only ever opens: the inbox opens a review and never approves
      * one (ruling 2).
