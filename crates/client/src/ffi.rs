@@ -2481,6 +2481,11 @@ fn push_call(
             if let Some(what) = reason.what() {
                 line["what"] = json!(what);
             }
+            // No answer by the call's deadline (ov-147): not a refusal, so no
+            // `code`, and not a dropped link. Present only when true.
+            if matches!(reason, Lost::Call(SessionError::TimedOut { .. })) {
+                line["timed_out"] = json!(true);
+            }
             line
         }
     };

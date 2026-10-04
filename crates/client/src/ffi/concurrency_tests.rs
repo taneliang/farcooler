@@ -186,3 +186,16 @@ fn a_runner_that_goes_away_fails_every_waiting_call_promptly() {
     assert!(!unsafe { farcooler_client_connected(rig.handle) }, "the dead session is still in the slot");
     unsafe { farcooler_client_free(rig.handle) };
 }
+
+#[test]
+fn a_missed_deadline_crosses_as_its_own_flag_and_not_a_drop() {
+    let queue = Arc::new(std::sync::Mutex::new(VecDeque::new()));
+    let late = SessionError::TimedOut { method: "changes.file_diff".into(), after: Duration::from_secs(120) };
+    push_call(&queue, 7, Err(Lost::Call(late)), false);
+    push_call(&queue, 8, Err(Lost::Call(SessionError::Protocol("x".into()))), false);
+    let lines: Vec<Value> = locked(&queue).iter().map(|l| serde_json::from_str(l).unwrap()).collect();
+    assert_eq!(lines[0]["timed_out"], true, "{}", lines[0]);
+    assert_eq!(lines[0]["disconnected"], false);
+    assert!(lines[0].get("code").is_none(), "no runner refused anything");
+    assert!(lines[1].get("timed_out").is_none(), "absent unless true: {}", lines[1]);
+}
