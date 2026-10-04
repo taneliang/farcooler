@@ -155,4 +155,18 @@ class AgentSendingTest {
             PermissionAnswering.outcome("resource-conflict"),
         )
     }
+
+    /**
+     * A prompt to a pane whose agent stopped says so, not "Couldn’t reach
+     * this runner" about a runner that answered (ov-174).
+     */
+    @Test
+    fun aPromptToAStoppedAgentSaysSo() {
+        val stopped = AgentSending.messageFor(
+            CoreException("The agent stopped. Restart it, then try again.", word = "agent-stopped"))
+        assertEquals("The agent stopped. Restart it, then try again.", stopped)
+        val connecting = AgentSending.messageFor(
+            CoreException("no agent is connected to this pane", word = "agent-not-connected"))
+        assertFalse(connecting, connecting.contains("reach this runner"))
+    }
 }

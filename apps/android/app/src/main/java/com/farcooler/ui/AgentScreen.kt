@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Warning
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -244,6 +245,9 @@ fun AgentScreen(
                         onShowTerminal = terminal?.let { pane ->
                             { scope.launch { connection.setPaneMode(pane, "terminal") } }
                         },
+                        onRestart = terminal?.let { pane ->
+                            { scope.launch { connection.setPaneMode(pane, "agent") } }
+                        },
                     )
                 } else {
                     LazyColumn(
@@ -331,6 +335,14 @@ fun AgentScreen(
                         ApprovalCard(pending) { optionId -> stream.answer(pending.id, optionId) }
                     }
 
+                // Agent mode again on a pane already in it restarts the agent;
+                // what was queued is sent once it's back.
+                agentStoppedLine(terminal?.agentFailure, transcript.rows.isNotEmpty())?.let { line ->
+                    terminal?.let { pane ->
+                        StoppedRow(line) { scope.launch { connection.setPaneMode(pane, "agent") } }
+                    }
+                }
+
                 sendFailure?.let { failure ->
                     SendFailureRow(
                         message = failure.message,
@@ -400,6 +412,34 @@ private fun SendFailureRow(message: String, onRetry: () -> Unit, onDismiss: () -
                 modifier = Modifier.size(16.dp),
             )
         }
+    }
+}
+
+/** A pane whose agent stopped under its conversation, and Restart. */
+@Composable
+private fun StoppedRow(line: String, onRestart: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.errorContainer)
+            .padding(start = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Outlined.Warning,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onErrorContainer,
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            line,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onErrorContainer,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onRestart) { Text(RESTART) }
     }
 }
 
@@ -517,13 +557,24 @@ internal enum class AgentFailure(val word: String) {
  * the future reads as the generic failure, with the offer to go and look at the
  * terminal — precisely what `adapter-failed` already means.
  */
-internal fun agentFailureState(word: String?): AgentEmptyState? {
+internal fun agentFailureState(word: String?, started: Boolean = false): AgentEmptyState? {
     if (word.isNullOrEmpty()) return null
+    val failure = AgentFailure.of(word) ?: AgentFailure.ADAPTER_FAILED
+    // An agent that died mid-conversation stopped; it didn't fail to start
+    // (ov-174). The runner sends the same word for both.
+    if (started && (failure == AgentFailure.ADAPTER_FAILED || failure == AgentFailure.ADAPTER_SILENT)) {
+        return AgentEmptyState(
+            AgentEmptyState.Mark.ALARM,
+            "The agent stopped",
+            "Restart it to carry on. Messages waiting to send go once it’s back.",
+            action = "Show the terminal",
+        )
+    }
     // Sentence case for the copy and for the button, which is Android's, not
     // Apple's: the pane's own header already says "Show the terminal" and one
     // action with two spellings is two actions to a reader.
     val terminal = "Show the terminal"
-    return when (AgentFailure.of(word) ?: AgentFailure.ADAPTER_FAILED) {
+    return when (failure) {
         AgentFailure.NO_ADAPTER -> AgentEmptyState(
             AgentEmptyState.Mark.ALARM,
             "No chat adapter for this agent",
@@ -555,6 +606,20 @@ internal fun agentFailureState(word: String?): AgentEmptyState? {
         )
     }
 }
+
+/** The label on the button that starts a pane's agent again, in place. */
+internal const val RESTART = "Restart"
+
+/**
+ * The one line a pane whose agent stopped shows under its conversation, or
+ * null: no failure, or no conversation, where [AgentEmpty] says it instead.
+ *
+ * It used to be said only over an empty transcript, so an agent that died
+ * after its first reply left a turn that stopped and nothing saying why
+ * (ov-174).
+ */
+internal fun agentStoppedLine(failure: String?, hasRows: Boolean): String? =
+    if (hasRows) agentFailureState(failure, started = true)?.title else null
 
 /**
  * The four honest states, and the two that are still trying change with how
@@ -657,6 +722,8 @@ private fun AgentEmpty(
     failure: String? = null,
     /** Null before the first fleet lands, and only then. */
     onShowTerminal: (() -> Unit)? = null,
+    /** Agent mode again, which restarts the pane's agent (ov-174). */
+    onRestart: (() -> Unit)? = null,
 ) {
     val state = agentEmptyState(phase, failure)
     Column(
@@ -728,8 +795,13 @@ private fun AgentEmpty(
 
         // The way out, offered and never taken. Only a failure carries one.
         state.action?.let { label ->
-            if (onShowTerminal != null) {
+            // Restart first: it's the one that brings the chat back.
+            if (onRestart != null) {
                 Spacer(Modifier.height(16.dp))
+                Button(onClick = onRestart) { Text(RESTART) }
+            }
+            if (onShowTerminal != null) {
+                Spacer(Modifier.height(if (onRestart != null) 8.dp else 16.dp))
                 OutlinedButton(onClick = onShowTerminal) { Text(label) }
             }
         }

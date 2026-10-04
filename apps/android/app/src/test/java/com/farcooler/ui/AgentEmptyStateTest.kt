@@ -369,4 +369,25 @@ class AgentEmptyStateTest {
             }
         }
     }
+
+    /**
+     * An agent that died mid-conversation says it stopped, on one line under
+     * the conversation, with Restart (ov-174). It was said only over an empty
+     * transcript, as "couldn't start".
+     */
+    @Test
+    fun aStoppedAgentIsSaidUnderItsConversation() {
+        assertEquals("The agent stopped", agentStoppedLine("adapter-failed", hasRows = true))
+        assertEquals("The agent stopped", agentStoppedLine("adapter-silent", hasRows = true))
+        assertEquals("The agent stopped", agentStoppedLine("from-the-future", hasRows = true))
+        assertEquals(
+            "This agent needs you to sign in",
+            agentStoppedLine("not-authenticated", hasRows = true),
+        )
+        assertNull(agentStoppedLine(null, hasRows = true))
+        // With no conversation the full-screen state says it, as it did.
+        assertNull(agentStoppedLine("adapter-failed", hasRows = false))
+        assertEquals("The agent couldn’t start", agentFailureState("adapter-failed")?.title)
+        assertEquals("Restart", RESTART)
+    }
 }

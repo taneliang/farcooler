@@ -103,7 +103,13 @@ enum class RunnerRefusal(val word: String, val sentence: String) {
     INVALID_ARGUMENT(
         "invalid-argument",
         "This runner couldn’t make sense of what Far Cooler asked for. That’s a problem in " +
-            "the app, not in anything you typed.");
+            "the app, not in anything you typed."),
+    /** The pane's agent stopped, and only a restart brings it back (ov-174). */
+    AGENT_STOPPED("agent-stopped", "The agent stopped. Restart it, then try again."),
+    /** The pane's agent hasn't connected yet: a chat still starting. */
+    AGENT_NOT_CONNECTED(
+        "agent-not-connected",
+        "The agent isn’t connected yet. Try again in a moment.");
 
     companion object {
         /**
