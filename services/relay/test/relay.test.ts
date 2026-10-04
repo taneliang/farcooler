@@ -7393,7 +7393,7 @@ describe("the runner's and the card's shared contract fixtures", () => {
     await post('/v1/heartbeat', contract('runner/heartbeat.json'), 'mine')
     expect((await post('/v1/heartbeat', contract('runner/withdraw.json'), 'mine')).status).toBe(200)
     const response = await post('/v1/pulse', {}, contract('registration/ios.json').pulseToken)
-    expect(await response.json()).toEqual({ runners: [] })
+    expect(await response.json()).toEqual({ runners: [], turns: [] })
   })
 
   it('files a running card, updates it, and ends it when its runs retire', async () => {

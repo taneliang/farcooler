@@ -1312,12 +1312,17 @@ async function heartbeat(request: Request, env: Env): Promise<Response> {
   return json({ ok: true })
 }
 
+/// The most agents' outcomes one pulse answer carries: a fleet far larger than
+/// anyone runs, so the answer stays small however long rows linger.
+const PULSE_TURNS_SHOWN = 100
+
 /// Which of an account's runners are beating, what each calls itself, and how
 /// long ago each was heard.
 ///
 /// Read by a phone's widget, which can't see the app's links while the app is
 /// suspended, with the device's pulse token (see `registerDevice`). It reads
-/// names and ages on its own account and nothing else.
+/// names and ages on its own account, and each finished agent's outcome
+/// (`turns`, below), and nothing else.
 ///
 /// **An age, not a timestamp**, so the phone's clock never enters it: the
 /// relay's clock stamped the beat and the relay's clock measures from it.
@@ -1328,6 +1333,14 @@ async function heartbeat(request: Request, env: Env): Promise<Response> {
 /// One entry per runner, by install id where it sent one, and the newest beat
 /// among its tokens. A runner silent for `ROW_RETENTION_MS` is left out, the
 /// age at which the relay forgets its roster rows as well.
+///
+/// **`turns`** (ov-239): how each finished agent's last turn ended, for the
+/// watch, which hears from this relay over this route and no other. One entry
+/// per `done` row on the account whose runner said (`failed` set), newest
+/// first: an opaque terminal id, whether the turn failed, and when the relay
+/// filed it (`at`, epoch ms, the same clock the card's `updatedAt` uses). It
+/// names no runner, label or path. Additive: a client that predates it reads
+/// `runners` and drops the rest, and one that finds none draws what it had.
 ///
 /// Whether a runner is quiet is the phone's call, not this route's:
 /// `RunnerPulse.quietAfter` in AgentKit. The relay states the same rule once
@@ -1373,7 +1386,19 @@ async function pulse(request: Request, env: Env): Promise<Response> {
     const held = newest.get(runner)
     if (!held || row.last_seen_at > held.last_seen_at) newest.set(runner, row)
   }
+  const finished = await env.DB.prepare(
+    `SELECT terminal, failed, updated_at FROM live_activities
+     WHERE account_id = ? AND status = 'done' AND failed IS NOT NULL
+     ORDER BY updated_at DESC LIMIT ?`,
+  )
+    .bind(device.account_id, PULSE_TURNS_SHOWN)
+    .all<{ terminal: string; failed: number; updated_at: number }>()
   return json({
+    turns: (finished.results ?? []).map(row => ({
+      terminal: row.terminal,
+      failed: row.failed === 1,
+      at: row.updated_at,
+    })),
     runners: [...newest.values()]
       .sort((a, b) => a.label.localeCompare(b.label))
       .map(row => ({
