@@ -255,7 +255,7 @@ struct ContentView: View {
             WorktreeToolbar(
                 editor: detailWorktree, onEditorError: { editorError = $0 },
                 changes: changesToolbarState, onChanges: { ws in toggleChangesPane(in: ws) },
-                files: files.toolbar(toolbarWorktree, client: toolbarWorktree.flatMap { store.client(for: $0) }),
+                files: filesToolbarState,
                 onFiles: { ws in files.toggleInspector(for: ws) })
         }
         .titleBarStatus(statusSource, room: room, actions: statusActions, width: $windowWidth)
@@ -1396,6 +1396,12 @@ struct ContentView: View {
             refusal: { TitleConsoleRecipient.refusal(seat: seat?.terminal) },
             recipient: scene?.summary.map { $0.isImplicit ? "Main" : $0.name },
             current: selectedPane?.terminal)
+    }
+
+    /// Show Files in the toolbar (ov-189): drawn by `WorktreeToolbar` and
+    /// counted by `titleStatusRoom`, from the one place.
+    private var filesToolbarState: WorktreeToolbar.Files? {
+        files.toolbar(toolbarWorktree, client: toolbarWorktree.flatMap { store.client(for: $0) })
     }
 
     /// What the status area sizes itself around (`TitleStatusRoom`).
