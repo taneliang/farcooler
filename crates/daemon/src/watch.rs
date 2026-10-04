@@ -5219,6 +5219,7 @@ impl Watcher {
             }
 
             let mut message = wire::terminal_with_agent_state(view, self.service.agents());
+            crate::task_link::stamp_notice_task(&self.service.store, &view.terminal, &mut message);
             message.activity = observed.activity as i32;
             message.activity_changed_at = Some(wire::timestamp(observed.state_since));
             message.turn_started_at = observed.turn_started_at.map(wire::timestamp);

@@ -2402,6 +2402,9 @@ impl Rpc {
         view: &crate::service::TerminalView,
     ) -> farcooler_protocol::v1::Terminal {
         let mut message = wire::terminal_with_agent_state(view, self.service.agents());
+        // The runner's answer to which task this agent's notices fold into,
+        // from the same call `announce` makes, so a list and an event agree.
+        crate::task_link::stamp_notice_task(&self.service.store, &view.terminal, &mut message);
         let (activity, state_since, turn_started_at) = self.watcher.activity(view.terminal.id).await;
         message.activity = activity as i32;
         message.activity_changed_at = state_since.map(wire::timestamp);

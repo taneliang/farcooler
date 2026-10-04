@@ -9,7 +9,8 @@ use farcooler_store::models::{Actor, NoteKind, TaskStatus, TaskUpdate};
 
 use super::*;
 use crate::service::Service;
-use crate::watch::{Quoted, Tapped, Watcher};
+use crate::watch::{Observed, Quoted, Tapped, Watcher};
+use farcooler_transport::Handler;
 
 /// A runner with a Main workspace, its checkout, and one claude pane there.
 async fn a_runner() -> (crate::test_support::ScratchDir, Arc<Service>, Uuid, Uuid, Uuid) {
@@ -502,4 +503,60 @@ async fn a_second_blocker_in_the_same_status_is_news() {
     let heard = task_notices(&mut taps).await;
     assert_eq!(heard.len(), 1, "{heard:#?}");
     assert_eq!(heard[0].subtitle, format!("Blocked on {}", b.key));
+}
+
+/// The same hand-opened agent, in a lane with one open task, read two ways: in
+/// a `terminal.list` reply and in the `TerminalChanged` event the watcher
+/// broadcasts. Both carry the id, because both finishers stamp it; a client
+/// that lists and then watches must never be told two different answers.
+#[tokio::test]
+async fn the_list_and_the_event_agree_on_the_notice_task() {
+    let (_dir, svc, workspace, checkout, _) = a_runner().await;
+    let repo = svc.store.get_worktree(checkout).unwrap().repository_id;
+    let lane = svc.store.create_worktree(repo, "lane", "/tmp/fc-t/ov-112-lane", false).unwrap().id;
+    let task = svc.store.create_task(workspace, "On the lane", Actor::User).unwrap();
+    let update = TaskUpdate {
+        title: task.title.clone(),
+        intent: String::new(),
+        acceptance: Vec::new(),
+        constraints: Vec::new(),
+        labels: Vec::new(),
+        worktree_id: Some(lane),
+    };
+    let task = svc.store.update_task(task.id, task.resource_version, &update).unwrap();
+    let pane = svc.store.create_terminal_for_test(lane, workspace);
+    let bystander = svc.store.create_terminal_for_test(checkout, workspace);
+    let watcher = Watcher::new(svc.clone());
+    let want = Some(bytes::Bytes::copy_from_slice(task.id.as_bytes()));
+
+    // The list.
+    let rpc = crate::rpc::RpcFactory::new(
+        svc.clone(),
+        watcher.clone(),
+        Arc::new(tokio::sync::Notify::new()),
+        farcooler_transport::Peer { client_id: None, scope: pb::Scope::Control },
+    );
+    let listed = rpc
+        .handle(pb::Request {
+            method: "terminal.list".into(),
+            payload: Some(pb::request::Payload::Empty(pb::Empty {})),
+            ..Default::default()
+        })
+        .await;
+    let Some(pb::response::Outcome::Result(pb::Result { value: Some(pb::result::Value::TerminalList(list)) })) =
+        listed.outcome
+    else {
+        panic!("a terminal list, got {listed:?}")
+    };
+    let by_id = |id: Uuid| list.items.iter().find(|t| t.id.as_ref() == id.as_bytes()).expect("listed").clone();
+    assert_eq!(by_id(pane).notice_task_id, want, "the list");
+    assert_eq!(by_id(bystander).notice_task_id, None, "a hand-opened agent in the main checkout notifies as itself");
+
+    // The event.
+    let mut events = watcher.subscribe();
+    watcher.announce(pane, Observed::begin(AgentActivity::Working, 0)).await;
+    let Some(pb::event::Payload::TerminalChanged(changed)) = events.recv().await.unwrap().payload else {
+        panic!("a terminal event")
+    };
+    assert_eq!(changed.notice_task_id, want, "the event");
 }

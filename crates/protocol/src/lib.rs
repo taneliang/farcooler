@@ -454,6 +454,14 @@ pub mod capability {
     /// reads it absent says the runner needs an update to record subagents;
     /// an app keeps its old "No Agent" rule.
     pub const TASK_WORKERS: &str = "task_workers";
+    /// `Terminal.notice_task_id` (ov-112): the task a terminal's own
+    /// notifications fold into, decided by the runner.
+    ///
+    /// Its own capability because an absent field means both "notifies as
+    /// itself" and "a runner too old to say". A client that reads the
+    /// capability absent folds nothing, which at worst shows a duplicate banner
+    /// and never silences one.
+    pub const NOTICE_TASK: &str = "notice_task";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -466,7 +474,7 @@ pub mod capability {
             LAUNCH_PROMPT, TERMINAL_TASK, WORKTREE_FORK_ONLY, WORKSTREAMS, ORCHESTRATOR_HANDOFF,
             NEEDS_YOU, WAKE_ON_ANSWER, STREAM_SIZE_MARKERS, TASK_NOTICES, REPORT, AGENT_USAGE,
             AGENTS_FOUND,
-            TASK_WAITS, TASK_WORKERS,
+            TASK_WAITS, TASK_WORKERS, NOTICE_TASK,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
@@ -1053,6 +1061,15 @@ mod tests {
         ] {
             assert_eq!(capability::for_method(method), Some(capability::WORKSTREAMS), "{method}");
         }
+    }
+
+    /// `Terminal.notice_task_id` is a field, so no method names its capability.
+    /// This is the only thing that keeps the daemon from forgetting to say it
+    /// has the field, which would leave every client folding nothing.
+    #[test]
+    fn notice_task_is_advertised() {
+        assert_eq!(capability::NOTICE_TASK, "notice_task");
+        assert!(capability::ALL.contains(&capability::NOTICE_TASK), "the daemon would not advertise it");
     }
 
     /// Every channel, so a match arm added to one list and forgotten in another

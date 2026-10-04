@@ -61,6 +61,14 @@ pub(crate) fn notice_task(store: &Store, terminal: &Terminal) -> Option<Task> {
     task_of(store, terminal).filter(|t| !matches!(t.status, TaskStatus::Done | TaskStatus::Cancelled))
 }
 
+/// Say on the wire which task `terminal`'s notifications fold into. Called by
+/// both places a terminal message is finished, so the list and the event
+/// cannot disagree.
+pub(crate) fn stamp_notice_task(store: &Store, terminal: &Terminal, message: &mut farcooler_protocol::v1::Terminal) {
+    message.notice_task_id =
+        notice_task(store, terminal).map(|task| bytes::Bytes::copy_from_slice(task.id.as_bytes()));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
