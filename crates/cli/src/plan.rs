@@ -26,7 +26,7 @@
 use std::collections::HashMap;
 
 use clap::{Args, Subcommand, ValueEnum};
-use farcooler_core::usage_words::{NOT_REPORTED, tokens};
+use farcooler_core::usage_words::{NOT_REPORTED, dollars, tokens};
 use farcooler_protocol::capability;
 use farcooler_protocol::v1::{self as pb, request, result};
 use farcooler_transport::ClientError;
@@ -951,10 +951,29 @@ fn spend_words(spend: &pb::LaneSpend) -> String {
         return NOT_REPORTED.to_string();
     }
     let mut said = format!("{} tokens", tokens(total));
+    if let Some(micros) = spend.cost_micros {
+        said.push_str(&format!(" · {} API-equivalent", dollars(micros)));
+    }
     if spend.unmeasured_agents > 0 {
         said.push_str(&format!(" · {} not reported", count(spend.unmeasured_agents as usize, "agent")));
     }
     said
+}
+
+/// A card's part of a lane's spend. A lane's agents are recorded on the lane,
+/// not on a card, so a card's number is the lane's split evenly and says so;
+/// `None` for a lane with fewer than two cards, where the lane's spend is the
+/// card's.
+fn share_words(spend: &pb::LaneSpend, cards: usize) -> Option<String> {
+    let total = spend.input_tokens + spend.output_tokens + spend.cache_read_tokens + spend.cache_write_tokens;
+    if cards < 2 || total == 0 {
+        return None;
+    }
+    let mut said = format!("About {} tokens", tokens(total / cards as u64));
+    if let Some(micros) = spend.cost_micros {
+        said.push_str(&format!(" · {} API-equivalent", dollars(micros / cards as i64)));
+    }
+    Some(format!("{said} a card, the lane\u{2019}s spend split evenly across {cards} cards"))
 }
 
 /// "1 of 2 done": the cancelled cards left out, as the Mac's `PlanWords.total`
@@ -1183,7 +1202,11 @@ fn lane_text(l: &pb::Lane, keys: &Keys, events: &[pb::PlanEvent], now: i64) -> S
         let slice = if c.slice.is_empty() { "whole card".to_string() } else { c.slice.clone() };
         out.push(format!("  {}  {}", keys.of(&c.task_id), slice));
     }
-    out.push(format!("Spend  {}", spend_words(&l.spend.unwrap_or_default())));
+    let spend = l.spend.unwrap_or_default();
+    out.push(format!("Spend  {}", spend_words(&spend)));
+    if let Some(share) = share_words(&spend, l.cards.len()) {
+        out.push(format!("Share  {share}"));
+    }
     if !l.agents.is_empty() {
         let agents: Vec<String> = l
             .agents

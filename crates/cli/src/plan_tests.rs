@@ -457,6 +457,19 @@ fn an_unmeasured_lane_says_not_reported() {
     assert_eq!(spend_words(&some), "1.5K tokens · 1 agent not reported");
 }
 
+/// Dollars follow tokens, and a card's part of a lane is labeled a share.
+#[test]
+fn spend_puts_tokens_first_and_a_card_s_part_is_a_share() {
+    let s = pb::LaneSpend { input_tokens: 3_000, output_tokens: 1_000, cost_micros: Some(40_000), runs: 1, ..Default::default() };
+    assert_eq!(spend_words(&s), "4K tokens · $0.04 API-equivalent");
+    assert_eq!(
+        share_words(&s, 2).as_deref(),
+        Some("About 2K tokens · $0.02 API-equivalent a card, the lane\u{2019}s spend split evenly across 2 cards")
+    );
+    assert_eq!(share_words(&s, 1), None, "one card has the lane\u{2019}s whole spend, not a share of it");
+    assert_eq!(share_words(&pb::LaneSpend::default(), 3), None, "nothing measured is never a share of zero");
+}
+
 /// A lane stuck for over an hour says how long.
 #[test]
 fn a_stale_lane_says_how_long() {

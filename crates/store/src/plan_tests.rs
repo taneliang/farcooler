@@ -248,6 +248,10 @@ fn finished_lanes_age_out_of_the_read() {
 }
 
 fn run_turn(store: &Store, agent: &str, tokens: u64) {
+    run_turn_on(store, agent, tokens, None);
+}
+
+fn run_turn_on(store: &Store, agent: &str, tokens: u64, task_id: Option<Uuid>) {
     store
         .record_turn(&NewTurn {
             key: format!("claude-log:agent:{agent}"),
@@ -255,7 +259,7 @@ fn run_turn(store: &Store, agent: &str, tokens: u64) {
             worktree_id: None,
             repository_id: None,
             workspace_id: None,
-            task_id: None,
+            task_id,
             harness: "claude".into(),
             surface: Surface::Terminal,
             started_at: None,
@@ -295,6 +299,32 @@ fn a_lane_s_spend_is_its_own_agents_runs() {
     assert_eq!(spend.unmeasured_agents, 2, "a2 has no turn yet, and codex reports none");
     run_turn(&store, "a2", 10);
     assert_eq!(store.plan(main, 0).unwrap().lanes[0].spend.unmeasured_agents, 1);
+}
+
+/// A lane's spend is what `usage.report` says for the same agents: the lane
+/// reads `agent_turns` by agent key, the report reads them by the card the
+/// agents are recorded on, and for one card the two are the same sum.
+#[test]
+fn a_lane_s_spend_matches_the_usage_report_for_its_agents() {
+    use crate::usage::UsageFilter;
+    let (store, main, t) = board(2);
+    let l = store
+        .create_lane(main, &NewLane { name: "a".into(), ..Default::default() }, &[LaneCard { task_id: t[0].id, slice: String::new() }], Some(&builder("a1")), Actor::Manager)
+        .unwrap();
+    store.record_lane_agent(l.id, &AgentRecord { role: AgentRole::Fix, ..builder("a2") }, Actor::Manager).unwrap();
+    run_turn_on(&store, "a1", 1000, Some(t[0].id));
+    run_turn_on(&store, "a2", 250, Some(t[0].id));
+    run_turn_on(&store, "other", 77_777, Some(t[1].id));
+
+    let report = store.usage_summary(&UsageFilter { task_id: Some(t[0].id), ..Default::default() }, &[], 0).unwrap().pop().unwrap().totals;
+    let spend = store.plan(main, 0).unwrap().lanes[0].spend;
+    assert_eq!(spend.input_tokens, 1250);
+    assert_eq!(
+        (spend.input_tokens, spend.output_tokens, spend.cache_read_tokens, spend.cache_write_tokens),
+        (report.tokens.input, report.tokens.output, report.tokens.cache_read, report.tokens.cache_write)
+    );
+    assert_eq!(spend.cost_micros, Some(report.cost_reported_micros + report.cost_estimated_micros));
+    assert_eq!(u64::from(spend.runs), report.subagent_runs);
 }
 
 /// An agent recorded again is the same agent: ending it ends it, recording it
