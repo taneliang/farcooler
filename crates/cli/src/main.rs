@@ -30,6 +30,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 mod changes;
+mod draft_prompt;
 mod clients;
 mod report;
 mod task_usage;
@@ -866,9 +867,7 @@ enum TerminalCmd {
         #[arg(long = "image")]
         images: Vec<PathBuf>,
     },
-    /// Leave text in a TUI pane's input box as one paste and never press
-    /// Enter, so a person finishes the sentence. Refused, typing nothing,
-    /// unless the pane is provably an idle agent with an empty box.
+    /// Paste text into a TUI pane's box, never Enter; refused unless safe.
     DraftPrompt { terminal: String, text: String },
     /// Answer a pending agent question, carrying the ids back exactly as the
     /// adapter sent them — inventing one here would make the answer
@@ -3024,20 +3023,7 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
             println!("sent to {}", short(id));
         }
 
-        TerminalCmd::DraftPrompt { terminal, text } => {
-            use farcooler_protocol::v1::agent_prompt_block::Content;
-            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
-            link.call(with(
-                req("terminal.draft_prompt"),
-                request::Payload::AgentPrompt(farcooler_protocol::v1::AgentPrompt {
-                    terminal_id: id_bytes(id),
-                    blocks: vec![farcooler_protocol::v1::AgentPromptBlock { content: Some(Content::Text(text)) }],
-                }),
-            ))
-            .await?;
-            println!("drafted in {}", short(id));
-        }
-
+        TerminalCmd::DraftPrompt { terminal, text } => draft_prompt::run(runner, &terminal, text).await?,
         TerminalCmd::AgentAnswer { terminal, request_id, option_id } => {
             let (mut link, id) = terminal_by_record(runner, &terminal).await?;
             answer_agent(&mut link, id, request_id, option_id).await?;
