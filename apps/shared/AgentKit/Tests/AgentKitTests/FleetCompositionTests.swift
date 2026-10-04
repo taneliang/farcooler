@@ -129,10 +129,11 @@ private func theAppRanksAndCountsTheFleetAsTheTableSays(_ fleet: Table.Case) thr
     #expect(snapshot.reviewsWaiting == fleet.expect.reviewsWaiting)
 
     // The one thing a small widget or a complication says: the header's count
-    // when anything needs you, else what's working, else nothing. Reviews
-    // are the `reviewsWaiting` line above.
+    // when anything needs you, else the worktrees to review (ov-181), else
+    // what's working, else nothing. The table has no failed turns.
     let glance: FleetSnapshot.Glance? =
         fleet.expect.header > 0 ? .blocked(fleet.expect.header)
+        : (fleet.expect.reviewsWaiting ?? 0) > 0 ? .review(fleet.expect.reviewsWaiting ?? 0)
         : fleet.expect.working > 0 ? .working(fleet.expect.working) : nil
     #expect(snapshot.glance(at: now) == glance)
 }
