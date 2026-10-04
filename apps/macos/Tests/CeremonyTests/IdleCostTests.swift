@@ -91,6 +91,30 @@ struct IdleCostTests {
         #expect(shown.displayLink?.isPaused == false, "a pane shown again didn't resume")
     }
 
+    /// A visible pane whose program is quiet stops ticking after a moment,
+    /// and the next byte starts it again.
+    @Test func aQuietPaneRestsUntilItsScreenMoves() throws {
+        WindowVisibility.assumeVisible = true
+        defer { WindowVisibility.assumeVisible = false }
+        let (view, window) = Self.paneInWindow()
+        _ = window
+        let link = try #require(view.displayLink)
+        view.tick()
+        #expect(!link.isPaused, "a pane rested on its first tick")
+
+        for _ in 0..<TerminalRenderView.ticksBeforeResting { view.tick() }
+        #expect(link.isPaused, "a quiet pane is still ticking")
+
+        view.feed(Array("hello".utf8))
+        #expect(!link.isPaused, "new bytes didn't wake a resting pane")
+        view.tick()
+        #expect(!link.isPaused)
+
+        for _ in 0..<TerminalRenderView.ticksBeforeResting { view.tick() }
+        view.core.scroll(lines: 1)
+        #expect(!link.isPaused, "a scroll didn't wake a resting pane")
+    }
+
     /// The rows a frame changed, from a real emulator.
     private static func damaged(after bytes: String, on core: VTCore, _ damage: inout TerminalDamage) -> IndexSet? {
         core.feed(Array(bytes.utf8))
@@ -133,6 +157,19 @@ struct IdleCostTests {
         var wakes = 0
         while let next = entries.next(), next < start.addingTimeInterval(3600) { wakes += 1 }
         #expect(wakes == 59, "a row woke \(wakes) times between its first minute and its first hour")
+    }
+
+    @Test func aClockForOneStateTicksOnlyInIt() {
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        let idle = Array(WhileSchedule(every: 5, running: false).entries(from: start, mode: .normal).prefix(3))
+        #expect(idle == [start], "a stopped clock woke \(idle.count) times")
+        let running = Array(WhileSchedule(every: 5, running: true).entries(from: start, mode: .normal).prefix(3))
+        #expect(running == [start, start.addingTimeInterval(5), start.addingTimeInterval(10)])
+    }
+
+    @Test func noViewWakesOnAShortFixedPeriod() throws {
+        let found = try Self.offenders { $0.contains("TimelineView(.periodic(") }
+        #expect(found.isEmpty, "Wake when the view can change (see `WhileSchedule`):\n\(found.joined(separator: "\n"))")
     }
 
     @Test func noLabelTicksEverySecond() throws {

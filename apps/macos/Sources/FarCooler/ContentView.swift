@@ -14,6 +14,7 @@ struct ContentView: View {
     @Environment(\.openSettings) private var openSettings
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.windowVisible) private var windowVisible
     @Environment(\.markReadConfirmation) private var markReadConfirmation
     @State private var selection: Selection?
 
@@ -1832,7 +1833,11 @@ struct ContentView: View {
                         Divider()
                     }
                 }
-                TimelineView(.periodic(from: .now, by: 5)) { context in
+                // Ticks only while a start is being timed, in a window
+                // somebody can see: the time matters to nothing else (ov-229).
+                TimelineView(
+                    WhileSchedule(every: 5, running: orchestratorStartedAt[key] != nil && windowVisible)
+                ) { context in
                     let state = ConversationColumn.state(
                         seat: seat, isStarting: startingOrchestrators.isStarting(workspace, host: host),
                         startedAt: orchestratorStartedAt[key], now: context.date)

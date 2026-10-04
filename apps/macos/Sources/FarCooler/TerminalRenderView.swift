@@ -49,7 +49,13 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     /// The grid this view can show, which is what the pane must be resized to.
     var onGeometry: ((Int, Int) -> Void)?
 
-    private(set) var core: VTCore
+    private(set) var core: VTCore {
+        didSet {
+            core.onChange = { [weak self] in self?.wake() }
+            // A different screen: what the last one drew says nothing about it.
+            damage = TerminalDamage()
+        }
+    }
     /// The core the live stream is filling, until its first byte arrives.
     ///
     /// A pane that has been on screen before draws its LAST frame the instant
@@ -85,6 +91,8 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     private(set) lazy var windowWatch = WindowVisibilityWatch { [weak self] _ in self?.updateDrawing() }
     /// Which rows the last frame drew, so the next draws only what moved.
     var damage = TerminalDamage()
+    /// Ticks in a row that found nothing new. See `rest()`.
+    var restingTicks = 0
     /// Watches the theme, so a pick in Settings reaches a live terminal.
     ///
     /// Subscribed here rather than threaded down as a `themeRevision` property
@@ -222,6 +230,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         italicFont = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
         core = VTCore(columns: 80, rows: 24)
         super.init(frame: .zero)
+        core.onChange = { [weak self] in self?.wake() }
         measure()
         wantsLayer = true
         // Dropping a file on a pane is the same intent as pasting one, and on
@@ -294,7 +303,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         // is told. A single terminal is the same rule with one pane in the list.
     }
 
-    @objc private func tick() {
+    @objc func tick() {
         // Before reading the revision, not after: this is the one call that can
         // MOVE it without a byte having arrived. A program that opened a
         // synchronized update and then died leaves the core holding a frame
@@ -306,7 +315,11 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         // The core tells us when something might have changed. An idle terminal
         // — which is most of a night — costs one comparison per frame.
         let revision = core.revision
-        guard revision != lastDrawnRevision else { return }
+        guard revision != lastDrawnRevision else {
+            rest()
+            return
+        }
+        restingTicks = 0
         lastDrawnRevision = revision
         invalidateChangedRows()
         drainSignals()

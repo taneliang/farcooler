@@ -24,10 +24,16 @@ final class VTCore {
         if let handle { farcooler_vt_free(handle) }
     }
 
+    /// Told after anything that can move the screen: bytes, a resize, a
+    /// scroll, a palette. The view's display link rests while nothing does,
+    /// and this is what wakes it (ov-229).
+    var onChange: (() -> Void)?
+
     // MARK: - Output
 
     func feed(_ bytes: [UInt8]) {
         guard let handle, !bytes.isEmpty else { return }
+        defer { onChange?() }
         // False means the core failed on these bytes and reset the terminal to
         // a blank screen. Its revision has moved, so the next frame shows that
         // with nothing to do here, and the program repaints on its next output.
@@ -44,6 +50,7 @@ final class VTCore {
     @discardableResult
     func setPalette(_ colors: [UInt32]) -> Bool {
         guard let handle else { return false }
+        defer { onChange?() }
         return colors.withUnsafeBufferPointer {
             farcooler_vt_set_palette(handle, $0.baseAddress, $0.count)
         }
@@ -51,6 +58,7 @@ final class VTCore {
 
     func resize(columns: Int, rows: Int) {
         guard let handle else { return }
+        defer { onChange?() }
         farcooler_vt_resize(handle, UInt16(clamping: columns), UInt16(clamping: rows))
     }
 
@@ -112,6 +120,7 @@ final class VTCore {
     /// Scroll the view. Positive goes back into history.
     func scroll(lines: Int32) {
         guard let handle else { return }
+        defer { onChange?() }
         farcooler_vt_scroll(handle, lines)
     }
 
@@ -124,6 +133,7 @@ final class VTCore {
         var raw = FarCoolerVtSnapshot()
         guard farcooler_vt_snapshot(handle, &raw), raw.display_offset > 0 else { return }
         farcooler_vt_scroll_to_bottom(handle)
+        onChange?()
     }
 
     /// Read the screen and draw it inside `body`.

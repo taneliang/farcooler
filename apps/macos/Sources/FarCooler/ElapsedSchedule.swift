@@ -42,3 +42,21 @@ struct ElapsedSchedule: TimelineSchedule {
         return since.addingTimeInterval(((elapsed / step).rounded(.down) + 1) * step)
     }
 }
+
+/// Every `every` seconds while `running`, and only the first moment otherwise.
+///
+/// For a view that needs the time only in one state, such as an orchestrator
+/// still starting. `.periodic` would wake it every few seconds in every state
+/// and rebuild everything inside it (ov-229).
+struct WhileSchedule: TimelineSchedule {
+    let every: TimeInterval
+    let running: Bool
+
+    func entries(from start: Date, mode: TimelineScheduleMode) -> AnyIterator<Date> {
+        var upcoming: Date? = start
+        return AnyIterator {
+            defer { upcoming = running ? upcoming?.addingTimeInterval(every) : nil }
+            return upcoming
+        }
+    }
+}

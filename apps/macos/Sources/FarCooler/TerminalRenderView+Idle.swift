@@ -23,7 +23,31 @@ extension TerminalRenderView {
 
     /// Pause or resume the display link to match `drawsNow`.
     func updateDrawing() {
+        restingTicks = 0
         displayLink?.isPaused = !drawsNow
+    }
+
+    /// How many empty ticks the link runs before it rests: half a second at
+    /// 120 Hz. Longer than the 150 ms a synchronized update may stay open, so
+    /// a program that opened one and died is still flushed by a tick
+    /// (`VTCore.flushExpiredSync`): its bytes woke the link, and the link
+    /// outlives the deadline.
+    static let ticksBeforeResting = 60
+
+    /// A tick found nothing new. After enough of them the link rests until
+    /// the screen moves again (`wake`). A visible pane with a quiet program
+    /// was otherwise woken 120 times a second to compare one integer, which
+    /// was most of what a visible idle window still cost.
+    func rest() {
+        restingTicks += 1
+        if restingTicks >= Self.ticksBeforeResting { displayLink?.isPaused = true }
+    }
+
+    /// The screen may have moved: tick again, if anybody can see it.
+    func wake() {
+        guard drawsNow else { return }
+        restingTicks = 0
+        displayLink?.isPaused = false
     }
 
     /// Mark for redrawing only the rows that differ from the last frame.
