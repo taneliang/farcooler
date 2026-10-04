@@ -374,9 +374,18 @@ final class AgentStream: ObservableObject {
         }
     }
 
-    func send(_ text: String, images: [(mime: String, data: Data)] = []) async {
+    /// `replacing` is the echo a failed attempt at this same message drew.
+    /// Retry passes it so the words are drawn once: left in, the second
+    /// attempt's echo sat beside the first and the transcript said you had
+    /// sent it twice (ov-172). Withdrawn only now, not when the send failed,
+    /// because the composer was cleared on send and the echo is the one place
+    /// the words still are while the banner offers Retry.
+    func send(
+        _ text: String, images: [(mime: String, data: Data)] = [], replacing failedEcho: Int? = nil
+    ) async {
+        if let failedEcho { transcript.withdrawLocalUserMessage(rowID: failedEcho) }
         // Always drawn, never predicted — see the Mac's `AgentStream.send`.
-        transcript.appendLocalUserMessage(text)
+        let echo = transcript.appendLocalUserMessage(text)
         // Base64 through the FFI, which decodes it into the protocol's bytes.
         // The picture travels WITH the prompt; there is no path, because a path
         // from a phone means nothing on the host.
@@ -400,7 +409,7 @@ final class AgentStream: ObservableObject {
             // picture attached, where a multi-megabyte payload is the most
             // likely thing to fail.
             sendFailure = SendFailure(message: Self.message(for: error)) { [weak self] in
-                await self?.send(text, images: images)
+                await self?.send(text, images: images, replacing: echo)
             }
         }
     }

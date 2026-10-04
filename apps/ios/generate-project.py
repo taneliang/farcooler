@@ -673,6 +673,7 @@ UI_TEST_SOURCES = [
     "ComposerKeyboardTests.swift",
     "ChangesPullRequestTests.swift",
     "ChangesPatchNoticeTests.swift",
+    "AgentRetrySendTests.swift",
     # A runner saved before `Runner.reach` existed still loads. Needs no runner
     # and no daemon: it seeds the old shape through the argument domain and
     # reads the screen the app puts up before any connection resolves, so it
