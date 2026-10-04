@@ -65,9 +65,15 @@ enum ConversationColumn {
         seat?.terminal.agent == .done
     }
 
-    /// The sentence under "No Orchestrator" (spec §8).
-    static let emptyExplanation =
-        "An orchestrator runs this workspace’s board. It reads the charter, dispatches agents, and asks you when it needs a decision."
+    /// What "No Orchestrator" says under it (spec §8): what an orchestrator
+    /// is for, then what it does, in rows rather than a paragraph (ov-205).
+    static let emptyCopy = EmptyStateCopy(
+        lede: "An orchestrator runs this workspace’s board.",
+        rows: [
+            .init(symbol: "bubble.left", text: "Tell it what you want done"),
+            .init(symbol: "checklist", text: "It plans tasks and puts agents on them"),
+            .init(symbol: "hand.raised", text: "It asks you when it needs a decision"),
+        ])
 }
 
 /// The orchestrator's menu: what the conversation column's header held
@@ -225,11 +231,9 @@ struct ConversationPlaceholder: View {
             switch state {
             case .none:
                 Text("No Orchestrator").font(.headline)
-                Text(ConversationColumn.emptyExplanation)
+                EmptyStateRows(copy: ConversationColumn.emptyCopy)
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 320)
             case .starting(let slow):
                 // An agent starting: the app's status mark, not a spinner
                 // (ov-177).

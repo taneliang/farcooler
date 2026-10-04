@@ -46,10 +46,13 @@ struct OpenMainPlaceholderTests {
         #expect(FleetPlaceholder.mainToOpen(in: [], fleet: Self.fleet([main])) == nil)
     }
 
-    @Test("The explainer leads with purpose and never describes the layout")
+    /// The owner on the first version, one five-line paragraph: "too many
+    /// words. illustrations or bullets instead so that it's more scannable?"
+    @Test("No Workspace Selected leads with purpose, then three short rows, never a paragraph")
     func explainerLeadsWithPurpose() {
-        let text = FleetPlaceholder.workspaceExplainer
-        #expect(text.hasPrefix("A workspace is one line of work"))
-        for layout in ["left", "right", "title bar", "sidebar"] { #expect(!text.contains(layout)) }
+        let copy = FleetPlaceholder.workspaceCopy
+        #expect(copy.lede?.hasPrefix("Each workspace is one line of work") == true)
+        #expect(copy.rows.map(\.symbol) == ["bubble.left", "checklist", "hand.raised"])
+        EmptyStateCopyTests.expectScannable(copy)
     }
 }

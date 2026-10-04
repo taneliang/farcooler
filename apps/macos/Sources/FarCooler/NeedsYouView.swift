@@ -87,6 +87,16 @@ enum NeedsYouRowModel {
 
 /// The Needs You list, in the detail.
 struct NeedsYouView: View {
+    /// Under "Nothing Needs You": what the page is for, then what lands on
+    /// it, one row each (ov-205).
+    static let emptyCopy = EmptyStateCopy(
+        lede: "Agents wait here when they need you.",
+        rows: [
+            .init(symbol: "questionmark.bubble", text: "Questions to answer"),
+            .init(symbol: "hand.raised", text: "Decisions to make"),
+            .init(symbol: "eye", text: "Changes to review"),
+        ])
+
     let items: [NeedsYouItem]
     /// Runners too old to send decisions and asks, by name: each gets its
     /// line (`NeedsYou.olderRunnerNote`).
@@ -102,7 +112,7 @@ struct NeedsYouView: View {
                 ContentUnavailableView {
                     Label("Nothing Needs You", systemImage: "tray")
                 } description: {
-                    Text("When an orchestrator or agent needs an answer, a decision, or a review, it waits here until you’ve dealt with it.")
+                    EmptyStateRows(copy: Self.emptyCopy)
                 }
             } else {
                 ScrollView {

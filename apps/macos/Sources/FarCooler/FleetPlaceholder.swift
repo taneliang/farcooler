@@ -42,10 +42,33 @@ struct FleetPlaceholder: View {
         return .loading
     }
 
-    /// What a workspace is for, by its job: the purpose and the outcome, not
-    /// where anything sits on screen.
-    static let workspaceExplainer =
-        "A workspace is one line of work, like a feature or a cleanup, run by its own orchestrator. Tell the orchestrator what you want, and it plans the tasks, puts agents on them, and asks you when something needs a decision. Use separate workspaces to keep unrelated work and conversations apart."
+    /// What a workspace is for, by its job: the purpose, then what its
+    /// orchestrator does, never where anything sits on screen. Rows, not the
+    /// five-line paragraph the owner found "too many words" (ov-205).
+    static let workspaceCopy = EmptyStateCopy(
+        lede: "Each workspace is one line of work, like a feature.",
+        rows: [
+            .init(symbol: "bubble.left", text: "Tell its orchestrator what you want"),
+            .init(symbol: "checklist", text: "It plans tasks and puts agents on them"),
+            .init(symbol: "hand.raised", text: "It asks you when it needs a decision"),
+        ])
+
+    /// Under "No Repositories": what to add, then what a worktree does for
+    /// you, by its job before its name.
+    static let noRepositoriesCopy = EmptyStateCopy(
+        lede: "Add the repository you want agents to work in.",
+        rows: [
+            .init(symbol: "arrow.triangle.branch", text: "Each agent gets its own folder and branch"),
+            .init(symbol: "arrow.triangle.merge", text: "Your checkout changes only when you merge"),
+        ])
+
+    /// Under "No Worktrees".
+    static let noWorktreesCopy = EmptyStateCopy(
+        lede: "A worktree is where an agent works.",
+        rows: [
+            .init(symbol: "arrow.triangle.branch", text: "It has its own folder and branch"),
+            .init(symbol: "arrow.triangle.merge", text: "Your checkout changes only when you merge"),
+        ])
 
     /// The Main the empty detail's Open Main opens: the one repository's, and
     /// only where a Main exists to open, never a guess between several. A
@@ -97,7 +120,7 @@ struct FleetPlaceholder: View {
             ContentUnavailableView {
                 Label("No Repositories", systemImage: "rectangle.stack")
             } description: {
-                Text("Add the repository you want agents to work in. Each agent gets its own worktree, a separate directory and branch, so agents never step on each other or on your checkout.")
+                EmptyStateRows(copy: Self.noRepositoriesCopy)
             } actions: {
                 Button("Add Repository…", action: onAddRepository)
             }
@@ -105,7 +128,7 @@ struct FleetPlaceholder: View {
             ContentUnavailableView {
                 Label("No Worktrees", systemImage: "rectangle.stack")
             } description: {
-                Text("A worktree is where an agent works: its own directory and branch, so it never touches your checkout until you merge it.")
+                EmptyStateRows(copy: Self.noWorktreesCopy)
             } actions: {
                 Button("New Worktree…", action: onNewWorktree)
             }
@@ -113,7 +136,7 @@ struct FleetPlaceholder: View {
             ContentUnavailableView {
                 Label("No Workspace Selected", systemImage: "square.stack.3d.up")
             } description: {
-                Text(Self.workspaceExplainer)
+                EmptyStateRows(copy: Self.workspaceCopy)
             } actions: {
                 if let onOpenMain {
                     Button("Open Main", action: onOpenMain)
