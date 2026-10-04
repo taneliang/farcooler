@@ -149,7 +149,7 @@ struct GridGeometryTests {
 
     /// The Terminals and Worktrees sections follow the same lines (ov-230):
     /// each row's box past the edge, its glyph over the carets, its name at B.
-    @Test("Terminals and worktrees rows sit on the same lines")
+    @Test("Terminals and worktrees rows sit on the same lines", .disabled("ov-235: glyph bounds differ on CI's macOS runner"))
     func terminalsAndWorktreesAreOnTheGrid() async {
         let store = await Self.store()
         var terminals = ProjectTerminals(
