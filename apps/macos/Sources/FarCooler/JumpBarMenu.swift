@@ -335,5 +335,5 @@ struct JumpMenuSource {
     var count = 0
     var build: () -> [JumpMenu] = { [] }
 
-    static let none = JumpMenuSource()
+    static var none: JumpMenuSource { JumpMenuSource() }
 }
