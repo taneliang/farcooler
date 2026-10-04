@@ -34,6 +34,8 @@ enum TitleBarHarness {
         var trayCount = 11
         /// Whether the window offers Back and Forward (slice 3).
         var backForward = false
+        /// Whether Show Files is beside Changes (ov-189).
+        var files = false
         /// The title bar's field (slice 4), where a test opens it.
         var console: TitleConsoleModel? = nil
         let content: Content
@@ -43,7 +45,7 @@ enum TitleBarHarness {
         private var room: TitleStatusRoom {
             TitleStatusRoom(
                 switcherTitle: words.title, switcherRepository: words.repository, editor: true,
-                changes: true, trouble: nil, needsYou: trayCount, backForward: backForward)
+                changes: true, files: files, trouble: nil, needsYou: trayCount, backForward: backForward)
         }
 
         var body: some View {
@@ -58,7 +60,8 @@ enum TitleBarHarness {
                 .toolbar {
                     WorktreeToolbar(
                         editor: TitleBarHarness.worktree, onEditorError: { _ in },
-                        changes: .init(worktree: TitleBarHarness.worktree, open: false), onChanges: { _ in })
+                        changes: .init(worktree: TitleBarHarness.worktree, open: false), onChanges: { _ in },
+                        files: files ? .init(worktree: TitleBarHarness.worktree, open: false) : nil)
                 }
                 .titleBarStatus(
                     TitleStatusSource(

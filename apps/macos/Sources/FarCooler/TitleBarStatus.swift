@@ -119,12 +119,14 @@ enum TitleStatus {
     /// count, the space before them, then Open in Editor and Changes, and
     /// the runner trouble's words while there's any. Measured as `leading`
     /// is, in the regular toolbar: the tray 36 pt and its count, the editor 80,
-    /// Changes 36, and 8 between items.
-    static func trailing(editor: Bool, changes: Bool, trouble: String?, needsYou: Int = 0) -> CGFloat {
+    /// Changes 36, Show Files 36, and 8 between items.
+    static func trailing(editor: Bool, changes: Bool, files: Bool = false, trouble: String?, needsYou: Int = 0) -> CGFloat {
         var width: CGFloat = 10 + 36 + 12
         if let count = NeedsYouToolbar.countText(count: needsYou) { width += 4 + textWidth(count) }
         if editor { width += 80 + 8 }
         if changes { width += 36 + 8 }
+        // Show Files (ov-189): an icon button in the same capsule, as Changes is.
+        if files { width += 36 + 8 }
         if let trouble { width += 34 + textWidth(trouble) + 8 }
         return width
     }
@@ -595,6 +597,8 @@ struct TitleStatusRoom: Equatable {
     let switcherRepository: String
     let editor: Bool
     let changes: Bool
+    /// Whether Show Files is in the toolbar (ov-189).
+    let files: Bool
     let trouble: String?
     /// The tray's count, every workspace's.
     let needsYou: Int
@@ -608,18 +612,20 @@ struct TitleStatusRoom: Equatable {
     let trailingWidth: CGFloat
 
     init(
-        switcherTitle: String, switcherRepository: String, editor: Bool, changes: Bool, trouble: String?,
-        needsYou: Int = 0, backForward: Bool = false
+        switcherTitle: String, switcherRepository: String, editor: Bool, changes: Bool, files: Bool = false,
+        trouble: String?, needsYou: Int = 0, backForward: Bool = false
     ) {
         self.switcherTitle = switcherTitle
         self.switcherRepository = switcherRepository
         self.editor = editor
         self.changes = changes
+        self.files = files
         self.trouble = trouble
         self.needsYou = needsYou
         self.backForward = backForward
         leadingWidth = TitleStatus.leading(switcher: switcherTitle, repository: switcherRepository)
-        trailingWidth = TitleStatus.trailing(editor: editor, changes: changes, trouble: trouble, needsYou: needsYou)
+        trailingWidth = TitleStatus.trailing(
+            editor: editor, changes: changes, files: files, trouble: trouble, needsYou: needsYou)
     }
 
     /// What Back and Forward take beside the switcher: their own capsule,

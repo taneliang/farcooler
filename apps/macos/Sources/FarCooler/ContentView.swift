@@ -1403,7 +1403,7 @@ struct ContentView: View {
         let switcher = workspaceSwitcher
         return TitleStatusRoom(
             switcherTitle: switcher.title, switcherRepository: switcher.repository,
-            editor: detailWorktree != nil, changes: changesToolbarState != nil,
+            editor: detailWorktree != nil, changes: changesToolbarState != nil, files: filesToolbarState != nil,
             trouble: RunnerStatusItem.label(troubles: runnerTroubles, stale: store.staleHosts, ahead: store.aheadHosts),
             needsYou: store.needsYou.count, backForward: selection != nil)
     }
