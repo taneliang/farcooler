@@ -4564,6 +4564,16 @@ impl Service {
             });
         }
 
+        // Agent mode on a pane already in it restarts the agent only when its
+        // shim said the agent stopped (ov-174). A healthy chat is left as it
+        // is and the call succeeds: several clients ask for agent mode from a
+        // view that may be stale, and a double-tapped Restart must not kill
+        // the agent the first tap started.
+        let restart = term.pane_mode == models::PaneMode::Agent && pane_mode == models::PaneMode::Agent;
+        if restart && self.agents.failure(id).is_none() {
+            return Ok(term);
+        }
+
         // `ConfirmationRequired` rather than a new code: a turn in flight is
         // exactly the existing "tell the user what this destroys and ask", and
         // `force` is the confirmation coming back.
@@ -4691,10 +4701,11 @@ impl Service {
         // asking it would refuse with "nothing in this pane is an agent". The
         // record names the agent the shim was started for (`preset_after_adopting`
         // below), so that is the agent this restarts.
-        let restart = term.pane_mode == models::PaneMode::Agent && pane_mode == models::PaneMode::Agent;
+        // A record with no preset names no agent, so it goes to the refusal
+        // below rather than starting a shim with `--preset ''`.
         let harness = if restart {
             let preset = term.command_preset.split_once(':').map_or(term.command_preset.as_str(), |(a, _)| a);
-            Some(preset.to_string())
+            Some(preset.to_string()).filter(|p| !p.is_empty())
         } else {
             self.registry()
                 .identify(&pane.command, &self.screen(id).await.map(|(text, _, _)| text).unwrap_or_default())

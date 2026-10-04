@@ -22,6 +22,9 @@ impl AgentSupervisor {
     /// and a restart sends what's left (`restarting`). Refusing those was what
     /// left them stuck where nobody could remove them.
     pub fn deliver(&self, terminal: Uuid, message: DaemonMessage) -> Result<(), DomainError> {
+        if let Some(done) = self.rekeep(terminal, &message) {
+            return done;
+        }
         if self.failure(terminal).is_some() {
             return match message {
                 DaemonMessage::CancelQueued { id } => {
@@ -82,6 +85,37 @@ impl AgentSupervisor {
         Ok(())
     }
 
+    /// Remove or rewrite a prompt a restart is keeping for the next shim.
+    ///
+    /// Between the restart and the new shim's `Established` the failure is
+    /// gone and no shim is there, so a Remove would get the retryable
+    /// `AgentNotConnected`, and its retry would find the prompt already
+    /// resent under a new id: removed, and sent anyway. Changed in `resend`
+    /// itself, under the lock `resend_stranded` takes it out with, so a
+    /// prompt is either removed or sent, never both. `None` for anything
+    /// else, which goes on as it would have.
+    fn rekeep(&self, terminal: Uuid, message: &DaemonMessage) -> Option<Result<(), DomainError>> {
+        let (id, text) = match message {
+            DaemonMessage::CancelQueued { id } => (id, None),
+            DaemonMessage::EditQueued { id, text } => (id, Some(text)),
+            _ => return None,
+        };
+        let items = {
+            let mut sessions = self.sessions.lock().ok()?;
+            let kept = &mut sessions.get_mut(&terminal)?.resend;
+            let at = kept.iter().position(|q| &q.id == id)?;
+            match text {
+                None => {
+                    kept.remove(at);
+                }
+                Some(text) => kept[at].text = text.clone(),
+            }
+            kept.clone()
+        };
+        self.record(terminal, vec![AgentEvent::PromptQueue { items }], &|_, _| {});
+        Some(Ok(()))
+    }
+
     /// The pane is being restarted in agent mode (`Service::set_pane_mode`).
     ///
     /// Everything `left_agent_mode` drops goes, the failure first among it:
@@ -114,6 +148,24 @@ impl AgentSupervisor {
                 tracing::warn!(terminal = %terminal, "a prompt kept over a restart found no shim to take it");
             }
         }
+    }
+
+    /// A new shim connecting to this pane, as `serve` and its `Established`
+    /// register it, for a test outside this module (`service`).
+    #[cfg(test)]
+    pub(crate) fn connected_for_test(&self, terminal: Uuid) -> tokio::sync::mpsc::UnboundedReceiver<DaemonMessage> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        self.writers.lock().unwrap().insert(terminal, tx);
+        let hello = ShimMessage::Established { session_id: "s".into(), available_modes: Vec::new() };
+        self.apply(terminal, hello, &|_, _| {});
+        rx
+    }
+
+    /// One prompt queued on this pane, as its shim would report it.
+    #[cfg(test)]
+    pub(crate) fn queued_for_test(&self, terminal: Uuid, text: &str) {
+        let items = vec![QueuedPrompt { id: format!("q-{text}"), text: text.into(), images: Vec::new() }];
+        self.record(terminal, vec![AgentEvent::PromptQueue { items }], &|_, _| {});
     }
 
     /// Mark a pane's agent as stopped, as its shim would, for a test outside

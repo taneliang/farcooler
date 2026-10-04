@@ -165,3 +165,22 @@ fn a_switch_to_the_terminal_after_a_restart_keeps_nothing_to_send() {
     established(&supervisor, terminal);
     assert!(prompts(&mut new).is_empty());
 }
+
+/// Removed while the restart was under way, before the new shim was there:
+/// removed, and never sent (review finding 2).
+#[test]
+fn a_prompt_removed_during_a_restart_is_not_sent() {
+    let supervisor = AgentSupervisor::new();
+    let terminal = Uuid::now_v7();
+    queued(&supervisor, terminal, &["one", "two", "three"]);
+    stopped(&supervisor, terminal);
+    supervisor.restarting(terminal);
+
+    supervisor.deliver(terminal, DaemonMessage::CancelQueued { id: "q-one".into() }).expect("removed");
+    supervisor
+        .deliver(terminal, DaemonMessage::EditQueued { id: "q-three".into(), text: "3".into() })
+        .expect("edited");
+    let mut new = a_shim(&supervisor, terminal);
+    established(&supervisor, terminal);
+    assert_eq!(prompts(&mut new), ["two", "3"]);
+}
