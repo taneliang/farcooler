@@ -68,6 +68,15 @@ enum TitleBarHarness {
         }
     }
 
+    /// A window the screen can't shrink. AppKit clamps a titled window to
+    /// the screen it's on, and CI's runner has one 1024 by 768 display, so
+    /// the 1200 and 1790 windows these tests ask for came out 1024 wide, and
+    /// the status area chose the form that width affords, not the one asked
+    /// about (ov-235). The test's windows are off every screen anyway.
+    final class UnclampedWindow: NSWindow {
+        override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
+    }
+
     /// A window `width` wide around `root`, made the way SwitcherWidthTests
     /// makes one: titled, full-size content, starting in the unified style,
     /// so the chrome the root asks for is what changes it. `beforeShowing`
@@ -76,7 +85,7 @@ enum TitleBarHarness {
     static func window<V: View>(
         _ root: V, width: CGFloat, height: CGFloat = 400, beforeShowing: () -> Void = {}
     ) async throws -> NSWindow {
-        let window = NSWindow(
+        let window = UnclampedWindow(
             contentRect: NSRect(x: -6000, y: -6000, width: width, height: height),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered, defer: false)
