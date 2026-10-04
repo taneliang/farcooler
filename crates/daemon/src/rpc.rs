@@ -332,7 +332,7 @@ fn local_name(macos: bool) -> &'static str {
 
 /// The scope a method requires, by its wire name, or `None` for a name this
 /// build does not know, which `handle` refuses as a capability it lacks.
-fn required_scope(method: &str) -> Option<Scope> {
+pub(crate) fn required_scope(method: &str) -> Option<Scope> {
     Method::parse(method).map(scope_of)
 }
 
@@ -1843,29 +1843,21 @@ impl Rpc {
                 self.terminal_result(id).await
             }
 
-            // Ask the Orchestrator (ov-184): the same payload as a prompt, but
-            // pasted into a TUI pane's box and never sent. Refused, typing
-            // nothing, unless the pane is provably an idle agent with an
-            // empty box (`Watcher::draft_into`).
-            "terminal.draft_prompt" => {
+            // The same payload as a prompt, typed into a TUI pane's box past
+            // the answer wake's gate, else refused with nothing typed. Ask the
+            // Orchestrator (ov-184) never sends it (`Watcher::draft_into`); the
+            // Mac title bar's field (ov-214) submits it (`Watcher::tell_into`).
+            "terminal.draft_prompt" | "terminal.tell" => {
                 let Some(request::Payload::AgentPrompt(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                self.watcher.draft_into(id, &wire::prompt_text(&p.blocks)).await?;
-                self.terminal_result(id).await
-            }
-
-            // The Mac title bar's field (ov-214): a message to a terminal
-            // orchestrator, typed and submitted, past the answer wake's
-            // whole gate, else refused with nothing typed
-            // (`Watcher::tell_into`).
-            "terminal.tell" => {
-                let Some(request::Payload::AgentPrompt(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                self.watcher.tell_into(id, &wire::prompt_text(&p.blocks)).await?;
+                let text = wire::prompt_text(&p.blocks);
+                if req.method == "terminal.tell" {
+                    self.watcher.tell_into(id, &text).await?;
+                } else {
+                    self.watcher.draft_into(id, &text).await?;
+                }
                 self.terminal_result(id).await
             }
 
@@ -2637,16 +2629,6 @@ mod tests {
         );
     }
 
-    /// A file is source, as a diff is: never `read`, the scope that sees
-    /// only the shape of the fleet (ov-189).
-    #[test]
-    fn a_worktrees_files_are_control_like_its_diff() {
-        for method in ["worktree.list_dir", "worktree.read_file"] {
-            assert_eq!(required_scope(method), required_scope("changes.file_diff"), "{method}");
-            assert_eq!(required_scope(method), Some(Scope::Control), "{method}");
-        }
-    }
-
     #[test]
     fn tiling_is_control_not_admin() {
         // An agent has to be able to place its own panes, and none of this
@@ -2899,36 +2881,8 @@ mod terminal_task_tests {
 }
 
 #[cfg(test)]
-mod revision_tests {
-    use super::screen_revision;
-
-    #[test]
-    fn the_same_screen_has_the_same_revision() {
-        assert_eq!(screen_revision("hello", 1, 2), screen_revision("hello", 1, 2));
-    }
-
-    #[test]
-    fn a_moved_cursor_is_a_different_screen() {
-        // Nothing else changed, and a client told "unchanged" would leave the
-        // caret in the wrong cell.
-        assert_ne!(screen_revision("hello", 1, 2), screen_revision("hello", 2, 2));
-        assert_ne!(screen_revision("hello", 1, 2), screen_revision("hello", 1, 3));
-    }
-
-    #[test]
-    fn different_contents_differ() {
-        assert_ne!(screen_revision("hello", 0, 0), screen_revision("hellp", 0, 0));
-    }
-
-    #[test]
-    fn zero_is_never_a_real_revision() {
-        // The wire uses it to mean "I hold nothing", so a screen that hashed to
-        // it would be resent forever.
-        for text in ["", "a", "the quick brown fox"] {
-            assert_ne!(screen_revision(text, 0, 0), 0);
-        }
-    }
-}
+#[path = "rpc_revision_tests.rs"]
+mod revision_tests;
 
 /// `terminal.agent_answer` for an ask a claude TUI's hook is holding
 /// (`hook_asks`), rather than one an ACP shim is waiting on.

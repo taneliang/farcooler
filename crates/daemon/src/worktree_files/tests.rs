@@ -150,3 +150,16 @@ fn the_root_itself_may_be_reached_through_a_link() {
     symlink(&root, &alias).unwrap();
     assert!(list(Path::new(&alias), "src").is_ok());
 }
+
+/// A file is source, as a diff is: never `read`, the scope that sees only
+/// the shape of the fleet (ov-189). Moved here from rpc.rs (integ-8), which
+/// was past its size ceiling with ov-189, ov-214 and ov-234 together.
+#[test]
+fn a_worktrees_files_are_control_like_its_diff() {
+    use crate::rpc::required_scope;
+    use farcooler_protocol::v1::Scope;
+    for method in ["worktree.list_dir", "worktree.read_file"] {
+        assert_eq!(required_scope(method), required_scope("changes.file_diff"), "{method}");
+        assert_eq!(required_scope(method), Some(Scope::Control), "{method}");
+    }
+}
