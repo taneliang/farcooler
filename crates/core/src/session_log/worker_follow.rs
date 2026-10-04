@@ -39,6 +39,8 @@ const LOOK_AGAIN_MS: i64 = 30_000;
 /// Spawns remembered per session, for joining a launch result to the
 /// description its call carried.
 const REMEMBERED_SPAWNS: usize = 256;
+/// Agents whose last stop is remembered per session.
+const REMEMBERED_STOPS: usize = 4096;
 
 /// One session to follow, and the subagents in it whose own files to read.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,6 +104,12 @@ struct Session {
     spawns: VecDeque<(String, String)>,
     agents: BTreeMap<String, Tail>,
     usage: LogUsage,
+    /// Each agent's last stop or resume in this session, wanted or not, so one
+    /// recorded after it stopped (a foreground run writes its launch and its
+    /// end in one line) is told where it stands the pass it becomes wanted.
+    last_stop: HashMap<String, Seen>,
+    /// The agents wanted on the last pass.
+    known: Vec<String>,
 }
 
 impl WorkerFollow {
@@ -126,6 +134,8 @@ impl WorkerFollow {
                 spawns: VecDeque::new(),
                 agents: BTreeMap::new(),
                 usage: LogUsage::default(),
+                last_stop: HashMap::new(),
+                known: Vec::new(),
             });
             session.pass(home, want, now_ms, &mut out);
             if session.file.is_some() {
@@ -146,7 +156,7 @@ impl Session {
         let first = self.tail.is_none();
         let mut lines = Vec::new();
         if first {
-            let tail = Tail::new(file.clone());
+            let tail = Tail::wide(file.clone());
             lines = catch_up(&file);
             self.tail = Some(tail);
         }
@@ -165,20 +175,38 @@ impl Session {
             if !["agentId", "resumedAgentId", "task-notification", "\"Agent\""].iter().any(|k| line.contains(k)) {
                 continue;
             }
-            for event in claude::parse_line(line) {
+            let events = claude::parse_line(line);
+            let is_result = events.iter().any(|e| matches!(e, TurnEvent::Answered { .. }));
+            // A launch or a foreground end is believed only on the result of
+            // an `Agent` call this follower saw made: any other tool result
+            // with an `agentId` in it is not a subagent's. A notification or
+            // a resume carries no such call and is read as it comes.
+            let mut trusted = true;
+            for event in events {
                 match event {
-                    TurnEvent::Subagent { id, description, .. } if !description.is_empty() => {
+                    TurnEvent::Subagent { id, description, .. } if !is_result => {
                         self.spawns.retain(|(known, _)| known != &id);
                         self.spawns.push_back((id, description));
                         if self.spawns.len() > REMEMBERED_SPAWNS {
                             self.spawns.pop_front();
                         }
                     }
-                    TurnEvent::SubagentLaunched { id, agent_id } => {
+                    TurnEvent::Subagent { id, description, .. } => {
+                        trusted = self.spawns.iter().any(|(known, _)| known == &id);
+                        if let (true, false, Some(spawn)) =
+                            (trusted, description.is_empty(), self.spawns.iter_mut().find(|(known, _)| known == &id))
+                        {
+                            spawn.1 = description;
+                        }
+                    }
+                    TurnEvent::SubagentLaunched { id, agent_id } if trusted => {
                         let at_ms = claude::timestamp_ms(line);
                         let news = at_ms.is_some_and(|at| at >= self.attached_at_ms - SPAWN_NEWS_MS);
-                        let description =
-                            self.spawns.iter().find(|(known, _)| known == &id).map(|(_, d)| d.clone());
+                        let description = self
+                            .spawns
+                            .iter()
+                            .find(|(known, d)| known == &id && !d.is_empty())
+                            .map(|(_, d)| d.clone());
                         if let (true, Some(description)) = (news, description) {
                             out.seen.push(Seen::Spawned {
                                 session: session.to_string(),
@@ -188,16 +216,32 @@ impl Session {
                             });
                         }
                     }
-                    TurnEvent::SubagentEnded { agent_id, status } if want.agents.contains(&agent_id) => {
-                        push_stop(&mut stops, Seen::Ended { session: session.to_string(), agent_id, status });
+                    TurnEvent::SubagentEnded { agent_id, status } if trusted => {
+                        let seen = Seen::Ended { session: session.to_string(), agent_id: agent_id.clone(), status };
+                        self.remember(&agent_id, &seen);
+                        if want.agents.contains(&agent_id) {
+                            push_stop(&mut stops, seen);
+                        }
                     }
-                    TurnEvent::SubagentResumed { agent_id } if want.agents.contains(&agent_id) => {
-                        push_stop(&mut stops, Seen::Resumed { session: session.to_string(), agent_id });
+                    TurnEvent::SubagentResumed { agent_id } => {
+                        let seen = Seen::Resumed { session: session.to_string(), agent_id: agent_id.clone() };
+                        self.remember(&agent_id, &seen);
+                        if want.agents.contains(&agent_id) {
+                            push_stop(&mut stops, seen);
+                        }
                     }
                     _ => {}
                 }
             }
         }
+        // An agent wanted only now: where it stood already.
+        for agent in want.agents.iter().filter(|a| !self.known.contains(a)) {
+            let said = stops.iter().any(|s| matches!(s, Seen::Ended { agent_id, .. } | Seen::Resumed { agent_id, .. } if agent_id == agent));
+            if let (false, Some(seen)) = (said, self.last_stop.get(agent)) {
+                stops.push(seen.clone());
+            }
+        }
+        self.known = want.agents.clone();
         if first {
             // The first read is everything the file holds, or its last
             // mebibytes: a subagent that stopped, was resumed and stopped
@@ -215,6 +259,13 @@ impl Session {
         out.seen.extend(stops);
     }
 
+    fn remember(&mut self, agent: &str, seen: &Seen) {
+        if self.last_stop.len() >= REMEMBERED_STOPS && !self.last_stop.contains_key(agent) {
+            self.last_stop.clear();
+        }
+        self.last_stop.insert(agent.to_string(), seen.clone());
+    }
+
     fn read_agents(&mut self, file: &Path, want: &Wanted, out: &mut Followed) {
         self.agents.retain(|id, _| want.agents.contains(id));
         let dir = file.with_extension("").join("subagents");
@@ -222,7 +273,7 @@ impl Session {
             let tail = self
                 .agents
                 .entry(agent.clone())
-                .or_insert_with(|| Tail::new(dir.join(format!("agent-{agent}.jsonl"))));
+                .or_insert_with(|| Tail::wide(dir.join(format!("agent-{agent}.jsonl"))));
             let lines = tail.read_new_lines();
             if lines.is_empty() {
                 continue;

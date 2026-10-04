@@ -34,6 +34,11 @@ use std::path::{Path, PathBuf};
 /// bounded in the worst case.
 const MAX_LINE_BYTES: usize = 64 * 1024;
 
+/// The cap of a `Tail::wide`: for a reader that needs a few fields of lines
+/// that can be long (a subagent's `<result>`, a prompt), and holds one at a
+/// time. Claude's longest observed line is 1.35 MB.
+const WIDE_LINE_BYTES: usize = 8 * 1024 * 1024;
+
 /// How much is pulled from disk per `read` syscall while scanning for
 /// newlines. Kept well below `MAX_LINE_BYTES` so a single oversized (or
 /// still-growing) line is scanned in bounded steps instead of being pulled
@@ -103,6 +108,8 @@ fn fnv(mut state: u64, bytes: &[u8]) -> u64 {
 /// nothing worse than re-scanning from the last complete line.
 pub struct Tail {
     path: PathBuf,
+    /// The largest line handed back whole; longer ones are skipped.
+    max_line: usize,
     offset: u64,
     /// Where this `Tail` began reading: 0, or the end of a large file it
     /// attached to. `prefix` covers the bytes from here.
@@ -201,6 +208,7 @@ impl Tail {
         let len = meta.as_ref().map_or(0, |m| m.len());
         let offset = if len <= READ_FROM_START_BYTES { 0 } else { len };
         Tail {
+            max_line: MAX_LINE_BYTES,
             identity: meta.as_ref().and_then(identity_of),
             path,
             offset,
@@ -214,6 +222,13 @@ impl Tail {
             #[cfg(test)]
             rehashed: 0,
         }
+    }
+
+    /// `new`, handing back lines up to `WIDE_LINE_BYTES` whole. For the
+    /// subagent follower, whose ends and spawns sit in lines (a notification
+    /// carrying a long `<result>`, a prompt) that the usual cap would skip.
+    pub fn wide(path: PathBuf) -> Tail {
+        Tail { max_line: WIDE_LINE_BYTES, ..Tail::new(path) }
     }
 
     /// Which file this is following.
@@ -369,7 +384,7 @@ impl Tail {
                     current_len += 1;
                     if !current_over_cap {
                         current.push(byte);
-                        if current.len() > MAX_LINE_BYTES {
+                        if current.len() > self.max_line {
                             current_over_cap = true;
                             skip_head = Some(fnv(FNV_START, &current[..SKIP_HEAD_BYTES]));
                             current.clear();

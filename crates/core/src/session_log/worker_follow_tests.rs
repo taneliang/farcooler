@@ -231,3 +231,64 @@ fn what_a_subagent_is_doing_and_what_it_spent_come_from_its_transcript() {
     assert_eq!(followed.spend.len(), 1);
     assert_eq!(followed.spend[0].1.key, format!("claude-log:agent:{}", agent(1)));
 }
+
+/// A foreground run writes its launch and its end in one result line. A
+/// subagent recorded after that line was read, in a session already being
+/// followed for another, is ended the pass it's recorded, not left running.
+fn foreground(n: u32) -> [String; 2] {
+    let rename = |line: &str| {
+        line.replace("a0000000000000001", &agent(n))
+            .replace("toolu_000000000000000000000001", &format!("toolu_{n:024}"))
+    };
+    [rename(note(0)), rename(note(1)).replace("async_launched", "completed")]
+}
+
+#[test]
+fn an_end_read_before_the_agent_was_wanted_is_told_when_it_is() {
+    let mut h = Home::new("late");
+    h.session(&[]);
+    h.pass(&[agent(1)], then());
+    let lines = foreground(77);
+    h.session(&[&lines[0], &lines[1]]);
+    let early = h.pass(&[agent(1)], then() + 1);
+    assert!(!early.iter().any(|s| matches!(s, Seen::Ended { .. })), "not wanted yet: {early:?}");
+    assert_eq!(
+        h.pass(&[agent(1), agent(77)], then() + 2),
+        [Seen::Ended { session: SESSION.into(), agent_id: agent(77), status: SubagentStatus::Completed }]
+    );
+    assert!(h.pass(&[agent(1), agent(77)], then() + 3).is_empty(), "said once");
+}
+
+/// A notification with a long `<result>`, and a launch with a long prompt:
+/// both are lines the ordinary 64 KiB cap skips whole.
+#[test]
+fn a_line_over_64_kib_still_ends_an_agent_and_still_links() {
+    let mut h = Home::new("long");
+    h.session(&[]);
+    h.pass(&[agent(1)], then());
+    let long = "x".repeat(100 * 1024);
+    let notice = note(2).replace("<result>removed</result>", &format!("<result>{long}</result>"));
+    let launch = foreground(5);
+    let spawn = launch[0].replace("\"prompt\":\"removed\"", &format!("\"prompt\":\"{long}\""));
+    let launched = launch[1].replace("completed", "async_launched");
+    assert!(notice.len() > 100 * 1024 && spawn.len() > 100 * 1024);
+    h.session(&[&notice, &spawn, &launched]);
+    let seen = h.pass(&[agent(1)], then() + 1);
+    assert!(seen.iter().any(|s| matches!(s, Seen::Ended { agent_id, .. } if agent_id == &agent(1))), "{seen:?}");
+    assert!(seen.iter().any(|s| matches!(s, Seen::Spawned { agent_id, .. } if agent_id == &agent(5))), "{seen:?}");
+}
+
+/// A tool result with an `agentId` in it is a subagent's only on the result
+/// of an `Agent` call this follower saw made.
+#[test]
+fn a_result_for_a_call_never_seen_is_not_believed() {
+    let mut h = Home::new("trust");
+    h.session(&[]);
+    h.pass(&[agent(6)], then());
+    let lines = foreground(6);
+    h.session(&[&lines[1]]);
+    assert!(h.pass(&[agent(6)], then() + 1).is_empty());
+    let async_only = lines[1].replace("completed", "async_launched");
+    h.session(&[&async_only]);
+    assert!(h.pass(&[agent(6)], then() + 2).is_empty(), "no spawn, no link");
+}
