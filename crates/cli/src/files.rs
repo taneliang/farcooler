@@ -46,7 +46,7 @@ async fn answer<L: DispatchLink>(link: &mut L, cmd: FilesCmd, json: bool) -> Fal
     match cmd {
         FilesCmd::Ls { worktree, path } => {
             let id = crate::resolve_worktree_id(link, &worktree).await?;
-            let payload = pb::WorktreeDirRequest { worktree_id: crate::id_bytes(id), path };
+            let payload = pb::WorktreeDirRequest { worktree_id: crate::id_bytes(id), path, ..Default::default() };
             let r = link.call(with(req("worktree.list_dir"), request::Payload::WorktreeDir(payload))).await?;
             let result::Value::WorktreeDir(d) = expect_value(r.value)? else {
                 return Err(crate::daemon_link::UNREADABLE.into());
@@ -68,7 +68,7 @@ async fn answer<L: DispatchLink>(link: &mut L, cmd: FilesCmd, json: bool) -> Fal
         }
         FilesCmd::Cat { worktree, path } => {
             let id = crate::resolve_worktree_id(link, &worktree).await?;
-            let payload = pb::WorktreeFileRequest { worktree_id: crate::id_bytes(id), path };
+            let payload = pb::WorktreeFileRequest { worktree_id: crate::id_bytes(id), path, ..Default::default() };
             let r = link.call(with(req("worktree.read_file"), request::Payload::WorktreeFile(payload))).await?;
             let result::Value::WorktreeFile(f) = expect_value(r.value)? else {
                 return Err(crate::daemon_link::UNREADABLE.into());
