@@ -312,7 +312,7 @@ final class DestinationOpener: ObservableObject {
                 open, isCurrent: { pending?.id == open.id }, world: world, read: read, land: land, now: now,
                 pause: pause)
             if case .stayed(let note) = outcome {
-                NSLog("Far Cooler: a notification's subject wasn't opened (%@).", note?.rawValue ?? "left alone")
+                NSLog("Far Cooler: a notification's subject wasn't opened (%@).", note?.rawValue ?? "left alone")  // not UI copy: a log line
             }
             finish(open)
             return
