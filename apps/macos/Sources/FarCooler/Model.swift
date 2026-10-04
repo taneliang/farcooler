@@ -309,6 +309,10 @@ struct Terminal: Decodable, Identifiable, Hashable {
     var short: String
     var title: String
     var preset: String
+    /// What the pane was launched as (`claude`, `shell`), from a CLI that
+    /// says; nil from an older one. Unlike `preset`, which is what's running
+    /// now, it stays put when the program renames itself (ov-218).
+    var program: String?
     var state: String
     /// What the AGENT is doing, as the daemon derived it. Absent on older
     /// daemons, which is why it is optional rather than defaulted to something
@@ -564,6 +568,18 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// Whether a title is the automatic one every terminal is created with.
     private static func isPlaceholder(_ title: String) -> Bool {
         title.hasPrefix("Terminal ") || title == "Terminal"
+    }
+
+    /// What a pane's header calls it: its program, from what was launched
+    /// (ov-218). Never the live name: Claude Code renames its own process,
+    /// and the pane's title, to the session's title, which the header then
+    /// showed where it should say `claude`, and which the window's title
+    /// already shows. A changes pane is "Changes"; with no launch recorded,
+    /// what's running.
+    var headerName: String {
+        if isChangesPane { return "Changes" }
+        let launched = (program ?? "").split(separator: ":").first.map(String.init) ?? ""
+        return Self.name(of: launched.isEmpty ? preset : launched)
     }
 
     /// `label`, plus its ordinal when it has one.

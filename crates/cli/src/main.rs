@@ -22,6 +22,8 @@ mod agent_host;
 mod daemon_link;
 mod hook;
 mod notice_task;
+#[cfg(test)]
+mod program_field_tests;
 mod remote;
 mod runner_install;
 mod runner_pipe;
@@ -3622,6 +3624,9 @@ fn worktree_list_terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_js
         "short": short_bytes(&t.id),
         "title": t.title,
         "preset": label(t),
+        // What was launched, which `preset` stops being once the program
+        // renames itself: a pane header names its program by this (ov-218).
+        "program": t.command_preset,
         "ports": t.ports,
         // Which board task this pane was opened for, so a board card can go to
         // the agent working it. The daemon has recorded it since
@@ -3850,6 +3855,9 @@ fn terminal_event_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Valu
         "worktree": uuid_of(&t.worktree_id).to_string(),
         "title": t.title,
         "preset": label(t),
+        // What was launched, which `preset` stops being once the program
+        // renames itself: a pane header names its program by this (ov-218).
+        "program": t.command_preset,
         "ports": t.ports,
         // Which board task this pane was opened for, so a board card can go to
         // the agent working it. The daemon has recorded it since

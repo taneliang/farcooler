@@ -616,7 +616,8 @@ struct TilePane: View {
                 .foregroundStyle(isFocused ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
                 .frame(minWidth: 9)
 
-            Text(terminal.label)
+            // Its program, never the session's title (ov-218).
+            Text(terminal.headerName)
                 .font(WorkspaceStyle.paneTitle)
                 .fontWeight(isFocused ? .semibold : .medium)
                 .foregroundStyle(isFocused ? .primary : .secondary)
