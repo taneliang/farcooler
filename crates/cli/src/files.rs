@@ -25,6 +25,50 @@ pub enum FilesCmd {
     },
     /// One file's text, whole, up to 512 KiB.
     Cat { worktree: String, path: String },
+    /// One directory of an extra read-only folder, by the name `status
+    /// --json` gives it under `readOnlyFolders` (ov-232).
+    FolderLs {
+        folder: String,
+        /// Relative to the folder's root. The root when left out.
+        #[arg(default_value = "")]
+        path: String,
+    },
+    /// One file of an extra read-only folder, whole, up to 512 KiB.
+    FolderCat { folder: String, path: String },
+}
+
+/// Which files a request reads: a worktree, by what the user typed for it, or
+/// an extra folder, by its name.
+enum Place {
+    Worktree(String),
+    Folder(String),
+}
+
+impl FilesCmd {
+    /// Whether it reads an extra folder, which a runner needs
+    /// `read_only_folders` for.
+    fn reads_folder(&self) -> bool {
+        matches!(self, FilesCmd::FolderLs { .. } | FilesCmd::FolderCat { .. })
+    }
+}
+
+/// The two ids a request names its place by: `worktree_id` and `folder`.
+/// Never both (the runner refuses that).
+async fn place_ids<L: DispatchLink>(link: &mut L, place: Place) -> Result<(bytes::Bytes, String), Box<dyn std::error::Error>> {
+    match place {
+        Place::Worktree(w) => Ok((crate::id_bytes(crate::resolve_worktree_id(link, &w).await?), String::new())),
+        Place::Folder(name) => Ok((bytes::Bytes::new(), name)),
+    }
+}
+
+/// `worktree.list_dir`'s request for `place`.
+pub(crate) fn dir_request(worktree_id: bytes::Bytes, folder: String, path: String) -> pb::WorktreeDirRequest {
+    pb::WorktreeDirRequest { worktree_id, folder, path, ..Default::default() }
+}
+
+/// `worktree.read_file`'s request for `place`.
+pub(crate) fn file_request(worktree_id: bytes::Bytes, folder: String, path: String) -> pb::WorktreeFileRequest {
+    pb::WorktreeFileRequest { worktree_id, folder, path, ..Default::default() }
 }
 
 pub async fn files(runner: Option<&str>, cmd: FilesCmd, json: bool) -> Fallible {
@@ -36,6 +80,9 @@ async fn files_over<L: DispatchLink>(link: &mut L, cmd: FilesCmd, json: bool) ->
     if !link.capabilities().iter().any(|c| c == capability::WORKTREE_FILES) {
         return Err(Refused::new("this runner needs an update to show a worktree's files".into(), None).into());
     }
+    if cmd.reads_folder() && !link.capabilities().iter().any(|c| c == capability::READ_ONLY_FOLDERS) {
+        return Err(Refused::new("this runner needs an update to show its extra folders".into(), None).into());
+    }
     answer(link, cmd, json).await.map_err(|e| match e.downcast::<ClientError>() {
         Ok(err) => Box::new(refusal(*err)) as Box<dyn std::error::Error>,
         Err(other) => other,
@@ -44,9 +91,14 @@ async fn files_over<L: DispatchLink>(link: &mut L, cmd: FilesCmd, json: bool) ->
 
 async fn answer<L: DispatchLink>(link: &mut L, cmd: FilesCmd, json: bool) -> Fallible {
     match cmd {
-        FilesCmd::Ls { worktree, path } => {
-            let id = crate::resolve_worktree_id(link, &worktree).await?;
-            let payload = pb::WorktreeDirRequest { worktree_id: crate::id_bytes(id), path, ..Default::default() };
+        cmd @ (FilesCmd::Ls { .. } | FilesCmd::FolderLs { .. }) => {
+            let (place, path) = match cmd {
+                FilesCmd::Ls { worktree, path } => (Place::Worktree(worktree), path),
+                FilesCmd::FolderLs { folder, path } => (Place::Folder(folder), path),
+                _ => unreachable!(),
+            };
+            let (id, folder) = place_ids(link, place).await?;
+            let payload = dir_request(id, folder, path);
             let r = link.call(with(req("worktree.list_dir"), request::Payload::WorktreeDir(payload))).await?;
             let result::Value::WorktreeDir(d) = expect_value(r.value)? else {
                 return Err(crate::daemon_link::UNREADABLE.into());
@@ -66,9 +118,14 @@ async fn answer<L: DispatchLink>(link: &mut L, cmd: FilesCmd, json: bool) -> Fal
                 println!("(only the first {} entries)", d.entries.len());
             }
         }
-        FilesCmd::Cat { worktree, path } => {
-            let id = crate::resolve_worktree_id(link, &worktree).await?;
-            let payload = pb::WorktreeFileRequest { worktree_id: crate::id_bytes(id), path, ..Default::default() };
+        cmd @ (FilesCmd::Cat { .. } | FilesCmd::FolderCat { .. }) => {
+            let (place, path) = match cmd {
+                FilesCmd::Cat { worktree, path } => (Place::Worktree(worktree), path),
+                FilesCmd::FolderCat { folder, path } => (Place::Folder(folder), path),
+                _ => unreachable!(),
+            };
+            let (id, folder) = place_ids(link, place).await?;
+            let payload = file_request(id, folder, path);
             let r = link.call(with(req("worktree.read_file"), request::Payload::WorktreeFile(payload))).await?;
             let result::Value::WorktreeFile(f) = expect_value(r.value)? else {
                 return Err(crate::daemon_link::UNREADABLE.into());
@@ -104,3 +161,7 @@ fn refusal(err: ClientError) -> Refused {
     };
     Refused::naming(said.into(), code, what)
 }
+
+#[cfg(test)]
+#[path = "files_tests.rs"]
+mod tests;

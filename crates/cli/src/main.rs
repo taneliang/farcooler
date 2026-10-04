@@ -1473,6 +1473,18 @@ fn status_json(
         // build there is a downgrade, and the Mac must not offer it as an
         // update. False from a runner too old to say.
         "runnerIsNewer": runner_is_newer(host),
+        // The extra folders the Files viewer can read on this runner
+        // (ov-232), by name; `path` is empty for a read-scoped client. Null
+        // from a runner too old to say, which has none.
+        "readOnlyFolders": capabilities
+            .iter()
+            .any(|c| c == farcooler_protocol::capability::READ_ONLY_FOLDERS)
+            .then(|| {
+                host.read_only_folders
+                    .iter()
+                    .map(|f| serde_json::json!({"name": f.name, "path": f.path}))
+                    .collect::<Vec<_>>()
+            }),
         "roots": counts.roots,
         "repositories": counts.repositories,
         "worktrees": counts.worktrees,
@@ -4900,6 +4912,21 @@ mod tests {
         let says = ["agents_found".to_string()];
         assert_eq!(status_json(&host, &says, counts())["agentsFound"], serde_json::json!(["codex"]));
         assert!(status_json(&host, &[], counts())["agentsFound"].is_null());
+    }
+
+    #[test]
+    fn status_says_the_read_only_folders_only_when_the_runner_does() {
+        let counts = || StatusCounts { roots: 0, repositories: 0, worktrees: 0, terminals: 0 };
+        let host = farcooler_protocol::v1::Host {
+            read_only_folders: vec![farcooler_protocol::v1::ReadOnlyFolder { name: "logs".into(), path: "/var/log".into() }],
+            ..Default::default()
+        };
+        let says = vec!["read_only_folders".to_string()];
+        assert_eq!(
+            status_json(&host, &says, counts())["readOnlyFolders"],
+            serde_json::json!([{"name": "logs", "path": "/var/log"}])
+        );
+        assert!(status_json(&host, &[], counts())["readOnlyFolders"].is_null());
     }
 
     /// **Which way two builds differ** (ov-143). The Mac read only
