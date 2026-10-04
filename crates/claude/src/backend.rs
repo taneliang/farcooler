@@ -342,8 +342,8 @@ impl ClaudeBackend {
                     }
                     // Anything else the CLI asks is answered rather than left
                     // hanging — an unanswered control request blocks the turn —
-                    // but answered with a bare success, not a permission
-                    // verdict. `SDKControlRequestInner` lets the CLI send
+                    // but refused with an error response, not a permission
+                    // verdict or a success. `SDKControlRequestInner` lets the CLI send
                     // `hook_callback`, `elicitation`, `request_user_dialog` and
                     // `mcp_message` on this channel, and each has its own
                     // response shape; this used to reply to all four with

@@ -193,7 +193,10 @@ impl CodexBackend {
         // common "nothing recorded yet" refusal is the empty case, not news.
         if let Some(detail) = resume_failure {
             let lower = detail.to_lowercase();
-            let reason = if lower.contains("no rollout found") || lower.contains("not found") {
+            // Codex's own words for a thread with nothing recorded, as the
+            // ACP adapter relays them too. Anything else, "not found"
+            // included, is a failure worth showing.
+            let reason = if lower.contains("no rollout found") {
                 farcooler_agent_core::event::AgentGapReason::LoadEmpty
             } else {
                 farcooler_agent_core::event::AgentGapReason::LoadFailed { detail }

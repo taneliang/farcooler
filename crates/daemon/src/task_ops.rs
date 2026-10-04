@@ -643,7 +643,10 @@ fn rejected_by_answer(svc: &Service, task: Uuid, answer: &str) -> Result<Option<
     else {
         return Ok(None);
     };
-    let same = |a: &str, b: &str| a.trim().eq_ignore_ascii_case(b.trim());
+    // Unicode lowercase, so an option in any script matches itself however
+    // the answer was cased. The latest question is the one asked, because an
+    // agent that asks again before an answer has withdrawn the earlier ask.
+    let same = |a: &str, b: &str| a.trim().to_lowercase() == b.trim().to_lowercase();
     if !options.iter().any(|o| same(o, answer)) {
         return Ok(None);
     }
@@ -1000,5 +1003,40 @@ mod tests {
         };
         assert_eq!(answer(" deploy now ")["rejected"], serde_json::json!(["Wait", "Drop it"]));
         assert!(answer("Deploy relay-local now; stable later").get("rejected").is_none());
+    }
+
+    /// An agent that asks again before the first ask is answered has replaced
+    /// it: an answer is read against the LATEST question, deterministically,
+    /// and words that only the withdrawn question offered pick nothing.
+    #[tokio::test]
+    async fn a_second_question_before_an_answer_is_the_one_answered() {
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
+        let watcher = Watcher::new(svc.clone());
+        let actor = farcooler_store::models::Actor::User;
+        let task = svc.store.create_task(workspace, "Pick", actor).unwrap();
+        for options in [serde_json::json!(["Alpha", "Beta"]), serde_json::json!(["Gamma", "ÉCOLE", "Delta"])] {
+            svc.store
+                .add_note(task.id, NoteKind::Question, actor, "Which?", serde_json::json!({ "options": options }))
+                .unwrap();
+        }
+        let answer = |body: &str| {
+            let written = note(
+                &svc,
+                &watcher,
+                &pb::TaskNoteAppend {
+                    task_id: crate::wire::id_bytes(task.id),
+                    kind: pb::TaskNoteKind::Answer as i32,
+                    actor: "user".into(),
+                    body: body.into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            serde_json::from_str::<serde_json::Value>(&written.extra_json).unwrap_or_default()
+        };
+        assert_eq!(answer("gamma")["rejected"], serde_json::json!(["ÉCOLE", "Delta"]));
+        assert_eq!(answer("école")["rejected"], serde_json::json!(["Gamma", "Delta"]));
+        assert!(answer("Alpha").get("rejected").is_none(), "the withdrawn question's option");
     }
 }

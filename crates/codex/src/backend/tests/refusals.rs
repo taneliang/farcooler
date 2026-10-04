@@ -48,3 +48,15 @@ async fn a_selector_the_backend_does_not_have_is_refused_not_acknowledged() {
     ));
     backend.set_config_option("model", "m").await.expect("a real selector is accepted");
 }
+
+#[tokio::test]
+async fn an_unrelated_not_found_is_a_failure_to_load() {
+    let prelude = start_after_failed_resume("model not found").await;
+    assert!(
+        prelude.iter().any(|e| matches!(
+            e,
+            AgentEvent::Gap { reason: AgentGapReason::LoadFailed { detail } } if detail.contains("model not found")
+        )),
+        "{prelude:?}"
+    );
+}
