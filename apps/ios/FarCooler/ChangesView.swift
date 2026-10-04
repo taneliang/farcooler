@@ -1653,16 +1653,7 @@ private struct ChangesFileBody: View {
                 // merge's first-parent view is a patch that is really there,
                 // so these say what kind of patch it is and the hunks follow.
                 ForEach(store.fileNotices[file.path] ?? [], id: \.self) { notice in
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle")
-                            .accessibilityHidden(true)
-                        Text(notice)
-                            .accessibilityIdentifier("changes-file-notice")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
+                    PatchNoticeRow(text: notice)
                 }
                 if store.loadingFiles.contains(file.path) {
                     HStack(spacing: 8) {
@@ -1883,17 +1874,7 @@ private struct DiffHunks: View {
             // conclusion from. Fires on a lockfile or a generated client, and
             // on almost nothing a person wrote.
             if let more = PatchBudget.moreLabel(total: lines.count, whole: whole) {
-                Button {
-                    whole = true
-                } label: {
-                    Label(more, systemImage: "chevron.up.chevron.down")
-                        .font(.footnote)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .accessibilityIdentifier("changes-show-more-lines")
+                ShowMoreLinesButton(title: more) { whole = true }
             }
         }
         .padding(.bottom, 4)

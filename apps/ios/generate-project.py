@@ -133,6 +133,8 @@ SOURCES = [
     "BranchAndStack.swift",
     # What a screen says when something a person asked for was refused (ov-179).
     "ActionFailure.swift",
+    "ChangesPatchNotice.swift",
+    "ConnectionActions.swift",
 ]
 
 # The enrollment ceremony, in `Far Cooler/Ceremony/`.

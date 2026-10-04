@@ -19,7 +19,7 @@
 2798 apps/ios/FarCooler/TerminalView.swift
 2633 apps/macos/Sources/FarCooler/ChangesPane.swift
 2333 apps/android/app/src/main/java/com/farcooler/net/Connection.kt
-2321 apps/ios/FarCooler/Connection.swift
+2317 apps/ios/FarCooler/Connection.swift
 2314 apps/shared/AgentKit/Sources/AgentKit/ShellNavigation.swift
 2251 apps/ios/FarCooler/TerminalSession.swift
 2115 apps/android/app/src/main/java/com/farcooler/ui/ChangesScreen.kt
@@ -34,8 +34,8 @@
 1774 crates/codex/src/backend.rs
 1774 crates/daemon/src/agent_supervisor.rs
 1700 crates/claude/src/normalize.rs
-1649 apps/ios/FarCooler/Changes.swift
 1643 apps/android/app/src/main/java/com/farcooler/net/TerminalSession.kt
 1634 crates/daemon/src/hook_install.rs
 1623 apps/macos/Sources/FarCooler/ChangesModel.swift
+1605 apps/ios/FarCooler/Changes.swift
 1554 crates/daemon/src/push.rs
