@@ -678,6 +678,12 @@ public enum TaskNoteKind: String, CaseIterable, Sendable, Hashable {
     case comment
     case statusChange = "status_change"
     case created
+    /// A task's start changed: put in a line, held, parked, or let go
+    /// (ov-212). Written only by the runner.
+    case wait
+    /// A subagent started, ended or resumed on the task (ov-213). Written
+    /// only by the runner.
+    case worker
 
     /// The label above a note. Title case, like every other heading.
     public var title: String {
@@ -690,6 +696,8 @@ public enum TaskNoteKind: String, CaseIterable, Sendable, Hashable {
         case .comment: return "Comment"
         case .statusChange: return "Status Change"
         case .created: return "Created"
+        case .wait: return "Start"
+        case .worker: return "Subagent"
         }
     }
 
@@ -699,7 +707,9 @@ public enum TaskNoteKind: String, CaseIterable, Sendable, Hashable {
     /// transaction that moves or makes a task — the CLI refuses to let anybody
     /// append one. They read as history rather than as somebody's word, and
     /// the board draws them quieter for it.
-    public var isMachineWritten: Bool { self == .statusChange || self == .created }
+    public var isMachineWritten: Bool {
+        self == .statusChange || self == .created || self == .wait || self == .worker
+    }
 }
 
 /// One entry in the record, as the board draws it.

@@ -54,6 +54,10 @@ struct TaskNoteStyle: Equatable {
             return TaskNoteStyle(label: "Status Change", symbol: "arrow.right.circle", tint: .secondary, weight: .quiet)
         case .created:
             return TaskNoteStyle(label: "Created", symbol: "plus.circle", tint: .secondary, weight: .quiet)
+        case .wait:
+            return TaskNoteStyle(label: "Start", symbol: "clock", tint: .secondary, weight: .quiet)
+        case .worker:
+            return TaskNoteStyle(label: "Subagent", symbol: "person.2", tint: .secondary, weight: .quiet)
         }
     }
 

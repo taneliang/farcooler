@@ -1807,6 +1807,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "handoff_task" => "that task isn't on this workspace's board",
         "cycle" => "those two tasks would end up waiting on each other",
         "blocked_by" => "the task it would wait on is not on this runner",
+        "not_lost" => "that terminal isn't lost anymore: it was already restarted or dismissed",
         // The workspace words, which the runner also has sentences for.
         "task_prefix" => "a prefix is a letter followed by up to seven letters or digits",
         "task_prefix_taken" => "that prefix is already used by another workspace",
