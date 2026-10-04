@@ -34,10 +34,10 @@ private func section(_ repository: String, _ rows: [PhoneWorkspaceRow]) -> Phone
     #expect(!PhoneFirstRun.noOrchestratorAnywhere([section("a", [row("a", orchestrator: nil, implicit: true)])]))
 }
 
-@Test func theNoOrchestratorCopyTeachesWhatAWorkspaceIsFor() {
+@Test func theNoOrchestratorCopySaysWhatToDoFirst() {
     let copy = PhoneFirstRun.noOrchestratorCopy(sections: [section("a", [row("main", orchestrator: nil)])])
     #expect(copy == PhoneEmptyStates.noAgentsWorking)
-    #expect(copy?.rows.contains { $0.text.contains("one line of work") } == true)
+    #expect(copy?.rows.contains { $0.text.contains("Start an orchestrator") } == true)
     #expect(PhoneFirstRun.noOrchestratorCopy(sections: []) == nil)
     // Agents already working make "no agents are working yet" untrue.
     #expect(PhoneFirstRun.noOrchestratorCopy(sections: [section("a", [row("main", orchestrator: nil)])], working: 2) == nil)

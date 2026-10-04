@@ -7,11 +7,10 @@ import SwiftUI
 /// purpose, then rows of a symbol and a few words, as every other empty state.
 struct BoardBlankState: View {
     static let copy = EmptyStateCopy(
-        lede: "The orchestrator turns your requests into tasks.",
+        lede: "Tasks show up here as the orchestrator makes them.",
         rows: [
-            .init(symbol: "person.crop.circle.badge.checkmark", text: "An agent works on each one"),
-            .init(symbol: "questionmark.bubble", text: "It asks you when it’s stuck"),
-            .init(symbol: "eye", text: "Finished work waits for your review"),
+            .init(symbol: "bubble.left", text: "Tell it what you want built"),
+            .init(symbol: "eye", text: "Finished work waits here for your review"),
         ])
 
     var body: some View {

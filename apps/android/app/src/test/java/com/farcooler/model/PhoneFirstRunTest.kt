@@ -118,7 +118,7 @@ class PhoneFirstRunTest {
     }
 
     @Test
-    fun `the no orchestrator sentence says what a workspace is for`() {
-        assertTrue(PhoneEmptyStates.NO_AGENTS_WORKING.rows.any { it.text.contains("one line of work") })
+    fun `the no orchestrator row says what to do first`() {
+        assertTrue(PhoneEmptyStates.NO_AGENTS_WORKING.rows.any { it.text.contains("Start an orchestrator") })
     }
 }

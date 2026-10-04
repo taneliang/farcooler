@@ -46,11 +46,10 @@ struct FleetPlaceholder: View {
     /// orchestrator does, never where anything sits on screen. Rows, not the
     /// five-line paragraph the owner found "too many words" (ov-205).
     static let workspaceCopy = EmptyStateCopy(
-        lede: "Each workspace is one line of work, like a feature.",
+        lede: "A workspace is where you work on one feature or fix.",
         rows: [
-            .init(symbol: "bubble.left", text: "Tell its orchestrator what you want"),
-            .init(symbol: "checklist", text: "It plans tasks and puts agents on them"),
-            .init(symbol: "hand.raised", text: "It asks you when it needs a decision"),
+            .init(symbol: "bubble.left", text: "Tell the orchestrator what you want"),
+            .init(symbol: "checklist", text: "Agents start on the tasks it makes"),
         ])
 
     /// Under "No Repositories": what to add, then what a worktree does for
@@ -59,15 +58,14 @@ struct FleetPlaceholder: View {
         lede: "Add the repository you want agents to work in.",
         rows: [
             .init(symbol: "arrow.triangle.branch", text: "Each agent gets its own folder and branch"),
-            .init(symbol: "arrow.triangle.merge", text: "Your checkout changes only when you merge"),
+            .init(symbol: "arrow.triangle.merge", text: "Your files don’t change until you merge"),
         ])
 
     /// Under "No Worktrees".
     static let noWorktreesCopy = EmptyStateCopy(
-        lede: "A worktree is where an agent works.",
+        lede: "A worktree gives an agent its own folder and branch.",
         rows: [
-            .init(symbol: "arrow.triangle.branch", text: "It has its own folder and branch"),
-            .init(symbol: "arrow.triangle.merge", text: "Your checkout changes only when you merge"),
+            .init(symbol: "arrow.triangle.merge", text: "Your files don’t change until you merge"),
         ])
 
     /// The Main the empty detail's Open Main opens: the one repository's, and

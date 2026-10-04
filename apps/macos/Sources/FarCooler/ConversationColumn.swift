@@ -68,11 +68,10 @@ enum ConversationColumn {
     /// What "No Orchestrator" says under it (spec §8): what an orchestrator
     /// is for, then what it does, in rows rather than a paragraph (ov-205).
     static let emptyCopy = EmptyStateCopy(
-        lede: "An orchestrator runs this workspace’s board.",
+        lede: "An orchestrator turns your requests into tasks and starts agents on them.",
         rows: [
-            .init(symbol: "bubble.left", text: "Tell it what you want done"),
-            .init(symbol: "checklist", text: "It plans tasks and puts agents on them"),
-            .init(symbol: "hand.raised", text: "It asks you when it needs a decision"),
+            .init(symbol: "bubble.left", text: "Tell it what you want built"),
+            .init(symbol: "hand.raised", text: "Anything it can’t decide comes to you"),
         ])
 }
 

@@ -5,7 +5,7 @@ package com.farcooler.model
  * drawing in `ui/PhoneEmptyRows.kt`, so the words and their shape can be tested
  * on the JVM without Compose.
  */
-enum class EmptyIcon { BUBBLE, CHECKLIST, HAND, WORKSPACE, ADD_PERSON, BRANCH, MERGE }
+enum class EmptyIcon { BUBBLE, HAND, EYE, ADD_PERSON, BRANCH, MERGE }
 
 /**
  * What an empty state says under its title, as a short lede and a few icon rows
@@ -26,11 +26,10 @@ data class PhoneEmptyCopy(val lede: String, val rows: List<Row>) {
 object PhoneEmptyStates {
     /** No orchestrator, in a workspace. The Mac's words. */
     val NO_ORCHESTRATOR = PhoneEmptyCopy(
-        "An orchestrator runs this workspace’s board.",
+        "An orchestrator turns your requests into tasks and starts agents on them.",
         listOf(
-            PhoneEmptyCopy.Row(EmptyIcon.BUBBLE, "Tell it what you want done"),
-            PhoneEmptyCopy.Row(EmptyIcon.CHECKLIST, "It plans tasks and puts agents on them"),
-            PhoneEmptyCopy.Row(EmptyIcon.HAND, "It asks you when it needs a decision"),
+            PhoneEmptyCopy.Row(EmptyIcon.BUBBLE, "Tell it what you want built"),
+            PhoneEmptyCopy.Row(EmptyIcon.HAND, "Anything it can’t decide comes to you"),
         ),
     )
 
@@ -38,8 +37,7 @@ object PhoneEmptyStates {
     val NO_AGENTS_WORKING = PhoneEmptyCopy(
         "No agents are working yet.",
         listOf(
-            PhoneEmptyCopy.Row(EmptyIcon.WORKSPACE, "Each workspace is one line of work"),
-            PhoneEmptyCopy.Row(EmptyIcon.ADD_PERSON, "Start a workspace’s orchestrator to begin"),
+            PhoneEmptyCopy.Row(EmptyIcon.ADD_PERSON, "Start an orchestrator and give it work"),
         ),
     )
 
@@ -48,40 +46,37 @@ object PhoneEmptyStates {
         "Add the repository you want agents to work in.",
         listOf(
             PhoneEmptyCopy.Row(EmptyIcon.BRANCH, "Each agent gets its own folder and branch"),
-            PhoneEmptyCopy.Row(EmptyIcon.MERGE, "Your checkout changes only when you merge"),
+            PhoneEmptyCopy.Row(EmptyIcon.MERGE, "Your files don’t change until you merge"),
         ),
     )
 
     /** A workspace's worktrees with none. The Mac's words. */
     val NO_WORKTREES = PhoneEmptyCopy(
-        "A worktree is where an agent works.",
+        "A worktree gives an agent its own folder and branch.",
         listOf(
-            PhoneEmptyCopy.Row(EmptyIcon.BRANCH, "It has its own folder and branch"),
-            PhoneEmptyCopy.Row(EmptyIcon.MERGE, "Your checkout changes only when you merge"),
+            PhoneEmptyCopy.Row(EmptyIcon.MERGE, "Your files don’t change until you merge"),
         ),
     )
 
-    /** An empty board its orchestrator leads, running. */
+    /** An empty board its orchestrator leads, running. The Mac's words. */
     val BOARD_WITH_ORCHESTRATOR = PhoneEmptyCopy(
-        "The orchestrator fills this board.",
+        "Tasks show up here as the orchestrator makes them.",
         listOf(
-            PhoneEmptyCopy.Row(EmptyIcon.BUBBLE, "Tell it what you want done"),
-            PhoneEmptyCopy.Row(EmptyIcon.CHECKLIST, "Each piece of work becomes a task"),
+            PhoneEmptyCopy.Row(EmptyIcon.BUBBLE, "Tell it what you want built"),
+            PhoneEmptyCopy.Row(EmptyIcon.EYE, "Finished work waits here for your review"),
         ),
     )
 
     /** The same with none running: start it first. */
     val BOARD_NO_ORCHESTRATOR = PhoneEmptyCopy(
-        "The orchestrator fills this board.",
+        "Tasks show up here once an orchestrator is running.",
         listOf(
-            PhoneEmptyCopy.Row(EmptyIcon.ADD_PERSON, "Start the orchestrator first"),
-            PhoneEmptyCopy.Row(EmptyIcon.BUBBLE, "Tell it what you want done"),
-            PhoneEmptyCopy.Row(EmptyIcon.CHECKLIST, "Each piece of work becomes a task"),
+            PhoneEmptyCopy.Row(EmptyIcon.ADD_PERSON, "Start the orchestrator, then give it work"),
         ),
     )
 
     /** A board on a runner too old for workspaces: one line short enough to need no rows. */
-    val BOARD_IMPLICIT = PhoneEmptyCopy("Each piece of work on this board appears here as a task.", emptyList())
+    val BOARD_IMPLICIT = PhoneEmptyCopy("Tasks show up here as they’re added.", emptyList())
 
     val all: List<PhoneEmptyCopy> = listOf(
         NO_ORCHESTRATOR, NO_AGENTS_WORKING, NO_REPOSITORIES, NO_WORKTREES, BOARD_WITH_ORCHESTRATOR,

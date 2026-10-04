@@ -8,7 +8,7 @@ import AppKit
 
 /// Every phone empty state that explains something says it as a short lede and
 /// rows, never a paragraph (ov-245). The Mac's `EmptyStateCopyTests` shape: a
-/// lede of one short sentence, two or three rows of a real SF Symbol and at most
+/// lede of one short sentence, one to three rows of a real SF Symbol and at most
 /// eight words each, and no layout talk. A board on an old runner is the one
 /// exception, a single line short enough to need no rows.
 @Suite struct PhoneEmptyStatesTests {
@@ -17,7 +17,7 @@ import AppKit
         // One sentence: a full stop only at the end.
         #expect(!copy.lede.dropLast().contains("."), "more than one sentence: \(copy.lede)", sourceLocation: sourceLocation)
         if copy.rows.isEmpty { return }
-        #expect((2...3).contains(copy.rows.count), "rows, not a paragraph", sourceLocation: sourceLocation)
+        #expect((1...3).contains(copy.rows.count), "rows, not a paragraph", sourceLocation: sourceLocation)
         for row in copy.rows {
             #expect(words(row.text) <= 8, "a row of \(words(row.text)) words: \(row.text)", sourceLocation: sourceLocation)
             #expect(!row.text.hasSuffix("."), "a row is a list item: \(row.text)", sourceLocation: sourceLocation)
@@ -46,12 +46,11 @@ import AppKit
     /// The Mac's own words, where the Mac has the same state, so a runner reads
     /// the same on every device.
     @Test func theStatesTheMacAlsoHasSayWhatTheMacSays() {
-        #expect(PhoneEmptyStates.noOrchestrator.lede == "An orchestrator runs this workspace’s board.")
+        #expect(PhoneEmptyStates.noOrchestrator.lede == "An orchestrator turns your requests into tasks and starts agents on them.")
         #expect(PhoneEmptyStates.noOrchestrator.rows.map(\.text) == [
-            "Tell it what you want done", "It plans tasks and puts agents on them",
-            "It asks you when it needs a decision",
+            "Tell it what you want built", "Anything it can’t decide comes to you",
         ])
-        #expect(PhoneEmptyStates.noWorktrees.lede == "A worktree is where an agent works.")
+        #expect(PhoneEmptyStates.noWorktrees.lede == "A worktree gives an agent its own folder and branch.")
         #expect(PhoneEmptyStates.noRepositories.lede.hasPrefix("Add the repository"))
     }
 }

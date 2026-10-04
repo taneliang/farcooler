@@ -9,10 +9,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.CallMerge
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
-import androidx.compose.material.icons.outlined.Checklist
-import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.PanTool
 import androidx.compose.material.icons.outlined.PersonAdd
+import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -29,9 +28,8 @@ import com.farcooler.model.PhoneEmptyCopy
 /** The Material icon for a row's [EmptyIcon]. */
 fun EmptyIcon.vector(): ImageVector = when (this) {
     EmptyIcon.BUBBLE -> Icons.Outlined.ChatBubbleOutline
-    EmptyIcon.CHECKLIST -> Icons.Outlined.Checklist
     EmptyIcon.HAND -> Icons.Outlined.PanTool
-    EmptyIcon.WORKSPACE -> Icons.Outlined.Layers
+    EmptyIcon.EYE -> Icons.Outlined.Visibility
     EmptyIcon.ADD_PERSON -> Icons.Outlined.PersonAdd
     EmptyIcon.BRANCH -> Icons.Outlined.AccountTree
     EmptyIcon.MERGE -> Icons.Outlined.CallMerge

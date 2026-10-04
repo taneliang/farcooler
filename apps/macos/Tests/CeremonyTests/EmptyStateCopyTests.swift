@@ -10,10 +10,10 @@ import Testing
 @MainActor
 struct EmptyStateCopyTests {
     /// The shape that keeps an empty state scannable: a lede of one short
-    /// sentence, two or three rows of a real SF Symbol and at most eight
+    /// sentence, one to three rows of a real SF Symbol and at most eight
     /// words each, and no layout talk.
     static func expectScannable(_ copy: EmptyStateCopy, sourceLocation: SourceLocation = #_sourceLocation) {
-        #expect((2...3).contains(copy.rows.count), "rows, not a paragraph", sourceLocation: sourceLocation)
+        #expect((1...3).contains(copy.rows.count), "rows, not a paragraph", sourceLocation: sourceLocation)
         if let lede = copy.lede {
             #expect(words(lede) <= 12, "a lede of \(words(lede)) words: \(lede)", sourceLocation: sourceLocation)
             // One sentence: a full stop only at the end.
@@ -42,18 +42,18 @@ struct EmptyStateCopyTests {
         Self.expectScannable(FleetPlaceholder.noRepositoriesCopy)
         Self.expectScannable(FleetPlaceholder.noWorktreesCopy)
         #expect(FleetPlaceholder.noRepositoriesCopy.lede?.hasPrefix("Add the repository") == true)
-        #expect(FleetPlaceholder.noWorktreesCopy.lede?.hasPrefix("A worktree is where an agent works") == true)
+        #expect(FleetPlaceholder.noWorktreesCopy.lede?.hasPrefix("A worktree gives an agent") == true)
     }
 
-    @Test("Nothing Needs You lists what waits there, one row each")
+    @Test("Nothing Needs You says what to do with what waits there")
     func needsYou() {
         Self.expectScannable(NeedsYouView.emptyCopy)
-        #expect(NeedsYouView.emptyCopy.rows.count == 3)
+        #expect(NeedsYouView.emptyCopy.rows.count == 2)
     }
 
-    @Test("No Orchestrator says what one is for, then what it does, in rows")
+    @Test("No Orchestrator says what one does for you, then what stays yours")
     func noOrchestrator() {
         Self.expectScannable(ConversationColumn.emptyCopy)
-        #expect(ConversationColumn.emptyCopy.lede?.hasPrefix("An orchestrator runs") == true)
+        #expect(ConversationColumn.emptyCopy.lede?.hasPrefix("An orchestrator turns your requests into tasks") == true)
     }
 }

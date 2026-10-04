@@ -92,9 +92,8 @@ struct NeedsYouView: View {
     static let emptyCopy = EmptyStateCopy(
         lede: "Agents wait here when they need you.",
         rows: [
-            .init(symbol: "questionmark.bubble", text: "Questions to answer"),
-            .init(symbol: "hand.raised", text: "Decisions to make"),
-            .init(symbol: "eye", text: "Changes to review"),
+            .init(symbol: "questionmark.bubble", text: "Answer questions and make decisions"),
+            .init(symbol: "eye", text: "Review finished work before you merge it"),
         ])
 
     let items: [NeedsYouItem]

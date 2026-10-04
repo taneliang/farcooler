@@ -62,9 +62,9 @@ final class FirstRunUITests: XCTestCase {
         app.buttons["segment-board"].tap()
         XCTAssertTrue(element(app, "board-empty").waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["No Tasks"].exists)
-        XCTAssertTrue(app.staticTexts["The orchestrator fills this board."].exists)
-        XCTAssertTrue(app.staticTexts["Tell it what you want done"].exists)
-        XCTAssertFalse(app.staticTexts["Start the orchestrator first"].exists)
+        XCTAssertTrue(app.staticTexts["Tasks show up here as the orchestrator makes them."].exists)
+        XCTAssertTrue(app.staticTexts["Tell it what you want built"].exists)
+        XCTAssertFalse(app.staticTexts["Start the orchestrator, then give it work"].exists)
         XCTAssertFalse(app.buttons["board-show-orchestrator"].exists)
     }
 
@@ -75,21 +75,21 @@ final class FirstRunUITests: XCTestCase {
         openWorkspace(app, "Billing")
         app.buttons["segment-board"].tap()
         XCTAssertTrue(element(app, "board-empty").waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Start the orchestrator first"].exists)
+        XCTAssertTrue(app.staticTexts["Start the orchestrator, then give it work"].exists)
         app.buttons["board-show-orchestrator"].tap()
         XCTAssertTrue(app.buttons["start-orchestrator"].waitForExistence(timeout: 10))
     }
 
-    /// **No Orchestrator is a lede and three icon rows, not a paragraph**
+    /// **No Orchestrator is a lede and two icon rows, not a paragraph**
     /// (ov-245), above the Start Orchestrator button.
     func testNoOrchestratorIsALedeAndIconRows() throws {
         let app = launch(["-phone-billing-blank"])
         openWorkspace(app, "Billing")
         app.buttons["segment-orchestrator"].tap()
         XCTAssertTrue(app.buttons["start-orchestrator"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["An orchestrator runs this workspace’s board."].exists)
+        XCTAssertTrue(app.staticTexts["An orchestrator turns your requests into tasks and starts agents on them."].exists)
         let rows = element(app, "empty-rows").descendants(matching: .any).matching(identifier: "empty-row")
-        XCTAssertEqual(rows.count, 3)
+        XCTAssertEqual(rows.count, 2)
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Instead of running'")).firstMatch.exists)
     }
 

@@ -39,19 +39,17 @@ public struct PhoneEmptyCopy: Equatable, Sendable {
 public enum PhoneEmptyStates {
     /// No Orchestrator, in a workspace. The Mac's words.
     public static let noOrchestrator = PhoneEmptyCopy(
-        lede: "An orchestrator runs this workspace’s board.",
+        lede: "An orchestrator turns your requests into tasks and starts agents on them.",
         rows: [
-            .init(symbol: "bubble.left", text: "Tell it what you want done"),
-            .init(symbol: "checklist", text: "It plans tasks and puts agents on them"),
-            .init(symbol: "hand.raised", text: "It asks you when it needs a decision"),
+            .init(symbol: "bubble.left", text: "Tell it what you want built"),
+            .init(symbol: "hand.raised", text: "Anything it can’t decide comes to you"),
         ])
 
     /// Under an empty Needs You, while no orchestrator runs anywhere.
     public static let noAgentsWorking = PhoneEmptyCopy(
         lede: "No agents are working yet.",
         rows: [
-            .init(symbol: "square.stack.3d.up", text: "Each workspace is one line of work"),
-            .init(symbol: "person.crop.circle.badge.plus", text: "Start a workspace’s orchestrator to begin"),
+            .init(symbol: "person.crop.circle.badge.plus", text: "Start an orchestrator and give it work"),
         ])
 
     /// A runner that lists no repository. The Mac's words.
@@ -59,38 +57,35 @@ public enum PhoneEmptyStates {
         lede: "Add the repository you want agents to work in.",
         rows: [
             .init(symbol: "arrow.triangle.branch", text: "Each agent gets its own folder and branch"),
-            .init(symbol: "arrow.triangle.merge", text: "Your checkout changes only when you merge"),
+            .init(symbol: "arrow.triangle.merge", text: "Your files don’t change until you merge"),
         ])
 
     /// A workspace's Worktrees with none. The Mac's words.
     public static let noWorktrees = PhoneEmptyCopy(
-        lede: "A worktree is where an agent works.",
+        lede: "A worktree gives an agent its own folder and branch.",
         rows: [
-            .init(symbol: "arrow.triangle.branch", text: "It has its own folder and branch"),
-            .init(symbol: "arrow.triangle.merge", text: "Your checkout changes only when you merge"),
+            .init(symbol: "arrow.triangle.merge", text: "Your files don’t change until you merge"),
         ])
 
-    /// An empty board its orchestrator leads, running.
+    /// An empty board its orchestrator leads, running. The Mac's words.
     public static let boardWithOrchestrator = PhoneEmptyCopy(
-        lede: "The orchestrator fills this board.",
+        lede: "Tasks show up here as the orchestrator makes them.",
         rows: [
-            .init(symbol: "bubble.left", text: "Tell it what you want done"),
-            .init(symbol: "checklist", text: "Each piece of work becomes a task"),
+            .init(symbol: "bubble.left", text: "Tell it what you want built"),
+            .init(symbol: "eye", text: "Finished work waits here for your review"),
         ])
 
     /// The same with none running: start it first.
     public static let boardNoOrchestrator = PhoneEmptyCopy(
-        lede: "The orchestrator fills this board.",
+        lede: "Tasks show up here once an orchestrator is running.",
         rows: [
-            .init(symbol: "person.crop.circle.badge.plus", text: "Start the orchestrator first"),
-            .init(symbol: "bubble.left", text: "Tell it what you want done"),
-            .init(symbol: "checklist", text: "Each piece of work becomes a task"),
+            .init(symbol: "person.crop.circle.badge.plus", text: "Start the orchestrator, then give it work"),
         ])
 
     /// A board on a runner too old for workspaces: no orchestrator leads it, and
     /// the one line is short enough to need no rows.
     public static let boardImplicit = PhoneEmptyCopy(
-        lede: "Each piece of work on this board appears here as a task.", rows: [])
+        lede: "Tasks show up here as they’re added.", rows: [])
 
     static var all: [PhoneEmptyCopy] {
         [

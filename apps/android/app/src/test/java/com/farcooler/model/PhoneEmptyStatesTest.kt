@@ -8,7 +8,7 @@ import org.junit.Test
 /**
  * Every phone empty state that explains something says it as a short lede and
  * rows, never a paragraph (ov-245). The Mac's `EmptyStateCopyTests` shape: a
- * lede of one short sentence, two or three rows of an icon and at most eight
+ * lede of one short sentence, one to three rows of an icon and at most eight
  * words each, and no layout talk. A board on an old runner is the one exception,
  * a single line short enough to need no rows.
  */
@@ -19,7 +19,7 @@ class PhoneEmptyStatesTest {
         assertTrue("a lede of ${words(copy.lede)} words: ${copy.lede}", words(copy.lede) <= 12)
         assertFalse("more than one sentence: ${copy.lede}", copy.lede.dropLast(1).contains("."))
         if (copy.rows.isEmpty()) return
-        assertTrue("rows, not a paragraph", copy.rows.size in 2..3)
+        assertTrue("rows, not a paragraph", copy.rows.size in 1..3)
         for (row in copy.rows) {
             assertTrue("a row of ${words(row.text)} words: ${row.text}", words(row.text) <= 8)
             assertFalse("a row is a list item: ${row.text}", row.text.endsWith("."))
@@ -43,16 +43,15 @@ class PhoneEmptyStatesTest {
     /** The Mac's own words where the Mac has the same state, so a runner reads the same on every device. */
     @Test
     fun theStatesTheMacAlsoHasSayWhatTheMacSays() {
-        assertEquals("An orchestrator runs this workspace’s board.", PhoneEmptyStates.NO_ORCHESTRATOR.lede)
         assertEquals(
-            listOf(
-                "Tell it what you want done",
-                "It plans tasks and puts agents on them",
-                "It asks you when it needs a decision",
-            ),
+            "An orchestrator turns your requests into tasks and starts agents on them.",
+            PhoneEmptyStates.NO_ORCHESTRATOR.lede,
+        )
+        assertEquals(
+            listOf("Tell it what you want built", "Anything it can’t decide comes to you"),
             PhoneEmptyStates.NO_ORCHESTRATOR.rows.map { it.text },
         )
-        assertEquals("A worktree is where an agent works.", PhoneEmptyStates.NO_WORKTREES.lede)
+        assertEquals("A worktree gives an agent its own folder and branch.", PhoneEmptyStates.NO_WORKTREES.lede)
         assertTrue(PhoneEmptyStates.NO_REPOSITORIES.lede.startsWith("Add the repository"))
     }
 
@@ -60,11 +59,10 @@ class PhoneEmptyStatesTest {
     @Test
     fun theRowsReadTheSameAsTheIPhones() {
         val iphone = listOf(
-            "Tell it what you want done", "It plans tasks and puts agents on them",
-            "It asks you when it needs a decision", "Each workspace is one line of work",
-            "Start a workspace’s orchestrator to begin", "Each agent gets its own folder and branch",
-            "Your checkout changes only when you merge", "It has its own folder and branch",
-            "Each piece of work becomes a task", "Start the orchestrator first",
+            "Tell it what you want built", "Anything it can’t decide comes to you",
+            "Start an orchestrator and give it work", "Each agent gets its own folder and branch",
+            "Your files don’t change until you merge", "Finished work waits here for your review",
+            "Start the orchestrator, then give it work",
         )
         val ours = PhoneEmptyStates.all.flatMap { it.rows.map { row -> row.text } }.toSet()
         assertEquals(iphone.toSet(), ours)
