@@ -342,15 +342,15 @@ fn an_agent_recorded_twice_is_one_agent() {
     assert_eq!(refused(store.record_lane_agent(l.id, &AgentRecord { harness: "gemini".into(), ..builder("x") }, Actor::Manager)), "harness");
 }
 
-/// The migration is `Welcome`, and the schema it stamps still lets the build
-/// before it open the file.
+/// The migration is the 23rd and `Welcome`, so the build before it can still
+/// open the file. ov-199's LFS record follows it as 0024.
 #[test]
 fn the_migration_is_welcome() {
     use crate::compat::Older;
-    let last = crate::migrate::MIGRATIONS.last().unwrap();
+    let last = &crate::migrate::MIGRATIONS[22];
     assert!(std::ptr::fn_addr_eq(last.0, migration_0023_plan_layer as fn(&Transaction) -> rusqlite::Result<()>));
     assert_eq!(last.1, Older::Welcome);
-    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 23);
+    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 24);
 }
 
 /// Nothing existing carries a column for the layer: every table old code

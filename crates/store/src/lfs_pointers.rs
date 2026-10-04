@@ -22,7 +22,7 @@ use crate::store::Store;
 
 /// One new table that only this file touches. An older build never reads or
 /// writes it, and deleting a worktree from any build cascades its rows.
-pub(crate) fn migration_0023_lfs_pointers(tx: &Transaction) -> rusqlite::Result<()> {
+pub(crate) fn migration_0024_lfs_pointers(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch(
         r#"
         CREATE TABLE worktree_lfs_pointers (

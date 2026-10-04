@@ -68,7 +68,7 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     // One new table (ov-199) only lfs_pointers.rs touches, whose rows go with
     // their worktree by cascade, whichever build deletes it. An older build
     // never reads or writes which large files weren't downloaded.
-    (crate::lfs_pointers::migration_0023_lfs_pointers, Older::Welcome),
+    (crate::lfs_pointers::migration_0024_lfs_pointers, Older::Welcome),
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
