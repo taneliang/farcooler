@@ -979,9 +979,9 @@ data class DaemonBuild(
      * nothing" would blank the UI against every older runner, which is the
      * opposite of the point. Matches the iOS reading exactly.
      */
-    fun can(capability: String): Boolean {
-        if (capabilities.isEmpty()) return capability == "workspaces" || capability == "terminals"
-        return capabilities.contains(capability)
+    fun can(capability: Capability): Boolean {
+        if (capabilities.isEmpty()) return capability == Capability.WORKTREES || capability == Capability.TERMINALS
+        return capabilities.contains(capability.wire)
     }
 
     /**

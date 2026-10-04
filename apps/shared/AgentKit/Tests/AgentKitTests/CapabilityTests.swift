@@ -12,8 +12,8 @@ import Testing
     let daemon = DaemonBuild(
         version: "0.1.0+abc", matches: true, platform: "linux",
         capabilities: ["workspaces", "terminals", "changes"])
-    #expect(daemon.can("changes"))
-    #expect(daemon.can("workspaces"))
+    #expect(daemon.can(.changes))
+    #expect(daemon.can(.worktrees))
 }
 
 @Test func aRunnerThatDoesNotNameAFeatureCannotDoIt() {
@@ -22,8 +22,8 @@ import Testing
     let daemon = DaemonBuild(
         version: "0.1.0+abc", matches: true, platform: "linux",
         capabilities: ["workspaces", "terminals"])
-    #expect(!daemon.can("changes"))
-    #expect(!daemon.can("stack"))
+    #expect(!daemon.can(.changes))
+    #expect(!daemon.can(.stack))
 }
 
 @Test func aDaemonTooOldToAnswerStillGetsItsOldFeatures() {
@@ -32,10 +32,10 @@ import Testing
     // nothing" would blank the UI against every runner older than the change
     // that introduced the question — which is the opposite of the point.
     let ancient = DaemonBuild(version: "0.1.0+old", matches: false, platform: "linux")
-    #expect(ancient.can("workspaces"))
-    #expect(ancient.can("terminals"))
-    #expect(!ancient.can("changes"))
-    #expect(!ancient.can("stack"))
+    #expect(ancient.can(.worktrees))
+    #expect(ancient.can(.terminals))
+    #expect(!ancient.can(.changes))
+    #expect(!ancient.can(.stack))
 }
 
 @Test func capabilitiesAreSeparateFromWhetherTheBuildsMatch() {
@@ -46,7 +46,7 @@ import Testing
         version: "0.9.0+other", matches: false, platform: "linux",
         capabilities: ["workspaces", "terminals", "changes", "stack"])
     #expect(!different.matches)
-    #expect(different.can("stack"))
+    #expect(different.can(.stack))
 }
 
 @Test func aNarrowerGrantIsWhatDimsARunnerControl() {

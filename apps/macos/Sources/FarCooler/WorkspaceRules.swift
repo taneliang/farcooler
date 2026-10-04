@@ -82,7 +82,7 @@ extension ContentView {
     /// Whether a worktree's runner can take `worktree assign`, as `store`
     /// knows it at the moment of asking.
     static func assigns(_ store: FleetStore) -> (Worktree) -> Bool {
-        { store.client(for: $0)?.daemonBuild?.can("workstreams") ?? false }
+        { store.client(for: $0)?.daemonBuild?.can(.workstreams) ?? false }
     }
 
     /// The orchestrators the runner lists in `worktree`, by their role:

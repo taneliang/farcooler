@@ -143,7 +143,7 @@ extension TaskLink {
     /// there is.
     public static func taskNoticeReachesPhone(_ build: DaemonBuild?, registered: Bool) -> Bool {
         guard let build else { return false }
-        return build.can("task_notices") && build.pushPaired && registered
+        return build.can(.taskNotices) && build.pushPaired && registered
     }
 }
 
@@ -163,7 +163,7 @@ extension Fleet {
     /// tested: the phone has no unit test target of its own.
     func agentReports(runner build: DaemonBuild?, registered: Bool) -> [AgentReport] {
         let reaches = TaskLink.taskNoticeReachesPhone(build, registered: registered)
-        let answers = build?.can("notice_task") == true
+        let answers = build?.can(.noticeTask) == true
         return worktrees.flatMap { worktree in
             worktree.terminals.map { terminal in
                 AgentReport(

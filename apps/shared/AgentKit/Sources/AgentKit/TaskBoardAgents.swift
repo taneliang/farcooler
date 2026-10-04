@@ -91,7 +91,7 @@ extension TaskAgentLink {
     /// runner that is not connected gets no pills, no "No Agent", and no count
     /// — "can't say", which is different from "none".
     public static func speaksOfAgents(connected: Bool, build: DaemonBuild?) -> Bool {
-        connected && build?.can("terminal_task") == true
+        connected && build?.can(.terminalTask) == true
     }
 
     /// What a board says when its Agent button has nowhere to land: the pane

@@ -71,6 +71,7 @@ import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.coroutineScope
 import com.farcooler.model.BoardRow
+import com.farcooler.model.Capability
 import com.farcooler.model.FirstRunCopy
 import com.farcooler.model.GlancePalette
 import com.farcooler.model.PhoneFirstRun
@@ -263,7 +264,7 @@ fun BoardTab(
                         columnCount = board.waitingOnYou,
                         decisions = RunnerBoards.decisions(workspace, needsYou?.items.orEmpty()),
                         listRead = needsYou != null,
-                        listServed = daemon?.can("needs_you") == true,
+                        listServed = daemon?.can(Capability.NEEDS_YOU) == true,
                     )
                     TaskBoard.waitingSentence(waitingCount)?.let { waiting ->
                         item(key = "waiting") {

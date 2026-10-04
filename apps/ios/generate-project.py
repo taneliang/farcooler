@@ -488,6 +488,9 @@ AGENTKIT_SOURCES = [
     # AgentKit reaches the FFI.
     "ReviewComments.swift",
     "TokenStore.swift",
+    # Every capability a runner can advertise, generated from Rust's
+    # `capability::ALL` (scripts/capability-names.py): what `can` takes.
+    "Capability.swift",
     "VersionSection.swift",
     "Transcript.swift",
     # What a polling terminal asks the host for. In AgentKit for the one reason

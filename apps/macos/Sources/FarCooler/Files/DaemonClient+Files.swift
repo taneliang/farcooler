@@ -85,7 +85,7 @@ extension DaemonClient {
     /// has been read. `"worktree_files"` is
     /// `farcooler_protocol::capability::WORKTREE_FILES`.
     var showsFiles: Bool? {
-        daemonBuild.map { $0.can("worktree_files") }
+        daemonBuild.map { $0.can(.worktreeFiles) }
     }
 
     /// One directory of `worktree`, `path` relative to its root ("" is the

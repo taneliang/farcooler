@@ -362,7 +362,7 @@ final class TaskBoardStore: ObservableObject {
     /// it needs an update; a read that fails keeps what was shown before,
     /// and with nothing shown, offers Try Again.
     func readUsage(_ row: TaskRow) async {
-        let can = client.daemonBuild?.can("agent_usage")
+        let can = client.daemonBuild?.can(.agentUsage)
         if can == false {
             usage[row.id] = .needsUpdate
             return

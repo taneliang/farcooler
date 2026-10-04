@@ -149,7 +149,7 @@ final class DaemonClient: ObservableObject {
         // Terminal streams are opened far from here, by host arguments alone.
         // `"stream_size_markers"` is `farcooler_protocol::capability::STREAM_SIZE_MARKERS`.
         didSet {
-            let promised = daemonBuild?.can("stream_size_markers") == true
+            let promised = daemonBuild?.can(.streamSizeMarkers) == true
             StreamSizes.record(cliHostArguments, promised: promised)
         }
     }
@@ -966,7 +966,7 @@ final class DaemonClient: ObservableObject {
             // Which way a mismatch goes (ov-143). Absent from an older CLI,
             // which then reads as before.
             runnerIsNewer: body["runnerIsNewer"] as? Bool ?? false)
-        servedNeedsYou = daemonBuild?.can("needs_you") == true
+        servedNeedsYou = daemonBuild?.can(.needsYou) == true
         pushPaired = body["pushPaired"] as? Bool ?? false
     }
 
@@ -1228,7 +1228,7 @@ final class DaemonClient: ObservableObject {
     /// Whether this runner records what agents spend (ov-194): without it a
     /// report's spend is absent, which isn't zero. Unknown until the build
     /// is read, which counts as yes; the read then says what it finds.
-    var recordsAgentUsage: Bool { daemonBuild?.can("agent_usage") ?? true }
+    var recordsAgentUsage: Bool { daemonBuild?.can(.agentUsage) ?? true }
 
     /// Every note in the repository's record carrying `query`, each with its
     /// task's key: the History page's note search (ov-103).
@@ -1285,7 +1285,7 @@ final class DaemonClient: ObservableObject {
     /// `status` read, what the last build said: a reconnect clears the
     /// build, and reading that gap as an older runner swapped every decision
     /// and ask for the derived list for one round trip, then back.
-    var servesNeedsYou: Bool { daemonBuild.map { $0.can("needs_you") } ?? servedNeedsYou }
+    var servesNeedsYou: Bool { daemonBuild.map { $0.can(.needsYou) } ?? servedNeedsYou }
 
     /// What the last build this client read said about `needs_you`.
     private var servedNeedsYou = false
@@ -1940,14 +1940,14 @@ final class DaemonClient: ObservableObject {
         // gives a new branch, never a checkout. An older runner has only the
         // list's word for it. `"workspace_fork_only"` is
         // `farcooler_protocol::capability::WORKTREE_FORK_ONLY`.
-        let forkOnly = daemonBuild?.can("workspace_fork_only") ?? false
+        let forkOnly = daemonBuild?.can(.worktreeForkOnly) ?? false
         // Claimed for the workspace the window is in, or its repository's
         // Main, so it is that workspace's from the start rather than
         // Unclaimed for good: a pane in an unclaimed worktree has no
         // workspace, so nothing done there claims it. Only where the runner has workspaces: an
         // older one would refuse the flag, and the create with it.
         // `"workstreams"` is `farcooler_protocol::capability::WORKSTREAMS`.
-        let claim = (daemonBuild?.can("workstreams") ?? false) ? workspace : nil
+        let claim = (daemonBuild?.can(.workstreams) ?? false) ? workspace : nil
         let (made, makeFailure) = await runRaw(
             ["--json", "worktree", "create", project, name, "--branch", branch, "--no-terminal"]
                 + (forkOnly ? ["--fork-only"] : [])
@@ -1989,7 +1989,7 @@ final class DaemonClient: ObservableObject {
     ) async -> TaskStart {
         // `"launch_prompt"` is `farcooler_protocol::capability::LAUNCH_PROMPT`.
         let asArgument =
-            (daemonBuild?.can("launch_prompt") ?? false) && Agents.takesPrompt(preset: agent)
+            (daemonBuild?.can(.launchPrompt) ?? false) && Agents.takesPrompt(preset: agent)
         let (terminalMade, terminalFailure) = await runRaw(
             ["--json"]
                 + Self.taskTerminalArguments(
@@ -2171,7 +2171,7 @@ final class DaemonClient: ObservableObject {
         // isn't Unclaimed for good. Only where the runner has workspaces: an
         // older one would refuse the flag, and the create with it.
         // `"workstreams"` is `farcooler_protocol::capability::WORKSTREAMS`.
-        let claim = (daemonBuild?.can("workstreams") ?? false) ? workspace : nil
+        let claim = (daemonBuild?.can(.workstreams) ?? false) ? workspace : nil
         // Sampled before the create, and diffed after the refresh — the same
         // way `startTask` finds the worktree it just made. The daemon does not
         // report the id it minted, and matching on the name would find the
@@ -2714,7 +2714,7 @@ final class DaemonClient: ObservableObject {
         // `farcooler` invocation on its clock forever, to be refused the same
         // way each time. `daemonBuild` is nil until the first status read
         // lands, which reads as "not yet" and is retried by the next tick.
-        guard daemonBuild?.can("watching") ?? false else { return }
+        guard daemonBuild?.can(.watching) ?? false else { return }
         let changed = claim != watching
 
         // Nothing claimed and nothing to take back: say nothing. This is every

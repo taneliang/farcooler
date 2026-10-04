@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.core.CoreException
 import com.farcooler.model.AgentHarness
+import com.farcooler.model.Capability
 import com.farcooler.model.FirstRunCopy
 import com.farcooler.model.PhoneEmptyStates
 import com.farcooler.model.HarnessAvailability
@@ -136,7 +137,7 @@ fun WorkspaceScreen(
         worktrees = fleet.worktrees,
         startedAt = startedAt,
         now = now,
-        canStart = !workspace.isImplicit && mayControl && daemon?.can("workstreams") != false,
+        canStart = !workspace.isImplicit && mayControl && daemon?.can(Capability.WORKSTREAMS) != false,
     )
     // Seen: the phone's own start is confirmed, and the clock can stop.
     LaunchedEffect(seat) { if (seat is OrchestratorSeat.Live) startedAt = null }

@@ -99,7 +99,7 @@ object TaskLink {
      * and this phone is [registered] with the relay.
      */
     fun taskNoticeReachesPhone(daemon: DaemonBuild?, registered: Boolean): Boolean =
-        daemon != null && daemon.can("task_notices") && daemon.pushPaired && registered
+        daemon != null && daemon.can(Capability.TASK_NOTICES) && daemon.pushPaired && registered
 
     /**
      * Every pane in [fleet] as [com.farcooler.notify.Notifier.report] takes
@@ -109,7 +109,7 @@ object TaskLink {
      */
     fun agentReports(fleet: Fleet, daemon: DaemonBuild?, registered: Boolean): List<AgentReport> {
         val reaches = taskNoticeReachesPhone(daemon, registered)
-        val answers = daemon?.can("notice_task") == true
+        val answers = daemon?.can(Capability.NOTICE_TASK) == true
         return fleet.worktrees.flatMap { worktree ->
             worktree.terminals.map { terminal ->
                 AgentReport(terminal, worktree.task, leavesBannerToTask(terminal, worktree, reaches, answers))

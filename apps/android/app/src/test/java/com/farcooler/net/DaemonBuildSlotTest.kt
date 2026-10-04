@@ -1,5 +1,6 @@
 package com.farcooler.net
 
+import com.farcooler.model.Capability
 import com.farcooler.model.DaemonBuild
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -29,7 +30,7 @@ class DaemonBuildSlotTest {
         slot.linkCameUp()
         assertNull(slot.current.value)
         assertTrue(slot.land(slot.link, upgraded))
-        assertEquals(true, slot.current.value?.can("watching"))
+        assertEquals(true, slot.current.value?.can(Capability.WATCHING))
     }
 
     @Test

@@ -85,6 +85,14 @@ jobs:
       # must catch and cases it must pass, then the tree.
       - run: ./scripts/copy-lint.py --self-test
       - run: ./scripts/copy-lint.py
+      # The capability names the apps ask a runner for are generated from
+      # `farcooler_protocol::capability` (ov-154), and `can` takes the
+      # generated type, so a misspelling does not compile. A generated file
+      # that is out of date fails here, naming the command that rewrites it.
+      - name: Capability names
+        run: |
+          ./scripts/capability-names.py --self-test
+          ./scripts/capability-names.py --check
       # No source file grows past 1,500 lines (ov-169); the ones already past
       # it are grandfathered in scripts/file-size-budget.txt, each with a
       # ceiling of its size then plus max(2%, 50 lines). The rule against its

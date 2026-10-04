@@ -211,8 +211,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// no task notifies as it always has.
     static func foldsIntoTask(_ terminal: Terminal, in worktree: Worktree, runner: DaemonBuild?) -> Bool {
         TaskLink.leavesBannerToTask(
-            terminal, in: worktree, noticeReachesHere: runner?.can("task_notices") == true,
-            runnerAnswers: runner?.can("notice_task") == true)
+            terminal, in: worktree, noticeReachesHere: runner?.can(.taskNotices) == true,
+            runnerAnswers: runner?.can(.noticeTask) == true)
     }
 
     /// The notification for `notice`, posted from the runner `target` names.

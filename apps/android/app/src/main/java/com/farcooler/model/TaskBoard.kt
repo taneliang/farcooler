@@ -426,7 +426,7 @@ object TaskAgentLink {
      * Anything else is "can't say", which is different from "none".
      */
     fun speaksOfAgents(link: RunnerLink, build: DaemonBuild?): Boolean =
-        link == RunnerLink.ANSWERING && build?.can("terminal_task") == true
+        link == RunnerLink.ANSWERING && build?.can(Capability.TERMINAL_TASK) == true
 
     /** Menu items for several panes, told apart by short id where the titles collide. */
     fun menuTitles(titles: List<String>, shorts: List<String>): List<String> {
@@ -565,7 +565,7 @@ object RunnerBoards {
         build: DaemonBuild?,
         link: RunnerLink,
     ): List<BoardRow> {
-        if (build?.can("tasks") != true) return emptyList()
+        if (build?.can(Capability.TASKS) != true) return emptyList()
         val speaks = TaskAgentLink.speaksOfAgents(link, build)
         val names = repositories.associate { it.id to it.displayName.ifEmpty { it.short } }
         return boards.map { workspace ->

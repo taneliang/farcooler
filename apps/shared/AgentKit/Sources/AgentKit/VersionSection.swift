@@ -201,13 +201,13 @@ public struct DaemonBuild: Equatable, Sendable {
     /// never hidden: the same app showing different controls on two runners
     /// with nothing said about why reads as a bug, and this app already tells
     /// you when a runner has no Far Cooler installed rather than omitting it.
-    public func can(_ capability: String) -> Bool {
+    public func can(_ capability: Capability) -> Bool {
         // A daemon that answered nothing predates capabilities entirely, so it
         // has exactly the feature set that existed then — worktrees and
         // terminals. Treating silence as "can do nothing" would blank the UI
         // against every daemon older than this change.
-        if capabilities.isEmpty { return capability == "workspaces" || capability == "terminals" }
-        return capabilities.contains(capability)
+        if capabilities.isEmpty { return capability == .worktrees || capability == .terminals }
+        return capabilities.contains(capability.rawValue)
     }
 
     /// Whether this runner keeps an order a drag can write to: whether it
@@ -224,7 +224,7 @@ public struct DaemonBuild: Equatable, Sendable {
     /// `Session::fleet` puts `"ordinal"` on every worktree regardless — so a
     /// runner too old to store an order looks, on the wire, exactly like a new
     /// one whose ranks happen to be 0.
-    public var keepsWorktreeOrder: Bool { can("workspace_order") }
+    public var keepsWorktreeOrder: Bool { can(.worktreeOrder) }
 
     /// The same build, spelled the way the app spells its own.
     ///

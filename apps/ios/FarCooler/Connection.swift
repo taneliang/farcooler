@@ -1228,7 +1228,7 @@ final class Connection: ObservableObject {
         // without the check it would spend a failing round trip every few
         // seconds, for as long as a pane is on screen, to be refused the same
         // way every time.
-        guard daemon?.can("watching") ?? false else { return }
+        guard daemon?.can(.watching) ?? false else { return }
         let changed = terminals != watching
         guard changed || Date().timeIntervalSince(watchingSentAt) >= Self.watchingFloor else {
             return
@@ -1343,7 +1343,7 @@ final class Connection: ObservableObject {
     /// than reading on over the new link beside the new link's own sweep.
     func loadBoards() async {
         guard phase == .connected else { return }
-        guard daemon?.can("tasks") == true else {
+        guard daemon?.can(.tasks) == true else {
             // No build yet to say whether the runner keeps a board: owed
             // when it lands. See `BoardSweep`.
             if daemon == nil { boardSweep.refused() }
@@ -1411,7 +1411,7 @@ final class Connection: ObservableObject {
         var read = false
         repeat {
             boardMovedAgain.remove(key)
-            guard phase == .connected, (daemon ?? standInBuild)?.can("tasks") == true else {
+            guard phase == .connected, (daemon ?? standInBuild)?.can(.tasks) == true else {
                 return read
             }
             if let data = try? await rpc("task.list", args),
@@ -1483,7 +1483,7 @@ final class Connection: ObservableObject {
     /// `loadInbox` keeps its counts, and never reads as a dropped link.
     func loadNeedsYou() async {
         guard phase == .connected || isStandIn, let build = daemon ?? standInBuild else { return }
-        guard build.can("needs_you") else {
+        guard build.can(.needsYou) else {
             needsYou = NeedsYou.derived(fromTerminals: fleet.olderPanes())
             needsYouDerived = true
             needsYouRead = true
@@ -1505,7 +1505,7 @@ final class Connection: ObservableObject {
     /// is up to carry its `needs_you` notice: then the poll is all there is.
     private func needsYouOwedAfterFleet() async -> Bool {
         guard let build = daemon else { return false }
-        if !build.can("needs_you") || !needsYouRead { return true }
+        if !build.can(.needsYou) || !needsYouRead { return true }
         return !(await core.eventsLive)
     }
 
@@ -1581,7 +1581,7 @@ final class Connection: ObservableObject {
     /// that this runner needs an update to record it, or that the read
     /// didn't come back (which the section offers to try again).
     func taskUsage(_ task: String) async -> TaskUsageState {
-        let can = daemon?.can("agent_usage")
+        let can = daemon?.can(.agentUsage)
         if can == false { return .needsUpdate }
         do {
             let data = try await rpc("usage.task", ["task": task])
@@ -2042,7 +2042,7 @@ final class Connection: ObservableObject {
         // it cannot serve.
         await loadDaemonBuild()
         guard let daemon else { return .couldNotWrite }
-        guard daemon.can("enrollment") else { return .tooOld }
+        guard daemon.can(.enrollment) else { return .tooOld }
 
         // The keys are camelCase because that is what `crates/client/src/ffi.rs`
         // reads, and it checks the required three for PRESENCE by name rather

@@ -166,8 +166,8 @@ public enum RunnerBoards {
         needsYou: [NeedsYouItem]? = nil,
         connected: Bool
     ) -> [RunnerBoardRow] {
-        guard (build ?? lastKnownBuild)?.can("tasks") == true else { return [] }
-        let served = (build ?? lastKnownBuild)?.can("needs_you") == true
+        guard (build ?? lastKnownBuild)?.can(.tasks) == true else { return [] }
+        let served = (build ?? lastKnownBuild)?.can(.needsYou) == true
         let speaks = TaskAgentLink.speaksOfAgents(connected: connected, build: build)
         return boards.map { workspace in
             let board = models[workspace.id]
@@ -225,7 +225,7 @@ public enum RunnerBoards {
         guard let board else { return 0 }
         return waiting(
             columnCount: board.waitingOnYou, decisions: decisions(for: workspace, in: items),
-            listRead: listRead, listServed: build?.can("needs_you") == true)
+            listRead: listRead, listServed: build?.can(.needsYou) == true)
     }
 
     /// The Board rows of a runner without workspaces: one per repository, in

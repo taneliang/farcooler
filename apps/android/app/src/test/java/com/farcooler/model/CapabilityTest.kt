@@ -21,8 +21,8 @@ class CapabilityTest {
             platform = "linux",
             capabilities = setOf("workspaces", "terminals", "changes"),
         )
-        assertTrue(daemon.can("changes"))
-        assertTrue(daemon.can("workspaces"))
+        assertTrue(daemon.can(Capability.CHANGES))
+        assertTrue(daemon.can(Capability.WORKTREES))
     }
 
     @Test
@@ -35,8 +35,8 @@ class CapabilityTest {
             platform = "linux",
             capabilities = setOf("workspaces", "terminals"),
         )
-        assertFalse(daemon.can("changes"))
-        assertFalse(daemon.can("stack"))
+        assertFalse(daemon.can(Capability.CHANGES))
+        assertFalse(daemon.can(Capability.STACK))
     }
 
     @Test
@@ -45,10 +45,10 @@ class CapabilityTest {
         // exactly the feature set that existed then. Reading that as "can do
         // nothing" would blank the UI against every older runner.
         val ancient = DaemonBuild(version = "0.1.0+old", matches = false, platform = "linux")
-        assertTrue(ancient.can("workspaces"))
-        assertTrue(ancient.can("terminals"))
-        assertFalse(ancient.can("changes"))
-        assertFalse(ancient.can("stack"))
+        assertTrue(ancient.can(Capability.WORKTREES))
+        assertTrue(ancient.can(Capability.TERMINALS))
+        assertFalse(ancient.can(Capability.CHANGES))
+        assertFalse(ancient.can(Capability.STACK))
     }
 
     @Test
@@ -63,7 +63,7 @@ class CapabilityTest {
             capabilities = setOf("workspaces", "terminals", "changes", "stack"),
         )
         assertFalse(different.matches)
-        assertTrue(different.can("stack"))
+        assertTrue(different.can(Capability.STACK))
     }
 
     @Test

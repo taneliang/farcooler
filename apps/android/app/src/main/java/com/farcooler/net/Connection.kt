@@ -1,5 +1,6 @@
 package com.farcooler.net
 
+import com.farcooler.model.Capability
 import com.farcooler.model.RunnerLink
 import com.farcooler.model.FleetRead
 import com.farcooler.model.given
@@ -525,7 +526,7 @@ class Connection(
      */
     private val boardReads = BoardReads(
         scope = scope,
-        canRead = { _phase.value is Phase.Connected && daemonBuild.current.value?.can("tasks") == true },
+        canRead = { _phase.value is Phase.Connected && daemonBuild.current.value?.can(Capability.TASKS) == true },
         read = { workspace ->
             attempt { core.call("task.list", BoardReads.request(workspace)) }
                 .getOrNull()
@@ -603,7 +604,7 @@ class Connection(
         if (_phase.value !is Phase.Connected) return
         val build = daemonBuild.current.value ?: return
         needsYouOwed = false
-        if (!build.can(NEEDS_YOU_CAPABILITY)) {
+        if (!build.can(Capability.NEEDS_YOU)) {
             if (_fleetRead.value == FleetRead.THIS_LINK) {
                 _needsYou.value = NeedsYou.derivedReading(_fleet.value)
             }
@@ -647,7 +648,7 @@ class Connection(
      * (which the section offers to try again).
      */
     suspend fun taskUsage(task: String): com.farcooler.model.TaskUsageState {
-        val can = daemonBuild.current.value?.can("agent_usage")
+        val can = daemonBuild.current.value?.can(Capability.AGENT_USAGE)
         if (can == false) return com.farcooler.model.TaskUsageState.NeedsUpdate
         val read = attempt { core.call("usage.task", args("task" to task)) }
         if ((read.exceptionOrNull() as? com.farcooler.core.CoreException)?.word == "capability-unsupported") {
@@ -1214,7 +1215,7 @@ class Connection(
         // What needs you: derived from this very fleet on a runner that can't
         // say, owed after a notice nobody read, and on the poll when no event
         // channel would bring the notice.
-        val derives = daemonBuild.current.value?.can(NEEDS_YOU_CAPABILITY) == false
+        val derives = daemonBuild.current.value?.can(Capability.NEEDS_YOU) == false
         if (derives || needsYouOwed || (polls % INBOX_EVERY == 1L && !core.eventsLive())) readNeedsYou()
         // No event channel: nothing will say a board moved, so read them on
         // the poll, at most once a minute.
@@ -1374,7 +1375,7 @@ class Connection(
         // without the check it would spend a failing round trip every few
         // seconds, for as long as a pane is on screen, to be refused the same
         // way every time.
-        if (daemonBuild.current.value?.can("watching") != true) return
+        if (daemonBuild.current.value?.can(Capability.WATCHING) != true) return
         // Backgrounded is not watching, and that is the half of the request
         // that matters most: an agent finishing while the phone is in a pocket
         // is exactly what the push exists for. A screen still composed behind a
@@ -2216,9 +2217,6 @@ class Connection(
          * installing it later should be noticed without relaunching the app.
          */
         private const val SLOW_RETRY_MS = 300_000L
-
-        /** The capability a runner advertises when it computes `needs_you` itself. */
-        const val NEEDS_YOU_CAPABILITY = "needs_you"
 
         /**
          * How long to wait before the next attempt.

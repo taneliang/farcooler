@@ -1682,7 +1682,7 @@ struct ContentView: View {
             },
             onAction: { action, terminal in Task { await run(action, on: terminal, in: checkout) } },
             onNew: usable ? { Task { await openShell(besideOrchestratorIn: checkout, workspace: workspace.id) } } : nil,
-            canRename: store.clients[host]?.daemonBuild?.can("terminal_names") == true,
+            canRename: store.clients[host]?.daemonBuild?.can(.terminalNames) == true,
             onThisMac: host.isEmpty)
     }
 
@@ -2289,7 +2289,7 @@ struct ContentView: View {
                         open(lane, terminal: terminal.id)
                     },
                     onOpenInBrowser: { terminal in Task { await run(.openInBrowser, on: terminal, in: lane) } },
-                    onRename: store.clients[host]?.daemonBuild?.can("terminal_names") == true
+                    onRename: store.clients[host]?.daemonBuild?.can(.terminalNames) == true
                         ? { terminal in Task { await run(.rename, on: terminal, in: lane) } } : nil,
                     onClose: { terminal in Task { await run(.close, on: terminal, in: lane) } })
             }
@@ -2384,7 +2384,7 @@ struct ContentView: View {
             onRemove: { removeWorktree = ws },
             onOpenTerminal: { t in open(ws, terminal: t.id) },
             onTerminalAction: { action, t in Task { await run(action, on: t, in: ws) } },
-            canRename: store.clients[host]?.daemonBuild?.can("terminal_names") == true,
+            canRename: store.clients[host]?.daemonBuild?.can(.terminalNames) == true,
             onThisMac: host.isEmpty,
             onShowChanges: showChangesAction(for: ws, usable: store.refusal(for: host) == nil)
         )
@@ -2457,7 +2457,7 @@ struct ContentView: View {
     /// A workspace's navigator, or a sentence saying where its board went.
     @ViewBuilder
     private func boardColumn(host: String, id: String, orchestrator: NavigatorOrchestrator?) -> some View {
-        if let client = store.clients[host], client.daemonBuild.map({ !$0.can("tasks") }) == true {
+        if let client = store.clients[host], client.daemonBuild.map({ !$0.can(.tasks) }) == true {
             // A runner too old for boards: said, rather than a board that
             // can't be read.
             ContentUnavailableView {
