@@ -377,6 +377,14 @@ final class ShellGestureTests: XCTestCase {
         XCTAssertEqual(try pane(app, "ws-0-tab-1")["born"], neighbor)
     }
 
+    /// How many panes say `visible=1` in one snapshot of the accessibility
+    /// tree. Walks the snapshot, so every probe is read from the same frame.
+    static func visiblePaneCount(in root: XCUIElementSnapshot) -> Int {
+        let own = root.identifier.hasPrefix("shell-pane-")
+            && ((root.value as? String) ?? "").contains("visible=1") ? 1 : 0
+        return root.children.reduce(own) { $0 + visiblePaneCount(in: $1) }
+    }
+
     /// **Exactly one pane is `isVisible`, at rest and mid-gesture.**
     ///
     /// `DockedBar.swift:34-41` is why: an input accessory lives in the
@@ -388,21 +396,26 @@ final class ShellGestureTests: XCTestCase {
     /// only time two panes are both on screen and therefore the only time the
     /// wrong answer is reachable.
     func testExactlyOnePaneIsVisible() throws {
-        try XCTSkipIf(true, "ov-236: fails on CI's simulator; quarantined until diagnosed")
         let app = launch()
 
-        func visibleCount() -> Int {
-            let probes = app.descendants(matching: .any)
-                .matching(NSPredicate(format: "identifier BEGINSWITH %@", "shell-pane-"))
-            return (0..<probes.count).filter {
-                ((probes.element(boundBy: $0).value as? String) ?? "").contains("visible=1")
-            }.count
+        // ONE snapshot of the whole tree, not one query per probe (ov-236).
+        // `probes.element(boundBy:).value` re-resolves the element on every
+        // call, so a count built from several of them reads the panes at
+        // different instants. After a release the track re-seats, and the
+        // old pane stops being the pane in the same frame the new one
+        // becomes it; a read of the first probe before that frame and the
+        // second after it counts both. CI's slower simulator is still
+        // settling when the test looks, which is how "2" appeared there and
+        // never here. A snapshot is a single instant, so "exactly one" is
+        // asked of one frame, which is the claim.
+        func visibleCount() throws -> Int {
+            try Self.visiblePaneCount(in: try app.snapshot())
         }
 
         XCTAssertTrue(
             app.descendants(matching: .any).matching(identifier: "shell-pane-ws-0-tab-0")
                 .firstMatch.waitForExistence(timeout: 30))
-        XCTAssertEqual(visibleCount(), 1, "at rest, exactly one pane is the pane")
+        XCTAssertEqual(try visibleCount(), 1, "at rest, exactly one pane is the pane")
 
         // Half a page across and HELD, which is the state that has two panes
         // on screen. `press(thenDragTo:)` cannot be interrogated mid-flight,
@@ -412,7 +425,7 @@ final class ShellGestureTests: XCTestCase {
         let mid = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: y))
         start.press(forDuration: 0.05, thenDragTo: mid, withVelocity: .slow,
                     thenHoldForDuration: 0.05)
-        XCTAssertEqual(visibleCount(), 1, "a drag made a second pane visible")
+        XCTAssertEqual(try visibleCount(), 1, "a drag made a second pane visible")
     }
 
     // MARK: - The three bugs from the device
