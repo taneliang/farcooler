@@ -182,7 +182,7 @@ struct ChangesPane: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(9)
-        .background(Tint.attentionFill(scheme), in: .control)
+        .attentionSurface(in: .control)
         .padding(.horizontal, Spacing.group)
         .padding(.top, Spacing.tight)
     }
@@ -227,7 +227,7 @@ struct ChangesPane: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Tint.attentionFill(scheme), in: .control)
+            .attentionSurface(in: .control)
             .padding(.horizontal, Spacing.group)
             .padding(.vertical, Spacing.tight)
             .help(guessedBaseDetail)
@@ -2207,7 +2207,7 @@ private struct ReviewOutbox: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(9)
-        .background(Tint.attentionFill(scheme), in: .control)
+        .attentionSurface(in: .control)
         .padding(.horizontal, Spacing.group)
         .padding(.vertical, Spacing.tight)
     }

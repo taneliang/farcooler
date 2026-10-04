@@ -397,8 +397,9 @@ private struct ToolRowView: View {
         // block's own: a tool call that needs nothing should not shout, and
         // one that does should be findable without reading the transcript. The
         // fill is the one `Tint` writes down for "needs you", the same amber as
-        // the sidebar's ring, and there is no outline.
-        .background(pending != nil ? Tint.attentionFill(scheme) : Color.clear, in: .card)
+        // the sidebar's ring, and there is no outline except under Increase
+        // Contrast (`attentionSurface`).
+        .attentionSurface(in: .card, when: pending != nil)
         // Driven by the model rather than a timer, exactly as the thought row
         // is: the fold follows the turn moving on, on the shared spring.
         .animation(BoardMotion.list(reduceMotion: reduceMotion), value: pending != nil)
@@ -560,7 +561,7 @@ private struct SubagentBlockView: View {
             }
         }
         .surface(.inset, in: .card)
-        .background(pending != nil ? Tint.attentionFill(scheme) : Color.clear, in: .card)
+        .attentionSurface(in: .card, when: pending != nil)
         // Driven by the model rather than by the toggle alone: children arrive
         // while the block is open, and an unanimated insert makes the
         // transcript below it jump. The fold follows the block finishing.
@@ -664,7 +665,8 @@ private struct GapRow: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(reason.isInformational ? Fill.inset() : Tint.attentionFill(scheme), in: .control)
+        .background(reason.isInformational ? Fill.inset() : Color.clear, in: .control)
+        .attentionSurface(in: .control, when: !reason.isInformational)
     }
 }
 

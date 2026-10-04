@@ -1570,7 +1570,7 @@ private struct QuestionAnswers: View {
         .padding(1.5 * ColumnGrid.rhythm)
         .frame(maxWidth: .infinity, alignment: .leading)
         // Amber, as every "needs you" is; the accent is for the answering buttons.
-        .background(Tint.attentionFill(scheme), in: .card)
+        .attentionSurface(in: .card)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("task-card-question")
         // The field comes back open, with what was in it, whenever this view

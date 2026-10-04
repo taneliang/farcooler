@@ -612,8 +612,8 @@ struct ApprovalCard: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         // The amber fill is the whole card: the glyph carries the state, with no
-        // outline.
-        .background(Tint.attentionFill(scheme), in: .card)
+        // outline except under Increase Contrast (`attentionSurface`).
+        .attentionSurface(in: .card)
     }
 }
 
@@ -660,8 +660,8 @@ struct AgentFailureRow: View {
         .padding(12)
         .frame(maxWidth: 420, alignment: .leading)
         // The amber fill is the whole card: the glyph carries the state, with no
-        // outline.
-        .background(Tint.attentionFill(scheme), in: .card)
+        // outline except under Increase Contrast (`attentionSurface`).
+        .attentionSurface(in: .card)
         .padding(16)
     }
 }

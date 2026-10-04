@@ -118,9 +118,17 @@ public enum Tint {
     /// acts on the state (the link or button). Never color alone: pair it with a
     /// glyph or words.
     public static func attention(_ scheme: ColorScheme) -> Color { GlancePalette.amber(scheme) }
-    /// The wash behind an attention card: `attention` at 0.10.
-    public static func attentionFill(_ scheme: ColorScheme) -> Color {
-        attention(scheme).opacity(0.10)
+    /// The opacity of `attentionFill`: 0.10, and 0.20 under Increase Contrast,
+    /// where `Fill.inset` itself doubles to 0.10 and a 0.10 wash over it would
+    /// be lost.
+    public static func attentionFillOpacity(_ contrast: ColorSchemeContrast) -> Double {
+        contrast == .increased ? 0.20 : 0.10
+    }
+    /// The wash behind an attention card: `attention` at `attentionFillOpacity`.
+    /// A view draws it with `.attentionSurface(in:)`, which reads the contrast
+    /// and adds the outline.
+    public static func attentionFill(_ scheme: ColorScheme, contrast: ColorSchemeContrast = .standard) -> Color {
+        attention(scheme).opacity(attentionFillOpacity(contrast))
     }
     /// A failed turn, the system red.
     public static let failure = GlancePalette.failed
@@ -200,7 +208,33 @@ private struct SurfaceModifier<S: Shape>: ViewModifier {
     }
 }
 
+/// An attention card's wash, and its edge under Increase Contrast.
+private struct AttentionSurfaceModifier<S: Shape>: ViewModifier {
+    let shape: S
+    let on: Bool
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    func body(content: Content) -> some View {
+        content
+            .background(on ? Tint.attentionFill(scheme, contrast: contrast) : Color.clear, in: shape)
+            .overlay {
+                // The one outline an attention card gets: with Increase
+                // Contrast on, a wash alone is too faint to find the card by.
+                if on && contrast == .increased { shape.stroke(Tint.attention(scheme), lineWidth: 1) }
+            }
+    }
+}
+
 extension View {
+    /// Draw this as an attention card (an approval, a failure, a tool call
+    /// waiting on you) while `on`: `Tint.attentionFill`, and under Increase
+    /// Contrast a stronger fill with a 1 pt `Tint.attention` outline. No outline
+    /// otherwise; the glyph and words carry the state.
+    public func attentionSurface<S: Shape>(in shape: S, when on: Bool = true) -> some View {
+        modifier(AttentionSurfaceModifier(shape: shape, on: on))
+    }
+
     /// The only way a view gets a background shape, fill, edge or glass. `fill`
     /// is for `.content` only: the Mac passes the theme-tinted document color,
     /// everyone else takes the platform's text background.
