@@ -57,6 +57,7 @@ pub mod wire;
 pub mod worker_seen;
 pub mod workspace_home;
 pub mod workspace_ops;
+pub mod worktree_files;
 
 /// This machine's name, for rejecting it as a pane title.
 ///

@@ -200,6 +200,10 @@ message Request {
     TaskWorkerSet task_worker_set = 132;
     // Raise what is read on a board (ov-113), behind `board_reads`.
     WorkspaceMarkRead workspace_mark_read = 133;
+    // A worktree's files, read-only (ov-189), behind `worktree_files`. Tags
+    // from 150, for 120's reason.
+    WorktreeDirRequest worktree_dir = 150;
+    WorktreeFileRequest worktree_file = 151;
   }
 }
 
@@ -293,6 +297,9 @@ message Result {
     TaskUsage task_usage = 121;
     // `workspace.mark_read`: the board's read state after the merge.
     BoardReads board_reads = 122;
+    // `worktree.list_dir` and `worktree.read_file`, behind `worktree_files`.
+    WorktreeDir worktree_dir = 150;
+    WorktreeFile worktree_file = 151;
   }
 }
 
@@ -402,6 +409,75 @@ message WorktreeFileSearch {
 }
 
 message WorktreeFileList { repeated string paths = 1; }
+
+// `worktree.list_dir`: one directory of a worktree, read-only (ov-189).
+//
+// Every path in these messages is relative to the worktree's root, with `/`
+// between plain names: never absolute, never `..`. The daemon walks it one
+// component at a time and never through a symbolic link
+// (`crates/daemon/src/worktree_files.rs`), so a path an agent wrote can't
+// read outside the worktree.
+message WorktreeDirRequest {
+  bytes worktree_id = 1;
+  // Empty is the root.
+  string path = 2;
+}
+
+enum WorktreeEntryKind {
+  WORKTREE_ENTRY_KIND_UNSPECIFIED = 0;
+  WORKTREE_ENTRY_KIND_FILE = 1;
+  WORKTREE_ENTRY_KIND_DIRECTORY = 2;
+  // Listed, never followed. `link_target` says where it points.
+  WORKTREE_ENTRY_KIND_LINK = 3;
+  // A FIFO, a socket or a device: listed, never read.
+  WORKTREE_ENTRY_KIND_OTHER = 4;
+}
+
+message WorktreeDirEntry {
+  string name = 1;
+  WorktreeEntryKind kind = 2;
+  // A file's size in bytes; zero for the rest.
+  uint64 size = 3;
+  // A link's target, as written in the link.
+  string link_target = 4;
+}
+
+// Directories first, then the rest, each by name without regard to case.
+// The repository's own `.git` at the root is left out.
+message WorktreeDir {
+  string path = 1;
+  repeated WorktreeDirEntry entries = 2;
+  // There were more than the daemon sends for one directory (5,000).
+  bool truncated = 3;
+}
+
+// `worktree.read_file`: one file of a worktree, whole, read-only (ov-189).
+message WorktreeFileRequest {
+  bytes worktree_id = 1;
+  string path = 2;
+}
+
+enum WorktreeFileState {
+  WORKTREE_FILE_STATE_UNSPECIFIED = 0;
+  // `text` is the whole file.
+  WORKTREE_FILE_STATE_TEXT = 1;
+  // A NUL byte in its first 8,000, or not UTF-8. No text is sent.
+  WORKTREE_FILE_STATE_BINARY = 2;
+  // Over the 512 KiB a client is sent. No text is sent.
+  WORKTREE_FILE_STATE_TOO_LARGE = 3;
+  // The path's last component is a symbolic link: `link_target` is where
+  // it points, and nothing was read through it.
+  WORKTREE_FILE_STATE_LINK = 4;
+}
+
+message WorktreeFile {
+  string path = 1;
+  WorktreeFileState state = 2;
+  // In bytes, for every state but `LINK`.
+  uint64 size = 3;
+  string text = 4;
+  string link_target = 5;
+}
 
 // Why part of a transcript is missing.
 //

@@ -444,7 +444,10 @@ fn scope_of(method: Method) -> Scope {
         | Method::ChangesSetBase
         | Method::ChangesMarkRead
         | Method::StackSetParent
-        | Method::PrRefresh => Scope::Control,
+        | Method::PrRefresh
+        // A file is source, the same as a diff (ov-189).
+        | Method::WorktreeListDir
+        | Method::WorktreeReadFile => Scope::Control,
         // Metadata about work, not the work. Counts, +/-, PR state and the
         // needs-you badge let a read-scoped phone triage the fleet without being
         // able to read a line of the code.
@@ -2252,6 +2255,20 @@ impl Rpc {
                 }))
             }
 
+            "worktree.list_dir" => {
+                let Some(request::Payload::WorktreeDir(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::WorktreeDir(crate::worktree_files::list_dir(svc, &p).await?))
+            }
+
+            "worktree.read_file" => {
+                let Some(request::Payload::WorktreeFile(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::WorktreeFile(crate::worktree_files::read_file(svc, &p).await?))
+            }
+
             // ---- tiling ----
             //
             // The worktree is always the envelope target and the group is
@@ -2602,6 +2619,16 @@ mod tests {
             adapter_origin("my-agent", &set(&["my-agent"]), &built_in),
             AdapterOrigin::User
         );
+    }
+
+    /// A file is source, as a diff is: never `read`, the scope that sees
+    /// only the shape of the fleet (ov-189).
+    #[test]
+    fn a_worktrees_files_are_control_like_its_diff() {
+        for method in ["worktree.list_dir", "worktree.read_file"] {
+            assert_eq!(required_scope(method), required_scope("changes.file_diff"), "{method}");
+            assert_eq!(required_scope(method), Some(Scope::Control), "{method}");
+        }
     }
 
     #[test]

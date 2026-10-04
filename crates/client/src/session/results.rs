@@ -52,5 +52,7 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::UsageReport(_) => "usage_report",
         result::Value::TaskUsage(_) => "task_usage",
         result::Value::BoardReads(_) => "board_reads",
+        result::Value::WorktreeDir(_) => "worktree_dir",
+        result::Value::WorktreeFile(_) => "worktree_file",
     }
 }

@@ -469,6 +469,13 @@ pub mod capability {
     /// state: a client that reads it absent keeps its own per-device store.
     /// Needs `workstreams`, since a board here is a workspace's.
     pub const BOARD_READS: &str = "board_reads";
+    /// A worktree's files, read-only (ov-189): `worktree.list_dir` and
+    /// `worktree.read_file`.
+    ///
+    /// Its own capability because no runner before this one can answer
+    /// either: a client that reads it absent says the runner needs an update
+    /// to show files, rather than an empty tree.
+    pub const WORKTREE_FILES: &str = "worktree_files";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -481,7 +488,7 @@ pub mod capability {
             LAUNCH_PROMPT, TERMINAL_TASK, WORKTREE_FORK_ONLY, WORKSTREAMS, ORCHESTRATOR_HANDOFF,
             NEEDS_YOU, WAKE_ON_ANSWER, STREAM_SIZE_MARKERS, TASK_NOTICES, REPORT, AGENT_USAGE,
             AGENTS_FOUND,
-            TASK_WAITS, TASK_WORKERS, NOTICE_TASK, BOARD_READS,
+            TASK_WAITS, TASK_WORKERS, NOTICE_TASK, BOARD_READS, WORKTREE_FILES,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
@@ -654,6 +661,8 @@ pub mod method {
         TaskSetLine = "task.set_line" => TASK_WAITS,
         TaskWorker = "task.worker" => TASK_WORKERS,
         WorkspaceMarkRead = "workspace.mark_read" => BOARD_READS,
+        WorktreeListDir = "worktree.list_dir" => WORKTREE_FILES,
+        WorktreeReadFile = "worktree.read_file" => WORKTREE_FILES,
     }
 }
 

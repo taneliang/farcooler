@@ -490,6 +490,8 @@ fn route(method: Method) -> Option<&'static str> {
         // Their own C entry points, `farcooler_client_paste_file` and
         // `farcooler_client_stream_start`, because neither is one reply.
         Method::TerminalPasteFile | Method::TerminalAttach => None,
+        // The Files tab is the Mac's first (ov-189); the phones follow.
+        Method::WorktreeListDir | Method::WorktreeReadFile => None,
         // Tiling is tmux's, and a phone shows one pane at a time.
         Method::LayoutList
         | Method::LayoutSplit
