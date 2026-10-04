@@ -223,6 +223,10 @@ AGENTKIT_SOURCES = [
     # reaches them. See `FilesBrowserTests`.
     "Files.swift",
     "FilesBrowser.swift",
+    # The tab chosen in each worktree, kept across a launch (ov-233). Here for
+    # the reason `ShellNavigation.swift` is: the iOS target has no unit tests.
+    # See `FocusMemoryTests`.
+    "FocusMemory.swift",
     # What a phone says before it closes a terminal, and the rule for when it
     # says anything at all. Here for `ShellNavigation.swift`'s reason and for
     # one of its own: closing is irreversible — the pane is killed and the

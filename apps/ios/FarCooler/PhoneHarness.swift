@@ -44,6 +44,9 @@ import SwiftUI
 //   -phone-usage-fails       the runner doesn't answer usage.task
 //   -phone-task-fails        the runner refuses task.get, so a task has no record
 //   -phone-hide-fails        the runner refuses worktree.hide and worktree.unhide
+//   -phone-reopen-worktree   the last launch kept the checkout worktree open to resume, with
+//                            Changes chosen in it (ov-233); implies -phone-keep-stack
+//   -phone-no-kept-focus     with -phone-reopen-worktree, nothing was chosen in it: the rule decides
 //   -phone-files-old         the runner is older than Files: no worktree_files, no read_only_folders
 //   -phone-board-first       Billing opens on its Board segment, for a capture that sends no input
 //   -phone-board-reads       the runner keeps read state (`board_reads`): Billing's floor is
@@ -100,8 +103,21 @@ struct PhoneHarness: View {
             UserDefaults.standard.set(
                 PhoneLaunch.encode([.workspace(billing), .task(billing, task: HarnessRunner.goneTask)]),
                 forKey: PhoneLaunch.stackKey)
+        } else if CommandLine.arguments.contains("-phone-reopen-worktree") {
+            // The last run: the checkout open to resume, Changes the tab
+            // chosen in it, as `FocusMemory` kept it.
+            let runner = HarnessRunner.host.id.uuidString
+            UserDefaults.standard.set(
+                PhoneLaunch.encode([.worktree(runner: runner, worktree: HarnessRunner.checkout, landing: .resume)]),
+                forKey: PhoneLaunch.stackKey)
+            FocusMemory<PaneFocus>.save(
+                CommandLine.arguments.contains("-phone-no-kept-focus") ? [:] : [HarnessRunner.checkout: .changes],
+                runner: runner)
         } else if !CommandLine.arguments.contains("-phone-keep-stack") {
             UserDefaults.standard.removeObject(forKey: PhoneLaunch.stackKey)
+        }
+        if !CommandLine.arguments.contains("-phone-reopen-worktree") {
+            FocusMemory<PaneFocus>.save([:], runner: HarnessRunner.host.id.uuidString)
         }
         for key in UserDefaults.standard.dictionaryRepresentation().keys
         where key.hasPrefix("workspace.segment.") || key.hasPrefix("board.collapsed.")
@@ -280,6 +296,7 @@ final class HarnessRunner {
     }
 
     func stand() async {
+        connection.loadRememberedFocus(runner: Self.host.id.uuidString)
         connection.standInCalls = { [weak self] method, args in
             guard let self else { throw ClientCore.CoreError.notStarted }
             return try await self.answer(method, args)

@@ -181,12 +181,13 @@ final class Connection: ObservableObject {
     /// per-runner, and a memory that outlived the runner would name nothing on
     /// the next one.
     ///
-    /// It dies with the process too, and that is a change. The path and this
-    /// memory were both written through to `@SceneStorage`, and both blobs went
-    /// with the navigation they belonged to — see `FleetView`. What that costs
-    /// is a worktree opening on the rule's answer rather than on the tab you
-    /// left it on, but only across a launch; within one, the shell resumes
-    /// exactly as it did.
+    /// It is kept across a launch (ov-233), in `UserDefaults` under a key per
+    /// runner (`FocusMemory`). It used to die with the process: the path and
+    /// this memory were written through to `@SceneStorage`, and both blobs went
+    /// with the navigation they belonged to — see `FleetView` — so a worktree
+    /// reopened on the rule's answer rather than on the tab you left it on.
+    /// Defaults don't go with the navigation, and the owner asked for the app
+    /// to go back to wherever he was.
     @Published private(set) var lastFocus: [String: PaneFocus] = [:]
 
     /// The fallback poll. See `startPolling` for what it is now a fallback TO.
@@ -340,6 +341,9 @@ final class Connection: ObservableObject {
         newsRefresh?.cancel()
         reconnectTask?.cancel()
         self.host = host
+        // The tab chosen in each worktree last run (ov-233). Read once, and
+        // never over what this run has chosen already.
+        loadRememberedFocus(runner: host.id.uuidString)
         // The watch is no longer handed a connection here.
         //
         // It used to be: the phone ran one session and this was the one place
@@ -972,6 +976,7 @@ final class Connection: ObservableObject {
         do {
             let data = try await core.call("fleet")
             fleet = try JSONDecoder().decode(Fleet.self, from: data)
+            pruneFocus(to: fleet)
             // The runner has now told us what it has, at least once.
             //
             // `fleet` alone cannot answer this: `Fleet.empty` and a real fleet
@@ -2274,6 +2279,26 @@ final class Connection: ObservableObject {
         // no opinion", and reading it back would beat the rule with nothing.
         if case .none = focus { return }
         lastFocus[worktree] = focus
+        if let host { FocusMemory<PaneFocus>.save(lastFocus, runner: host.id.uuidString) }
+    }
+
+    /// Read the choices kept for `runner` into `lastFocus`, when this run has
+    /// made none. The harness calls it too, so it opens through the code a
+    /// launch does.
+    func loadRememberedFocus(runner: String) {
+        if lastFocus.isEmpty { lastFocus = FocusMemory<PaneFocus>.load(runner: runner) }
+    }
+
+    /// Forget the choices made in worktrees a loaded fleet no longer has
+    /// (ov-233). Only from a fleet that has worktrees: an empty read is a
+    /// runner that hasn't answered, not one with nothing, and pruning on it
+    /// would forget every choice.
+    private func pruneFocus(to fleet: Fleet) {
+        guard !fleet.worktrees.isEmpty, let host else { return }
+        let kept = FocusMemory<PaneFocus>.pruned(lastFocus, keeping: Set(fleet.worktrees.map(\.id)))
+        guard kept.count != lastFocus.count else { return }
+        lastFocus = kept
+        FocusMemory<PaneFocus>.save(kept, runner: host.id.uuidString)
     }
 
     #if DEBUG
