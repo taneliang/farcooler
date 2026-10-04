@@ -256,8 +256,7 @@ struct PhoneRoot: View {
     /// to, and the paired ones nothing is connecting, which a tap is told to
     /// connect when it names one.
     private func destinationSources() -> [PhoneDestination.Source] {
-        let everyRunner = FleetSettings.allRunnersAtOnce
-        var sources = fleet.runners.map { runner in
+        let connected = fleet.runners.map { runner in
             let connection = runner.connection
             return PhoneDestination.Source(
                 host: runner.host.id.uuidString, runnerId: connection.lastDaemon?.runnerId,
@@ -265,13 +264,11 @@ struct PhoneRoot: View {
                 idle: false, fleet: connection.fleet, boardList: connection.boardList,
                 boards: connection.boards)
         }
-        for host in hosts.hosts where !sources.contains(where: { $0.host == host.id.uuidString }) {
-            sources.append(
-                PhoneDestination.Source(
-                    host: host.id.uuidString, runnerId: nil, ready: false,
-                    idle: !everyRunner && host.id != hosts.selected?.id, fleet: nil))
-        }
-        return sources
+        // A paired runner nothing is connecting is seated with the id it said
+        // when it last connected, so a push naming it can connect it (ov-231).
+        return PhoneDestination.sources(
+            connected: connected, paired: hosts.hosts.map { $0.id.uuidString }, known: RunnerIds().all,
+            everyRunner: FleetSettings.allRunnersAtOnce, selected: hosts.selected?.id.uuidString)
     }
 
     /// Open what waits, asked again as the runners come up, until it opens

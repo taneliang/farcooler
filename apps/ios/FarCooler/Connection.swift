@@ -924,6 +924,9 @@ final class Connection: ObservableObject {
             agentsFound: body["agentsFound"] as? [String])
         daemon = build
         lastDaemon = build
+        // Kept for the next launch, when a push names this runner before it
+        // is connected (ov-231).
+        if let host { RunnerIds().remember(build.runnerId, for: host.id.uuidString) }
         // Boards this link never read — `loadBoards` refused them while the
         // build was missing. Not the ordinary link-up, whose own sweep comes
         // after this. Detached, so the poll that installed the build does not

@@ -462,6 +462,9 @@ AGENTKIT_SOURCES = [
     "DestinationPayloads.swift",
     "DestinationResolver.swift",
     "PhoneDestination.swift",
+    # The runner id each paired runner last said, so a push can find one the
+    # phone isn't connected to (ov-231). App only.
+    "RunnerIds.swift",
     "RelaySection.swift",
     # Beside `RelaySection.swift` because it is the same screen and the same
     # shape of setting: which rendezvous tunneled runners and this phone meet

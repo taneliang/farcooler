@@ -698,6 +698,7 @@ final class RunnerStore: ObservableObject {
 
     func remove(_ host: Runner) {
         hosts.removeAll { $0.id == host.id }
+        RunnerIds().forget(host.id.uuidString)
         if selected?.id == host.id { selected = hosts.first }
         // Nothing should still be waiting to reconnect a runner nobody has any
         // more. `Reachability`'s subscribers are keyed by runner id and a

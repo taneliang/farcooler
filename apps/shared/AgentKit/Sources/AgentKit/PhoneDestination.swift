@@ -31,6 +31,30 @@ enum PhoneDestination {
         var boards: [String: TaskBoardModel] = [:]
     }
 
+    /// Every runner the phone holds, as seats: the ones being talked to
+    /// (`connected`, read from their connections), then each paired runner
+    /// nothing is connecting, seated idle with the `runner_id` it said the
+    /// last time it connected (`known`, by host id), so a push naming it
+    /// finds it and connects it (ov-231). A runner never connected here has
+    /// no id to find it by, and a tap never dials it to look. A live id
+    /// beats a remembered one.
+    static func sources(
+        connected: [Source], paired: [String], known: [String: String], everyRunner: Bool, selected: String?
+    ) -> [Source] {
+        var sources = connected.map { source in
+            var source = source
+            source.runnerId = source.runnerId ?? known[source.host]
+            return source
+        }
+        for host in paired where !sources.contains(where: { $0.host == host }) {
+            sources.append(
+                Source(
+                    host: host, runnerId: known[host], ready: false,
+                    idle: !everyRunner && host != selected, fleet: nil))
+        }
+        return sources
+    }
+
     /// What the phone holds now, for `DestinationResolver`.
     static func world(_ sources: [Source], last: PhoneWorkspace?) -> DestinationResolver.World {
         DestinationResolver.World(
