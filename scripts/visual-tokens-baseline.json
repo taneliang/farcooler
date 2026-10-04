@@ -8,7 +8,7 @@
   "apps/macos/Sources/FarCooler/BoardWorktreesSection.swift": {"separator": 1},
   "apps/macos/Sources/FarCooler/Ceremony/AddDeviceView.swift": {"radius": 1},
   "apps/macos/Sources/FarCooler/Ceremony/JoinView.swift": {"radius": 1},
-  "apps/macos/Sources/FarCooler/ChangesPane.swift": {"fill": 4, "radius": 8, "separator": 19, "stroke": 1},
+  "apps/macos/Sources/FarCooler/ChangesPane.swift": {"fill": 4, "radius": 8, "separator": 18, "stroke": 1},
   "apps/macos/Sources/FarCooler/ColumnHeader.swift": {"separator": 1},
   "apps/macos/Sources/FarCooler/Commands.swift": {"separator": 13},
   "apps/macos/Sources/FarCooler/Components/CompactTaskRow.swift": {"fill": 1},

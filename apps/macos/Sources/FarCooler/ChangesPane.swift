@@ -1743,36 +1743,9 @@ struct DiffLineRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            Rectangle()
-                .fill(line.kind.accent)
-                .frame(width: 2)
-            HStack(spacing: 0) {
-                Text(line.oldNumber.map(String.init) ?? "")
-                    .frame(width: gutter, alignment: .trailing)
-                Text(line.newNumber.map(String.init) ?? "")
-                    .frame(width: gutter, alignment: .trailing)
-            }
-            .foregroundStyle(.tertiary)
-            .background(WorkspaceStyle.diffGutter)
-            .overlay(alignment: .trailing) {
-                Rectangle().fill(WorkspaceStyle.hairline.opacity(0.65)).frame(width: 1)
-            }
-            Text(line.kind.marker)
-                .foregroundStyle(line.kind.accent)
-                .frame(width: 12)
-            if clipsLongLines {
-                Text(line.text.isEmpty ? " " : line.text)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                Text(line.text.isEmpty ? " " : line.text)
-                    .fixedSize(horizontal: true, vertical: false)
-                Spacer(minLength: 0)
-            }
-        }
-        .font(font)
-        .padding(.vertical, 0.5)
+        // Drawn by the file viewer's row (ov-189), so a line reads the same
+        // in a file and in its diff: two gutter columns, old and new.
+        //
         // No syntax highlighting, still. What earns the pixels is which lines
         // changed, and coloring keywords on top of an add/remove background
         // fights the one signal that matters.
@@ -1781,9 +1754,14 @@ struct DiffLineRow: View {
         // here and a second, disagreeing copy of two of them in `DiffView`.
         // One table now, on the kind itself — see the `DiffComputation.Kind`
         // extension in `DiffView.swift`.
-        .background(line.kind.wash)
-        .overlay(alignment: .leading) { note }
-        .onHover { hovering = $0 }
+        CodeLineRow(
+            numbers: [line.oldNumber, line.newNumber],
+            text: Text(line.text.isEmpty ? " " : line.text),
+            gutter: gutter, font: font,
+            marker: CodeLineRow.Marker(glyph: line.kind.marker, color: line.kind.accent),
+            stripe: line.kind.accent, wash: line.kind.wash, clipsLongLines: clipsLongLines)
+            .overlay(alignment: .leading) { note }
+            .onHover { hovering = $0 }
     }
 
     /// Only on a line that HAS a place in the new file.
