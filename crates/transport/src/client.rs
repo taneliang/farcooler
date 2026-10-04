@@ -474,6 +474,15 @@ impl<R, W> Client<R, W> {
         self.shared.ignore_events.store(true, Ordering::Relaxed);
     }
 
+    /// Whether the connection has ended, for whatever reason.
+    ///
+    /// True once the reader has seen the close, not when the peer went away: the
+    /// two differ by however long the reader takes to notice. A test that needs
+    /// "the link is known dead" waits on this rather than on a sleep.
+    pub fn has_ended(&self) -> bool {
+        self.shared.table().gone.is_some()
+    }
+
     /// How many replies have arrived for a call nobody was waiting on.
     ///
     /// Each is also logged. Most are a call that gave up before its answer

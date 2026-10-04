@@ -742,6 +742,11 @@ impl Session {
         Ok(ssh.lock().await.exec(command).await?)
     }
 
+    /// Whether the connection has ended, as the reader has seen it.
+    pub fn link_ended(&self) -> bool {
+        self.client.has_ended()
+    }
+
     pub fn daemon_version(&self) -> &str {
         &self.client.server_hello().daemon_version
     }

@@ -2,6 +2,12 @@
 //!
 //! A write the transport never began fails as `not_sent`; one it began, or
 //! one that failed after the runner may have answered, does not.
+//!
+//! Two cases that look odd and are safe. `terminal.resize` is urgent too, so
+//! it carries the flag as well; the phones read it only for typed input. And a
+//! framing error on the link reaches the answer as `NotSent` with
+//! `disconnected` false: the input still never reached the wire, so holding it
+//! for Try Again is right, and the slot stays filled.
 
 use std::time::{Duration, Instant};
 
@@ -34,8 +40,14 @@ fn input_the_transport_never_wrote_says_not_sent() {
 fn a_key_typed_on_a_link_that_just_died_is_not_sent() {
     let rig = rig();
     rig.runner.abort();
-    // The reader notices the close on its own; nothing here can ask it.
-    std::thread::sleep(Duration::from_millis(500));
+    // The reader notices the close on its own. Wait until it has, so the key
+    // below is queued on a link already known dead, however loaded the machine.
+    let session = locked(&unsafe { as_handle(rig.handle) }.unwrap().session).clone().expect("session");
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while !session.link_ended() {
+        assert!(Instant::now() < deadline, "the reader never saw the close");
+        std::thread::sleep(Duration::from_millis(10));
+    }
     let terminal = uuid::Uuid::now_v7().to_string();
     let ticket = call(rig.handle, "terminal.write", json!({ "terminal": terminal, "hex": "6c" }));
     let line = answer_for(rig.handle, ticket, Instant::now() + Duration::from_secs(60)).expect("answered");
