@@ -4,7 +4,7 @@
 # `./scripts/file-size-budget.py --update` after a split; never raise one by
 # hand. Format: <ceiling> <path>
 12760 crates/daemon/src/service.rs
-9090 crates/daemon/src/watch.rs
+8719 crates/daemon/src/watch.rs
 5410 crates/cli/src/main.rs
 4813 crates/cli/src/tasks.rs
 4029 apps/macos/Sources/FarCooler/ContentView.swift
@@ -12,24 +12,24 @@
 3544 crates/client/src/ffi.rs
 3380 services/relay/src/index.ts
 3343 crates/client/src/session.rs
-3274 apps/macos/Sources/FarCooler/DaemonClient.swift
 3245 crates/store/src/tasks.rs
+3213 apps/macos/Sources/FarCooler/DaemonClient.swift
 3097 crates/daemon/src/rpc.rs
 2993 apps/ios/FarCooler/ChangesView.swift
 2798 apps/ios/FarCooler/TerminalView.swift
 2633 apps/macos/Sources/FarCooler/ChangesPane.swift
 2333 apps/android/app/src/main/java/com/farcooler/net/Connection.kt
 2317 apps/ios/FarCooler/Connection.swift
-2314 apps/shared/AgentKit/Sources/AgentKit/ShellNavigation.swift
+2266 apps/shared/AgentKit/Sources/AgentKit/ShellNavigation.swift
 2251 apps/ios/FarCooler/TerminalSession.swift
 2115 apps/android/app/src/main/java/com/farcooler/ui/ChangesScreen.kt
 1957 crates/core/src/feed.rs
 1949 crates/core/src/activity.rs
-1881 apps/macos/Sources/FarCooler/TaskBoard.swift
 1856 apps/shared/AgentKit/Sources/AgentKit/FleetSnapshot.swift
 1837 crates/fence/src/lib.rs
 1808 crates/store/src/store.rs
 1802 crates/store/src/migrate.rs
+1794 apps/macos/Sources/FarCooler/TaskBoard.swift
 1793 crates/daemon/src/hook_ingress.rs
 1774 crates/codex/src/backend.rs
 1774 crates/daemon/src/agent_supervisor.rs
