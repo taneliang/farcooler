@@ -124,6 +124,16 @@ enum WorkspaceStyle {
     /// `document` as the dynamic `NSColor` it wraps, so it can be resolved under a chosen appearance.
     static var documentNS: NSColor { blend(.textBackgroundColor, withTheme: 0.09) }
 
+    /// The paper a card is drawn on (ov-220): the text background with only 3%
+    /// of the theme in it, where `document` carries 9%. Against the frosted plane
+    /// (or its opaque fallback under Reduce Transparency) a 9% paper in light mode
+    /// was the plane's own gray, and a card with no stroke needs its color to be
+    /// its edge.
+    static var paper: Color { Color(nsColor: paperNS) }
+
+    /// `paper` as the dynamic `NSColor` it wraps.
+    static var paperNS: NSColor { blend(.textBackgroundColor, withTheme: 0.03) }
+
     static var paneChrome: Color { Color(nsColor: paneChromeNS) }
 
     /// `paneChrome` as the dynamic `NSColor` it wraps, so it can be resolved under a chosen appearance.

@@ -104,7 +104,7 @@ struct ChangesPane: View {
                 }
             }
         }
-        .background(WorkspaceStyle.document)
+        .background(WorkspaceStyle.paper)
         .task(id: changes.worktree.id) { await changes.loadIfNeeded() }
         // Where a relaunch left the review (`ChangesStore.applyKeptPosition`).
         .onChange(of: changes.restoreTarget, initial: true) { _, path in

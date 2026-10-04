@@ -58,7 +58,7 @@ extension View {
 
     /// One terminal, as a card on the plane.
     ///
-    /// Opaque paper in the theme-tinted document color, in `Radius.medium`
+    /// Opaque paper (`WorkspaceStyle.paper`), in `Radius.medium`
     /// corners, with no stroke (ov-221): the card against the frosted plane is
     /// its own edge, and Increase Contrast draws a 1 px separator back around it
     /// (`Surface.content`). The pane's header is drawn on the card's own color,
@@ -72,6 +72,6 @@ extension View {
     /// header says it, with the number and title in primary ink and the title
     /// in semibold, against secondary for every other pane.
     func paneCard() -> some View {
-        clipShape(.card).surface(.content, in: .card, fill: WorkspaceStyle.document)
+        clipShape(.card).surface(.content, in: .card, fill: WorkspaceStyle.paper)
     }
 }

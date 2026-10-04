@@ -64,7 +64,7 @@ struct BoardHistoryView: View {
             }
         }
         .environment(\.taskKeyWidth, TaskKeyColumn.width(for: all.map(\.key)))
-        .background(WorkspaceStyle.document)
+        .background(WorkspaceStyle.paper)
         // The runner's note search, a moment after typing stops. It matches
         // the phrase as typed, where keys and titles match every word: the
         // record's search is literal (`task search`). Its hits count only

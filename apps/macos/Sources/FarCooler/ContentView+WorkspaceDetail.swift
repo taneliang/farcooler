@@ -290,7 +290,7 @@ extension ContentView {
             // The task is one card on the plane (ov-223): its header, tabs and
             // body together, in the paper's color, inset by the window's gutter.
             .clipShape(.card)
-            .surface(.content, in: .card, fill: WorkspaceStyle.document)
+            .surface(.content, in: .card, fill: WorkspaceStyle.paper)
             .padding(Gutter.window)
         case .workspace(let host, let id, .history(let status)?):
             if let client = store.clients[host], let workspace = board(host: host, id: id) {
@@ -298,10 +298,10 @@ extension ContentView {
                     store: boardStore(for: workspace, client: client, host: host), status: status,
                     onOpen: { row in chooseTask(row.id, host: host, workspace: id, glance: false) }
                 )
-                .background(WorkspaceStyle.document)
+                .background(WorkspaceStyle.paper)
             } else {
                 ContentUnavailableView("Board Not Found", systemImage: "checklist")
-                    .background(WorkspaceStyle.document)
+                    .background(WorkspaceStyle.paper)
             }
         case .workspace(let host, _, .worktree(let wt, _)?), .looseWorktree(let host, let wt, _):
             if !settled {
@@ -318,10 +318,10 @@ extension ContentView {
                 tiled(shown, titled: false, keyboard: current)
             } else if let ws = worktree(host: host, id: wt) {
                 worktreeDetail(ws)
-                    .background(WorkspaceStyle.document)
+                    .background(WorkspaceStyle.paper)
             } else {
                 ContentUnavailableView("Worktree Not Found", systemImage: "folder")
-                    .background(WorkspaceStyle.document)
+                    .background(WorkspaceStyle.paper)
             }
         default:
             EmptyView()
@@ -544,7 +544,7 @@ extension ContentView {
                 // stay, and a soft edge that says there is more below.
                 .scrollIndicators(.visible)
                 .scrollEdgeEffectStyle(.soft, for: .bottom)
-                .background(WorkspaceStyle.document)
+                .background(WorkspaceStyle.paper)
             } agent: {
                 // A task passed on the way, glancing: no terminal mounted
                 // until it settles. Mounted once, then kept behind the other

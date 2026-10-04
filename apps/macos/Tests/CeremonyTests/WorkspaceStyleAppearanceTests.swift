@@ -19,7 +19,7 @@ struct WorkspaceStyleAppearanceTests {
     func surfacesFollowTheAppearance() {
         // Read ONCE, as a view body does, then resolved under each appearance.
         let surfaces: [(String, NSColor)] = [
-            ("canvas", WorkspaceStyle.canvasNS), ("document", WorkspaceStyle.documentNS),
+            ("canvas", WorkspaceStyle.canvasNS), ("document", WorkspaceStyle.documentNS), ("paper", WorkspaceStyle.paperNS),
             ("paneChrome", WorkspaceStyle.paneChromeNS),
         ]
         for (name, color) in surfaces {

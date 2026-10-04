@@ -246,7 +246,7 @@ struct NeedsYouItemRow: View {
         .padding(Spacing.inset)
         // A card: `Radius.medium` paper, with no stroke. The card against the
         // plane is its edge; Increase Contrast draws a separator back.
-        .surface(.content, in: .card, fill: WorkspaceStyle.document)
+        .surface(.content, in: .card, fill: WorkspaceStyle.paper)
         .contentShape(Rectangle())
         .onTapGesture(perform: onOpen)
         .accessibilityElement(children: .contain)

@@ -38,7 +38,7 @@ struct SurfaceTests {
     func contentIsNeverTranslucent() throws {
         for name in [NSAppearance.Name.aqua, .darkAqua] {
             let plain = Color.clear.surface(.content, in: .card)
-            let themed = Color.clear.surface(.content, in: .card, fill: WorkspaceStyle.document)
+            let themed = Color.clear.surface(.content, in: .card, fill: WorkspaceStyle.paper)
             #expect(try alpha(of: plain, at: middle, size: size, name) == 1)
             #expect(try alpha(of: themed, at: middle, size: size, name) == 1)
         }

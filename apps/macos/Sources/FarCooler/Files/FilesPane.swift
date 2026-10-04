@@ -36,7 +36,7 @@ struct FilesPane: View {
                 }
             }
         }
-        .background(WorkspaceStyle.document)
+        .background(WorkspaceStyle.paper)
         .task(id: model.place.id) { await model.loadIfNeeded() }
         .simultaneousGesture(TapGesture().onEnded { onFocus() })
         .onChange(of: model.finding) { _, on in findFocused = on }

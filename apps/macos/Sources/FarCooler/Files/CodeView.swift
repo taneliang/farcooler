@@ -61,7 +61,7 @@ struct CodeView: View {
                 if let scroll { proxy.scrollTo(scroll.line, anchor: .center) }
             }
         }
-        .background(WorkspaceStyle.document)
+        .background(WorkspaceStyle.paper)
     }
 
     private func row(
