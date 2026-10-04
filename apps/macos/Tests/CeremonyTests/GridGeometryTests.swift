@@ -74,7 +74,10 @@ struct GridGeometryTests {
     private func check(_ marks: [Mark], expect: [String: CGFloat]) {
         // A box starts past the grid and a glyph is placed by its center
         // (`checkTheLines`); everything else is on a column.
-        for mark in marks where mark.role == .text {
+        // The navigator's text column (ov-255) is past the glyph column and
+        // its gap, so it is the one place text is not on a `ColumnGrid` column;
+        // a task's title follows its key, whose column is the widest key's.
+        for mark in marks where mark.role == .text && mark.row != "summary.title" && abs(mark.x - NavigatorGrid.text) >= 0.5 {
             #expect(ColumnGrid.isColumn(mark.x), "\(mark) is between columns")
         }
         for (name, column) in expect.sorted(by: { $0.key < $1.key }) {
@@ -142,6 +145,16 @@ struct GridGeometryTests {
         // tolerance (ov-235). A `.leading` mutation moves a glyph (18 - width)
         // / 2, at least 2.5 for the 13-wide ones, so it still turns this red.
         let snap: CGFloat = 0.5
+        // ov-255: the gap between a glyph's right edge and the text after
+        // it, as Finder's and Xcode's sidebars leave it (6 to 8 pt after a
+        // 16 pt icon). The widest glyph here is 14 pt, so at least 7 less a
+        // snap; reverting `gap` to 0 leaves 2 pt and fails.
+        #expect(NavigatorGrid.gap >= 5, "the gap constant is \(NavigatorGrid.gap)")
+        #expect(NavigatorGrid.text == NavigatorGrid.edge + NavigatorGrid.mark + NavigatorGrid.gap)
+        for icon in found where icon.role == .icon {
+            let gap = NavigatorGrid.text - (icon.x + icon.width)
+            #expect(gap >= 7 - snap, "\(icon) ends \(gap) pt short of the text column, under 7")
+        }
         for icon in found where icon.role == .icon {
             #expect(abs(icon.midX - NavigatorGrid.glyphCenter) <= snap, "\(icon) isn't centered on the carets: icon.midX \(icon.midX), glyphCenter \(NavigatorGrid.glyphCenter), glyph width \(icon.width)")
             for caret in found where caret.role == .chevron {
@@ -201,14 +214,14 @@ struct GridGeometryTests {
             "filter.text": NavigatorGrid.text,
             "orchestrator.box": NavigatorGrid.boxEdge,
             "orchestrator.text": NavigatorGrid.text,
-            "summary.text": ColumnGrid.b,
-            "tasks.text": ColumnGrid.b,
-            "status.text": ColumnGrid.b,
-            "card.text": ColumnGrid.b,
+            "summary.text": NavigatorGrid.text,
+            "tasks.text": NavigatorGrid.text,
+            "status.text": NavigatorGrid.text,
+            "card.text": NavigatorGrid.text,
         ]
         if !collapsedSummary {
-            expect["summary.group.text"] = ColumnGrid.b
-            expect["summary.key.text"] = ColumnGrid.b
+            expect["summary.group.text"] = NavigatorGrid.text
+            expect["summary.key.text"] = NavigatorGrid.text
         }
         check(found, expect: expect)
         checkTheLines(found)

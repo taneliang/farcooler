@@ -334,6 +334,42 @@ struct NavigatorRhythmTests {
         #expect(Self.strays(in: ".padding(.top, 3)  // rhythm-exempt: a badge").isEmpty)
     }
 
+    // MARK: - The text column (ov-255)
+
+    /// Every word in a long navigator starts on the one text column, 39 pt in:
+    /// 16 of margin, the 18 pt glyph column, and 5 pt of gap, so a 16 pt icon
+    /// centered on x = 25 leaves 6 pt before its label (a 14 pt one, 7), as Finder's and
+    /// Xcode's sidebars do. Measured on the real board (the filter, the
+    /// orchestrator, section and group headers, task keys, terminals,
+    /// worktrees and their Add rows), with half a point for CI's 1x runner.
+    /// Reverting `NavigatorGrid.gap` to 0 puts the column at 34 and fails.
+    @Test("Every word and glyph keeps the wider gap")
+    func theTextColumnIsWide() async {
+        #expect(NavigatorGrid.text == 39, "the text column is at \(NavigatorGrid.text)")
+        #expect(NavigatorGrid.glyphCenter == 25, "glyphs center on \(NavigatorGrid.glyphCenter)")
+        let box = Box()
+        let width = WorkspaceColumns.navigatorDefault
+        let root = Probe(box: box, content: Self.board(await Self.store(done: 32, review: 4, others: true)).frame(width: width, height: 1800, alignment: .topLeading))
+        let host = NSHostingView(rootView: root)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: width, height: 1800), styleMask: [.borderless],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.close() }
+        await Self.settle(host) { "\(box.marks.map(\.1))" }
+        let words = box.marks.filter { $0.0.role == .text && $0.0.row != "summary.title" }
+        let rows = Set(words.map(\.0.row))
+        #expect(rows.isSuperset(of: ["filter", "orchestrator", "tasks", "status", "summary.key", "projectTerminal", "boardWorktree", "projectTerminalNew"]), "rows drawn: \(rows.sorted())")
+        for (mark, rect) in words {
+            #expect(abs(rect.minX - 39) <= 0.5, "\(mark.row) text starts at \(rect.minX), not 39")
+        }
+        for (mark, rect) in box.marks where mark.role == .icon {
+            #expect(39 - rect.maxX >= 6.5, "\(mark.row)'s glyph ends at \(rect.maxX): under 7 pt from the text")
+            #expect(abs(rect.midX - 25) <= 0.5, "\(mark.row)'s glyph centers at \(rect.midX), not 25")
+        }
+    }
+
     // MARK: - Captures
 
     /// Write the captures and the measured gaps, when asked to

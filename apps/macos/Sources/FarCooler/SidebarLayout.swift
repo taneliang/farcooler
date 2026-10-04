@@ -57,7 +57,7 @@ enum ColumnGrid {
 ///   on both sides: half of it. The owner's screenshot of 3 October
 ///   ("hella cramped") showed boxes sitting exactly on the grid, their glyphs
 ///   squeezed against their edges.
-/// - the glyph column, `edge` to `text`: where a chevron sits, and where
+/// - the glyph column, `mark` wide from `edge`, then `gap` of room before `text`: where a chevron sits, and where
 ///   every glyph inside a box sits too, centered on the same x
 ///   (`glyphCenter`), so the pulsating dot lines up with the carets over it.
 ///
@@ -67,8 +67,17 @@ enum NavigatorGrid {
     static let edge: CGFloat = ColumnGrid.a
     /// The glyph column's width, from `edge` to `text`: one step.
     static let mark: CGFloat = ColumnGrid.step
-    /// The text column: column B.
-    static let text: CGFloat = edge + mark
+    /// The room between a glyph's cell and the text after it (ov-255). The
+    /// owner, 4 October: "the horizontal gap between the icons and the text
+    /// in the sidebar is a bit small". Measured, the
+    /// glyphs (8 to 14 pt wide, centered on `glyphCenter`) ended 2 to 3.5 pt
+    /// short of the text; Finder's and Xcode's sidebars leave 6 to 8 pt after
+    /// a 16 pt icon. At 5, a 16 pt icon leaves 6 pt, the terminal's 14 pt one
+    /// 7, the filter's 12 pt one 8.
+    static let gap: CGFloat = 5
+    /// The text column: past the glyph column and `gap`. Every row's words
+    /// start here; it is no longer one of `ColumnGrid`'s columns.
+    static let text: CGFloat = edge + mark + gap
     /// How far into a row drawn from `edge` its text starts.
     static let textInset: CGFloat = text - edge
     /// How far a box reaches past `edge`, on each side: half the margin.
@@ -135,9 +144,11 @@ enum NavigatorRhythm {
 
 extension View {
     /// Put this glyph (or chevron) in the navigator's glyph column: a cell
-    /// from `edge` to `text`, the glyph centered in it.
+    /// from `edge`, `NavigatorGrid.mark` wide, the glyph centered in it, and
+    /// `NavigatorGrid.gap` after it, so the next view starts on `text`.
     func glyphColumn() -> some View {
         frame(width: NavigatorGrid.mark, alignment: .center)
+            .padding(.trailing, NavigatorGrid.gap)
     }
 
     /// Let a box's shape (a fill, a focus ring) reach `NavigatorGrid.outset`

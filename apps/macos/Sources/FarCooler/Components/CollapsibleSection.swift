@@ -80,6 +80,8 @@ struct SectionMetrics: Equatable {
     /// Where the chevron sits in its cell: the navigator's is centered in
     /// the glyph column, so it shares an x with the glyphs in boxes.
     var chevronAlignment: Alignment = .leading
+    /// Room after the chevron's cell, before the title.
+    var chevronGap: CGFloat = 0
     var minHeight: CGFloat = ColumnGrid.rowHeight
     /// Over and under the header's title, inside its hit target: the
     /// navigator's `NavigatorRhythm.air`, so a header's slot is its line
@@ -95,8 +97,8 @@ struct SectionMetrics: Equatable {
     /// Its header's slot is its title and `NavigatorRhythm.air`, and its
     /// content's first slot touches it (ov-243).
     static let navigator = SectionMetrics(
-        spacing: NavigatorRhythm.row, chevronWidth: NavigatorGrid.mark, chevronAlignment: .center, minHeight: 0,
-        headerAir: NavigatorRhythm.air, isHeading: true)
+        spacing: NavigatorRhythm.row, chevronWidth: NavigatorGrid.mark, chevronAlignment: .center, chevronGap: NavigatorGrid.gap,
+        minHeight: 0, headerAir: NavigatorRhythm.air, isHeading: true)
     /// A small disclosure in running text: a thought, a card's details, a
     /// settings row's.
     static let inline = SectionMetrics(spacing: 6, chevronWidth: 14, minHeight: 0)
@@ -355,6 +357,7 @@ struct CollapsibleSection<Label: View, Accessory: View, Content: View>: View {
         DisclosureChevron(expanded: expanded, visible: canExpand)
             .gridMark(Self.gridRow(id), .chevron)
             .frame(width: metrics.chevronWidth, alignment: metrics.chevronAlignment)
+            .padding(.trailing, metrics.chevronGap)
     }
 
     private var header: some View {
