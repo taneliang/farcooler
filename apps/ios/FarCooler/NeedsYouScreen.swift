@@ -338,8 +338,17 @@ struct NeedsYouScreen: View {
                     Button {
                         browsingFolder = BrowsedFolder(runner: runner.id, name: name)
                     } label: {
-                        Label(name, systemImage: "folder")
-                            .frame(minHeight: PaneMetrics.target, alignment: .leading)
+                        HStack(spacing: 12) {
+                            Image(systemName: "folder")
+                                .foregroundStyle(.secondary)
+                                .frame(width: markWidth)
+                            Text(name)
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .frame(minHeight: PaneMetrics.target)
                     }
                     .foregroundStyle(.primary)
                     .accessibilityIdentifier("folder-row-\(name)")
