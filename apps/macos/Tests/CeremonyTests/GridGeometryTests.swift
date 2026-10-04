@@ -23,7 +23,10 @@ struct GridGeometryTests {
         let role: GridRole
         let x: CGFloat
         let width: CGFloat
+        var y: CGFloat = 0
+        var height: CGFloat = 0
         var midX: CGFloat { x + width / 2 }
+        var midY: CGFloat { y + height / 2 }
         var description: String { "\(row).\(role.rawValue) at \(x), \(width) wide" }
     }
 
@@ -32,7 +35,9 @@ struct GridGeometryTests {
         func record(_ marks: [GridMark], _ proxy: GeometryProxy) {
             self.marks = marks.map { 
                 let bounds = proxy[$0.bounds]
-                return Mark(row: $0.row, role: $0.role, x: bounds.minX, width: bounds.width)
+                return Mark(
+                    row: $0.row, role: $0.role, x: bounds.minX, width: bounds.width, y: bounds.minY,
+                    height: bounds.height)
             }
         }
     }
@@ -117,6 +122,31 @@ struct GridGeometryTests {
         running
             ? NavigatorOrchestrator(state: .working, agent: "claude", status: .working, nowDoing: "Reading the board")
             : NavigatorOrchestrator(state: .none, offers: [.start(.claude)])
+    }
+
+    /// ov-260: the orchestrator's pulse dot (ov-229's Core Animation dot, drawn
+    /// only in a live window) occupies the icon's frame: the same center, on
+    /// the glyph column's x and on the title's first line. Each state is
+    /// measured in the same environment as the others, not against constants.
+    @Test("The orchestrator's pulse dot is centered where its icon is")
+    func theOrchestratorDotIsWhereTheIconIs() async {
+        func row(_ state: OrchestratorRow.State, status: Status?) async -> [Mark] {
+            let model = NavigatorOrchestrator(state: state, agent: "claude", status: status, nowDoing: "Reading the board")
+            let view = OrchestratorRowView(model: model, inProgress: 1, selected: false, keyed: false)
+                .environment(\.inLiveWindow, true)
+            return await marks(view, width: WorkspaceColumns.navigatorDefault, height: 120)
+        }
+        let icon = await row(.idle, status: nil).first { $0.row == "orchestrator" && $0.role == .icon }
+        let dot = await row(.working, status: .working).filter { $0.row == "orchestratorDot" }
+        let title = await row(.working, status: .working).first { $0.role == .text }
+        #expect(dot.count == 1, "the dot's marks: \(dot)")
+        guard let icon, let dot = dot.first, let title else { Issue.record("a mark wasn't drawn"); return }
+        #expect(abs(dot.midX - icon.midX) <= 0.5, "dot \(dot) vs icon \(icon): x centers \(dot.midX), \(icon.midX)")
+        #expect(abs(dot.midY - icon.midY) <= 0.5, "dot \(dot) vs icon \(icon): y centers \(dot.midY), \(icon.midY)")
+        // The row alone has no margin, so the glyph column's center is half
+        // a cell in; in the board it's `glyphCenter` (`checkTheLines`).
+        #expect(abs(dot.midX - NavigatorGrid.mark / 2) <= 0.5, "dot \(dot) isn't centered in the glyph column")
+        #expect(abs(dot.midY - title.midY) <= 0.5, "dot \(dot) vs title \(title): y centers \(dot.midY), \(title.midY)")
     }
 
     /// ov-230: every box reaches `outset` past the edge, every chevron

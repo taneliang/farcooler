@@ -520,16 +520,34 @@ struct OrchestratorMark: View {
     var body: some View {
         switch state {
         case .working, .starting:
-            StatusGlyph(status: status ?? (state == .starting ? .starting : .working))
+            // Drawn over the frame the resting icon has, not by itself
+            // (ov-260). In the navigator's row the glyph column aligns its
+            // content by first-text baseline, and the pulse dot, being an
+            // AppKit layer (ov-229) with no baseline of its own, sat on that
+            // line's bottom edge, eight points below the icon and off its
+            // center. Laid over the icon's own frame, hidden, it takes the
+            // icon's place exactly, on every platform's metrics.
+            restingIcon
+                .hidden()
+                .overlay {
+                    StatusGlyph(status: status ?? (state == .starting ? .starting : .working))
+                        .gridMark("orchestratorDot", .icon)
+                }
         case .needsYou, .unread:
             Circle()
                 .fill(state == .needsYou ? Color.accentColor : GlancePalette.amber(scheme))
                 .frame(width: 7, height: 7)
         case .idle:
-            Image(systemName: "person.wave.2").font(.system(size: 10)).foregroundStyle(.secondary)
+            restingIcon.foregroundStyle(.secondary)
         case .none, .stopped:
-            Image(systemName: "person.wave.2").font(.system(size: 10)).foregroundStyle(.tertiary)
+            restingIcon.foregroundStyle(.tertiary)
         }
+    }
+
+    /// The glyph shown when nothing runs; its frame is the one every other
+    /// state's mark occupies.
+    private var restingIcon: some View {
+        Image(systemName: "person.wave.2").font(.system(size: 10))
     }
 }
 
