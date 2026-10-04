@@ -42,6 +42,7 @@ use images::mime_for;
 mod report;
 mod terminal_requests;
 mod task_usage;
+mod confirmation;
 mod tasks;
 mod workspaces;
 use terminal_requests::terminal_create_request;
@@ -1557,17 +1558,9 @@ async fn root(runner: Option<&str>, cmd: RootCmd, json: bool) -> Fallible {
                 // a wrong --confirm would think it had removed a root it still
                 // has.
                 //
-                // The same error `worktree remove` returns further down: the
-                // daemon's own `ConfirmationRequired`, so `--json` prints
-                // `code: confirmation-required` and the Mac tells a name
-                // mismatch from a real failure by that word.
+                // The daemon's own `ConfirmationRequired`, as `worktree remove`'s.
                 RemoveRootOutcome::NameDidNotMatch => {
-                    return Err(Box::new(farcooler_transport::ClientError::Daemon {
-                        code: farcooler_protocol::v1::ErrorCode::ConfirmationRequired as i32,
-                        retryable: false,
-                        message: "exact typed confirmation required".into(),
-                        what: String::new(),
-                    }));
+                    return Err(confirmation::required());
                 }
             }
         }
@@ -2445,16 +2438,9 @@ async fn worktree(runner: Option<&str>, cmd: WorktreeCmd, json: bool) -> Fallibl
                 RemoveWorktreeOutcome::Removed => {
                     println!("removed worktree for {} (branch kept)", short_bytes(&ws.id));
                 }
-                // The daemon's own `ConfirmationRequired`, with its word on
-                // stderr under `--json` (`error_code_lines`), which is what the
-                // Mac reads to ask for the name.
+                // With its word on stderr under `--json` (`confirmation`).
                 RemoveWorktreeOutcome::ConfirmationRequired => {
-                    return Err(Box::new(farcooler_transport::ClientError::Daemon {
-                        code: farcooler_protocol::v1::ErrorCode::ConfirmationRequired as i32,
-                        retryable: false,
-                        message: "exact typed confirmation required".into(),
-                        what: String::new(),
-                    }));
+                    return Err(confirmation::required());
                 }
             }
         }
