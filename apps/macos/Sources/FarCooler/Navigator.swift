@@ -101,8 +101,9 @@ enum OrchestratorRow {
         case needsYou
         /// It finished a turn nobody has seen.
         case unread
-        /// Its last turn died, or its pane did (ov-137).
-        case failed
+        /// Its last turn died, its pane never started, or its pane was lost
+        /// (ov-137): which, so each reads as its own status does.
+        case failed(Status)
         case idle
         /// Its pane exited, or can't be read.
         case stopped
@@ -116,7 +117,7 @@ enum OrchestratorRow {
             case .working: .working
             case .needsYou: .blocked
             case .unread: .done
-            case .failed: .failedTurn
+            case .failed(let status): status
             case .idle: .idle
             }
         }
@@ -129,7 +130,7 @@ enum OrchestratorRow {
         let status = seat.terminal.status
         if status == .blocked { return .needsYou }
         // Before unread: a turn that died is `done` too, and reads failed.
-        if status.tone == .failed { return .failed }
+        if status.tone == .failed { return .failed(status) }
         if ConversationColumn.unread(seat) { return .unread }
         switch status {
         case .starting: return .starting

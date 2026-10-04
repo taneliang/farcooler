@@ -35,7 +35,7 @@ struct StatusPresentationTests {
         let seat = Self.seat(activity: "done", turnFailed: true)
         #expect(seat.terminal.status == .failedTurn)
         // The orchestrator's row and the title bar.
-        #expect(OrchestratorRow.state(seat: seat) == .failed)
+        #expect(OrchestratorRow.state(seat: seat) == .failed(.failedTurn))
         #expect(OrchestratorRow.word(OrchestratorRow.state(seat: seat)) == "Failed")
         // A task's header.
         let line = TaskColumnModel.agentLine(seat)
@@ -46,6 +46,33 @@ struct StatusPresentationTests {
         #expect(agent?.word.hasSuffix("failed") == true)
         // The board's worktree dot.
         #expect(Status.failedTurn.tone.color(.light) == Tint.failure)
+    }
+
+    /// Each failure reads as its own status on every surface: a lost pane is
+    /// "Lost", not "Failed" (review M2).
+    @Test(arguments: Status.allCases.filter { $0.tone == .failed })
+    func eachFailureReadsTheSameEverywhere(_ status: Status) {
+        let seat = Self.seat(status)
+        #expect(seat.terminal.status == status)
+        #expect(OrchestratorRow.word(OrchestratorRow.state(seat: seat)) == status.label)
+        #expect(TaskColumnModel.agentLine(seat)?.text == "claude \(status.label.lowercased())")
+        #expect(TaskRowMeta.agent(live: [seat], presence: .agents(1))?.word == "claude \(status.label.lowercased())")
+    }
+
+    /// A pane in `status`, from the wire's words.
+    static func seat(_ status: Status) -> BoardPane {
+        var t = Terminal(id: "agent", short: "a", title: "claude", preset: "claude", state: "running", epoch: 0)
+        switch status {
+        case .lost: t.state = "LOST"
+        case .failed: t.state = "ERROR"
+        case .failedRun: (t.state, t.exitCode) = ("exited", 1)
+        case .failedTurn: (t.activity, t.turnFailed) = ("done", true)
+        default: break
+        }
+        let worktree = Worktree(
+            id: "wt", short: "w", task: "wt", branch: "wt", repository: "shop", host: "", path: "/tmp/w",
+            state: "active", terminals: [t])
+        return BoardPane(terminal: t, worktree: worktree)
     }
 
     /// The board's Needs Decision header is amber like the row under it,
