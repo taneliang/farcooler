@@ -60,6 +60,33 @@ struct IdleCostTests {
         #expect(breath.autoreverses)
     }
 
+    /// The owner's "pulsing indicator flying all over" (ov-229): a
+    /// `repeatForever` started in `onAppear` was attached to the transaction
+    /// that also placed the dot, so every move of its row (a toolbar
+    /// re-measure, a section opening) was animated on the endless loop too.
+    /// The breath now animates the layer's opacity and nothing else: a dot
+    /// moved and resized while breathing carries no position or bounds
+    /// animation, and still breathes.
+    @Test func theBreathAnimatesOpacityAndNeverPosition() throws {
+        let view = BreathingView(Circle().frame(width: 8, height: 8))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 200), styleMask: [.titled],
+            backing: .buffered, defer: true)
+        window.contentView?.addSubview(view)
+        view.frame = NSRect(x: 10, y: 10, width: 8, height: 8)
+        view.frame = NSRect(x: 120, y: 160, width: 15, height: 15)
+        window.contentView?.layoutSubtreeIfNeeded()
+        CATransaction.flush()
+
+        let layer = try #require(view.layer)
+        #expect(layer.animationKeys() == [BreathingAnimation.key], "\(layer.animationKeys() ?? [])")
+        let breath = try #require(layer.animation(forKey: BreathingAnimation.key) as? CABasicAnimation)
+        #expect(breath.keyPath == "opacity")
+        for sublayer in layer.sublayers ?? [] {
+            #expect(sublayer.animationKeys() == nil, "the hosted mark is animated: \(sublayer.animationKeys() ?? [])")
+        }
+    }
+
     // MARK: - Terminals
 
     private static func paneInWindow() -> (TerminalRenderView, NSWindow) {
