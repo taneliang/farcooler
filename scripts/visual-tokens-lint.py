@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""No new hand-drawn edge, fill, rule or glass in a Mac or AgentKit view (ov-216).
+"""No new hand-drawn edge, fill, rule or glass in a Mac, iOS, Android or AgentKit view (ov-216, ov-256).
 
 The Mac app grew ten corner radii, eleven grays, forty-two dividers and five
 selection looks because every surface solved its own edge. The tokens now live
 in apps/shared/AgentKit/Sources/AgentKit/DesignTokens.swift (and anything under
 a `Style/` folder): `Radius`, `.control` / `.card` / `.floating`, `Surface`,
-`Separator`, `Fill`, `Tint`. This scans apps/macos/Sources and
+`Separator`, `Fill`, `Tint`. This scans apps/macos/Sources, apps/ios (Swift) and
 apps/shared/AgentKit/Sources, outside those files, for seven kinds of site:
 
   radius     a literal `cornerRadius:` (`RoundedRectangle(cornerRadius: 8)`,
@@ -18,6 +18,16 @@ apps/shared/AgentKit/Sources, outside those files, for seven kinds of site:
   fill       `.primary.opacity(`, `.accentColor.opacity(`, `.secondary.opacity(`,
              `.black/.white/.gray.opacity(`, `Color(white:`, and
              `GlancePalette.<ink>(…).opacity(`
+
+Kotlin under apps/android/app/src/main is scanned for two of them, outside the
+theme (Theme.kt, where the `Radius` tokens live):
+
+  radius     `RoundedCornerShape(12.dp)` (or any literal / arithmetic first
+             argument), `CornerSize(8.dp)`, `cornerRadius = 8.dp`, `radius = 4.dp`
+  separator  `Divider(`, `HorizontalDivider(`, `VerticalDivider(`
+
+A percent shape (`RoundedCornerShape(50)`) is a literal too: use a token or a
+named shape.
 
 A site that is right on purpose carries `// style-exempt: <reason>` on its line
 or the line above (a menu's `Divider()` is `// style-exempt: menu`).
@@ -48,13 +58,21 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 BASELINE = ROOT / "scripts" / "visual-tokens-baseline.json"
 
-SWIFT_ROOTS = ["apps/macos/Sources", "apps/shared/AgentKit/Sources"]
+# (root, extension, fewest files a scan of it may find). A root that finds fewer
+# is the wrong tree.
+SOURCES = [
+    ("apps/macos/Sources", ".swift", 100),
+    ("apps/shared/AgentKit/Sources", ".swift", 10),
+    ("apps/ios", ".swift", 50),
+    ("apps/android/app/src/main", ".kt", 100),
+]
 # Where the tokens are defined, so the only place a radius, a material or a gray
 # may be spelled out.
-TOKEN_FILES = {"DesignTokens.swift"}
+TOKEN_FILES = {"DesignTokens.swift", "Theme.kt"}
 TOKEN_DIRS = {"Style"}
-# A scan that finds fewer files than this is looking at the wrong tree.
-MIN_FILES = 100
+# UI-test targets and build output are not views.
+SKIP_DIRS = {"FarCoolerUITests", "build", ".build"}
+MIN_FILES = sum(m for _, _, m in SOURCES)
 
 MATERIALS = r"(?:ultraThin|thin|regular|thick|ultraThick)Material"
 INK = r"(?:primary|secondary|accentColor|black|white|gray)"
@@ -71,15 +89,24 @@ RULES: dict[str, re.Pattern] = {
     "fill": re.compile(
         rf"\.{INK}\.opacity\(|\bColor\(white:|\bGlancePalette\.\w+\([^()]*\)\.opacity\("),
 }
+KOTLIN_RULES: dict[str, re.Pattern] = {
+    "radius": re.compile(
+        r"\bRoundedCornerShape\(\s*[\d(]"
+        r"|\b(?:Absolute)?RoundedCornerShape\(\s*\w+\s*=\s*[\d(]"
+        r"|\bCornerSize\(\s*[\d(]"
+        r"|\b(?:cornerRadius|radius)\s*=\s*\d[\d.]*f?\.dp\b"),
+    "separator": re.compile(r"\b(?:Horizontal|Vertical)?Divider\("),
+}
 EXEMPT = re.compile(r"//\s*style-exempt\s*:\s*\S")
 EMPTY_EXEMPT = re.compile(r"//\s*style-exempt\s*:?\s*$")
 
 # What to do about a new site, by rule.
 USE = {
-    "radius": "use Radius.small/.medium/.large via .control, .card or .floating (or .concentric)",
+    "radius": "use Radius.small/.medium/.large via .control, .card or .floating (or .concentric); on Android, the Radius tokens in Theme.kt",
     "material": "use .surface(.content/.floating, in:) (a frosted plane draws nothing)",
     "glass": "use .surface(.floating, in:), or one GlassEffectContainer of floating members",
-    "separator": "use Spacing, or .separator(.grid/.split/.listEdge); a menu Divider is exempt",
+    "separator": "use Spacing, or .separator(.grid/.split/.listEdge); a menu Divider is exempt; "
+                 "on Android, the theme's separator",
     "stroke": "drop it: .surface supplies the edge; a state stroke (drop target) is exempt",
     "shadow": "drop it: .surface(.floating) draws its own",
     "fill": "use Fill.inset, Fill.hover, Fill.selection or Tint.attentionFill",
@@ -109,7 +136,7 @@ def code_of(line: str) -> str:
     return "".join(out)
 
 
-def hits(text: str) -> collections.Counter:
+def hits(text: str, rules: dict[str, re.Pattern] = RULES) -> collections.Counter:
     """Rule -> count of unexempt sites in one file's text."""
     counts: collections.Counter = collections.Counter()
     lines = text.splitlines()
@@ -129,25 +156,29 @@ def hits(text: str) -> collections.Counter:
                                         and lines[index - 1].strip().startswith("//"))
         if exempt:
             continue
-        for rule, pattern in RULES.items():
+        for rule, pattern in rules.items():
             counts[rule] += len(pattern.findall(code))
     return +counts
 
 
 def files():
-    for root in SWIFT_ROOTS:
-        for path in sorted((ROOT / root).rglob("*.swift")):
+    for root, ext, _ in SOURCES:
+        for path in sorted((ROOT / root).rglob("*" + ext)):
             rel = path.relative_to(ROOT)
-            if path.name in TOKEN_FILES or TOKEN_DIRS & set(rel.parts):
+            if path.name in TOKEN_FILES or (TOKEN_DIRS | SKIP_DIRS) & set(rel.parts):
                 continue
             yield path
+
+
+def rules_for(path: pathlib.Path) -> dict[str, re.Pattern]:
+    return KOTLIN_RULES if path.suffix == ".kt" else RULES
 
 
 def tree_counts() -> tuple[dict[str, dict[str, int]], int]:
     out, scanned = {}, 0
     for path in files():
         scanned += 1
-        counts = hits(path.read_text(encoding="utf-8"))
+        counts = hits(path.read_text(encoding="utf-8"), rules_for(path))
         if counts:
             out[str(path.relative_to(ROOT))] = dict(sorted(counts.items()))
     return out, scanned
@@ -209,6 +240,12 @@ def scan() -> int:
     if scanned < MIN_FILES:
         print(f"visual-tokens-lint: scanned only {scanned} files; the roots are wrong")
         return 1
+    seen = [str(p.relative_to(ROOT)) for p in files()]
+    for root, ext, fewest in SOURCES:
+        found = sum(1 for f in seen if f.startswith(root + "/"))
+        if found < fewest:
+            print(f"visual-tokens-lint: {root} has only {found} {ext} files; the root is wrong")
+            return 1
     problems, lowerable = compare(tree, load_baseline())
     problems += empty_exempts()
     for line in problems:
@@ -259,7 +296,41 @@ def self_test() -> int:
         "Divider() // style-exempt: menu",
         ".background(.thickMaterial) // style-exempt: sheet scrim",
     ]
+    kotlin_red = [
+        ("radius", ".clip(RoundedCornerShape(12.dp))"),
+        ("radius", "shape = RoundedCornerShape(50),"),
+        ("radius", "RoundedCornerShape((28f * fraction).dp)"),
+        ("radius", "RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp)"),
+        ("radius", "val s = CornerSize(4.dp)"),
+        ("radius", "Canvas { drawRoundRect(cornerRadius = 6.dp) }"),
+        ("separator", "HorizontalDivider()"),
+        ("separator", "HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)"),
+        ("separator", "VerticalDivider(Modifier.height(8.dp))"),
+        ("separator", "Divider(thickness = 1.dp)"),
+    ]
+    kotlin_green = [
+        ".clip(RoundedCornerShape(Radius.medium))",
+        ".clip(CircleShape)",
+        ".padding(vertical = 4.dp)",
+        "// RoundedCornerShape(12.dp) was the old look",
+        " * A HorizontalDivider() would draw a rule here.",
+        "val note = \"HorizontalDivider() is a word here\"",
+        "radius = size.ringRadius(attention).dp.toPx()",
+        "HorizontalDivider() // style-exempt: sheet grabber",
+        "val dividerColor = outlineVariant",
+    ]
     failed = 0
+    for rule, line in kotlin_red:
+        if not hits(line, KOTLIN_RULES).get(rule):
+            print(f"self-test: kotlin {rule} missed: {line!r}")
+            failed += 1
+    for line in kotlin_green:
+        if hits(line, KOTLIN_RULES):
+            print(f"self-test: kotlin wrongly caught {dict(hits(line, KOTLIN_RULES))}: {line!r}")
+            failed += 1
+    if hits("RoundedCornerShape(12.dp)", RULES):
+        print("self-test: a Swift rule matched Kotlin")
+        failed += 1
     for rule, line in red:
         if not hits(line).get(rule):
             print(f"self-test: {rule} missed: {line!r}")
@@ -309,8 +380,13 @@ def self_test() -> int:
         print("self-test: an empty exemption isn't detected")
         failed += 1
     # The real scan must see the real tree, or a broken root would pass green.
-    if sum(1 for _ in files()) < MIN_FILES:
-        print("self-test: the scan sees fewer than 100 files")
+    seen = [str(p.relative_to(ROOT)) for p in files()]
+    for root, ext, fewest in SOURCES:
+        if sum(1 for f in seen if f.startswith(root + "/")) < fewest:
+            print(f"self-test: the scan sees fewer than {fewest} {ext} files under {root}")
+            failed += 1
+    if any("UITests" in f or f.endswith("Theme.kt") for f in seen):
+        print("self-test: the scan reads a UI-test target or the theme")
         failed += 1
     print("visual-tokens-lint self-test: " + ("ok" if not failed else f"{failed} failed"))
     return 1 if failed else 0
