@@ -27,7 +27,10 @@ import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-# Files and directories that must not name the layer.
+# Files and directories that must not name the layer. A path that isn't there
+# fails the check: a refactor that moves one of these (task_ops into a
+# directory, tasks.rs split under the size budget) would otherwise leave the
+# guard checking nothing and green. Update this list with the move.
 GUARDED = [
     "crates/store/src/tasks.rs",
     "crates/store/src/waits.rs",
@@ -39,23 +42,42 @@ GUARDED = [
     "crates/store/src/usage.rs",
     "crates/store/src/board_reads.rs",
     "crates/store/src/review.rs",
+    "crates/store/src/backup.rs",
     "crates/daemon/src/task_ops.rs",
     "crates/daemon/src/rpc_board.rs",
     "crates/daemon/src/task_starts.rs",
     "crates/daemon/src/needs_you.rs",
     "crates/daemon/src/board_reads_ops.rs",
+    "crates/daemon/src/usage.rs",
+    "crates/daemon/src/watch/task_notice.rs",
     "crates/daemon/src/report",
+    # The `task` verbs are unchanged, so their CLI never names the layer.
+    "crates/cli/src/tasks.rs",
 ]
 
-# The layer's own names. `lanes` alone is prose in comments, so it only counts
-# after a SQL keyword.
-FORBIDDEN = re.compile(
-    r"\b(board_themes?|board_theme_tasks|lane_tasks|lane_agents|plan_events|plan_read|rpc_plan"
-    r"|BoardTheme\w*|PlanChanged|LaneView|ThemeView)\b"
-    r"|\b(FROM|JOIN|INTO|UPDATE|TABLE)\s+lanes\b"
-    r"|(farcooler_store|crate)::plan\b",
-    re.I,
-)
+# The layer, by meaning rather than by one spelling. Matched over the whole
+# file, so a statement split over lines is still one statement.
+#   - its tables, and its names in SQL (`lanes` alone is prose in comments, so
+#     it only counts after a SQL keyword, however the line breaks);
+#   - its modules and types, however they are imported: `crate::plan`,
+#     `use crate::{plan, tasks}`, `plan::Lane`, `use farcooler_store::plan::*`;
+#   - its reads, called as methods (`store.plan(..)`, `store.lane(..)`);
+#   - its columns and ids.
+FORBIDDEN = [
+    re.compile(
+        r"\b(board_themes?|board_theme_tasks|lane_tasks|lane_agents|plan_events|plan_read|rpc_plan"
+        r"|plan_layer|plan_rank|BoardTheme\w*|PlanChanged|LaneView|ThemeView|LaneState|LaneCard"
+        r"|LaneAgent\w*|AgentRecord|lane_id|theme_id)\b"
+    ),
+    re.compile(r"\b(FROM|JOIN|INTO|UPDATE|TABLE)\s+lanes\b", re.I),
+    # Any `use` that brings the layer in, braces and all.
+    re.compile(r"\buse\b[^;]*\b(plan|plan_read|rpc_plan)\b[^;]*;"),
+    # A path through the module: `crate::plan::..`, `farcooler_store::plan::..`, `plan::Lane`.
+    re.compile(r"(?<![\w.])plan::"),
+    # The layer's reads and writes, called on a store or a service.
+    re.compile(r"\.(plan|board_theme|create_theme|update_theme|theme_cards|create_lane|update_lane"
+               r"|lane_cards|record_lane_agent|set_plan|plan_events)\s*\("),
+]
 
 # Task-shaped proto messages: their fields never name the layer.
 GUARDED_MESSAGES = ["Task", "TaskDetail", "TaskList", "TaskNote", "TaskWorker", "TaskBlock", "Workspace"]
@@ -84,25 +106,37 @@ def message_body(source: str, name: str):
     return None
 
 
+def line_of(text: str, offset: int) -> int:
+    return text.count("\n", 0, offset) + 1
+
+
 def scan(root: pathlib.Path):
-    """Every (path, line number, text) that names the layer."""
+    """Every (path, line number, text) that names the layer, or that guards nothing."""
     hits = []
     for rel in GUARDED:
-        for path in files_under(root, rel):
-            for n, line in enumerate(path.read_text().splitlines(), 1):
-                if FORBIDDEN.search(line):
-                    hits.append((str(path.relative_to(root)), n, line.strip()))
+        found = list(files_under(root, rel))
+        if not found:
+            hits.append((rel, 0, "guarded path is missing: it moved, so nothing is checking it. Update GUARDED."))
+        for path in found:
+            text = path.read_text()
+            for pattern in FORBIDDEN:
+                for m in pattern.finditer(text):
+                    n = line_of(text, m.start())
+                    hits.append((str(path.relative_to(root)), n, text.splitlines()[n - 1].strip()))
     proto = root / PROTO
-    if proto.exists():
-        source = proto.read_text()
-        for name in GUARDED_MESSAGES:
-            body = message_body(source, name)
-            if body is None:
-                continue
-            for n, line in enumerate(body.splitlines(), 1):
-                code = line.split("//")[0]
-                if PROTO_FORBIDDEN.search(code):
-                    hits.append((f"{PROTO}: message {name}", n, line.strip()))
+    if not proto.exists():
+        hits.append((PROTO, 0, "the proto is missing: nothing is checking the Task messages."))
+        return hits
+    source = proto.read_text()
+    for name in GUARDED_MESSAGES:
+        body = message_body(source, name)
+        if body is None:
+            hits.append((f"{PROTO}: message {name}", 0, "guarded message is missing: it was renamed, so nothing is checking it."))
+            continue
+        for n, line in enumerate(body.splitlines(), 1):
+            code = line.split("//")[0]
+            if PROTO_FORBIDDEN.search(code):
+                hits.append((f"{PROTO}: message {name}", n, line.strip()))
     return hits
 
 
@@ -123,6 +157,7 @@ def check() -> int:
 
 def self_test() -> int:
     failures = []
+    clean_proto = "".join(f"message {m} {{\n  // The lane this task is using.\n  bytes worktree_id = 1;\n}}\n" for m in GUARDED_MESSAGES)
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
 
@@ -131,26 +166,61 @@ def self_test() -> int:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text)
 
-        put("crates/store/src/tasks.rs", "// a task moving lanes changes both\nSELECT 1 FROM tasks;\n")
-        put("crates/daemon/src/report/mod.rs", "fn ok() {}\n")
-        put(PROTO, "message Task {\n  // The lane this task is using.\n  bytes worktree_id = 1;\n}\n")
-        if scan(root):
-            failures.append("a clean tree was flagged")
+        def clean_tree():
+            for rel in GUARDED:
+                if rel.endswith(".rs"):
+                    put(rel, "// a task moving lanes changes both\nSELECT 1 FROM tasks;\nuse crate::tasks;\nlet plan_b = 1;\n")
+                else:
+                    put(rel + "/mod.rs", "fn ok() {}\n")
+            put(PROTO, clean_proto)
 
+        clean_tree()
+        flagged = scan(root)
+        if flagged:
+            failures.append(f"a clean tree was flagged: {flagged}")
+
+        # Each way a reference gets in, in a guarded file, by meaning.
+        in_file = "crates/store/src/waits.rs"
         cases = [
-            ("crates/store/src/tasks.rs", "SELECT * FROM tasks t JOIN lane_tasks l ON l.task_id = t.id;"),
-            ("crates/store/src/waits.rs", "conn.execute(\"UPDATE lanes SET reason = ''\")"),
-            ("crates/store/src/workers.rs", "use crate::plan::Lane;"),
-            ("crates/daemon/src/task_ops.rs", "farcooler_store::plan::prune_moved(&conn);"),
-            ("crates/daemon/src/report/gather.rs", "let t = \"board_themes\";"),
+            "SELECT * FROM tasks t JOIN lane_tasks l ON l.task_id = t.id;",
+            'conn.execute("UPDATE lanes SET reason = \'\'")',
+            'conn.execute("SELECT 1 FROM\n    lanes WHERE 1")',
+            "use crate::plan::Lane;",
+            "use crate::{plan, tasks};",
+            "use crate::{\n    tasks,\n    plan,\n};",
+            "let l: plan::Lane = x;",
+            "farcooler_store::plan::prune_moved(&conn);",
+            "let n = self.plan(ws, 0)?;",
+            "store.set_plan(ws, &lanes, actor)",
+            'conn.execute("UPDATE tasks SET plan_rank = 1")',
+            "let t = \"board_themes\";",
+            "fn f(s: LaneState) {}",
         ]
-        for rel, text in cases:
-            put(rel, text + "\n")
+        for text in cases:
+            clean_tree()
+            put(in_file, text + "\n")
+            if not any(h[0] == in_file for h in scan(root)):
+                failures.append(f"missed in {in_file}: {text!r}")
+        # Files the guard was too narrow for, and one inside a directory guard.
+        for rel in ["crates/cli/src/tasks.rs", "crates/daemon/src/usage.rs", "crates/daemon/src/watch/task_notice.rs",
+                    "crates/store/src/backup.rs", "crates/daemon/src/report/gather.rs"]:
+            clean_tree()
+            put(rel, "use crate::{plan};\n")
             if not any(h[0] == rel for h in scan(root)):
-                failures.append(f"missed a reference in {rel}: {text}")
-            (root / rel).unlink()
-        put(PROTO, "message Task {\n  bytes worktree_id = 1;\n  bytes lane_id = 2;\n}\n")
-        if not any("message Task" in h[0] for h in scan(root)):
+                failures.append(f"missed a reference in {rel}")
+        # The code it guards moving must fail, not pass by checking nothing.
+        clean_tree()
+        (root / "crates/daemon/src/task_ops.rs").unlink()
+        if not any("missing" in h[2] for h in scan(root)):
+            failures.append("a guarded file that moved was not flagged")
+        clean_tree()
+        put(PROTO, clean_proto.replace("message TaskNote", "message TaskNoteRenamed"))
+        if not any("missing" in h[2] for h in scan(root)):
+            failures.append("a guarded message that was renamed was not flagged")
+        clean_tree()
+        put(PROTO, clean_proto + "message TaskExtra {}\n")
+        put(PROTO, clean_proto.replace("bytes worktree_id = 1;", "bytes worktree_id = 1;\n  bytes lane_id = 2;", 1))
+        if not any("message Task" in h[0] and "lane_id" in h[2] for h in scan(root)):
             failures.append("missed a lane field on message Task")
     if failures:
         print("\n".join(failures))
