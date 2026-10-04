@@ -121,6 +121,8 @@ SOURCES = [
     "ImagePaste.swift",
     "AgentStream.swift",
     "AgentView.swift",
+    # The queued message's row, split out of `AgentView` for its size ceiling.
+    "QueuedRow.swift",
     # A claude TUI pane's permission ask, with Allow and Deny, over its
     # terminal. Reads the pane's ring through `AgentStream` and draws
     # `AgentView`'s `ApprovalCard`.
@@ -279,6 +281,9 @@ AGENTKIT_SOURCES = [
     # — seven surfaces draw one, which is why the table is not in any of them.
     # See `RunnerRefusalTests`.
     "RunnerRefusal.swift",
+    # Whether a runner can edit, remove or steer a queued message, and the
+    # sentence a refusal of one gets. See `QueueControlsTests`.
+    "QueueControls.swift",
     # The other half of the same argument: what the shell MOVES by, and the
     # flying page's geometry. Here rather than beside the views because the
     # iOS target has no unit tests — a transform inside a `View` can be checked

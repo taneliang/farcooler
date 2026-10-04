@@ -296,7 +296,8 @@ final class HarnessRunner {
                 capabilities: Set(
                     ["tasks", "needs_you", "workstreams", "terminal_task"]
                         + (Self.keepsReads ? ["board_reads"] : [])
-                        + (CommandLine.arguments.contains("-phone-usage-old") ? [] : ["agent_usage"])),
+                        + (CommandLine.arguments.contains("-phone-usage-old") ? [] : ["agent_usage"])
+                        + (CommandLine.arguments.contains("-phone-queue-old") ? [] : ["agent_queue"])),
                 grantedScope: Self.readOnly ? "read" : "control",
                 agentsFound: Self.agentsFound))
         // What a poll does with a fleet: the runner's projection for the

@@ -492,21 +492,21 @@ final class AgentStream: ObservableObject {
     func editQueued(_ id: String, _ text: String) async {
         await perform(
             "terminal.agent_edit_queued", ["queuedId": id, "text": text],
-            failed: "Couldn’t save that edit.")
+            failed: QueueControls.Action.edit.failed)
     }
 
     /// Send a queued message into the turn already running.
     func steerQueued(_ id: String) async {
         await perform(
             "terminal.agent_steer_queued", ["queuedId": id],
-            failed: "Couldn’t send that into the running turn.")
+            failed: QueueControls.Action.steer.failed)
     }
 
     /// Take back a message that has not gone out yet.
     func cancelQueued(_ id: String) async {
         await perform(
             "terminal.agent_cancel_queued", ["queuedId": id],
-            failed: "Couldn’t take that message back.")
+            failed: QueueControls.Action.cancel.failed)
     }
 
     func setModel(_ model: String) async {
