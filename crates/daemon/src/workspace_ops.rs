@@ -167,7 +167,7 @@ pub fn move_tasks(svc: &Service, watcher: &Watcher, req: &pb::TaskMove) -> Resul
     if any {
         watcher.announce_needs_you();
     }
-    Ok(pb::TaskList { items: crate::task_starts::pb_tasks(svc, &moved)? })
+    Ok(pb::TaskList { items: crate::task_starts::pb_tasks(svc, &moved)?, reads: None })
 }
 
 /// `worktree.assign`: give a worktree to a workspace, whoever owned it.

@@ -306,8 +306,13 @@ fn named_workspace(
 /// that listed every finished or waiting task beside the ones needing
 /// attention is a view nobody reads.
 pub fn list(svc: &Service, req: &pb::TaskListRequest) -> Result<pb::TaskList> {
+    let mut board = None;
     let scope = match &req.workspace_id {
-        Some(workspace) => TaskScope::Workspace(named_workspace(svc, workspace, &req.repository_id)?.id),
+        Some(workspace) => {
+            let id = named_workspace(svc, workspace, &req.repository_id)?.id;
+            board = Some(id);
+            TaskScope::Workspace(id)
+        }
         None => TaskScope::Repository(required_id(&req.repository_id)?),
     };
     let stale = req.stale_after_millis.filter(|ms| *ms > 0);
@@ -323,7 +328,10 @@ pub fn list(svc: &Service, req: &pb::TaskListRequest) -> Result<pb::TaskList> {
         let now = crate::review::now_millis();
         items.retain(|task| !task.workers.iter().any(|w| worked_within(w, now, window)));
     }
-    Ok(pb::TaskList { items })
+    // A read that names a board brings its read state in the same round trip
+    // (ov-113), so every re-read a client already does keeps Unread current.
+    let reads = board.map(|id| crate::board_reads_ops::reads_of(svc, id)).transpose()?;
+    Ok(pb::TaskList { items, reads })
 }
 
 /// Whether a subagent is running and wrote a line within `window` of `now`.
@@ -373,7 +381,7 @@ pub fn get_by_key(svc: &Service, req: &pb::TaskGetByKeyRequest) -> Result<pb::Ta
         "repository_id",
     )?;
     let tasks = svc.store.tasks_with_key(repository, key)?;
-    Ok(pb::TaskList { items: crate::task_starts::pb_tasks(svc, &tasks)? })
+    Ok(pb::TaskList { items: crate::task_starts::pb_tasks(svc, &tasks)?, reads: None })
 }
 
 /// `task.search`: every note in a repository whose body carries a phrase.

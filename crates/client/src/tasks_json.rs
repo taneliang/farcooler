@@ -90,6 +90,17 @@ pub fn list_json(tasks: &[pb::Task], now: i64) -> serde_json::Value {
     json!({ "tasks": tasks.iter().map(|t| task_json(t, now)).collect::<Vec<_>>() })
 }
 
+/// The board with its read state (ov-113): `list_json`, and beside `tasks` a
+/// `reads` key when the runner sent one. Additive: a decoder that reads
+/// `tasks` alone, as AgentKit's `WireTaskList` does, never sees it.
+pub fn board_json(list: &pb::TaskList, now: i64) -> serde_json::Value {
+    let mut board = list_json(&list.items, now);
+    if let Some(reads) = &list.reads {
+        board["reads"] = crate::session::reads_json(reads);
+    }
+    board
+}
+
 /// One task with its record: the shape `task show --json` prints and the FFI's
 /// `task.get` returns.
 pub fn detail_json(detail: &pb::TaskDetail, now: i64) -> serde_json::Value {

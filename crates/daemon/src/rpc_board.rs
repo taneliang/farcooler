@@ -1,4 +1,5 @@
-//! The board's routes: `task.*` but `task.move`, a workspace write.
+//! The board's routes: `task.*` but `task.move`, a workspace write, and
+//! `workspace.mark_read`, whose read state is the board's.
 //!
 //! Out of `rpc.rs` so the dispatch table there stays inside its size budget.
 //! `Rpc::dispatch` names every route here in one arm, so its own coverage
@@ -102,6 +103,12 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, req: Request) -> 
             let pane = crate::task_starts::orchestrator_pane(svc, &p).await;
             Ok(result::Value::Task(crate::task_starts::worker(svc, watcher, &p, pane)?))
         }
+        "workspace.mark_read" => {
+            let Some(request::Payload::WorkspaceMarkRead(p)) = req.payload else {
+                return Err(DomainError::InvalidArgument { what: "payload" });
+            };
+            Ok(result::Value::BoardReads(crate::board_reads_ops::mark_read(svc, watcher, &p)?))
+        }
         other => {
             tracing::error!(method = %other, "a board route with no handler");
             Err(DomainError::NotFound)
@@ -119,12 +126,15 @@ mod tests {
     #[test]
     fn every_board_route_has_an_arm() {
         let source = include_str!("rpc_board.rs");
-        let routes = Method::ALL.iter().map(|m| m.name()).filter(|m| m.starts_with("task.") && *m != "task.move");
+        let routes = Method::ALL
+            .iter()
+            .map(|m| m.name())
+            .filter(|m| (m.starts_with("task.") && *m != "task.move") || *m == "workspace.mark_read");
         let mut seen = 0;
         for route in routes {
             assert!(source.contains(&format!("\"{route}\" => {{")), "no arm for {route}");
             seen += 1;
         }
-        assert_eq!(seen, 12, "the board's routes");
+        assert_eq!(seen, 13, "the board's routes");
     }
 }

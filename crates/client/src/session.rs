@@ -24,7 +24,9 @@ use uuid::Uuid;
 use crate::changes_json::{stack_json, change_set_json, file_change_json, file_diff_json, inbox_json};
 use crate::ssh;
 
+mod board_reads;
 mod notice_task;
+pub use board_reads::{MarkRead, reads_json};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
@@ -288,6 +290,11 @@ pub enum FleetEvent {
     /// answering a decision or a chat ask changes no terminal and no
     /// worktree, so nothing else would say the list moved.
     NeedsYou,
+    /// A board's read state moved on another device (ov-113). Carries the
+    /// whole state, which a client merges as it is: every part only rises.
+    /// Not a re-read notice, and not coalesced into one by the FFI's queue
+    /// except against an identical line.
+    Reads { workspace: Uuid, floor_ms: i64, opened: Vec<(Uuid, i64)> },
 }
 
 impl FleetEvent {
@@ -336,6 +343,11 @@ impl FleetEvent {
             // Already debounced on the runner, and coalesced again by the
             // FFI's queue, since the line carries nothing to tell two apart.
             Payload::NeedsYouChanged(_) => Some(FleetEvent::NeedsYou),
+            Payload::BoardReadsChanged(r) => Some(FleetEvent::Reads {
+                workspace: uuid_of(&r.workspace_id),
+                floor_ms: r.floor_ms,
+                opened: r.opened.iter().map(|m| (uuid_of(&m.task_id), m.opened_ms)).collect(),
+            }),
             // This arm used to return `None`, with a note saying to revisit it
             // when a board existed to hear it. The Mac board is that board, so
             // here it is. Kept as a sentence rather than deleted because the
@@ -1902,7 +1914,7 @@ impl Session {
         let (list, required) = task_list_request(self.capabilities(), repository, workspace);
         let payload = request::Payload::TaskList(list);
         match self.value_requiring("task.list", Some(repository), Some(payload), required).await? {
-            result::Value::TaskList(l) => Ok(crate::tasks_json::list_json(&l.items, now_millis())),
+            result::Value::TaskList(l) => Ok(crate::tasks_json::board_json(&l, now_millis())),
             other => Err(wrong("task_list", &other)),
         }
     }
@@ -2303,7 +2315,7 @@ fn split_of(t: &Terminal) -> Option<String> {
     t.split_of.as_deref().and_then(|b| Uuid::from_slice(b).ok()).map(|u| u.to_string())
 }
 
-fn now_millis() -> i64 {
+pub(crate) fn now_millis() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
@@ -2359,6 +2371,7 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::Report(_) => "report",
         result::Value::UsageReport(_) => "usage_report",
         result::Value::TaskUsage(_) => "task_usage",
+        result::Value::BoardReads(_) => "board_reads",
     }
 }
 

@@ -498,6 +498,11 @@ fn scope_of(method: Method) -> Scope {
         | Method::WorkspaceStartOrchestrator
         | Method::TaskMove
         | Method::WorktreeAssign
+        // Saying you have read a board sits with `terminal.seen` and for its
+        // reason: it changes what this runner tells the owner, and the state
+        // is shared by every device, so a read-scoped client that could write
+        // it could silence Unread on the owner's others.
+        | Method::WorkspaceMarkRead
         | Method::TerminalSetRole => Scope::Control,
         // Tiling is `control`, not `host_admin`. It touches no files and stops
         // no process — the worst a wrong one does is show you the wrong pane —
@@ -1991,7 +1996,7 @@ impl Rpc {
             // The arms live in `rpc_board`; every route is named here.
             "task.list" | "task.get" | "task.get_by_key" | "task.search" | "task.create" | "task.update"
             | "task.set_status" | "task.note" | "task.block" | "task.set_wait" | "task.set_line"
-            | "task.worker" => crate::rpc_board::dispatch(svc, &self.watcher, req).await,
+            | "task.worker" | "workspace.mark_read" => crate::rpc_board::dispatch(svc, &self.watcher, req).await,
 
             // ---- workspaces ----
             //
@@ -2652,6 +2657,7 @@ mod tests {
             "workspace.set_settings",
             "workspace.delete",
             "task.move",
+            "workspace.mark_read",
             "worktree.assign",
             "terminal.set_role",
             "workspace.start_orchestrator",

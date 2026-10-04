@@ -77,3 +77,5 @@ prost-types.workspace = true
 farcooler-daemon.workspace = true
 # Test teardown ends its tmux server by PID (ov-207).
 farcooler-tmux.workspace = true
+# A board's tasks, written into the runner's store for the phone-path tests (ov-113).
+farcooler-store.workspace = true

@@ -206,6 +206,18 @@ fn event_line(what: &crate::session::FleetEvent) -> String {
         // runner without `workstreams`, which a client reads as every board in
         // the repository; `from_workspace` is set only on a move. See
         // `FleetEvent::Task`.
+        // The state itself, since a client merges it as it is (ov-113). An
+        // overflowed queue collapses to `resync`, which re-reads every board,
+        // and each re-read carries its reads, so nothing is lost.
+        FleetEvent::Reads { workspace, floor_ms, opened } => json!({
+            "event": "reads",
+            "workspace_id": workspace.to_string(),
+            "floor_ms": floor_ms,
+            "opened": opened.iter().map(|(task, ms)| json!({
+                "task_id": task.to_string(),
+                "opened_ms": ms,
+            })).collect::<Vec<_>>(),
+        }),
         FleetEvent::Task { repository, workspace, from_workspace, actor } => json!({
             "event": "task",
             "repository": repository.to_string(),
@@ -1959,6 +1971,15 @@ async fn dispatch(
 
         "task.get" => Ok(session.task(id("task")?).await?),
 
+        // Raise what is read on one board (ov-113): `{workspace, floor_ms?,
+        // opened: [{task_id, opened_ms}], seeds_floor?}`, answering with the
+        // board's state after the merge. Refused on a runner without
+        // `board_reads`; the app keeps its own store there.
+        "workspace.mark_read" => {
+            let (workspace, raise) = mark_read_of(args)?;
+            Ok(session.mark_read(workspace, raise).await?)
+        }
+
         // A task's spend, for its screen's Usage section (ov-195), as
         // `usage_json` shapes it.
         "usage.task" => {
@@ -3185,6 +3206,10 @@ mod tests {
 /// The agent screen's controls against a real daemon, as a phone sends them.
 #[cfg(test)]
 mod phone_path_tests;
+#[cfg(test)]
+mod board_reads_phone_tests;
+mod board_reads_args;
+use board_reads_args::mark_read_of;
 mod calls;
 #[cfg(test)]
 mod concurrency_tests;

@@ -94,13 +94,25 @@ mod tests {
         }
     }
 
+    /// A mark is a small write to what the runner already holds, so it waits
+    /// like any other: not ahead of anything (an app queues them after a board
+    /// read and a failed one is sent again), and not for minutes.
+    #[test]
+    fn marking_a_board_read_is_an_ordinary_call() {
+        let how = for_method("workspace.mark_read");
+        assert_eq!(how.deadline, Some(ORDINARY));
+        assert!(!how.urgent);
+    }
+
     #[test]
     fn git_and_agents_get_the_long_deadline_and_reads_the_short_one() {
         for method in ["changes.file_diff", "changes.commit_files", "pr.refresh", "terminal.agent_prompt"] {
             assert_eq!(for_method(method).deadline, Some(WORK), "{method}");
             assert!(!for_method(method).urgent, "{method}");
         }
-        for method in ["terminal.list", "terminal.screen", "worktree.list", "task.get", "pr.refreshed"] {
+        for method in
+            ["terminal.list", "terminal.screen", "worktree.list", "task.get", "pr.refreshed", "workspace.mark_read"]
+        {
             assert_eq!(for_method(method).deadline, Some(ORDINARY), "{method}");
         }
     }

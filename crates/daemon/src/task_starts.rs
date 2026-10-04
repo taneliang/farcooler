@@ -180,7 +180,7 @@ pub fn set_line(svc: &Service, watcher: &Watcher, req: &pb::TaskSetLine) -> Resu
         let task = if ids.contains(&task.id) { task.clone() } else { svc.store.get_task(task.id)? };
         announce(watcher, &task, actor);
     }
-    Ok(pb::TaskList { items: pb_tasks(svc, &in_line)? })
+    Ok(pb::TaskList { items: pb_tasks(svc, &in_line)?, reads: None })
 }
 
 /// The pane a `task.worker` was run from, when the socket it names is this

@@ -35,6 +35,7 @@ use crate::service::Service;
 use crate::wire;
 
 pub(crate) mod answer_wake;
+mod board_reads;
 mod failure_observation;
 mod holds;
 mod workers;

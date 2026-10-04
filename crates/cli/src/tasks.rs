@@ -3564,7 +3564,7 @@ mod tests {
                         .collect();
                     result::Value::WorkspaceList(pb::WorkspaceList { items })
                 }
-                "task.list" => result::Value::TaskList(pb::TaskList { items: self.tasks.clone() }),
+                "task.list" => result::Value::TaskList(pb::TaskList { items: self.tasks.clone(), reads: None }),
                 "terminal.list" => {
                     let mut items = self.terminals.clone();
                     if self.sent.iter().any(|r| r.method == "terminal.create") {

@@ -45,6 +45,7 @@ pub mod session_discovery;
 pub mod skill_install;
 pub mod task_link;
 pub(crate) mod rpc_board;
+pub(crate) mod board_reads_ops;
 pub mod task_ops;
 pub mod task_starts;
 pub mod usage;

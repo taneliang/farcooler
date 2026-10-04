@@ -462,6 +462,13 @@ pub mod capability {
     /// capability absent folds nothing, which at worst shows a duplicate banner
     /// and never silences one.
     pub const NOTICE_TASK: &str = "notice_task";
+    /// Read state on the runner (ov-113): `workspace.mark_read`,
+    /// `TaskList.reads` and the `board_reads_changed` event.
+    ///
+    /// Its own capability because an older runner drops the write and sends no
+    /// state: a client that reads it absent keeps its own per-device store.
+    /// Needs `workstreams`, since a board here is a workspace's.
+    pub const BOARD_READS: &str = "board_reads";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -474,7 +481,7 @@ pub mod capability {
             LAUNCH_PROMPT, TERMINAL_TASK, WORKTREE_FORK_ONLY, WORKSTREAMS, ORCHESTRATOR_HANDOFF,
             NEEDS_YOU, WAKE_ON_ANSWER, STREAM_SIZE_MARKERS, TASK_NOTICES, REPORT, AGENT_USAGE,
             AGENTS_FOUND,
-            TASK_WAITS, TASK_WORKERS, NOTICE_TASK,
+            TASK_WAITS, TASK_WORKERS, NOTICE_TASK, BOARD_READS,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
@@ -645,6 +652,7 @@ pub mod method {
         TaskSetWait = "task.set_wait" => TASK_WAITS,
         TaskSetLine = "task.set_line" => TASK_WAITS,
         TaskWorker = "task.worker" => TASK_WORKERS,
+        WorkspaceMarkRead = "workspace.mark_read" => BOARD_READS,
     }
 }
 
@@ -692,6 +700,8 @@ pub const MAX_COLUMNS: u32 = 500;
 pub const MIN_ROWS: u32 = 5;
 pub const MAX_ROWS: u32 = 200;
 
+#[cfg(test)]
+mod board_reads_tests;
 #[cfg(test)]
 mod task_starts_tests;
 

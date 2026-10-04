@@ -25,10 +25,10 @@ use super::dispatch;
 use crate::session::{Session, SessionError};
 
 /// A runner whose every connection is at one scope, with one agent pane.
-struct Runner {
+pub(super) struct Runner {
     _dir: tempfile::TempDir,
-    socket: std::path::PathBuf,
-    service: Arc<Service>,
+    pub(super) socket: std::path::PathBuf,
+    pub(super) service: Arc<Service>,
     pane: uuid::Uuid,
 }
 
@@ -40,7 +40,7 @@ impl Drop for Runner {
     }
 }
 
-async fn a_runner(scope: Scope) -> Runner {
+pub(super) async fn a_runner(scope: Scope) -> Runner {
     // Short, because the agent socket lives in it and macOS caps a socket path
     // at 104 bytes. The system temporary directory alone is most of that.
     std::fs::create_dir_all("/tmp/fc-phone").unwrap();
@@ -465,6 +465,9 @@ fn route(method: Method) -> Option<&'static str> {
         | Method::TaskList
         | Method::TaskGet
         | Method::TaskNote
+        // Read state on the runner (ov-113): a phone opens a ticket, and
+        // the Unread section is built from what comes back.
+        | Method::WorkspaceMarkRead
         | Method::WorkspaceStartOrchestrator
         | Method::TerminalWatching
         | Method::UsageTask => Some(method.name()),

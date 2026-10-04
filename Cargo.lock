@@ -962,6 +962,7 @@ dependencies = [
  "farcooler-fence",
  "farcooler-ffi-guard",
  "farcooler-protocol",
+ "farcooler-store",
  "farcooler-tailcat",
  "farcooler-tmux",
  "farcooler-transport",
