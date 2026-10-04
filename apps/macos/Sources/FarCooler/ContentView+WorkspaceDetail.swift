@@ -316,6 +316,7 @@ extension ContentView {
                 PlanPageView(plan: board.plan, page: page, context: planContext(board, host: host, workspace: id))
             } else {
                 ContentUnavailableView("Board Not Found", systemImage: "map")
+                    .background(WorkspaceStyle.paper)
             }
         case .workspace(let host, _, .worktree(let wt, _)?), .looseWorktree(let host, let wt, _):
             if !settled {

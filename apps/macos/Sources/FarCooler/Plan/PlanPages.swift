@@ -45,16 +45,20 @@ struct PlanPageView: View {
         .task(id: plan.generation) { await plan.reloadIfMoved() }
     }
 
-    @ViewBuilder private func missing(_ title: String) -> some View {
-        if plan.hasRead {
-            ContentUnavailableView(title, systemImage: "map")
-        } else {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+    private func missing(_ title: String) -> some View {
+        Group {
+            if plan.hasRead {
+                ContentUnavailableView(title, systemImage: "map")
+            } else {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
+        .background(WorkspaceStyle.paper)
     }
 }
 
-/// The page's column: a document, as the History page's.
+/// The page's column: a document, flat on the paper as the History page is
+/// (ov-220), not a card.
 private struct PlanDocument<Content: View>: View {
     let id: String
     @ViewBuilder let content: () -> Content
@@ -69,7 +73,7 @@ private struct PlanDocument<Content: View>: View {
             .padding(.vertical, 2 * ColumnGrid.rhythm)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(WorkspaceStyle.document)
+        .background(WorkspaceStyle.paper)
         .identified(id)
     }
 }
@@ -460,11 +464,11 @@ struct PlanTaskLineView: View {
             .accessibilityElement(children: .contain)
             .accessibilityLabel(line.text)
             .identified("plan-task-line")
-            // Under the header's key, on the header's plane.
+            // Under the header's key, on the task card's paper: no fill of its
+            // own, since the header and tab bar draw none (ov-223).
             .padding(.horizontal, TaskTypography.inset.leading)
             .padding(.bottom, ColumnGrid.rhythm)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(WorkspaceStyle.canvas)
         } else if plan.showing {
             Color.clear.frame(height: 0)
                 .task(id: ObjectIdentifier(plan)) { await plan.readIfNeverRead() }

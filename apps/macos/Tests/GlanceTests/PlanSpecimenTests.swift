@@ -182,7 +182,7 @@ struct PlanSpecimenTests {
                     TaskViewHeader(row: row)
                     PlanTaskLineView(plan: plan, task: row.id) { _ in }
                 }
-                .background(WorkspaceStyle.canvas)
+                .background(WorkspaceStyle.paper)
             }
         }
     }
