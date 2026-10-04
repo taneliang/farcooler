@@ -79,6 +79,9 @@ PAGE_FILES = [
     "crates/client/src/session.rs",
     "crates/client/src/session/results.rs",
     # The CLI.
+    "crates/cli/src/page.rs",
+    "crates/cli/src/page_text.rs",
+    "crates/cli/src/page_tests.rs",
     "crates/cli/src/main.rs",
     "crates/cli/src/event_lines.rs",
 ]

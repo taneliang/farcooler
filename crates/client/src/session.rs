@@ -315,8 +315,7 @@ pub enum FleetEvent {
     /// written. A client showing that board's Plan re-reads `plan.get`. The
     /// board only, so two writes to one board are one notice.
     Plan { workspace: Uuid },
-    /// A page on a board was written or removed (ov-282). A client with that
-    /// page open re-reads the slot; one without pages open ignores it.
+    /// A page was written or removed (ov-282): re-read that slot if it's open.
     Pages { workspace: Uuid, slot: String, removed: bool },
 }
 
@@ -350,10 +349,7 @@ impl FleetEvent {
             // board's plan (ov-274). The actor isn't carried: the plan has one
             // writer, the orchestrator, and a phone never writes it.
             Payload::PlanChanged(p) => Some(FleetEvent::Plan { workspace: uuid_of(&p.workspace_id) }),
-            // Orchestrator pages (ov-269): news of one board's slot.
-            Payload::PagesChanged(p) => {
-                Some(FleetEvent::Pages { workspace: uuid_of(&p.workspace_id), slot: p.slot, removed: p.removed })
-            }
+            Payload::PagesChanged(p) => Some(FleetEvent::Pages { workspace: uuid_of(&p.workspace_id), slot: p.slot, removed: p.removed }),
             // Reserved arms no daemon emits yet. Named one by one rather than
             // swept up by `_` so that the day a NEW variant is added to this
             // oneof, this match stops compiling (E0004) and somebody decides

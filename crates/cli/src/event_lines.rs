@@ -79,9 +79,38 @@ pub(crate) fn plan_event_json(p: &pb::PlanChanged) -> serde_json::Value {
     })
 }
 
+/// A page on a board was written or removed (ov-269). A client with that page
+/// open re-reads the slot. Not `task`: no task moved.
+pub(crate) fn pages_event_json(p: &pb::PagesChanged) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "pages",
+        "workspace": uuid_of(&p.workspace_id).to_string(),
+        "slot": p.slot,
+        "revision": p.revision,
+        "actor": p.actor,
+        "removed": p.removed,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pages line names the board and the slot, and says when the page went.
+    #[test]
+    fn a_pages_line_names_its_board_slot_and_whether_it_went() {
+        let ws = uuid::Uuid::now_v7();
+        let line = pages_event_json(&pb::PagesChanged {
+            workspace_id: bytes::Bytes::copy_from_slice(ws.as_bytes()),
+            slot: "train".into(),
+            revision: 3,
+            actor: "manager".into(),
+            removed: true,
+        });
+        assert_eq!(line["kind"], "pages");
+        assert_eq!(line["workspace"], ws.to_string());
+        assert_eq!((line["slot"].as_str(), line["revision"].as_u64(), line["removed"].as_bool()), (Some("train"), Some(3), Some(true)));
+    }
 
     /// **A plan line names the board it's about** (ov-273): the Mac's
     /// `EventStream` reads `workspace` to re-read that board's plan and no
