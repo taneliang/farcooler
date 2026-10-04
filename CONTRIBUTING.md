@@ -34,6 +34,7 @@ crates/
 ├── agent-hooks  parsing agents' lifecycle hooks
 ├── review       diff parsing, and anchoring review comments to a moving diff
 ├── fence        the fenced block Far Cooler owns in authorized_keys and ssh config
+├── ffi-guard    the panic guard every function the apps call goes through
 └── tailcat      the tunnel, a Go library in crates/tailcat/go
 apps/macos       the Mac app, SwiftUI
 apps/ios         the iPhone, Apple Watch, widget and Live Activity targets
@@ -53,7 +54,9 @@ explains what that means for the Kotlin side.
 
 - **Rust**, stable, 1.85 or later. If `cargo` isn't on your `PATH` (rustup puts
   it in `~/.cargo/bin`), `apps/macos/build-app.sh` fails at its CLI step.
-- **tmux 3.x** and **git**, for the daemon and its tests.
+- **tmux 3.x** and **git**, for the daemon and its tests. A few daemon tests
+  also want `git-lfs` and `fish`; with `CI` set they fail rather than skip when
+  one is missing.
 - **Go**, the version in `crates/tailcat/go/go.mod`, for the tunnel. Only the
   Mac app bundle, the phone frameworks and the Linux release binaries need it;
   a plain `cargo build` doesn't.
@@ -143,7 +146,7 @@ how to build on the runner itself instead.
 
 | What | Command |
 | --- | --- |
-| Rust | `cargo test --workspace --no-fail-fast` |
+| Rust | `cargo test --workspace --no-fail-fast` (CI wraps it in `./scripts/tmux-leak-check.py --`, which fails a test that leaves a tmux server running) |
 | Rust lints | `cargo clippy --workspace --all-targets -- -D warnings` |
 | AgentKit | `swift test --package-path apps/shared/AgentKit` |
 | Mac app | `swift test --package-path apps/macos` |
@@ -181,8 +184,9 @@ Every test that starts a real agent is `#[ignore]` and also needs
 installed and signed in, and they cost real tokens. Run them after touching
 `crates/core/src/activity.rs` or `title.rs`. A failure writes the captured
 screen to `target/live-agents/`; once the rules are fixed it belongs in
-`crates/core/captures/`. [`test/live_agents.rs`](test/live_agents.rs) has
-the rest.
+`crates/core/captures/`. [`crates/core/tests/live_agents.rs`](crates/core/tests/live_agents.rs)
+has the rest, and [`test/live_agents.rs`](test/live_agents.rs) is the switch
+every such test asks first.
 
 ## The checks CI runs
 
@@ -196,6 +200,7 @@ push:
 | `./scripts/swallow-lint.py` | A client call whose failure is silently dropped. Justified exceptions live in `scripts/swallow-lint-allow.txt`. |
 | `./scripts/proto-lint.py` | A wire change that would break a client already in the field. See [`docs/releasing.md`](docs/releasing.md#the-wire-has-the-same-rule). |
 | `./scripts/copy-lint.py` | A count in parentheses in any app's copy. |
+| `./scripts/visual-tokens-lint.py` | A hand-drawn radius, rule, shadow, material or fill in a Mac or AgentKit view, where a design token exists. |
 
 `./scripts/install-git-hooks.sh` installs a `commit-msg` hook that runs the
 doc comment check on every commit. A doc comment you moved on purpose takes a

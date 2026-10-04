@@ -9,7 +9,10 @@ own git worktree. An orchestrator agent keeps the task board, dispatches the
 agents and asks you when it needs a decision, and everything waiting on you
 reaches your Mac, your iPhone, your Apple Watch or your Android phone.
 
-<!-- Screenshot: docs/images/far-cooler-mac.png lands in a follow-up commit. -->
+<!-- HERO SCREENSHOT: docs/images/hero.png is captured from a Debug build
+     against a scratch daemon and a demo repository, then committed in a
+     follow-up. Until the file exists, readers see the alt text below. -->
+![Far Cooler on the Mac: the navigator with a workspace's tasks and agents, and an agent's terminal beside its changes](docs/images/hero.png)
 
 > **Early software.** There's no stable release yet. The Mac app ships as a
 > canary build from every push to `main`, and it breaks sometimes.
@@ -30,7 +33,7 @@ reaches your Mac, your iPhone, your Apple Watch or your Android phone.
   agents asking permission (answer with **Allow** or **Deny**), agents blocked
   at their terminal, decisions the orchestrator asked you for, and work ready
   for review. It's the same count on the Mac, the lock screen, the widget and
-  the watch.
+  the watch, and tapping a notification opens the task or agent it's about.
 - **You manage the orchestrator, not the tasks.** Tell the orchestrator what
   you want in plain words. It writes a charter for how work gets done with you,
   puts the work on the board, starts agents in fresh worktrees, and reports
@@ -43,11 +46,16 @@ reaches your Mac, your iPhone, your Apple Watch or your Android phone.
 
 | | |
 | --- | --- |
-| **Mac** | The full workspace: the orchestrator's conversation, the board with its Unread section, every worktree's terminals, each branch's changes a commit at a time, Go to Anything (⌘P), and the Needs You tray. It runs this Mac's own runner for you. |
-| **iPhone and iPad** | Needs You first, then the boards, agents and terminals of every runner. Notifications you can answer, Home Screen widgets and a Live Activity. |
+| **Mac** | The full workspace: the orchestrator's conversation, the board with its Unread section, every worktree's terminals, each branch's changes a commit at a time, and a read-only file viewer (Files) beside them. Terminals can be named, and a terminal that's listening on a port offers Open in Browser. Back and Forward in the toolbar retrace where you've been, Go to Anything (⌘P) finds the rest, and the Needs You tray stays in reach. It runs this Mac's own runner for you. |
+| **iPhone and iPad** | Needs You first, then the boards, agents and terminals of every runner. Notifications you can answer, Home Screen widgets and a Live Activity. When the runner is slow to answer, the app says so in a sentence instead of freezing, and keeps what you typed so you can try again. |
 | **Apple Watch** | What needs you, at a glance: allow or deny a permission ask, read what an agent did, and reply by dictation. A complication puts the agent that most needs you on your watch face. |
-| **Android** | Needs You, boards, agents and terminals, from the same Rust core as the other apps. |
+| **Android** | Needs You, boards, agents and terminals, from the same Rust core as the other apps. A task's screen can start a message to the orchestrator about it, as the iPhone's can. |
 | **Command line** | `farcooler` does everything the apps do and more, on this machine or on any runner with `--runner you@box`. |
+
+Every task card says which agent is on it and when it starts, and an
+orchestrator's subagents show up as agents of their own. **Ask the
+Orchestrator** (⌘K on the Mac, a row on a task's screen on the phones) drafts a
+message about the task you're looking at.
 
 A few words carry the whole product. A **workspace** is one line of work in a
 repository, with its own **board** of tasks, its own charter and its own
