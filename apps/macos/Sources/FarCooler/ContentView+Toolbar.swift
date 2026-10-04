@@ -85,14 +85,9 @@ extension ContentView {
     /// board, so just the field, for Go to Anything.
     static var noWorkspaceSource: TitleStatusSource { TitleStatusSource(orchestrator: nil, status: nil, nowDoing: nil) }
 
-    /// What the title bar's field does (slice 4): finds with the palette's
-    /// index and runs what's chosen as the palette did; sends to this
-    /// workspace's orchestrator, by its composer's route.
+    /// What the title bar's field does (slice 4, ov-264): finds with the
+    /// palette's index and runs what's chosen as the palette did.
     var titleConsoleActions: TitleConsoleActions {
-        let scene = selection.flatMap(workspaceScene)
-        let seat = scene.flatMap { s in
-            s.summary.flatMap { WorkspaceScreen.orchestrator(of: $0, host: s.host, in: store.fleet) }
-        }
         let worktrees = store.fleet.worktrees
         return TitleConsoleActions(
             find: { [paletteWorkspaces, paletteTasks, selectedPane] query in
@@ -108,24 +103,6 @@ extension ContentView {
             },
             run: { perform($0) },
             files: FilesRouting.palette(paletteWorktree, client: paletteWorktree.flatMap { store.client(for: $0) }),
-            send: { text in
-                guard let seat, let client = store.client(for: seat.worktree) else {
-                    return .refused(TitleConsoleRecipient.noOrchestrator)
-                }
-                switch TitleConsoleRecipient.route(seat.terminal) {
-                case .composer:
-                    // A chat: its composer's route.
-                    let failure = await client.agentPrompt(terminal: seat.terminal.short, text: text)
-                    return failure == nil ? .sent : .refused(TitleConsole.sendFailed)
-                case .terminal:
-                    // A terminal: the runner's answer gate, which types
-                    // nothing unless it's provably safe.
-                    let failure = await client.tellOrchestrator(terminal: seat.terminal.short, text: text)
-                    return failure == nil ? .sent : TellRefusal.outcome(message: failure)
-                }
-            },
-            refusal: { TitleConsoleRecipient.refusal(seat: seat?.terminal) },
-            recipient: scene?.summary.map { $0.isImplicit ? "Main" : $0.name },
             current: selectedPane?.terminal)
     }
 
@@ -255,7 +232,7 @@ extension ContentView {
         case .newWorktree: run(.newWorktree)
         case .addRepository: showAddRepository = true
         case .addRunner: showAdd = true
-        case .find: console.console.open(finding: true)
+        case .find: console.console.open(recents: true)
         case .runners:
             preferences.settingsTab = "machines"
             openSettings()

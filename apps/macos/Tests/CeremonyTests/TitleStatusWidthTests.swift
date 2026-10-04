@@ -147,7 +147,7 @@ struct TitleConsoleWidthTests {
         let closed = try #require(Harness.status(in: window))
         #expect(closed.width == form.width)
         for finding in [false, true] {
-            console.console.open(finding: finding)
+            console.console.open(recents: finding)
             try await Harness.settle(window)
             let open = try #require(Harness.status(in: window), "the status item left the toolbar")
             #expect(open.width == closed.width && open.item == closed.item, "open (finding \(finding)): \(open)")
@@ -192,7 +192,7 @@ struct TitleConsoleInlineTests {
         let window = try await Harness.window(
             Harness.Root(words: Harness.Words(), console: console, content: Color.clear), width: width)
         defer { window.close() }
-        console.console.open(finding: false)
+        console.console.open(recents: false)
         try await Harness.settle(window)
         #expect(Self.fieldInToolbar(window) == inline, "at \(width)")
         console.console.close()

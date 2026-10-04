@@ -54,7 +54,8 @@ enum Shortcut {
             "Terminals",
             [
                 Item(keys: "⌘T", action: "New terminal in this worktree"),
-                Item(keys: "⌘W", action: "Close terminal"),
+                Item(keys: "⌘W", action: "Close terminal, or the Settings window when it’s in front"),
+                Item(keys: "⌥⌘W", action: "Close every window"),
                 Item(keys: "⌃⌘1 … ⌃⌘9", action: "Jump to a terminal on screen"),
                 Item(keys: "⌘]", action: "Next terminal on screen"),
                 Item(keys: "⌘[", action: "Previous terminal on screen"),
@@ -142,7 +143,7 @@ enum Shortcut {
             "App",
             [
                 Item(keys: "⌘P", action: "Go to a workspace, task, terminal, or file, or start a worktree"),
-                Item(keys: "⌘K", action: "Ask the orchestrator, or see what’s happening"),
+                Item(keys: "⌘K", action: "See what’s happening, or type to find anything"),
                 Item(keys: "⌘B", action: "Show or hide the sidebar"),
                 Item(keys: "⌘F", action: "Find in the file open in Files, filter the navigator’s tasks, or find a workspace, task, or agent"),
                 Item(keys: "⇧⌘L", action: "Go to a line of the file open in Files"),

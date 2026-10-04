@@ -24,9 +24,9 @@ enum AppCommand: String {
     /// Board ▸ Mark All as Read: the navigator's Unread, read (ov-104).
     case markAllRead
     case commandPalette
-    /// ⌘K: the title bar's field, to ask the orchestrator or see what's
-    /// happening (ov-214).
-    case askOrchestrator
+    /// ⌘K: the title bar's field, to see what's happening or find
+    /// something (ov-214, ov-264).
+    case showActivity
     case toggleSidebar
     case diffNextHunk
     case diffPreviousHunk
@@ -166,11 +166,14 @@ struct FarCoolerCommands: Commands {
             let close = CloseCommand.at(mainWindow)
             Button(close.title) { close.perform(keyWindow: NSApp.keyWindow) }
                 .keyboardShortcut("w", modifiers: .command)
+                .disabled(!CloseCommand.closes(NSApp.keyWindow))
             if close == .terminal {
                 Button("Close Window") { CloseCommand.window.perform(keyWindow: NSApp.keyWindow) }
+                    .disabled(!MainWindowFocus.isKey(mainWindow))
             }
             Button("Close All") { CloseCommand.closeAll(NSApp.windows) }
                 .keyboardShortcut("w", modifiers: [.command, .option])
+                .disabled(!CloseCommand.closes(NSApp.keyWindow))
         }
 
         CommandGroup(after: .newItem) {
@@ -491,7 +494,7 @@ struct FarCoolerCommands: Commands {
                 // ⌘P, the shortcut everyone arriving here already has in their
                 // fingers from an editor, for the thing it means there: show me
                 // everything, I will type the part I remember. Since ov-214 it
-                // opens the title bar's field with "/" typed, the field's find.
+                // opens the title bar's field on the recent terminals.
                 Button("Go to Anything…") { AppCommand.commandPalette.post() }
                     .keyboardShortcut("p", modifiers: .command)
                     .disabled(!MainWindowFocus.isKey(mainWindow))
@@ -499,7 +502,7 @@ struct FarCoolerCommands: Commands {
                 // here: no menu item held it and a terminal pane hands every
                 // ⌘ chord to the menu (`TerminalRenderView.keyDown`), so it
                 // was never Clear in a pane.
-                Button("Ask the Orchestrator…") { AppCommand.askOrchestrator.post() }
+                Button("Show Activity") { AppCommand.showActivity.post() }
                     .keyboardShortcut("k", modifiers: .command)
                     .disabled(!MainWindowFocus.isKey(mainWindow))
                 // ⌘R, which is Reload everywhere else. ⌘0 is Actual Size.

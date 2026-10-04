@@ -3099,16 +3099,6 @@ final class DaemonClient: ObservableObject {
         return message ?? "The command didn’t finish."
     }
 
-    /// A message for a terminal orchestrator (ov-214): `terminal tell`,
-    /// which the runner types and submits only past the answer gate. Nil
-    /// when it was told; else the CLI's refusal, with its `code:` and
-    /// `what:` lines (`--json`), for `TellRefusal` to put in words.
-    func tellOrchestrator(terminal: String, text: String) async -> String? {
-        let (data, message) = await runRaw(["terminal", "tell", terminal, "--json", "--", text], background: true)
-        if data != nil { return nil }
-        return message ?? ""
-    }
-
     // MARK: - Subprocess
 
     /// Run a command; on failure, hand back `nil` and make the failure the

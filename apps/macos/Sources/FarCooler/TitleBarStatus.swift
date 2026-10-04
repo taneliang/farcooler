@@ -348,7 +348,7 @@ struct TitleStatusView: View {
     /// (slice 4), else in a popover (slice 2).
     private func showActivity() {
         if let console = actions.console {
-            console.console.open(finding: false)
+            console.console.open(recents: false)
         } else {
             showingActivity = true
         }
@@ -360,7 +360,7 @@ struct TitleStatusView: View {
     private var activityButton: some View {
         Button {
             if let console = actions.console, model.orchestrator == nil, model.nowDoing == nil {
-                console.console.open(finding: true)
+                console.console.open(recents: true)
             } else {
                 showActivity()
             }

@@ -100,7 +100,7 @@ struct ContentView: View {
     @State var removeWorktree: Worktree?
     @State var removeRepository: RepositoryToRemove?
     @State private var showResumeBranch = false
-    /// The title bar's field (ov-214): ⌘K to ask the orchestrator, ⌘P to
+    /// The title bar's field (ov-214, ov-264): ⌘K for the activity, ⌘P for
     /// find. It took the floating palette's place.
     @State var console = TitleConsoleModel()
     /// Quick-create's draft, reachable from here so that what was typed into
@@ -391,8 +391,8 @@ struct ContentView: View {
                 selection = target
             }
         }
-        // The title bar's field holds each workspace's message apart, so
-        // one written here never goes to another's orchestrator (ov-214).
+        // The title bar's field closes as the window moves to another
+        // workspace, and keeps today's spend by it (ov-214).
         .onChange(of: selection.flatMap(workspaceScene)?.key ?? "", initial: true) { _, key in
             console.console.enter(workspace: key)
         }

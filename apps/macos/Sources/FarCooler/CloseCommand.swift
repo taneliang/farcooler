@@ -34,6 +34,10 @@ enum CloseCommand: Equatable {
         }
     }
 
+    /// Whether there's a window for ⌘W to act in: one that's key.
+    @MainActor
+    static func closes(_ keyWindow: NSWindow?) -> Bool { keyWindow != nil }
+
     /// File ▸ Close All (⌥⌘W), which replacing File's close items takes
     /// away with Close: every window that can be closed.
     @MainActor

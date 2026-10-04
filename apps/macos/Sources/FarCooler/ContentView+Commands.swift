@@ -393,7 +393,7 @@ extension ContentView {
                 navigatorHidden = false
                 boardFilterRequest += 1
             } else {
-                console.console.open(finding: true)
+                console.console.open(recents: true)
             }
 
         case .markAllRead:
@@ -404,9 +404,9 @@ extension ContentView {
         // Toggles rather than opens. ⌘P on an open palette is what a hand
         // reaches for when it changed its mind, and every switcher on this
         // machine closes that way.
-        case .commandPalette: console.console.toggle(finding: true)
-        // ⌘K: ask the orchestrator, or see what's happening (ov-214).
-        case .askOrchestrator: console.console.toggle(finding: false)
+        case .commandPalette: console.console.toggle(recents: true)
+        // ⌘K: see what's happening, or type to find (ov-214, ov-264).
+        case .showActivity: console.console.toggle(recents: false)
 
         // The window's one sidebar is the navigator (ov-178).
         case .toggleSidebar: toggleNavigator()
@@ -451,6 +451,10 @@ extension ContentView {
 
         case .openWorkspace(let host, let id):
             selection = .workspace(host: host, workspace: id, focus: nil)
+
+        case .openOrchestrator(let host, let id):
+            selection = .workspace(host: host, workspace: id, focus: nil)
+            selectOrchestrator(keyboard: .conversation)
 
         case .openTask(let host, let workspace, let id):
             openTask(id, host: host, workspace: workspace)

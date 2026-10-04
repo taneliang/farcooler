@@ -117,16 +117,16 @@ struct FilesLogicTests {
 
         let actions = TitleConsoleActions(find: { _ in [] }, files: files)
         var console = TitleConsole()
-        console.open(finding: true)
-        console.edit("/ma")
+        console.open(recents: false)
+        console.edit("ma")
         console.found(files: ["src/main.rs"], for: "m")
         #expect(actions.entries(console).isEmpty, "an answer for an older query isn't listed")
         console.found(files: ["src/main.rs"], for: "ma")
         #expect(actions.entries(console).map(\.action) == [.openFile(worktree: "w-1", path: "src/main.rs")])
-        console.edit("/mai")
+        console.edit("mai")
         #expect(actions.entries(console).isEmpty, "typing on hides what the last query found")
-        console.edit("ma")
+        console.close()
         console.found(files: ["src/main.rs"], for: "ma")
-        #expect(actions.entries(console).isEmpty, "asking isn't finding")
+        #expect(actions.entries(console).isEmpty, "a closed field finds nothing")
     }
 }

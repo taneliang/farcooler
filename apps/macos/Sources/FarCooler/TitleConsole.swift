@@ -2,85 +2,44 @@ import AgentKit
 import AppKit
 import SwiftUI
 
-// The title bar's field (ov-214, slice 4): the status area's activity line
-// at rest; ⌘K, or a click on it, makes it a field.
+// The title bar's field (ov-214, slice 4; ov-264): the status area's activity
+// line at rest; ⌘K, ⌘P, or a click on it, makes it a field that searches and
+// goes to things. Typing always searches: Go to Anything, the palette's
+// results, in place, then the files of the worktree on screen whose paths
+// match (ov-189). It sends nothing anywhere: the orchestrator is talked to in
+// its own pane, and "Go to Orchestrator" is one of the results.
 //
-//   ask    the default. Return sends what's typed to this workspace's
-//          orchestrator, named in the field ("Ask Billing’s orchestrator"),
-//          and only ever to it: a chat orchestrator by its composer's route
-//          (`terminal agent-prompt`), one in a terminal through the
-//          runner's answer gate (`terminal tell`: a proven agent, idle, an
-//          empty box, bracketed paste known), which types nothing when any
-//          check fails. Empty, the panel under it shows the activity.
-//   find   `/` at the start, or ⌘P, which opens it with `/` already typed:
-//          Go to Anything, the palette's results, in place, then the files
-//          of the worktree on screen whose paths match (ov-189).
-//   Esc    back to the activity line, even while a send is out. A message
-//          being written is kept, for its own workspace: each workspace has
-//          its own, so a message is never sent to another's orchestrator.
-//
-// Never sent by accident: only Return sends (never a click, and never
-// mid-composition in an input method), an empty or whitespace-only message
-// is refused with a sentence, a second Return while one is out does
-// nothing, and a send the runner doesn't answer in `timeout` stops waiting
-// and says so.
+//   ⌘K     opens it; with nothing typed, the panel under it shows the
+//          workspace's activity.
+//   ⌘P     opens it; with nothing typed, it lists the recent terminals.
+//   Esc    back to the activity line. A search isn't kept.
 //
 // The rules are this value's, so `TitleConsoleTests` pins them; the views
 // draw it.
 
 /// The field's state.
 struct TitleConsole: Equatable {
-    enum Mode: Equatable { case rest, ask, find }
-
-    /// What a Return does.
-    enum Intent: Equatable {
-        case none
-        /// Send this, trimmed, to the orchestrator, as send `id`.
-        case send(String, id: Int)
-        /// Refused, with the sentence now in `notice`.
-        case refuse
-        /// Open the find result at this index.
-        case open(Int)
-    }
-
-    /// How a send came out.
-    enum Outcome: Equatable {
-        case sent
-        /// Nothing was typed, and why: the message stays in the field.
-        case refused(String)
-        /// It was typed but not submitted, or landed somewhere it wasn't
-        /// meant to: the field lets it go, and the sentence says where.
-        case left(String)
-    }
-
-    /// A send that's out.
-    struct Pending: Equatable {
-        var id: Int
-        var workspace: String
-        var text: String
+    enum Mode: Equatable {
+        case rest
+        /// Open, with nothing typed, from ⌘K: the activity.
+        case activity
+        /// Open and searching: what's typed, or the recent terminals.
+        case find
     }
 
     private(set) var isOpen = false
-    /// What's in the field.
+    /// What's in the field: the query.
     private(set) var text = ""
+    /// Opened by ⌘P: with nothing typed, the recent terminals rather than
+    /// the activity.
+    private(set) var recents = false
     /// The result the highlight is on, once ↑ or ↓ has moved it.
     private(set) var highlight = 0
     /// Whether ↑ or ↓ has moved the highlight since the results changed:
     /// until then it's where the results say to start (`opening`).
     private(set) var moved = false
-    /// What the last Return refused or failed with; typing clears it.
-    private(set) var notice: String?
-    /// A message is on its way, and the field is waiting for it.
-    private(set) var sending = false
-    /// The last send, until its answer comes, waited for or not.
-    private(set) var pending: Pending?
-    private var sends = 0
-    /// A message set aside while finding, given back by the next ⌘K.
-    private(set) var draft = ""
-    /// The workspace on screen (`host|workspace`): whose message `text` is.
+    /// The workspace on screen (`host|workspace`), for what's kept by it.
     private(set) var workspace = ""
-    /// Every other workspace's message being written, by workspace.
-    private(set) var drafts: [String: String] = [:]
     /// What the runner found in the files of the worktree on screen (ov-189),
     /// and the query it found them for: listed only while that's still the
     /// query, so a slow answer never lists files for what was typed before.
@@ -89,81 +48,43 @@ struct TitleConsole: Equatable {
 
     var mode: Mode {
         guard isOpen else { return .rest }
-        return text.hasPrefix("/") ? .find : .ask
+        return query.isEmpty && !recents ? .activity : .find
     }
 
-    /// What find mode searches for: the text after its `/`.
-    var query: String { String(text.dropFirst()).trimmingCharacters(in: .whitespaces) }
+    /// What's searched for.
+    var query: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-    /// What ask mode would send.
-    var message: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+    static let placeholder = "Find a workspace, task, terminal, or file"
 
-    /// How long a send is waited for.
-    static let timeout: Duration = .seconds(20)
-
-    static let empty = "Type a message first."
-    static let sendFailed = "Couldn’t send that to the orchestrator. Your message is still here."
-    static let timedOut =
-        "The runner didn’t answer in 20 seconds. Your message is still here; check the orchestrator before sending it again."
-    static let findPlaceholder = "Find a workspace, task, terminal, or file"
-
-    /// "Ask Billing’s orchestrator, or type / to find".
-    static func askPlaceholder(recipient: String?) -> String {
-        guard let recipient, !recipient.isEmpty else { return "Ask the orchestrator, or type / to find" }
-        return "Ask \(recipient)’s orchestrator, or type / to find"
-    }
-
-    /// "To Billing’s orchestrator".
-    static func sendTitle(recipient: String?) -> String {
-        guard let recipient, !recipient.isEmpty else { return "To the orchestrator" }
-        return "To \(recipient)’s orchestrator"
-    }
-
-    /// The window moved to workspace `key`: this one's message is kept for
-    /// it, the field closes, and `key`'s own message, if any, comes back.
+    /// The window moved to workspace `key`: the field closes.
     mutating func enter(workspace key: String) {
         guard key != workspace else { return }
-        let keep = text.hasPrefix("/") ? draft : text
-        if !workspace.isEmpty { drafts[workspace] = keep.isEmpty ? nil : keep }
         workspace = key
-        text = drafts.removeValue(forKey: key) ?? ""
-        draft = ""
-        isOpen = false
-        sending = false
-        notice = nil
-        resetHighlight()
+        close()
     }
 
-    /// ⌘K, a click on the activity line, or Show Activity: open to ask,
-    /// with any message set aside given back. ⌘P (`finding`): open to
-    /// find, with `/` typed, setting a message being written aside.
-    mutating func open(finding: Bool) {
-        if !sending { notice = nil }
+    /// ⌘K, a click on the activity line, or Show Activity: open, the
+    /// activity under it. ⌘P (`recents`): open, the recent terminals under it.
+    mutating func open(recents: Bool) {
         resetHighlight()
-        if finding, !text.hasPrefix("/") {
-            if !message.isEmpty { draft = text }
-            text = "/"
-        } else if !finding, text.hasPrefix("/") {
-            text = draft
-            draft = ""
-        }
+        self.recents = recents
         isOpen = true
     }
 
-    /// ⌘P or ⌘K again on a field already open in that mode closes it, as
-    /// every switcher on the Mac does.
-    mutating func toggle(finding: Bool) {
-        if isOpen, (mode == .find) == finding { close() } else { open(finding: finding) }
+    /// ⌘P or ⌘K again on a field already open that way closes it, as every
+    /// switcher on the Mac does.
+    mutating func toggle(recents: Bool) {
+        if isOpen, self.recents == recents { close() } else { open(recents: recents) }
     }
 
-    /// Esc, or the field losing the keyboard: back to the activity line. A
-    /// message is kept for next time; a search isn't. A send that's out
-    /// stops being waited for (`sent` still hears its answer).
+    /// Esc, the field losing the keyboard, or a result opened: back to the
+    /// activity line, the search gone.
     mutating func close() {
-        if text.hasPrefix("/") { text = draft; draft = "" }
         isOpen = false
-        sending = false
-        notice = nil
+        text = ""
+        recents = false
+        fileHits = []
+        fileHitsQuery = nil
         resetHighlight()
     }
 
@@ -180,10 +101,9 @@ struct TitleConsole: Equatable {
         mode == .find && !query.isEmpty && fileHitsQuery == query ? fileHits : []
     }
 
-    /// What was typed. Typing never sends.
+    /// What was typed. Typing searches; it never does anything else.
     mutating func edit(_ new: String) {
         text = new
-        if !sending { notice = nil }
         resetHighlight()
     }
 
@@ -203,77 +123,14 @@ struct TitleConsole: Equatable {
         moved = true
     }
 
-    /// Return. `results` is how many find results are listed, `opening`
-    /// where their highlight starts; `refusal` is why there's nobody to
-    /// send to, or nil.
-    mutating func submit(results: Int, opening: Int = 0, refusal: String?) -> Intent {
-        switch mode {
-        case .rest:
-            return .none
-        case .find:
-            return results > 0 ? .open(min(highlight(opening: opening), results - 1)) : .none
-        case .ask:
-            guard !sending else { return .none }
-            guard !message.isEmpty else {
-                notice = Self.empty
-                return .refuse
-            }
-            if let refusal {
-                notice = refusal
-                return .refuse
-            }
-            sends += 1
-            sending = true
-            notice = nil
-            pending = Pending(id: sends, workspace: workspace, text: text)
-            return .send(message, id: sends)
-        }
+    /// Return: the index of the result to open, of `results` listed whose
+    /// highlight starts at `opening`; nil with nothing to open.
+    func submit(results: Int, opening: Int = 0) -> Int? {
+        guard mode == .find, results > 0 else { return nil }
+        return min(highlight(opening: opening), results - 1)
     }
 
-    /// Send `id` came back. Waited for, `.sent` clears and closes the
-    /// field, `.refused` keeps the message and says why, `.left` lets it go
-    /// and says where it is. Not waited for any more (Esc, a timeout,
-    /// another workspace), only a message that went is taken out of the
-    /// field or its workspace's drafts, so it can't be sent twice.
-    mutating func sent(id: Int, _ outcome: Outcome) {
-        guard let p = pending, p.id == id else { return }
-        pending = nil
-        let went: Bool = {
-            switch outcome {
-            case .sent, .left: return true
-            case .refused: return false
-            }
-        }()
-        guard sending else {
-            if went {
-                if p.workspace == workspace, text == p.text { text = "" }
-                if drafts[p.workspace] == p.text { drafts[p.workspace] = nil }
-            }
-            return
-        }
-        sending = false
-        switch outcome {
-        case .sent:
-            text = ""
-            isOpen = false
-            notice = nil
-        case .refused(let why):
-            notice = why
-        case .left(let where_):
-            text = ""
-            notice = where_
-        }
-    }
-
-    /// Send `id` wasn't answered in `timeout`: stop waiting, keep the
-    /// message, and say so. Its answer, if one comes, is still heard.
-    mutating func timedOut(id: Int) {
-        guard sending, pending?.id == id else { return }
-        sending = false
-        notice = Self.timedOut
-    }
-
-    /// A find result was opened: the field closes.
+    /// A result was opened: the field closes.
     mutating func opened() { close() }
 }
 
@@ -294,63 +151,6 @@ struct TitleConsole: Equatable {
     }
 }
 
-/// Who there is to send to: why not, or nil when the orchestrator may take
-/// a message (the runner still checks a terminal one, `TellRefusal`).
-enum TitleConsoleRecipient {
-    static let noOrchestrator = "There’s no orchestrator here to ask."
-    static let cantTake = "The orchestrator can’t take a message from here. Type in its pane instead."
-    static let notRunning = "The orchestrator isn’t running. Restart it from its menu first."
-
-    static func refusal(seat: Terminal?) -> String? {
-        guard let seat else { return noOrchestrator }
-        let kind = StateKind.parse(seat.state)
-        guard kind == .running || kind == .starting else { return notRunning }
-        guard !seat.isChangesPane else { return cantTake }
-        return nil
-    }
-
-    /// Which route a message to `seat` takes: a chat's composer, or the
-    /// runner's typing gate for a terminal.
-    enum Route: Equatable { case composer, terminal }
-
-    static func route(_ seat: Terminal) -> Route { seat.isAgentPane ? .composer : .terminal }
-}
-
-/// What a terminal orchestrator's runner says when it types nothing, or
-/// leaves the text somewhere: its stable word (`what:`) or code (`code:`),
-/// in this app's sentences. Never the runner's own text.
-enum TellRefusal {
-    static func outcome(message: String?) -> TitleConsole.Outcome {
-        let lines = (message ?? "").split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
-        let what = lines.first { $0.hasPrefix("what: ") }.map { String($0.dropFirst("what: ".count)) }
-        let code = lines.first { $0.hasPrefix("code: ") }.map { String($0.dropFirst("code: ".count)) }
-        switch what {
-        case "busy"?: return .refused("The orchestrator is working. Send it again when it’s done.")
-        case "prompt"?: return .refused("The orchestrator is asking something. Answer it in its pane first.")
-        case "draft"?: return .refused("There’s text in the orchestrator’s box. Send or clear it in its pane first.")
-        case "typing"?: return .refused("Someone is typing in the orchestrator’s pane. Try again in a moment.")
-        case "not_an_agent"?: return .refused("No agent is running in the orchestrator’s pane.")
-        case "unfamiliar"?:
-            return .refused("Far Cooler doesn’t recognize what the orchestrator’s pane shows, so it typed nothing.")
-        case "unproven"?:
-            return .refused(
-                "This runner’s tmux is older than 3.7, so Far Cooler can’t tell yet whether the orchestrator takes a paste.")
-        case "too_long"?: return .refused("That’s too long to type into a terminal. Keep it under 500 characters.")
-        case "not_running"?: return .refused(TitleConsoleRecipient.notRunning)
-        case "text"?: return .refused(TitleConsole.empty)
-        case "paste_left"?:
-            return .left("Your message is in the orchestrator’s box but wasn’t sent. Press Return in its pane to send it.")
-        case "left_at_shell"?:
-            return .left("The orchestrator stopped before your message was sent. It was left at its shell prompt, not run.")
-        default: break
-        }
-        if code == "capability-unsupported" {
-            return .refused("This runner needs an update to take messages from the title bar.")
-        }
-        return .refused(TitleConsole.sendFailed)
-    }
-}
-
 /// What the field does, routed by the window.
 struct TitleConsoleActions {
     /// Find results for a query; the recent terminals for an empty one.
@@ -359,12 +159,6 @@ struct TitleConsoleActions {
     /// The files find searches (ov-189): the worktree on screen's, or nil
     /// with none, or on a runner too old to show files.
     var files: PaletteFiles? = nil
-    /// Send to the orchestrator, and how it came out.
-    var send: (String) async -> TitleConsole.Outcome = { _ in .sent }
-    /// Why nothing can be sent now, or nil.
-    var refusal: () -> String? = { nil }
-    /// The workspace whose orchestrator a message goes to, by name.
-    var recipient: String? = nil
     /// The terminal the window has the keyboard in, so finding with nothing
     /// typed starts on the one before it, as ⌘P and Return always went back.
     var current: String? = nil
@@ -384,29 +178,15 @@ struct TitleConsoleActions {
         return 0
     }
 
-    /// Return, carried out.
+    /// Return, carried out: the highlighted result, opened.
     @MainActor
     func submit(_ model: TitleConsoleModel) {
         let results = entries(model.console)
-        let start = opening(model.console, results)
-        switch model.console.submit(results: results.count, opening: start, refusal: refusal()) {
-        case .none, .refuse:
-            return
-        case .open(let index):
-            let action = results[index].action
-            model.console.opened()
-            run(action)
-        case .send(let message, let id):
-            let send = send
-            Task { @MainActor in
-                let outcome = await send(message)
-                model.console.sent(id: id, outcome)
-            }
-            Task { @MainActor in
-                try? await Task.sleep(for: TitleConsole.timeout)
-                model.console.timedOut(id: id)
-            }
-        }
+        guard let index = model.console.submit(results: results.count, opening: opening(model.console, results))
+        else { return }
+        let action = results[index].action
+        model.console.opened()
+        run(action)
     }
 }
 
@@ -416,16 +196,14 @@ struct TitleConsoleField: View {
     let actions: TitleConsoleActions
 
     var body: some View {
-        let console = model.console
         HStack(spacing: 6) {
-            Image(systemName: console.mode == .find ? "magnifyingglass" : "arrow.up.message")
+            Image(systemName: "magnifyingglass")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .frame(width: 14)
             PaletteField(
                 text: Binding(get: { model.console.text }, set: { model.console.edit($0) }),
-                placeholder: console.mode == .find
-                    ? TitleConsole.findPlaceholder : TitleConsole.askPlaceholder(recipient: actions.recipient),
+                placeholder: TitleConsole.placeholder,
                 horizontalMoves: false, fontSize: NSFont.systemFontSize,
                 onMove: { move in
                     let entries = actions.entries(model.console)
@@ -444,12 +222,8 @@ struct TitleConsoleField: View {
                 onCancel: { model.console.close() },
                 onEndEditing: { model.fieldEndedEditing() })
             .frame(height: 22)
-            .accessibilityLabel(
-                console.mode == .find ? "Find" : TitleConsole.sendTitle(recipient: actions.recipient))
+            .accessibilityLabel("Find")
             .accessibilityIdentifier("title-console-field")
-            if console.sending {
-                Text("Sending…").font(.caption).foregroundStyle(.secondary).fixedSize()
-            }
         }
         .padding(.horizontal, Spacing.tight + 2)
         .frame(height: 28)
@@ -462,8 +236,8 @@ extension Array {
     subscript(safe index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
 }
 
-/// Under the field: the activity while there's nothing typed; the message's
-/// one action while there is; the results while finding.
+/// Under the field: the activity from ⌘K with nothing typed; else the
+/// results.
 struct TitleConsolePanel: View {
     let model: TitleConsoleModel
     let actions: TitleConsoleActions
@@ -472,9 +246,6 @@ struct TitleConsolePanel: View {
     /// Whether the field is drawn here too, for a status area too narrow to
     /// hold it.
     var showsField = false
-
-    /// The send row was clicked: it lights, and still only Return sends.
-    @State private var sendLit = false
 
     var body: some View {
         let console = model.console
@@ -485,24 +256,12 @@ struct TitleConsolePanel: View {
             switch console.mode {
             case .rest:
                 EmptyView()
-            case .ask:
-                if console.text.isEmpty {
-                    TitleActivityPopover(activity: activity, actions: status, cache: model) { model.console.close() }
-                } else {
-                    sendRow(console)
-                }
+            case .activity:
+                TitleActivityPopover(activity: activity, actions: status, cache: model) { model.console.close() }
             case .find:
                 results(console)
             }
-            if let notice = console.notice {
-                Label(notice, systemImage: "info.circle")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, Spacing.inset)
-                    .padding(.bottom, Spacing.group)
-                    .accessibilityIdentifier("title-console-notice")
-            }
-            footer(console)
+            footer(console.mode)
         }
         .frame(width: 420, alignment: .leading)
         .surface(.floating, in: .floating)
@@ -510,7 +269,6 @@ struct TitleConsolePanel: View {
         // (`TitleConsoleModel.fieldEndedEditing`).
         .onHover { inside in model.pointerInPanel = inside }
         .onDisappear { model.pointerInPanel = false }
-        .onChange(of: console.text) { _, _ in sendLit = false }
         // A file search on the runner, a beat after the last keystroke: each
         // keystroke cancels the one before (ov-189).
         .task(id: console.mode == .find ? console.query : nil) {
@@ -521,26 +279,6 @@ struct TitleConsolePanel: View {
             let found = await files.search(query)
             if !Task.isCancelled { model.console.found(files: found, for: query) }
         }
-    }
-
-    private func sendRow(_ console: TitleConsole) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
-            Image(systemName: "arrow.up.message").foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(TitleConsole.sendTitle(recipient: actions.recipient)).font(.callout.weight(.semibold))
-                Text(console.message).font(.callout).foregroundStyle(.secondary).lineLimit(3)
-            }
-            Spacer(minLength: 0)
-            Text(sendLit ? "Press ↩ to Send" : "↩").foregroundStyle(.tertiary).fixedSize()
-        }
-        .padding(Spacing.inset)
-        .background(sendLit ? Fill.hover : Color.clear, in: .control)
-        .contentShape(Rectangle())
-        // Lights, never sends: only Return sends (ov-214 review).
-        .onTapGesture { sendLit = true }
-        .accessibilityElement(children: .combine)
-        .accessibilityHint("Press Return to send")
-        .accessibilityIdentifier("title-console-send")
     }
 
     @ViewBuilder
@@ -579,15 +317,13 @@ struct TitleConsolePanel: View {
         }
     }
 
-    private func footer(_ console: TitleConsole) -> some View {
+    private func footer(_ mode: TitleConsole.Mode) -> some View {
         HStack(spacing: Spacing.group) {
-            switch console.mode {
-            case .find:
+            if mode == .find {
                 KeyHint(keys: "↑↓", label: "Move")
                 KeyHint(keys: "↩", label: "Open")
-            default:
-                KeyHint(keys: "↩", label: "Send")
-                KeyHint(keys: "/", label: "Find")
+            } else {
+                Text("Type to find anything")
             }
             Spacer(minLength: 0)
             KeyHint(keys: "⎋", label: "Close")
@@ -612,7 +348,7 @@ struct PaletteRow: View {
                 } else if let symbol = entry.symbol {
                     Image(systemName: symbol)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(isHighlighted ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
                 }
             }
             .frame(width: 14)

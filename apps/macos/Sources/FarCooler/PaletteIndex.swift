@@ -16,9 +16,11 @@ enum PaletteAction: Hashable {
     /// description far more often than it is a search for one. Its title is
     /// "New Worktree…": it makes a worktree and files no task.
     case newWorktree(String)
-    /// A workspace: its conversation beside its board. Its orchestrator's
-    /// row lands here too.
+    /// A workspace: its conversation beside its board.
     case openWorkspace(host: String, id: String)
+    /// Go to Orchestrator: the workspace, with the keyboard in its
+    /// orchestrator's pane (ov-264), where it's talked to.
+    case openOrchestrator(host: String, workspace: String)
     /// A task, opened beside its workspace's board.
     case openTask(host: String, workspace: String, id: String)
     /// Make a workspace, named what was typed (`workspace create`).
@@ -175,13 +177,14 @@ enum PaletteIndex {
                     score))
             }
             if place.hasOrchestrator,
-                let score = ["\(place.name) Orchestrator", "Orchestrator"].compactMap({ Fuzzy.score($0, query) }).max()
+                let score = ["\(place.name) Orchestrator", "Go to Orchestrator", "Orchestrator"]
+                    .compactMap({ Fuzzy.score($0, query) }).max()
             {
                 scored.append((
                     PaletteEntry(
                         id: "orchestrator:\(place.host)|\(place.id)",
-                        action: .openWorkspace(host: place.host, id: place.id),
-                        title: "\(place.name) Orchestrator", detail: "Orchestrator · \(place.repository)",
+                        action: .openOrchestrator(host: place.host, workspace: place.id),
+                        title: "Go to Orchestrator", detail: "\(place.name) · \(place.repository)",
                         symbol: "person.wave.2", kind: "orchestrator"),
                     score))
             }

@@ -65,7 +65,8 @@ struct PaletteWorkspaceTests {
     }
 
     /// Found by its name, whether or not any worktree matches; its
-    /// orchestrator by "Billing Orchestrator". It used to be dropped when
+    /// orchestrator by "Billing Orchestrator" or "go to orch", as Go to
+    /// Orchestrator, which opens its pane (ov-264). It used to be dropped when
     /// no worktree in it matched.
     @Test("A workspace with no matching worktree is still found")
     func aWorkspaceWithNoMatchingWorktreeIsStillFound() {
@@ -73,7 +74,11 @@ struct PaletteWorkspaceTests {
         #expect(found.contains { $0.action == .openWorkspace(host: "", id: "ws-bil") && $0.title == "Billing" })
         #expect(found.first { $0.kind == "workspace" }?.detail == "Workspace · overnight")
         let orchestrator = PaletteIndex.matching("billing orch", in: [Self.lane], workspaces: [Self.billing])
-        #expect(orchestrator.first?.title == "Billing Orchestrator")
+        #expect(orchestrator.first?.title == "Go to Orchestrator")
+        #expect(orchestrator.first?.detail == "Billing · overnight")
+        #expect(orchestrator.first?.action == .openOrchestrator(host: "", workspace: "ws-bil"))
+        let go = PaletteIndex.matching("go to orch", in: [Self.lane], workspaces: [Self.billing])
+        #expect(go.first?.action == .openOrchestrator(host: "", workspace: "ws-bil"))
         // And creation is still last, under anything to go to.
         #expect(found.last?.action == .newWorktree("billing"))
     }

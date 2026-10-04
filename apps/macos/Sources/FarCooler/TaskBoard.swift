@@ -839,7 +839,7 @@ struct TaskBoardView: View {
     /// named the board ("Main", which the title bar's switcher names),
     /// counted what's waiting (which the title bar's status area counts) and
     /// offered New Task…, which went with ov-184: the orchestrator owns the
-    /// list, and the title bar's field asks it (⌘K). Refresh is ⌘R.
+    /// list, and its own pane is where it's talked to. Refresh is ⌘R.
     private var topBand: some View {
         HStack(spacing: SidebarGrid.gap / 2) {
             filterField
