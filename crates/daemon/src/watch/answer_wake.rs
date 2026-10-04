@@ -14,7 +14,8 @@
 //!
 //! **Whom.** A running agent or orchestrator terminal in the task's
 //! workspace: the newest opened for the task (`Terminal.task_id`), else the
-//! only agent pane in the task's worktree, else the workspace's
+//! only agent pane in the task's worktree (never the main checkout's: an
+//! agent opened by hand there is nobody's), else the workspace's
 //! orchestrator. Never another workspace's terminal or a Changes pane. An
 //! agent pane counts only if launched as an agent; a pane ADOPTED as the
 //! orchestrator counts whatever it was launched as (a shell someone runs
@@ -638,7 +639,10 @@ impl Watcher {
         if let Some(t) = mine.into_iter().find(|t| eligible(t, TerminalRole::Agent)) {
             return Some(t);
         }
-        if let Some(lane) = task.worktree_id {
+        // The main checkout has no lane fallback: an agent opened by hand
+        // there is nobody's (`task_link::task_of`, ov-112, ov-240).
+        let lane = task.worktree_id.filter(|&w| store.get_worktree(w).is_ok_and(|w| !w.is_main_checkout));
+        if let Some(lane) = lane {
             let lane: Vec<Terminal> = store
                 .list_terminals_for_worktree(lane)
                 .ok()?

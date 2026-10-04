@@ -1241,6 +1241,9 @@ fn an_unreadable_mark_is_typing_now() {
 #[path = "worker_tests.rs"]
 mod worker_tests;
 
+#[path = "lane_tests.rs"]
+mod lane_tests;
+
 // ---- Ask the Orchestrator (ov-184): a draft is pasted and never sent ----
 
 /// Nothing reached the pane: no paste and no Enter.
