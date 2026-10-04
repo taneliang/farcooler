@@ -105,7 +105,7 @@ struct WorkspaceBoardList: View {
     }
 
     var body: some View {
-        Group {
+        ZStack {
             if let board, BoardForm.isBlank(board), !unread {
                 // Seven headers each reading zero is a blank page. Show the
                 // shape of what will appear, say who fills it, and, with no

@@ -324,7 +324,7 @@ struct NeedsYouScreen: View {
     private func noRepositories(_ runner: Runner) -> some View {
         Section {
             VStack(spacing: 8) {
-                Text(FirstRunCopy.Phone.noRepositoriesTitle(runner.host.label))
+                Text(FirstRunCopy.Phone.noRepositoriesTitle(runner.label))
                     .font(.headline)
                     .multilineTextAlignment(.center)
                     .accessibilityIdentifier("no-repositories-title")
