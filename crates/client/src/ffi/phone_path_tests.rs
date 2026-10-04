@@ -480,6 +480,8 @@ fn route(method: Method) -> Option<&'static str> {
         // Discovery and a node key are the Mac's and the ceremony's: paths
         // sit behind `host_admin`, and the tunnel is joined by the CLI.
         Method::WorktreeDiscover | Method::ClientSetNodeKey => None,
+        // The Mac's Ask the Orchestrator: a phone has no TUI to paste into.
+        Method::TerminalDraftPrompt => None,
         // Their own C entry points, `farcooler_client_paste_file` and
         // `farcooler_client_stream_start`, because neither is one reply.
         Method::TerminalPasteFile | Method::TerminalAttach => None,

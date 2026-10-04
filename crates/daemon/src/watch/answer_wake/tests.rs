@@ -1240,3 +1240,83 @@ fn an_unreadable_mark_is_typing_now() {
 
 #[path = "worker_tests.rs"]
 mod worker_tests;
+
+// ---- Ask the Orchestrator (ov-184): a draft is pasted and never sent ----
+
+/// Nothing reached the pane: no paste and no Enter.
+fn nothing_typed(si: &StandIn) {
+    assert!(!si.log().contains("PASTE") && !si.log().contains("ENTER"), "{}", si.log());
+}
+
+/// What Ask the Orchestrator pastes can't carry a line break or a carriage
+/// return, so the paste can't submit: control characters arrive as text, and
+/// the trailing space that parks the cursor past the colon stays.
+#[test]
+fn a_draft_never_carries_a_line_break_or_ends_in_one() {
+    for raw in ["About ov-1 (“A”): ", "About ov-1 (“A\r\nB”): \n", "About ov-1\r", "a\u{1b}[201~\rb\n"] {
+        let text = draft_text(raw);
+        assert!(!text.contains(['\n', '\r']), "{text:?}");
+        assert!(!text.ends_with(['\n', '\r']), "{text:?}");
+        assert!(!text.chars().any(char::is_control), "{text:?}");
+    }
+    assert_eq!(draft_text("About ov-1 (“A”): "), "About ov-1 (“A”): ");
+}
+
+/// An idle claude run by hand in the adopted orchestrator's pane gets the
+/// reference pasted, and no Enter, so nothing is submitted.
+#[tokio::test]
+async fn a_draft_is_pasted_into_an_idle_orchestrator_and_never_submitted() {
+    let b = board().await;
+    let orchestrator = b.adopted_shell().await;
+    let si = b.stand_in(&orchestrator, "claude", "claude").await;
+    b.doing(orchestrator.id, AgentActivity::Idle).await;
+    b.watcher.draft_into(orchestrator.id, "About ov-1 (“Fix”): ").await.expect("pasted");
+    assert!(si.log().contains("PASTE "), "a bracketed paste: {}", si.log());
+    assert!(si.submitted().is_empty(), "Enter was pressed: {}", si.log());
+}
+
+/// Every check that fails closed for an answer fails for a draft too: an
+/// error, and nothing typed, which is what sends the Mac to the clipboard.
+#[tokio::test]
+async fn a_draft_is_refused_where_an_answer_would_wait() {
+    let b = board().await;
+    let orchestrator = b.adopted_shell().await;
+    let si = b.stand_in(&orchestrator, "claude", "claude").await;
+    // Busy.
+    b.doing(orchestrator.id, AgentActivity::Working).await;
+    assert!(b.watcher.draft_into(orchestrator.id, "About ov-1: ").await.is_err());
+    nothing_typed(&si);
+    // A menu.
+    b.doing(orchestrator.id, AgentActivity::Idle).await;
+    si.show("menu").await;
+    b.screen_with(orchestrator.id, "Tab to amend").await;
+    assert!(b.watcher.draft_into(orchestrator.id, "About ov-1: ").await.is_err());
+    nothing_typed(&si);
+    // Someone's draft in the box.
+    si.show("draft:fix the flaky").await;
+    b.screen_with(orchestrator.id, "fix the flaky").await;
+    assert!(b.watcher.draft_into(orchestrator.id, "About ov-1: ").await.is_err());
+    nothing_typed(&si);
+}
+
+/// A process that isn't an agent, drawing a perfect agent screen: refused.
+#[tokio::test]
+async fn a_draft_is_refused_for_a_process_that_is_not_an_agent() {
+    let b = board().await;
+    let orchestrator = b.adopted_shell().await;
+    let si = b.stand_in(&orchestrator, "claude", "perl").await;
+    b.doing(orchestrator.id, AgentActivity::Idle).await;
+    assert!(b.watcher.draft_into(orchestrator.id, "About ov-1: ").await.is_err());
+    nothing_typed(&si);
+}
+
+/// A send that fails is an error, so the Mac copies instead.
+#[tokio::test]
+async fn a_draft_whose_send_fails_is_an_error() {
+    let b = board().await;
+    let orchestrator = b.adopted_shell().await;
+    let _si = b.stand_in(&orchestrator, "claude", "claude").await;
+    b.doing(orchestrator.id, AgentActivity::Idle).await;
+    b.watcher.fail_sends.store(true, Ordering::SeqCst);
+    assert!(b.watcher.draft_into(orchestrator.id, "About ov-1: ").await.is_err());
+}

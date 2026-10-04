@@ -565,6 +565,7 @@ pub mod method {
         TerminalSetPaneMode = "terminal.set_pane_mode" => AGENT,
         TerminalAgentSubscribe = "terminal.agent_subscribe" => AGENT,
         TerminalAgentPrompt = "terminal.agent_prompt" => AGENT,
+        TerminalDraftPrompt = "terminal.draft_prompt" => AGENT,
         TerminalAgentAnswer = "terminal.agent_answer" => AGENT,
         TerminalAgentSetMode = "terminal.agent_set_mode" => AGENT,
         TerminalAgentSetModel = "terminal.agent_set_model" => AGENT,

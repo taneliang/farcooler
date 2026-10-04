@@ -197,6 +197,15 @@ pub(crate) fn one_line(raw: &str, longest: usize) -> String {
     format!("{}…", cut.trim_end())
 }
 
+/// What Ask the Orchestrator pastes: `raw` on one line with every control and
+/// invisible character written out (`one_line`), cut at 300 characters, and a
+/// space after it if it had one, so the cursor sits past a colon. Never a line
+/// break, so never an Enter.
+pub(crate) fn draft_text(raw: &str) -> String {
+    let line = one_line(raw, 300);
+    if raw.ends_with(' ') && !line.is_empty() { format!("{line} ") } else { line }
+}
+
 /// Format characters that draw nothing and can disguise what's around them.
 fn invisible(c: char) -> bool {
     matches!(c, '\u{ad}' | '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{feff}')
@@ -423,46 +432,13 @@ impl Watcher {
         self.settle(wake, Some(task), Some(told(wake.kind, to)))
     }
 
-    /// A TUI pane: checks 3 to 5, then claim, paste, read back, Enter.
+    /// A TUI pane: checks 3 to 5 (`proven_tui`), then claim, paste, read
+    /// back, Enter.
     async fn type_into(&self, wake: &PendingWake, task: &Task, to: &Terminal, text: &str) -> Pass {
-        let launched = to.command_preset.split(':').next().unwrap_or_default();
-        let tty = self
-            .service
-            .inventory_snapshot()
-            .claimants(to.id)
-            .into_iter()
-            .find(|p| p.proves_life())
-            .map(|p| p.tty.clone());
-        let Some(tty) = tty else { return Pass::Waiting(Held::NotAnAgent) };
-        // The agent in front, proven by its process. A pane launched as an
-        // agent must be running that one. An adopted orchestrator launched
-        // as anything else is read as the agent its process proves.
-        let Some(preset) = foreground_agent(&tty).await else { return Pass::Waiting(Held::NotAnAgent) };
-        if launched != preset && (is_an_agent_preset(launched) || to.role != TerminalRole::Orchestrator) {
-            return Pass::Waiting(Held::NotAnAgent);
-        }
-        let Ok(composer) = self.box_of(to, preset).await else { return Pass::Waiting(Held::Unfamiliar) };
-        match composer {
-            Ok(Composer::Empty) => {}
-            Ok(Composer::Holds(_)) => return Pass::Waiting(Held::Draft),
-            Ok(Composer::Unrecognized) => return Pass::Waiting(Held::Unfamiliar),
+        let (preset, tty) = match self.proven_tui(to).await {
+            Ok(proven) => proven,
             Err(held) => return Pass::Waiting(held),
-        }
-        let bracketed = match self.service.pane_bracketed_paste(to.id).await {
-            Ok(Some(on)) => on,
-            // tmux can't say (older than 3.7): the pane's own output can, if
-            // this daemon has followed it since the agent last set the mode.
-            // Not known yet: it may be once the agent sets it again (a
-            // respawn, a stream followed afresh), so the answer waits.
-            Ok(None) => match self.service.streamed_bracketed_paste(to.id).await {
-                Some(on) => on,
-                None => return Pass::Waiting(Held::Unproven),
-            },
-            Err(_) => false,
         };
-        if !bracketed {
-            return Pass::Waiting(Held::Unfamiliar);
-        }
         match self.service.store.claim_wake(wake) {
             Ok(true) => {}
             Ok(false) => return Pass::Settled,
@@ -506,6 +482,86 @@ impl Watcher {
         }
         self.mark_told(to.id);
         self.settle(wake, Some(task), Some(told(wake.kind, to)))
+    }
+
+    /// Checks 3 to 5 of the gate, for a TUI pane: the agent in front proven
+    /// by its process, its box recognized and empty, and bracketed paste on.
+    /// Returns the proven agent's preset and the pane's tty, or why not. Every
+    /// check fails closed.
+    async fn proven_tui(&self, to: &Terminal) -> std::result::Result<(&'static str, String), Held> {
+        let launched = to.command_preset.split(':').next().unwrap_or_default();
+        let tty = self
+            .service
+            .inventory_snapshot()
+            .claimants(to.id)
+            .into_iter()
+            .find(|p| p.proves_life())
+            .map(|p| p.tty.clone());
+        let Some(tty) = tty else { return Err(Held::NotAnAgent) };
+        // The agent in front, proven by its process. A pane launched as an
+        // agent must be running that one. An adopted orchestrator launched
+        // as anything else is read as the agent its process proves.
+        let Some(preset) = foreground_agent(&tty).await else { return Err(Held::NotAnAgent) };
+        if launched != preset && (is_an_agent_preset(launched) || to.role != TerminalRole::Orchestrator) {
+            return Err(Held::NotAnAgent);
+        }
+        let Ok(composer) = self.box_of(to, preset).await else { return Err(Held::Unfamiliar) };
+        match composer {
+            Ok(Composer::Empty) => {}
+            Ok(Composer::Holds(_)) => return Err(Held::Draft),
+            Ok(Composer::Unrecognized) => return Err(Held::Unfamiliar),
+            Err(held) => return Err(held),
+        }
+        let bracketed = match self.service.pane_bracketed_paste(to.id).await {
+            Ok(Some(on)) => on,
+            // tmux can't say (older than 3.7): the pane's own output can, if
+            // this daemon has followed it since the agent last set the mode.
+            // Not known yet: it may be once the agent sets it again (a
+            // respawn, a stream followed afresh), so the answer waits.
+            Ok(None) => match self.service.streamed_bracketed_paste(to.id).await {
+                Some(on) => on,
+                None => return Err(Held::Unproven),
+            },
+            Err(_) => false,
+        };
+        if !bracketed {
+            return Err(Held::Unfamiliar);
+        }
+        Ok((preset, tty))
+    }
+
+    /// Ask the Orchestrator (ov-184): leave `text` in a TUI pane's box as one
+    /// bracketed paste, and NEVER press Enter, so the person finishes the
+    /// sentence. The same gate as typing an answer (`ready`, then
+    /// `proven_tui`): the pane is a proven agent, idle, nobody is typing, its
+    /// box is empty, and bracketed paste is known to be on. Any failure is
+    /// an error, and nothing is typed; the Mac then copies the text instead.
+    ///
+    /// Not recorded as someone typing (`marks: None`), as an answer isn't.
+    pub(crate) async fn draft_into(&self, id: Uuid, text: &str) -> Result<()> {
+        let to = self.service.store.get_terminal(id)?;
+        if to.pane_mode == PaneMode::Agent {
+            // A chat pane has a composer of the app's own; no TUI to paste to.
+            return Err(DomainError::InvalidArgument { what: "terminal" });
+        }
+        if to.pane_mode == PaneMode::Changes
+            || !may_be_typed_to(&to.command_preset, to.role)
+            || !self.service.is_running(&to)
+        {
+            return Err(DomainError::Conflict { what: "not_pasteable" });
+        }
+        let text = draft_text(text);
+        if text.trim().is_empty() {
+            return Err(DomainError::InvalidArgument { what: "text" });
+        }
+        self.ready(&to).await.map_err(|_| DomainError::Conflict { what: "not_pasteable" })?;
+        self.proven_tui(&to).await.map_err(|_| DomainError::Conflict { what: "not_pasteable" })?;
+        let runtime = Runtime { marks: None, ..self.service.runtime() };
+        let paste: String = crate::pastes::encode_paste(true, &text).iter().map(|b| format!("{b:02x}")).collect();
+        if self.fail_sends_for_tests() {
+            return Err(DomainError::OperationFailed);
+        }
+        runtime.send_bytes_hex(to.id, &paste).await
     }
 
     /// The pane's box as a fresh capture shows it, or why it's no box to

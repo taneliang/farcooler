@@ -2108,6 +2108,18 @@ final class DaemonClient: ObservableObject {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
+    /// Ask the daemon to paste `text` into a TUI pane's box and NEVER press
+    /// return (`terminal draft-prompt`, ov-184), so the person finishes the
+    /// sentence. True only when it did. The daemon refuses, typing nothing,
+    /// unless the pane is provably an idle agent with an empty box and its
+    /// paste mode known (the same gate as typing an answer); a runner that
+    /// doesn't know the command refuses too. Either way the caller copies
+    /// instead.
+    func draftPrompt(terminal: String, text: String) async -> Bool {
+        let (data, _) = await runRaw(["terminal", "draft-prompt", terminal, text], background: true)
+        return data != nil
+    }
+
     /// Type text into a terminal and press return.
     func send(terminal: String, text: String) async {
         _ = await run(["terminal", "send", terminal, text], background: true)

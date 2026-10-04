@@ -2179,14 +2179,29 @@ struct ContentView: View {
 
     /// Ask the Orchestrator for `workspace`'s tasks: on while it has an
     /// orchestrator running, which it reads from the fleet as it is now. It
-    /// leaves the draft in that composer and goes there; it starts nothing.
+    /// leaves the draft in that composer, or pastes it into a terminal
+    /// orchestrator (`AskOrchestrator.deliver`), and goes there; it starts
+    /// nothing.
     private func askOrchestrator(host: String, workspace: WorkspaceSummary) -> AskOrchestrator.Action {
         let seat = WorkspaceScreen.orchestrator(of: workspace, host: host, in: store.fleet)
         return AskOrchestrator.Action(
             available: seat != nil,
             perform: { row in
-                guard AskOrchestrator.ask(about: row, of: seat) else { return }
+                guard let seat else { return }
                 selection = .workspace(host: host, workspace: workspace.id, focus: nil)
+                let client = store.client(for: seat.worktree)
+                Task { @MainActor in
+                    let delivery = await AskOrchestrator.deliver(
+                        row, to: seat,
+                        paste: { text in await client?.draftPrompt(terminal: seat.terminal.short, text: text) ?? false },
+                        copy: { text in (client?.copyToClipboard ?? { _ in })(text) })
+                    // A terminal pane has no composer to fill: the person
+                    // pastes, so the pane takes the keyboard.
+                    if delivery != .composer {
+                        focus(PaneRef(host: host, worktree: seat.worktree.id, terminal: seat.terminal.id))
+                    }
+                    if delivery == .copied { errorBanner = AskOrchestrator.copiedNotice(for: row) }
+                }
             })
     }
 

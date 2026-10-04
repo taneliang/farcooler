@@ -77,8 +77,9 @@ struct AskOrchestratorTests {
     private static let row = TaskRow(
         id: "t-9", key: "bil-9", title: "Invoice PDF export", status: .inProgress, statusSince: .now)
 
-    private static func pane(_ id: String, state: String = "running") -> BoardPane {
+    private static func pane(_ id: String, state: String = "running", chat: Bool = true) -> BoardPane {
         var terminal = Terminal(id: id, short: id, title: id, preset: "claude", state: state, epoch: 0)
+        terminal.paneMode = chat ? "agent" : "terminal"
         terminal.role = "orchestrator"
         terminal.workspace = workspace
         let worktree = Worktree(
@@ -130,5 +131,71 @@ struct AskOrchestratorTests {
     func theDisabledSentence() {
         #expect(AskOrchestrator.unavailable == "Start an orchestrator to ask about this task")
         #expect(!AskOrchestrator.Action.unavailable.available)
+    }
+
+    // MARK: A terminal orchestrator: pasted by the daemon, or copied
+
+    /// What a delivery did: the paste it asked for, and what it copied.
+    private final class Spy {
+        var pasted: [String] = []
+        var copied: [String] = []
+    }
+
+    private func deliver(
+        _ pane: BoardPane, pasteSucceeds: Bool, spy: Spy, handoff: ComposerHandoff = ComposerHandoff()
+    ) async -> AskOrchestrator.Delivery {
+        await AskOrchestrator.deliver(
+            Self.row, to: pane,
+            paste: { text in
+                spy.pasted.append(text)
+                return pasteSucceeds
+            },
+            copy: { spy.copied.append($0) }, handoff: handoff)
+    }
+
+    @Test("A terminal orchestrator is asked of the daemon to paste, and nothing is copied")
+    func aTerminalOrchestratorIsPastedByTheDaemon() async {
+        let spy = Spy()
+        let handoff = ComposerHandoff()
+        let got = await deliver(Self.pane("orch", chat: false), pasteSucceeds: true, spy: spy, handoff: handoff)
+        #expect(got == .pasted)
+        #expect(spy.pasted == ["About bil-9 (“Invoice PDF export”): "])
+        #expect(spy.copied.isEmpty)
+        #expect(handoff.waiting.isEmpty, "a terminal has no composer to fill")
+    }
+
+    @Test("A paste the daemon refuses is copied instead, with the notice")
+    func aRefusedPasteIsCopied() async {
+        let spy = Spy()
+        let got = await deliver(Self.pane("orch", chat: false), pasteSucceeds: false, spy: spy)
+        #expect(got == .copied)
+        #expect(spy.copied == ["About bil-9 (“Invoice PDF export”):"])
+        #expect(AskOrchestrator.copiedNotice(for: Self.row) == "Copied a reference to bil-9. Paste it into the orchestrator.")
+    }
+
+    @Test("A chat orchestrator takes it in its composer and the daemon is never asked")
+    func aChatOrchestratorIsNotPasted() async {
+        let spy = Spy()
+        let handoff = ComposerHandoff()
+        let got = await deliver(Self.pane("orch"), pasteSucceeds: true, spy: spy, handoff: handoff)
+        #expect(got == .composer)
+        #expect(spy.pasted.isEmpty && spy.copied.isEmpty)
+        #expect(handoff.waiting["orch"] == "About bil-9 (“Invoice PDF export”): ")
+    }
+
+    @Test("What Ask the Orchestrator sends to the daemon or the clipboard never ends in a line break")
+    func neverAnEnter() async {
+        let spy = Spy()
+        var row = Self.row
+        row.title = "Line\nbreak\r and\n"
+        for ok in [true, false] {
+            _ = await AskOrchestrator.deliver(
+                row, to: Self.pane("orch", chat: false),
+                paste: { spy.pasted.append($0); return ok }, copy: { spy.copied.append($0) },
+                handoff: ComposerHandoff())
+        }
+        for text in spy.pasted + spy.copied { #expect(!text.contains(where: \.isNewline)) }
+        for text in spy.pasted + spy.copied { #expect(!text.hasSuffix("\n") && !text.hasSuffix("\r"), "\(text.debugDescription)") }
+        #expect(!spy.pasted.isEmpty && !spy.copied.isEmpty)
     }
 }

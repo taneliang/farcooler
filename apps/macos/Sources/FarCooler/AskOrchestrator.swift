@@ -19,17 +19,60 @@ enum AskOrchestrator {
     /// orchestrator reads the task itself (`farcooler task show`). Ends where
     /// the person goes on typing.
     static func draft(for row: TaskRow) -> String {
-        "About \(row.key) (“\(row.title)”): "
+        // One line: a title with a line break would be a second line in the
+        // composer, or an Enter in a terminal.
+        let title = row.title.split(whereSeparator: \.isNewline).joined(separator: " ")
+        return "About \(row.key) (“\(title)”): "
     }
 
-    /// Leave `row`'s draft in `orchestrator`'s composer. False when there's no
-    /// orchestrator to leave it with, and then nothing is left anywhere.
+    /// Leave `row`'s draft in a chat orchestrator's composer. False when
+    /// there's no orchestrator to leave it with, and then nothing is left
+    /// anywhere.
     @MainActor
     @discardableResult
     static func ask(about row: TaskRow, of orchestrator: BoardPane?, handoff: ComposerHandoff = .shared) -> Bool {
         guard let orchestrator else { return false }
         handoff.offer(draft(for: row), to: orchestrator.terminal.short)
         return true
+    }
+
+    /// Where the reference went.
+    enum Delivery: Equatable {
+        /// A chat orchestrator's composer, waiting for the person.
+        case composer
+        /// A terminal orchestrator's input line, pasted by the daemon with no
+        /// Enter.
+        case pasted
+        /// Onto the clipboard: the daemon couldn't prove the pane safe.
+        case copied
+    }
+
+    /// What the window says when the reference was copied instead of pasted.
+    static func copiedNotice(for row: TaskRow) -> String {
+        "Copied a reference to \(row.key). Paste it into the orchestrator."
+    }
+
+    /// Hand the reference to `orchestrator`, whichever kind of pane it is.
+    ///
+    /// A chat pane takes it in its composer. A terminal pane (the owner's
+    /// shell running claude, adopted as the orchestrator) is asked of the
+    /// daemon, which pastes it with no Enter only past the gate that types an
+    /// answer: a proven, idle agent with an empty box and a known paste mode.
+    /// Anything less, or any failure, copies it instead. Nothing here ever
+    /// presses Enter, and the Mac never writes to the pane itself.
+    @MainActor
+    static func deliver(
+        _ row: TaskRow, to orchestrator: BoardPane,
+        paste: (String) async -> Bool, copy: (String) -> Void,
+        handoff: ComposerHandoff = .shared
+    ) async -> Delivery {
+        if orchestrator.terminal.isAgentPane {
+            ask(about: row, of: orchestrator, handoff: handoff)
+            return .composer
+        }
+        if await paste(draft(for: row)) { return .pasted }
+        copy(draft(for: row).trimmingCharacters(in: .whitespaces))
+        return .copied
     }
 
     /// What a view needs to draw the item: whether it works now, and what it

@@ -410,6 +410,9 @@ fn scope_of(method: Method) -> Scope {
         Method::TerminalSetPaneMode
         | Method::TerminalAgentSubscribe
         | Method::TerminalAgentPrompt
+        // Types into a TUI pane like `terminal.write`, but never Enter, and
+        // only past the answer wake's gate (`Watcher::draft_into`).
+        | Method::TerminalDraftPrompt
         | Method::TerminalAgentAnswer
         | Method::TerminalAgentSetMode | Method::TerminalAgentSetModel | Method::TerminalAgentSetConfig
         | Method::TerminalAgentCancel
@@ -1824,6 +1827,19 @@ impl Rpc {
                 // event to move the row off `Done` would leave a terminal you
                 // are actively using still asking for your attention.
                 self.watcher.mark_seen(id).await;
+                self.terminal_result(id).await
+            }
+
+            // Ask the Orchestrator (ov-184): the same payload as a prompt, but
+            // pasted into a TUI pane's box and never sent. Refused, typing
+            // nothing, unless the pane is provably an idle agent with an
+            // empty box (`Watcher::draft_into`).
+            "terminal.draft_prompt" => {
+                let Some(request::Payload::AgentPrompt(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
+                self.watcher.draft_into(id, &wire::prompt_text(&p.blocks)).await?;
                 self.terminal_result(id).await
             }
 
