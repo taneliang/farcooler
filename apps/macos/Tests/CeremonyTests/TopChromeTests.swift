@@ -84,12 +84,14 @@ struct TopChromeTests {
         return (Harness.band(window), seen.views)
     }
 
-    @Test("A lone pane's content starts 62 pt below the window's top: the regular bar and the canvas inset")
+    @Test("A lone pane's content starts below the regular bar and the gutter")
     func lonePane() async throws {
         let (band, seen) = try await Self.measure(["orchestrator"])
         #expect(band == 52, "the toolbar is \(band) pt, not the regular 52")
         let body = try #require(seen["pane-body"]?.first, "no pane was drawn")
-        #expect(abs(body.minY - 62) < 0.5, "the pane's content starts \(body.minY) pt down, not 62")
+        // The 52 pt bar and the gutter: 62 on macOS 26, 58 on 27 (`Gutter.window`).
+        let expected = 52 + Pane.inset
+        #expect(abs(body.minY - expected) < 0.5, "the pane's content starts \(body.minY) pt down, not \(expected)")
         #expect(seen["pane-header"] == nil, "a lone pane drew its title row")
     }
 
@@ -100,6 +102,6 @@ struct TopChromeTests {
         let headers = try #require(seen["pane-header"])
         #expect(headers.count == 2, "\(headers.count) title rows for two panes")
         let top = try #require(seen["pane-body"]?.map(\.minY).min())
-        #expect(abs(top - (62 + WorkspaceStyle.paneHeaderHeight)) < 0.5, "the first pane's content starts \(top) pt down")
+        #expect(abs(top - (52 + Pane.inset + WorkspaceStyle.paneHeaderHeight)) < 0.5, "the first pane's content starts \(top) pt down")
     }
 }

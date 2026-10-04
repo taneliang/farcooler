@@ -359,7 +359,7 @@ struct TileView: View {
 /// four agents on screen that is the single most important thing the view says.
 /// It is a border rather than a dimming of the others, because the others are
 /// working and you are reading them.
-private struct TilePane: View {
+struct TilePane: View {
     /// §01's inks are two literals apiece rather than one dimmed, so anything
     /// drawing one has to know which appearance it is in.
     @Environment(\.colorScheme) private var scheme
@@ -450,7 +450,7 @@ private struct TilePane: View {
             if showsHeader { header.probed("pane-header") }
             paneBody.probed("pane-body")
         }
-        .paneCard(focused: isFocused || landing != nil)
+        .paneCard()
         // Not animated at all.
         //
         // Focus was animated on the theory that a moving highlight is easier to
@@ -565,10 +565,11 @@ private struct TilePane: View {
     private var dropIndicator: some View {
         if let landing {
             let half = landing.half
-            RoundedRectangle(cornerRadius: Pane.radius)
+            // style-exempt: a drop target's state, drawn at the card's own radius
+            RoundedRectangle.card
                 .fill(Color.accentColor.opacity(0.28))
                 .overlay(
-                    RoundedRectangle(cornerRadius: Pane.radius)
+                    RoundedRectangle.card
                         .strokeBorder(Color.accentColor.opacity(0.8), lineWidth: 1.5)
                 )
                 .frame(width: size.width * half.width, height: size.height * half.height)
@@ -611,12 +612,12 @@ private struct TilePane: View {
         HStack(spacing: 6) {
             Text("\(index)")
                 .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                .foregroundStyle(
-                    isFocused ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.tertiary))
+                .foregroundStyle(isFocused ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
                 .frame(minWidth: 9)
 
             Text(terminal.label)
                 .font(WorkspaceStyle.paneTitle)
+                .fontWeight(isFocused ? .semibold : .medium)
                 .foregroundStyle(isFocused ? .primary : .secondary)
                 .lineLimit(1)
                 .layoutPriority(1)
@@ -643,9 +644,7 @@ private struct TilePane: View {
                     .foregroundStyle(
                         native ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.tertiary))
                     .background(
-                        native
-                            ? AnyShapeStyle(Color.accentColor.opacity(0.15))
-                            : AnyShapeStyle(Color.primary.opacity(0.06)),
+                        native ? AnyShapeStyle(Fill.selection(active: true)) : AnyShapeStyle(Fill.inset()),
                         in: Capsule()
                     )
                     .help(
@@ -685,7 +684,6 @@ private struct TilePane: View {
         }
         .padding(.horizontal, 8)
         .frame(height: Self.headerHeight)
-        .background { PaneHeaderBackground(focused: isFocused) }
     }
 
     /// A changes pane owns its comparison controls in the same strip that names

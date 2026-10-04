@@ -1,3 +1,4 @@
+import AgentKit
 import SwiftUI
 
 /// The detail area's shape, in one place.
@@ -30,13 +31,8 @@ enum Pane {
     /// the card shares the corner's center (`Gutter.window`).
     static var inset: CGFloat { Gutter.window }
 
-    /// The cards' radius.
-    ///
-    /// Not derived from the window's, and deliberately: once a card is clear of
-    /// the corner curve the two arcs are far enough apart that the eye stops
-    /// relating them, and a concentric radius at this inset would be nearly
-    /// square. 10 matches the platform's own language for an inset surface.
-    static let radius: CGFloat = 10
+    /// The cards' radius: `Radius.medium`, the step every card is drawn in.
+    static let radius: CGFloat = Radius.medium
 }
 
 extension View {
@@ -60,24 +56,22 @@ extension View {
             // tints the cards only, and the wallpaper supplies the plane's.
     }
 
-    /// One terminal, as a card on the canvas.
-    /// One hairline, the same on every pane.
+    /// One terminal, as a card on the plane.
+    ///
+    /// Opaque paper in the theme-tinted document color, in `Radius.medium`
+    /// corners, with no stroke (ov-221): the card against the frosted plane is
+    /// its own edge, and Increase Contrast draws a 1 px separator back around it
+    /// (`Surface.content`). The pane's header is drawn on the card's own color,
+    /// not a wash of its own.
     ///
     /// Three versions of a focus border were tried here and every one of them
     /// was the loudest thing on screen: a blue ring (fine over a VT grid, awful
     /// around a chat), a drop shadow (which a full-window pane smeared across
     /// the chrome above it), and a thicker grey edge (just as heavy as the blue
-    /// one, minus the color).
-    ///
-    /// The border is not where this belongs. A pane already says it has the
-    /// keyboard in its own header — the number goes accent, the title goes
-    /// primary and gains weight, the strip tints — and that is a whole row of
-    /// signal on the pane itself. The edge can go back to being an edge.
-    func paneCard(focused: Bool = false) -> some View {
-        clipShape(RoundedRectangle(cornerRadius: Pane.radius))
-            .overlay(
-                RoundedRectangle(cornerRadius: Pane.radius)
-                    .strokeBorder(WorkspaceStyle.hairline, lineWidth: 1)
-            )
+    /// one, minus the color). Focus is not drawn on the card at all: the pane's
+    /// header says it, with the number and title in primary ink and the title
+    /// in semibold, against secondary for every other pane.
+    func paneCard() -> some View {
+        clipShape(.card).surface(.content, in: .card, fill: WorkspaceStyle.document)
     }
 }

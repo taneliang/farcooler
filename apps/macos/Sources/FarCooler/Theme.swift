@@ -222,19 +222,6 @@ enum ThemeBackdrop {
     }
 }
 
-/// A pane's chrome is one semantic surface. Focus adds a wash rather than a
-/// border, so switching panes is obvious without boxing the content in blue.
-struct PaneHeaderBackground: View {
-    let focused: Bool
-
-    var body: some View {
-        ZStack {
-            WorkspaceStyle.paneChrome
-            if focused { Fill.selection(active: true) }
-        }
-    }
-}
-
 /// Every theme this runner offers, and which one is in force.
 ///
 /// One object rather than a preference holding colors: a theme defined on a
