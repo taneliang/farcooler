@@ -223,6 +223,13 @@ struct ContentView: View {
     }
 
     var body: some View {
+        // The title bar's values, worked out once a pass (ov-229): each
+        // measures text or walks the fleet, and several parts read them.
+        let room = titleStatusRoom
+        let layout = room.layout(window: windowWidth)
+        let consoleActions = titleConsoleActions
+        let statusActions = titleStatusActions(consoleActions)
+        let statusSource = titleStatusSource ?? Self.noWorkspaceSource
         // The detail is the window: the old Fleet sidebar is gone, and the
         // navigator inside a workspace is its one sidebar (ov-178).
         detailOpeningNotices
@@ -244,7 +251,7 @@ struct ContentView: View {
                 editor: detailWorktree, onEditorError: { editorError = $0 },
                 changes: changesToolbarState, onChanges: { ws in toggleChangesPane(in: ws) })
         }
-        .titleBarStatus(titleStatusSource ?? Self.noWorkspaceSource, room: titleStatusRoom, actions: titleStatusActions, width: $windowWidth)
+        .titleBarStatus(statusSource, room: room, actions: statusActions, width: $windowWidth)
         // The title would repeat the switcher or the breadcrumb
         // (`TitleBar`); the window keeps it for the Window menu.
         .toolbar(removing: TitleBar.showsTitle(for: selection) ? nil : .title)
@@ -254,7 +261,7 @@ struct ContentView: View {
                 navigator: NavigatorToggle(
                     hidden: navigatorHidden, available: selection.flatMap(workspaceScene)?.board != nil,
                     toggle: { toggleNavigator() }),
-                backForward: titleStatusRoom.layout(window: windowWidth).backForward ? backForward : nil)
+                backForward: layout.backForward ? backForward : nil)
         }
         // The compact toolbar (ov-214), on whatever made the window.
         .mainWindowChrome()
@@ -345,6 +352,11 @@ struct ContentView: View {
             if let target = WorkspaceNumbers.target(number, in: WorkspaceNumbers.groups(in: store.fleet)) {
                 selection = target
             }
+        }
+        // The title bar's field holds each workspace's message apart, so
+        // one written here never goes to another's orchestrator (ov-214).
+        .onChange(of: selection.flatMap(workspaceScene)?.key ?? "", initial: true) { _, key in
+            console.console.enter(workspace: key)
         }
         .onChange(of: navigatorHidden) { _, hidden in
             UserDefaults.standard.set(NavigatorVisibility.stored(hidden), forKey: NavigatorVisibility.key)
@@ -570,9 +582,8 @@ struct ContentView: View {
         .overlay(alignment: .top) {
             if console.console.isOpen {
                 TitleConsoleDropdown(
-                    model: console, actions: titleConsoleActions, status: titleStatusActions,
-                    source: titleStatusSource ?? Self.noWorkspaceSource,
-                    showsField: titleStatusRoom.form(window: windowWidth) < .medium)
+                    model: console, actions: consoleActions, status: statusActions, source: statusSource,
+                    showsField: layout.form < .medium)
                     .padding(.top, Spacing.tight)
                     .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.opacity.combined(with: .move(edge: .top)))
             }
@@ -1292,10 +1303,24 @@ struct ContentView: View {
             },
             run: { perform($0) },
             send: { text in
-                guard let seat, let client = store.client(for: seat.worktree) else { return TitleConsoleRecipient.noOrchestrator }
-                return await client.agentPrompt(terminal: seat.terminal.short, text: text)
+                guard let seat, let client = store.client(for: seat.worktree) else {
+                    return .refused(TitleConsoleRecipient.noOrchestrator)
+                }
+                switch TitleConsoleRecipient.route(seat.terminal) {
+                case .composer:
+                    // A chat: its composer's route.
+                    let failure = await client.agentPrompt(terminal: seat.terminal.short, text: text)
+                    return failure == nil ? .sent : .refused(TitleConsole.sendFailed)
+                case .terminal:
+                    // A terminal: the runner's answer gate, which types
+                    // nothing unless it's provably safe.
+                    let failure = await client.tellOrchestrator(terminal: seat.terminal.short, text: text)
+                    return failure == nil ? .sent : TellRefusal.outcome(message: failure)
+                }
             },
-            refusal: { TitleConsoleRecipient.refusal(seat: seat?.terminal) })
+            refusal: { TitleConsoleRecipient.refusal(seat: seat?.terminal) },
+            recipient: scene?.summary.map { $0.isImplicit ? "Main" : $0.name },
+            current: selectedPane?.terminal)
     }
 
     /// What the status area sizes itself around (`TitleStatusRoom`).
@@ -1310,9 +1335,9 @@ struct ContentView: View {
 
     /// What the status area's parts do, by the routes the window already
     /// has: the orchestrator's row, ⌃⌘N within this workspace, a task's row.
-    private var titleStatusActions: TitleStatusActions {
+    private func titleStatusActions(_ consoleActions: TitleConsoleActions) -> TitleStatusActions {
         guard let scene = selection.flatMap(workspaceScene), let summary = scene.summary, let board = scene.board
-        else { return TitleStatusActions(console: console, consoleActions: titleConsoleActions) }
+        else { return TitleStatusActions(console: console, consoleActions: consoleActions) }
         let host = scene.host
         return TitleStatusActions(
             goToOrchestrator: { selectOrchestrator(keyboard: .conversation) },
@@ -1329,10 +1354,12 @@ struct ContentView: View {
             openLine: { line in openActivityLine(line, host: host, workspace: summary) },
             readSpend: {
                 guard let client = store.clients[host] else { return .couldntRead }
-                let read = await client.spendToday(repository: summary.repository ?? summary.id)
+                guard client.recordsAgentUsage else { return .needsUpdate }
+                let read = await client.spendToday(
+                    repository: summary.repository ?? summary.id, workspace: summary.boardWorkspace)
                 return ActivitySpend.read(data: read.data, message: read.message)
             },
-            console: console, consoleActions: titleConsoleActions)
+            console: console, consoleActions: consoleActions)
     }
 
     /// A row of the activity panel or the failed menu, opened: its pane, or

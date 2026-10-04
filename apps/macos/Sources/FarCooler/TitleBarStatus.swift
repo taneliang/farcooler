@@ -454,6 +454,9 @@ struct TitleStatusView: View {
 struct TitleActivityPopover: View {
     let activity: TitleActivity
     let actions: TitleStatusActions
+    /// Where today's spend is kept between openings, by workspace: read at
+    /// most once a minute, not each time the panel comes back.
+    var cache: TitleConsoleModel? = nil
     let close: () -> Void
 
     @State private var spend: ActivitySpend = .reading
@@ -469,7 +472,15 @@ struct TitleActivityPopover: View {
                 close()
                 actions.goToOrchestrator()
             })
-        .task { spend = await actions.readSpend() }
+        .task {
+            let key = cache?.console.workspace ?? ""
+            if let kept = cache?.spend[key], Date().timeIntervalSince(kept.at) < 60 {
+                spend = kept.spend
+                return
+            }
+            spend = await actions.readSpend()
+            cache?.spend[key] = (Date(), spend)
+        }
     }
 }
 
@@ -524,7 +535,11 @@ struct TitleStatusItem: ToolbarContent {
             // a minute, and rebuilding the item for each would close its
             // menu and move VoiceOver's focus. The text truncates inside the
             // form's fixed width instead.
-            TitleStatusBoard(source: source, form: form, actions: actions).id(form)
+            TitleStatusBoard(source: source, form: form, actions: actions)
+                // Still, not breathing: this mark is on screen however long an
+                // agent works, the window hidden or not (ov-229).
+                .environment(\.statusGlyphStill, true)
+                .id(form)
         }
         // Plain text on the bar, as Xcode's activity view is: the HIG's
         // "reduce the use of toolbar backgrounds", and ov-216's rule that
@@ -566,17 +581,36 @@ private struct TitleStatusBoard: View {
 /// What the window's leading and trailing items take, for the status area
 /// to size itself around.
 struct TitleStatusRoom: Equatable {
-    var switcherTitle: String
-    var switcherRepository: String
-    var editor: Bool
-    var changes: Bool
-    var trouble: String?
+    let switcherTitle: String
+    let switcherRepository: String
+    let editor: Bool
+    let changes: Bool
+    let trouble: String?
     /// The tray's count, every workspace's.
-    var needsYou: Int = 0
+    let needsYou: Int
     /// Whether the window offers Back and Forward in its leading group
     /// (slice 3); they're drawn only where they leave the status area
     /// room for its medium form (`layout`).
     var backForward = false
+    /// The leading and trailing items' widths, measured once, here: the
+    /// window reads `layout` several times a pass (ov-229).
+    let leadingWidth: CGFloat
+    let trailingWidth: CGFloat
+
+    init(
+        switcherTitle: String, switcherRepository: String, editor: Bool, changes: Bool, trouble: String?,
+        needsYou: Int = 0, backForward: Bool = false
+    ) {
+        self.switcherTitle = switcherTitle
+        self.switcherRepository = switcherRepository
+        self.editor = editor
+        self.changes = changes
+        self.trouble = trouble
+        self.needsYou = needsYou
+        self.backForward = backForward
+        leadingWidth = TitleStatus.leading(switcher: switcherTitle, repository: switcherRepository)
+        trailingWidth = TitleStatus.trailing(editor: editor, changes: changes, trouble: trouble, needsYou: needsYou)
+    }
 
     /// What Back and Forward take beside the switcher: their own capsule,
     /// two 28 pt buttons, and the space before it.
@@ -587,8 +621,7 @@ struct TitleStatusRoom: Equatable {
     /// form or wider, else without them, since what the orchestrator is
     /// doing is worth more than two buttons ⌃⌘← and ⌃⌘→ already press.
     func layout(window: CGFloat) -> (form: TitleStatus.Form, backForward: Bool) {
-        let trailing = TitleStatus.trailing(editor: editor, changes: changes, trouble: trouble, needsYou: needsYou)
-        let leading = TitleStatus.leading(switcher: switcherTitle, repository: switcherRepository)
+        let (leading, trailing) = (leadingWidth, trailingWidth)
         if backForward {
             let with = TitleStatus.form(
                 available: TitleStatus.available(

@@ -183,7 +183,7 @@ struct AgentSendFailureTests {
         #expect(stream.failure?.sentence.hasPrefix("Your message wasn’t sent. ") == true)
         #expect(stream.failure?.canRetry == true)
         #expect(!stream.transcript.rows.contains { $0.kind == .message(role: .user, text: "add tests", parent: nil) })
-        #expect(runner.calls("agent-prompt") == [["terminal", "agent-prompt", "t1", "add tests", "--json"]])
+        #expect(runner.calls("agent-prompt") == [["terminal", "agent-prompt", "t1", "--json", "--", "add tests"]])
     }
 
     /// A send with no word back (the link dropped, maybe after the daemon took

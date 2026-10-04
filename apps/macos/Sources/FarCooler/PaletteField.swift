@@ -34,8 +34,9 @@ struct PaletteField: NSViewRepresentable {
     let onMove: (PaletteMove) -> Void
     let onSubmit: () -> Void
     let onCancel: () -> Void
-    /// The field lost the keyboard and didn't get it back within a moment:
-    /// long enough for a click on one of its own results to land first.
+    /// The field lost the keyboard and didn't get it back. The title bar's
+    /// field closes then, unless the click was in its own panel
+    /// (`TitleConsoleModel.fieldEndedEditing`).
     var onEndEditing: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -77,6 +78,16 @@ struct PaletteField: NSViewRepresentable {
         view.onMove = onMove
         view.onSubmit = onSubmit
         view.onCancel = onCancel
+        view.onResign = onEndEditing.map { end in
+            { [weak view] in
+                // After the change of first responder settles, and only if
+                // it didn't come back here.
+                DispatchQueue.main.async {
+                    guard let view, view.window?.firstResponder !== view else { return }
+                    end()
+                }
+            }
+        }
     }
 
     static func dismantleNSView(_ view: PaletteTextView, coordinator: Coordinator) {
@@ -112,13 +123,7 @@ struct PaletteField: NSViewRepresentable {
             parent.text = view.string
         }
 
-        func textDidEndEditing(_ notification: Notification) {
-            guard let view = notification.object as? NSTextView, let end = parent.onEndEditing else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak view] in
-                guard let view, view.window?.firstResponder !== view else { return }
-                end()
-            }
-        }
+
     }
 }
 
@@ -128,14 +133,28 @@ final class PaletteTextView: NSTextView {
     var onMove: ((PaletteMove) -> Void)?
     var onSubmit: (() -> Void)?
     var onCancel: (() -> Void)?
+    /// The keyboard left: whatever had it took it, or it went nowhere.
+    var onResign: (() -> Void)?
     var placeholder: String = "" { didSet { needsDisplay = true } }
 
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned { onResign?() }
+        return resigned
+    }
+
     override func keyDown(with event: NSEvent) {
+        // While an input method is composing, every key is its: Return
+        // confirms, Esc cancels the composition, Tab and the arrows choose
+        // among candidates. None of them may submit, close, or move the
+        // highlight here.
+        if hasMarkedText() {
+            super.keyDown(with: event)
+            return
+        }
         switch Int(event.keyCode) {
-        // Return, keypad Enter. Not while an input method is composing:
-        // there, Return confirms the composition, and a field that sends on
-        // Return mustn't send half a word.
-        case 36 where !hasMarkedText(), 76 where !hasMarkedText():
+        // Return, keypad Enter.
+        case 36, 76:
             onSubmit?()
         case 53:  // Esc
             onCancel?()

@@ -10,8 +10,9 @@ import SwiftUI
 // draws it and decides nothing.
 //
 // Read when it's opened, never on a timer: the spend is one `farcooler
-// report` call per opening, and nothing here ticks while the panel is shut
-// or the window is hidden (ov-229).
+// report` call, at most once a minute, and only from a runner that records
+// agent usage. Status marks here are drawn still (`statusGlyphStill`), so
+// nothing animates in the title bar or its panel (ov-229).
 
 /// One row of the panel: a task's agent, a recorded subagent, a queued
 /// task or a failed one.
@@ -185,7 +186,7 @@ struct TitleActivityPanel: View {
                     .foregroundStyle(spend == .reading ? .secondary : .primary)
                     .accessibilityIdentifier("activity-spend")
                 if case .spent = spend {
-                    Text("API-equivalent, across this repository").font(.caption).foregroundStyle(.tertiary)
+                    Text("API-equivalent, in this workspace").font(.caption).foregroundStyle(.tertiary)
                 }
             }
         }

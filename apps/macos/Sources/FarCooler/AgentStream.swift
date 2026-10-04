@@ -339,7 +339,7 @@ final class AgentStream: ObservableObject {
         // the path never leaves this machine. Passing base64 as an argument
         // instead would put a megabyte on a command line, which is the one
         // thing an argv is guaranteed to be bad at.
-        var arguments = AgentAction.send.arguments(terminal: terminal) + [text]
+        var pictures: [String] = []
         var scratch: [URL] = []
         for image in images {
             let url = FileManager.default.temporaryDirectory
@@ -355,14 +355,15 @@ final class AgentStream: ObservableObject {
                 return false
             }
             scratch.append(url)
-            arguments += ["--image", url.path]
+            pictures.append(url.path)
         }
+        let arguments = AgentAction.sendArguments(terminal: terminal, text: text, images: pictures)
         defer { for url in scratch { try? FileManager.default.removeItem(at: url) } }
         // Drawn after the pictures are ready, so a send stopped above draws
         // nothing, and before the call, for the queue report's sake (above).
         let echo = transcript.appendLocalUserMessage(text)
         do {
-            _ = try await runCLI(arguments + ["--json"])
+            _ = try await runCLI(arguments)
             return true
         } catch {
             guard Self.sendIsKnownUnsent(error) else {
@@ -617,10 +618,18 @@ enum AgentAction: Equatable {
         switch self {
         case .send: return ["terminal", "agent-prompt", terminal]
         case let .config(id, value): return ["terminal", "agent-set-config", terminal, id, value]
-        case let .editQueued(id, text): return ["terminal", "agent-edit-queued", terminal, id, text]
+        // `--` before the words, so a message starting with a dash is a
+        // message, not a flag (ov-214 review: `--help` "sent" and was lost).
+        case let .editQueued(id, text): return ["terminal", "agent-edit-queued", terminal, id, "--", text]
         case let .steerQueued(id): return ["terminal", "agent-steer-queued", terminal, id]
         case let .cancelQueued(id): return ["terminal", "agent-cancel-queued", terminal, id]
         }
+    }
+
+    /// A message sent from the composer: its pictures by path, then `--json`,
+    /// then `--` and the words, so words starting with a dash are words.
+    static func sendArguments(terminal: String, text: String, images: [String] = []) -> [String] {
+        AgentAction.send.arguments(terminal: terminal) + images.flatMap { ["--image", $0] } + ["--json", "--", text]
     }
 
     /// What didn't happen, as the end of a sentence that says why.

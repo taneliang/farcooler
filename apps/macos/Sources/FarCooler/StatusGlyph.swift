@@ -195,9 +195,10 @@ struct StatusGlyph: View {
 private struct Breathing: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.inLiveWindow) private var inLiveWindow
+    @Environment(\.statusGlyphStill) private var still
 
     func body(content: Content) -> some View {
-        if reduceMotion {
+        if reduceMotion || still {
             // The value that was on screen before this existed. Motion is the
             // part being asked for less of, not the dimming.
             content.opacity(0.85)
@@ -275,6 +276,14 @@ enum BreathingAnimation {
         breath.isRemovedOnCompletion = false
         return breath
     }
+}
+
+extension EnvironmentValues {
+    /// Whether a status mark is drawn still, as Reduce Motion draws it: for
+    /// one that's on screen whatever the person is doing, the title bar's
+    /// (ov-214), where a breath that never stops is a frame drawn every
+    /// tick for as long as an agent works, the window hidden or not (ov-229).
+    @Entry var statusGlyphStill = false
 }
 
 extension Status {

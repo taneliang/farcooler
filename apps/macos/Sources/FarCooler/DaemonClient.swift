@@ -1218,9 +1218,17 @@ final class DaemonClient: ObservableObject {
     /// What agents spent today in `repository` (ov-195's report, for the
     /// title bar's activity panel): `farcooler report --since today --json`,
     /// whose `spend.total` `ActivitySpend.read` decodes.
-    func spendToday(repository: String) async -> (data: Data?, message: String?) {
-        await runRaw(["report", "--since", "today", "--repo", repository, "--json"], background: true)
+    func spendToday(repository: String, workspace: String?) async -> (data: Data?, message: String?) {
+        await runRaw(
+            ["report", "--since", "today", "--repo", repository] + (workspace.map { ["--workspace", $0] } ?? [])
+                + ["--json"],
+            background: true)
     }
+
+    /// Whether this runner records what agents spend (ov-194): without it a
+    /// report's spend is absent, which isn't zero. Unknown until the build
+    /// is read, which counts as yes; the read then says what it finds.
+    var recordsAgentUsage: Bool { daemonBuild?.can("agent_usage") ?? true }
 
     /// Every note in the repository's record carrying `query`, each with its
     /// task's key: the History page's note search (ov-103).
@@ -3060,9 +3068,19 @@ final class DaemonClient: ObservableObject {
     /// one popover.
     func agentPrompt(terminal: String, text: String) async -> String? {
         let (data, message) = await runRaw(
-            ["terminal", "agent-prompt", terminal, text], background: true)
+            ["terminal", "agent-prompt", terminal, "--", text], background: true)
         if data != nil { return nil }
         return message ?? "The command didn’t finish."
+    }
+
+    /// A message for a terminal orchestrator (ov-214): `terminal tell`,
+    /// which the runner types and submits only past the answer gate. Nil
+    /// when it was told; else the CLI's refusal, with its `code:` and
+    /// `what:` lines (`--json`), for `TellRefusal` to put in words.
+    func tellOrchestrator(terminal: String, text: String) async -> String? {
+        let (data, message) = await runRaw(["terminal", "tell", terminal, "--json", "--", text], background: true)
+        if data != nil { return nil }
+        return message ?? ""
     }
 
     // MARK: - Subprocess

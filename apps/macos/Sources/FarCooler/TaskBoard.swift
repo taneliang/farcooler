@@ -817,10 +817,11 @@ struct TaskBoardView: View {
     // MARK: - The top band
 
     /// The navigator's top band (ov-214): the filter, then the board's own
-    /// state. (Its one write, New Task, went when the orchestrator took the task list, ov-184.) It took the place of a
-    /// header row that named the board ("Main", which the title bar's
-    /// switcher names) and counted what's waiting (which the title bar's
-    /// status area counts); Refresh is ⌘R, as it was.
+    /// state at the trailing edge. It took the place of a header row that
+    /// named the board ("Main", which the title bar's switcher names),
+    /// counted what's waiting (which the title bar's status area counts) and
+    /// offered New Task…, which went with ov-184: the orchestrator owns the
+    /// list, and the title bar's field asks it (⌘K). Refresh is ⌘R.
     private var topBand: some View {
         HStack(spacing: SidebarGrid.gap / 2) {
             filterField

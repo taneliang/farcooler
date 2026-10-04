@@ -57,6 +57,22 @@ struct BackForwardToolbarTests {
         }
     }
 
+    @Test("Widening and narrowing the window on screen brings Back and Forward in and takes them out")
+    func resizingOnScreen() async throws {
+        let window = try await Harness.window(Self.root(backForward: true), width: 900)
+        defer { window.close() }
+        #expect(Harness.backForward(in: window) == nil)
+        for (width, shown, form) in [(1790, true, TitleStatus.Form.wide), (900, false, .medium), (1200, true, .medium)]
+            as [(CGFloat, Bool, TitleStatus.Form)]
+        {
+            window.setContentSize(NSSize(width: width, height: 400))
+            try await Harness.settle(window)
+            #expect((Harness.backForward(in: window) != nil) == shown, "at \(width)")
+            let status = try #require(Harness.status(in: window))
+            #expect(status.width == form.width && status.item >= status.width, "at \(width): \(status)")
+        }
+    }
+
     @Test("Their tooltips name the keys that do the same")
     func tooltips() {
         #expect(BackForwardControl.backHelp == "Go back (⌃⌘←)")

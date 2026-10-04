@@ -182,9 +182,9 @@ When some are left out, **All Done** opens the History page, which you can
 search and filter by area.
 A long section shows ten tasks, then **Show N More**. ⌘R re-reads the board.
 The orchestrator owns the task list: it files tasks, moves them and closes them,
-so the app has no New Task… and no way to change a task's status. To change
-one, ask the orchestrator (below). Answering an agent's question still works
-from the task.
+so the app has no New Task… and no way to change a task's status. To add or
+change one, ask the orchestrator (⌘K, below). Answering an agent's question
+still works from the task.
 
 ## Following a task to its changes
 

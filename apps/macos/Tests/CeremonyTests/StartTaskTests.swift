@@ -558,7 +558,7 @@ struct StartTaskTests {
     /// after them, lands after theirs. `agent-prompt`, so no filter below
     /// (`sent`, `watchingCalls`, `seenCalls`) ever counts it.
     private func afterTheSentinel(_ client: DaemonClient, _ runner: Runner) async {
-        let sentinel = ["terminal", "agent-prompt", "sentinel", ""]
+        let sentinel = ["terminal", "agent-prompt", "sentinel", "--", ""]
         Task { _ = await client.agentPrompt(terminal: "sentinel", text: "") }
         for _ in 0..<500 where !runner.calls.contains(sentinel) {
             try? await Task.sleep(for: .milliseconds(10))
