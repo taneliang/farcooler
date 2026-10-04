@@ -22,5 +22,5 @@ jobs:
         run: |
           for i in 1 2 3; do
             echo "=== run $i"
-            swift test --package-path apps/macos --filter GridGeometry 2>&1 | tail -40
+            swift test --package-path apps/macos --filter GridGeometry --filter TitleStatusWidth 2>&1 | tail -80
           done
