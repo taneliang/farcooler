@@ -436,7 +436,7 @@ public struct MarkdownText: View {
             }
 
         case .rule:
-            Divider()
+            Divider()  // style-exempt: a Markdown rule is the author's content
 
         case let .table(header, rows):
             MarkdownTable(header: header, rows: rows)
@@ -662,9 +662,9 @@ private struct MarkdownTable: View {
             // One border around the outside; each cell draws its own leading
             // and bottom edge, so every interior rule is shared rather than
             // doubled.
-            RoundedRectangle(cornerRadius: 5).strokeBorder(.quaternary)
+            RoundedRectangle.control.strokeBorder(.quaternary)  // style-exempt: the table's one outer border, so the cells' shared rules close up
         }
-        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .clipShape(.control)
         .padding(.vertical, 4)
     }
 
@@ -708,11 +708,11 @@ private struct TableCell: ViewModifier {
                 // Every column but the first draws the rule to its left, so
                 // neighbors share one line instead of drawing two.
                 if column > 0 {
-                    Rectangle().fill(.quaternary).frame(width: 1)
+                    Color.clear.separator(.grid, edge: .leading)
                 }
             }
             .overlay(alignment: .bottom) {
-                Rectangle().fill(.quaternary).frame(height: 1)
+                Color.clear.separator(.grid, edge: .bottom)
             }
             .background(isHeader ? AnyShapeStyle(.quinary) : AnyShapeStyle(.clear))
     }
@@ -811,7 +811,7 @@ public struct DetailBox: View {
         // expand.
         .fixedSize(horizontal: false, vertical: true)
         .background {
-            if chrome { RoundedRectangle(cornerRadius: 7).fill(.quinary) }
+            if chrome { RoundedRectangle.control.fill(.quinary) }
         }
     }
 

@@ -149,7 +149,7 @@ public struct GlanceCardView: View {
     private func hairline(_ ink: AnyShapeStyle) -> some View {
         Rectangle()
             .fill(ink)
-            .frame(height: 1)
+            .frame(height: 1)  // style-exempt: the glance card's hairline, in the card's own ink
     }
 }
 

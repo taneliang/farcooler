@@ -543,7 +543,7 @@ public struct GlanceMarkView: View {
     public init(_ mark: GlanceMark, size: GlanceMarkSize, decorative: Bool = false) {
         self.mark = mark
         self.diameter = size.diameter
-        self.ring = size.stroke(mark.attention)
+        self.ring = size.stroke(mark.attention)  // style-exempt: the ring's width, not an edge
         self.coreDiameter = mark.core == .producing ? size.core : nil
         self.fillsCore = false
         self.elongated = false
@@ -607,7 +607,7 @@ public struct GlanceMarkView: View {
     public init(_ mark: GlanceMark, inAppDiameter: CGFloat, elongated: Bool = false) {
         self.mark = mark
         self.diameter = inAppDiameter
-        self.ring = GlanceMarkSize.ribbon.stroke(mark.attention)
+        self.ring = GlanceMarkSize.ribbon.stroke(mark.attention)  // style-exempt: the ring's width, not an edge
         self.coreDiameter = nil
         self.fillsCore = mark.core == .producing
         self.elongated = elongated
@@ -636,7 +636,7 @@ public struct GlanceMarkView: View {
                     .fill(GlancePalette.ink1(scheme))
             }
             Capsule()
-                .strokeBorder(ringColor, style: strokeStyle)
+                .strokeBorder(ringColor, style: strokeStyle)  // style-exempt: the ring is the glyph itself
             if let coreDiameter {
                 // Never amber. §03 reserves the ring for the person's side and
                 // the core for the agent's, and amber is the person's color:
