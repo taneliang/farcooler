@@ -55,6 +55,22 @@ import WidgetKit
 /// by field name, so renaming it here would only stop the push arriving. It is
 /// **runner** in every word a person reads.
 struct AgentActivityWidget: Widget {
+    /// The snapshot, with a failed mark taken off wherever this card's relay
+    /// says the turn since finished well, and the widgets told (ov-186).
+    ///
+    /// A quiet success sends no banner, so nothing else rewrites the file the
+    /// widget reads; this render is the one place that hears it. Idempotent: the
+    /// second render finds nothing to clear and writes nothing. The watch gets
+    /// the corrected file the next time the app sends one.
+    static func reconciled(_ snapshot: FleetSnapshot?, with card: AgentCardState) -> FleetSnapshot? {
+        guard let snapshot,
+            let cleared = snapshot.clearingFailures(vouchedBy: card.rows, at: Date())
+        else { return snapshot }
+        SnapshotStore.write(cleared)
+        WidgetCenter.shared.reloadAllTimelines()
+        return cleared
+    }
+
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: AgentActivityAttributes.self) { context in
             // Read once per render and handed down, the same way `FleetTail`
@@ -73,7 +89,7 @@ struct AgentActivityWidget: Widget {
             // the app's poll and the notification service write — is the only
             // word there is (ov-125). One small JSON, as `FleetWidget` reads on
             // every timeline. See `AgentCardRow.turnFailed`.
-            let snapshot = SnapshotStore.read()
+            let snapshot = Self.reconciled(SnapshotStore.read(), with: context.state)
             let failed = snapshot?.failedTurns ?? []
             // Which of the two cards this is. See `LockScreenCard`, which is
             // where the choice is argued: rows when the relay sent any and

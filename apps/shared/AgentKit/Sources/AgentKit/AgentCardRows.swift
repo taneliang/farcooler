@@ -949,3 +949,38 @@ extension GlanceState {
             status: card.status, failed: card.failed ?? known.contains(card.terminal))
     }
 }
+
+// MARK: - The card clearing a failed mark the file still holds (ov-186)
+
+extension FleetSnapshot {
+    /// This snapshot with a failed mark taken off every agent the relay says
+    /// finished well since, or nil when there is nothing to take off (ov-186).
+    ///
+    /// **The widget and the watch read this file and nothing else.** A turn that
+    /// failed is written here with `turnFailed`, and the quiet success after it
+    /// (`alert: false`, or the alert toggle off) sends no banner, so the
+    /// notification service never runs and nothing rewrites the file until the
+    /// app next polls. The Live Activity card does hear it, as a `done` row
+    /// whose `failed` the relay set to `false` (migration 0018). Only a row
+    /// that says so outright counts: an older relay sends no word, and absent
+    /// is not "finished well".
+    ///
+    /// Folded in with `merging`, so the agent is stamped as freshly heard from,
+    /// which a relay's word is. The glyph goes with the mark: a cleared turn
+    /// drawn as ✗ would be the same bug in `accessoryCircular`, which draws
+    /// only the glyph.
+    public func clearingFailures(vouchedBy rows: [AgentCardRow], at now: Date) -> FleetSnapshot? {
+        var next = self
+        var changed = false
+        for row in rows where row.status == "done" && row.failed == false {
+            guard var agent = next.agents.first(where: { $0.id == row.terminal }),
+                agent.turnFailed
+            else { continue }
+            agent.turnFailed = false
+            if agent.glyph == "✗" { agent.glyph = "✓" }
+            next = next.merging(agent, at: now)
+            changed = true
+        }
+        return changed ? next : nil
+    }
+}
