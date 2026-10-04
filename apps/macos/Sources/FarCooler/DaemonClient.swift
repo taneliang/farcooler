@@ -1738,13 +1738,6 @@ final class DaemonClient: ObservableObject {
         await layoutOrNil(worktree, ["break"], [terminal.short]) != nil
     }
 
-    @discardableResult
-    func renameLayout(_ name: String, in worktree: Worktree, layout group: String? = nil)
-        async -> [PaneGroup]
-    {
-        await layout(worktree, ["rename"], [name] + Self.naming(group))
-    }
-
     /// Tell tmux how big the view showing this layout is, in cells.
     ///
     /// The one thing the app is authoritative about, because it is the only thing

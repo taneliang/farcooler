@@ -105,13 +105,4 @@ struct BoardGlanceTests {
         #expect(!EscapeBack.goesBack(responder: NSView(), selection: loose, focusColumn: false, closable: false))
         #expect(EscapeBack.goesBack(responder: NSView(), selection: loose, focusColumn: true, closable: false))
     }
-
-    @Test("A loose worktree beside a workspace's own board doesn't end its visit")
-    func aLooseWorktreeBesideTheBoardStays() {
-        let loose = Selection.looseWorktree(host: "h", worktree: "w-9", terminal: nil)
-        #expect(!WorkspaceSelection.leaves(top, for: loose, beside: "ws"))
-        #expect(WorkspaceSelection.leaves(top, for: loose, beside: "main"))
-        #expect(WorkspaceSelection.leaves(top, for: loose))
-        #expect(!WorkspaceSelection.leaves(top, for: bil3))
-    }
 }

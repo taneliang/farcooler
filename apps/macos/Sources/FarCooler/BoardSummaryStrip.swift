@@ -352,12 +352,7 @@ struct BoardSummaryStrip: View {
 
     @ViewBuilder private func more(_ count: Int) -> some View {
         if count > 0 {
-            Text("and \(count) more")
-                .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .padding(.vertical, NavigatorRhythm.air)
-                .padding(.leading, NavigatorGrid.textInset)
+            SummaryMoreLine(count: count)
                 .probed("summary-more")
         }
     }
@@ -402,5 +397,21 @@ struct ActivityNoteView: View {
     /// "12m ago · +2 more".
     static func foot(_ entry: BoardSummary.Activity, now: Date) -> String {
         [TaskRow.ago(now.timeIntervalSince(entry.at)), entry.moreLine].compactMap { $0 }.joined(separator: " · ")
+    }
+}
+
+/// The strip's "and 4 more" line: its words, and `NavigatorRhythm.air` over and
+/// under them. A view of its own so the room around it can be measured (ov-164):
+/// the strip's other padding is held by the rhythm test, and this one was not.
+struct SummaryMoreLine: View {
+    let count: Int
+
+    var body: some View {
+        Text("and \(count) more")
+            .font(.system(size: WorkspaceStyle.PaneText.secondary))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .padding(.vertical, NavigatorRhythm.air)
+            .padding(.leading, NavigatorGrid.textInset)
     }
 }

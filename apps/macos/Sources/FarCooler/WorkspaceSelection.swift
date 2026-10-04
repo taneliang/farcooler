@@ -97,18 +97,6 @@ extension WorkspaceSelection {
             return selection
         }
     }
-
-    /// Whether going from `old` to `new` leaves `old`'s workspace: for
-    /// another workspace, Needs You, a loose worktree beside another board,
-    /// or nothing. Opening a task or a worktree beside its board, and
-    /// closing it, stays in it, as does a loose worktree opened beside this
-    /// workspace's own board (`beside`, the board `new` draws).
-    static func leaves(_ old: ContentView.Selection?, for new: ContentView.Selection?, beside: String? = nil) -> Bool {
-        guard case .workspace(let host, let id, _)? = old else { return false }
-        if case .workspace(host, id, _)? = new { return false }
-        if case .looseWorktree(host, _, _)? = new, beside == id { return false }
-        return true
-    }
 }
 
 /// One pane, on one runner, in the worktree its runner lists it in.

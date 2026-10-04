@@ -13,7 +13,7 @@ import Testing
 /// `swift test` is a slow suite that tells you nothing new.
 @MainActor
 struct RenderCostTests {
-    static var enabled: Bool { ProcessInfo.processInfo.environment["FARCOOLER_RENDER_BENCH"] != nil }
+    nonisolated static var enabled: Bool { ProcessInfo.processInfo.environment["FARCOOLER_RENDER_BENCH"] != nil }
 
     /// A grid of the size a real pane is, filled the way real output fills it.
     private func view(columns: Int, rows: Int, fill: Fill) -> TerminalRenderView {
@@ -98,12 +98,13 @@ struct RenderCostTests {
         return best
     }
 
-    @Test("One frame, ablated: blank grid, plain text, colored text")
+    /// Reported as skipped unless `FARCOOLER_RENDER_BENCH` is set. It used to
+    /// `return` early, which swift-testing reports as a pass after 0.001
+    /// seconds in every run: a benchmark nobody ran, shown as a test that
+    /// worked. `.enabled(if:)` is swift-testing's skip, and the summary says
+    /// "skipped".
+    @Test("One frame, ablated: blank grid, plain text, colored text", .enabled(if: RenderCostTests.enabled))
     func theFrameCost() {
-        // Returns rather than fails when unset. There is no skip in
-        // swift-testing, and a benchmark that reddens every ordinary `swift
-        // test` would be deleted within a week.
-        guard Self.enabled else { return }
         let grids = [(80, 24), (120, 40), (190, 50), (240, 70)]
         for (columns, rows) in grids {
             var line = "\(columns)x\(rows)  "

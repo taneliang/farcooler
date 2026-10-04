@@ -208,9 +208,6 @@ struct WorktreeCallsTests {
         ) {
             _ = await $0.split(Self.worktree, beside: nil, side: .right, layout: "@2")
         }
-        await record("rename", ["layout", "rename", "w1", "shells"] + named) {
-            _ = await $0.renameLayout("shells", in: Self.worktree, layout: "@2")
-        }
         await record("viewport", ["layout", "viewport", "w1", "100", "30"] + named) {
             _ = await $0.viewport(columns: 100, rows: 30, in: Self.worktree, layout: "@2")
         }

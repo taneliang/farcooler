@@ -579,13 +579,6 @@ struct BoardAgents {
     func presence(for row: TaskRow) -> TaskAgentPresence {
         row.agentPresence(livePanes: live(for: row).count, runnerRecordsTasks: runnerRecordsTasks)
     }
-
-    /// How many of `board`'s tasks have an agent on them — the sidebar row's
-    /// quiet count.
-    func tasksWithAgents(on board: TaskBoardModel) -> Int {
-        guard runnerRecordsTasks else { return 0 }
-        return board.tasksWithLiveAgents(in: worktrees.flatMap(\.terminals))
-    }
 }
 
 /// Which of the board's writes this connection may make.

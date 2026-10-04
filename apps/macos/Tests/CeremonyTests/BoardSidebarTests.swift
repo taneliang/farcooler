@@ -89,9 +89,6 @@ struct BoardSidebarTests {
         #expect(live.map(\.worktree.id) == ["lane-a", "lane-b"])
         #expect(live.first?.title == "claude in lane-a")
         #expect(agents.presence(for: Self.row()) == .agents(2))
-        #expect(agents.tasksWithAgents(on: TaskBoardModel(columns: [
-            TaskBoardColumn(status: .inProgress, rows: [Self.row()])
-        ])) == 1)
     }
 
     /// A runner without `terminal_task` gets no link, whatever its panes
@@ -102,9 +99,6 @@ struct BoardSidebarTests {
             runnerRecordsTasks: false)
         #expect(agents.live(for: Self.row()).isEmpty)
         #expect(agents.presence(for: Self.row()) == .unsaid)
-        #expect(agents.tasksWithAgents(on: TaskBoardModel(columns: [
-            TaskBoardColumn(status: .inProgress, rows: [Self.row()])
-        ])) == 0)
     }
 
     /// A board selection is a workspace's, and nothing about a terminal
@@ -403,9 +397,6 @@ struct BoardSidebarTests {
     /// spends most of an outage there between attempts.
     @Test func aRunnerThatIsntConnectedSaysNothingAboutAgents() {
         let fleet = [Self.worktree("lane", [Self.terminal("agent")])]
-        let board = TaskBoardModel(columns: [
-            TaskBoardColumn(status: .inProgress, rows: [Self.row()])
-        ])
         let recording = Self.build(["tasks", "terminal_task"])
         for state: HostState in [
             .unreachable(reason: "gone"), .notInstalled, .connecting, .reconnecting(attempt: 1),
@@ -413,7 +404,6 @@ struct BoardSidebarTests {
             let agents = BoardAgents.on(fleet, state: state, build: recording)
             #expect(agents.live(for: Self.row()).isEmpty, "\(state)")
             #expect(agents.presence(for: Self.row()) == .unsaid, "\(state)")
-            #expect(agents.tasksWithAgents(on: board) == 0, "\(state)")
             // And no "No Agent" for a card with nobody on it, either.
             #expect(
                 BoardAgents.on([], state: state, build: recording).presence(for: Self.row())
@@ -422,7 +412,6 @@ struct BoardSidebarTests {
         // Connected: it says.
         let connected = BoardAgents.on(fleet, state: .connected, build: recording)
         #expect(connected.presence(for: Self.row()) == .agents(1))
-        #expect(connected.tasksWithAgents(on: board) == 1)
         // And a runner that doesn't record tasks never does.
         #expect(
             BoardAgents.on(fleet, state: .connected, build: Self.build(["tasks"]))

@@ -225,22 +225,4 @@ struct WorkspaceSelectionTests {
         #expect(FleetStore.settled([(.connected, true), (.unreachable(reason: "x"), false)]))
         #expect(!FleetStore.settled([(.connected, false)]))
     }
-
-    /// A visit to a workspace ends when it's left, not when a task or a
-    /// worktree in it is drilled into or come back up from (ov-79, for
-    /// ov-80's "Since you were last here").
-    @Test("Drilling in and out stays in a workspace; anything else leaves it")
-    func drillingInAndOutStaysInAWorkspace() {
-        let top = ContentView.Selection.workspace(host: "", workspace: "ws", focus: nil)
-        let task = ContentView.Selection.workspace(host: "", workspace: "ws", focus: .task("t"))
-        let lane = ContentView.Selection.workspace(host: "", workspace: "ws", focus: .worktree("w", terminal: nil))
-        let other = ContentView.Selection.workspace(host: "", workspace: "billing", focus: nil)
-        let elsewhere = ContentView.Selection.workspace(host: "mini", workspace: "ws", focus: nil)
-        let stays = [(top, task), (task, lane), (lane, top), (task, top)].map { WorkspaceSelection.leaves($0, for: $1) }
-        let goes = [other, elsewhere, .needsYou, .looseWorktree(host: "", worktree: "w", terminal: nil), nil]
-            .map { WorkspaceSelection.leaves(task, for: $0) }
-        #expect(stays == [false, false, false, false])
-        #expect(goes == [true, true, true, true, true])
-        #expect(!WorkspaceSelection.leaves(.needsYou, for: top))
-    }
 }

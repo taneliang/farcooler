@@ -332,6 +332,20 @@ struct GridGeometryTests {
         }
     }
 
+    /// The "and 4 more" line is its words and `NavigatorRhythm.air` over and
+    /// under them. Nothing held this padding: adding 8 pt to it left the whole
+    /// suite green (ov-164). The words are measured here, in the same
+    /// environment, not taken from a constant.
+    @Test("The \"and more\" line has the air over and under it")
+    func theMoreLineHasItsAir() {
+        let more = NSHostingController(rootView: SummaryMoreLine(count: 4))
+        let words = NSHostingController(
+            rootView: Text("and 4 more").font(.system(size: WorkspaceStyle.PaneText.secondary)))
+        let line = words.sizeThatFits(in: CGSize(width: 400, height: 400)).height
+        let height = more.sizeThatFits(in: CGSize(width: 400, height: 400)).height
+        #expect(abs(height - (line + 2 * NavigatorRhythm.air)) < 0.5, "\(height) tall, its words \(line)")
+    }
+
     // MARK: - No stray offsets
 
     /// The row files, and how much of each holds rows: TaskBoard.swift's
