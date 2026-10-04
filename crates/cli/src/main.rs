@@ -31,6 +31,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 mod changes;
+mod files;
 mod clients;
 mod draft_prompt;
 mod board_reads;
@@ -136,6 +137,8 @@ enum Command {
     /// What a worktree changed.
     #[command(subcommand)]
     Changes(changes::ChangesCmd),
+    /// A worktree's files, read-only: a directory's entries, or a file's text.
+    #[command(subcommand)] Files(files::FilesCmd),
     /// The repository's board: what is being worked on, and why it is like that.
     ///
     /// Two halves that must not be collapsed into one. `task set` revises what
@@ -1223,6 +1226,7 @@ async fn run() -> Fallible {
         Command::Terminal(c) => terminal(runner, c, cli.json).await,
         Command::Workspace(c) => workspaces::workspace(runner, c, cli.json).await,
         Command::Changes(c) => changes::changes(runner, c, cli.json).await,
+        Command::Files(c) => files::files(runner, c, cli.json).await,
         Command::Task(c) => tasks::task(runner, c, cli.json).await,
         Command::Worktree(c) => worktree(runner, c, cli.json).await,
         Command::Layout(c) => layout(runner, c, cli.json).await,

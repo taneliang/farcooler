@@ -13,6 +13,7 @@ pub mod ceremony;
 pub mod deadlines;
 pub mod changes_json;
 pub mod ffi;
+pub mod files_json;
 pub mod needs_you_json;
 pub mod session;
 pub mod ssh;
