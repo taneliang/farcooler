@@ -333,9 +333,9 @@ async fn a_reviewer_moves_the_lane_in_the_same_write() {
     assert_eq!(p.agent.as_ref().unwrap().role, pb::LaneAgentRole::Review as i32);
 
     let mut link = runner();
-    say(&mut link, "lane set mac-fu3 --agent r1 --role review").await.unwrap();
-    let Some(request::Payload::LaneUpdate(p)) = &last(&link).payload else { panic!() };
-    assert_eq!(p.state, Some(pb::LaneState::Review as i32), "queued to review rides with the reviewer, and the runner refuses it");
+    let err = say(&mut link, "lane set mac-fu3 --agent r1 --role review").await.unwrap_err();
+    assert_eq!(err.to_string(), "mac-fu3 is queued. It can go to building or dropped.", "the move rides with the reviewer, and a queued lane can't make it");
+    assert!(link.sent.iter().all(|r| r.method != "lane.update"));
 
     let mut link = runner();
     say(&mut link, "lane set mac-ux --agent f1 --role fix").await.unwrap();
@@ -398,8 +398,8 @@ async fn a_card_must_be_on_this_board() {
 async fn a_refusal_is_said_in_words_a_person_reads() {
     let mut link = runner();
     link.refuse = Some("lane_state");
-    let err = say(&mut link, "lane set mac-fu3 --state landed").await.unwrap_err();
-    assert!(err.to_string().starts_with("A lane goes from queued to building"), "{err}");
+    let err = say(&mut link, "lane set mac-ux --state landing").await.unwrap_err();
+    assert!(err.to_string().starts_with("A lane can't make that move"), "{err}");
     let refusal = err.downcast_ref::<Refused>().expect("keeps its code");
     assert_eq!(refusal.what(), Some("lane_state"));
     for word in [
@@ -509,4 +509,17 @@ fn ages_read_naturally() {
     assert_eq!(ago(5 * 60_000), "5m ago");
     assert_eq!(ago(3 * HOUR), "3h ago");
     assert_eq!(age(49 * HOUR), "2d");
+}
+
+/// A refused move says where the lane is and where it can go, before anything
+/// is sent, and review lands in one command.
+#[tokio::test]
+async fn a_refused_move_says_where_the_lane_can_go() {
+    let mut link = runner();
+    let err = say(&mut link, "lane set mac-ux --state building").await.unwrap_err();
+    assert_eq!(err.to_string(), "mac-ux is in review. It can go to fixing, landing, landed or dropped.");
+    let err = say(&mut link, "lane set fix-ac84 --state review").await.unwrap_err();
+    assert_eq!(err.to_string(), "fix-ac84 is landed, so it takes no more changes.");
+    assert!(link.sent.iter().all(|r| r.method != "lane.update"), "refused before the wire");
+    say(&mut link, "lane set mac-ux --state landed --sha abc").await.expect("review lands in one command");
 }

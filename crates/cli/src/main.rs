@@ -35,8 +35,9 @@ mod files;
 mod clients;
 mod draft_prompt;
 mod board_reads;
-mod event_lines; mod plan;
+mod event_lines;
 mod images;
+mod plan;
 mod tell;
 use images::mime_for;
 mod report;
@@ -110,7 +111,8 @@ enum Command {
     #[command(subcommand)]
     Repo(RepoCmd),
     /// List the color schemes available on this runner.
-    #[command(subcommand)] Theme(ThemeCmd),
+    #[command(subcommand)]
+    Theme(ThemeCmd),
     /// Read and change what this runner's config.toml holds.
     ///
     /// The same writes the apps' runner-settings screens make, for scripting
@@ -154,7 +156,8 @@ enum Command {
     #[command(subcommand)]
     Task(tasks::TaskCmd),
     /// What is read on a board, shared by every device on this runner.
-    #[command(subcommand)] Board(board_reads::BoardCmd),
+    #[command(subcommand)]
+    Board(board_reads::BoardCmd),
     /// The plan (experimental): themes, lanes, and what's next. Run bare for the overview.
     Plan(plan::PlanArgs),
     /// Arrange terminals on screen: tile, zoom, focus, switch groups.
@@ -3773,7 +3776,7 @@ fn event_json(payload: farcooler_protocol::v1::event::Payload) -> Option<serde_j
         // from somebody else's, which is the difference between a refresh
         // and a loop. See `FleetEvent::Task` in crates/client/src/session.rs,
         // which is the same news over the other transport.
-        farcooler_protocol::v1::event::Payload::TaskChanged(t) => task_event_json(&t),
+        farcooler_protocol::v1::event::Payload::TaskChanged(t) => event_lines::task_event_json(&t),
         // The daemon dropped events it owed this connection, because it fell
         // more than a backlog behind. What they were is gone, so a client
         // re-reads everything this stream feeds it: the phones' `resync`,
@@ -3799,42 +3802,6 @@ fn event_json(payload: farcooler_protocol::v1::event::Payload) -> Option<serde_j
         // the bug the board arm above was, and which is what this function
         // exists to make testable.
         _ => return None,
-    })
-}
-
-/// A repository's board moved.
-///
-/// A named function rather than an object built inline in `events`, for the
-/// reason `terminal_event_json` above is one: a hand-built object in a match
-/// arm is a thing with no test, and the field most likely to be dropped from
-/// one is the field a client cannot work without. Here that is `actor` —
-/// without it the line still says "the board moved" and every client keeps
-/// working, and the one thing that quietly stops being possible is telling
-/// your own write apart from somebody else's.
-///
-/// The repository and not just the task, because `task list` answers a whole
-/// board in one call and a board is what is on screen: a client told only
-/// which task moved would still have to read the board to know where the row
-/// goes now. See `FleetEvent::Task` in crates/client/src/session.rs, which is
-/// the same news over the other transport.
-fn task_event_json(t: &farcooler_protocol::v1::TaskChanged) -> serde_json::Value {
-    serde_json::json!({
-        "kind": "task",
-        "task": uuid_of(&t.task_id).to_string(),
-        "short": short_bytes(&t.task_id),
-        "repository": uuid_of(&t.repository_id).to_string(),
-        // `user`, `manager`, or `agent:<uuid>` — the daemon's `Actor` display,
-        // verbatim. Never parsed into parts here: two fields are two things
-        // that can disagree, which is the argument the proto's own comment on
-        // this field makes.
-        "actor": t.actor,
-        // Which board moved, and on a move the board it left too, so a
-        // client showing either one reads it again and a client showing
-        // neither doesn't. Null from a runner without workspaces, where the
-        // repository is the one board. The FFI's event line spells them the
-        // same way.
-        "workspace": workspaces_json::workspace_of(t.workspace_id.as_deref()),
-        "from_workspace": workspaces_json::workspace_of(t.from_workspace_id.as_deref()),
     })
 }
 
@@ -5034,7 +5001,7 @@ mod tests {
     fn a_board_change_reaches_a_client_with_the_repository_and_the_actor() {
         let task = uuid::Uuid::now_v7();
         let repository = uuid::Uuid::now_v7();
-        let json = task_event_json(&farcooler_protocol::v1::TaskChanged {
+        let json = event_lines::task_event_json(&farcooler_protocol::v1::TaskChanged {
             task_id: bytes::Bytes::copy_from_slice(task.as_bytes()),
             repository_id: bytes::Bytes::copy_from_slice(repository.as_bytes()),
             actor: "agent:0198f2c0-0000-7000-8000-000000000001".into(),
@@ -5062,14 +5029,14 @@ mod tests {
     fn a_board_change_names_its_board_and_a_move_names_both() {
         let (billing, main) = (uuid::Uuid::now_v7(), uuid::Uuid::now_v7());
         let bytes = |u: uuid::Uuid| bytes::Bytes::copy_from_slice(u.as_bytes());
-        let json = task_event_json(&farcooler_protocol::v1::TaskChanged {
+        let json = event_lines::task_event_json(&farcooler_protocol::v1::TaskChanged {
             workspace_id: Some(bytes(billing)),
             from_workspace_id: Some(bytes(main)),
             ..Default::default()
         });
         assert_eq!(json["workspace"], billing.to_string());
         assert_eq!(json["from_workspace"], main.to_string());
-        let nil = task_event_json(&farcooler_protocol::v1::TaskChanged {
+        let nil = event_lines::task_event_json(&farcooler_protocol::v1::TaskChanged {
             workspace_id: Some(bytes(uuid::Uuid::nil())),
             ..Default::default()
         });
@@ -5081,7 +5048,7 @@ mod tests {
     #[test]
     fn every_actor_word_crosses_the_cli_unchanged() {
         for word in ["user", "manager", "agent:0198f2c0-0000-7000-8000-000000000001"] {
-            let json = task_event_json(&farcooler_protocol::v1::TaskChanged {
+            let json = event_lines::task_event_json(&farcooler_protocol::v1::TaskChanged {
                 task_id: bytes::Bytes::new(),
                 repository_id: bytes::Bytes::new(),
                 actor: word.to_string(),

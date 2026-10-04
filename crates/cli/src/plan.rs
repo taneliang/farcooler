@@ -402,7 +402,7 @@ fn said_here(what: &str) -> Option<&'static str> {
         "name" => "A lane's name is one word with no spaces, and a theme's is a short phrase. Neither can be empty.",
         "name_taken" => "That name is already in use on this board.",
         "other_board" => "Those cards aren't all on this board.",
-        "lane_state" => "A lane goes from queued to building, review and landing to landed, with fixing between review and landing. It can be dropped from any of those.",
+        "lane_state" => "A lane can't make that move. It goes queued, building, review, landing, landed, with fixing between review and either landing or landed. It can be dropped until it lands.",
         "lane_closed" => "That lane has landed or been dropped, so it takes no more changes.",
         "lane_twice" => "A lane can only be in the plan once.",
         "plan_state" => "Only a queued lane can be in the plan.",
@@ -801,6 +801,9 @@ async fn lane<L: DispatchLink>(
             {
                 return Err("Say what to change: --state, --reason, --train, --no-train, --sha, --agent, --path or --branch.".into());
             }
+            if let Some(to) = state {
+                refuse_a_move(found, to)?;
+            }
             let p = request::Payload::LaneUpdate(pb::LaneUpdate {
                 lane_id: found.id.clone(),
                 state: state.map(|s| s as i32),
@@ -845,6 +848,30 @@ async fn lane<L: DispatchLink>(
             })
         }
     }
+}
+
+/// A move the state machine refuses, said before sending with where the lane
+/// is and where it can go. The machine is the store's (`LaneState::can_move_to`),
+/// so this can't disagree with it.
+fn refuse_a_move(lane: &pb::Lane, to: pb::LaneState) -> Result<(), Failed> {
+    use farcooler_store::plan::LaneState;
+    let word = |s: i32| LaneState::parse(lane_state_word(s));
+    let (Some(from), Some(target)) = (word(lane.state), word(to as i32)) else { return Ok(()) };
+    if from.can_move_to(target) {
+        return Ok(());
+    }
+    let go: Vec<&str> = from.moves().into_iter().map(|s| s.as_str()).collect();
+    Err(match go.as_slice() {
+        [] => format!("{} is {}, so it takes no more changes.", lane.name, from.as_str()),
+        [only] => format!("{} is {}. It can only go to {only}.", lane.name, state_word(lane.state).to_lowercase()),
+        [init @ .., last] => format!(
+            "{} is {}. It can go to {} or {last}.",
+            lane.name,
+            state_word(lane.state).to_lowercase(),
+            init.join(", ")
+        ),
+    }
+    .into())
 }
 
 fn lane_state(arg: LaneStateArg) -> pb::LaneState {
