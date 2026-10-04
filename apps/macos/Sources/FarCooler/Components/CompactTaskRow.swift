@@ -59,7 +59,7 @@ struct CompactTaskRow<Second: View>: View {
             }
         }
         .help(title)
-        .navigatorRow(selected: selected, keyed: keyed, trailing: ColumnGrid.rhythm, box: keyMark)
+        .navigatorRow(selected: selected, keyed: keyed, box: keyMark)
         .background {
             RoundedRectangle.control
                 .fill(Color.accentColor.opacity(highlighted ? 0.16 : 0))

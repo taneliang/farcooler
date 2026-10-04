@@ -93,7 +93,7 @@ struct GridGeometryTests {
 
     /// A store read through a stubbed CLI: three tasks, all new in the last
     /// day, so the summary has groups to draw.
-    private static func store() async -> TaskBoardStore {
+    static func store() async -> TaskBoardStore {
         let client = DaemonClient(target: "", notifications: NotificationCenter())
         let now = Int64(Date().timeIntervalSince1970 * 1000) - 60_000
         client.commandRunnerForTesting = { args in
@@ -113,7 +113,7 @@ struct GridGeometryTests {
     }
 
     /// The orchestrator's row, running, or with none and its Start menu.
-    private static func orchestrator(running: Bool) -> NavigatorOrchestrator {
+    static func orchestrator(running: Bool) -> NavigatorOrchestrator {
         running
             ? NavigatorOrchestrator(state: .working, agent: "claude", status: .working, nowDoing: "Reading the board")
             : NavigatorOrchestrator(state: .none, offers: [.start(.claude)])
@@ -190,6 +190,42 @@ struct GridGeometryTests {
                 "projectTerminalNew.text": NavigatorGrid.text, "boardWorktree.box": NavigatorGrid.boxEdge, "boardWorktree.text": NavigatorGrid.text,
             ])
         checkTheLines(found)
+    }
+
+    /// ov-257: the owner, 4 October: "these circles should probably be
+    /// aligned with the numbers as well?" Every count (a section's, a
+    /// group's) and every status ring (a terminal's, a worktree's) ends on
+    /// the trailing column: the content's right edge less
+    /// `NavigatorGrid.trailingInset`. Right edges, so a 7 pt ring and a 12 pt
+    /// "3" read as one column.
+    ///
+    /// The tolerance is 0.5 pt: at 1x (CI's headless runner) a glyph's drawn
+    /// bounds snap to a whole point. The row it replaced stood a step (18 pt)
+    /// inside the counts, 36 times the tolerance.
+    @Test("Status rings and counts end on one trailing column")
+    func ringsAndCountsShareTheTrailingColumn() async {
+        let store = await Self.store()
+        let width = WorkspaceColumns.navigatorDefault
+        let found = await marks(NavigatorTrailingSpecimenTests.board(store), width: width, height: 1600)
+        let trailing = found.filter { $0.role == .trailing }
+        let column = width - NavigatorGrid.edge - NavigatorGrid.trailingInset
+        for name in ["count", "groupCount", "projectTerminal", "boardWorktree"] {
+            let drawn = trailing.filter { $0.row == name }
+            #expect(!drawn.isEmpty, "no \(name) trailing mark was drawn")
+            for mark in drawn {
+                #expect(
+                    abs(mark.x + mark.width - column) <= 0.5,
+                    "\(mark) ends at \(mark.x + mark.width), not the trailing column at \(column)")
+            }
+        }
+        // And against each other, not just a constant: the rings' right
+        // edges are the counts'.
+        let counts = Set(trailing.filter { $0.row == "count" }.map { ($0.x + $0.width).rounded() })
+        let rings = trailing.filter { $0.row == "projectTerminal" || $0.row == "boardWorktree" }
+        #expect(counts.count == 1, "section counts end at \(counts.sorted())")
+        for ring in rings {
+            #expect(counts.allSatisfy { abs($0 - (ring.x + ring.width)) <= 1 }, "\(ring) vs counts \(counts)")
+        }
     }
 
     @Test(

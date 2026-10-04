@@ -379,7 +379,10 @@ struct CollapsibleSection<Label: View, Accessory: View, Content: View>: View {
             accessory()
                 .environment(\.sectionHeaderHovered, headerHovered)
             if !fillsRow { Spacer(minLength: 0) }
-            if let count { SectionCount(count: count).accessibilityHidden(true) }
+            if let count {
+                SectionCount(count: count).accessibilityHidden(true)
+                    .padding(.trailing, NavigatorGrid.trailingInset)
+            }
         }
         .padding(metrics.headerInsets)  // rhythm-exempt: none in the navigator; a card's own
         .contentShape(Rectangle())
@@ -480,12 +483,24 @@ extension CollapsibleSection where Label == SectionTitle, Accessory == EmptyView
 /// and Xcode draw theirs. Never "Title (N)".
 struct SectionCount: View {
     let text: String
+    /// The row it's marked on at the trailing column for `GridGeometryTests`.
+    var gridRow: String? = "count"
 
-    init(count: Int) { text = "\(count)" }
+    init(count: Int, gridRow: String? = "count") {
+        text = "\(count)"
+        self.gridRow = gridRow
+    }
     /// Progress, "3 of 7": the plan's.
-    init(_ done: Int, of total: Int) { text = "\(done) of \(total)" }
+    init(_ done: Int, of total: Int) {
+        text = "\(done) of \(total)"
+        gridRow = nil
+    }
 
     var body: some View {
+        if let gridRow { label.gridMark(gridRow, .trailing) } else { label }
+    }
+
+    private var label: some View {
         Text(text)
             .font(.system(size: WorkspaceStyle.PaneText.secondary))
             .monospacedDigit()
@@ -518,7 +533,7 @@ struct GroupHeader: View {
         HStack(spacing: SidebarGrid.gap) {
             SectionTitle(text: title, style: .minor).probed("subgroup-title")
             Spacer(minLength: 0)
-            if let count { SectionCount(count: count) }
+            if let count { SectionCount(count: count, gridRow: "groupCount").padding(.trailing, NavigatorGrid.trailingInset) }
         }
         .padding(.vertical, NavigatorRhythm.air)
         .padding(.top, follows ? Self.above : 0)  // rhythm-exempt: Self.above is NavigatorRhythm.subgroup
@@ -582,7 +597,7 @@ extension View {
     /// names the row for `GridGeometryTests`, which reads where it starts.
     func navigatorRow(
         selected: Bool, keyed: Bool, minHeight: CGFloat = 0,
-        leading: CGFloat = NavigatorGrid.textInset, trailing: CGFloat = ColumnGrid.step, box: String? = nil
+        leading: CGFloat = NavigatorGrid.textInset, trailing: CGFloat = NavigatorGrid.trailingInset, box: String? = nil
     ) -> some View {
         modifier(
             NavigatorRowStyle(
@@ -600,9 +615,9 @@ struct NavigatorRowStyle: ViewModifier {
     /// column's (`NavigatorGrid.textInset`), or 0 for a row that draws its
     /// own glyph column first, as the orchestrator's does.
     var leading: CGFloat = NavigatorGrid.textInset
-    /// Its inset at the trailing edge: a task row's runs to the header's
-    /// count, a rhythm in, rather than a step (ov-104).
-    var trailing: CGFloat = ColumnGrid.step
+    /// Its inset at the trailing edge: the trailing column's, where the
+    /// header's count ends (ov-257).
+    var trailing: CGFloat = NavigatorGrid.trailingInset
     var box: String?
 
     /// The selection's fill: `Fill.selection`, shared with the task cards'.

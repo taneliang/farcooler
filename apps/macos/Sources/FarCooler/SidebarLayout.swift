@@ -57,6 +57,8 @@ enum ColumnGrid {
 ///   on both sides: half of it. The owner's screenshot of 3 October
 ///   ("hella cramped") showed boxes sitting exactly on the grid, their glyphs
 ///   squeezed against their edges.
+/// - the trailing column (`trailingInset`): where every count, status ring
+///   and row end meets the content's right edge.
 /// - the glyph column, `mark` wide from `edge`, then `gap` of room before `text`: where a chevron sits, and where
 ///   every glyph inside a box sits too, centered on the same x
 ///   (`glyphCenter`), so the pulsating dot lines up with the carets over it.
@@ -86,6 +88,20 @@ enum NavigatorGrid {
     static let boxEdge: CGFloat = edge - outset
     /// The x a chevron and every glyph in a box is centered on.
     static let glyphCenter: CGFloat = edge + mark / 2
+    /// How far the trailing column's right edge is inside the content
+    /// column's (ov-257). The owner, 4 October: "these circles should
+    /// probably be aligned with the numbers as well?" The section and group
+    /// counts, a terminal's and a worktree's status ring, a task row's text
+    /// and a history row's chevron all end here.
+    ///
+    /// Right edges, not centers: a count is text, so its right edge is
+    /// where it ends, and a ring whose right edge meets it reads as one
+    /// column. Centering the ring on the count's edge would push half of it
+    /// (4 pt) out of the margin the box already leaves, past every row's
+    /// selection and the filter field's own right edge. The column's edge is
+    /// the content's edge, so a row's box reaches `outset` past it, as it
+    /// does on the leading side.
+    static let trailingInset: CGFloat = 0
 }
 
 /// The navigator's vertical rhythm (ov-243): the room over and under every
@@ -162,6 +178,8 @@ extension View {
 /// edge of a filled shape: a field, a row's selection.
 enum GridRole: String, Sendable {
     case chevron, icon, text, box
+    /// A row's accessory at the trailing column: a count, a status ring.
+    case trailing
 }
 
 /// One mark a row reported: which row type, which kind of mark, and where it

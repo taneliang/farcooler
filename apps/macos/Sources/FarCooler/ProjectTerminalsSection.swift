@@ -165,8 +165,10 @@ private struct ProjectTerminalRow: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .fixedSize()
+                        .padding(.trailing, SidebarGrid.gap)
                 }
                 StatusGlyph(status: terminal.status)
+                    .gridMark("projectTerminal", .trailing)
                     .help(terminal.status.label)
             }
             .navigatorRow(selected: selected, keyed: keyed, leading: 0, box: "projectTerminal")

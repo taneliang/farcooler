@@ -195,6 +195,7 @@ private struct BoardWorktreeRow: View {
                 Circle()
                     .fill(status.wantsAttention ? GlancePalette.amber(scheme) : Color.secondary)
                     .frame(width: 7, height: 7)
+                    .gridMark("boardWorktree", .trailing)
                     .help(status.label)
             }
         }

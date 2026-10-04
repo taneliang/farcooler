@@ -131,14 +131,17 @@ struct HistoryRow: View {
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: SidebarGrid.gap)
-                SectionCount(count: total)
-                // Forward, a way to a page: not a disclosure's chevron.
+                SectionCount(count: total, gridRow: nil)
+                // Forward, a way to a page: not a disclosure's chevron. It is
+                // this row's accessory, so it takes the trailing column and
+                // the count stands before it, as Mail's and Settings' do.
                 Image(systemName: "chevron.forward")
                     .font(.system(size: 8, weight: .bold))
                     .foregroundStyle(.tertiary)
+                    .gridMark("historyRow", .trailing)
             }
             .padding(.leading, NavigatorGrid.textInset)
-            .padding(.trailing, ColumnGrid.rhythm)
+            .padding(.trailing, NavigatorGrid.trailingInset)
             .padding(.vertical, NavigatorRhythm.air)
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(hovering ? 0.06 : 0)))
             .contentShape(Rectangle())
