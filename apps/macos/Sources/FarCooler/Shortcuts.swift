@@ -55,7 +55,7 @@ enum Shortcut {
             [
                 Item(keys: "⌘T", action: "New terminal in this worktree"),
                 Item(keys: "⌘W", action: "Close terminal, or the Settings window when it’s in front"),
-                Item(keys: "⌥⌘W", action: "Close every window"),
+                Item(keys: "⌥⌘W", action: "Close every window; the next launch won’t reopen them"),
                 Item(keys: "⌃⌘1 … ⌃⌘9", action: "Jump to a terminal on screen"),
                 Item(keys: "⌘]", action: "Next terminal on screen"),
                 Item(keys: "⌘[", action: "Previous terminal on screen"),

@@ -101,15 +101,14 @@ glyph and a number, then only the state's word, then only the orchestrator's
 mark and the need-you count.
 
 **The title bar's field.** Press ⌘K, or click what the orchestrator is doing,
-and the status area becomes a field. Type a message and press Return to send
-it to this workspace's orchestrator, from anywhere in the workspace, a task
-included; it arrives as if typed into the orchestrator's own composer. Only
-Return sends, an empty message isn't sent, and Esc puts the field away,
-keeping what you'd written for the next ⌘K. With nothing typed, the panel
-under the field shows the activity. Type `/` first, or press ⌘P, to find a
-workspace, task, worktree or terminal instead: ↑ and ↓ move through the
-results and Return opens one. This is Go to Anything; there's no separate
-palette. In a narrow window the field opens in the panel under the title bar.
+and the status area becomes a search field. Type and results appear straight
+away, with no prefix: a workspace, task, worktree or terminal. ↑ and ↓ move
+through them and Return opens the highlighted one. Nothing typed here is sent
+anywhere. **Go to Orchestrator** is a result too: it opens the workspace and
+puts the keyboard in the orchestrator's own pane, where you can talk to it. With
+nothing typed, ⌘K shows the activity, and ⌘P shows the recent terminals. Esc
+puts the field away. This is Go to Anything; there's no separate palette. In a
+narrow window the field opens in the panel under the title bar.
 
 Back and Forward sit after the switcher when the window is wide enough
 for them and the status area's longer form; ⌃⌘← and ⌃⌘→ do the same at any
@@ -183,7 +182,7 @@ search and filter by area.
 A long section shows ten tasks, then **Show N More**. ⌘R re-reads the board.
 The orchestrator owns the task list: it files tasks, moves them and closes them,
 so the app has no New Task… and no way to change a task's status. To add or
-change one, ask the orchestrator (⌘K, below). Answering an agent's question
+change one, ask the orchestrator (Go to Orchestrator in ⌘K, below). Answering an agent's question
 still works from the task.
 
 ## Following a task to its changes

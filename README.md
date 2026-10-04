@@ -53,7 +53,7 @@ reaches your Mac, your iPhone, your Apple Watch or your Android phone.
 
 Every task card says which agent is on it and when it starts, and an
 orchestrator's subagents show up as agents of their own. **Ask the
-Orchestrator** (⌘K on the Mac, a row on a task's screen on the phones) drafts a
+Orchestrator** (a button on a task's screen on the Mac, a row on it on the phones) drafts a
 message about the task you're looking at.
 
 A few words carry the whole product. A **workspace** is one line of work in a
