@@ -73,6 +73,7 @@ struct PlanModelTests {
         #expect(review.agents[0].endedAt == Self.now - Self.hour && review.agents[1].endedAt == nil)
         #expect(review.spend.totalTokens == 470_000 && review.spend.costMicros == 31_000_000)
         #expect(review.spend.unmeasuredAgents == 1)
+        #expect(review.spend.sharedAgents == 1)
         #expect(plan.lanes[2].landedSha == "4d3c8cb1e2")
         #expect(plan.nextUp.map(\.name) == ["mac-fu3"])
         #expect(plan.nextUp.first?.planRank == 1)
@@ -244,6 +245,10 @@ struct PlanModelTests {
         s.unmeasuredAgents = 0
         s.costMicros = nil
         #expect(PlanWords.spend(s, locale: us) == "470K tokens")
+        s.sharedAgents = 1
+        #expect(PlanWords.spend(s, locale: us) == "470K tokens · 1 agent’s spend split with other lanes")
+        s.sharedAgents = 2
+        #expect(PlanWords.spend(s, locale: us) == "470K tokens · 2 agents’ spend split with other lanes")
     }
 
     @Test("An agent reads as its role, its model and how long it ran, to now while it's open")

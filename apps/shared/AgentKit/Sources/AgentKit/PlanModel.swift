@@ -102,6 +102,9 @@ public struct PlanSpend: Decodable, Equatable, Sendable {
     public var costMicros: Int64?
     public var runs = 0
     public var unmeasuredAgents = 0
+    /// Agents also recorded on another lane, whose spend is split evenly
+    /// across their lanes: the figures hold this lane's part.
+    public var sharedAgents = 0
 
     public init() {}
 
@@ -116,10 +119,12 @@ public struct PlanSpend: Decodable, Equatable, Sendable {
         costMicros = try c.decodeIfPresent(Int64.self, forKey: .costMicros)
         runs = try c.decodeIfPresent(Int.self, forKey: .runs) ?? 0
         unmeasuredAgents = try c.decodeIfPresent(Int.self, forKey: .unmeasuredAgents) ?? 0
+        sharedAgents = try c.decodeIfPresent(Int.self, forKey: .sharedAgents) ?? 0
     }
 
     private enum CodingKeys: String, CodingKey {
         case inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costMicros, runs, unmeasuredAgents
+        case sharedAgents
     }
 
     public var totalTokens: UInt64 { inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens }
@@ -453,6 +458,11 @@ public enum PlanWords {
         }
         if s.unmeasuredAgents > 0 {
             parts.append(s.unmeasuredAgents == 1 ? "1 agent not reported" : "\(s.unmeasuredAgents) agents not reported")
+        }
+        if s.sharedAgents > 0 {
+            parts.append(
+                s.sharedAgents == 1
+                    ? "1 agent’s spend split with other lanes" : "\(s.sharedAgents) agents’ spend split with other lanes")
         }
         return parts.joined(separator: " · ")
     }

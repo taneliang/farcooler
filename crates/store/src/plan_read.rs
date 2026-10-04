@@ -99,6 +99,11 @@ pub struct LaneSpend {
     /// How many runs the totals cover.
     pub runs: u32,
     pub unmeasured_agents: u32,
+    /// How many of the lane's Claude agents are also recorded on another
+    /// lane. Each such agent's spend is split evenly across its lanes, so
+    /// summing lanes counts it once (review 1004j P1), and a client says the
+    /// lane's figure holds a split.
+    pub shared_agents: u32,
 }
 
 /// A lane, with everything about it that is derived.
@@ -357,19 +362,44 @@ fn fix_rounds_of(conn: &Connection, lane: Uuid) -> Result<u32> {
 
 /// Totals over the turns recorded for the lane's Claude agents: a subagent's
 /// turns are keyed `claude-log:agent:<agentId>` (`daemon/src/usage.rs`).
+///
+/// An agent recorded on several lanes (a reviewer given two branches) did
+/// one run's work for all of them, and its turns can't say which part was
+/// whose. So its spend is split evenly across its lanes: each lane gets
+/// `1 / lanes` of every figure, and the lanes' totals sum to what it spent,
+/// not to that times the lanes. `shared_agents` says how many such agents a
+/// lane holds, so the figure is labeled a split. Runs still count whole: a
+/// run is in each lane it worked for.
 fn spend_of(conn: &Connection, lane: Uuid, agents: &[LaneAgent]) -> Result<LaneSpend> {
     let (input, output, read, write, priced, unpriced, runs): (i64, i64, i64, i64, i64, i64, i64) = conn
         .query_row(
-            "SELECT coalesce(sum(m.input_tokens), 0), coalesce(sum(m.output_tokens), 0),
-                    coalesce(sum(m.cache_read_tokens), 0), coalesce(sum(m.cache_write_tokens), 0),
-                    coalesce(sum(m.cost_micros), 0), coalesce(sum(m.cost_micros IS NULL), 0),
+            "WITH lanes_of AS (
+                 SELECT harness, agent_id, count(*) AS lanes FROM lane_agents GROUP BY harness, agent_id
+             )
+             SELECT CAST(coalesce(round(sum(m.input_tokens * 1.0 / s.lanes)), 0) AS INTEGER),
+                    CAST(coalesce(round(sum(m.output_tokens * 1.0 / s.lanes)), 0) AS INTEGER),
+                    CAST(coalesce(round(sum(m.cache_read_tokens * 1.0 / s.lanes)), 0) AS INTEGER),
+                    CAST(coalesce(round(sum(m.cache_write_tokens * 1.0 / s.lanes)), 0) AS INTEGER),
+                    CAST(coalesce(round(sum(m.cost_micros * 1.0 / s.lanes)), 0) AS INTEGER),
+                    coalesce(sum(m.cost_micros IS NULL), 0),
                     count(DISTINCT t.id)
                FROM lane_agents a
+               JOIN lanes_of s ON s.harness = a.harness AND s.agent_id = a.agent_id
                JOIN agent_turns t ON t.turn_key = 'claude-log:agent:' || a.agent_id
                JOIN agent_turn_models m ON m.turn_id = t.id
               WHERE a.lane_id = ?1 AND a.harness = 'claude'",
             params![uuid_blob(lane)],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
+        )
+        .map_err(map_err)?;
+    let shared: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM lane_agents a
+              WHERE a.lane_id = ?1 AND a.harness = 'claude'
+                AND EXISTS (SELECT 1 FROM lane_agents o
+                             WHERE o.harness = a.harness AND o.agent_id = a.agent_id AND o.lane_id != a.lane_id)",
+            params![uuid_blob(lane)],
+            |r| r.get(0),
         )
         .map_err(map_err)?;
     let measured: i64 = conn
@@ -390,5 +420,6 @@ fn spend_of(conn: &Connection, lane: Uuid, agents: &[LaneAgent]) -> Result<LaneS
         cost_micros: (runs > 0 && unpriced == 0).then_some(priced),
         runs: runs.max(0) as u32,
         unmeasured_agents: (agents.len() as i64 - measured).max(0) as u32,
+        shared_agents: shared.max(0) as u32,
     })
 }

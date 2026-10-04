@@ -326,6 +326,7 @@ fn pb_spend(s: &LaneSpend) -> pb::LaneSpend {
         cost_micros: s.cost_micros,
         runs: s.runs,
         unmeasured_agents: s.unmeasured_agents,
+        shared_agents: s.shared_agents,
     }
 }
 

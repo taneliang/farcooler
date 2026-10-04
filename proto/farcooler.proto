@@ -3941,6 +3941,10 @@ message LaneSpend {
   optional int64 cost_micros = 5;
   uint32 runs = 6;
   uint32 unmeasured_agents = 7;
+  // How many of the lane's agents also worked in another lane. Each one's
+  // spend is split evenly across its lanes, so the figures above hold only
+  // this lane's part of it and summing lanes counts it once.
+  uint32 shared_agents = 8;
 }
 
 message Lane {

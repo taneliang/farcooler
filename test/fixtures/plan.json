@@ -47,6 +47,7 @@
         "input_tokens": 0,
         "output_tokens": 0,
         "runs": 0,
+        "shared_agents": 0,
         "unmeasured_agents": 0
       },
       "stale": false,
@@ -98,6 +99,7 @@
         "input_tokens": 300000,
         "output_tokens": 170000,
         "runs": 2,
+        "shared_agents": 1,
         "unmeasured_agents": 1
       },
       "stale": false,
@@ -132,6 +134,7 @@
         "input_tokens": 0,
         "output_tokens": 0,
         "runs": 0,
+        "shared_agents": 0,
         "unmeasured_agents": 0
       },
       "stale": false,

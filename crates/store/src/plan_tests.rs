@@ -301,6 +301,32 @@ fn a_lane_s_spend_is_its_own_agents_runs() {
     assert_eq!(store.plan(main, 0).unwrap().lanes[0].spend.unmeasured_agents, 1);
 }
 
+/// An agent on two lanes counts once across them (review 1004j P1): each
+/// lane holds half its spend and says one agent is shared, so the lanes sum
+/// to what it spent. An agent on one lane still counts whole there.
+#[test]
+fn an_agent_on_two_lanes_is_split_between_them_and_counted_once() {
+    let (store, main, t) = board(2);
+    let card = |i: usize| vec![LaneCard { task_id: t[i].id, slice: String::new() }];
+    let a = store.create_lane(main, &NewLane { name: "a".into(), ..Default::default() }, &card(0), Some(&builder("a1")), Actor::Manager).unwrap();
+    let b = store.create_lane(main, &NewLane { name: "b".into(), ..Default::default() }, &card(1), Some(&builder("b1")), Actor::Manager).unwrap();
+    let reviewer = AgentRecord { role: AgentRole::Review, ..builder("rev") };
+    store.record_lane_agent(a.id, &reviewer, Actor::Manager).unwrap();
+    store.record_lane_agent(b.id, &reviewer, Actor::Manager).unwrap();
+    run_turn(&store, "a1", 1000);
+    run_turn(&store, "rev", 600);
+
+    let plan = store.plan(main, 0).unwrap();
+    let spend = |name: &str| plan.lanes.iter().find(|l| l.lane.name == name).unwrap().spend;
+    let (a, b) = (spend("a"), spend("b"));
+    assert_eq!((a.input_tokens, a.output_tokens), (1000 + 300, 500 + 150), "a1 whole, half the reviewer's");
+    assert_eq!((b.input_tokens, b.output_tokens), (300, 150), "half the reviewer's");
+    assert_eq!(a.input_tokens + b.input_tokens, 1000 + 600, "the reviewer counts once across the lanes");
+    assert_eq!((a.cost_micros, b.cost_micros), (Some(2_000 + 1_000), Some(1_000)), "each run is priced 2,000");
+    assert_eq!((a.shared_agents, b.shared_agents), (1, 1));
+    assert_eq!((a.runs, b.runs), (2, 1), "a run is in each lane it worked for");
+}
+
 /// A lane's spend is what `usage.report` says for the same agents: the lane
 /// reads `agent_turns` by agent key, the report reads them by the card the
 /// agents are recorded on, and for one card the two are the same sum.

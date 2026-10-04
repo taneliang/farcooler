@@ -62,6 +62,7 @@
     "input_tokens": 300000,
     "output_tokens": 170000,
     "runs": 2,
+    "shared_agents": 0,
     "unmeasured_agents": 0
   },
   "stale": false,

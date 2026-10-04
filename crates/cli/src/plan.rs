@@ -957,7 +957,19 @@ fn spend_words(spend: &pb::LaneSpend) -> String {
     if spend.unmeasured_agents > 0 {
         said.push_str(&format!(" · {} not reported", count(spend.unmeasured_agents as usize, "agent")));
     }
+    said.push_str(&shared_words(spend.shared_agents));
     said
+}
+
+/// " · 1 agent's spend split with other lanes": an agent on several lanes
+/// counts once across them, evenly, and the lane's figure says it holds a
+/// part. Empty when no agent is shared.
+fn shared_words(shared: u32) -> String {
+    match shared {
+        0 => String::new(),
+        1 => " · 1 agent\u{2019}s spend split with other lanes".to_string(),
+        n => format!(" · {n} agents\u{2019} spend split with other lanes"),
+    }
 }
 
 /// A card's part of a lane's spend. A lane's agents are recorded on the lane,
@@ -1309,6 +1321,7 @@ fn lane_json(l: &pb::Lane, keys: &Keys) -> Value {
             "input_tokens": spend.input_tokens, "output_tokens": spend.output_tokens,
             "cache_read_tokens": spend.cache_read_tokens, "cache_write_tokens": spend.cache_write_tokens,
             "cost_micros": spend.cost_micros, "runs": spend.runs, "unmeasured_agents": spend.unmeasured_agents,
+            "shared_agents": spend.shared_agents,
         },
     })
 }

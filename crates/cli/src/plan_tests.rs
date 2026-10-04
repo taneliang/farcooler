@@ -470,6 +470,16 @@ fn spend_puts_tokens_first_and_a_card_s_part_is_a_share() {
     assert_eq!(share_words(&pb::LaneSpend::default(), 3), None, "nothing measured is never a share of zero");
 }
 
+/// A lane holding part of an agent shared with other lanes says so, after
+/// what wasn't reported (review 1004j P1).
+#[test]
+fn a_lane_with_a_shared_agent_says_its_figure_is_a_split() {
+    let one = pb::LaneSpend { input_tokens: 2_000, runs: 1, shared_agents: 1, ..Default::default() };
+    assert_eq!(spend_words(&one), "2K tokens · 1 agent\u{2019}s spend split with other lanes");
+    let two = pb::LaneSpend { input_tokens: 2_000, runs: 1, unmeasured_agents: 1, shared_agents: 2, ..Default::default() };
+    assert_eq!(spend_words(&two), "2K tokens · 1 agent not reported · 2 agents\u{2019} spend split with other lanes");
+}
+
 /// A lane stuck for over an hour says how long.
 #[test]
 fn a_stale_lane_says_how_long() {
@@ -558,7 +568,7 @@ fn plan_json_is_the_shape_the_mac_reads() {
     review.cards[0].slice = "Mac".into();
     review.spend = Some(pb::LaneSpend {
         input_tokens: 300_000, output_tokens: 170_000, cost_micros: Some(31_000_000), runs: 2, unmeasured_agents: 1,
-        ..Default::default()
+        shared_agents: 1, ..Default::default()
     });
     review.agents = vec![
         pb::LaneAgent { harness: "claude".into(), agent_id: "a1".into(), role: pb::LaneAgentRole::Build as i32,
