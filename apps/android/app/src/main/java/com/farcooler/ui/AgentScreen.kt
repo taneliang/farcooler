@@ -82,6 +82,7 @@ import com.farcooler.model.AgentChoice
 import com.farcooler.model.ComposerToken
 import com.farcooler.model.ConfigOption
 import com.farcooler.model.PromptImageBudget
+import com.farcooler.model.QueueControls
 import com.farcooler.model.QueuedPrompt
 import com.farcooler.model.TailSample
 import com.farcooler.model.TranscriptItem
@@ -153,6 +154,9 @@ fun AgentScreen(
     val phase by stream.phase.collectAsStateWithLifecycle()
     val answering by stream.answering.collectAsStateWithLifecycle()
     val sendFailure by stream.sendFailure.collectAsStateWithLifecycle()
+    val queueFailure by stream.queueFailure.collectAsStateWithLifecycle()
+    val daemon by connection.daemon.collectAsStateWithLifecycle()
+    val queueControls = QueueControls.gate(daemon)
     val transcript = stream.transcript
 
     val terminal = model.fleet.terminal(ref)
@@ -327,6 +331,7 @@ fun AgentScreen(
                         onEdit = { text -> stream.editQueued(queued.id, text) },
                         onCancel = { stream.cancelQueued(queued.id) },
                         onSteer = { stream.steerQueued(queued.id) },
+                        controls = queueControls,
                     )
                 }
                 transcript.pendingPermission
@@ -348,6 +353,14 @@ fun AgentScreen(
                             },
                         )
                     }
+                }
+
+                queueFailure?.let { failure ->
+                    SendFailureRow(
+                        message = failure.message,
+                        onRetry = { stream.retryQueue() },
+                        onDismiss = { stream.dismissQueueFailure() },
+                    )
                 }
 
                 sendFailure?.let { failure ->
@@ -836,84 +849,6 @@ private fun WorkingRow() {
         "Working" + ".".repeat(dots),
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-}
-
-/** A message written but not yet sent. */
-@Composable
-private fun QueuedRow(
-    queued: QueuedPrompt,
-    onEdit: (String) -> Unit,
-    onCancel: () -> Unit,
-    onSteer: () -> Unit,
-) {
-    var editing by remember { mutableStateOf(false) }
-    var draft by remember(queued.id) { mutableStateOf(queued.text) }
-
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-    ) {
-        if (editing) {
-            BasicTextField(
-                value = draft,
-                onValueChange = { draft = it },
-                textStyle = LocalTextStyle.current.copy(
-                    color = MaterialTheme.colorScheme.onSurface,
-                ),
-                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                modifier = Modifier.fillMaxWidth(),
-            )
-        } else if (queued.text.isEmpty() && queued.imageCount > 0) {
-            // An image with no words is still a message. Without this the
-            // bubble was empty and read as a dropped attachment.
-            Text(
-                if (queued.imageCount == 1) "1 image" else "${queued.imageCount} images",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        } else {
-            Text(queued.text, style = MaterialTheme.typography.bodyMedium)
-        }
-
-        Row(
-            Modifier.padding(top = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                "Queued",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            // The queue's whole point is that a message you can still see and
-            // still edit beats one already gone — so waiting is the default.
-            // But a message written mid-turn is very often a correction, and a
-            // correction is worth nothing once the wrong thing has been done.
-            Action("Send now", onSteer)
-            Action(if (editing) "Save" else "Edit") {
-                if (editing) {
-                    editing = false
-                    val trimmed = draft.trim()
-                    if (trimmed.isNotEmpty() && trimmed != queued.text) onEdit(trimmed)
-                } else {
-                    draft = queued.text
-                    editing = true
-                }
-            }
-            Action("Remove", onCancel)
-        }
-    }
-}
-
-@Composable
-private fun Action(label: String, onClick: () -> Unit) {
-    Text(
-        label,
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.clickable(onClick = onClick),
     )
 }
 

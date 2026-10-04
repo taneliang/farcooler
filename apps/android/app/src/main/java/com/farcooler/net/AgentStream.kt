@@ -3,12 +3,13 @@ package com.farcooler.net
 import android.os.SystemClock
 import com.farcooler.core.ClientCore
 import com.farcooler.core.DisconnectedException
+import com.farcooler.core.refusalWord
 import com.farcooler.model.AgentEvent
 import com.farcooler.model.PermissionAnswering
+import com.farcooler.model.QueueControls
 import com.farcooler.model.Sequenced
 import com.farcooler.model.Transcript
 import com.farcooler.model.Trouble
-import com.farcooler.core.refusalWord
 import com.farcooler.model.troubleFor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -43,7 +44,7 @@ class AgentStream(
      * How a request reaches the runner. The core's, except in a test, which is
      * how [answer] and [send] run in a JVM test as the app calls them.
      */
-    call: suspend (method: String, args: JsonObject) -> JsonObject = { method, args ->
+    private val call: suspend (method: String, args: JsonObject) -> JsonObject = { method, args ->
         core.call(method, args)
     },
 ) {
@@ -274,20 +275,66 @@ class AgentStream(
     /** Put the failed prompt's warning away. */
     fun dismissSendFailure() = sending.dismissSendFailure()
 
+    /**
+     * The queue call a runner refused, said beside the composer (ov-171).
+     *
+     * These were `fireAndForget`, so a refused edit, Remove or Send now looked
+     * exactly like one the runner took. Kept until the next queue call works,
+     * or dismissed.
+     */
+    private val _queueFailure = MutableStateFlow<QueueFailure?>(null)
+    val queueFailure: StateFlow<QueueFailure?> = _queueFailure.asStateFlow()
+
+    /** A queue call that did not go: what to say, and what to run again. */
+    data class QueueFailure(
+        val message: String,
+        val method: String,
+        val args: JsonObject,
+        val action: QueueControls.Action,
+    )
+
+    private fun queueCall(action: QueueControls.Action, method: String, args: JsonObject) {
+        scope.launch {
+            try {
+                call(method, args)
+                _queueFailure.value = null
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                _queueFailure.value = QueueFailure(
+                    QueueControls.refusal(action, e.refusalWord, e.message), method, args, action,
+                )
+            }
+        }
+    }
+
+    /** Run the failed queue call again. */
+    fun retryQueue() {
+        val failed = _queueFailure.value ?: return
+        _queueFailure.value = null
+        queueCall(failed.action, failed.method, failed.args)
+    }
+
+    fun dismissQueueFailure() {
+        _queueFailure.value = null
+    }
+
     /** Rewrite a message that has not gone out yet. */
-    fun editQueued(id: String, text: String) = fireAndForget(
+    fun editQueued(id: String, text: String) = queueCall(
+        QueueControls.Action.EDIT,
         "terminal.agent_edit_queued",
         Connection.args("terminal" to terminal, "queuedId" to id, "text" to text),
     )
 
     /** Send a queued message into the turn already running. */
-    fun steerQueued(id: String) = fireAndForget(
+    fun steerQueued(id: String) = queueCall(
+        QueueControls.Action.STEER,
         "terminal.agent_steer_queued",
         Connection.args("terminal" to terminal, "queuedId" to id),
     )
 
     /** Take back a message that has not gone out yet. */
-    fun cancelQueued(id: String) = fireAndForget(
+    fun cancelQueued(id: String) = queueCall(
+        QueueControls.Action.CANCEL,
         "terminal.agent_cancel_queued",
         Connection.args("terminal" to terminal, "queuedId" to id),
     )
