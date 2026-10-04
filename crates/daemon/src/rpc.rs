@@ -2638,43 +2638,9 @@ mod tests {
         assert_eq!(required_scope("layout.list"), Some(Scope::Read));
     }
 
-    /// Every method on the wire is dispatched here, and every route this file
-    /// dispatches is a method on the wire.
-    ///
-    /// A SET DIFFERENCE, both ways, because the two sides fail differently and
-    /// a check in one direction misses the one that matters. A route in
-    /// `dispatch` that is not a `Method` is unreachable: `required_scope`
-    /// refuses it as an unknown method, which reads to a client as "this
-    /// runner is too old" for a feature this runner has. That is how the agent
-    /// queue's three shipped. A `Method` not in `dispatch` is worse: the scope
-    /// check passes, the method falls through to the `other =>` arm, and the
-    /// caller is told `NotFound` as though the thing it named did not exist.
-    ///
-    /// Scopes need no such check: `scope_of` is a match on `Method` with no
-    /// wildcard, so the compiler holds that side. Dispatch matches wire names
-    /// and the compiler cannot, so it is read out of this file's own source and
-    /// compared with `Method::ALL`, never with a list typed here.
-    #[test]
-    fn every_method_is_dispatched_and_every_dispatched_route_is_a_method() {
-        let source = include_str!("rpc.rs");
-        let methods: std::collections::BTreeSet<String> =
-            Method::ALL.iter().map(|m| m.name().to_string()).collect();
-        let prefixes: std::collections::BTreeSet<String> =
-            methods.iter().map(|m| format!("{}.", m.split('.').next().expect("a dotted name"))).collect();
-        let prefixes: Vec<&str> = prefixes.iter().map(String::as_str).collect();
-        // `"layout."` alone is the prefix arm's own pattern, not a route.
-        let dispatched: std::collections::BTreeSet<String> =
-            methods_in(source, "async fn dispatch", "\n    }\n", &prefixes)
-                .into_iter()
-                .filter(|m| !m.ends_with('.'))
-                .collect();
-
-        assert!(dispatched.len() > 50, "the slicing found {}, so this test proves nothing", dispatched.len());
-        let unknown: Vec<_> = dispatched.difference(&methods).collect();
-        assert!(unknown.is_empty(), "dispatched but refused as unknown on every runner: {unknown:?}");
-        let unhandled: Vec<_> = methods.difference(&dispatched).collect();
-        assert!(unhandled.is_empty(), "a method with a scope and no handler: {unhandled:?}");
-    }
+    // `every_method_is_dispatched_and_every_dispatched_route_is_a_method` is
+    // `tests/every_method_is_dispatched.rs` (ov-171): it parses this file, so
+    // it reads the arms rather than the text.
 
     /// The board and workspace routes are split the way the scope table's
     /// comments say they are, which no set comparison can see.
@@ -2709,34 +2675,6 @@ mod tests {
         // a route here would fail on a caller's data rather than at review.
         assert_eq!(required_scope("task.note_update"), None);
         assert_eq!(required_scope("task.note_edit"), None);
-    }
-
-    /// The method string literals under `prefixes` (`"task."`, …) inside one
-    /// function of this file.
-    ///
-    /// `start` names the function, `end` the first thing after its body — `\n}\n`
-    /// for a free function, `\n    }\n` for one inside an `impl`. Crude on
-    /// purpose: a parser here would be a second thing that can be wrong.
-    #[cfg(test)]
-    fn methods_in(
-        source: &str,
-        start: &str,
-        end: &str,
-        prefixes: &[&str],
-    ) -> std::collections::BTreeSet<String> {
-        let body = source.split_once(start).expect("this file declares that function").1;
-        let body = body.split_once(end).expect("that function closes").0;
-        let mut found = std::collections::BTreeSet::new();
-        for prefix in prefixes {
-            let needle = format!("\"{prefix}");
-            let mut rest = body;
-            while let Some((_, after)) = rest.split_once(needle.as_str()) {
-                let (name, tail) = after.split_once('"').expect("a closed string literal");
-                found.insert(format!("{prefix}{name}"));
-                rest = tail;
-            }
-        }
-        found
     }
 
     #[test]

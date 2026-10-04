@@ -1034,6 +1034,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "ssh-key",
+ "syn 2.0.119",
  "tempfile",
  "thiserror 2.0.19",
  "tokio",

@@ -127,6 +127,10 @@ landlock = "0.4"
 
 [dev-dependencies]
 tempfile = "3"
+# Parses `rpc.rs` so `every_method_is_dispatched` reads the arms off the syntax
+# tree rather than scanning the text. Already in the lockfile through the
+# derive macros; a dev-dependency only.
+syn = { version = "2", features = ["full", "visit"] }
 # To leave a database the way a newer build would (`refusal`'s tests): the
 # store has no method that writes a version it doesn't know, and must not.
 rusqlite.workspace = true
