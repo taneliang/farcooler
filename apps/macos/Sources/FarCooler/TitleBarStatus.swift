@@ -540,9 +540,16 @@ struct OrchestratorMark: View {
                         .gridMark("orchestratorDot", .icon)
                 }
         case .needsYou, .unread:
-            Circle()
-                .fill(state == .needsYou ? Color.accentColor : GlancePalette.amber(scheme))
-                .frame(width: 7, height: 7)
+            // Over the resting icon's frame too, so it takes the icon's place
+            // rather than sitting on its own baseline (ov-260 review, L4).
+            restingIcon
+                .hidden()
+                .overlay {
+                    Circle()
+                        .fill(state == .needsYou ? Color.accentColor : GlancePalette.amber(scheme))
+                        .frame(width: 7, height: 7)
+                        .gridMark("orchestratorDot", .icon)
+                }
         case .idle:
             restingIcon.foregroundStyle(.secondary)
         case .none, .stopped:

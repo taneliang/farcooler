@@ -147,6 +147,13 @@ struct GridGeometryTests {
         // a cell in; in the board it's `glyphCenter` (`checkTheLines`).
         #expect(abs(dot.midX - NavigatorGrid.mark / 2) <= 0.5, "dot \(dot) isn't centered in the glyph column")
         #expect(abs(dot.midY - title.midY) <= 0.5, "dot \(dot) vs title \(title): y centers \(dot.midY), \(title.midY)")
+        // The needs-you and unread dots take the icon's place too (ov-260 review).
+        for state in [OrchestratorRow.State.needsYou, .unread] {
+            let news = await row(state, status: nil).first { $0.row == "orchestratorDot" }
+            guard let news else { Issue.record("no mark for \(state)"); continue }
+            #expect(abs(news.midX - icon.midX) <= 0.5, "\(state) \(news) vs icon \(icon): x centers")
+            #expect(abs(news.midY - icon.midY) <= 0.5, "\(state) \(news) vs icon \(icon): y centers \(news.midY), \(icon.midY)")
+        }
     }
 
     /// ov-230: every box reaches `outset` past the edge, every chevron
