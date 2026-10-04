@@ -79,7 +79,7 @@ class AppModel(
      */
     private val reviewStorage = PreferenceReviewStorage(application)
 
-    val fleet = FleetRepository(hosts, settings, reviewStorage, viewModelScope)
+    val fleet = FleetRepository(hosts, settings, reviewStorage, viewModelScope, PrefsBoardReads.of(application))
 
     /**
      * The network coming back, which no backoff timer can predict.

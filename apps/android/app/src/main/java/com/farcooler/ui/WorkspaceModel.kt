@@ -4,6 +4,7 @@ import com.farcooler.model.AgentHarness
 import com.farcooler.model.BoardDone
 import com.farcooler.model.BoardReads
 import com.farcooler.model.BoardSectionCut
+import com.farcooler.model.BoardSummary
 import com.farcooler.model.Fleet
 import com.farcooler.model.Repository
 import com.farcooler.model.StateKind
@@ -47,9 +48,63 @@ sealed interface BoardListEntry {
         override val key: String get() = "history/${status.wire}"
         val title: String get() = BoardDone.historyTitle(status)
     }
+
+    // Unread (ov-113): the board's first section, the Mac's `BoardSummary`. Each
+    // group is cut at five with "and N more".
+
+    /** "Unread" and how many lines it lists; Mark all as read is offered while it lists any. */
+    data class UnreadHeader(val count: Int) : BoardListEntry {
+        override val key: String get() = "unread/header"
+        val offersMarkAll: Boolean get() = count > 0
+    }
+
+    /** "You’re all caught up.", when nothing is unread. */
+    data object UnreadNothing : BoardListEntry {
+        override val key: String get() = "unread/nothing"
+        val text: String get() = BoardSummary.NOTHING
+    }
+
+    /** A group's title and how many lines it has in all: Finished, Needs you or review, New, Activity. */
+    data class UnreadGroup(val title: String, val count: Int) : BoardListEntry {
+        override val key: String get() = "unread/group/$title"
+    }
+
+    /** A finish, a move or a new ticket, opening its task. */
+    data class UnreadLine(val item: BoardSummary.Item) : BoardListEntry {
+        override val key: String get() = "unread/line/${item.id}"
+    }
+
+    /** A ticket's newest unread note, opening its task. */
+    data class UnreadNote(val activity: BoardSummary.Activity) : BoardListEntry {
+        override val key: String get() = "unread/note/${activity.id}"
+    }
+
+    /** "and 2 more", under a group cut at five. */
+    data class UnreadMore(val group: String, val count: Int) : BoardListEntry {
+        override val key: String get() = "unread/more/$group"
+        val text: String get() = "and $count more"
+    }
 }
 
 object BoardList {
+    /** The Unread section's entries, for [summary]: its header, then its groups, or "all caught up". */
+    fun unreadEntries(summary: BoardSummary): List<BoardListEntry> {
+        val out = mutableListOf<BoardListEntry>(BoardListEntry.UnreadHeader(summary.count))
+        if (summary.isEmpty) return out + BoardListEntry.UnreadNothing
+        fun <T> group(title: String, items: List<T>, line: (T) -> BoardListEntry) {
+            if (items.isEmpty()) return
+            val (shown, more) = BoardSummary.capped(items)
+            out += BoardListEntry.UnreadGroup(title, items.size)
+            shown.forEach { out += line(it) }
+            if (more > 0) out += BoardListEntry.UnreadMore(title, more)
+        }
+        group("Finished", summary.finished, BoardListEntry::UnreadLine)
+        group("Needs you or review", summary.moved, BoardListEntry::UnreadLine)
+        group("New", summary.created, BoardListEntry::UnreadLine)
+        group("Activity", summary.activity, BoardListEntry::UnreadNote)
+        return out
+    }
+
     /** Statuses that start collapsed when they have tasks: work that has stopped. */
     val COLLAPSED_AT_FIRST: Set<TaskStatus> = setOf(TaskStatus.DONE, TaskStatus.CANCELLED)
 
@@ -65,8 +120,10 @@ object BoardList {
         nowMs: Long = System.currentTimeMillis(),
         reads: BoardReads = BoardReads.firstLook(nowMs),
         showingMore: Set<TaskStatus> = emptySet(),
+        /** What's unread, to list first (ov-113); null leaves the section out. */
+        unread: BoardSummary? = null,
     ): List<BoardListEntry> =
-        board.sections.flatMap { section ->
+        unread?.let(::unreadEntries).orEmpty() + board.sections.flatMap { section ->
             val count = section.rows.size
             val expanded = count > 0 && ((section.status !in COLLAPSED_AT_FIRST) != (section.status in toggled))
             // Done and Canceled draw the unread and today's, newest first,

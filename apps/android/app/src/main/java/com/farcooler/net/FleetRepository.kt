@@ -79,6 +79,8 @@ class FleetRepository(
      */
     private val review: com.farcooler.data.ReviewStorage,
     private val scope: CoroutineScope,
+    /** Handed to every [Connection]: where this phone keeps what it has read (ov-113). */
+    private val boardReads: com.farcooler.model.BoardReadsStore = com.farcooler.model.InMemoryBoardReads(),
 ) {
     private val connections = mutableMapOf<String, Connection>()
     private val starts = mutableMapOf<String, Job>()
@@ -136,7 +138,7 @@ class FleetRepository(
             // `settings.derpMap` rather than its value: a rendezvous changed
             // after this connection exists has to reach its next attempt. See
             // [Connection.rendezvous].
-            val connection = Connection(host, review, settings.derpMap, scope)
+            val connection = Connection(host, review, settings.derpMap, scope, boardReads)
             connection.onFleet = { fleet -> onFleet?.invoke(host, fleet) }
             connections[host.id] = connection
             starts[host.id] = scope.launch { connection.start() }

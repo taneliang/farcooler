@@ -711,10 +711,61 @@ data class BoardReads(val floorMs: Long, val opened: Map<String, Long> = emptyMa
     }
 }
 
-/** Where a board's read state is kept: this phone's preferences, until a runner keeps it. */
+/**
+ * Where a board's read state is kept: this phone's preferences, until a runner
+ * keeps it (ov-113, `BoardReadsKeeper`).
+ */
 interface BoardReadsStore {
     fun load(host: String, workspace: String, nowMs: Long): BoardReads
     fun save(reads: BoardReads, host: String, workspace: String)
+
+    /**
+     * What this phone kept for the board, as opposed to what [load] made up:
+     * marks, and a floor only if someone set it. A first look nobody saw as
+     * Unread is no floor here. Null when nothing real is kept.
+     */
+    fun keptReads(host: String, workspace: String): BoardReads?
+
+    /** Whether this phone's state was sent up to a runner that keeps it, once, so it isn't again. */
+    fun isUploaded(host: String, workspace: String): Boolean
+    fun markUploaded(host: String, workspace: String)
+
+    /** Marks made and not yet acknowledged by the runner, kept so they survive a relaunch. */
+    fun loadPending(host: String, workspace: String): ReadsRaise
+    fun savePending(pending: ReadsRaise, host: String, workspace: String)
+}
+
+/** A store that lives as long as the process: what a test, or a connection built without a phone, keeps its marks in. */
+class InMemoryBoardReads : BoardReadsStore {
+    private val states = mutableMapOf<String, BoardReads>()
+    private val invented = mutableSetOf<String>()
+    private val uploaded = mutableSetOf<String>()
+    private val pending = mutableMapOf<String, ReadsRaise>()
+
+    private fun key(host: String, workspace: String) = "$host/$workspace"
+
+    override fun load(host: String, workspace: String, nowMs: Long): BoardReads {
+        val k = key(host, workspace)
+        return states[k] ?: BoardReads.firstLook(nowMs).also { states[k] = it; invented += k }
+    }
+
+    override fun save(reads: BoardReads, host: String, workspace: String) {
+        val k = key(host, workspace)
+        if (states[k]?.floorMs != reads.floorMs) invented -= k
+        states[k] = reads.pruned()
+    }
+
+    override fun keptReads(host: String, workspace: String): BoardReads? {
+        val k = key(host, workspace)
+        val state = states[k] ?: return null
+        if (k !in invented) return state
+        return BoardReads(Long.MIN_VALUE, state.opened).takeIf { it.opened.isNotEmpty() }
+    }
+
+    override fun isUploaded(host: String, workspace: String) = key(host, workspace) in uploaded
+    override fun markUploaded(host: String, workspace: String) { uploaded += key(host, workspace) }
+    override fun loadPending(host: String, workspace: String) = pending[key(host, workspace)] ?: ReadsRaise()
+    override fun savePending(pending: ReadsRaise, host: String, workspace: String) { this.pending[key(host, workspace)] = pending }
 }
 
 /**

@@ -44,6 +44,7 @@ import SwiftUI
 //   -phone-usage-fails       the runner doesn't answer usage.task
 //   -phone-task-fails        the runner refuses task.get, so a task has no record
 //   -phone-hide-fails        the runner refuses worktree.hide and worktree.unhide
+//   -phone-board-first       Billing opens on its Board segment, for a capture that sends no input
 //   -phone-board-reads       the runner keeps read state (`board_reads`): Billing's floor is
 //                            25 hours back, so bil-5 (done a day ago) and bil-7 (moved
 //                            ten minutes ago) are unread, and `workspace.mark_read` raises it
@@ -106,6 +107,10 @@ struct PhoneHarness: View {
             || key.hasPrefix("board.read.")
         {
             UserDefaults.standard.removeObject(forKey: key)
+        }
+        if CommandLine.arguments.contains("-phone-board-first") {
+            WorkspaceSegment.board.remember(
+                for: PhoneWorkspace(runner: HarnessRunner.host.id.uuidString, workspace: HarnessRunner.billing))
         }
     }()
 

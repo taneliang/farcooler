@@ -56,7 +56,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboard
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
@@ -66,11 +65,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.coroutineScope
+import com.farcooler.model.BoardReads
 import com.farcooler.model.BoardRow
+import com.farcooler.model.BoardSummary
 import com.farcooler.model.Capability
 import com.farcooler.model.FirstRunCopy
 import com.farcooler.model.GlancePalette
@@ -180,18 +180,11 @@ fun BoardTab(
     var toggled by rememberSaveable(workspace.id) { mutableStateOf(emptyList<String>()) }
     // The long sections showing every task, not just ten.
     var showingMore by rememberSaveable(workspace.id) { mutableStateOf(emptyList<String>()) }
-    // What's been read on this board on this phone (ov-104): what Done keeps.
-    val context = LocalContext.current
-    val readsStore = remember { PrefsBoardReads.of(context) }
-    var reads by remember(workspace.id) {
-        mutableStateOf(readsStore.load(connection.host.id, workspace.id, System.currentTimeMillis()))
-    }
-    // Read again on coming back: a task opened from a push or Needs You read
-    // it while this board wasn't looking.
-    LifecycleResumeEffect(workspace.id) {
-        reads = readsStore.load(connection.host.id, workspace.id, System.currentTimeMillis())
-        onPauseOrDispose {}
-    }
+    // What's been read on this board (ov-104, ov-113): the runner's state when it
+    // keeps it, this phone's own when it can't. What Unread lists and Done keeps.
+    val allReads by connection.readState.collectAsStateWithLifecycle()
+    val reads = allReads[workspace.id] ?: BoardReads.firstLook(System.currentTimeMillis())
+    var askingMarkAll by remember { mutableStateOf(false) }
 
     // Read on opening, whatever was last read: the row that opened this may
     // be showing a count from before the last reconnect. While it is open, a
@@ -205,6 +198,8 @@ fun BoardTab(
         scope.launch { snackbar.showSnackbar(why) }
     }
     val flipped = toggled.mapNotNull(TaskStatus::parse).toSet()
+    val notes = board?.let { rememberUnreadNotes(connection, it, reads) } ?: emptyMap()
+    val summary = board?.let { BoardSummary.make(it.rows, notes, reads) }
 
     Box(modifier.fillMaxSize()) {
         PullToRefreshBox(
@@ -277,8 +272,26 @@ fun BoardTab(
                         }
                     }
                     val more = showingMore.mapNotNull(TaskStatus::parse).toSet()
-                    for (entry in BoardList.entries(board, flipped, reads = reads, showingMore = more)) {
+                    for (entry in BoardList.entries(board, flipped, reads = reads, showingMore = more, unread = summary)) {
                         when (entry) {
+                            is BoardListEntry.UnreadHeader -> item(key = entry.key) {
+                                UnreadHeader(entry) { askingMarkAll = true }
+                            }
+                            is BoardListEntry.UnreadNothing -> item(key = entry.key) { UnreadNothingRow(entry) }
+                            is BoardListEntry.UnreadGroup -> item(key = entry.key) { UnreadGroupRow(entry) }
+                            is BoardListEntry.UnreadLine -> item(key = entry.key) {
+                                UnreadLineRow(entry.item.key, entry.item.title, "board-unread-${entry.item.id}", entry.item.whenSaid(System.currentTimeMillis())) {
+                                    connection.readsSync.open(workspace.id, board.row(entry.item.taskId) ?: return@UnreadLineRow)
+                                    onOpenTask(entry.item.taskId)
+                                }
+                            }
+                            is BoardListEntry.UnreadNote -> item(key = entry.key) {
+                                UnreadNoteRow(entry.activity, "board-unread-activity-${entry.activity.key}") {
+                                    connection.readsSync.open(workspace.id, board.row(entry.activity.taskId) ?: return@UnreadNoteRow)
+                                    onOpenTask(entry.activity.taskId)
+                                }
+                            }
+                            is BoardListEntry.UnreadMore -> item(key = entry.key) { UnreadMoreRow(entry) }
                             is BoardListEntry.Header -> item(key = entry.key) {
                                 SectionHeader(entry) {
                                     val word = entry.status.wire
@@ -307,7 +320,7 @@ fun BoardTab(
                                     speaks = speaks,
                                     presence = row.agentPresence(agents.size, speaks),
                                     onOpen = {
-                                        reads = readsStore.open(row, connection.host.id, workspace.id)
+                                        connection.readsSync.open(workspace.id, row)
                                         onOpenTask(row.id)
                                     },
                                     onJump = jump,
@@ -336,6 +349,16 @@ fun BoardTab(
             }
         }
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
+        if (askingMarkAll && summary != null && board != null) {
+            MarkAllReadDialog(
+                message = BoardSummary.markAllReadMessage(summary.taskCount, connection.readsSync.areShared(workspace.id)),
+                onConfirm = {
+                    askingMarkAll = false
+                    connection.readsSync.markAllRead(workspace.id, board.rows, notes.values.flatten().maxOfOrNull { it.atMs })
+                },
+                onDismiss = { askingMarkAll = false },
+            )
+        }
     }
 }
 
@@ -668,10 +691,10 @@ fun TaskDetailScreen(
     }
 
     val row = boards[workspaceId]?.row(taskId)
-    // Opened: read (ov-104), so its finish no longer keeps it in Done's short list.
-    val context = LocalContext.current
+    // Opened: read (ov-104), so its finish no longer keeps it in Done's short
+    // list, and (ov-113) on every device when the runner keeps read state.
     LaunchedEffect(row?.id) {
-        row?.let { PrefsBoardReads.of(context).open(it, connection.host.id, workspaceId) }
+        row?.let { connection.readsSync.open(workspaceId, it) }
     }
     // What this task asks of you, as the runner put it: a decision with its
     // options, a review, or an ask its agent holds. Answered here as on Needs

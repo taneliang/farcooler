@@ -109,6 +109,8 @@ class Connection(
      */
     private val rendezvous: StateFlow<String>,
     private val scope: CoroutineScope,
+    /** Where this phone keeps what it has read, until the runner keeps it (ov-113). */
+    boardReadsStore: com.farcooler.model.BoardReadsStore = com.farcooler.model.InMemoryBoardReads(),
 ) : ChangesSource, com.farcooler.notify.VisibleTerminalSink {
 
     sealed interface Phase {
@@ -530,9 +532,28 @@ class Connection(
         read = { workspace ->
             attempt { core.call("task.list", BoardReads.request(workspace)) }
                 .getOrNull()
-                ?.let { runCatching { TaskBoard.decode(it) }.getOrNull() }
+                ?.let { text ->
+                    runCatching { TaskBoard.decode(text) }.getOrNull()?.also { readsSync.adopt(workspace.id, text) }
+                }
         },
     )
+
+    /** What's been read on each board (ov-113): the runner's state when it keeps it, this phone's when it can't. */
+    val readsSync = BoardReadsKeepers(
+        store = boardReadsStore,
+        host = host.id,
+        scope = scope,
+        markRead = { workspace, raise ->
+            if (daemonBuild.current.value?.can(Capability.BOARD_READS) != true) null
+            else attempt { core.call("workspace.mark_read", raise.arguments(workspace)) }.getOrNull()
+        },
+    )
+    val readState: StateFlow<Map<String, com.farcooler.model.BoardReads>> = readsSync.reads
+
+    /** A task's notes, from `task.get`, or null when the read didn't come back. */
+    suspend fun taskNotes(taskId: String): List<com.farcooler.model.TaskNoteRow>? =
+        attempt { core.call("task.get", kotlinx.serialization.json.buildJsonObject { put("task", taskId) }) }
+            .getOrNull()?.let { runCatching { com.farcooler.model.TaskNotes.decode(it) }.getOrNull() }
 
     /** Each board as last read, by workspace id. */
     val boards: StateFlow<Map<String, TaskBoard>> = boardReads.boards
@@ -677,6 +698,12 @@ class Connection(
     private fun noticeArrived(notice: JsonObject) {
         val event = notice["event"]?.jsonPrimitive?.contentOrNull
         val moved = BoardNotice.of(notice)
+        // Another device read something: this board's whole read state, which
+        // no board needs reading again for (ov-113).
+        if (event == "reads") {
+            scope.launch { readsSync.hear(notice) }
+            return
+        }
         if (event == "needs_you" || event == "resync") {
             needsYouOwed = true
             if (isForeground) scope.launch { readNeedsYou() }
