@@ -31,6 +31,11 @@ struct WindowRestoreTests {
         var mounted = true
         /// This Mac's runner, still coming up until a test says it's up.
         var world = World(seats: [World.Seat(host: "", ready: false)])
+        /// When the launch began, and the restore's clock, held still: the
+        /// wall clock runs on while other tests hold the main actor, and on
+        /// CI it passed the restore's ten seconds before this test's runner
+        /// came up, so both windows gave up and opened Needs You.
+        let launch = Date()
     }
 
     struct Host: View {
@@ -42,7 +47,8 @@ struct WindowRestoreTests {
                     WindowRestore(
                         restoring: $window.restoring, interrupted: { window.selection != nil },
                         world: { window.world }, read: { _, _ in nil },
-                        land: { window.selection = MacDestination.landing($0, click: false, in: .empty).selection }))
+                        land: { window.selection = MacDestination.landing($0, click: false, in: .empty).selection },
+                        now: { window.launch }))
             }
         }
     }
@@ -106,7 +112,7 @@ struct WindowRestoreTests {
         let windows = records.map { record in
             let window = Window()
             if let kept = SelectionMemory.kept(destination: record.place?.encoded ?? "", legacy: "") {
-                window.restoring = DestinationOpen(destination: kept, arrival: .restore, since: Date())
+                window.restoring = DestinationOpen(destination: kept, arrival: .restore, since: window.launch)
             }
             return window
         }
@@ -130,9 +136,12 @@ struct WindowRestoreTests {
                     workspaces: [World.Workspace(id: Self.billing), World.Workspace(id: Self.shop)], worktrees: [])
             ])
         for window in windows { window.world = up }
-        let deadline = ContinuousClock.now + .seconds(5)
-        while windows.contains(where: { $0.selection == nil }), ContinuousClock.now < deadline {
+        // Counted in passes, not seconds: a pass the main actor was held
+        // through is one pass, and the restore task still gets the rest.
+        var passes = 0
+        while windows.contains(where: { $0.selection == nil }), passes < 100 {
             try await Self.settle(shown, for: .milliseconds(50))
+            passes += 1
         }
 
         let expected = records.map { record -> ContentView.Selection? in
