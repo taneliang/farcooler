@@ -235,6 +235,8 @@ struct OrchestratorRowView: View {
     /// The navigator has the keyboard: selected reads in the accent.
     let keyed: Bool
 
+    @Environment(\.colorScheme) private var scheme
+
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 0) {
             // In the glyph column, centered under the carets, so its title is
@@ -258,7 +260,8 @@ struct OrchestratorRowView: View {
                             .gridMark("orchestrator", .text)
                         Text(OrchestratorRow.word(model.state))
                             .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                            .foregroundStyle(model.state == .needsYou ? Color.accentColor : Color.secondary)
+                            // Amber, as every "needs you" is; the accent is for controls.
+                            .foregroundStyle(model.state == .needsYou ? Tint.attention(scheme) : Color.secondary)
                             .lineLimit(1)
                     }
                     if let doing = model.nowDoing {
@@ -389,11 +392,14 @@ struct NavigatorFilterField: View {
                 .boxOutset()
         }
         .overlay {
-            RoundedRectangle.control
-                .strokeBorder(
-                    focused.wrappedValue ? Color.accentColor.opacity(0.6) : WorkspaceStyle.hairline,
-                    lineWidth: focused.wrappedValue ? 1 : 0.5)
-                .boxOutset()
+            // The field's fill is its edge; only focus draws a line, in the
+            // system's own focus-ring color.
+            if focused.wrappedValue {
+                RoundedRectangle.control
+                    // style-exempt: the focus ring, a state
+                    .strokeBorder(Color(nsColor: .keyboardFocusIndicatorColor), lineWidth: 1.5)
+                    .boxOutset()
+            }
         }
         .help("Filter tasks by key or title (⌘F)")
     }

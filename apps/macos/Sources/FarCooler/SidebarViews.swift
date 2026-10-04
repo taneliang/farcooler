@@ -60,7 +60,7 @@ struct WorktreeDot: View {
     private var color: Color {
         switch StateKind.parse(state) {
         case .error: return .red
-        case .hidden: return Color.secondary.opacity(0.4)
+        case .hidden: return Color(nsColor: .tertiaryLabelColor)
         // Red, not a dimmed amber. `StatusGlyph` spends amber on one state —
         // an agent is waiting on you — and a directory that is gone is not
         // waiting for anything. It is the worktree-level `Status.lost`, and
@@ -244,7 +244,7 @@ struct WorktreeDetail: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 40)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.03)))
+        .surface(.inset, in: .card)
     }
 
     private func terminalCard(_ t: Terminal) -> some View {
@@ -273,10 +273,7 @@ struct WorktreeDetail: View {
             }
             .padding(.vertical, 12)
             .padding(.horizontal, 14)  // grid-exempt: a card's inset on the detail page
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.primary.opacity(0.04))
-            )
+            .surface(.inset, in: .card)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

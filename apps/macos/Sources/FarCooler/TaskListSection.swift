@@ -143,7 +143,7 @@ struct HistoryRow: View {
             .padding(.leading, NavigatorGrid.textInset)
             .padding(.trailing, NavigatorGrid.trailingInset)
             .padding(.vertical, NavigatorRhythm.air)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(hovering ? 0.06 : 0)))
+            .background(hovering ? Fill.hover : Color.clear, in: .control)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

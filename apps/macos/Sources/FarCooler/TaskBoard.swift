@@ -948,9 +948,9 @@ struct TaskBoardView: View {
                         keyed: hasKeyboard)
                     .id(NavigatorItem.orchestrator)
                     .padding(.horizontal, NavigatorGrid.edge)
+                    // Space, not a rule, between the orchestrator and the panes.
                     if ruleUnderOrchestrator {
-                        Divider().probed("navigator-divider")
-                            .padding(.vertical, NavigatorRhythm.rule)
+                        Color.clear.frame(height: Spacing.group)
                     }
                 }
                 NavigatorSplitView(panes: panes(
@@ -1245,7 +1245,7 @@ struct TaskListRow: View {
         .contextMenu {
             TaskRowMenu(row: row, live: live, orchestrator: orchestrator, onGoTo: onGoTo, ask: ask)
             if let worktree, !worktreeMenu.isEmpty {
-                Divider()
+                Divider()  // style-exempt: menu
                 Menu("Worktree \(worktree.task)") {
                     WorktreeMenuItems(items: worktreeMenu, perform: performOnWorktree)
                 }
@@ -1269,7 +1269,7 @@ private struct TaskRowMenu: View {
         if live.isEmpty, let orchestrator {
             Button("Go to Orchestrator") { onGoTo(orchestrator) }
         }
-        if !live.isEmpty || orchestrator != nil { Divider() }
+        if !live.isEmpty || orchestrator != nil { Divider() }  // style-exempt: menu
         AskOrchestratorButton(row: row, action: ask)
     }
 }
@@ -1361,7 +1361,7 @@ private struct UnreadableColumnView: View {
                 .padding(.horizontal, NavigatorGrid.textInset)
                 .padding(.vertical, NavigatorRhythm.card)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 8).fill(WorkspaceStyle.paneChrome))
+                .surface(.inset, in: .card)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

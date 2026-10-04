@@ -1,3 +1,4 @@
+import AgentKit
 import SwiftUI
 
 /// The worktree's layouts, when it has more than one.
@@ -68,10 +69,7 @@ struct GroupBar: View {
             .foregroundStyle(active ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
             .padding(.horizontal, 9)
             .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 5)
-                    .fill(active ? Color.accentColor.opacity(0.13) : .clear)
-            )
+            .background(active ? Fill.selection(active: true) : Color.clear, in: .control)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
