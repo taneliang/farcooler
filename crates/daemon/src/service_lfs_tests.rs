@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::git_lfs::{LIMIT, helper};
+use crate::git_lfs::{LIMIT, WRITTEN, helper};
 use crate::service::Service;
 use crate::test_support::fixture;
 
@@ -199,4 +199,61 @@ async fn reading_the_changes_notices_files_an_agent_downloaded_itself() {
     assert!(svc.recheck_lfs_pointers(ws.id).await, "the count moved");
     assert_eq!(svc.store.lfs_pointer_count(ws.id).unwrap(), 0);
     assert!(!svc.recheck_lfs_pointers(ws.id).await, "and says so once");
+}
+
+/// Try Again never writes the worktree's real index (review 1004j X2): an
+/// `update-index` there could put HEAD's entry back over one the agent
+/// staged a moment before, or fail the agent's `git commit` on `index.lock`.
+/// The index file is the same bytes after the retry as before it, and the
+/// filled file still reads as unchanged.
+#[tokio::test]
+async fn trying_again_leaves_the_real_index_byte_for_byte() {
+    let content = small(6);
+    let Some((_dir, svc, repo_id, repo)) = lfs_repo("trying_again_leaves_the_real_index", &content, false).await
+    else {
+        return;
+    };
+    let ws = make(&svc, repo_id).await;
+    let wt = PathBuf::from(&ws.worktree_path);
+    std::fs::write(wt.join("notes.txt"), "mine\n").unwrap();
+    plain(&wt, &["add", "notes.txt"]);
+    store_object(&repo, &content);
+
+    let index = git_dir(&wt).join("index");
+    let before = std::fs::read(&index).unwrap();
+    svc.hydrate_lfs(ws.id).await.unwrap();
+    assert!(std::fs::read(wt.join("big.bin")).unwrap() == content, "the file is its content");
+    assert!(std::fs::read(&index).unwrap() == before, "the real index was written");
+
+    let tree = crate::change_set::working_tree(&wt).await.unwrap();
+    assert!(tree.unstaged.is_empty(), "the filled file reads as unchanged: {:?}", tree.unstaged);
+}
+
+/// An agent that stages an edit of a large file while Try Again runs keeps
+/// it: the entry it staged, and the file it wrote, are what's there after.
+#[tokio::test]
+async fn an_edit_the_agent_stages_mid_retry_survives() {
+    let content = small(7);
+    let Some((_dir, svc, repo_id, repo)) = lfs_repo("an_edit_the_agent_stages_mid_retry", &content, false).await
+    else {
+        return;
+    };
+    let ws = make(&svc, repo_id).await;
+    let wt = PathBuf::from(&ws.worktree_path);
+    store_object(&repo, &content);
+
+    fn agent(wt: &Path) {
+        std::fs::write(wt.join("big.bin"), "the agent's own\n").unwrap();
+        plain(wt, &["add", "big.bin"]);
+    }
+    WRITTEN.with(|w| w.set(Some(agent)));
+    let after = svc.hydrate_lfs(ws.id).await;
+    WRITTEN.with(|w| w.set(None));
+    after.unwrap();
+
+    let staged = plain(&wt, &["ls-files", "-s", "big.bin"]);
+    let theirs = plain(&wt, &["hash-object", "big.bin"]);
+    assert!(staged.contains(theirs.trim()), "the agent's staged entry stands: {staged}");
+    assert_eq!(std::fs::read_to_string(wt.join("big.bin")).unwrap(), "the agent's own\n");
+    assert_eq!(plain(&wt, &["diff", "--cached", "--name-only"]).trim(), "big.bin");
 }

@@ -131,6 +131,9 @@ thread_local! {
     /// [`HYDRATE_LIMIT`] for this thread's worktrees, for a test that wants a
     /// hydration to run out.
     pub(crate) static LIMIT: std::cell::Cell<Option<std::time::Duration>> = const { std::cell::Cell::new(None) };
+    /// Run by [`rehydrate`] once its files are written, standing in for an
+    /// agent working in the worktree meanwhile.
+    pub(crate) static WRITTEN: std::cell::Cell<Option<fn(&Path)>> = const { std::cell::Cell::new(None) };
 }
 
 fn hydrate_limit() -> std::time::Duration {
@@ -270,23 +273,23 @@ fn is_pointer(worktree: &Path, relative: &str) -> bool {
 /// agent's `git commit` record the large files as deleted. This writes
 /// through a throwaway index instead: `read-tree HEAD` makes one with no stat
 /// data, so every entry reads as changed, and `checkout-index -f` writes the
-/// files through the filter without touching the worktree's real index, so an
-/// agent's git sees no gap.
+/// files through the filter.
 ///
-/// What it does then to the real index is one short `update-index
-/// --cacheinfo` for the paths it wrote ([`refresh`]). The real index still
-/// holds the pointer's size for them, and git calls a file whose size differs
-/// from its entry's modified without reading it, so Changes would list every
-/// downloaded file as edited until something rewrote the entry. `--cacheinfo`
-/// writes entries with no stat data, which git compares by content, through
-/// the filter, where they match.
+/// **The worktree's real index is never written**, not even to refresh it:
+/// it is only read (`diff-index`). An `update-index` there, however short,
+/// could land between an agent's `git add` and the check before it and put
+/// HEAD's entry back over the agent's staged one, or make the agent's `git
+/// commit` fail on `index.lock`. The cost is that the real index still holds
+/// a written file's pointer size, so `git status` calls it modified;
+/// `change_set` drops such a path when `git diff` finds no difference, which
+/// is a read too.
 ///
 /// Only paths that are pointers now and whose index entry is still HEAD's are
-/// rewritten: a path the agent edited, staged or removed is theirs. A
-/// failed or timed-out write is undone the same way with LFS off, which
-/// writes the pointer back over a half-written file; these paths held only
-/// pointers, so none of the agent's content is at stake. The caller holds the
-/// repository's lock.
+/// rewritten: a path the agent edited, staged or removed is theirs. Each
+/// batch is checked for pointers again right before it is written, since the
+/// batches before it may have taken minutes. A failed or timed-out write is
+/// undone the same way with LFS off, which writes the pointer back over a
+/// half-written file. The caller holds the repository's lock.
 pub async fn rehydrate(worktree: &Path, recorded: &[String]) -> Vec<String> {
     let still = pointers(worktree, recorded).await;
     if still.is_empty() || helper().is_none() {
@@ -308,83 +311,60 @@ pub async fn rehydrate(worktree: &Path, recorded: &[String]) -> Vec<String> {
     };
     let index = dir.join(format!("fc-lfs-{}.index", std::process::id()));
     let deadline = tokio::time::Instant::now() + hydrate_limit();
-    let wrote = rewrite(worktree, &index, &untouched, &[], deadline).await.is_ok();
-    if !wrote {
+    let wrote = rewrite(worktree, &index, &untouched, &[], deadline, true).await;
+    #[cfg(test)]
+    if let (Ok(()), Some(agent)) = (&wrote, WRITTEN.with(std::cell::Cell::get)) {
+        agent(worktree);
+    }
+    if let Err(attempted) = wrote {
         tracing::warn!("Git LFS files couldn't be downloaded; they stay pointers");
         // With LFS off, whatever the cut-short write left becomes the pointer
-        // again.
+        // again: only the batches it got to.
         let undo = tokio::time::Instant::now() + crate::git::GIT_TIMEOUT;
-        if rewrite(worktree, &index, &untouched, &off(), undo).await.is_err() {
+        let attempted: Vec<&str> = attempted.iter().map(String::as_str).collect();
+        if rewrite(worktree, &index, &attempted, &off(), undo, false).await.is_err() {
             tracing::warn!(worktree = %worktree.display(), "a cut-short LFS retry couldn't be undone");
         }
     }
-    if wrote {
-        refresh(worktree, &index, &untouched).await;
-    }
     let _ = std::fs::remove_file(&index);
     pointers(worktree, recorded).await
-}
-
-/// Tell the worktree's real index about files [`rewrite`] wrote, for the
-/// paths whose entry is still HEAD's: asked again here, since the download
-/// took as long as it took and the agent may have staged one meanwhile.
-async fn refresh(worktree: &Path, index: &Path, paths: &[&str]) {
-    let none: &[crate::git_guard::Pin] = &[];
-    let limit = crate::git::GIT_TIMEOUT;
-    for batch in paths.chunks(BATCH) {
-        let mut args = vec!["diff-index", "--cached", "--name-only", "-z", "HEAD", "--"];
-        args.extend_from_slice(batch);
-        let Ok(changed) = crate::git::git_bytes(worktree, &args).await else { return };
-        let changed: std::collections::HashSet<String> = paths_of(&changed.stdout).into_iter().collect();
-        let mut args = vec!["ls-files", "-s", "-z", "--"];
-        args.extend_from_slice(batch);
-        let Ok(listed) = crate::git::git_with_index(worktree, &args, none, limit, index).await else { return };
-        // "<mode> <oid> <stage>\t<path>", NUL-separated.
-        let entries: Vec<String> = listed
-            .stdout
-            .split('\0')
-            .filter_map(|line| {
-                let (info, path) = line.split_once('\t')?;
-                let mut parts = info.split(' ');
-                let (mode, oid) = (parts.next()?, parts.next()?);
-                (!changed.contains(path)).then(|| format!("{mode},{oid},{path}"))
-            })
-            .collect();
-        if entries.is_empty() {
-            continue;
-        }
-        let mut args = vec!["update-index".to_string()];
-        args.extend(entries.iter().flat_map(|e| ["--cacheinfo".to_string(), e.clone()]));
-        let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        if !matches!(crate::git::git(worktree, &args).await, Ok(u) if u.ok) {
-            tracing::warn!("couldn't tell the index about downloaded Git LFS files; Changes may list them as edited");
-        }
-    }
 }
 
 /// How many paths one `checkout-index` is given: an argument list has a limit.
 const BATCH: usize = 200;
 
 /// `read-tree HEAD` into `index`, then `checkout-index -f` of `paths` against
-/// it, with `pins` after the usual ones, all within `deadline`.
+/// it, with `pins` after the usual ones, all within `deadline`. With
+/// `recheck`, each batch keeps only the paths that are still pointers right
+/// before it is written, so a file an agent filled meanwhile is left alone.
+/// A failure answers every path a `checkout-index` was started on, for the
+/// undo.
 async fn rewrite(
     worktree: &Path,
     index: &Path,
     paths: &[&str],
     pins: &[crate::git_guard::Pin],
     deadline: tokio::time::Instant,
-) -> Result<(), ()> {
+    recheck: bool,
+) -> Result<(), Vec<String>> {
     let left = || deadline.saturating_duration_since(tokio::time::Instant::now());
     let read = crate::git::git_with_index(worktree, &["read-tree", "HEAD"], &[], left(), index).await;
     if !matches!(read, Ok(r) if r.ok) {
-        return Err(());
+        return Err(Vec::new());
     }
+    let mut attempted = Vec::new();
     for batch in paths.chunks(BATCH) {
+        let batch: Vec<String> = batch.iter().map(|p| p.to_string()).collect();
+        let batch = if recheck { pointers(worktree, &batch).await } else { batch };
+        if batch.is_empty() {
+            continue;
+        }
+        attempted.extend(batch.iter().cloned());
         let mut args = vec!["checkout-index", "-f", "-q", "--"];
-        args.extend_from_slice(batch);
+        args.extend(batch.iter().map(String::as_str));
         let wrote = crate::git::git_with_index(worktree, &args, pins, left(), index).await;
         if !matches!(wrote, Ok(w) if w.ok) {
-            return Err(());
+            return Err(attempted);
         }
     }
     Ok(())

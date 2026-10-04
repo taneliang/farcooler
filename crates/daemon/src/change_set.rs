@@ -471,7 +471,45 @@ async fn working_tree_as_git_reports_it(repo: &Path) -> Result<WorkingTree> {
     if !raw.ok {
         return Err(DomainError::OperationFailed);
     }
-    Ok(parse_porcelain_v2_z(&raw.stdout))
+    let mut tree = parse_porcelain_v2_z(&raw.stdout);
+    drop_unchanged_content(repo, &mut tree).await;
+    Ok(tree)
+}
+
+/// Take out the unstaged "modified" paths whose content isn't.
+///
+/// `git status` calls a file modified, without reading it, whenever its size
+/// differs from its index entry's. A filtered file whose entry still holds
+/// the size of what git stores reads that way even when it cleans to the same
+/// blob. Git LFS's large files are the case that matters: `git_lfs::rehydrate`
+/// fills them in without writing the agent's index, so the index keeps each
+/// pointer's size, and every file Try Again filled would be listed as edited
+/// and make the worktree dirty.
+///
+/// `git diff` compares such a file by content (`skip_stat_unmatch`), so a
+/// modified path it doesn't name is dropped. `--no-optional-locks` keeps it a
+/// read: git doesn't refresh the index on the way. It runs only when there is
+/// an unstaged modified path, and costs a content read only for a filtered
+/// one, which the `--numstat` pass of `apply_uncommitted_counts` reads anyway.
+/// When it fails, the tree stays as `git status` said.
+async fn drop_unchanged_content(repo: &Path, tree: &mut WorkingTree) {
+    let asks = |f: &FileChange| f.status == FileStatus::Modified && !f.submodule;
+    if !tree.unstaged.iter().any(asks) {
+        return;
+    }
+    let Ok(diff) = git_bytes(repo, &["--no-optional-locks", "diff", "--name-only", "-z", "--no-renames"]).await else {
+        return;
+    };
+    if !diff.ok {
+        return;
+    }
+    let differ: std::collections::HashSet<String> = diff
+        .stdout
+        .split(|b| *b == 0)
+        .filter(|p| !p.is_empty())
+        .map(|p| String::from_utf8_lossy(p).into_owned())
+        .collect();
+    tree.unstaged.retain(|f| !asks(f) || differ.contains(&f.path));
 }
 
 /// Fill in the line counts `git status` cannot report.
