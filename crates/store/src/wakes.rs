@@ -25,10 +25,29 @@ use crate::models::{Actor, NoteKind, TaskNote, get_uuid, uuid_blob};
 use crate::store::Store;
 use crate::tasks::{insert_note, now_millis};
 
-/// An answer not yet told, with what it said.
+/// What a queued wake is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WakeKind {
+    /// A person's answer to a decision (`answer_wakes`).
+    Answer,
+    /// A task held until a time, whose time came (`hold_wakes`, ov-212).
+    HoldEnded,
+}
+
+impl WakeKind {
+    fn table(self) -> &'static str {
+        match self {
+            WakeKind::Answer => "answer_wakes",
+            WakeKind::HoldEnded => "hold_wakes",
+        }
+    }
+}
+
+/// An answer, or a hold that ended, not yet told, with what it said.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingWake {
-    /// The ANSWER note.
+    pub kind: WakeKind,
+    /// The ANSWER note, or the runner's `wait` note that ended the hold.
     pub note: Uuid,
     pub task: Uuid,
     /// The answer as written.
@@ -58,19 +77,30 @@ impl Store {
 
     /// Every answer not yet told, oldest first.
     pub fn pending_answer_wakes(&self) -> Result<Vec<PendingWake>> {
+        self.pending_wakes(WakeKind::Answer)
+    }
+
+    /// Every hold that ended and wasn't yet told, oldest first.
+    pub fn pending_hold_wakes(&self) -> Result<Vec<PendingWake>> {
+        self.pending_wakes(WakeKind::HoldEnded)
+    }
+
+    fn pending_wakes(&self, kind: WakeKind) -> Result<Vec<PendingWake>> {
         let conn = self.conn();
         let mut stmt = conn
-            .prepare(
+            .prepare(&format!(
                 "SELECT w.note_id, w.task_id, n.body, n.actor, w.enqueued_at, w.claimed_at
-                   FROM answer_wakes w JOIN task_notes n ON n.id = w.note_id
+                   FROM {} w JOIN task_notes n ON n.id = w.note_id
                   WHERE w.done_at IS NULL
                   ORDER BY w.enqueued_at, w.rowid",
-            )
+                kind.table()
+            ))
             .map_err(map_err)?;
         let rows = stmt
             .query_map([], |r| {
                 let actor: String = r.get(3)?;
                 Ok(PendingWake {
+                    kind,
                     note: get_uuid(r, 0)?,
                     task: get_uuid(r, 1)?,
                     body: r.get(2)?,
@@ -148,11 +178,23 @@ impl Store {
     /// Claim `note`'s wake: say typing is about to begin. False when it was
     /// already claimed or done, and then nothing may be typed for it.
     pub fn claim_answer_wake(&self, note: Uuid) -> Result<bool> {
+        self.claim(WakeKind::Answer, note)
+    }
+
+    /// `claim_answer_wake` for whichever queue `wake` came from.
+    pub fn claim_wake(&self, wake: &PendingWake) -> Result<bool> {
+        self.claim(wake.kind, wake.note)
+    }
+
+    fn claim(&self, kind: WakeKind, note: Uuid) -> Result<bool> {
         let claimed = self
             .conn()
             .execute(
-                "UPDATE answer_wakes SET claimed_at = ?2
-                  WHERE note_id = ?1 AND claimed_at IS NULL AND done_at IS NULL",
+                &format!(
+                    "UPDATE {} SET claimed_at = ?2
+                      WHERE note_id = ?1 AND claimed_at IS NULL AND done_at IS NULL",
+                    kind.table()
+                ),
                 params![uuid_blob(note), now_millis()],
             )
             .map_err(map_err)?;
@@ -171,12 +213,24 @@ impl Store {
     /// task as a PROGRESS note from the runner, in one transaction. `None`
     /// when it was already done, so a second finisher writes nothing.
     pub fn finish_answer_wake(&self, note: Uuid, record: Option<&str>) -> Result<Option<Option<TaskNote>>> {
+        self.finish(WakeKind::Answer, note, record)
+    }
+
+    /// `finish_answer_wake` for whichever queue `wake` came from.
+    pub fn finish_wake(&self, wake: &PendingWake, record: Option<&str>) -> Result<Option<Option<TaskNote>>> {
+        self.finish(wake.kind, wake.note, record)
+    }
+
+    fn finish(&self, kind: WakeKind, note: Uuid, record: Option<&str>) -> Result<Option<Option<TaskNote>>> {
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
         let task: Option<Vec<u8>> = {
             use rusqlite::OptionalExtension;
             tx.query_row(
-                "UPDATE answer_wakes SET done_at = ?2 WHERE note_id = ?1 AND done_at IS NULL RETURNING task_id",
+                &format!(
+                    "UPDATE {} SET done_at = ?2 WHERE note_id = ?1 AND done_at IS NULL RETURNING task_id",
+                    kind.table()
+                ),
                 params![uuid_blob(note), now_millis()],
                 |r| r.get(0),
             )

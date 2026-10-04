@@ -185,6 +185,25 @@ pub fn leading_key(description: &str) -> Option<&str> {
     (prefix_ok && number_ok).then_some(key)
 }
 
+/// The spend a subagent already made, filed to the task it now works.
+///
+/// Its transcript is read from when the orchestrator's session is first
+/// followed, which is before the orchestrator says which task the subagent
+/// works, so its `agent_turns` row (`claude-log:agent:<agentId>`, ov-194) is
+/// there already, on no task or on the pane's. Rows written afterwards are
+/// filed by the daemon the same way (`task_of_subagent`).
+fn attach_usage(tx: &Connection, task: Uuid, record: &WorkerRecord) -> Result<()> {
+    if record.harness != "claude" {
+        return Ok(());
+    }
+    tx.execute(
+        "UPDATE agent_turns SET task_id = ?1 WHERE turn_key = ?2 AND task_id IS NOT ?1",
+        params![uuid_blob(task), format!("claude-log:agent:{}", record.agent_id)],
+    )
+    .map_err(map_err)?;
+    Ok(())
+}
+
 /// End one open subagent, with its `worker` note on its own task.
 fn end_one(tx: &Connection, worker: &TaskWorker, reason: EndReason, actor: Actor) -> Result<()> {
     tx.execute(
@@ -376,6 +395,7 @@ impl Store {
             if record.linked_by == LinkedBy::Orchestrator {
                 unlink_elsewhere(&tx, task, record, actor)?;
             }
+            attach_usage(&tx, task, record)?;
             if matches!(status, TaskStatus::Backlog | TaskStatus::Todo) {
                 move_in(&tx, task, status, TaskStatus::InProgress, actor, now)?;
             }
@@ -468,8 +488,46 @@ impl Store {
         rows.collect::<rusqlite::Result<_>>().map_err(map_err)
     }
 
-    /// Every open subagent on the runner, oldest first: what ov-213's lane B
-    /// follows.
+    /// The subagents the runner follows: those open, and those that ended
+    /// at or after `since` (a resume is what ends that), each with the
+    /// workspace of its task. Only ones recorded with a session.
+    pub fn followed_workers(&self, since: i64) -> Result<Vec<(TaskWorker, Uuid)>> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {}, t.workspace_id FROM task_workers w JOIN tasks t ON t.id = w.task_id
+                  WHERE w.session_id IS NOT NULL AND w.harness = 'claude'
+                    AND (w.ended_at IS NULL OR w.ended_at >= ?1)
+                  ORDER BY w.started_at, w.rowid",
+                WORKER_COLUMNS.split(", ").map(|c| format!("w.{c}")).collect::<Vec<_>>().join(", ")
+            ))
+            .map_err(map_err)?;
+        let rows = stmt
+            .query_map(params![since], |row| Ok((row_to_worker(row)?, get_uuid(row, 13)?)))
+            .map_err(map_err)?;
+        rows.collect::<rusqlite::Result<_>>().map_err(map_err)
+    }
+
+    /// Every record of one subagent, on any task, newest first.
+    pub fn workers_of_agent(&self, harness: &str, agent: &str) -> Result<Vec<TaskWorker>> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {WORKER_COLUMNS} FROM task_workers WHERE harness = ?1 AND agent_id = ?2
+                  ORDER BY started_at DESC, rowid DESC"
+            ))
+            .map_err(map_err)?;
+        let rows = stmt.query_map(params![harness, agent], row_to_worker).map_err(map_err)?;
+        rows.collect::<rusqlite::Result<_>>().map_err(map_err)
+    }
+
+    /// The task a subagent is recorded on, the newest if it was recorded on
+    /// more than one.
+    pub fn task_of_subagent(&self, harness: &str, agent: &str) -> Result<Option<Uuid>> {
+        Ok(self.workers_of_agent(harness, agent)?.first().map(|w| w.task_id))
+    }
+
+    /// Every open subagent on the runner, oldest first.
     pub fn open_workers(&self) -> Result<Vec<TaskWorker>> {
         let conn = self.conn();
         let mut stmt = conn
@@ -483,3 +541,7 @@ impl Store {
 #[cfg(test)]
 #[path = "workers_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "workers_observed_tests.rs"]
+mod observed_tests;

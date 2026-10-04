@@ -38,5 +38,5 @@ pub use models::{
 pub use compat::{DatabaseSchema, read_schema};
 pub use store::{IDEMPOTENCY_RETENTION_MILLIS, Store};
 pub use tasks::{TaskScope, derive_prefix};
-pub use wakes::PendingWake;
+pub use wakes::{PendingWake, WakeKind};
 pub use workspaces::{Vacated, valid_prefix};

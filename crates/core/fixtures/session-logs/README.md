@@ -289,8 +289,7 @@ Redacted: nothing. The line is the whole file, and it contains no path or
 message text beyond the plan-limit error string itself.
 
 **`claude-subagent-notifications.jsonl`** (10 lines) is cut from the
-coordinator's own session (one of 850 subagents' worth of notifications), one
-record of each shape: the `Agent` call and its `async_launched` result; four
+coordinator's own session, one record of each shape: the `Agent` call and its `async_launched` result; four
 `queue-operation` notifications, one per `<status>`; a monitor's, which has an
 `<event>` and no status; an `attachment` and a `user` turn carrying the same
 notification; and the `SendMessage` result with `resumedAgentId`. Every line
