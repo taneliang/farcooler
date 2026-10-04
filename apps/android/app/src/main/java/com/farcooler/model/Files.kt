@@ -340,6 +340,12 @@ class CoreFilesSource(
 
 /** One row of a directory. */
 data class FilesRow(
+    /**
+     * Unique within its directory, for the list's key: the runner sends names
+     * through a lossy UTF-8 decode, so two names on disk can arrive as one
+     * string, and a lazy list keyed by name throws on the repeat.
+     */
+    val key: String,
     val name: String,
     val kind: FileEntry.Kind,
     /** A file's size, a link's "→ target", nothing for a directory. */
@@ -420,19 +426,20 @@ object FilesLoader {
     private fun failureOf(e: Throwable): FileReadFailure = (e as? FilesFailure)?.why ?: FileReadFailure.FAILED
 
     fun directory(listing: FileListing, here: FilesLocation, root: String): FilesDirectory {
-        val rows = listing.entries.map { entry ->
+        val rows = listing.entries.mapIndexed { index, entry ->
+            val key = "$index/${entry.name}"
             val path = FilesPaths.join(here.path, entry.name)
             when (entry.kind) {
                 FileEntry.Kind.DIRECTORY -> FilesRow(
-                    entry.name, entry.kind, "", FilesLocation(here.place, path, FilesExpecting.DIRECTORY))
+                    key, entry.name, entry.kind, "", FilesLocation(here.place, path, FilesExpecting.DIRECTORY))
                 FileEntry.Kind.FILE -> FilesRow(
-                    entry.name, entry.kind, FilesText.size(entry.size),
+                    key, entry.name, entry.kind, FilesText.size(entry.size),
                     FilesLocation(here.place, path, FilesExpecting.FILE))
                 FileEntry.Kind.LINK -> FilesRow(
-                    entry.name, entry.kind, "→ ${entry.linkTarget}",
+                    key, entry.name, entry.kind, "→ ${entry.linkTarget}",
                     FilesPaths.linkDestination(path, entry.linkTarget, root)
                         ?.let { FilesLocation(here.place, it, FilesExpecting.EITHER) })
-                FileEntry.Kind.OTHER -> FilesRow(entry.name, entry.kind, "", null)
+                FileEntry.Kind.OTHER -> FilesRow(key, entry.name, entry.kind, "", null)
             }
         }
         return FilesDirectory(

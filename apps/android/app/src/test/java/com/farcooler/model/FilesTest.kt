@@ -181,6 +181,17 @@ class FilesTest {
     }
 
     @Test
+    fun `two names that decode alike are two rows with two keys`() {
+        val dir = FilesLoader.directory(
+            FileListing("", listOf(entry("x\uFFFD", FileEntry.Kind.FILE), entry("x\uFFFD", FileEntry.Kind.FILE),
+                entry("y", FileEntry.Kind.DIRECTORY)), false),
+            FilesLocation(wt), "",
+        )
+        assertEquals(3, dir.rows.size)
+        assertEquals(3, dir.rows.map { it.key }.toSet().size)
+    }
+
+    @Test
     fun `titles and a truncated or empty directory say so`() {
         assertEquals("logs", FilesLocation(FilesPlace.Folder("logs")).title)
         assertEquals("Files", FilesLocation(wt).title)

@@ -17,6 +17,7 @@ import com.farcooler.model.Destination
 import com.farcooler.model.DestinationResolver
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import com.farcooler.model.NeedsYouKind
+import com.farcooler.model.RunnerLink
 import com.farcooler.model.Terminal
 import com.farcooler.net.Connection
 import com.farcooler.data.PreferenceReviewStorage
@@ -109,7 +110,7 @@ class AppModel(
     /** What is on screen: the top of [stack], kept beside it so screens can observe just that. */
     val route: StateFlow<Route> = _route.asStateFlow()
 
-    private val _focus = MutableStateFlow<Map<String, Focus>>(emptyMap())
+    private val focusLedger = FocusLedger({ saved[FOCUS] }, { saved[FOCUS] = it }, reviewStorage)
 
     /**
      * Which pane each worktree is showing, keyed `runner/worktree`.
@@ -123,7 +124,7 @@ class AppModel(
      * iOS can key by worktree alone only because its equivalent lives on a
      * `Connection` that dies with the runner.
      */
-    val focus: StateFlow<Map<String, Focus>> = _focus.asStateFlow()
+    val focus: StateFlow<Map<String, Focus>> = focusLedger.focus
 
     /**
      * Whether the app has decided where to open yet.
@@ -175,7 +176,7 @@ class AppModel(
         // itself. Nothing here is checked against a fleet yet — there is no
         // fleet at this point in a launch — which is what `settle` is for.
         Backstack.decodeStack(saved[STACK])?.let { install(it, persist = false) }
-        _focus.value = Backstack.restoreFocus(saved[FOCUS], reviewStorage)
+        focusLedger.restore()
         // A real relaunch has no saved stack: it goes back to where the last
         // run was, whatever is waiting on Needs You (ov-182, the owner's ruling).
         if (!launchDecided) requestRestore()
@@ -645,7 +646,7 @@ class AppModel(
     fun paneOf(route: Route.Terminal): Pane? {
         val terminals = terminalsIn(route.hostId, route.worktreeId)
         val key = Backstack.key(route.hostId, route.worktreeId)
-        return Backstack.chooseFocus(terminals, _focus.value[key])
+        return Backstack.chooseFocus(terminals, focusLedger[key])
     }
 
     /** Where somebody was sent. Not written down — see [Focus]. */
@@ -657,18 +658,7 @@ class AppModel(
         )
 
     private fun record(key: String, pane: Pane, chosen: Boolean) {
-        val existing = _focus.value[key]
-        if (existing?.pane == pane && existing.chosen == chosen) return
-        _focus.value = _focus.value + (key to Focus(pane, chosen))
-        // Only a choice changes what is on disk, so a fleet row tap costs
-        // nothing here and cannot overwrite a real preference in the saved
-        // copy. What that trades is narrow and deliberate: a pane you were sent
-        // to and never confirmed does not come back after a process death — the
-        // one you last chose in that worktree does.
-        if (chosen) {
-            saved[FOCUS] = Backstack.encodeFocus(_focus.value)
-            Backstack.keepFocus(_focus.value, reviewStorage)
-        }
+        focusLedger.record(key, pane, chosen)
         keepDestination()
     }
 
@@ -686,19 +676,11 @@ class AppModel(
         val next = Backstack.truncate(_stack.value, ::resolves)
         if (next != _stack.value) install(next)
 
-        val pruned = Backstack.prune(_focus.value) { key, terminalId ->
-            val host = key.substringBefore('/')
-            val worktree = key.substringAfter('/')
-            // A runner that has not answered yet keeps its memory, for the same
-            // reason its routes survive below: "not connected" is not "gone".
-            if (!answered(host)) return@prune true
-            terminalsIn(host, worktree).any { it.id == terminalId }
-        }
-        if (pruned != _focus.value) {
-            _focus.value = pruned
-            saved[FOCUS] = Backstack.encodeFocus(pruned)
-            Backstack.keepFocus(pruned, reviewStorage)
-        }
+        focusLedger.prune(
+            fleetRead = { host -> fleet.connection(host)?.link?.value == RunnerLink.ANSWERING },
+            hasWorktree = { host, worktree -> worktreeIn(host, worktree) },
+            hasTerminal = { host, worktree, id -> terminalsIn(host, worktree).any { it.id == id } },
+        )
     }
 
     /**
@@ -742,6 +724,9 @@ class AppModel(
         fleet.connection(hostId)?.fleet?.value?.worktrees
             ?.firstOrNull { it.id == worktreeId }?.terminals.orEmpty()
 
+    private fun worktreeIn(hostId: String, worktreeId: String): Boolean =
+        fleet.connection(hostId)?.fleet?.value?.worktrees?.any { it.id == worktreeId } == true
+
     private fun install(next: List<Route>, persist: Boolean = true) {
         // Never empty. There is no such thing as being nowhere, and an empty
         // stack is a blank screen with a back gesture that does nothing.
@@ -766,7 +751,7 @@ class AppModel(
     private fun keepDestination() {
         if (!launchDecided) return
         val destination = DestinationRoutes.destination(_stack.value) { host, worktree ->
-            (_focus.value[Backstack.key(host, worktree)]?.pane as? Pane.Terminal)?.terminalId
+            (focusLedger[Backstack.key(host, worktree)]?.pane as? Pane.Terminal)?.terminalId
         } ?: return
         settings.setKeptDestination(destination.encoded())
     }

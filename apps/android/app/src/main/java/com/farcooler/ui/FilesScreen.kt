@@ -177,7 +177,7 @@ private fun FilesDirectoryList(directory: FilesDirectory, onOpen: (FilesLocation
                 )
             }
         }
-        itemsIndexed(directory.rows, key = { _, row -> row.name }) { _, row ->
+        itemsIndexed(directory.rows, key = { _, row -> row.key }) { _, row ->
             val destination = row.destination
             ListItem(
                 headlineContent = { Text(row.name, maxLines = 1, overflow = TextOverflow.MiddleEllipsis) },
