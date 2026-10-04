@@ -139,10 +139,16 @@ struct GridGeometryTests {
         let drawn = Set(found.filter { $0.role == .icon }.map(\.row))
         #expect(!carets.isEmpty, "no caret was drawn")
         #expect(drawn.isSuperset(of: ["filter", "orchestrator"]), "glyphs drawn: \(drawn.sorted())")
+        // At 1x (CI's headless runner) a glyph's drawn bounds snap to a whole
+        // point, so an odd-width glyph centered on 25 draws from 19 to 32 and
+        // its center reads 25.5: half a point off, exactly. That is the
+        // tolerance (ov-235). A `.leading` mutation moves a glyph (18 - width)
+        // / 2, at least 2.5 for the 13-wide ones, so it still turns this red.
+        let snap: CGFloat = 0.5
         for icon in found where icon.role == .icon {
-            #expect(abs(icon.midX - NavigatorGrid.glyphCenter) < 0.5, "\(icon) isn't centered on the carets: icon.midX \(icon.midX), glyphCenter \(NavigatorGrid.glyphCenter), glyph width \(icon.width)")
+            #expect(abs(icon.midX - NavigatorGrid.glyphCenter) <= snap, "\(icon) isn't centered on the carets: icon.midX \(icon.midX), glyphCenter \(NavigatorGrid.glyphCenter), glyph width \(icon.width)")
             for caret in found where caret.role == .chevron {
-                #expect(abs(icon.midX - caret.midX) < 0.5, "\(icon) vs \(caret): icon.midX \(icon.midX), caret.midX \(caret.midX), glyphCenter \(NavigatorGrid.glyphCenter), icon width \(icon.width), caret width \(caret.width)")
+                #expect(abs(icon.midX - caret.midX) <= snap, "\(icon) vs \(caret): icon.midX \(icon.midX), caret.midX \(caret.midX), glyphCenter \(NavigatorGrid.glyphCenter), icon width \(icon.width), caret width \(caret.width)")
             }
         }
     }
