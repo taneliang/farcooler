@@ -72,9 +72,8 @@ async fn a_decision_notice_has_a_task_and_no_terminal() {
     .unwrap();
     // Now as its task's notice (ov-94): `kind: "task"`, class decision.
     let sent = next(&mut taps).await.expect("a decision pushes");
-    // Still `kind: "decision"` for older relays and apps, with the task
-    // notice's fields beside it (ov-94, `task_notice::LEGACY_DECISION`).
-    assert_eq!((sent.kind, sent.event), (Some("decision"), Some("decision")));
+    // Only `kind: "task"`: the legacy decision kind is gone (ov-108).
+    assert_eq!((sent.kind, sent.event), (Some("task"), Some("decision")));
     assert!(sent.notice_id.as_deref().is_some_and(|id| id.starts_with("t:")));
     assert_eq!(sent.terminal, None, "a decision is about a task, not a pane");
     assert_eq!(sent.task.as_deref(), Some(task.key.as_str()));

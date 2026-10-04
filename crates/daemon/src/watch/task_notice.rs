@@ -162,22 +162,6 @@ pub(crate) struct Composed {
     pub about: Option<Uuid>,
 }
 
-/// Whether a status decision also goes out as `kind: "decision"`, carrying
-/// the task notice's fields: a relay older than ov-94 alerts only on that
-/// kind, and an older app's tap opens a task only from it. A relay of this
-/// era reads it as a task notice, so it alerts once either way. An agent's
-/// fold stays `kind: "task"`: an old relay already alerts on its agent
-/// notice, and a decision as well would be twice.
-///
-/// TODO(ov-94): remove after one stable release has shipped the relay and
-/// apps that read `kind: "task"`, with the relay's `legacyDecision` reading.
-pub(crate) const LEGACY_DECISION: bool = true;
-
-/// The wire kind `composed` goes out as. See `LEGACY_DECISION`.
-pub(crate) fn wire_kind(composed: &Composed) -> &'static str {
-    if LEGACY_DECISION && composed.of_status && composed.class == Class::Decision { "decision" } else { "task" }
-}
-
 /// The id every platform files `task`'s notices under: `t:<runner>:<key>`,
 /// or, past APNs's 64 bytes, `t:` and the first 16 hex characters of
 /// `sha256(runner + ":" + task id)`.
@@ -463,9 +447,8 @@ impl Watcher {
         let Some(pairing) = self.audience() else { return };
         let count = self.needs_you_count().await;
         let reviews = crate::review_ops::waiting(&self.service).await;
-        let kind = wire_kind(&composed);
         self.tap(Tapped {
-            kind: Some(kind),
+            kind: Some("task"),
             title: title.clone(),
             task: Some(task.key.clone()),
             workspace: workspace.clone(),
@@ -479,7 +462,7 @@ impl Watcher {
             ..Tapped::default()
         });
         let outgoing = crate::push::Outgoing {
-            kind: Some(kind),
+            kind: Some("task"),
             title: &title,
             subtitle: &composed.body,
             task: Some(&task.key),

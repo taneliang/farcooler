@@ -7060,10 +7060,10 @@ describe('an agent notice the daemon marks alert: false', () => {
   })
 })
 
-/// A runner sends a status decision as `kind: "decision"` with the task
-/// notice's fields (ov-94 fix round), so an old relay still alerts and an old
-/// app's tap still opens the task. This relay must read it as a task notice.
-describe('a legacy decision carrying task notice fields', () => {
+/// The legacy status decision, `kind: "decision"` carrying the task notice's
+/// fields, is gone (ov-108): no runner sends it, and this relay no longer
+/// reads it as a task notice. Only `kind: "task"` is one.
+describe('a decision carrying task notice fields', () => {
   const runner = '7537626f-0002-415e-1e11-000d48034210'
   const noticeId = `t:${runner}:ov-90`
   const decision = {
@@ -7083,7 +7083,7 @@ describe('a legacy decision carrying task notice fields', () => {
     return pushes(calls).filter(call => call.headers['apns-push-type'] !== 'liveactivity')
   }
 
-  it('alerts once, under the task notice id, with its options', async () => {
+  it('is an old-style decision, with no notice id and no options', async () => {
     const calls = watchFetch()
     await register('user_1')
     await pair('user_1', 'mine')
@@ -7093,20 +7093,18 @@ describe('a legacy decision carrying task notice fields', () => {
     expect(await response.json()).toEqual({ delivered: 1 })
     const sent = alerts(calls)
     expect(sent.length).toBe(1)
-    expect(sent[0].headers['apns-collapse-id']).toBe(noticeId)
-    expect(sent[0].body.aps['thread-id']).toBe(noticeId)
+    expect(sent[0].headers['apns-collapse-id']).toBeUndefined()
     expect(sent[0].body.kind).toBe('decision')
-    expect(sent[0].body.event).toBe('decision')
-    expect(sent[0].body.options).toEqual(['pdfkit', 'pdf.js'])
+    expect(sent[0].body.event).toBeUndefined()
+    expect(sent[0].body.options).toBeUndefined()
   })
 
-  it("obeys a device's classes, as a task notice does", async () => {
+  it('does not obey the device classes, which only a task notice does', async () => {
     const calls = watchFetch()
     await register('user_1', { pushToken: 'quiet', notifyEvents: ['review'] })
-    await register('user_1', { pushToken: 'loud' })
     await pair('user_1', 'mine')
     await post('/v1/notify', decision, 'mine')
-    expect(alerts(calls).map(call => call.url.split('/device/')[1])).toEqual(['loud'])
+    expect(alerts(calls).length).toBe(1)
   })
 
   it('still alerts an old decision with no event, as it always has', async () => {
@@ -7145,8 +7143,8 @@ describe("a task notice and the lock screen's card", () => {
   })
 })
 
-describe('a legacy decision to an Android phone', () => {
-  it('is drawn by the app, with its options, so it keeps its buttons', async () => {
+describe('a decision carrying task notice fields, to an Android phone', () => {
+  it('is drawn by Firebase as a plain decision, with no options', async () => {
     const calls = watchFetch()
     await register('user_1', { platform: 'fcm', pushToken: 'android-token' })
     await pair('user_1', 'mine')
@@ -7159,11 +7157,8 @@ describe('a legacy decision to an Android phone', () => {
       'mine',
     )
     const message = pushes(calls).find(call => call.url.includes('fcm.googleapis.com'))?.body.message
-    expect(message.notification).toBeUndefined()
-    expect(message.data).toEqual({
-      kind: 'decision', task: 'ov-90', event: 'decision', noticeId: 't:r:ov-90',
-      title: 'ov-90 Pick', body: 'Needs your decision · Which?', options: JSON.stringify(['A', 'B']),
-    })
+    expect(message.notification).toEqual({ title: 'ov-90 Pick', body: 'Needs your decision · Which?' })
+    expect(message.data).toEqual({ kind: 'decision', task: 'ov-90' })
   })
 })
 

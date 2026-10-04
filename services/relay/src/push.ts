@@ -749,9 +749,7 @@ export function androidChannel(status: string | undefined, kind?: string, event?
 }
 
 async function sendFcm(env: any, token: string, payload: Payload): Promise<boolean> {
-  // A legacy decision carrying the task notice's fields is drawn the same way
-  // (ov-94): an older app still draws a data decision and opens its task.
-  const drawnByApp = (payload.kind === 'task' || payload.kind === 'decision') && payload.event === 'decision'
+  const drawnByApp = payload.kind === 'task' && payload.event === 'decision'
   const account = JSON.parse(env.FCM_SERVICE_ACCOUNT)
   const accessToken = await googleAccessToken(account)
   const response = await fetch(

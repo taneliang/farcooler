@@ -63,11 +63,6 @@ class ContractTest {
             // The runner rides with a pane too (ov-183): a tap looks there first.
             kind = null, task = null, runner = runner,
         ),
-        "decision-legacy" to PushMessage.Task(
-            TaskNotice("ov-90", runner, "decision", noticeId, listOf("pdfkit", "pdf.js")),
-            "ov-90 Pick a PDF library",
-            "Needs your decision · Which PDF library should export use?",
-        ),
         // A runner older than ov-94 sends no event, so this is no task notice:
         // it reads as a card that carries the task and its runner.
         "decision-old-runner" to PushMessage.Card(

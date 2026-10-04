@@ -129,20 +129,6 @@ fn written() -> Vec<(&'static str, serde_json::Value)> {
             ..Outgoing::default()
         }),
         ("count", Outgoing { kind: Some("count"), needs_you: Some(0), install: Some(INSTALL), ..Outgoing::default() }),
-        ("decision-legacy", Outgoing {
-            kind: Some("decision"),
-            title: "ov-90 Pick a PDF library",
-            subtitle: "Needs your decision · Which PDF library should export use?",
-            task: Some("ov-90"),
-            workspace: Some("Billing"),
-            needs_you: Some(1),
-            install: Some(INSTALL),
-            notice_id: Some(&notice_id),
-            event: Some("decision"),
-            level: Some("time-sensitive"),
-            options: &options,
-            ..Outgoing::default()
-        }),
         // What a runner older than ov-94 sends for a status decision: the
         // task and runner, with no `event` and no notice id. Android reads it
         // as a card that opens the task (`PushMessage.Card.task`), not as a

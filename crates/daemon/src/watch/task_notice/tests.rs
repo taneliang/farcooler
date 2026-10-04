@@ -48,8 +48,7 @@ fn note(svc: &Service, watcher: &Watcher, task: Uuid, kind: pb::TaskNoteKind, ac
 }
 
 /// Every task notice tapped until the composer has long gone quiet, in
-/// order, whether it went as `kind: "task"` or as a legacy decision: both
-/// carry a class. Count notices, which the same writes cause, are left out.
+/// order: each carries a class. Count notices, which the same writes cause, are left out.
 async fn task_notices(taps: &mut tokio::sync::mpsc::UnboundedReceiver<Tapped>) -> Vec<Tapped> {
     let mut heard = Vec::new();
     while let Ok(Some(tap)) = tokio::time::timeout(AT_MOST * 3, taps.recv()).await {
@@ -176,9 +175,8 @@ async fn a_decision_sends_at_once_with_its_question_and_options() {
             break tap;
         }
     };
-    // As a legacy decision, so a relay or an app older than task notices
-    // still alerts and opens it, carrying the task notice's own fields.
-    assert_eq!(first.kind, Some("decision"));
+    // A task notice, never the legacy `kind: "decision"` (ov-108).
+    assert_eq!(first.kind, Some("task"));
     let runner = crate::service::stable_host_id(svc.install_id()).to_string();
     assert_eq!(first.notice_id, Some(notice_id(&runner, &task)));
     assert!(began.elapsed() < QUIET_FOR, "waited {:?} on a decision", began.elapsed());

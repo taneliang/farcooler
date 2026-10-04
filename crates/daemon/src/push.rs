@@ -591,9 +591,8 @@ fn wire_body<'a>(o: &Outgoing<'a>) -> Option<Notification<'a>> {
             ..shared
         },
         Some("ask") => Notification { terminal: Some(o.terminal?), ask: o.ask, ..shared },
-        // A decision carries the task notice's fields too when it has them
-        // (ov-94, `task_notice::LEGACY_DECISION`): an older relay reads only
-        // its kind, a newer one reads it as a task notice.
+        // A decision from a runner older than ov-94, which no runner sends
+        // any more (ov-108): kept so the contract fixture for it still builds.
         Some("decision") => Notification {
             title: Some(o.title),
             subtitle: Some(o.subtitle),
@@ -1252,41 +1251,6 @@ mod tests {
         assert_eq!(decision["runner"], crate::service::stable_host_id("install-1").to_string());
         let review = notice("review");
         assert!(review.get("options").is_none(), "only a decision has buttons: {review}");
-    }
-
-    /// A status decision still goes as `kind: "decision"` for relays and apps
-    /// older than task notices, and carries the task notice's id, class,
-    /// level and options for a relay that reads them (ov-94). Removing the
-    /// legacy kind, or dropping the fields from it, fails this.
-    #[test]
-    fn a_legacy_decision_carries_the_task_notice_fields() {
-        let options = vec!["pdfkit".to_string()];
-        let decision = serde_json::to_value(
-            wire_body(&Outgoing {
-                kind: Some("decision"),
-                title: "ov-90 Pick",
-                subtitle: "Needs your decision · Which?",
-                task: Some("ov-90"),
-                notice_id: Some("t:r-1:ov-90"),
-                event: Some("decision"),
-                level: Some("time-sensitive"),
-                options: &options,
-                ..Outgoing::default()
-            })
-            .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(decision["kind"], "decision");
-        assert_eq!(decision["noticeId"], "t:r-1:ov-90");
-        assert_eq!(decision["event"], "decision");
-        assert_eq!(decision["level"], "time-sensitive");
-        assert_eq!(decision["options"], serde_json::json!(["pdfkit"]));
-        assert!(decision.get("terminal").is_none());
-        // And the composer still sends a status decision this way.
-        use crate::watch::task_notice::{Class, Composed, wire_kind};
-        let status = Composed { class: Class::Decision, body: String::new(), options: Vec::new(), of_status: true, about: None };
-        assert_eq!(wire_kind(&status), "decision");
-        assert_eq!(wire_kind(&Composed { of_status: false, ..status }), "task", "an agent's fold never doubles");
     }
 
     /// An agent working on a task sends its notice for the card alone:

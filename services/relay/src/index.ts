@@ -995,15 +995,10 @@ async function notify(request: Request, env: Env): Promise<Response> {
   if (alerts && !body.title) return json({ error: 'title' }, 400)
   // A task notice's class, id, level and options (ov-94). Each is checked
   // here and dropped when it fails, never refused: the daemon ships apart.
-  // A status decision from a runner of this lane's era arrives as
-  // `kind: "decision"` carrying the task notice's fields, so an older relay
-  // still alerts on it and an older app's tap still opens its task. Read here
-  // exactly as a task notice: one alert, its classes, its id. An old runner's
-  // decision, with no `event`, alerts as it always has.
-  // TODO(ov-94): drop this once the runner stops sending legacy decisions,
-  // after one stable release (see `watch::task_notice::LEGACY_DECISION`).
-  const legacyDecision = kind === 'decision' && body.event === 'decision'
-  const taskLike = kind === 'task' || legacyDecision
+  // A decision with no `event` is a runner older than ov-94, and alerts as it
+  // always has. Only `kind: "task"` is a task notice: the dual-sent decision
+  // that carried the notice's fields is no longer read (ov-108).
+  const taskLike = kind === 'task'
   const event = taskLike ? eventOf(body.event) : undefined
   const noticeId = taskLike && typeof body.noticeId === 'string' && NOTICE_ID.test(body.noticeId)
     ? body.noticeId

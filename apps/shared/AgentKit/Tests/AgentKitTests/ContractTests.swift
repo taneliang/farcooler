@@ -157,10 +157,6 @@ struct PushContractTests {
     static let expected: [String: (tap: Destination.Place, notice: TaskNotice?)] = [
         "agent-blocked": (.terminal("term-01999a8f2c4e"), nil),
         "agent-done-failed": (.terminal("term-01999a90aa10"), nil),
-        "decision-legacy": (
-            .task(workspace: nil, task: .init(key: "ov-90")),
-            TaskNotice(key: "ov-90", runner: runner, event: .decision, noticeId: noticeId, options: ["pdfkit", "pdf.js"])
-        ),
         // A runner older than ov-94: no event and no notice id, so it opens
         // the task's card and is no task notice.
         "decision-old-runner": (.task(workspace: nil, task: .init(key: "ov-90")), nil),
@@ -196,7 +192,6 @@ struct PushContractTests {
     static let agents: [String: AgentPush?] = [
         "agent-blocked": AgentPush(terminal: "term-01999a8f2c4e", status: "blocked", label: "claude", failed: false),
         "agent-done-failed": AgentPush(terminal: "term-01999a90aa10", status: "done", label: "codex", failed: true),
-        "decision-legacy": nil,
         "decision-old-runner": nil,
         "task-decision": nil,
         "task-review": nil,
