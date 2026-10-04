@@ -9,17 +9,53 @@
 //! client that assumed the next frame was its answer would eventually read an
 //! event as a reply — rarely, and under load, which is the worst way to find
 //! out.
+//!
+//! **Calls run alongside each other (ov-147).** `call` used to own the reader
+//! for the length of one request — it wrote, then read frames until its own
+//! answer came — so it took `&mut self`, and anything sharing a connection
+//! queued behind whatever was in flight. On a phone that was a keystroke behind
+//! a diff: the daemon has run requests concurrently since `serve_connection`
+//! grew lanes, but the client never sent the second one until the first was
+//! answered. Now a reader task owns the read half and hands each `Response` to
+//! the caller waiting on its `request_id`, and a writer task owns the write
+//! half, so `call` takes `&self` and any number can be outstanding.
+//!
+//! What that brings with it, each decided here once:
+//!
+//! - **Deadlines.** `call_with` takes one, and a call that outlives it fails
+//!   with `TimedOut` naming the method. `call` has none, as before: the CLI
+//!   and the tests wait as long as the daemon takes.
+//! - **Urgent calls.** The writer sends urgent frames before ordinary ones that
+//!   are still queued, so a keystroke never waits behind a large upload in the
+//!   client's own queue. Order among urgent frames, and among ordinary ones, is
+//!   the order they were sent in.
+//! - **Cancellation.** A caller that gives up — its future dropped, or its
+//!   deadline passed — is forgotten at once. If its request had not reached the
+//!   wire yet it never does; if it had, the answer arrives for nobody and is
+//!   dropped.
+//! - **A reply for nobody** is dropped, logged, and counted
+//!   (`stray_replies`), never handed to the next caller.
+//! - **Disconnect.** When either half fails, every waiting call fails at once
+//!   with the reason, and every later call fails before it is sent. Nothing
+//!   waits for a deadline to learn the link is gone.
 
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 
+use bytes::Bytes;
+use farcooler_protocol::framing::FramingError;
 use farcooler_protocol::v1::{
     ClientHello, Event, Request, Response, ServerHello, WireEnvelope, response, wire_envelope,
 };
 use farcooler_protocol::{PROTOCOL_VERSION, ids};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::UnixStream;
+use tokio::sync::{mpsc, oneshot};
 
-use crate::codec::{CodecError, FrameReader, FrameWriter};
+use crate::codec::{CodecError, FrameReader, FrameWriter, encode_frame};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
@@ -50,16 +86,186 @@ pub enum ClientError {
     EmptyResult,
     #[error("the daemon returned {got} where {expected} was expected")]
     WrongResult { expected: &'static str, got: &'static str },
+    /// No answer by the call's deadline. The connection is left as it is:
+    /// one slow answer is not a dead link, and the reader is still there to
+    /// notice if it is one.
+    #[error("{method} got no answer within {after:?}")]
+    TimedOut { method: String, after: Duration },
 }
 
+/// How one call is made. The default is how `call` always behaved: no
+/// deadline, and queued in turn.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CallOptions {
+    /// Fail with `TimedOut` if no answer has arrived by then.
+    pub deadline: Option<Duration>,
+    /// Put the request on the wire ahead of ordinary requests still queued.
+    pub urgent: bool,
+}
+
+/// How many events wait for `next_event` before the reader stops reading.
+///
+/// A bound, not a buffer size anyone tuned: it is what keeps a client that has
+/// stopped reading events — a terminal stream whose viewer went away — pushing
+/// back on the daemon through the socket, as it did when nothing read the
+/// socket between calls, rather than holding the backlog in this process.
+const EVENT_BACKLOG: usize = 1024;
+
 pub struct Client<R, W> {
-    reader: FrameReader<R>,
-    writer: FrameWriter<W>,
+    shared: Arc<Shared>,
+    urgent: mpsc::UnboundedSender<Outgoing>,
+    ordinary: mpsc::UnboundedSender<Outgoing>,
+    events: mpsc::Receiver<Event>,
     server: ServerHello,
-    /// Events that arrived while waiting for a response. Kept rather than
-    /// dropped: they are the daemon telling us something changed, and a client
-    /// that discards them silently goes stale.
-    pending_events: Vec<Event>,
+    reader: tokio::task::JoinHandle<()>,
+    /// The halves now belong to the tasks; the types stay in the signature so
+    /// every caller that names a `Client<R, W>` still does.
+    _halves: std::marker::PhantomData<fn() -> (R, W)>,
+}
+
+/// What the reader, the writer and the callers share.
+struct Shared {
+    table: Mutex<Table>,
+    /// Replies that arrived for nobody. See `stray_replies`.
+    strays: AtomicU64,
+    /// Set by `ignore_events`.
+    ignore_events: AtomicBool,
+}
+
+#[derive(Default)]
+struct Table {
+    waiting: HashMap<Bytes, oneshot::Sender<Result<Response, Gone>>>,
+    /// Why the connection ended, once it has. Checked under the same lock a
+    /// call registers under, so no call can register after the last one was
+    /// failed and then wait forever.
+    gone: Option<Gone>,
+}
+
+/// One request's frame, already encoded, and the id it waits under.
+struct Outgoing {
+    request_id: Bytes,
+    frame: Vec<u8>,
+}
+
+/// Why the connection ended, kept in a form every waiting call can be handed
+/// its own copy of. `ClientError` holds an `io::Error`, which cannot be cloned.
+#[derive(Debug)]
+enum Gone {
+    Closed,
+    Io(std::io::ErrorKind, String),
+    Truncated,
+    Framing(FramingError),
+}
+
+impl Gone {
+    fn of(error: CodecError) -> Self {
+        match error {
+            CodecError::Io(e) => Gone::Io(e.kind(), e.to_string()),
+            CodecError::Truncated => Gone::Truncated,
+            CodecError::Framing(f) => Gone::Framing(f),
+        }
+    }
+
+    /// The same error a caller got when it read the frame itself, so nothing
+    /// that matched on `Closed` or `Codec` has to learn a new variant.
+    fn error(&self) -> ClientError {
+        match self {
+            Gone::Closed => ClientError::Closed,
+            Gone::Io(kind, message) => {
+                ClientError::Codec(CodecError::Io(std::io::Error::new(*kind, message.clone())))
+            }
+            Gone::Truncated => ClientError::Codec(CodecError::Truncated),
+            Gone::Framing(f) => ClientError::Codec(CodecError::Framing(copy(f))),
+        }
+    }
+}
+
+impl Clone for Gone {
+    fn clone(&self) -> Self {
+        match self {
+            Gone::Closed => Gone::Closed,
+            Gone::Io(kind, message) => Gone::Io(*kind, message.clone()),
+            Gone::Truncated => Gone::Truncated,
+            Gone::Framing(f) => Gone::Framing(copy(f)),
+        }
+    }
+}
+
+/// `FramingError` is not `Clone`, and is not this crate's to change for one
+/// caller.
+fn copy(f: &FramingError) -> FramingError {
+    match f {
+        FramingError::Oversized(a, b) => FramingError::Oversized(*a, *b),
+        FramingError::ZeroLength => FramingError::ZeroLength,
+        FramingError::Malformed => FramingError::Malformed,
+    }
+}
+
+impl Shared {
+    fn table(&self) -> MutexGuard<'_, Table> {
+        // A panic while holding this lock leaves a map of senders, which is
+        // still a correct map; refusing every later call over it would turn
+        // one bug into a dead connection.
+        self.table.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Fail every waiting call with `why`, and every later one before it is
+    /// sent. The first reason wins: a writer that fails because the reader
+    /// already saw the socket close is not news.
+    fn end(&self, why: Gone) {
+        let (why, waiting) = {
+            let mut table = self.table();
+            let why = table.gone.get_or_insert(why).clone();
+            (why, std::mem::take(&mut table.waiting))
+        };
+        for (_, caller) in waiting {
+            let _ = caller.send(Err(why.clone()));
+        }
+    }
+}
+
+/// A request on its way, and the answer it is waiting for.
+///
+/// Returned by `Client::send` once the request is queued for the wire, which
+/// is what lets a caller fix the ORDER of two requests synchronously and wait
+/// for their answers however it likes. Dropping it is giving up: the call is
+/// forgotten at once, and a request not yet written is never written.
+pub struct Answer {
+    shared: Arc<Shared>,
+    request_id: Bytes,
+    method: String,
+    deadline: Option<Duration>,
+    answer: oneshot::Receiver<Result<Response, Gone>>,
+}
+
+impl Answer {
+    /// Wait for the answer, until the deadline the call was sent with.
+    pub async fn answer(mut self) -> Result<farcooler_protocol::v1::Result, ClientError> {
+        let answered = match self.deadline {
+            None => (&mut self.answer).await,
+            Some(after) => match tokio::time::timeout(after, &mut self.answer).await {
+                Ok(answered) => answered,
+                Err(_) => {
+                    let method = std::mem::take(&mut self.method);
+                    return Err(ClientError::TimedOut { method, after });
+                }
+            },
+        };
+        match answered {
+            Ok(Ok(response)) => unwrap_response(response),
+            Ok(Err(gone)) => Err(gone.error()),
+            // The sender went without a word, which only the reader being
+            // aborted does: the client is being dropped.
+            Err(_) => Err(ClientError::Closed),
+        }
+    }
+}
+
+impl Drop for Answer {
+    fn drop(&mut self) {
+        // Already gone if it was answered; there if the caller gave up.
+        self.shared.table().waiting.remove(&self.request_id);
+    }
 }
 
 impl Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf> {
@@ -77,11 +283,14 @@ impl Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf> {
 
 impl<R, W> Client<R, W>
 where
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
+    R: AsyncRead + Unpin + Send + 'static,
+    W: AsyncWrite + Unpin + Send + 'static,
 {
     /// Handshake over any pair of streams, so the same client works over stdio
     /// through sshd as it does over a local socket.
+    ///
+    /// Then hands the halves to a reader task and a writer task, which is why
+    /// this needs a tokio runtime and `'static` halves.
     pub async fn over(
         read: R,
         write: W,
@@ -131,60 +340,212 @@ where
             });
         }
 
-        Ok(Self { reader, writer, server, pending_events: Vec::new() })
-    }
+        let shared = Arc::new(Shared {
+            table: Mutex::new(Table::default()),
+            strays: AtomicU64::new(0),
+            ignore_events: AtomicBool::new(false),
+        });
+        let (events_tx, events) = mpsc::channel(EVENT_BACKLOG);
+        let (urgent, urgent_rx) = mpsc::unbounded_channel();
+        let (ordinary, ordinary_rx) = mpsc::unbounded_channel();
+        let reader = tokio::spawn(read_replies(reader, Arc::clone(&shared), events_tx));
+        tokio::spawn(write_requests(writer, urgent_rx, ordinary_rx, Arc::clone(&shared)));
 
+        Ok(Self {
+            shared,
+            urgent,
+            ordinary,
+            events,
+            server,
+            reader,
+            _halves: std::marker::PhantomData,
+        })
+    }
+}
+
+impl<R, W> Drop for Client<R, W> {
+    fn drop(&mut self) {
+        // The writer ends by itself once both queues' senders are gone, after
+        // sending what was queued; the reader would wait on the socket.
+        self.reader.abort();
+    }
+}
+
+impl<R, W> Client<R, W> {
     pub fn server_hello(&self) -> &ServerHello {
         &self.server
     }
 
+    /// Drop events instead of keeping them for `next_event`.
+    ///
+    /// For a connection that only makes calls — a phone's control connection,
+    /// whose events arrive on a channel of their own. Without this they would
+    /// fill `EVENT_BACKLOG`, and a full backlog stops the reader, which would
+    /// leave every call waiting on an answer nobody reads.
+    pub fn ignore_events(&self) {
+        self.shared.ignore_events.store(true, Ordering::Relaxed);
+    }
+
+    /// How many replies have arrived for a call nobody was waiting on.
+    ///
+    /// Each is also logged. Most are a call that gave up before its answer
+    /// came; any other is a daemon answering an id it was never sent.
+    pub fn stray_replies(&self) -> u64 {
+        self.shared.strays.load(Ordering::Relaxed)
+    }
 
     /// Wait for the next event.
     ///
-    /// Events buffered while a call was in flight come out first, so nothing is
-    /// lost by having made a request at the wrong moment.
+    /// Events that arrived while a call was in flight come out first, in the
+    /// order they arrived, so nothing is lost by having made a request at the
+    /// wrong moment.
     pub async fn next_event(&mut self) -> Result<Event, ClientError> {
-        if !self.pending_events.is_empty() {
-            return Ok(self.pending_events.remove(0));
-        }
-        loop {
-            let envelope = self.reader.read_frame().await?.ok_or(ClientError::Closed)?;
-            match envelope.body {
-                Some(wire_envelope::Body::Event(event)) => return Ok(event),
-                // A response with nobody waiting for it. Dropped rather than
-                // stored: the caller that wanted it has gone.
-                _ => continue,
-            }
+        match self.events.recv().await {
+            Some(event) => Ok(event),
+            None => Err(self.shared.table().gone.clone().unwrap_or(Gone::Closed).error()),
         }
     }
 
-    /// Send a request and wait for the response that matches it.
+    /// Send a request and wait for the response that matches it, with no
+    /// deadline.
+    ///
+    /// `&mut self` though nothing here needs it: it kept the many one-caller
+    /// sites — the CLI, every daemon test — compiling without a warning when
+    /// calls became concurrent. A caller that shares a client uses `call_with`
+    /// or `send`, which take `&self`.
     pub async fn call(
         &mut self,
         request: Request,
     ) -> Result<farcooler_protocol::v1::Result, ClientError> {
-        let request_id = request.request_id.clone();
-        self.writer
-            .write_frame(&WireEnvelope {
-                protocol_version: PROTOCOL_VERSION,
-                message_id: ids::new_id(),
-                body: Some(wire_envelope::Body::Request(request)),
-            })
-            .await?;
+        self.call_with(request, CallOptions::default()).await
+    }
 
-        loop {
-            let envelope = self.reader.read_frame().await?.ok_or(ClientError::Closed)?;
-            match envelope.body {
-                Some(wire_envelope::Body::Response(r)) if r.request_id == request_id => {
-                    return unwrap_response(r);
-                }
-                // Another request's answer. Only possible once this client
-                // pipelines, but dropping it silently then would be a bug that
-                // only shows up under concurrency.
-                Some(wire_envelope::Body::Response(_)) => continue,
-                Some(wire_envelope::Body::Event(e)) => self.pending_events.push(e),
-                _ => continue,
+    /// `call`, with a deadline, or ahead of ordinary requests, or both.
+    pub async fn call_with(
+        &self,
+        request: Request,
+        how: CallOptions,
+    ) -> Result<farcooler_protocol::v1::Result, ClientError> {
+        self.send(request, how)?.answer().await
+    }
+
+    /// Queue `request` for the wire now, and return what will wait for its
+    /// answer.
+    ///
+    /// Synchronous on purpose: two calls to this are queued in the order they
+    /// were made, whichever task then waits on which answer first.
+    pub fn send(&self, mut request: Request, how: CallOptions) -> Result<Answer, ClientError> {
+        let method = request.method.clone();
+        let (answer_tx, answer) = oneshot::channel();
+        let request_id = {
+            let mut table = self.shared.table();
+            if let Some(gone) = &table.gone {
+                return Err(gone.error());
             }
+            // An id is what an answer is filed under, so two calls cannot
+            // share one. A caller that built its own request and left it
+            // empty, or reused one, gets a fresh one rather than another
+            // caller's answer.
+            if request.request_id.is_empty() || table.waiting.contains_key(&request.request_id) {
+                request.request_id = ids::new_id();
+            }
+            table.waiting.insert(request.request_id.clone(), answer_tx);
+            request.request_id.clone()
+        };
+        let waiting = Answer {
+            shared: Arc::clone(&self.shared),
+            request_id: request_id.clone(),
+            method,
+            deadline: how.deadline,
+            answer,
+        };
+
+        // Encoded here rather than in the writer, so a request too large to
+        // send fails this call alone and leaves the connection as it was.
+        let frame = encode_frame(&WireEnvelope {
+            protocol_version: PROTOCOL_VERSION,
+            message_id: ids::new_id(),
+            body: Some(wire_envelope::Body::Request(request)),
+        })?;
+        let queue = if how.urgent { &self.urgent } else { &self.ordinary };
+        if queue.send(Outgoing { request_id, frame }).is_err() {
+            // The writer has stopped, and `end` has said why.
+            return Err(self.shared.table().gone.clone().unwrap_or(Gone::Closed).error());
+        }
+        Ok(waiting)
+    }
+}
+
+/// The read half, for the life of the connection: answers to their callers,
+/// events to `next_event`.
+async fn read_replies<R: AsyncRead + Unpin>(
+    mut reader: FrameReader<R>,
+    shared: Arc<Shared>,
+    events: mpsc::Sender<Event>,
+) {
+    let why = loop {
+        let envelope = match reader.read_frame().await {
+            Ok(Some(envelope)) => envelope,
+            Ok(None) => break Gone::Closed,
+            Err(e) => break Gone::of(e),
+        };
+        match envelope.body {
+            Some(wire_envelope::Body::Response(r)) => {
+                let caller = shared.table().waiting.remove(&r.request_id);
+                match caller {
+                    // A caller that gave up between the lookup and this send
+                    // has dropped its receiver; nothing is owed to it.
+                    Some(caller) => drop(caller.send(Ok(r))),
+                    None => {
+                        shared.strays.fetch_add(1, Ordering::Relaxed);
+                        tracing::warn!(
+                            request_id = ?r.request_id,
+                            "dropped a reply nobody was waiting for"
+                        );
+                    }
+                }
+            }
+            Some(wire_envelope::Body::Event(e)) => {
+                if shared.ignore_events.load(Ordering::Relaxed) {
+                    continue;
+                }
+                // Waits while the backlog is full, which is the point: see
+                // `EVENT_BACKLOG`. A receiver that is gone takes nothing more.
+                if events.send(e).await.is_err() {
+                    shared.ignore_events.store(true, Ordering::Relaxed);
+                }
+            }
+            // Anything else has no business after the handshake, and never
+            // ended a connection before; it does not now.
+            _ => continue,
+        }
+    };
+    shared.end(why);
+}
+
+/// The write half: urgent frames first, then ordinary ones, each queue in the
+/// order it was filled.
+async fn write_requests<W: AsyncWrite + Unpin>(
+    mut writer: FrameWriter<W>,
+    mut urgent: mpsc::UnboundedReceiver<Outgoing>,
+    mut ordinary: mpsc::UnboundedReceiver<Outgoing>,
+    shared: Arc<Shared>,
+) {
+    loop {
+        let next = tokio::select! {
+            biased;
+            Some(next) = urgent.recv() => next,
+            Some(next) = ordinary.recv() => next,
+            else => break,
+        };
+        // Its caller has gone, so nothing is waiting for this answer: a
+        // request cancelled before it was sent is never sent.
+        if !shared.table().waiting.contains_key(&next.request_id) {
+            continue;
+        }
+        if let Err(e) = writer.write_raw(&next.frame).await {
+            shared.end(Gone::of(e));
+            break;
         }
     }
 }

@@ -387,10 +387,9 @@ type Lane = Option<Bytes>;
 /// Responses go out as requests finish, so they may arrive in a different order
 /// from the requests; `request_id` is what pairs them, as it always was.
 ///
-/// **What order is guaranteed, for a client that pipelines.** None does today:
-/// `Client::call` holds the reader for the length of one request, the mobile
-/// `Session` is behind a mutex, and the CLI is one call per process. A client
-/// that starts to must rely on exactly this and no more:
+/// **What order is guaranteed, for a client that pipelines.** `Client` does
+/// since ov-147 — a phone's calls run alongside each other on one connection —
+/// and relies on exactly this and no more:
 ///
 /// - Two requests with byte-equal `target_resource_id` run one after the
 ///   other, in the order they were sent. Everything that acts on one terminal

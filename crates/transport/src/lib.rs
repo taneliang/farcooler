@@ -21,7 +21,7 @@ pub mod listener;
 pub mod push;
 pub mod stdio;
 
-pub use client::{Client, ClientError, request};
+pub use client::{Answer, CallOptions, Client, ClientError, request};
 pub use codec::{CodecError, FrameReader, FrameWriter};
 pub use connection::{
     Connection, ConnectionError, HandshakeConfig, TOO_SLOW_DISCONNECT, refuse, serve_connection,
