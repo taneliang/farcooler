@@ -19,7 +19,11 @@ struct BackForwardControl: View {
     static let forwardHelp = "Go forward (⌃⌘→)"
 
     var body: some View {
-        ControlGroup {
+        // Two buttons in one item, not a `ControlGroup`: in a toolbar with a
+        // center item, a ControlGroup inserted after the window is on screen
+        // is split into two items and laid out at the trailing end (integ-8;
+        // the lane's probe). One item keeps its place after the switcher.
+        HStack(spacing: 0) {
             Button(action: back) { Label("Back", systemImage: "chevron.left") }
                 .disabled(!canGoBack)
                 .help(Self.backHelp)

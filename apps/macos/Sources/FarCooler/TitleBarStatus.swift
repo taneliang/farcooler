@@ -78,6 +78,11 @@ enum TitleStatus {
         }
     }
 
+    /// Whether the title bar's field opens in the status area's place at
+    /// `form`: at medium and wider. Narrower, the area can't hold a field
+    /// worth typing in, and it opens in the panel under the bar instead.
+    static func fieldInline(_ form: Form) -> Bool { form >= .medium }
+
     /// The widest form that fits in `available` points; the ring when none
     /// does, so the orchestrator's mark and the count are always offered.
     static func form(available: CGFloat) -> Form {
@@ -247,7 +252,7 @@ struct TitleStatusView: View {
     /// Whether the field is open in the status area's place (slice 4): at
     /// the medium form and wider; narrower, it opens in the panel under the
     /// bar instead, so the item never changes width.
-    private var fieldOpen: Bool { form >= .medium && actions.console?.console.isOpen == true }
+    private var fieldOpen: Bool { TitleStatus.fieldInline(form) && actions.console?.console.isOpen == true }
 
     var body: some View {
         HStack(spacing: form >= .medium ? 14 : 8) {

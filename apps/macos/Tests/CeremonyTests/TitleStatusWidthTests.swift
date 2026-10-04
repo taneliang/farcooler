@@ -153,3 +153,46 @@ struct TitleConsoleWidthTests {
         #expect(Harness.status(in: window) == closed)
     }
 }
+
+/// Where the field opens (slice 4): in the status area at medium and wider,
+/// and never in a ring or short area, which can't hold one worth typing in;
+/// there it's the panel's under the bar.
+@MainActor
+@Suite(.serialized)
+struct TitleConsoleInlineTests {
+    typealias Harness = TitleBarHarness
+
+    @Test("The field opens inline at medium and wider, in the panel narrower")
+    func whereByForm() {
+        #expect(!TitleStatus.fieldInline(.ring))
+        #expect(!TitleStatus.fieldInline(.short))
+        #expect(TitleStatus.fieldInline(.medium))
+        #expect(TitleStatus.fieldInline(.wide))
+    }
+
+    /// Whether the window's toolbar holds the field's text view.
+    private static func fieldInToolbar(_ window: NSWindow) -> Bool {
+        func walk(_ view: NSView, inItem: Bool) -> Bool {
+            let item = inItem || String(describing: type(of: view)).hasPrefix("ToolbarItemHostingView")
+            if item, view is PaletteTextView { return true }
+            return view.subviews.contains { walk($0, inItem: item) }
+        }
+        return window.contentView?.superview.map { walk($0, inItem: false) } ?? false
+    }
+
+    @Test(
+        "In a real window, the open field is in the toolbar only where the form holds it",
+        arguments: [(CGFloat(1790), true), (900, true), (700, false), (600, false)])
+    func inTheToolbar(width: CGFloat, inline: Bool) async throws {
+        let console = TitleConsoleModel()
+        let window = try await Harness.window(
+            Harness.Root(words: Harness.Words(), console: console, content: Color.clear), width: width)
+        defer { window.close() }
+        console.console.open(finding: false)
+        try await Harness.settle(window)
+        #expect(Self.fieldInToolbar(window) == inline, "at \(width)")
+        console.console.close()
+        try await Harness.settle(window)
+        #expect(!Self.fieldInToolbar(window), "closed at \(width)")
+    }
+}

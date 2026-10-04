@@ -605,7 +605,7 @@ struct ContentView: View {
             if console.console.isOpen {
                 TitleConsoleDropdown(
                     model: console, actions: consoleActions, status: statusActions, source: statusSource,
-                    showsField: layout.form < .medium)
+                    showsField: !TitleStatus.fieldInline(layout.form))
                     .padding(.top, Spacing.tight)
                     .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.opacity.combined(with: .move(edge: .top)))
             }

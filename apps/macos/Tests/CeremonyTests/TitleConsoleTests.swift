@@ -190,13 +190,22 @@ struct TitleConsoleTests {
         func outcome(_ what: String?, code: String = "resource-conflict") -> TitleConsole.Outcome {
             TellRefusal.outcome(message: "error: something internal\ncode: \(code)" + (what.map { "\nwhat: \($0)" } ?? ""))
         }
-        for word in ["busy", "prompt", "draft", "typing", "not_an_agent", "unfamiliar", "unproven", "too_long", "not_running"] {
+        let words = ["busy", "prompt", "draft", "typing", "not_an_agent", "unfamiliar", "unproven", "too_long", "not_running"]
+        var sentences: [String: String] = [:]
+        for word in words {
             guard case .refused(let why) = outcome(word) else {
                 Issue.record("\(word) let the message go")
                 continue
             }
-            #expect(!why.contains("internal") && !why.contains(word), "\(word): \(why)")
+            // Its own reason, not the catch-all, and none of the runner's
+            // text or its machine word on screen.
+            #expect(why != TitleConsole.sendFailed, "\(word) fell through to the catch-all")
+            #expect(!why.contains("something internal") && !why.contains("resource-conflict"), "\(word): \(why)")
+            #expect(!why.contains("_"), "\(word): a machine word on screen: \(why)")
+            sentences[word] = why
         }
+        #expect(Set(sentences.values).count == words.count, "two reasons read the same: \(sentences)")
+        #expect(outcome("a_word_from_a_newer_runner") == .refused(TitleConsole.sendFailed))
         for word in ["paste_left", "left_at_shell"] {
             guard case .left = outcome(word) else {
                 Issue.record("\(word) kept a message that's already in the pane")
