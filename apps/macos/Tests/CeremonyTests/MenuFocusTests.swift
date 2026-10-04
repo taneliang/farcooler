@@ -206,6 +206,7 @@ struct MenuWiringTests {
         "Back": "\\.goesBack",
         "Forward": "\\.goesForward",
         "Go to Jump Bar": "\\.hasJumpBar",
+        "Go to Line…": "findsInFile",
         "Focus": "\\.focuses",
         "Orchestrator": "\\.inWorkspace",
         "Navigator": "\\.inWorkspace",

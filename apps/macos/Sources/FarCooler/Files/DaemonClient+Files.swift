@@ -48,7 +48,7 @@ struct FileRead: Decodable, Equatable {
 }
 
 /// Why a read came back with nothing, in a sentence for the pane.
-enum FileReadFailure: Equatable {
+enum FileReadFailure: Error, Equatable {
     /// The runner predates `worktree_files`.
     case runnerTooOld
     /// Nothing at that path, or a link on the way to it.

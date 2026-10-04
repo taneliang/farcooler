@@ -145,7 +145,7 @@ enum Shortcut {
                 Item(keys: "⌘K", action: "Ask the orchestrator, or see what’s happening"),
                 Item(keys: "⌘B", action: "Show or hide the sidebar"),
                 Item(keys: "⌘F", action: "Find in the file open in Files, filter the navigator’s tasks, or find a workspace, task, or agent"),
-                Item(keys: "⌘L", action: "Go to a line of the file open in Files"),
+                Item(keys: "⇧⌘L", action: "Go to a line of the file open in Files"),
                 Item(keys: "⌘,", action: "Settings"),
                 Item(keys: "⌘/", action: "Keyboard shortcuts"),
                 Item(keys: "⌘R", action: "Reload the fleet"),

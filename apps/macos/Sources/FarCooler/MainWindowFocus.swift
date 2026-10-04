@@ -20,7 +20,7 @@ struct MainWindowFocus: Equatable {
     /// ▸ Mark All as Read reads its Unread (ov-104).
     var hasNavigator = false
     /// A file is open in the Files on screen, and was clicked into: ⌘F
-    /// finds in it and ⌘L goes to a line of it (ov-189).
+    /// finds in it and ⇧⌘L goes to a line of it (ov-189).
     var findsInFile = false
 
     // What the rest of the menu bar can act on, so an item that can't is

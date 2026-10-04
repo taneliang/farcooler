@@ -497,9 +497,10 @@ struct FarCoolerCommands: Commands {
                 Button(MainWindowFocus.findTitle(mainWindow)) { AppCommand.search.post() }
                     .keyboardShortcut("f", modifiers: .command)
                     .disabled(!MainWindowFocus.isKey(mainWindow))
-                // ⌘L, Xcode's, for the file open in Files (ov-189).
+                // ⇧⌘L for the file open in Files (ov-189): the jump bar
+                // (ov-192) holds Xcode's ⌘L.
                 Button("Go to Line…") { AppCommand.goToLine.post() }
-                    .keyboardShortcut("l", modifiers: .command)
+                    .keyboardShortcut("l", modifiers: [.command, .shift])
                     .disabled(mainWindow?.findsInFile != true)
             }
 

@@ -11,7 +11,7 @@ import SwiftUI
 /// an editor shows would only send people to the editor.
 struct FilesPane: View {
     @ObservedObject var model: FilesModel
-    /// The pane was clicked into: ⌘F and ⌘L are for it now.
+    /// The pane was clicked into: ⌘F and ⇧⌘L are for it now.
     var onFocus: () -> Void = {}
     /// Hide it, where it's an inspector rather than a tab.
     var onClose: (() -> Void)?
@@ -88,7 +88,7 @@ struct FilesPane: View {
                 Image(systemName: "number")
             }
             .buttonStyle(.borderless)
-            .help("Go to a line (⌘L)")
+            .help("Go to a line (⇧⌘L)")
             .disabled(model.lines.isEmpty)
             Menu {
                 Button("Copy Path") { copy(model.opened?.path ?? "") }

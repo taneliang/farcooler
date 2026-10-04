@@ -90,8 +90,8 @@ struct JumpBarMenuTests {
             menu.sections.map(\.title) == [
                 "bil-p1", "", "Needs Decision", "Backlog", "In Progress", "Done", "Worktrees",
             ])
-        #expect(menu.sections[0].items.map(\.title) == ["Overview", "Agent", "Changes"])
-        #expect(menu.sections[0].items.map(\.current) == [false, true, false])
+        #expect(menu.sections[0].items.map(\.title) == ["Overview", "Agent", "Changes", "Files"])
+        #expect(menu.sections[0].items.map(\.current) == [false, true, false, false])
         #expect(menu.sections[0].items[2].target == .tab(Self.task("p1"), .changes))
         #expect(menu.current?.id == "tab|agent")
         let p1 = menu.items.first { $0.id == "task|p1" }
