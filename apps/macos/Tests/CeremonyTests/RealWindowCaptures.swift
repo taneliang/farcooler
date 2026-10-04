@@ -81,7 +81,12 @@ struct RealWindowCaptures {
             .filter { wanted == nil || $0.name == wanted }
         try #require(!places.isEmpty, "no place to capture")
 
+        // What every local test run shares (the xctest domain): put back as
+        // it was when the captures are done (review L9).
         let defaults = UserDefaults.standard
+        let touched = ["window.sessions.v1", SelectionMemory.destinationKey, SelectionMemory.key]
+        let saved = Dictionary(uniqueKeysWithValues: touched.map { ($0, defaults.object(forKey: $0)) })
+        defer { Self.restore(saved, in: defaults) }
         for place in places {
             // Where the window was, as a relaunch reads it, and nothing else:
             // no window record, no newer destination.
@@ -106,6 +111,26 @@ struct RealWindowCaptures {
             }
             window.close()
         }
+    }
+
+    /// Each key back as it was: a value set again, an absent one removed.
+    static func restore(_ saved: [String: Any?], in defaults: UserDefaults) {
+        for (key, value) in saved {
+            if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+        }
+    }
+
+    @Test func theDefaultsComeBackAsTheyWere() throws {
+        let suite = "capture-restore-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("|kept|", forKey: "a")
+        let saved: [String: Any?] = ["a": defaults.object(forKey: "a"), "b": defaults.object(forKey: "b")]
+        defaults.set("|capture|", forKey: "a")
+        defaults.set("|capture|", forKey: "b")
+        Self.restore(saved, in: defaults)
+        #expect(defaults.string(forKey: "a") == "|kept|")
+        #expect(defaults.object(forKey: "b") == nil)
     }
 
     @Test func extraPlacesReadNameAndSelection() {
