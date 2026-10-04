@@ -684,6 +684,8 @@ final class DaemonClient: ObservableObject {
             // run `node` in stayed labeled `shell` until something forced a full
             // re-read. The whole point of pushing events is not needing one.
             updated.preset = event.preset
+            // Kept beside it, because a header names the program by this (ov-218).
+            updated.program = event.program
             // What can be switched to a chat, which is also what `⌃B a`
             // checks before it will even try.
             //

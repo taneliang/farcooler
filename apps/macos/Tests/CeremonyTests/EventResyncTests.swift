@@ -80,7 +80,7 @@ struct EventResyncTests {
 
         let event = TerminalEvent(
             id: "t-156", short: "new", worktree: "w-156", title: "new title", preset: "claude",
-            state: "running", activity: "working", chatCapable: true, exitCode: 3, exitSignal: 9,
+            program: "claude", state: "running", activity: "working", chatCapable: true, exitCode: 3, exitSignal: 9,
             activitySince: 1234, turnStartedAt: 5678, blockedQuestion: "Allow touch x?",
             feed: ["a line"], line: "3/7 · Testing", subagents: ["Explore"], turnFailed: true,
             noticeTaskId: "task-1", said: "Added the retry.", paneMode: "agent", rank: 7,

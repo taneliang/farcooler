@@ -24,6 +24,8 @@ struct TerminalEvent: Sendable, Decodable {
     var worktree: String
     var title: String
     var preset: String
+    /// What the pane was launched as (ov-218), nil from an older CLI.
+    var program: String?
     var state: String
     var activity: String?
     // Pushed for the same reason `preset` is: without it, a shell pane the
