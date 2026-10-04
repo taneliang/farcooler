@@ -1,4 +1,4 @@
-// Shipped by Canary at 4d797b12e9552967c83659829dc2dc5860c4dac4. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at d26b9cad1afd6c6588c8d3a60eb8f9b13bd266ab. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -199,6 +199,8 @@ message Request {
     TaskSetWait task_set_wait = 130;
     TaskSetLine task_set_line = 131;
     TaskWorkerSet task_worker_set = 132;
+    // Raise what is read on a board (ov-113), behind `board_reads`.
+    WorkspaceMarkRead workspace_mark_read = 133;
   }
 }
 
@@ -290,6 +292,8 @@ message Result {
     // `usage.report` and `usage.task`, behind `agent_usage`.
     UsageReport usage_report = 120;
     TaskUsage task_usage = 121;
+    // `workspace.mark_read`: the board's read state after the merge.
+    BoardReads board_reads = 122;
   }
 }
 
@@ -532,6 +536,11 @@ message Event {
     // its own notifications posts, under `notice_id`, so it and the relay's
     // push about the same task replace each other.
     Notice notice = 25;
+    // A board's read state moved (ov-113), behind `board_reads`: the whole
+    // state, which a client merges as it is because every part only rises.
+    // Not `task_changed`: nothing about a task moved, and that event wakes
+    // managers and makes every board re-read.
+    BoardReads board_reads_changed = 26;
   }
 }
 
@@ -2902,7 +2911,46 @@ message TaskWorker {
   optional bytes orchestrator_terminal = 12;
 }
 
-message TaskList { repeated Task items = 1; }
+message TaskList {
+  repeated Task items = 1;
+  // The board's read state (ov-113). Set by `task.list` when the request
+  // names a workspace and the runner has `board_reads`; absent otherwise,
+  // and an older client ignores it.
+  BoardReads reads = 2;
+}
+
+// When a ticket was last opened, on the runner's clock (ov-113).
+message TaskRead {
+  bytes task_id = 1;
+  int64 opened_ms = 2;
+}
+
+// One board's read state on this runner, shared by every device (ov-113).
+// Every time is the runner's clock, Unix milliseconds.
+message BoardReads {
+  bytes workspace_id = 1;
+  // Everything at or before it counts as read.
+  int64 floor_ms = 2;
+  // Only marks above the floor, for tickets on the board now.
+  repeated TaskRead opened = 3;
+}
+
+// Raise what is read on one board (ov-113): each mark and the floor only ever
+// rise, so a retried or out-of-order write converges. `workspace.mark_read`,
+// behind `board_reads`, at `control`. Answers with the merged `BoardReads`.
+//
+// Refusals, as `Error.what`:
+//   `other_board`  a mark for a task on another board than `workspace_id`
+//   `task_ids`     an id that isn't one
+message WorkspaceMarkRead {
+  bytes workspace_id = 1;
+  // Mark All as Read; absent for opening a ticket.
+  optional int64 floor_ms = 2;
+  repeated TaskRead opened = 3;
+  // 4 was `seeds_floor`, never shipped: the floor merges by max like every
+  // other value, so the outcome never depends on the order devices write in.
+  reserved 4;
+}
 
 // One entry in the record. Never edited, here or anywhere.
 message TaskNote {
