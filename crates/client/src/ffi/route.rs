@@ -77,6 +77,10 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         | Method::WorkspaceMarkRead
         | Method::WorkspaceStartOrchestrator
         | Method::TerminalWatching
+        // A worktree's files and the runner's read-only folders, read-only
+        // (ov-259).
+        | Method::WorktreeListDir
+        | Method::WorktreeReadFile
         | Method::UsageTask => Some(method.name()),
         Method::AdapterList => Some("adapters"),
         Method::ThemeList => Some("themes"),
@@ -98,8 +102,6 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // Their own C entry points, `farcooler_client_paste_file` and
         // `farcooler_client_stream_start`, because neither is one reply.
         Method::TerminalPasteFile | Method::TerminalAttach => None,
-        // The Files tab is the Mac's first (ov-189); the phones follow.
-        Method::WorktreeListDir | Method::WorktreeReadFile => None,
         // Tiling is tmux's, and a phone shows one pane at a time.
         Method::LayoutList
         | Method::LayoutSplit

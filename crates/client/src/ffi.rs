@@ -1619,6 +1619,9 @@ async fn dispatch(
                 // Which agents the runner can start (ov-205): null from a
                 // runner too old to say, so a phone offers every one.
                 "agentsFound": agents_found(&facts, session.can(farcooler_protocol::capability::AGENTS_FOUND)),
+                // The runner's extra read-only folders, by name (ov-259):
+                // null from a runner too old to have them.
+                "readOnlyFolders": files_args::read_only_folders(&facts, session.can(farcooler_protocol::capability::READ_ONLY_FOLDERS)),
                 "daemonVersion": facts.daemon_version,
                 "clientVersion": farcooler_protocol::BUILD,
                 "buildsMatch": facts.daemon_version == farcooler_protocol::BUILD,
@@ -2288,12 +2291,9 @@ async fn dispatch(
             Ok(json!({}))
         }
 
-        "worktree.file_search" => {
-            let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as u32;
-            let paths = session
-                .search_worktree_files(id("worktree")?, &text("query"), limit)
-                .await?;
-            Ok(json!({ "paths": paths }))
+        // Files (ov-259), in their own module for `ffi.rs`'s size budget.
+        "worktree.file_search" | "worktree.list_dir" | "worktree.read_file" => {
+            files_args::call(session, method, args).await
         }
 
         // Refused rather than defaulted, so a typo in a client is a visible
@@ -3235,7 +3235,10 @@ mod phone_path_tests;
 mod route;
 #[cfg(test)]
 mod board_reads_phone_tests;
+#[cfg(test)]
+mod files_phone_tests;
 mod board_reads_args;
+mod files_args;
 use board_reads_args::mark_read_of;
 mod calls;
 #[cfg(test)]

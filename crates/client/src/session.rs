@@ -26,9 +26,11 @@ use crate::ssh;
 
 mod board_reads;
 mod draft_prompt;
+mod files;
 mod notice_task;
 mod results;
 pub use board_reads::{MarkRead, reads_json};
+pub use files::FilesPlace;
 use results::wrong;
 
 #[derive(Debug, thiserror::Error)]
