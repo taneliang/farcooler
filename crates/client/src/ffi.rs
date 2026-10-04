@@ -2289,7 +2289,6 @@ async fn dispatch(
             Ok(json!({}))
         }
 
-        // Files (ov-259), in their own module for `ffi.rs`'s size budget.
         "worktree.file_search" | "worktree.list_dir" | "worktree.read_file" => {
             files_args::call(session, method, args).await
         }
