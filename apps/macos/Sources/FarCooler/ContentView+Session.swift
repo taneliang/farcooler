@@ -1,4 +1,5 @@
 import AgentKit
+import Combine
 import SwiftUI
 
 /// The window's side of its record (ov-248, ov-233): taking the one an earlier
@@ -19,6 +20,31 @@ extension ContentView {
         navigatorHidden = record.layout.navigatorHidden
         navigatorSplit = record.layout.split
         for _ in 0..<adoption.open { openWindow(id: FarCoolerApp.mainWindowID) }
+        WindowFrame.removeStale()
+        if let window = windowBox.window {
+            WindowFrame.apply(record, to: window)
+            captureFrame(of: window)
+        } else {
+            windowBox.attached = { window in
+                WindowFrame.apply(record, to: window)
+                captureFrame(of: window)
+            }
+        }
+    }
+
+    /// The window's frame and full-screen state, into its record.
+    func captureFrame(of window: NSWindow) {
+        let full = window.styleMask.contains(.fullScreen)
+        kept?.fullScreen = full
+        if !full { kept?.frame = window.frameDescriptor }
+    }
+
+    /// The window moved, was resized, or entered or left full screen: its
+    /// record follows. A full-screen frame isn't kept; leaving full screen
+    /// goes back to the one before.
+    func keepFrame(_ note: Notification) {
+        guard let window = windowBox.window, note.object as? NSWindow === window, kept != nil else { return }
+        captureFrame(of: window)
     }
 
     /// The window as its record says it is now, or nil while it has nowhere to
@@ -32,6 +58,11 @@ extension ContentView {
         record.forward = Self.entries(jumpBar.history.forward.reversed(), names: names)
         record.layout = WindowSession.Layout(focus: focusColumn, navigatorHidden: navigatorHidden, split: navigatorSplit)
         return record
+    }
+
+    /// What says the window's frame changed (`keepFrame`).
+    var windowGeometry: some Publisher<Notification, Never> {
+        Publishers.MergeMany(WindowFrame.changes.map { NotificationCenter.default.publisher(for: $0) })
     }
 
     /// The window closed: its record goes, unless it's the last window or the

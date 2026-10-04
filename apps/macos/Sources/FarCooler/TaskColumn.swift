@@ -617,7 +617,16 @@ enum EscapeBack {
 /// Esc in Settings doesn't close a task in the window behind it.
 @MainActor
 final class WindowBox {
-    weak var window: NSWindow?
+    weak var window: NSWindow? {
+        didSet {
+            guard let window, let attached else { return }
+            self.attached = nil
+            attached(window)
+        }
+    }
+    /// What to do once, when the window is known: a window that took its
+    /// record before it was drawn puts its frame back then (ov-233).
+    var attached: ((NSWindow) -> Void)?
 }
 
 /// Tells a `WindowBox` the window it's drawn in.

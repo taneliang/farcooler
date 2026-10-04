@@ -441,6 +441,7 @@ struct ContentView: View {
         .onChange(of: keptPlace) { _, now in
             if let now, windowBox.window?.isKeyWindow != false { lastDestination = now }
         }
+        .onReceive(windowGeometry) { keepFrame($0) }
         .onChange(of: sessionState) { _, record in if let record { WindowSessions.shared.update(record) } }
         // Where a new window starts, and the fallback: the key window's.
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
