@@ -224,6 +224,7 @@ struct PlanLaneRow: View {
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                                 .truncationMode(.tail)
+                                .probed("plan-lane-\(lane.name)-theme")
                         }
                     }
                     Text(second)

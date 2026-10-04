@@ -72,8 +72,10 @@ final class TaskBoardStore: ObservableObject {
     /// `id`'s Usage section: what was read for it, or loading until then.
     func usage(for id: String) -> TaskUsageState { usage[id] ?? .loading }
 
-    /// The board's plan (ov-273), read only once someone chooses Plan.
-    lazy var plan = PlanStore(client: client, workspace: workspace, host: hostKey)
+    /// The board's plan (ov-273), read only once someone chooses Plan; its
+    /// choice kept in `planDefaults`, which a test replaces before reading.
+    lazy var plan = PlanStore(client: client, workspace: workspace, host: hostKey, defaults: planDefaults)
+    var planDefaults = UserDefaults.standard
 
     /// The card that is open, or nil for the board alone.
     @Published var opened: TaskRow?
