@@ -59,7 +59,7 @@ const TERMINALS: [&str; 2] = ["terminal.stop", "terminal.remove"];
 /// header listed none (ov-115's review): an app developer reading it could not
 /// learn that a pane's prompt, picker or queued message has a method at all.
 /// `terminal.agent_subscribe` is the poll behind the live stream.
-const AGENT: [&str; 13] = [
+const AGENT: [&str; 12] = [
     "terminal.set_pane_mode",
     "terminal.agent_subscribe",
     "terminal.agent_prompt",
@@ -72,7 +72,6 @@ const AGENT: [&str; 13] = [
     "terminal.agent_cancel_queued",
     "terminal.agent_steer_queued",
     "terminal.agent_cancel",
-    "agent_queue",
 ];
 
 /// The header says so: an app developer reads that file to find out what may
@@ -80,6 +79,13 @@ const AGENT: [&str; 13] = [
 #[test]
 fn the_header_tells_an_app_developer_these_exist() {
     const HEADER: &str = include_str!("../include/farcooler_client.h");
+    // Whole names, not substrings: `terminal.agent_set_mode` is a prefix of
+    // `terminal.agent_set_model`, and `terminal.agent_cancel` of
+    // `terminal.agent_cancel_queued`, so `contains` could not fail for either.
+    let documented: std::collections::BTreeSet<&str> = HEADER
+        .split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.'))
+        .map(|word| word.trim_matches('.'))
+        .collect();
     for method in ENROLLMENT
         .iter()
         .chain(WORKTREES.iter())
@@ -90,7 +96,7 @@ fn the_header_tells_an_app_developer_these_exist() {
         .copied()
     {
         assert!(
-            HEADER.contains(method),
+            documented.contains(method),
             "{method} is routed but undocumented: nobody will find it"
         );
     }
