@@ -397,6 +397,8 @@ final class AgentStream: ObservableObject {
     /// there, it refused the size before sending, or a runner refused it by
     /// word. Anything else broke after it may have landed.
     static func sendIsKnownUnsent(_ error: Error) -> Bool {
+        // A cancelled send may have been delivered before it was stopped.
+        if error is CancellationError { return false }
         guard case let StreamError.failed(message) = error else { return true }
         let lower = message.lowercased()
         if lower.contains("too large") || lower.contains("payload") { return true }

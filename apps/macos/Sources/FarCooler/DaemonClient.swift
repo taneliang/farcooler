@@ -810,6 +810,10 @@ final class DaemonClient: ObservableObject {
         let (maybeData, failureMessage) = await runRaw(
             ["worktree", "list", "--json"], background: true)
         guard let data = maybeData else {
+            // Cancelled, not failed: whoever cancelled has already set the state
+            // it wants (`reconnect` sets `.connecting`), and writing
+            // `.unreachable` over it would show the runner as down.
+            if Task.isCancelled { return }
             let reason = failureMessage ?? "Couldn’t reach this runner."
             fleetError = reason
             if looksNotInstalled(reason) {
@@ -962,6 +966,8 @@ final class DaemonClient: ObservableObject {
             let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let version = body["daemonVersion"] as? String
         else {
+            // A cancelled read says nothing about the build.
+            if Task.isCancelled { return }
             // No guess either way. `daemonSkew` reads this as `.unknown`,
             // which offers nothing and claims nothing — see its own doc for
             // why silence beats a dot nobody can act on.
@@ -3154,6 +3160,10 @@ final class DaemonClient: ObservableObject {
         let ran = await ProcessRunner.run(
             bin, cliHostArguments + args, environment: environment)
         if let why = ran.launchFailure { return (nil, why) }
+        // A cancel somebody asked for (a reconnect abandoning its bring-up) is
+        // not the runner failing, and ssh's "Killed by signal 15." is not
+        // something to show for it.
+        if ran.cancelled { return (nil, "Cancelled.") }
         if !ran.succeeded {
             let message =
                 String(data: ran.stderr, encoding: .utf8)?
