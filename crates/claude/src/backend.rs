@@ -349,9 +349,12 @@ impl ClaudeBackend {
                     // response shape; this used to reply to all four with
                     // `{"behavior":"allow","updatedInput":{}}`, which is an
                     // answer to a question none of them asked. Answering each
-                    // one properly is future work.
-                    _ => {
-                        let _ = self.writer.respond_success(&request_id).await;
+                    // one properly is future work, and until then each is
+                    // refused: a success told the CLI a hook ran or a dialog
+                    // was answered when nothing happened.
+                    other => {
+                        let message = format!("Far Cooler does not handle `{other}` requests");
+                        let _ = self.writer.respond_error(&request_id, &message).await;
                         Ok(Vec::new())
                     }
                 }
@@ -652,10 +655,10 @@ impl AgentBackend for ClaudeBackend {
                 "apply_flag_settings",
                 serde_json::json!({ "settings": { "outputStyle": value } }),
             ),
-            // Unknown selectors are ignored rather than guessed at: sending a
+            // Unknown selectors are refused rather than guessed at: sending a
             // subtype the CLI does not know is silently dropped, which would
-            // move a control and change nothing.
-            _ => return Ok(()),
+            // move a control and change nothing, and `Ok` would say it did.
+            other => return Err(BackendError::Refused(format!("there is no `{other}` setting"))),
         };
         self.writer.control(subtype, fields).await.map(|_| ()).map_err(Into::into)
     }
@@ -862,6 +865,35 @@ mod tests {
                 "tool_use_id": "toolu_01A5aKxtkbRTQKMLULnQRAWe",
             }),
         )
+    }
+
+    #[tokio::test]
+    async fn a_request_this_client_cannot_do_is_answered_as_an_error_not_a_success() {
+        let mut backend = echoing_backend().await;
+        for subtype in ["elicitation", "hook_callback", "mcp_message"] {
+            backend
+                .handle(Incoming::Control {
+                    request_id: "r1".into(),
+                    request: serde_json::json!({ "subtype": subtype }),
+                })
+                .await
+                .expect("an unhandled request is not a failure of the session");
+            let Incoming::Frame(sent) = backend.recv_frame().await.expect("cat echoes it") else {
+                panic!("a response, not a request");
+            };
+            assert_eq!(sent["response"]["subtype"], "error", "{subtype} was answered as {sent}");
+            assert_eq!(sent["response"]["request_id"], "r1");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_selector_the_cli_has_no_setter_for_is_refused_not_acknowledged() {
+        let mut backend = echoing_backend().await;
+        assert!(matches!(
+            backend.set_config_option("verbosity", "high").await,
+            Err(BackendError::Refused(_))
+        ));
+        backend.set_config_option("model", "opus").await.expect("a real selector is accepted");
     }
 
     #[tokio::test]

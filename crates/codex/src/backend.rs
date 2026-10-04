@@ -105,6 +105,7 @@ impl CodexBackend {
         // rather than failing: a session id with no rollout yet is the COMMON
         // case, since every codex terminal is handed one at launch and a pane
         // switched to chat before its first turn has nothing recorded.
+        let mut resume_failure: Option<String> = None;
         let (result, resumed) = match &resume {
             Some(id) => {
                 let attempt = conn
@@ -115,10 +116,10 @@ impl CodexBackend {
                     .await;
                 match attempt {
                     Ok(result) => (result, true),
-                    Err(_) => (
-                        conn.request("thread/start", serde_json::json!({ "cwd": cwd })).await?,
-                        false,
-                    ),
+                    Err(e) => {
+                        resume_failure = Some(e.to_string());
+                        (conn.request("thread/start", serde_json::json!({ "cwd": cwd })).await?, false)
+                    }
                 }
             }
             None => (conn.request("thread/start", serde_json::json!({ "cwd": cwd })).await?, false),
@@ -185,6 +186,19 @@ impl CodexBackend {
         for (method, params) in conn.take_pending() {
             track_turn(&mut turn_id, &method, &params);
             prelude.extend(frame_to_events(&method, &params, Origin::Replay));
+        }
+
+        // A resume that failed started a NEW thread, and the pane must say so
+        // rather than present an empty conversation as the one asked for. The
+        // common "nothing recorded yet" refusal is the empty case, not news.
+        if let Some(detail) = resume_failure {
+            let lower = detail.to_lowercase();
+            let reason = if lower.contains("no rollout found") || lower.contains("not found") {
+                farcooler_agent_core::event::AgentGapReason::LoadEmpty
+            } else {
+                farcooler_agent_core::event::AgentGapReason::LoadFailed { detail }
+            };
+            prelude.push(AgentEvent::Gap { reason });
         }
 
         // History has to be ASKED for. `thread/resume` attaches to the thread
@@ -853,7 +867,9 @@ impl AgentBackend for CodexBackend {
             Some(Selector::Model) => self.model = Some(value.to_string()),
             Some(Selector::Effort) => self.effort = Some(value.to_string()),
             Some(Selector::Approval) => self.approval = Some(value.to_string()),
-            None => {}
+            // Refused, not ignored: `Ok` told the picker the control had moved
+            // when nothing had.
+            None => return Err(BackendError::Refused(format!("there is no `{id}` setting"))),
         }
         Ok(())
     }
@@ -885,6 +901,8 @@ impl AgentBackend for CodexBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod refusals;
 
     fn on(conn: CodexConnection, thread_id: &str) -> CodexBackend {
         let (writer, incoming) = conn.split();

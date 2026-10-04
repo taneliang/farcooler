@@ -126,20 +126,15 @@ impl ClaudeWriter {
         .await
     }
 
-    /// Answer a control request we do not understand, without pretending to.
+    /// Answer a control request this client cannot do, saying so.
     ///
-    /// Every inbound control request has to be answered — the CLI blocks until
-    /// it is — but they do NOT share a response shape. `SDKControlRequestInner`
-    /// lists `hook_callback`, `elicitation`, `request_user_dialog` and
-    /// `mcp_message` as things the CLI can ask a client, and a hook callback
-    /// answered with `{"behavior":"allow","updatedInput":{}}` is not a hook
-    /// response — it is a permission verdict for a question nobody asked, which
-    /// is what this used to send. A bare success says only "heard you", which is
-    /// the honest amount. Answering each of those four properly is future work.
-    pub async fn respond_success(&mut self, request_id: &str) -> Result<(), ClaudeError> {
+    /// A `subtype: "error"` response is how the CLI hears "no": a bare success
+    /// to an `elicitation` or `hook_callback` told it the user answered the
+    /// dialog and the hook ran, when neither happened.
+    pub async fn respond_error(&mut self, request_id: &str, message: &str) -> Result<(), ClaudeError> {
         self.write(serde_json::json!({
             "type": "control_response",
-            "response": { "subtype": "success", "request_id": request_id, "response": {} },
+            "response": { "subtype": "error", "request_id": request_id, "error": message },
         }))
         .await
     }

@@ -34,6 +34,8 @@ pub enum SessionError {
 /// JSON-RPC's code for a request whose parameters are wrong: here, a path
 /// outside the worktree.
 pub const INVALID_PARAMS: i64 = -32602;
+/// JSON-RPC's code for a method this side does not implement.
+pub const METHOD_NOT_FOUND: i64 = -32601;
 /// JSON-RPC's code for a failure on this side.
 pub const INTERNAL_ERROR: i64 = -32603;
 /// ACP's code for a resource that does not exist.
@@ -974,9 +976,9 @@ impl RunningSession {
                 // there goes nowhere at all.
                 println!("farcooler: unhandled ACP method `{other}`");
                 if let Some(id) = id {
-                    // Answer anyway. An empty result is a poor answer, but a
-                    // turn that continues beats one that waits forever.
-                    let _ = self.writer.respond(id, serde_json::json!({})).await;
+                    // Answered, as an error: `{}` told the adapter the method
+                    // worked. A turn that continues beats one that waits.
+                    let _ = self.writer.respond_error(id, METHOD_NOT_FOUND, "method not found").await;
                 }
                 Ok(vec![AgentEvent::Gap { reason: AgentGapReason::Unparsed }])
             }
@@ -987,6 +989,7 @@ impl RunningSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    mod refusals;
     use farcooler_agent_core::event::{AgentEvent, AgentGapReason};
 
     #[tokio::test]
