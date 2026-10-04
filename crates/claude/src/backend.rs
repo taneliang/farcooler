@@ -999,9 +999,10 @@ mod tests {
         let Incoming::Frame(sent) = backend.recv_frame().await.expect("cat echoes it") else {
             panic!("a response, not a request");
         };
-        assert_eq!(sent["response"]["subtype"], "success");
+        // Still answered, but as the refusal it is (ov-142): a bare success
+        // told the CLI the hook had run.
+        assert_eq!(sent["response"]["subtype"], "error");
         assert_eq!(sent["response"]["request_id"], "fc-hook");
-        assert_eq!(sent["response"]["response"], serde_json::json!({}));
         assert!(
             sent["response"]["response"]["behavior"].is_null(),
             "a hook response is not a permission verdict: {sent}"
