@@ -3107,7 +3107,7 @@ final class DaemonClient: ObservableObject {
     /// For a caller that says its own failure — a sheet, `refresh()`'s
     /// `.unreachable(reason:)` — rather than leaving it to the action it
     /// runs inside.
-    private func runRaw(
+    func runRaw(
         _ args: [String], background: Bool = false
     ) async -> (data: Data?, message: String?) {
         // A background poll must not toggle `busy`. That is a @Published change,

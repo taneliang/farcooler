@@ -143,6 +143,13 @@ struct WorktreeCallsTests {
         await record("searchFiles", ["worktree", "file-search", "w1", "mai", "--json"]) {
             _ = await $0.searchFiles(in: Self.worktree, query: "mai")
         }
+        // The Files tab's two reads (ov-189), the root and a file.
+        await record("listFiles", ["files", "ls", "w1", "", "--json"]) {
+            _ = await $0.listFiles(in: Self.worktree, path: "")
+        }
+        await record("readFile", ["files", "cat", "w1", "src/main.rs", "--json"]) {
+            _ = await $0.readFile(in: Self.worktree, path: "src/main.rs")
+        }
         await record("assign", ["worktree", "assign", "w1", "--to", Self.billing.id, "--json"]) {
             _ = await $0.assignWorktree(Self.worktree, to: Self.billing)
         }
