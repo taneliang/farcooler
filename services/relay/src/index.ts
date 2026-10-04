@@ -1049,11 +1049,15 @@ async function notify(request: Request, env: Env): Promise<Response> {
   }
   // What this token last said, read before it is overwritten, so an ask
   // notice can tell a count that moved from one told again. See below.
-  const told = (kind === 'ask' || taskLike) && needsYou !== null
-    ? (await env.DB.prepare(`SELECT needs_you FROM daemons WHERE id = ?`)
+  const was = (kind === 'ask' || taskLike) && needsYou !== null
+    ? await env.DB.prepare(`SELECT needs_you, reviews FROM daemons WHERE id = ?`)
         .bind(daemon.id)
-        .first<{ needs_you: number | null }>())?.needs_you ?? null
+        .first<{ needs_you: number | null; reviews: number | null }>()
     : null
+  const told = was?.needs_you ?? null
+  // A review count that moved is news on its own: it changes the card's "to
+  // review" and no needs-you item (ov-181).
+  const reviewsMoved = was !== null && reviews !== null && reviews !== was.reviews
   if (needsYou !== null) {
     await env.DB.prepare(
       `UPDATE daemons SET needs_you = ?, needs_you_at = ?, reviews = COALESCE(?, reviews) WHERE id = ?`,
@@ -1172,14 +1176,14 @@ async function notify(request: Request, env: Env): Promise<Response> {
       // A task notice moves the card only when the count it brings is news:
       // every refresh is a priority-10 push to every device, and most task
       // notices change nothing the card shows.
-      if (needsYou !== null && needsYou !== told) await refreshCard(env, daemon.account_id)
+      if ((needsYou !== null && needsYou !== told) || reviewsMoved) await refreshCard(env, daemon.account_id)
     } else if (kind === 'ask') {
       // The card moves only when the notice changed what it shows: the
       // header's count, or the headline's own ask. Every refresh is a
       // priority-10 push drawn from the budget the alerts depend on, and the
       // daemon stamps a count on every notice, told again or not.
       const changed = await rememberAsk(env, daemon, install, body)
-      const counted = needsYou !== null && needsYou !== told
+      const counted = (needsYou !== null && needsYou !== told) || reviewsMoved
       if (counted || changed !== null) {
         await refreshCard(env, daemon.account_id, headline =>
           counted || headline.terminal === changed)

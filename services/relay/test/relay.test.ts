@@ -4483,6 +4483,50 @@ describe('/v1/notify and Live Activities', () => {
       expect(lastCard(calls).body.aps['content-state'].review).toBe(2)
     })
 
+    it('moves the card when a task or ask notice brings a new review count and the same needs-you count (ov-181)', async () => {
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await post('/v1/notify', { title: 'claude needs you', terminal: 'term-1', status: 'blocked', needsYou: 1, reviews: 1 }, 'mine')
+      const before = pushes(calls).length
+
+      // Same needs-you count, one more worktree to review.
+      await post(
+        '/v1/notify',
+        { kind: 'decision', task: 'bil-7', title: 'bil-7 needs a decision', needsYou: 1, reviews: 2 },
+        'mine',
+      )
+      expect(pushes(calls).length).toBeGreaterThan(before)
+      expect(lastCard(calls).body.aps['content-state'].review).toBe(2)
+
+      const mid = pushes(calls).length
+      await post('/v1/notify', { kind: 'ask', terminal: 'term-1', needsYou: 1, reviews: 3 }, 'mine')
+      expect(pushes(calls).length).toBeGreaterThan(mid)
+      expect(lastCard(calls).body.aps['content-state'].review).toBe(3)
+
+      // Told again, nothing moves.
+      const after = pushes(calls).length
+      await post('/v1/notify', { kind: 'ask', terminal: 'term-1', needsYou: 1, reviews: 3 }, 'mine')
+      expect(pushes(calls).length).toBe(after)
+    })
+
+    it("keeps a failed turn inside `review` on a runner that counts worktrees, so `review - failedTurns` is the worktrees (ov-181)", async () => {
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      await post('/v1/notify', { title: 'claude needs you', terminal: 'term-2', status: 'blocked' }, 'mine')
+      await post(
+        '/v1/notify',
+        { title: 'claude failed', terminal: 'term-1', status: 'done', label: 'claude', failed: true, needsYou: 1, reviews: 2 },
+        'mine',
+      )
+      await post('/v1/notify', { kind: 'count', needsYou: 1, reviews: 2 }, 'mine')
+      const card = lastCard(calls).body.aps['content-state']
+      expect(card.failedTurns).toBe(1)
+      expect(card.review).toBe(3)
+      expect(card.review - card.failedTurns).toBe(2)
+    })
+
     it("heads the start alert with a mixed fleet's per-runner total", async () => {
       // The same rule on the one sentence the relay writes itself.
       const calls = watchFetch()
