@@ -54,35 +54,54 @@ fn the_floor_only_rises() {
     assert_eq!(reads.floor_ms, first + 1000, "a lower floor is a no-op");
 }
 
-/// Only the runner's own first-look default is replaced by a seed; one a
-/// device has written is raised by it, never lowered.
+/// A seed is a plain raise: the floor merges by max like every other value.
 #[test]
-fn a_seed_replaces_only_the_implicit_floor() {
+fn a_floor_never_lowers_even_from_a_first_upload() {
     let (store, main, _) = board(0);
-    let implicit = store.board_reads(main, NOW).unwrap().floor_ms;
-    assert_eq!(implicit, NOW - FIRST_LOOK_MS);
-    let seed = ReadsDelta { floor_ms: Some(implicit - 5000), seeds_floor: true, ..ReadsDelta::default() };
-    let (reads, _) = store.merge_board_reads(main, &seed, NOW).unwrap();
-    assert_eq!(reads.floor_ms, implicit - 5000, "the first seed wins over the default, even lower");
-    // A second seed (another Mac) is a plain raise.
-    let lower = ReadsDelta { floor_ms: Some(implicit - 9000), seeds_floor: true, ..ReadsDelta::default() };
-    let (reads, _) = store.merge_board_reads(main, &lower, NOW).unwrap();
-    assert_eq!(reads.floor_ms, implicit - 5000);
-    let higher = ReadsDelta { floor_ms: Some(implicit + 7000), seeds_floor: true, ..ReadsDelta::default() };
-    let (reads, _) = store.merge_board_reads(main, &higher, NOW).unwrap();
-    assert_eq!(reads.floor_ms, implicit + 7000);
+    let first = store.board_reads(main, NOW).unwrap().floor_ms;
+    let (reads, changed) = store.merge_board_reads(main, &floor(first - 5000), NOW).unwrap();
+    assert!(!changed);
+    assert_eq!(reads.floor_ms, first);
 }
 
-/// A phone's opened marks, sent with no floor, leave the default to be
-/// replaced by the Mac's seed afterwards.
+/// The same writes in either order end in the same state: a phone's mark
+/// between a Mac's older floor and the default is kept whether it arrives
+/// before or after.
 #[test]
-fn marks_alone_do_not_spend_the_seed() {
-    let (store, main, t) = board(1);
-    let implicit = store.board_reads(main, NOW).unwrap().floor_ms;
-    store.merge_board_reads(main, &open(&t[0], implicit + 10), NOW).unwrap();
-    let seed = ReadsDelta { floor_ms: Some(implicit - 1), seeds_floor: true, ..ReadsDelta::default() };
-    let (reads, _) = store.merge_board_reads(main, &seed, NOW).unwrap();
-    assert_eq!(reads.floor_ms, implicit - 1);
+fn the_same_writes_in_any_order_end_in_the_same_state() {
+    let writes = |t: &Task| {
+        vec![open(t, NOW - FIRST_LOOK_MS + 10), floor(NOW - FIRST_LOOK_MS - 5000), floor(NOW - 1000), open(t, NOW - 500)]
+    };
+    let mut ends = Vec::new();
+    for order in [[0, 1, 2, 3], [3, 2, 1, 0], [1, 0, 3, 2], [2, 3, 0, 1]] {
+        let (store, main, t) = board(1);
+        let all = writes(&t[0]);
+        for i in order {
+            store.merge_board_reads(main, &all[i], NOW).unwrap();
+        }
+        let r = store.board_reads(main, NOW).unwrap();
+        ends.push((r.floor_ms, marks(&r)));
+    }
+    assert!(ends.windows(2).all(|w| w[0] == w[1]), "{ends:?}");
+}
+
+/// A device's clock ahead of the runner's cannot hide later news: every time
+/// is clamped to the runner's now.
+#[test]
+fn a_future_time_cannot_hide_later_news() {
+    let (store, main, t) = board(2);
+    let later = NOW + 60_000;
+    let (reads, _) = store
+        .merge_board_reads(
+            main,
+            &ReadsDelta { floor_ms: Some(NOW + 10 * 86_400_000), opened: vec![(t[0].id, NOW + 86_400_000)] },
+            NOW,
+        )
+        .unwrap();
+    assert_eq!(reads.floor_ms, NOW, "the floor lands at runner now");
+    assert!(reads.opened.is_empty(), "a mark clamped to the floor is dropped");
+    let (reads, _) = store.merge_board_reads(main, &open(&t[1], NOW + 86_400_000), later).unwrap();
+    assert_eq!(reads.opened, vec![(t[1].id, later)], "a mark lands at the runner's now, not the device's");
 }
 
 /// A floor reads every older ticket as read, so its marks are dropped, and a
@@ -124,17 +143,37 @@ fn a_mark_follows_its_task_across_a_move() {
     assert_eq!(store.board_reads(other, NOW).unwrap().opened, vec![(t[0].id, at)]);
 }
 
+/// A ticket now on another board is skipped, not refused: the one-time
+/// upload sends every local mark, and one moved ticket must not wedge it.
 #[test]
-fn a_mark_for_another_boards_task_is_refused() {
-    let (store, main, t) = board(1);
+fn a_mark_for_another_boards_task_is_skipped_and_the_rest_land() {
+    let (store, main, t) = board(2);
     let other = store.create_workspace(t[0].repository_id, "Billing", "bil").unwrap().id;
-    let err = store.merge_board_reads(other, &open(&t[0], NOW - 5), NOW).unwrap_err();
-    assert!(matches!(err, DomainError::InvalidArgument { what: "other_board" }), "{err:?}");
-    // And nothing of the delta landed: the whole write was refused first.
-    let mixed = ReadsDelta { floor_ms: Some(NOW), opened: vec![(t[0].id, NOW - 5)], ..ReadsDelta::default() };
-    store.merge_board_reads(other, &mixed, NOW).unwrap_err();
-    assert_eq!(store.board_reads(other, NOW).unwrap().floor_ms, NOW - FIRST_LOOK_MS);
-    let _ = main;
+    store.move_tasks(&[t[0].id], other, Actor::Manager).unwrap();
+    let at = NOW - 1000;
+    let delta = ReadsDelta { floor_ms: None, opened: vec![(t[0].id, at), (t[1].id, at)] };
+    let (reads, _) = store.merge_board_reads(main, &delta, NOW).unwrap();
+    assert_eq!(reads.opened, vec![(t[1].id, at)]);
+    assert!(store.board_reads(other, NOW).unwrap().opened.is_empty(), "and not applied to the board it moved to");
+}
+
+/// A board already known is read without taking the write lock, so a read at
+/// `read` scope never waits behind a writer.
+#[test]
+fn reading_a_known_board_takes_no_write_lock() {
+    let dir = std::env::temp_dir().join(format!("farcooler-reads-{}", Uuid::now_v7()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("store.db");
+    let store = Store::open(&path).unwrap();
+    let repo = store.register_repository_for_test("overnight");
+    let main = store.ensure_main_workspace(repo).unwrap().id;
+    store.board_reads(main, NOW).unwrap();
+    let other = rusqlite::Connection::open(&path).unwrap();
+    other.busy_timeout(std::time::Duration::from_millis(0)).unwrap();
+    other.execute_batch("BEGIN IMMEDIATE").unwrap();
+    store.board_reads(main, NOW).expect("a read waits for no writer");
+    other.execute_batch("ROLLBACK").unwrap();
+    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]

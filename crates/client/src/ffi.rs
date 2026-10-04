@@ -92,7 +92,8 @@ const EVENT_QUEUE_LIMIT: usize = 64;
 ///
 /// That is affordable only because of what a notice says. Every `FleetEvent`
 /// means "re-read it" and carries no delta (see `FleetEvent` in `session.rs`),
-/// so two identical notices are worth exactly one re-read, and any set of
+/// except `Reads`, a board's whole read state, which merges by max and so
+/// coalesces and collapses into a resync like the rest. So two identical notices are worth exactly one re-read, and any set of
 /// notices is covered by re-reading everything. Which gives three rules:
 ///
 /// 1. **Never block.** `push` takes this lock, does O(n) over at most

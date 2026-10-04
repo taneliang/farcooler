@@ -37,7 +37,9 @@ pub(crate) fn reads_of(svc: &Service, workspace: Uuid) -> Result<pb::BoardReads>
 
 /// `workspace.mark_read`: raise what is read on one board.
 ///
-/// Answers with the board's state after the merge. Announces to every
+/// Answers with the board's state after the merge. `seeds_floor` is read by
+/// no one: the floor merges by max like every other value, so a seed is a
+/// plain raise and the outcome never depends on arrival order. Announces to every
 /// connected client when anything changed, so a retried write, or one a
 /// newer device already beat, is silent.
 pub(crate) fn mark_read(svc: &Service, watcher: &Watcher, req: &pb::WorkspaceMarkRead) -> Result<pb::BoardReads> {
@@ -50,7 +52,7 @@ pub(crate) fn mark_read(svc: &Service, watcher: &Watcher, req: &pb::WorkspaceMar
         let task = parse_id(&mark.task_id).ok_or(DomainError::InvalidArgument { what: "task_ids" })?;
         opened.push((task, mark.opened_ms));
     }
-    let delta = ReadsDelta { floor_ms: req.floor_ms, opened, seeds_floor: req.seeds_floor };
+    let delta = ReadsDelta { floor_ms: req.floor_ms, opened };
     let (reads, changed) = svc.store.merge_board_reads(workspace, &delta, crate::review::now_millis())?;
     let reads = to_pb(&reads);
     if changed {

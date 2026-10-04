@@ -24,7 +24,8 @@ pub struct MarkRead {
     pub floor_ms: Option<i64>,
     /// Tickets opened: the task and the runner-clock time seen through.
     pub opened: Vec<(Uuid, i64)>,
-    /// The floor is this device's pre-sync one. See `WorkspaceMarkRead`.
+    /// The floor is this device's pre-sync one. The runner merges it by max
+    /// like any floor; see `WorkspaceMarkRead`.
     pub seeds_floor: bool,
 }
 

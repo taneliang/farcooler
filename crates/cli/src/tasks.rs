@@ -441,31 +441,7 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
             let board =
                 board_for(&mut link, repo.as_deref(), workspace.as_deref(), std::env::var(WORKSPACE_ENV).ok())
                     .await?;
-            let list = board_in(&mut link, &board, status, stale).await?;
-
-            if json {
-                // `reads` beside `tasks` (ov-113): additive, so a reader of
-                // `tasks` alone never sees it.
-                println!("{}", render_board_json(&list));
-                return Ok(());
-            }
-            let items = list.items;
-            if items.is_empty() {
-                println!("nothing on this board");
-                return Ok(());
-            }
-            // Every board in the repository at once: each row says whose.
-            let names = match (&board.workspace, board.has_workspaces) {
-                (None, true) => Some(
-                    workspaces_on(&mut link, Some(board.repository))
-                        .await?
-                        .into_iter()
-                        .map(|w| (uuid_of(&w.id), w.name))
-                        .collect(),
-                ),
-                _ => None,
-            };
-            print!("{}", render_list(&items, names.as_ref(), now_millis()));
+            print!("{}", listing(&mut link, &board, status, stale, json).await?);
         }
 
         TaskCmd::Show { key, fields, notes, repo } => {
@@ -1509,6 +1485,37 @@ async fn repository_for<L: DispatchLink>(
             .into())
         }
     }
+}
+
+/// What `task list` prints for `board`, newline included: the JSON with its
+/// read state beside the rows (ov-113), or the table.
+///
+/// A function of the link so a test reaches the same call the command makes.
+pub(crate) async fn listing<L: DispatchLink>(
+    link: &mut L,
+    board: &Board,
+    status: Option<TaskStatus>,
+    stale: Option<Duration>,
+    json: bool,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let list = board_in(link, board, status, stale).await?;
+    if json {
+        // `reads` beside `tasks`: additive, so a reader of `tasks` alone
+        // never sees it.
+        return Ok(format!("{}\n", render_board_json(&list)));
+    }
+    let items = list.items;
+    if items.is_empty() {
+        return Ok("nothing on this board\n".to_string());
+    }
+    // Every board in the repository at once: each row says whose.
+    let names = match (&board.workspace, board.has_workspaces) {
+        (None, true) => Some(
+            workspaces_on(link, Some(board.repository)).await?.into_iter().map(|w| (uuid_of(&w.id), w.name)).collect(),
+        ),
+        _ => None,
+    };
+    Ok(render_list(&items, names.as_ref(), now_millis()))
 }
 
 /// Every task on `board`, or those in `status`, or those nothing has moved

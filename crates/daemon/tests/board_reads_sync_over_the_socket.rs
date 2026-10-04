@@ -144,18 +144,33 @@ async fn reads_ride_a_board_list_and_not_a_repository_list() {
     assert!(list(&mut link, None, repo.id).await.reads.is_none());
 }
 
-/// A mark for a ticket on another board is refused as `other_board`.
+/// A ticket on another board is skipped, not refused, so a queued upload with
+/// one moved ticket still lands the rest.
 #[tokio::test]
-async fn a_mark_for_another_boards_ticket_is_refused() {
+async fn a_mark_for_another_boards_ticket_is_skipped() {
     let h = start(Scope::Control).await;
     let repo = a_repository(&h);
     let billing = h.service.store.create_workspace(repo.id, "Billing", "bil").unwrap();
     let task = h.service.store.create_task(repo.workspace, "Mac: a jump", Actor::User).unwrap();
-    match connect(&h).await.call(mark(billing.id, &[(task.id, now_millis())], None)).await {
-        Err(ClientError::Daemon { code, what, .. }) => {
-            assert_eq!(code, ErrorCode::InvalidArgument as i32);
-            assert_eq!(what, "other_board");
-        }
-        other => panic!("expected a refusal, got {other:?}"),
-    }
+    let merged = reads_of(&mut connect(&h).await, mark(billing.id, &[(task.id, now_millis() - 5)], None))
+        .await
+        .expect("skipped, not refused");
+    assert!(merged.opened.is_empty());
+}
+
+/// A device's clock a day ahead of the runner's lands at the runner's now, so
+/// the news the runner writes after it is still unread.
+#[tokio::test]
+async fn a_future_time_from_a_device_cannot_hide_later_news() {
+    let h = start(Scope::Control).await;
+    let repo = a_repository(&h);
+    let task = h.service.store.create_task(repo.workspace, "Mac: a jump", Actor::User).unwrap();
+    let day = 86_400_000;
+    let before = now_millis();
+    let merged =
+        reads_of(&mut connect(&h).await, mark(repo.workspace, &[(task.id, before + day)], Some(before + day)))
+            .await
+            .unwrap();
+    assert!(merged.floor_ms <= now_millis(), "the floor is the runner's now, not {}", merged.floor_ms);
+    assert!(merged.floor_ms >= before);
 }

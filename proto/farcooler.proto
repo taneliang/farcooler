@@ -2946,8 +2946,9 @@ message WorkspaceMarkRead {
   // Mark All as Read; absent for opening a ticket.
   optional int64 floor_ms = 2;
   repeated TaskRead opened = 3;
-  // A device's pre-sync floor: replaces the runner's first-look default once,
-  // and is otherwise a plain raise. Set only by the one-time upload.
+  // Set by the one-time upload of a device's pre-sync floor. The runner
+  // ignores it: the floor merges by max like every other value, so the
+  // outcome never depends on the order devices write in.
   bool seeds_floor = 4;
 }
 

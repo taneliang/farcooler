@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use rusqlite::{OptionalExtension, Transaction, params};
 use uuid::Uuid;
 
-use farcooler_core::{DomainError, Result};
+use farcooler_core::Result;
 
 use crate::error::map_err;
 use crate::models::{get_uuid, uuid_blob};
@@ -38,10 +38,8 @@ pub(crate) fn migration_0022_board_reads(tx: &Transaction) -> rusqlite::Result<(
         r#"
         CREATE TABLE board_read_floors (
             workspace_id BLOB PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
-            floor_ms INTEGER NOT NULL,
-            -- 1 while the floor is the runner's own first-look default: the
-            -- first floor a device seeds replaces it outright.
-            implicit INTEGER NOT NULL DEFAULT 1
+            -- Starts at the runner's first look and only ever rises.
+            floor_ms INTEGER NOT NULL
         );
         CREATE TABLE task_reads (
             task_id BLOB PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
@@ -66,9 +64,6 @@ pub struct ReadsDelta {
     /// Mark All as Read. Absent for opening a ticket.
     pub floor_ms: Option<i64>,
     pub opened: Vec<(Uuid, i64)>,
-    /// The floor is a device's pre-sync one: it replaces the runner's
-    /// first-look default once, and is otherwise a plain raise.
-    pub seeds_floor: bool,
 }
 
 impl Store {
@@ -78,8 +73,20 @@ impl Store {
     /// reading a minute apart see one floor.
     pub fn board_reads(&self, workspace: Uuid, now_ms: i64) -> Result<BoardReads> {
         let mut conn = self.conn();
+        // A read first, and a write only for a board's first look: a board
+        // read at `read` scope takes no write lock once the row exists.
+        let known: Option<i64> = conn
+            .query_row(
+                "SELECT floor_ms FROM board_read_floors WHERE workspace_id = ?1",
+                params![uuid_blob(workspace)],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(map_err)?;
         let tx = conn.transaction().map_err(map_err)?;
-        floor_row(&tx, workspace, now_ms)?;
+        if known.is_none() {
+            floor_row(&tx, workspace, now_ms)?;
+        }
         let reads = load(&tx, workspace)?;
         tx.commit().map_err(map_err)?;
         Ok(reads)
@@ -88,9 +95,14 @@ impl Store {
     /// Raise a board's read state and answer what it is now, with whether
     /// anything changed.
     ///
-    /// Refused as `other_board` before any write when a mark names a task on
-    /// another board. A mark for a task that no longer exists is skipped: it
-    /// was deleted, and a device's queued write must not be stuck behind it.
+    /// Every value only rises and is merged by max, so the same writes in any
+    /// order end in the same state.
+    ///
+    /// Every time is clamped to `now_ms`, the runner's clock: a device's
+    /// clock running ahead must not hide news the runner writes later, on every
+    /// device, for good. A mark for a task that is gone, or now on another
+    /// board, is skipped: a device's queued write (the one-time upload sends
+    /// every local mark) must not be stuck behind it.
     pub fn merge_board_reads(
         &self,
         workspace: Uuid,
@@ -99,7 +111,7 @@ impl Store {
     ) -> Result<(BoardReads, bool)> {
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
-        let (mut floor, mut implicit) = floor_row(&tx, workspace, now_ms)?;
+        let mut floor = floor_row(&tx, workspace, now_ms)?;
         let before = load(&tx, workspace)?;
 
         let mut marks: Vec<(Uuid, i64)> = Vec::new();
@@ -110,21 +122,16 @@ impl Store {
                 .map_err(map_err)?;
             match on {
                 None => {}
-                Some(w) if w == uuid_blob(workspace) => marks.push((*task, *ms)),
-                Some(_) => return Err(DomainError::InvalidArgument { what: "other_board" }),
+                Some(w) if w == uuid_blob(workspace) => marks.push((*task, (*ms).min(now_ms))),
+                Some(_) => {}
             }
         }
 
-        if let Some(raised) = delta.floor_ms {
-            // A seed replaces the first-look default outright, even with a
-            // lower floor; every other floor is a plain raise.
-            if (implicit && delta.seeds_floor) || raised > floor {
-                floor = raised;
-                implicit = false;
-            }
+        if let Some(raised) = delta.floor_ms.map(|f| f.min(now_ms)).filter(|f| *f > floor) {
+            floor = raised;
             tx.execute(
-                "UPDATE board_read_floors SET floor_ms = ?2, implicit = ?3 WHERE workspace_id = ?1",
-                params![uuid_blob(workspace), floor, implicit as i64],
+                "UPDATE board_read_floors SET floor_ms = ?2 WHERE workspace_id = ?1",
+                params![uuid_blob(workspace), floor],
             )
             .map_err(map_err)?;
         }
@@ -150,18 +157,17 @@ impl Store {
     }
 }
 
-/// The board's floor and whether it is still the first-look default, making
-/// the default if there is none.
-fn floor_row(tx: &Transaction, workspace: Uuid, now_ms: i64) -> Result<(i64, bool)> {
+/// The board's floor, making the first look if there is none.
+fn floor_row(tx: &Transaction, workspace: Uuid, now_ms: i64) -> Result<i64> {
     tx.execute(
-        "INSERT OR IGNORE INTO board_read_floors (workspace_id, floor_ms, implicit) VALUES (?1, ?2, 1)",
+        "INSERT OR IGNORE INTO board_read_floors (workspace_id, floor_ms) VALUES (?1, ?2)",
         params![uuid_blob(workspace), now_ms.saturating_sub(FIRST_LOOK_MS)],
     )
     .map_err(map_err)?;
     tx.query_row(
-        "SELECT floor_ms, implicit FROM board_read_floors WHERE workspace_id = ?1",
+        "SELECT floor_ms FROM board_read_floors WHERE workspace_id = ?1",
         params![uuid_blob(workspace)],
-        |r| Ok((r.get(0)?, r.get::<_, i64>(1)? != 0)),
+        |r| r.get(0),
     )
     .map_err(map_err)
 }

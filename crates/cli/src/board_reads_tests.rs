@@ -1,7 +1,6 @@
 use clap::Parser;
 
 use super::*;
-use crate::tasks::board_in;
 
 const REPO: Uuid = Uuid::from_u128(0x0101);
 const WORKSPACE: Uuid = Uuid::from_u128(0x0202);
@@ -96,8 +95,8 @@ async fn a_ticket_from_another_board_is_said_in_words_about_a_board() {
 #[tokio::test]
 async fn a_boards_list_prints_its_reads_beside_its_tasks() {
     let mut link = runner(&["workstreams", "tasks", "board_reads"]);
-    let list = board_in(&mut link, &the_board(), None, None).await.expect("list");
-    let board: serde_json::Value = serde_json::from_str(&crate::tasks::render_board_json(&list)).unwrap();
+    let out = crate::tasks::listing(&mut link, &the_board(), None, None, true).await.expect("list");
+    let board: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(board["tasks"], serde_json::json!([]));
     assert_eq!(board["reads"]["floor_ms"], 100);
     assert_eq!(board["reads"]["opened"][0]["opened_ms"], 250);
