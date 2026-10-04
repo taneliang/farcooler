@@ -687,6 +687,8 @@ jobs:
 
       # `apps/macos/test.sh` builds the Rust cores before the Mac tests (ov-134).
       - run: ./scripts/macos-test-wrapper-test.sh
+      # The capture harness's stop ends its daemon and tmux with no CLI (ov-278).
+      - run: ./scripts/mac-capture-stop-test.sh
 
       - name: Test AgentKit
         run: swift test --package-path apps/shared/AgentKit

@@ -40,12 +40,25 @@ bin="${FARCOOLER_BIN:-$root/target/debug/farcooler}"
 fc() { FARCOOLER_HOME="$home" "$bin" "$@"; }
 
 if [ "${1:-}" = "stop" ]; then
-    [ -x "$bin" ] || exit 0
-    # The daemon, then its tmux server, which `daemon stop` leaves running:
-    # `status` names its socket in its recovery line.
-    socket=$(fc status 2>/dev/null | sed -n -E 's/.*tmux -L (farcooler-[0-9a-f]+).*/\1/p' | head -1)
-    fc daemon stop >/dev/null 2>&1 || true
-    [ -n "$socket" ] && tmux -L "$socket" kill-server 2>/dev/null || true
+    # The daemon, then its tmux server, which `daemon stop` leaves running.
+    # With the CLI: `status` names the socket in its recovery line. Without
+    # one (target/ already deleted): the daemon is whoever holds the home's
+    # lock, and the server is the one whose panes open under the home.
+    socket=""
+    if [ -x "$bin" ]; then
+        socket=$(fc status 2>/dev/null | sed -n -E 's/.*tmux -L (farcooler-[0-9a-f]+).*/\1/p' | head -1)
+        fc daemon stop >/dev/null 2>&1 || true
+    fi
+    for pid in $(lsof -t "$home/farcoolerd.lock" 2>/dev/null); do kill "$pid" 2>/dev/null || true; done
+    if [ -z "$socket" ]; then
+        socket=$(ps -axo command= | grep -F -- "-c $home/" | grep -v grep \
+            | sed -n -E 's/.*tmux -L (farcooler-[0-9a-f]+).*/\1/p' | head -1)
+    fi
+    if [ -n "$socket" ]; then
+        tmux -L "$socket" kill-server 2>/dev/null || true
+    else
+        echo "mac-capture: no tmux server found for $home" >&2
+    fi
     exit 0
 fi
 
