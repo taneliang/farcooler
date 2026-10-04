@@ -9,8 +9,9 @@ import SwiftUI
 /// and left Settings open. The menu bar cannot tell which window is key on its
 /// own; this is how it learns. `ContentView` publishes it as a focused SCENE
 /// value, so it is nil whenever any other window (Settings, About) is key, and
-/// the items that act on the main window are disabled then. A disabled item's
-/// chord goes on to the next match, which for ⌘W is File ▸ Close.
+/// the items that act on the main window are disabled then. A disabled item
+/// still takes its chord and does nothing with it, so ⌘W isn't disabled: it
+/// closes whichever window is key instead (`CloseCommand`, ov-265).
 struct MainWindowFocus: Equatable {
     /// The ⌘N task panel or the ⌘P palette is open over the window.
     var overlayOpen: Bool
@@ -86,7 +87,8 @@ struct MainWindowFocus: Equatable {
         navigates(focus) && focus?.taskOpen == true
     }
 
-    /// Close Terminal (⌘W) acts only when the main window is key.
+    /// Close Terminal (⌘W) acts only when the main window is key; with
+    /// another window key, ⌘W closes that one (`CloseCommand`).
     static func closesTerminal(_ focus: MainWindowFocus?) -> Bool {
         focus != nil
     }

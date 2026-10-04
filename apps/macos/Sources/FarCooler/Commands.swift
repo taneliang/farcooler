@@ -155,18 +155,25 @@ struct FarCoolerCommands: Commands {
                 .disabled(!MainWindowFocus.isKey(mainWindow))
         }
 
-        CommandGroup(after: .newItem) {
-            Divider()
-            // No Restart. A terminal is its process: restarting one is closing
-            // it and opening another, which is ⌘W then ⌘T. A separate verb for
-            // the same two steps is a concept to learn for nothing.
-            //
-            // Only while the main window is key. With Settings key, ⌘W
-            // stopped and removed the selected terminal behind it; disabled
-            // here, the chord goes on to File ▸ Close and closes Settings.
-            Button("Close Terminal") { AppCommand.closeTerminal.post() }
+        // File's close items, in place of SwiftUI's (ov-265). ⌘W closes the
+        // selected terminal while the main window is key, and with Settings
+        // or About key it closes that window (`CloseCommand`).
+        //
+        // No Restart. A terminal is its process: restarting one is closing
+        // it and opening another, which is ⌘W then ⌘T. A separate verb for
+        // the same two steps is a concept to learn for nothing.
+        CommandGroup(replacing: .saveItem) {
+            let close = CloseCommand.at(mainWindow)
+            Button(close.title) { close.perform(keyWindow: NSApp.keyWindow) }
                 .keyboardShortcut("w", modifiers: .command)
-                .disabled(!MainWindowFocus.closesTerminal(mainWindow))
+            if close == .terminal {
+                Button("Close Window") { CloseCommand.window.perform(keyWindow: NSApp.keyWindow) }
+            }
+            Button("Close All") { CloseCommand.closeAll(NSApp.windows) }
+                .keyboardShortcut("w", modifiers: [.command, .option])
+        }
+
+        CommandGroup(after: .newItem) {
             Divider()
             // The keyboard half of the title bar's editor control, which until
             // now was the one thing in this app you could only reach with a
