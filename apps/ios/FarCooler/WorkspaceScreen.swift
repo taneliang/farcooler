@@ -101,6 +101,7 @@ struct WorkspaceScreen: View {
                         listRead: connection.needsYouRead && !connection.needsYouDerived,
                         build: connection.daemon),
                     agents: connection.boardAgents(for:),
+                    orchestrator: connection.orchestratorAgent(for:),
                     onOpen: { row in navigator?.open(.task(place, task: row.id)) },
                     onJump: { agent in openAgent(agent) },
                     onRefresh: { await connection.readBoard(summary) },

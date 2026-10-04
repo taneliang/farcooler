@@ -53,6 +53,8 @@ struct WorkspaceBoardList: View {
     let waiting: Int
     /// The panes working a card, in fleet order.
     let agents: (TaskRow) -> [BoardAgent]
+    /// The pane a card's subagents live in, for its Subagent control.
+    let orchestrator: (TaskRow) -> BoardAgent?
     let onOpen: (TaskRow) -> Void
     let onJump: (BoardAgent) -> Void
     let onRefresh: () async -> Void
@@ -71,7 +73,9 @@ struct WorkspaceBoardList: View {
 
     init(
         board: TaskBoardModel?, unread: Bool, place: PhoneWorkspace, speaksOfAgents: Bool,
-        waiting: Int, agents: @escaping (TaskRow) -> [BoardAgent], onOpen: @escaping (TaskRow) -> Void,
+        waiting: Int, agents: @escaping (TaskRow) -> [BoardAgent],
+        orchestrator: @escaping (TaskRow) -> BoardAgent? = { _ in nil },
+        onOpen: @escaping (TaskRow) -> Void,
         onJump: @escaping (BoardAgent) -> Void, onRefresh: @escaping () async -> Void,
         ledByOrchestrator: Bool = false, onHistory: @escaping (TaskStatus) -> Void = { _ in }
     ) {
@@ -81,6 +85,7 @@ struct WorkspaceBoardList: View {
         self.speaksOfAgents = speaksOfAgents
         self.waiting = waiting
         self.agents = agents
+        self.orchestrator = orchestrator
         self.onOpen = onOpen
         self.onJump = onJump
         self.onRefresh = onRefresh
@@ -173,6 +178,8 @@ struct WorkspaceBoardList: View {
                             TaskBoardCardRow(
                                 row: row,
                                 live: live,
+                                orchestrator: orchestrator(row),
+                                speaksOfAgents: speaksOfAgents,
                                 presence: row.agentPresence(
                                     livePanes: live.count, runnerRecordsTasks: speaksOfAgents),
                                 onOpen: { onOpen(row) },
@@ -316,6 +323,10 @@ enum PhoneReads {
 struct TaskBoardCardRow: View {
     let row: TaskRow
     let live: [BoardAgent]
+    /// Where its subagents live, when it has some and that pane is known.
+    var orchestrator: BoardAgent?
+    /// Whether the runner can be believed about its agents right now.
+    var speaksOfAgents = true
     let presence: TaskAgentPresence
     let onOpen: () -> Void
     let onJump: (BoardAgent) -> Void
@@ -339,7 +350,9 @@ struct TaskBoardCardRow: View {
             .accessibilityHint("Opens the task")
             .accessibilityIdentifier("board-card-\(row.key)")
 
-            AgentControl(key: row.key, live: live, presence: presence, onJump: onJump)
+            AgentControl(
+                key: row.key, live: live, orchestrator: orchestrator, presence: presence,
+                onJump: onJump)
         }
         .padding(.vertical, 2)
     }
@@ -374,6 +387,7 @@ struct TaskBoardCardRow: View {
                     .font(.caption.weight(.medium))
                     .foregroundStyle(GlancePalette.amber(scheme))
             }
+            CardStartLines(row: row, speaksOfAgents: speaksOfAgents)
             CardTimeLines(row: row, timeFont: .caption2)
             if let progress = row.acceptanceProgress {
                 AcceptanceLine(progress: progress)
@@ -381,6 +395,35 @@ struct TaskBoardCardRow: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(.rect)
+    }
+}
+
+/// What holds a card back and when it starts: "Waiting on ov-191 and ov-192"
+/// in amber, because a block is the one thing here that needs attention, then
+/// the quiet start line ("Waiting to build, 2nd in line", "Claude subagent
+/// working, 12 min"). Both are AgentKit's sentences, and the Mac and Android
+/// say the same ones. Redrawn on the minute, because the line counts minutes.
+struct CardStartLines: View {
+    let row: TaskRow
+    var speaksOfAgents = true
+
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        BoardTick { now in
+            if let blocked = row.blockedSummary {
+                Text(blocked)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(GlancePalette.amber(scheme))
+                    .accessibilityIdentifier("board-blocked-\(row.key)")
+            }
+            if let line = row.startLine(at: now, speaksOfAgents: speaksOfAgents) {
+                Text(line)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("board-start-\(row.key)")
+            }
+        }
     }
 }
 
@@ -430,11 +473,13 @@ struct AcceptanceLine: View {
 }
 
 /// The way from a card to the agent working it: a button for one, a menu for
-/// several, a quiet "No Agent" for a task in progress with nobody on it, and
-/// nothing on a runner that cannot say.
+/// several, "Subagent" into the orchestrator's pane, a quiet "No Agent" for a
+/// task in progress with nobody on it, and nothing on a runner that cannot say.
 struct AgentControl: View {
     let key: String
     let live: [BoardAgent]
+    /// Where the subagents live, for `.subagents`; nil makes that plain text.
+    var orchestrator: BoardAgent?
     let presence: TaskAgentPresence
     let onJump: (BoardAgent) -> Void
 
@@ -447,6 +492,28 @@ struct AgentControl: View {
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .accessibilityIdentifier("board-no-agent-\(key)")
+        case .subagents:
+            // The orchestrator's pane, where the subagents live. Not a button
+            // when that pane isn't known: a control that leads nowhere is
+            // worse than a word.
+            if let orchestrator {
+                Button {
+                    onJump(orchestrator)
+                } label: {
+                    pill(mark: orchestrator.mark, trailing: "arrow.forward")
+                }
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
+                .controlSize(.small)
+                .accessibilityLabel("Go to Orchestrator")
+                .accessibilityHint(orchestrator.title)
+                .accessibilityIdentifier("board-subagent-\(key)")
+            } else {
+                Text(presence.title ?? "")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("board-subagent-\(key)")
+            }
         case .agents:
             if live.count == 1, let only = live.first {
                 Button {

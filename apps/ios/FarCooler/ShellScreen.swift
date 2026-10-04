@@ -1254,6 +1254,23 @@ extension Connection {
                 mark: ShellFleetMap.mark(of: pane.terminal).said(answering: isAnswering))
         }
     }
+
+    /// The pane the subagents on `row` live in: the orchestrator's, which is
+    /// where a Subagent control goes (ov-213). Nil when the runner didn't say
+    /// which pane, or it has closed since, so the control is not a button
+    /// that leads nowhere.
+    func orchestratorAgent(for row: TaskRow) -> BoardAgent? {
+        guard let id = row.orchestratorTerminalID else { return nil }
+        for worktree in fleet.worktrees {
+            guard let terminal = worktree.terminals.first(where: { $0.id == id }),
+                TaskAgentLink.liveStates.contains(terminal.boardState)
+            else { continue }
+            return BoardAgent(
+                id: id, title: "Orchestrator in \(worktree.task)",
+                mark: ShellFleetMap.mark(of: terminal).said(answering: isAnswering))
+        }
+        return nil
+    }
 }
 
 /// A runner and its connection, for the one sheet that needs both and is

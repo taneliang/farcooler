@@ -29,6 +29,10 @@ import SwiftUI
 //   -phone-saved-gone        the last launch kept a stack whose task is gone
 //   -phone-billing-led       Billing has its orchestrator from the start
 //   -phone-webhooks-hidden   fc-3-webhooks is put away, in Billing's Hidden
+//   -phone-start-states     Billing's board also holds bil-11 (a subagent running,
+//                            in the orchestrator's pane), bil-12 (second in the
+//                            build line) and bil-13 (waiting on bil-9); implies
+//                            -phone-billing-led
 //   -phone-usage-old         the runner is older than spend: no agent_usage
 //   -phone-usage-fails       the runner doesn't answer usage.task
 //
@@ -208,6 +212,11 @@ final class HarnessRunner {
     static let shell = "0198f2c0-0000-7000-8000-00000000d003"
     static let billingOrchestrator = "0198f2c0-0000-7000-8000-00000000d004"
     static let decisionTask = "0198f2c0-0000-7000-8000-00000000e007"
+    /// `-phone-start-states`: the cards that say who is on them and when they start.
+    static var startStates: Bool { CommandLine.arguments.contains("-phone-start-states") }
+    static let subagentTask = "0198f2c0-0000-7000-8000-00000000e011"
+    static let queuedTask = "0198f2c0-0000-7000-8000-00000000e012"
+    static let blockedTask = "0198f2c0-0000-7000-8000-00000000e013"
     static let agentTask = "0198f2c0-0000-7000-8000-00000000e009"
     static let doneTask = "0198f2c0-0000-7000-8000-00000000e005"
     /// A task no board has: what a kept stack names once it's deleted.
@@ -216,7 +225,8 @@ final class HarnessRunner {
     private let connection: Connection
     /// Whether Billing has an orchestrator yet. It starts without one,
     /// unless `-phone-billing-led`.
-    private var billingLed = CommandLine.arguments.contains("-phone-billing-led")
+    private var billingLed =
+        CommandLine.arguments.contains("-phone-billing-led") || Self.startStates
     /// Whether fc-3-webhooks is put away, as the runner keeps it: starts so
     /// under `-phone-webhooks-hidden`, and `worktree.unhide` clears it.
     private var webhooksHidden = CommandLine.arguments.contains("-phone-webhooks-hidden")
@@ -501,7 +511,41 @@ final class HarnessRunner {
     private func tasks(_ workspace: String?) -> [[String: Any]] {
         guard workspace == Self.billing else { return [] }
         let now = Int64(Date().timeIntervalSince1970 * 1000)
-        return [
+        func startStates() -> [[String: Any]] {
+            guard Self.startStates else { return [] }
+            return [
+                [
+                    "id": Self.subagentTask, "key": "bil-11", "title": "Receipt emails",
+                    "status": "in_progress", "status_since": now - 900_000,
+                    "workspace": Self.billing,
+                    "workers": [
+                        [
+                            "id": "0198f2c0-0000-7000-8000-00000000f011", "harness": "claude",
+                            "agent_id": "a3fd8fceef581c787", "label": "bil-11 Receipt emails",
+                            "model": "opus", "state": "running", "started_at": now - 720_000,
+                            "ended_at": NSNull(), "last_activity_at": now - 20_000,
+                            "doing": "Running cargo test", "linked_by_description": true,
+                            "orchestrator_terminal": Self.billingOrchestrator,
+                        ]
+                    ],
+                ],
+                [
+                    "id": Self.queuedTask, "key": "bil-12", "title": "Refund flow",
+                    "status": "in_progress", "status_since": now - 1_800_000,
+                    "workspace": Self.billing,
+                    "wait": [
+                        "kind": "in_line", "line": "build", "position": 2,
+                        "ahead": ["bil-11"], "since": now - 600_000,
+                    ],
+                ],
+                [
+                    "id": Self.blockedTask, "key": "bil-13", "title": "Tax rounding",
+                    "status": "backlog", "status_since": now - 7_200_000,
+                    "workspace": Self.billing, "waiting_on": ["bil-9"],
+                ],
+            ]
+        }
+        return startStates() + [
             [
                 "id": Self.decisionTask, "key": "bil-7", "title": "Pick a PDF library",
                 "status": "needs_decision", "status_since": now - 600_000,

@@ -93,6 +93,10 @@ struct TaskScreen: View {
                     Text(row.status.title)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    CardStartLines(
+                        row: row,
+                        speaksOfAgents: TaskAgentLink.speaksOfAgents(
+                            connected: connection.isAnswering, build: connection.daemon))
                     CardTimeLines(row: row, timeFont: .caption)
                     if let progress = row.acceptanceProgress {
                         AcceptanceLine(progress: progress)
@@ -239,11 +243,28 @@ struct TaskScreen: View {
     @ViewBuilder
     private func places(_ row: TaskRow) -> some View {
         let agents = connection.boardAgents(for: row)
+        // Subagents have no pane of their own; they live in the orchestrator's.
+        let orchestrator =
+            agents.isEmpty && !row.openWorkers.isEmpty ? connection.orchestratorAgent(for: row) : nil
         let worktree = row.worktreeID.flatMap { id in
             connection.fleet.worktrees.first { $0.id == id }
         }
-        if !agents.isEmpty || worktree != nil {
+        if !agents.isEmpty || orchestrator != nil || worktree != nil {
             Section {
+                if let orchestrator {
+                    link(
+                        "Orchestrator", systemImage: "sparkle", detail: "Where its subagents work",
+                        id: "task-orchestrator"
+                    ) {
+                        guard let home = connection.fleet.worktrees.first(where: {
+                            $0.terminals.contains { $0.id == orchestrator.id }
+                        }) else { return }
+                        navigator?.open(
+                            .worktree(
+                                runner: place.runner, worktree: home.id,
+                                landing: .terminal(orchestrator.id)))
+                    }
+                }
                 ForEach(agents) { agent in
                     link(
                         agents.count == 1 ? "Agent" : agent.title, systemImage: "sparkle",
