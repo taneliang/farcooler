@@ -1119,6 +1119,10 @@ class Connection(
             runnerId = body["runnerId"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotEmpty() },
             // Whether its task notices reach this phone as pushes (ov-107).
             pushPaired = body["pushPaired"]?.jsonPrimitive?.booleanOrNull ?: false,
+            // Which of claude, codex and cursor-agent it found (ov-205). Null
+            // from a runner too old to say, which offers every harness.
+            agentsFound = (body["agentsFound"] as? kotlinx.serialization.json.JsonArray)
+                ?.mapNotNull { it.jsonPrimitive.contentOrNull },
         )
         // A read that set out on the previous link answers into nothing.
         if (!daemonBuild.land(link, build)) return

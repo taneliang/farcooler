@@ -39,6 +39,8 @@ private func section(_ repository: String, _ rows: [PhoneWorkspaceRow]) -> Phone
     #expect(line == FirstRunCopy.Phone.noOrchestratorRunning)
     #expect(line?.contains("one line of work") == true)
     #expect(PhoneFirstRun.noOrchestratorLine(sections: []) == nil)
+    // Agents already working make "no agents are working yet" untrue.
+    #expect(PhoneFirstRun.noOrchestratorLine(sections: [section("a", [row("main", orchestrator: nil)])], working: 2) == nil)
 }
 
 @Test func aDaemonBuildReadsWhichHarnessesTheRunnerFound() {

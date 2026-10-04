@@ -173,7 +173,13 @@ fun liveSummary(runners: List<RunnerCount>): String {
  * than "Nothing is running", which is the one sentence here that would be a
  * claim about a runner nobody has heard from.
  */
-fun reassurance(runners: List<RunnerCount>, where: String, worktrees: Int): String {
+fun reassurance(
+    runners: List<RunnerCount>,
+    where: String,
+    worktrees: Int,
+    /** Workspaces exist and none has an orchestrator (ov-205): the one thing to do about an idle fleet. */
+    noOrchestrator: Boolean = false,
+): String {
     // No runners is not "connecting": there is nothing to connect to.
     if (runners.isEmpty()) return "Nothing is running."
     return when (val reading = fleetReading(runners)) {
@@ -183,7 +189,10 @@ fun reassurance(runners: List<RunnerCount>, where: String, worktrees: Int): Stri
         FleetReading.RuntimeDown -> "Can’t say what’s running$where: tmux isn’t answering."
         is FleetReading.Live -> {
             val working = reading.count
-            if (working == 0 && worktrees == 0) {
+            if (working == 0 && noOrchestrator) {
+                // Purpose first: no agents are working, and the way to change that.
+                FirstRunCopy.NO_ORCHESTRATOR_RUNNING
+            } else if (working == 0 && worktrees == 0) {
                 "Nothing is running$where yet."
             } else {
                 when (working) {

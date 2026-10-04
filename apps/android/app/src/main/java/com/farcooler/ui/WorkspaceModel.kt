@@ -1,5 +1,6 @@
 package com.farcooler.ui
 
+import com.farcooler.model.AgentHarness
 import com.farcooler.model.BoardDone
 import com.farcooler.model.BoardReads
 import com.farcooler.model.BoardSectionCut
@@ -172,9 +173,13 @@ sealed interface OrchestratorSeat {
 
 /** The harnesses an orchestrator runs on, in the Mac's order (`OrchestratorHarness`). */
 enum class OrchestratorHarness(val wire: String, val title: String) {
-    CLAUDE("claude", "Claude"),
+    CLAUDE("claude", "Claude Code"),
     CODEX("codex", "Codex"),
     CURSOR("cursor", "Cursor"),
+    ;
+
+    /** The same harness as first run knows it, which says which programs a runner has. */
+    val agent: AgentHarness get() = AgentHarness.entries.first { it.wire == wire }
 }
 
 /**

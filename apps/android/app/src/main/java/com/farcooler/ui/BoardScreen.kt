@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -69,7 +70,9 @@ import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.coroutineScope
 import com.farcooler.model.BoardRow
+import com.farcooler.model.FirstRunCopy
 import com.farcooler.model.GlancePalette
+import com.farcooler.model.PhoneFirstRun
 import com.farcooler.model.Markdown
 import com.farcooler.model.RunnerBoards
 import com.farcooler.model.TaskAcceptanceProgress
@@ -155,6 +158,10 @@ fun BoardTab(
     modifier: Modifier = Modifier,
     /** A finished status's History page (ov-103). */
     onOpenHistory: (TaskStatus) -> Unit = {},
+    /** Whether an orchestrator is up to tell, which decides what a blank board says (ov-205). */
+    orchestratorRunning: Boolean = true,
+    /** Switches to the Orchestrator tab, for a blank board with none running. */
+    onShowOrchestrator: (() -> Unit)? = null,
 ) {
     val boards by connection.boards.collectAsStateWithLifecycle()
     val unread by connection.unreadBoards.collectAsStateWithLifecycle()
@@ -215,6 +222,25 @@ fun BoardTab(
                 )
                 board == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
+                }
+                // Seven headers each reading zero is a blank page. Show the shape of
+                // what will appear, say who fills it and, with no orchestrator to
+                // tell, how to start one: the orchestrator owns the task list.
+                board.isEmpty && workspace.id !in unread -> {
+                    val led = !workspace.isImplicit
+                    EmptyState(
+                        title = FirstRunCopy.BOARD_TITLE,
+                        detail = PhoneFirstRun.blankLine(led, orchestratorRunning),
+                        modifier = Modifier.fillMaxSize().testTag("board-empty"),
+                    ) {
+                        TaskSkeleton(Modifier.widthIn(max = 240.dp).padding(vertical = 8.dp))
+                        if (PhoneFirstRun.offersOrchestrator(led, orchestratorRunning) && onShowOrchestrator != null) {
+                            OutlinedButton(
+                                onClick = onShowOrchestrator,
+                                modifier = Modifier.testTag("board-show-orchestrator"),
+                            ) { Text(FirstRunCopy.SHOW_ORCHESTRATOR) }
+                        }
+                    }
                 }
                 else -> LazyColumn(Modifier.fillMaxSize().testTag("board")) {
                     if (workspace.id in unread) {

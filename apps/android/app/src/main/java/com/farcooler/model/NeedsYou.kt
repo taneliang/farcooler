@@ -331,7 +331,7 @@ sealed interface WorktreeScope {
             else worktree.workspace == workspace.id
 
         override val emptySentence: String
-            get() = "No worktrees yet. The orchestrator makes them as it dispatches tasks."
+            get() = FirstRunCopy.WORKTREES_NONE
     }
 
     /**

@@ -957,7 +957,16 @@ data class DaemonBuild(
      * say. See [TaskLink.taskNoticeReachesPhone].
      */
     val pushPaired: Boolean = false,
+    /**
+     * The programs the runner found (`Host.agents_found`), or null when it
+     * didn't say: a runner too old to send the list, which offers every
+     * harness (ov-205).
+     */
+    val agentsFound: List<String>? = null,
 ) {
+    /** Which orchestrator harnesses this runner can start. */
+    val availability: HarnessAvailability get() = HarnessAvailability(agentsFound)
+
     /**
      * Whether this runner can do something, by name.
      *

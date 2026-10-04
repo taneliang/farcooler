@@ -56,7 +56,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.core.CoreException
 import com.farcooler.data.Runner
 import com.farcooler.model.AgentActivity
+import com.farcooler.model.FirstRunCopy
 import com.farcooler.model.GlancePalette
+import com.farcooler.model.PhoneFirstRun
 import com.farcooler.model.NeedsYou
 import com.farcooler.model.NeedsYouAnswer
 import com.farcooler.model.NeedsYouButton
@@ -107,6 +109,14 @@ fun NeedsYouScreen(model: AppModel, onOpenDrawer: () -> Unit) {
     val sections = runners.flatMap { (connection, runner) ->
         NeedsYou.workspaces(runner, merged).map { connection to it }
     }
+    val noOrchestrator = PhoneFirstRun.noOrchestratorAnywhere(sections.map { it.second })
+    // An answering runner that lists no repository: nothing to work on yet.
+    val withoutRepositories = runners.filter { (_, runner) ->
+        runner.answering && PhoneFirstRun.hasNoRepositories(NeedsYou.workspaces(runner, merged))
+    }.map { it.first }
+    var addingRepositoryTo by remember { mutableStateOf<Connection?>(null) }
+    val userId by model.account.userId.collectAsStateWithLifecycle()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     // What's running, for the sentence under "Nothing needs you": per runner,
     // because only an answering runner's count is believed. Hidden worktrees
@@ -174,12 +184,34 @@ fun NeedsYouScreen(model: AppModel, onOpenDrawer: () -> Unit) {
                 val people = runners.map { it.second }
                 if (NeedsYou.nothingNeedsYou(people, rows)) {
                     item(key = "reassurance") {
-                        Reassurance(connections, working, visible.size, NeedsYou.caveat(NeedsYou.unanswered(people)))
+                        Reassurance(
+                            connections, working, visible.size, NeedsYou.caveat(NeedsYou.unanswered(people)),
+                            noOrchestrator,
+                        )
                     }
                 } else if (rows.isEmpty()) {
                     // No runner's list is read yet, so "Nothing needs you"
                     // would be a claim nobody made.
                     item(key = "checking") { Checking() }
+                }
+
+                if (userId.isEmpty()) {
+                    item(key = "push") {
+                        Column(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).testTag("needs-you-push"),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(
+                                FirstRunCopy.PUSH_BODY,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            TextButton(
+                                onClick = { model.account.signIn(context) },
+                                modifier = Modifier.testTag("needs-you-sign-in"),
+                            ) { Text(FirstRunCopy.SIGN_IN) }
+                        }
+                    }
                 }
 
                 items(rows, key = { "item/${it.key}" }) { row ->
@@ -203,6 +235,21 @@ fun NeedsYouScreen(model: AppModel, onOpenDrawer: () -> Unit) {
                     )
                 }
 
+                items(withoutRepositories, key = { "no-repositories/${it.host.id}" }) { connection ->
+                    EmptyState(
+                        title = FirstRunCopy.noRepositoriesTitle(connection.host.displayLabel),
+                        detail = FirstRunCopy.NO_REPOSITORIES_BODY,
+                        modifier = Modifier.testTag("no-repositories"),
+                    ) {
+                        if (connection.daemon.value?.grantedScope != "read") {
+                            Button(
+                                onClick = { addingRepositoryTo = connection },
+                                modifier = Modifier.testTag("no-repositories-add"),
+                            ) { Text(FirstRunCopy.ADD_REPOSITORY) }
+                        }
+                    }
+                }
+
                 if (sections.isNotEmpty()) {
                     item(key = "workspaces") {
                         Text(
@@ -222,6 +269,14 @@ fun NeedsYouScreen(model: AppModel, onOpenDrawer: () -> Unit) {
                 )
             }
         }
+    }
+
+    addingRepositoryTo?.let { connection ->
+        AddRepositorySheet(
+            connection = connection,
+            onAdded = {},
+            onDismiss = { addingRepositoryTo = null },
+        )
     }
 
     editingRunner?.let { host ->
@@ -481,6 +536,7 @@ private fun Reassurance(
     working: Map<String, Int>,
     worktrees: Int,
     caveat: String?,
+    noOrchestrator: Boolean,
 ) {
     val runners = connections.map { connection ->
         key(connection.host.id) {
@@ -494,8 +550,8 @@ private fun Reassurance(
     val where = if (connections.size == 1) " on ${connections[0].host.displayLabel}" else ""
 
     EmptyState(
-        title = "Nothing needs you",
-        detail = reassurance(runners, where, worktrees),
+        title = FirstRunCopy.NOTHING_NEEDS_YOU,
+        detail = reassurance(runners, where, worktrees, noOrchestrator),
         icon = Icons.Outlined.CheckCircleOutline,
     ) {
         if (caveat != null) {

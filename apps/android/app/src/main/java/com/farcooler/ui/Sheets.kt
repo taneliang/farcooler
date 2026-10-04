@@ -42,6 +42,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.data.Reach
 import com.farcooler.data.Runner
 import com.farcooler.model.BranchRef
+import com.farcooler.model.FirstRunCopy
 import com.farcooler.model.QuickAgents
 import com.farcooler.model.TaskSlug
 import com.farcooler.model.TerminalPresets
@@ -835,8 +836,7 @@ fun AddRepositorySheet(
             modifier = Modifier.fillMaxWidth(),
         )
         Text(
-            "An existing Git repository on this runner. Far Cooler starts watching the " +
-                "folder it is in, and adopts every worktree it already has.",
+            FirstRunCopy.REPOSITORY_SUBTITLE,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

@@ -64,6 +64,50 @@ enum class OrchestratorExit {
     }
 }
 
+/**
+ * What Needs You says before there's anything to answer: a runner with no
+ * repositories, and workspaces with no orchestrator running anywhere. The
+ * iPhone's `PhoneFirstRun`, rule for rule.
+ */
+object PhoneFirstRun {
+    /** Whether a runner whose fleet was read lists no repository at all. */
+    fun hasNoRepositories(sections: List<RepositoryWorkspaces>): Boolean = sections.isEmpty()
+
+    /**
+     * Whether there are workspaces that could run an orchestrator and none
+     * does, on any runner. An implicit workspace (a repository on a runner too
+     * old for workspaces) can't have one, so it counts as neither.
+     */
+    fun noOrchestratorAnywhere(sections: List<RepositoryWorkspaces>): Boolean {
+        val rows = sections.flatMap { it.workspaces }.filter { !it.workspace.isImplicit }
+        return rows.isNotEmpty() && rows.all { it.orchestrator == null }
+    }
+
+    /** Whether a blank board offers Show orchestrator: one leads it and none is running. */
+    fun offersOrchestrator(ledByOrchestrator: Boolean, orchestratorRunning: Boolean): Boolean =
+        ledByOrchestrator && !orchestratorRunning
+
+    /** What an empty board says under "No tasks". The iPhone's `BoardForm.blankLine`. */
+    fun blankLine(ledByOrchestrator: Boolean, orchestratorRunning: Boolean): String = when {
+        !ledByOrchestrator -> FirstRunCopy.BOARD_IMPLICIT
+        orchestratorRunning -> FirstRunCopy.BOARD_WITH_ORCHESTRATOR
+        else -> FirstRunCopy.BOARD_NO_ORCHESTRATOR
+    }
+}
+
+/**
+ * When the phone asks for notification permission: never before the person
+ * has a runner, so the system's dialog doesn't cover the first screen, and a
+ * refusal there can't be permanent. The iPhone's `NotificationAsk`.
+ */
+object NotificationAsk {
+    /** Ask at launch only a phone that already has a runner: it has been through the explainer. */
+    fun asksAtLaunch(hasRunners: Boolean): Boolean = hasRunners
+
+    /** Whether the runner list going from [before] to [after] is the first runner arriving. */
+    fun explainsAfterFirstRunner(hadRunners: Boolean, hasRunners: Boolean): Boolean = !hadRunners && hasRunners
+}
+
 /** The phone's first-run words, sentence case throughout. The iPhone's are `FirstRunCopy.Phone`. */
 object FirstRunCopy {
     const val ONBOARDING_TITLE = "Connect to your agents"
@@ -100,7 +144,6 @@ object FirstRunCopy {
     const val WORKTREES_NONE =
         "No worktrees yet. When the orchestrator starts an agent on a task, the agent gets its own folder and branch, listed here."
     const val REPOSITORY_SUBTITLE = "Choose a Git repository on this runner for agents to work on."
-    const val REPOSITORY_SUBTITLE_FOR_WORKTREE = "Choose the repository for the new worktree."
     const val BOARD_IMPLICIT = "Each piece of work on this board appears here as a task."
 
     /** The explainer before the permission request, after the first runner (iOS: `NotificationAsk`). */
@@ -125,7 +168,7 @@ object FirstRunCopy {
             ADD_REPOSITORY, NOTHING_NEEDS_YOU, NO_ORCHESTRATOR_RUNNING, ORCHESTRATOR_TITLE, ORCHESTRATOR_BODY,
             START, NOT_INSTALLED, TRY_AGAIN, BOARD_TITLE, BOARD_NO_ORCHESTRATOR, BOARD_WITH_ORCHESTRATOR,
             SHOW_ORCHESTRATOR, PUSH_BODY, SIGN_IN, WORKTREES_NONE, REPOSITORY_SUBTITLE,
-            REPOSITORY_SUBTITLE_FOR_WORKTREE, BOARD_IMPLICIT, NOTIFY_TITLE, NOTIFY_BODY, NOTIFY_ALLOW, NOTIFY_DECLINE,
+            BOARD_IMPLICIT, NOTIFY_TITLE, NOTIFY_BODY, NOTIFY_ALLOW, NOTIFY_DECLINE,
             noRepositoriesTitle("build-01"),
         ) + AgentHarness.entries.flatMap { listOf(it.title, notInstalledTitle(it), notInstalledBody(it, "build-01")) }
 }

@@ -130,7 +130,7 @@ struct NeedsYouScreen: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Label(FirstRunCopy.Phone.nothingNeedsYou, systemImage: "checkmark.circle")
                         .foregroundStyle(.secondary)
-                    if let line = PhoneFirstRun.noOrchestratorLine(sections: allSections) {
+                    if let line = PhoneFirstRun.noOrchestratorLine(sections: allSections, working: workingAgents) {
                         Text(line)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -179,6 +179,15 @@ struct NeedsYouScreen: View {
                 .accessibilityIdentifier("needs-you-push")
             }
         }
+    }
+
+    /// The agents working on any runner, whoever started them.
+    private var workingAgents: Int {
+        fleet.runners
+            .flatMap { $0.connection.fleet.worktrees }
+            .flatMap(\.terminals)
+            .filter { $0.agent == .working }
+            .count
     }
 
     /// Every runner's sections, as the workspaces below are drawn from them.

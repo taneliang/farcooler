@@ -43,6 +43,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.core.CoreException
+import com.farcooler.model.AgentHarness
+import com.farcooler.model.FirstRunCopy
+import com.farcooler.model.HarnessAvailability
+import com.farcooler.model.OrchestratorExit
 import com.farcooler.model.RunnerLink
 import com.farcooler.model.WorktreeScope
 import com.farcooler.net.Connection
@@ -114,6 +118,10 @@ fun WorkspaceScreen(
     }
     var startedAt by remember(workspace.id) { mutableStateOf<Long?>(null) }
     var refusal by remember(workspace.id) { mutableStateOf<String?>(null) }
+    // Which agent this phone asked for, and when, kept past the pane's arrival
+    // so a quick exit 127 can be called "not installed" (ov-205).
+    var asked by remember(workspace.id) { mutableStateOf<Pair<OrchestratorHarness, Long>?>(null) }
+    var endedAfterMs by remember(workspace.id) { mutableStateOf<Long?>(null) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(startedAt) {
         while (startedAt != null) {
@@ -131,10 +139,24 @@ fun WorkspaceScreen(
     )
     // Seen: the phone's own start is confirmed, and the clock can stop.
     LaunchedEffect(seat) { if (seat is OrchestratorSeat.Live) startedAt = null }
+    // First seen ended: how long after the ask, which is what the 127 rule needs.
+    LaunchedEffect(seat) {
+        val ask = asked
+        if (seat is OrchestratorSeat.Lost && ask != null && endedAfterMs == null) {
+            endedAfterMs = System.currentTimeMillis() - ask.second
+        }
+    }
+    val missing: AgentHarness? = (seat as? OrchestratorSeat.Lost)?.let { lost ->
+        val ended = endedAfterMs ?: return@let null
+        if (OrchestratorExit.classify(lost.terminal.exitCode, ended) != OrchestratorExit.NOT_INSTALLED) return@let null
+        asked?.first?.agent ?: AgentHarness.entries.firstOrNull { it.wire == lost.terminal.preset }
+    }
 
     fun start(harness: OrchestratorHarness, replace: Boolean) {
         refusal = null
         startedAt = System.currentTimeMillis()
+        asked = harness to startedAt!!
+        endedAfterMs = null
         scope.launch {
             try {
                 connection.startOrchestrator(workspace.id, harness.wire, replace)
@@ -191,6 +213,7 @@ fun WorkspaceScreen(
                                 connection = connection,
                                 seat = seat,
                                 mayControl = mayControl && !workspace.isImplicit,
+                                availability = daemon?.availability ?: HarnessAvailability(null),
                                 onReplace = { start(it, replace = true) },
                                 onOpenWorktree = { ref -> model.open(ref) },
                             )
@@ -236,6 +259,9 @@ fun WorkspaceScreen(
                         seat = seat,
                         actions = seatActions(seat, mayControl && !workspace.isImplicit),
                         refusal = refusal,
+                        availability = daemon?.availability ?: HarnessAvailability(null),
+                        runner = connection.host.displayLabel,
+                        missing = missing,
                         onStart = { start(it, replace = false) },
                         onReplace = { start(it, replace = true) },
                         onRestart = { terminal -> scope.launch { connection.act(Connection.Action.RESTART, terminal) } },
@@ -249,6 +275,8 @@ fun WorkspaceScreen(
                         model.navigate(Route.BoardHistory(route.hostId, route.workspaceId, status.wire))
                     },
                     onJump = { model.openFromBoard(it) },
+                    orchestratorRunning = seat is OrchestratorSeat.Live || seat is OrchestratorSeat.Starting,
+                    onShowOrchestrator = { model.selectTab(route, WorkspaceTab.ORCHESTRATOR) },
                 )
                 WorkspaceTab.WORKTREES -> WorktreeList(
                     model = model,
@@ -309,6 +337,7 @@ private fun OrchestratorActions(
     connection: Connection,
     seat: OrchestratorSeat,
     mayControl: Boolean,
+    availability: HarnessAvailability,
     onReplace: (OrchestratorHarness) -> Unit,
     onOpenWorktree: (TerminalRef) -> Unit,
 ) {
@@ -347,7 +376,10 @@ private fun OrchestratorActions(
                 )
             }
         }
-        HarnessMenu(expanded = replacing, onDismiss = { replacing = false }, onPick = onReplace)
+        HarnessMenu(
+            expanded = replacing, availability = availability,
+            onDismiss = { replacing = false }, onPick = onReplace,
+        )
     }
 }
 
@@ -360,6 +392,10 @@ private fun OrchestratorEmpty(
     seat: OrchestratorSeat,
     actions: Set<SeatAction>,
     refusal: String?,
+    availability: HarnessAvailability,
+    runner: String,
+    /** The agent a quick exit 127 says isn't installed, when this phone can say which. */
+    missing: AgentHarness?,
     onStart: (OrchestratorHarness) -> Unit,
     onReplace: (OrchestratorHarness) -> Unit,
     onRestart: (com.farcooler.model.Terminal) -> Unit,
@@ -371,21 +407,38 @@ private fun OrchestratorEmpty(
     ) {
         when (seat) {
             is OrchestratorSeat.Empty -> {
-                Text("No orchestrator", style = MaterialTheme.typography.titleMedium)
+                Text(FirstRunCopy.ORCHESTRATOR_TITLE, style = MaterialTheme.typography.titleMedium)
+                OrchestratorVignette()
                 Text(
-                    "An orchestrator runs this workspace’s board. It reads the charter, dispatches " +
-                        "agents, and asks you when it needs a decision.",
+                    FirstRunCopy.ORCHESTRATOR_BODY,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )
+                val noneInstalled = availability.isKnown && availability.installed.isEmpty()
+                if (noneInstalled) {
+                    Text(
+                        "No coding agent is installed on $runner. Install Claude Code, Codex, or the Cursor CLI first.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.testTag("orchestrator-none-installed"),
+                    )
+                }
                 if (SeatAction.START in actions) {
                     var picking by remember { mutableStateOf(false) }
                     Box {
-                        Button(onClick = { picking = true }, modifier = Modifier.testTag("start-orchestrator")) {
-                            Text("Start Orchestrator")
+                        Button(
+                            onClick = { picking = true },
+                            enabled = !noneInstalled,
+                            modifier = Modifier.testTag("start-orchestrator"),
+                        ) {
+                            Text(FirstRunCopy.START)
                         }
-                        HarnessMenu(expanded = picking, onDismiss = { picking = false }, onPick = onStart)
+                        HarnessMenu(
+                            expanded = picking, availability = availability,
+                            onDismiss = { picking = false }, onPick = onStart,
+                        )
                     }
                 }
             }
@@ -398,10 +451,28 @@ private fun OrchestratorEmpty(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    if (SeatAction.REPLACE in actions) ReplaceButton(onReplace)
+                    if (SeatAction.REPLACE in actions) ReplaceButton(availability, onReplace)
                 }
             }
-            is OrchestratorSeat.Lost -> {
+            is OrchestratorSeat.Lost -> if (missing != null) {
+                Text(
+                    FirstRunCopy.notInstalledTitle(missing),
+                    style = MaterialTheme.typography.titleMedium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.testTag("orchestrator-not-installed"),
+                )
+                Text(
+                    FirstRunCopy.notInstalledBody(missing, runner),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                if (SeatAction.RESTART in actions) {
+                    Button(onClick = { onRestart(seat.terminal) }, modifier = Modifier.testTag("orchestrator-try-again")) {
+                        Text(FirstRunCopy.TRY_AGAIN)
+                    }
+                }
+            } else {
                 Text("The orchestrator stopped", style = MaterialTheme.typography.titleMedium)
                 Text(
                     "Restart picks its conversation up where it left off. Replace starts a new one.",
@@ -410,7 +481,7 @@ private fun OrchestratorEmpty(
                     textAlign = TextAlign.Center,
                 )
                 if (SeatAction.RESTART in actions) Button(onClick = { onRestart(seat.terminal) }) { Text("Restart") }
-                if (SeatAction.REPLACE in actions) ReplaceButton(onReplace)
+                if (SeatAction.REPLACE in actions) ReplaceButton(availability, onReplace)
             }
             is OrchestratorSeat.Live -> Unit
         }
@@ -421,21 +492,28 @@ private fun OrchestratorEmpty(
 }
 
 @Composable
-private fun ReplaceButton(onReplace: (OrchestratorHarness) -> Unit) {
+private fun ReplaceButton(availability: HarnessAvailability, onReplace: (OrchestratorHarness) -> Unit) {
     var picking by remember { mutableStateOf(false) }
     Box {
         OutlinedButton(onClick = { picking = true }) { Text("Replace…") }
-        HarnessMenu(expanded = picking, onDismiss = { picking = false }, onPick = onReplace)
+        HarnessMenu(expanded = picking, availability = availability, onDismiss = { picking = false }, onPick = onReplace)
     }
 }
 
 /** Claude, Codex or Cursor: what the orchestrator runs on. */
 @Composable
-private fun HarnessMenu(expanded: Boolean, onDismiss: () -> Unit, onPick: (OrchestratorHarness) -> Unit) {
+private fun HarnessMenu(
+    expanded: Boolean,
+    availability: HarnessAvailability,
+    onDismiss: () -> Unit,
+    onPick: (OrchestratorHarness) -> Unit,
+) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         OrchestratorHarness.entries.forEach { harness ->
+            val installed = availability.isInstalled(harness.agent)
             DropdownMenuItem(
-                text = { Text(harness.title) },
+                text = { Text(if (installed) harness.title else "${harness.title} · ${FirstRunCopy.NOT_INSTALLED}") },
+                enabled = installed,
                 onClick = {
                     onDismiss()
                     onPick(harness)

@@ -24,7 +24,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -58,6 +57,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import com.farcooler.model.FirstRunCopy
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.testTag
@@ -118,28 +118,27 @@ fun OnboardingScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            Icon(
-                Icons.Outlined.Dns,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(44.dp),
-            )
+            PhoneOnboardingMark()
             Spacer(Modifier.height(22.dp))
-            Text("Connect a runner", style = MaterialTheme.typography.headlineSmall)
+            Text(
+                FirstRunCopy.ONBOARDING_TITLE,
+                style = MaterialTheme.typography.headlineSmall,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.testTag("onboarding-title"),
+            )
             Spacer(Modifier.height(8.dp))
             Text(
-                "Far Cooler runs coding agents on runners you already reach over SSH. " +
-                    "Put this device’s key on one, then add its address.",
+                FirstRunCopy.ONBOARDING_BODY,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(32.dp))
             Button(onClick = onAuthorize, modifier = Modifier.fillMaxWidth()) {
-                Text("Connect This Device")
+                Text(FirstRunCopy.ONBOARDING_PRIMARY)
             }
             Spacer(Modifier.height(12.dp))
-            TextButton(onClick = { adding = true }) { Text("Add a runner") }
+            TextButton(onClick = { adding = true }) { Text(FirstRunCopy.ONBOARDING_SECONDARY) }
         }
     }
 
