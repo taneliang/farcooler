@@ -55,6 +55,42 @@ extension ContentView {
 
     // MARK: - Terminal actions
 
+    /// Close a terminal, asking first when an agent is mid-turn (ov-161).
+    ///
+    /// ⌘W, Close Pane and the context menu's Close Terminal all come here. An
+    /// agent that is working or waiting on you has something to lose, and the
+    /// phones ask about it (`ShellClose`); a shell, or an agent doing nothing,
+    /// closes at once, since asking about it is a tax on the harmless case.
+    func requestClose(_ terminal: Terminal, in worktree: Worktree) {
+        if let question = CloseTerminalGuard.question(for: terminal, at: Date()) {
+            closePending = CloseTerminalPending(worktree: worktree, terminal: terminal, question: question)
+        } else {
+            Task { await close(terminal, in: worktree) }
+        }
+    }
+
+    /// Stop, then remove the record. Closing a terminal should leave nothing
+    /// behind. One action: a Close whose stop was refused fails its remove
+    /// too, and that is one thing that didn't happen, not two.
+    func close(_ terminal: Terminal, in worktree: Worktree) async {
+        await act(.close, on: worktree, target: terminal.id, subject: Self.quoted(terminal)) { c in
+            await c.stop(terminal: terminal.short)
+            await c.removeTerminal(terminal.short)
+        }
+        // The runner publishes no layout when a pane closes, so the pane left
+        // behind kept the closed one's half of the grid until something else
+        // read the layout: a click (checklist O1). Read it now; the view
+        // re-sends its viewport when the arrangement changes.
+        await store.client(for: worktree)?.refreshLayout(worktree)
+        // Nothing to select here. Where the selection goes when a terminal
+        // disappears is `healSelection`'s one rule, run from
+        // `.onChange(of: store.fleet)` once the removal reaches the merged
+        // fleet. A neighbour picked here would be chosen before the removal
+        // reached `store.fleet`, find the closed terminal still listed, and
+        // leave `healSelection` nothing to heal: ⌘W in one worktree once landed
+        // you in another, often on another runner.
+    }
+
     func run(_ action: TerminalAction, on term: Terminal, in worktree: Worktree) async {
         switch action {
         case .restart:
@@ -70,14 +106,8 @@ extension ContentView {
                 await c.stop(terminal: term.short)
             }
         case .close:
-            // As ⌘W: stop it, then remove the record, which is one action. The
-            // layout is read again because the runner publishes none when a
-            // pane closes (checklist O1).
-            await act(.close, on: worktree, target: term.id, subject: Self.quoted(term)) { c in
-                await c.stop(terminal: term.short)
-                await c.removeTerminal(term.short)
-            }
-            await store.client(for: worktree)?.refreshLayout(worktree)
+            // As ⌘W, which asks first when the pane is mid-turn.
+            requestClose(term, in: worktree)
         case .rename:
             renaming = RenamingTerminal(terminal: term, worktree: worktree)
         case .openInBrowser:

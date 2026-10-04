@@ -25,15 +25,15 @@ import Foundation
 /// three sentences from `model/ShellClose.kt`, which is a port of this file and
 /// is tested the same way; the two phones may differ in GESTURE and must not
 /// differ in what they tell somebody they are about to lose.
-enum ShellClose {
+public enum ShellClose {
     /// The sheet a running pane earns, or nil for one that has already exited.
-    struct Question: Equatable {
+    public struct Question: Equatable {
         /// Names the pane, because the swipe that got here named nothing: a
         /// row slid sideways and a red button appeared under a thumb.
-        var title: String
+        public var title: String
         /// Names the agent and how long it has been going, then says what
         /// closing does and that it cannot be taken back.
-        var message: String
+        public var message: String
     }
 
     /// The button that does it. Title case, and it says the noun: a bare
@@ -84,12 +84,28 @@ enum ShellClose {
     /// its clause rather than gaining a "0s", because "working for 0s" is the
     /// one thing worse than not saying.
     private static func running(_ terminal: Terminal, at now: Date) -> String {
-        let name = Terminal.name(of: terminal.preset)
-        guard let doing = verb(terminal.agent), let elapsed = terminal.displayDuration(at: now)
-        else {
-            return "It’s running \(name)."
-        }
+        running(
+            agent: Terminal.name(of: terminal.preset), doing: verb(terminal.agent),
+            elapsed: terminal.displayDuration(at: now))
+    }
+
+    /// The same sentence from plain values, for the Mac, whose own `Terminal`
+    /// is not this one. `doing` is `verb`'s answer: "working", "waiting on
+    /// you", or nil for an agent with no clock to quote.
+    public static func running(agent name: String, doing: String?, elapsed: String?) -> String {
+        guard let doing, let elapsed else { return "It’s running \(name)." }
         return "It’s running \(name), which has been \(doing) for \(elapsed)."
+    }
+
+    /// What an agent is doing, said in the middle of a sentence, for the two
+    /// states that have a clock: `working` and `blocked`. Public for the Mac's
+    /// own activity type, by its raw word.
+    public static func doing(activity: String?) -> String? {
+        switch activity {
+        case "working": return "working"
+        case "blocked": return "waiting on you"
+        default: return nil
+        }
     }
 
     /// How to say what the agent is doing, for the two states with a clock.

@@ -272,35 +272,7 @@ extension ContentView {
 
         case .closeTerminal:
             guard let (worktree, terminal) = selectedTerminal else { return }
-            Task {
-                // Stop, then remove the record. Closing a terminal should leave
-                // nothing behind — that is what closing means everywhere else.
-                // One action: a Close whose stop was refused fails its remove
-                // too, and that is one thing that didn't happen, not two.
-                await act(.close, on: worktree, target: terminal.id, subject: Self.quoted(terminal)) { c in
-                    await c.stop(terminal: terminal.short)
-                    await c.removeTerminal(terminal.short)
-                }
-                // The runner publishes no layout when a pane closes, so the
-                // pane left behind kept the closed one's half of the grid
-                // until something else read the layout: a click (checklist
-                // O1). Read it now; the view re-sends its viewport when the
-                // arrangement changes.
-                await store.client(for: worktree)?.refreshLayout(worktree)
-                // Nothing to select here. Where the selection goes when a
-                // terminal disappears is `healSelection`'s one rule, run from
-                // `.onChange(of: store.fleet)` once the removal reaches the
-                // merged fleet — and it is that one rule on purpose.
-                //
-                // This used to call `selectNeighbour(of:)`, which walked the
-                // WHOLE fleet and took the first running terminal anywhere,
-                // on any runner. It also ran before the removal had reached
-                // `store.fleet` — `FleetStore.remerge` runs in a task of its
-                // own after the client changes — so it found the closed
-                // terminal still listed, moved the selection off it, and left
-                // `healSelection` nothing to heal. ⌘W in one worktree landed
-                // you in another, often on another runner.
-            }
+            requestClose(terminal, in: worktree)
 
         case .nextTerminal: step(by: 1)
         case .previousTerminal: step(by: -1)

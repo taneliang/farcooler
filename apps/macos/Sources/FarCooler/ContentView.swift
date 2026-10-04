@@ -142,6 +142,8 @@ struct ContentView: View {
     @State var orchestratorReplacement: OrchestratorReplacement?
     /// Use as Orchestrator on a workspace that has one, until confirmed.
     @State var adoptionPending: OrchestratorAdoptionPending?
+    /// A close waiting on its answer: an agent mid-turn (`requestClose`).
+    @State var closePending: CloseTerminalPending?
     /// The terminal the Rename Terminal sheet is asking a name for (ov-234).
     @State var renaming: RenamingTerminal?
 
@@ -282,7 +284,13 @@ struct ContentView: View {
         // The regular toolbar (ov-214), on whatever made the window.
         .mainWindowChrome()
         .overlay(alignment: .top) {
+            // Carries the close confirmation as well: this chain is at the
+            // type checker's limit, and a dialog may be presented from any
+            // view in the window.
             ActionBanners(outcomes: outcomes)
+                .confirmingClose($closePending) { pending in
+                    Task { await close(pending.terminal, in: pending.worktree) }
+                }
         }
         // A message arriving on a keystroke, so the same snappy preset
         // `PrefixHintOverlay` uses for its chip.
