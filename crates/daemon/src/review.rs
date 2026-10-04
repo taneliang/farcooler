@@ -335,6 +335,17 @@ impl ReviewCache {
         previous.filter(|p| p.counts != counts).map(|_| self.bump())
     }
 
+    /// Put counts in the cache as if a probe had found them, for a test that
+    /// needs a worktree with a diff and has no base to run `git diff` against.
+    #[cfg(test)]
+    pub fn set_counts_for_tests(&self, worktree_id: Uuid, worktree: &Path, counts: Counts) {
+        let key = self.shortstat_key(worktree_id, worktree);
+        self.shortstats
+            .lock()
+            .unwrap_or_else(|x| x.into_inner())
+            .insert(worktree_id, CachedShortstat { key, counts, stale: false });
+    }
+
     /// Forget the counts of worktrees that are no longer there.
     ///
     /// Called from the same pass that computes them, on the same terms as the

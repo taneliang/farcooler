@@ -462,6 +462,7 @@ impl Watcher {
         });
         let Some(pairing) = self.audience() else { return };
         let count = self.needs_you_count().await;
+        let reviews = self.reviews_count().await;
         let kind = wire_kind(&composed);
         self.tap(Tapped {
             kind: Some(kind),
@@ -469,6 +470,7 @@ impl Watcher {
             task: Some(task.key.clone()),
             workspace: workspace.clone(),
             needs_you: count,
+            reviews,
             event: Some(composed.class.event()),
             level: Some(composed.class.level()),
             notice_id: Some(id.clone()),
@@ -483,6 +485,7 @@ impl Watcher {
             task: Some(&task.key),
             workspace: workspace.as_deref(),
             needs_you: count,
+            reviews,
             notice_id: Some(&id),
             event: Some(composed.class.event()),
             level: Some(composed.class.level()),
@@ -492,7 +495,7 @@ impl Watcher {
         if self.deliver(pairing, outgoing).await
             && let Some(count) = count
         {
-            self.told(count);
+            self.told(count, reviews);
         }
     }
 }

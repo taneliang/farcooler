@@ -493,6 +493,8 @@ pub(crate) struct Tapped {
     pub task: Option<String>,
     pub workspace: Option<String>,
     pub needs_you: Option<u32>,
+    /// The worktrees-to-review count the notice carried, if any.
+    pub reviews: Option<u32>,
     /// The id of the ask the notice carried, if any.
     pub ask: Option<String>,
     /// An agent notice sent `alert: false`: its task's notice alerts instead
@@ -799,7 +801,7 @@ pub struct Watcher {
     count_pending: std::sync::atomic::AtomicBool,
     /// The needs-you count the relay was last told, by any notice. A count
     /// notice repeating it is not sent.
-    last_count: std::sync::Mutex<Option<u32>>,
+    last_count: std::sync::Mutex<Option<(u32, Option<u32>)>>,
     /// Per terminal whose last notice that LANDED was `blocked`, the id of the
     /// ask the relay was last told for it (`None` for "none open"). A
     /// terminal absent here gets no `kind:"ask"` notice at all. See
@@ -2999,6 +3001,7 @@ impl Watcher {
             // assembly, and noted as told once it lands so no count notice
             // repeats it.
             let needs_you = watcher.needs_you_count().await;
+            let reviews = watcher.reviews_count().await;
             // Read at sending, as the count is: a blocked notice carries the
             // ask open on its pane, and no other notice carries one.
             let blocked = notice.status == "blocked";
@@ -3009,6 +3012,7 @@ impl Watcher {
                 terminal: Some(terminal),
                 workspace: workspace.clone(),
                 needs_you,
+                reviews,
                 ask: ask.as_ref().map(|a| a.id().to_string()),
                 quiet: !alert,
                 ..Tapped::default()
@@ -3027,6 +3031,7 @@ impl Watcher {
                         task: None,
                         workspace: workspace.as_deref(),
                         needs_you,
+                        reviews,
                         // Stamped by `deliver`.
                         install: None,
                         started_at: notice.started_at,
@@ -3042,7 +3047,7 @@ impl Watcher {
                 )
                 .await;
             if landed && let Some(count) = needs_you {
-                watcher.told(count);
+                watcher.told(count, reviews);
             }
             if landed {
                 watcher.landed_status(terminal, blocked, ask.as_ref()).await;
@@ -3104,6 +3109,7 @@ impl Watcher {
             }
             let Some(pairing) = self.audience() else { return };
             let needs_you = self.needs_you_count().await;
+            let reviews = self.reviews_count().await;
             self.tap(Tapped {
                 kind: Some("ask"),
                 title: String::new(),
@@ -3111,6 +3117,7 @@ impl Watcher {
                 task: None,
                 workspace: None,
                 needs_you,
+                reviews,
                 ask: ask.as_ref().map(|a| a.id().to_string()),
                 ..Tapped::default()
             });
@@ -3119,6 +3126,7 @@ impl Watcher {
                 kind: Some("ask"),
                 terminal: Some(&id),
                 needs_you,
+                reviews,
                 ask: ask.as_ref(),
                 ..Default::default()
             };
@@ -3129,7 +3137,7 @@ impl Watcher {
                 *entry = ask.as_ref().map(|a| a.id().to_string());
             }
             if let Some(count) = needs_you {
-                self.told(count);
+                self.told(count, reviews);
             }
         }
     }
@@ -3720,6 +3728,15 @@ impl Watcher {
         Some(crate::needs_you::assemble(&inputs, std::time::SystemTime::now()).len() as u32)
     }
 
+    /// How many of this runner's worktrees have a diff that moved since anyone
+    /// reviewed it: the rows of `changes.inbox` that are `changed_since_reviewed`
+    /// and have a diff to show, which is what each app counts (`reviewsWaiting`)
+    /// before summing its runners. `None` when the inbox can't be read.
+    pub async fn reviews_count(&self) -> Option<u32> {
+        let inbox = crate::review_ops::inbox(&self.service).await.ok()?;
+        Some(inbox.items.iter().filter(|w| w.changed_since_reviewed && (w.insertions > 0 || w.deletions > 0)).count() as u32)
+    }
+
     /// Every notice this watcher sends from now on, paired or not. For tests.
     #[cfg(test)]
     pub(crate) fn tap_notices(&self) -> tokio::sync::mpsc::UnboundedReceiver<Tapped> {
@@ -3734,16 +3751,18 @@ impl Watcher {
         }
     }
 
-    /// Note that the relay is being told `count`, and say whether that is news.
-    fn already_told(&self, count: u32) -> bool {
-        *self.last_count.lock().unwrap_or_else(|e| e.into_inner()) == Some(count)
+    /// Note that the relay is being told `count` and `reviews`, and say
+    /// whether that is news. A moved review count is news on its own: it
+    /// changes no needs-you item, and the lock screen still counts it.
+    fn already_told(&self, count: u32, reviews: Option<u32>) -> bool {
+        *self.last_count.lock().unwrap_or_else(|e| e.into_inner()) == Some((count, reviews))
     }
 
     /// Note that the relay now has `count`: called only once a notice
     /// carrying it has landed, so a push that failed doesn't stop the same
     /// count being sent again.
-    fn told(&self, count: u32) {
-        *self.last_count.lock().unwrap_or_else(|e| e.into_inner()) = Some(count);
+    fn told(&self, count: u32, reviews: Option<u32>) {
+        *self.last_count.lock().unwrap_or_else(|e| e.into_inner()) = Some((count, reviews));
     }
 
     /// Whether a test is reading this watcher's notices.
@@ -3806,7 +3825,8 @@ impl Watcher {
             watcher.count_pending.store(false, Ordering::SeqCst);
             let Some(pairing) = watcher.audience() else { return };
             let Some(count) = watcher.needs_you_count().await else { return };
-            if watcher.already_told(count) {
+            let reviews = watcher.reviews_count().await;
+            if watcher.already_told(count, reviews) {
                 return;
             }
             watcher.tap(Tapped {
@@ -3816,12 +3836,14 @@ impl Watcher {
                 task: None,
                 workspace: None,
                 needs_you: Some(count),
+                reviews,
                 ask: None,
                 ..Tapped::default()
             });
-            let outgoing = crate::push::Outgoing { kind: Some("count"), needs_you: Some(count), ..Default::default() };
+            let outgoing =
+                crate::push::Outgoing { kind: Some("count"), needs_you: Some(count), reviews, ..Default::default() };
             if watcher.deliver(pairing, outgoing).await {
-                watcher.told(count);
+                watcher.told(count, reviews);
             }
         });
     }
@@ -4200,6 +4222,10 @@ impl Watcher {
 
             if let Some(version) = version {
                 self.announce_change_set(ws.id, version);
+                // A diff that moved can add or drop a worktree from the
+                // runner's review count, which moves no needs-you item. The
+                // notice is sent only if the pair the relay holds is stale.
+                self.schedule_count_notice();
             }
         }
     }
@@ -8680,6 +8706,38 @@ mod needs_you_push_tests {
             .await;
         let answered = next(&mut taps).await.expect("the answer moved the count");
         assert_eq!((answered.kind, answered.needs_you, answered.terminal), (Some("count"), Some(0), None));
+    }
+
+    /// The worktrees to review ride the count notice, and a diff that moved
+    /// with no needs-you item moving is news by itself (ov-181). The count is
+    /// the app's: a worktree that changed since it was reviewed AND has a diff.
+    #[tokio::test]
+    async fn a_moved_review_count_sends_a_count_notice_carrying_it() {
+        let (_dir, svc, _, pane) = a_runner().await;
+        let checkout = svc.store.get_terminal(pane).unwrap().worktree_id;
+        let ws = svc.store.get_worktree(checkout).unwrap();
+        let watcher = Watcher::new(svc.clone());
+        let mut taps = watcher.tap_notices();
+
+        assert_eq!(watcher.reviews_count().await, Some(0), "no diff, nothing to review");
+        svc.review_cache.set_counts_for_tests(
+            ws.id,
+            std::path::Path::new(&ws.worktree_path),
+            crate::review::Counts::Known(1, 4, 0),
+        );
+        assert_eq!(watcher.reviews_count().await, Some(1), "a diff nobody has reviewed");
+
+        tokio::time::pause();
+        watcher.schedule_count_notice();
+        let sent = next(&mut taps).await.expect("a moved review count is news");
+        assert_eq!((sent.kind, sent.reviews), (Some("count"), Some(1)));
+
+        // The same pair again is not.
+        watcher.schedule_count_notice();
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_secs(30), taps.recv()).await.is_err(),
+            "a repeat of what the relay holds is not sent"
+        );
     }
 
     /// The relay refreshes the card on every count notice, so a burst of

@@ -222,6 +222,16 @@ struct Notification<'a> {
     /// `needs_you` key reaches the relay as `undefined`.
     #[serde(rename = "needsYou", skip_serializing_if = "Option::is_none")]
     needs_you: Option<u32>,
+    /// How many of this runner's worktrees have a diff that moved since anyone
+    /// reviewed it: the number the app's review count sums over runners
+    /// (`reviewsWaiting`), taken from the same `review_ops::inbox` rows. It
+    /// rides every notice that carries `needsYou`, and the relay overwrites
+    /// this runner's last one with it (migration 0019).
+    ///
+    /// Absent, never `0`, when the inbox could not be read: the relay then
+    /// keeps what it had. A relay older than the field ignores it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reviews: Option<u32>,
     /// This runner's install id, its `install-id` file: the one name that is
     /// stable across re-pairing and distinct per runner, where the label the
     /// app pairs under is "This Mac" on every Mac. The relay keys this runner's
@@ -451,6 +461,8 @@ pub struct Outgoing<'a> {
     pub task: Option<&'a str>,
     pub workspace: Option<&'a str>,
     pub needs_you: Option<u32>,
+    /// Worktrees to review. See `Notification::reviews`.
+    pub reviews: Option<u32>,
     /// This runner's install id. See `Notification::install`. Stamped by the
     /// watcher's `deliver` on every notice, so no caller can forget it.
     pub install: Option<&'a str>,
@@ -496,6 +508,7 @@ impl Default for Outgoing<'_> {
             task: None,
             workspace: None,
             needs_you: None,
+            reviews: None,
             install: None,
             ask: None,
             started_at: None,
@@ -550,6 +563,7 @@ fn wire_body<'a>(o: &Outgoing<'a>) -> Option<Notification<'a>> {
     let shared = Notification {
         kind: o.kind,
         needs_you: o.needs_you,
+        reviews: o.reviews,
         install: o.install,
         version: farcooler_protocol::BUILD,
         ..Notification::default()
@@ -1168,6 +1182,45 @@ mod tests {
         keys.sort();
         assert_eq!(keys, ["kind", "needsYou", "version"], "a count is the count and nothing else: {count}");
         assert_eq!(count["needsYou"], serde_json::json!(0), "zero is a count, and is sent");
+    }
+
+    /// The worktree review count rides under the key the relay reads
+    /// (`reviews`), on any notice that has it, and a notice without it sends no
+    /// key at all: a zero would say "nothing to review" for a runner that never
+    /// counted (ov-181).
+    #[test]
+    fn the_body_carries_reviews_when_it_has_them_and_no_key_when_it_does_not() {
+        let count = serde_json::to_value(
+            wire_body(&Outgoing { kind: Some("count"), needs_you: Some(2), reviews: Some(3), ..Outgoing::default() })
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(count["reviews"], serde_json::json!(3), "{count}");
+        let zero = serde_json::to_value(
+            wire_body(&Outgoing { kind: Some("count"), needs_you: Some(2), reviews: Some(0), ..Outgoing::default() })
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(zero["reviews"], serde_json::json!(0), "zero is a count, and is sent: {zero}");
+        let agent = serde_json::to_value(
+            wire_body(&Outgoing {
+                title: "claude is done",
+                status: "done",
+                label: "claude",
+                terminal: Some("term-1"),
+                needs_you: Some(2),
+                reviews: Some(1),
+                ..Outgoing::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(agent["reviews"], serde_json::json!(1), "{agent}");
+        let unread = serde_json::to_value(
+            wire_body(&Outgoing { kind: Some("count"), needs_you: Some(2), ..Outgoing::default() }).unwrap(),
+        )
+        .unwrap();
+        assert!(unread.get("reviews").is_none(), "{unread}");
     }
 
     /// A decision is about a task, which is not a roster row: no terminal,

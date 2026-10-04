@@ -1883,6 +1883,9 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 crate::review_ops::mark_read(svc, &p).await?;
+                // A reviewed worktree leaves the runner's review count, which
+                // the lock screen shows and no needs-you item moved for.
+                self.watcher.announce_needs_you();
                 Ok(result::Value::Empty(farcooler_protocol::v1::Empty {}))
             }
 
