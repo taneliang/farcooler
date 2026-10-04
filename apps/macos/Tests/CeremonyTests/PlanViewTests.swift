@@ -59,11 +59,18 @@ struct PlanViewTests {
         let defaults: UserDefaults
         let seen: NavigatorFilterTests.Seen
         let opened: (PlanPage) -> Void
+        /// An orchestrator, terminals and worktrees in the navigator, as well
+        /// as the tasks.
+        var full = false
 
         var body: some View {
             TaskBoardView(
                 store: store, client: store.client, agents: .none, onGoTo: { _ in }, defaults: defaults,
-                hasKeyboard: true, onPlan: opened)
+                hasKeyboard: true, worktrees: { _ in full ? PlanViewTests.loose : .none },
+                orchestrator: full
+                    ? NavigatorOrchestrator(state: .working, agent: "claude", status: .working, nowDoing: "Reading")
+                    : nil,
+                onPlan: opened)
             .frame(width: 300, height: 900, alignment: .topLeading)
             .environment(\.gridProbing, true)
             .overlayPreferenceValue(ProbedViewsKey.self) { probed in
@@ -75,6 +82,22 @@ struct PlanViewTests {
             }
         }
     }
+
+    /// Hosted's terminals and worktrees, when `full`.
+    static let loose: BoardWorktrees = {
+        var shell = ProjectTerminals(terminals: [
+            Terminal(id: "term0", short: "term0", title: "proxy", preset: "zsh", state: "running", epoch: 0)
+        ])
+        shell.onNew = {}
+        var loose = BoardWorktrees(
+            shown: [
+                Worktree(
+                    id: "w0", short: "w0", task: "spike-0", branch: "spike-0", repository: "r", host: "",
+                    path: "/tmp/w0", state: "active", terminals: [], repositoryID: "r", workspace: nil)
+            ], terminals: shell)
+        loose.onNew = {}
+        return loose
+    }()
 
     /// The board drawn offscreen: what it drew, and where.
     final class Drawn {
@@ -107,10 +130,11 @@ struct PlanViewTests {
         }
     }
 
-    static func draw(_ store: TaskBoardStore, defaults: UserDefaults) async -> Drawn {
+    static func draw(_ store: TaskBoardStore, defaults: UserDefaults, full: Bool = false) async -> Drawn {
         let drawn = Drawn()
         drawn.host = NSHostingView(
-            rootView: Hosted(store: store, defaults: defaults, seen: drawn.seen, opened: { drawn.opened.append($0) }))
+            rootView: Hosted(
+                store: store, defaults: defaults, seen: drawn.seen, opened: { drawn.opened.append($0) }, full: full))
         drawn.window = NavigatorFilterTests.KeyWindow(
             contentRect: NSRect(x: -4000, y: -4000, width: 300, height: 900), styleMask: [.borderless],
             backing: .buffered, defer: false)
@@ -177,6 +201,28 @@ struct PlanViewTests {
         #expect(drawn.press("plan-theme-Visual language"))
         await drawn.settle()
         #expect(drawn.opened.last == .theme("00000000-0000-0000-0000-000000003001"))
+    }
+
+    @Test("Plan replaces only the Tasks section: the orchestrator, the filter, Terminals and Worktrees stay")
+    func planReplacesOnlyTasks() async throws {
+        let defaults = Self.defaults()
+        let store = try await Self.store(plan: true, defaults: defaults)
+        let tasks = await Self.draw(store, defaults: defaults, full: true)
+        let before = tasks.ids
+        tasks.window.close()
+        let kept: Set<String> = [
+            "navigator-divider", "section-header-tasks", "section-header-terminals", "section-header-worktrees",
+            "navigator-terminal-term0", "navigator-pane-terminals", "navigator-pane-worktrees",
+        ]
+        #expect(before.isSuperset(of: kept), "the board with Tasks chosen: \(before)")
+        #expect(before.contains("board-row-ov-1"))
+
+        store.plan.shown = true
+        let drawn = await Self.draw(store, defaults: defaults, full: true)
+        defer { drawn.window.close() }
+        #expect(drawn.ids.isSuperset(of: kept), "lost with Plan chosen: \(kept.subtracting(drawn.ids))")
+        #expect(drawn.ids.contains("plan-overview"))
+        #expect(!drawn.ids.contains("board-row-ov-1"), "the plan is in the Tasks section, in place of its rows")
     }
 
     @Test("The choice is kept per board on this Mac")

@@ -30,7 +30,8 @@ struct PlanToggle: View {
     }
 }
 
-/// The board's navigator with Plan chosen.
+/// The navigator's Tasks section with Plan chosen. A pane's content, so it
+/// scrolls in the pane's own scroll view and takes the pane's inset.
 struct PlanOverviewView: View {
     @ObservedObject var plan: PlanStore
     /// Each card's status as the board read it, by task id: whether a lane
@@ -45,16 +46,11 @@ struct PlanOverviewView: View {
     var defaults: UserDefaults = .standard
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: NavigatorRhythm.section) {
-                content
-            }
-            .padding(.horizontal, NavigatorGrid.edge)
-            .padding(.top, NavigatorRhythm.band)
-            .padding(.bottom, Spacing.section)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: NavigatorRhythm.section) {
+            content
         }
-        .scrollIndicators(.automatic)
+        .padding(.bottom, Spacing.section)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .identified("plan-overview")
         .task(id: plan.generation) { await plan.reloadIfMoved() }
         .task(id: ObjectIdentifier(plan)) { await plan.readIfNeverRead() }

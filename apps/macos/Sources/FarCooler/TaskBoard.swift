@@ -513,6 +513,9 @@ enum TaskBoardWrites {
 struct TaskBoardView: View {
     @ObservedObject var store: TaskBoardStore
     @ObservedObject var client: DaemonClient
+    /// The store's plan, watched so that choosing Plan redraws which rows
+    /// the Tasks section has to walk (`items`), not only its content.
+    @ObservedObject private var planStore: PlanStore
     let agents: BoardAgents
     /// Go to a pane working a task. The window's, because only the window can
     /// change what is selected.
@@ -657,6 +660,7 @@ struct TaskBoardView: View {
     ) {
         self.store = store
         self.client = client
+        self.planStore = store.plan
         self.agents = agents
         self.onGoTo = onGoTo
         self.defaults = defaults
@@ -684,17 +688,13 @@ struct TaskBoardView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Tasks | Plan, on a runner that keeps a plan (ov-273). With
-            // Tasks chosen, the board below is the board as it was.
+            // Tasks | Plan, on a runner that keeps a plan (ov-273). It
+            // switches the Tasks section's content and nothing else: the
+            // orchestrator's row, Terminals and Worktrees stay as they are,
+            // and with Tasks chosen the board is the board as it was.
             PlanToggle(plan: store.plan)
-            PlanOrTasks(plan: store.plan) {
-                topBand
-                list
-            } overview: {
-                PlanOverviewView(
-                    plan: store.plan, statuses: store.board.statuses, selected: planPage, keyed: hasKeyboard,
-                    onOpen: onPlan, defaults: defaults)
-            }
+            topBand
+            list
         }
         // One key column for the whole board, so every title starts at one x.
         .environment(\.taskKeyWidth, TaskKeyColumn.width(for: store.board.rows.map(\.key)))
@@ -839,7 +839,9 @@ struct TaskBoardView: View {
         let terminals = worktrees.terminals.narrowed(by: filter)
         let inProgress = store.board.columns.first { $0.status == .inProgress }?.rows.count ?? 0
         let unreadable = !shown.unreadable.isEmpty
-        let showsTasks = plan.showsTasks(unreadable: unreadable)
+        // With Plan chosen the Tasks section holds the plan, which the
+        // filter doesn't narrow, so it stays.
+        let showsTasks = plan.showsTasks(unreadable: unreadable) || store.plan.showing
         let ruleUnderOrchestrator = orchestrator != nil && plan.showsOrchestrator
             && (showsTasks || terminals.isShown || plan.showsWorktrees)
         return ScrollViewReader { proxy in
@@ -849,7 +851,7 @@ struct TaskBoardView: View {
             // (`NavigatorRhythm`, ov-243), a rule's half a section gap on
             // either side.
             VStack(alignment: .leading, spacing: 0) {
-                if plan.isEmpty(unreadable: unreadable) && !terminals.isShown {
+                if plan.isEmpty(unreadable: unreadable) && !terminals.isShown && !store.plan.showing {
                     NavigatorNoResults(filter: filter)
                 }
                 if let orchestrator, plan.showsOrchestrator {
@@ -1004,7 +1006,8 @@ struct TaskBoardView: View {
     private func items(worktrees all: BoardWorktrees) -> [NavigatorItem] {
         let shown = BoardFilter.narrowed(store.board, filter)
         let plan = self.plan(worktrees: all, shown: shown)
-        let tasksOpen = !closedSections.contains("tasks")
+        // With Plan chosen the section holds no task rows to walk.
+        let tasksOpen = !closedSections.contains("tasks") && !store.plan.showing
         let unread = tasksOpen && store.hasRead && plan.showsUnread && !unreadCollapsed
             ? BoardSummaryStrip.lines(BoardSummaryStrip.summary(store: store, reads: store.reads, filter: filter))
             : []
@@ -1065,8 +1068,15 @@ struct TaskBoardView: View {
                 content: AnyView(content.padding(.horizontal, NavigatorGrid.edge))))
         }
         if showsTasks {
+            // The Tasks | Plan control's one effect: what this section holds.
             pane("tasks", fills: true, header: sectionHeader("Tasks", id: "tasks"),
-                content: tasks(plan, shown: shown, worktrees: worktrees))
+                content: PlanOrTasks(plan: store.plan) {
+                    tasks(plan, shown: shown, worktrees: worktrees)
+                } overview: {
+                    PlanOverviewView(
+                        plan: store.plan, statuses: store.board.statuses, selected: planPage, keyed: hasKeyboard,
+                        onOpen: onPlan, defaults: defaults)
+                })
         }
         if terminals.isShown {
             // No count when it only offers New Terminal: "0" would read as
