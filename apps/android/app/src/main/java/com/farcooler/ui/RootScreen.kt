@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -18,6 +20,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
@@ -79,6 +82,16 @@ fun RootScreen(model: AppModel) {
     // a restored stack is checked against the fleet that just arrived — see
     // `AppModel.settle`.
     LaunchedEffect(entries, connections, hosts) { model.landIfNeeded() }
+
+    // What a refused restart, hide, reorder or pane switch says, over whatever
+    // screen is up: those controls live on four screens and the failure of each
+    // is the same sentence (ov-180).
+    val snackbar = remember { SnackbarHostState() }
+    LaunchedEffect(connections) {
+        connections.forEach { connection ->
+            launch { connection.notices.sentences.collect { snackbar.showSnackbar(it) } }
+        }
+    }
 
     val ground = stack.lastOrNull { !it.isOverlay } ?: Backstack.ROOT
     val overlays = stack.takeLastWhile { it.isOverlay }
@@ -180,6 +193,8 @@ fun RootScreen(model: AppModel) {
                 }
             }
         }
+
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
     }
 }
 

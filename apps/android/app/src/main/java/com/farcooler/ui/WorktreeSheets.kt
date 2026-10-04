@@ -43,6 +43,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.farcooler.model.LinkOpen
 import com.farcooler.model.BranchRef
 import com.farcooler.model.PullRequest
 import com.farcooler.model.StackLink
@@ -271,11 +272,13 @@ private fun PullRequestRows(pr: PullRequest) {
         SheetNoteText("Last read from GitHub a while ago. Refresh to be sure.")
     }
     if (pr.url.isNotEmpty()) {
-        FilledTonalButton(onClick = { runCatching { uri.openUri(pr.url) } }) {
+        var openFailure by remember(pr.url) { mutableStateOf<String?>(null) }
+        FilledTonalButton(onClick = { openFailure = LinkOpen.open(pr.url, uri::openUri) }) {
             Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null, Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
             Text("Open on GitHub")
         }
+        openFailure?.let { SheetNoteText(it) }
     }
 }
 

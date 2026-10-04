@@ -501,6 +501,13 @@ class Connection(
      */
     val core = ClientCore()
 
+    /**
+     * What a failed restart, hide, reorder or pane switch says, once each. The
+     * root screen shows these in a snackbar (ov-180).
+     */
+    val notices = ActionNotices()
+    private val actions = HostActions(core, notices)
+
     // ---- boards ----
 
     /**
@@ -1421,13 +1428,12 @@ class Connection(
         }
     }
 
+    /**
+     * A restart, stop or dismiss. A refusal is said through [notices] (ov-180);
+     * the refresh follows either way, so the row shows what the runner has.
+     */
     suspend fun act(action: Action, terminal: Terminal) {
-        val method = when (action) {
-            Action.RESTART -> "terminal.restart"
-            Action.STOP -> "terminal.stop"
-            Action.DISMISS_LOST -> "terminal.dismiss_lost"
-        }
-        attempt { core.call(method, args("terminal" to terminal.id)) }
+        actions.act(action, terminal.id)
         refresh()
     }
 
@@ -1722,8 +1728,7 @@ class Connection(
      * all. Moved rather than rewritten: it was never wrong, only somewhere else.
      */
     suspend fun setHidden(worktree: Worktree, hidden: Boolean) {
-        val method = if (hidden) "worktree.hide" else "worktree.unhide"
-        attempt { core.call(method, args("worktree" to worktree.id)) }
+        actions.setHidden(worktree.id, hidden)
         refresh()
     }
 
@@ -1746,10 +1751,7 @@ class Connection(
      */
     suspend fun reorderWorktrees(ordered: List<String>) {
         if (ordered.size < 2) return
-        val payload = JsonObject(
-            mapOf("worktrees" to JsonArray(ordered.map { JsonPrimitive(it) }))
-        )
-        attempt { core.call("worktree.reorder", payload) }
+        actions.reorder(ordered)
         refresh()
     }
 
@@ -1930,9 +1932,7 @@ class Connection(
      * client's to assume.
      */
     suspend fun setPaneMode(terminal: Terminal, mode: String) {
-        attempt {
-            core.call("terminal.set_pane_mode", args("terminal" to terminal.id, "paneMode" to mode))
-        }
+        actions.setPaneMode(terminal.id, mode)
         refresh()
     }
 

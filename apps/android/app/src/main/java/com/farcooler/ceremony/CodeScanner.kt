@@ -43,6 +43,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.farcooler.net.rethrowIfCancellation
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.BinaryBitmap
 import com.google.zxing.DecodeHintType
@@ -81,8 +83,31 @@ class CodeScanner {
      */
     private val armed = AtomicBoolean(false)
 
+    private val _cameraFailed = MutableStateFlow(false)
+
+    /**
+     * The camera didn't start: no provider, or it wouldn't bind. Without this
+     * the preview was a black square that never read anything and never said
+     * why (ov-180).
+     */
+    val cameraFailed: StateFlow<Boolean> = _cameraFailed.asStateFlow()
+
+    internal fun cameraUnavailable() {
+        _cameraFailed.value = true
+    }
+
+    /** Run the camera setup in [block]; if it throws, the screen says the camera didn't start. */
+    internal fun bindCamera(block: () -> Unit) {
+        try {
+            block()
+        } catch (e: Exception) {
+            cameraUnavailable()
+        }
+    }
+
     /** Begin, or begin again after a refusal. */
     fun start() {
+        _cameraFailed.value = false
         _scanned.value = null
         armed.set(true)
     }
@@ -145,9 +170,17 @@ fun ScanScreen(
                 CameraPreview(scanner, Modifier.fillMaxSize())
             }
             Spacer(Modifier.height(18.dp))
+            val cameraFailed by scanner.cameraFailed.collectAsStateWithLifecycle()
             Text(
-                instruction,
+                if (cameraFailed) {
+                    "The camera didn’t start. Another app may be using it. Go back and try " +
+                        "again, or add this device by pasting its key instead."
+                } else {
+                    instruction
+                },
                 style = MaterialTheme.typography.bodyMedium,
+                color = if (cameraFailed) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.onSurface,
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(18.dp))
@@ -213,7 +246,13 @@ private fun CameraPreview(scanner: CodeScanner, modifier: Modifier = Modifier) {
     var provider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
 
     LaunchedEffect(Unit) {
-        provider = runCatching { ProcessCameraProvider.awaitInstance(context) }.getOrNull()
+        provider = try {
+            ProcessCameraProvider.awaitInstance(context)
+        } catch (e: Exception) {
+            e.rethrowIfCancellation()
+            scanner.cameraUnavailable()
+            null
+        }
     }
 
     DisposableEffect(provider) {
@@ -228,7 +267,7 @@ private fun CameraPreview(scanner: CodeScanner, modifier: Modifier = Modifier) {
             analysis.setAnalyzer(executor) { image ->
                 image.use { frame -> reader.read(frame)?.let(scanner::report) }
             }
-            runCatching {
+            scanner.bindCamera {
                 camera.unbindAll()
                 camera.bindToLifecycle(
                     lifecycleOwner,

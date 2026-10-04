@@ -66,6 +66,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.core.TerminalPalette
 import com.farcooler.core.Vt
+import com.farcooler.model.LinkOpen
 import com.farcooler.model.LostPane
 import com.farcooler.model.NotLivePane
 import com.farcooler.model.StateKind
@@ -148,6 +149,8 @@ fun TerminalPane(
     // dialog that can be presented with nothing to present is one that
     // eventually will be.
     var heldLink by remember { mutableStateOf<String?>(null) }
+    // Why the held link didn't open, shown in its dialog, which then stays up.
+    var linkFailure by remember { mutableStateOf<String?>(null) }
 
     val fontChoice by model.settings.font.collectAsStateWithLifecycle()
     val fontSize by model.settings.fontSize.collectAsStateWithLifecycle()
@@ -382,6 +385,7 @@ fun TerminalPane(
                         val link = session.urlAt(row, column)
                         if (link != null) {
                             heldLink = link
+                            linkFailure = null
                         } else {
                             scope.launch { clipboard.readText()?.let { session.paste(it) } }
                         }
@@ -429,11 +433,18 @@ fun TerminalPane(
         AlertDialog(
             onDismissRequest = { heldLink = null },
             title = { Text("Link") },
-            text = { Text(link) },
+            text = {
+                Column {
+                    Text(link)
+                    linkFailure?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
             confirmButton = {
                 TextButton(onClick = {
-                    heldLink = null
-                    runCatching { uri.openUri(link) }
+                    linkFailure = LinkOpen.open(link, uri::openUri)
+                    if (linkFailure == null) heldLink = null
                 }) { Text("Open") }
             },
             dismissButton = {
