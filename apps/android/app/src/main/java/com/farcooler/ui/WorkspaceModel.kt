@@ -23,6 +23,11 @@ import com.farcooler.model.Worktree
 sealed interface BoardListEntry {
     val key: String
 
+    /** Part of the Unread section, which stays above the task sections and the Plan view alike. */
+    val isUnread: Boolean
+        get() = this is UnreadHeader || this === UnreadNothing || this is UnreadGroup || this is UnreadLine ||
+            this is UnreadNote || this is UnreadMore
+
     /**
      * A status and its count. An empty status is a header reading
      * "Backlog 0" that can't be expanded (spec §5, owner decision 3): never

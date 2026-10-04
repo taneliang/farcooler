@@ -552,6 +552,9 @@ class Connection(
     )
     val readState: StateFlow<Map<String, com.farcooler.model.BoardReads>> = readsSync.reads
 
+    /** The plan layer (ov-274), read on request behind `board_plan`. */
+    val plans = PlanReads({ method, args -> core.call(method, args) }, runnerCan = { daemonBuild.current.value?.can(Capability.BOARD_PLAN) })
+
     /** A task's notes, from `task.get`, or null when the read didn't come back. */
     suspend fun taskNotes(taskId: String): List<com.farcooler.model.TaskNoteRow>? =
         attempt { core.call("task.get", kotlinx.serialization.json.buildJsonObject { put("task", taskId) }) }
@@ -710,6 +713,7 @@ class Connection(
             needsYouOwed = true
             if (isForeground) scope.launch { readNeedsYou() }
         }
+        com.farcooler.model.PlanNews.board(notice)?.let { if (isForeground) scope.launch { plans.heard(it, boardList()) } }
         if (event != "task" && event != "resync") return
         scope.launch {
             // Boards are not read in the background — the fleet poll stops
@@ -722,8 +726,8 @@ class Connection(
             when (event) {
                 // The boards this notice moved: the workspace the task is on,
                 // and on a move the one it left. See [RunnerBoards.touched].
-                "task" -> if (moved != null) boardReads.noticed(moved, boardList())
-                "resync" -> boardReads.sweep(boardList())
+                "task" -> if (moved != null) boardReads.noticed(moved, boardList()).also { plans.reread(RunnerBoards.touched(moved, boardList())) }
+                "resync" -> boardReads.sweep(boardList()).also { plans.reread(boardList()) }
             }
         }
     }

@@ -230,6 +230,24 @@ sealed interface Route {
     ) : Route
 
     /**
+     * A theme's or lane's page of the plan layer on that board (ov-274):
+     * [kind] is `theme` or `lane`, [pageId] the plan's own id. Not a place a
+     * relaunch reopens; its workspace is.
+     */
+    @Serializable
+    @SerialName("plan-page")
+    data class PlanPage(
+        val hostId: String,
+        val workspaceId: String,
+        val kind: String,
+        val pageId: String,
+    ) : Route {
+        /** The page as the model names it. */
+        val page: com.farcooler.model.PlanPage
+            get() = if (kind == "theme") com.farcooler.model.PlanPage.Theme(pageId) else com.farcooler.model.PlanPage.Lane(pageId)
+    }
+
+    /**
      * Whether this route is drawn OVER the worktree rather than instead of it.
      *
      * Every pushed screen is. The worktree underneath stays composed, which is
@@ -242,7 +260,7 @@ sealed interface Route {
     val isOverlay: Boolean
         get() = when (this) {
             is Settings, is RunnerSettings, is Authorize, is Join, is AddDevice, is Devices,
-            is Worktrees, is BoardTask, is BoardHistory, is Files -> true
+            is Worktrees, is BoardTask, is BoardHistory, is Files, is PlanPage -> true
             is Board -> true
             // The three GROUND routes. A terminal is one of them and not an
             // overlay, even though it is now pushed onto the front door rather

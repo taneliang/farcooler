@@ -160,6 +160,8 @@ fun BoardTab(
     modifier: Modifier = Modifier,
     /** A finished status's History page (ov-103). */
     onOpenHistory: (TaskStatus) -> Unit = {},
+    /** A theme's or lane's page of the plan layer (ov-274). */
+    onOpenPlan: (com.farcooler.model.PlanPage) -> Unit = {},
     /** Whether an orchestrator is up to tell, which decides what a blank board says (ov-205). */
     orchestratorRunning: Boolean = true,
     /** Switches to the Orchestrator tab, for a blank board with none running. */
@@ -184,6 +186,15 @@ fun BoardTab(
     val allReads by connection.readState.collectAsStateWithLifecycle()
     val reads = allReads[workspace.id] ?: BoardReads.firstLook(System.currentTimeMillis())
     var askingMarkAll by remember { mutableStateOf(false) }
+    // The Tasks | Plan choice (ov-274), kept per board on this phone. Tasks until chosen otherwise.
+    val planPrefs = androidx.compose.ui.platform.LocalContext.current.getSharedPreferences("farcooler.plan", android.content.Context.MODE_PRIVATE)
+    val planKey = com.farcooler.model.PlanChoice.key(connection.host.id, workspace.id)
+    var planChosen by remember(planKey) { mutableStateOf(planPrefs.getBoolean(planKey, false)) }
+    val planStates by connection.plans.states.collectAsStateWithLifecycle()
+    val keepsPlan = daemon?.can(Capability.BOARD_PLAN) == true
+    val showsPlan = com.farcooler.model.PlanChoice.showing(keepsPlan, planChosen)
+    var landedOpen by rememberSaveable(workspace.id) { mutableStateOf(false) }
+    LaunchedEffect(showsPlan, workspace.id) { if (showsPlan) connection.plans.read(workspace) }
 
     // Read on opening, whatever was last read: the row that opened this may
     // be showing a count from before the last reconnect. While it is open, a
@@ -207,6 +218,7 @@ fun BoardTab(
                 scope.launch {
                     refreshing = true
                     connection.readBoard(workspace)
+                    if (showsPlan) connection.plans.read(workspace)
                     refreshing = false
                 }
             },
@@ -227,6 +239,14 @@ fun BoardTab(
                     BoardBlank(!workspace.isImplicit, orchestratorRunning, onShowOrchestrator)
                 }
                 else -> LazyColumn(Modifier.fillMaxSize().testTag("board")) {
+                    if (keepsPlan) {
+                        item(key = "plan/switch") {
+                            PlanSwitch(showsPlan, onChange = {
+                                planChosen = it
+                                planPrefs.edit().putBoolean(planKey, it).apply()
+                            })
+                        }
+                    }
                     if (workspace.id in unread) {
                         item(key = "unread") {
                             ListItem(
@@ -256,7 +276,11 @@ fun BoardTab(
                         }
                     }
                     val more = showingMore.mapNotNull(TaskStatus::parse).toSet()
-                    for (entry in BoardList.entries(board, flipped, reads = reads, showingMore = more, unread = summary)) {
+                    // With Plan chosen only the task sections go: Unread and the
+                    // waiting count above stay, and the plan takes their place.
+                    val entries = BoardList.entries(board, flipped, reads = reads, showingMore = more, unread = summary)
+                        .filter { !showsPlan || it.isUnread }
+                    for (entry in entries) {
                         when (entry) {
                             is BoardListEntry.UnreadHeader -> item(key = entry.key) {
                                 UnreadHeader(entry) { askingMarkAll = true }
@@ -313,7 +337,16 @@ fun BoardTab(
                             }
                         }
                     }
-                    if (board.unreadable.isNotEmpty()) {
+                    if (showsPlan) {
+                        planItems(
+                            state = planStates[workspace.id],
+                            statuses = board.rows.associate { it.id to it.status },
+                            onOpen = onOpenPlan,
+                            onRetry = { scope.launch { connection.plans.read(workspace) } },
+                            landedOpen = landedOpen,
+                            onToggleLanded = { landedOpen = !landedOpen },
+                        )
+                    } else if (board.unreadable.isNotEmpty()) {
                         item(key = "unreadable") {
                             Text(
                                 "Not on this version",

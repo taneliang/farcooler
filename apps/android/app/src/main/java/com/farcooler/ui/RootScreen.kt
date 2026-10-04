@@ -373,6 +373,22 @@ private fun OverlayScreen(model: AppModel, route: Route, connections: List<Conne
             }
         }
 
+        is Route.PlanPage -> {
+            val live = connections.firstOrNull { it.host.id == route.hostId }
+            if (live == null) {
+                model.back()
+            } else {
+                PlanPageScreen(
+                    connection = live,
+                    workspaceId = route.workspaceId,
+                    page = route.page,
+                    onOpenTask = { model.navigate(Route.BoardTask(route.hostId, route.workspaceId, it)) },
+                    onOpenPage = { model.navigate(Route.PlanPage(route.hostId, route.workspaceId, if (it is com.farcooler.model.PlanPage.Theme) "theme" else "lane", it.id)) },
+                    onBack = { model.back() },
+                )
+            }
+        }
+
         // The ground's routes never reach here; `Route.isOverlay` is the one
         // place that split is decided.
         is Route.Onboarding, is Route.NeedsYou, is Route.Workspace, is Route.Terminal -> Unit
