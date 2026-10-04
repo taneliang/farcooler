@@ -40,6 +40,7 @@ SHARDS = {
     ],
     "phone": [
         "WorkspaceScreenTests",  # -phone-harness
+        "BoardUnreadUITests",  # -phone-harness (ov-113)
         "TaskScreenTests",  # -phone-harness
         "ReadScopeTests",  # -phone-harness (TaskScreenTests.swift)
         "TaskUsageUITests",  # -phone-harness (ov-195, landed after this lane branched)
