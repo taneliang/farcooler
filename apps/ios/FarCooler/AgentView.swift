@@ -165,7 +165,21 @@ struct AgentView: View {
     /// iOS UI suite is compiled by CI and never executed, so copy chosen in a
     /// `View.body` is copy nothing checks. **A raw Rust error string never
     /// reaches this view.**
-    private var chatFailure: AgentFailureCopy? { paneTerminal?.chatFailure }
+    ///
+    /// Read whatever the transcript holds (ov-174): a pane whose agent died
+    /// mid-conversation says it stopped, beside the composer, where this used
+    /// to show only over an empty transcript and say it "couldn't start".
+    private var chatFailure: AgentFailureCopy? {
+        AgentFailureCopy.forWord(paneTerminal?.agentFailure, started: !transcript.rows.isEmpty)
+    }
+
+    /// Start the pane's agent again, in place. `set_pane_mode` to agent on a
+    /// pane already in agent mode respawns its shim; what was queued is sent
+    /// once the new one is up.
+    private func restart() {
+        guard let terminal = paneTerminal else { return }
+        Task { switchFailure = await connection.setPaneMode(terminal, to: "agent") }
+    }
 
     /// The agent behind this pane, capitalized for the placeholder.
     private var harnessName: String {
@@ -595,7 +609,29 @@ struct AgentView: View {
                 // actions are three more `AgentSupervisor::send` calls, so
                 // `QueuedRow` takes `hasAgent` too and this sentence is the
                 // explanation for both.
-                if !hasAgent, !transcript.rows.isEmpty {
+                // The agent stopped under a conversation (ov-174): one line,
+                // and the way to start it again. Red, like the send banner:
+                // nothing on this pane will answer until it's restarted.
+                if let failure = chatFailure, !transcript.rows.isEmpty {
+                    HStack(spacing: PaneMetrics.step) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                            .accessibilityHidden(true)
+                        Text(failure.title)
+                            .font(.footnote)
+                            .accessibilityIdentifier("agent-stopped")
+                        Spacer(minLength: PaneMetrics.step)
+                        Button(AgentFailureCopy.restart, action: restart)
+                            .font(.footnote.weight(.semibold))
+                            .frame(minHeight: PaneMetrics.target)
+                            .contentShape(.rect)
+                            .accessibilityIdentifier("agent-restart")
+                    }
+                    .padding(.horizontal, PaneMetrics.edge)
+                    .padding(.vertical, PaneMetrics.tight)
+                    .modifier(GlassSurface())
+                    .actionFailureAlert($switchFailure)
+                } else if !hasAgent, !transcript.rows.isEmpty {
                     HStack(spacing: PaneMetrics.step) {
                         // The mark `emptyState` gives this same fact, and
                         // secondary like it: a session that ended is not a
@@ -1076,12 +1112,17 @@ struct AgentView: View {
             symbol: "exclamationmark.triangle", mark: .red,
             title: failure.title, message: failure.message)
         if let terminal = paneTerminal {
+            // Restart first: it's the one that brings the chat back (ov-174).
+            Button(AgentFailureCopy.restart, action: restart)
+                .buttonStyle(.borderedProminent)
+                .padding(.top, 18)
+                .accessibilityIdentifier("agent-restart")
             Button(failure.action) {
                 Task { switchFailure = await connection.setPaneMode(terminal, to: "terminal") }
             }
             .actionFailureAlert($switchFailure)
             .buttonStyle(.bordered)
-            .padding(.top, 18)
+            .padding(.top, 8)
             .accessibilityIdentifier("agent-failure-action")
         }
     }
@@ -3502,9 +3543,13 @@ struct AgentLayoutHarness: View {
     private static var agentPane: Terminal {
         Terminal(
             id: "harness", short: "harness", title: "claude", preset: "claude", state: "running",
-            activity: emptyState == nil && !isEnded ? "working" : "idle",
-            epoch: 1, paneMode: "agent", chatCapable: true)
+            activity: emptyState == nil && !isEnded && !isStopped ? "working" : "idle",
+            epoch: 1, paneMode: "agent", chatCapable: true,
+            agentFailure: isStopped ? "adapter-failed" : nil)
     }
+
+    /// The conversation whose agent died under it (ov-174).
+    private static var isStopped: Bool { CommandLine.arguments.contains("-stopped") }
 
     /// The conversation whose session has gone out from under it.
     private static var isEnded: Bool { CommandLine.arguments.contains("-ended") }

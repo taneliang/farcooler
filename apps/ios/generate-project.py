@@ -686,6 +686,9 @@ UI_TEST_SOURCES = [
     "ChangesPullRequestTests.swift",
     "ChangesPatchNoticeTests.swift",
     "AgentRetrySendTests.swift",
+    # A chat whose agent died says so beside the composer, with Restart
+    # (ov-174). Stands on `-agent-layout-harness -stopped`; needs no runner.
+    "AgentStoppedTests.swift",
     "ActionFailureTests.swift",
     # A runner saved before `Runner.reach` existed still loads. Needs no runner
     # and no daemon: it seeds the old shape through the argument domain and
