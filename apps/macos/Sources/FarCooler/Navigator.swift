@@ -242,7 +242,7 @@ struct OrchestratorRowView: View {
             icon
                 .gridMark("orchestrator", .icon)
                 .glyphColumn()
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
                 if model.state == .none {
                     Text(OrchestratorRow.word(.none))
                         .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
@@ -309,7 +309,7 @@ struct OrchestratorRowView: View {
                 VStack(alignment: .leading, spacing: ColumnGrid.rhythm / 2) { startMenu(starts); useMenu }
             }
             .controlSize(.small)
-            .padding(.top, 2)
+            .padding(.top, NavigatorRhythm.lineGap)
         }
     }
 

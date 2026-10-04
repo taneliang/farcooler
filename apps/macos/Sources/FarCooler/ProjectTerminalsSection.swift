@@ -97,7 +97,7 @@ struct ProjectTerminalsSection: View {
     let keyed: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
+        VStack(alignment: .leading, spacing: NavigatorRhythm.row) {
             ForEach(terminals.terminals) { terminal in
                 ProjectTerminalRow(
                     terminal: terminal, selected: terminal.id == terminals.selected, keyed: keyed,
@@ -118,7 +118,7 @@ struct ProjectTerminalsSection: View {
                         Spacer(minLength: 0)
                     }
                     .foregroundStyle(.secondary)
-                    .frame(minHeight: ColumnGrid.rowHeight)
+                    .padding(.vertical, NavigatorRhythm.air)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -169,7 +169,7 @@ private struct ProjectTerminalRow: View {
                 StatusGlyph(status: terminal.status)
                     .help(terminal.status.label)
             }
-            .navigatorRow(selected: selected, keyed: keyed, minHeight: ColumnGrid.rowHeight, leading: 0, box: "projectTerminal")
+            .navigatorRow(selected: selected, keyed: keyed, leading: 0, box: "projectTerminal")
         }
         .buttonStyle(.plain)
         .contextMenu { menu }

@@ -41,7 +41,7 @@ struct CompactTaskRow<Second: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
             HStack(alignment: .firstTextBaseline, spacing: 0) {
                 Text(key)
                     .font(TaskKeyColumn.font)

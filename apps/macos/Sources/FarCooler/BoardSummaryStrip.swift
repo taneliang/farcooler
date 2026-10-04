@@ -82,15 +82,17 @@ struct BoardSummaryStrip: View {
                     }
                 }
             ) {
-                VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
+                // Its subgroups' slots touch, each one after the first
+                // keeping its own room over it (`GroupHeader.above`).
+                VStack(alignment: .leading, spacing: 0) {
                     if summary.isEmpty {
                         Text(BoardSummary.nothing)
                             .font(.system(size: WorkspaceStyle.PaneText.body))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.tail)
-                            .frame(minHeight: Self.lineHeight)
                             .gridMark("summary.empty", .text)
+                            .padding(.vertical, NavigatorRhythm.air)
                             .padding(.leading, NavigatorGrid.textInset)
                             .identified("board-summary-empty")
                             .transition(.opacity)
@@ -108,10 +110,10 @@ struct BoardSummaryStrip: View {
             .headerAction(offersMarkRead(summary) ? markReadAction(summary) : nil)
             // Measured from the board column's edge, as the list below is:
             // the disclosure at the grid's edge, everything else at its
-            // text column (`NavigatorGrid`).
+            // text column (`NavigatorGrid`). No room of its own over or
+            // under it: it's a group of the Tasks section, set apart as the
+            // statuses are (`NavigatorRhythm`, ov-243).
             .padding(.horizontal, NavigatorGrid.edge)
-            .padding(.top, Self.insets(collapsed: collapsed).top)
-            .padding(.bottom, Self.insets(collapsed: collapsed).bottom)
             .frame(maxWidth: .infinity, alignment: .leading)
             // No slab of its own (ov-104 review): its header and the
             // navigator's spacing set it apart, as variant B drew the list.
@@ -163,28 +165,6 @@ struct BoardSummaryStrip: View {
         DispatchQueue.main.async {
             withAnimation(.easeOut(duration: BoardMotion.highlightFade * slowdown)) { arrived.subtract(new) }
         }
-    }
-
-    /// A line of the strip: a group's label, "and 2 more".
-    static let lineHeight: CGFloat = 2 * ColumnGrid.rhythm
-
-    /// Its padding above and below. Open, the last line gets the air the
-    /// header's own 24 pt row gives its title above, so the text has as much
-    /// room under it as over it and the strip reads as a finished block, not
-    /// a list cut off at the divider (owner, 2 Oct). Closed, the one row is
-    /// centered already.
-    static func insets(collapsed: Bool) -> (top: CGFloat, bottom: CGFloat) {
-        let top = ColumnGrid.rhythm
-        return (top, collapsed ? top : top + headerAir)
-    }
-
-    /// The air over the header's title inside its row.
-    static let headerAir = (ColumnGrid.rowHeight - lineHeight) / 2
-
-    /// The room over its first line of text and under its last, as drawn.
-    static func visibleInsets(collapsed: Bool) -> (top: CGFloat, bottom: CGFloat) {
-        let insets = insets(collapsed: collapsed)
-        return (insets.top + headerAir, insets.bottom + (collapsed ? headerAir : 0))
     }
 
     /// The collapsed strip's one line: "3 unread".
@@ -375,8 +355,9 @@ struct BoardSummaryStrip: View {
                 .font(.system(size: WorkspaceStyle.PaneText.secondary))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .frame(minHeight: Self.lineHeight)
+                .padding(.vertical, NavigatorRhythm.air)
                 .padding(.leading, NavigatorGrid.textInset)
+                .probed("summary-more")
         }
     }
 
@@ -395,7 +376,7 @@ struct ActivityNoteView: View {
     let now: Date
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
+        VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
             Text(Self.note(entry))
                 .font(.system(size: WorkspaceStyle.PaneText.secondary))
                 .lineLimit(2)

@@ -844,7 +844,7 @@ struct TaskBoardView: View {
         // trailing edge, and a rhythm over it; the list's own top inset is
         // the rhythm under it.
         .padding(.horizontal, NavigatorGrid.edge)
-        .padding(.top, ColumnGrid.rhythm)
+        .padding(.top, NavigatorRhythm.band)
         .onChange(of: filterRequest) { _, _ in filterFocused = true }
     }
 
@@ -918,9 +918,17 @@ struct TaskBoardView: View {
         let terminals = worktrees.terminals.narrowed(by: filter)
         let inProgress = store.board.columns.first { $0.status == .inProgress }?.rows.count ?? 0
         let unreadable = !shown.unreadable.isEmpty
+        // The sections' slots touch: each one's room over it is its own
+        // (`NavigatorRhythm`, ov-243), a rule's half the section gap on
+        // either side, and a section that follows another with no rule
+        // between them the whole section gap.
+        let showsTasks = plan.showsTasks(unreadable: unreadable)
+        let ruleUnderOrchestrator = orchestrator != nil && plan.showsOrchestrator
+            && (showsTasks || terminals.isShown || plan.showsWorktrees)
+        let ruleUnderTasks = showsTasks && (terminals.isShown || plan.showsWorktrees)
         return ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
+                LazyVStack(alignment: .leading, spacing: 0) {
                     if plan.isEmpty(unreadable: unreadable) && !terminals.isShown {
                         NavigatorNoResults(filter: filter)
                     }
@@ -930,11 +938,12 @@ struct TaskBoardView: View {
                             keyed: hasKeyboard)
                         .id(NavigatorItem.orchestrator)
                         .padding(.horizontal, NavigatorGrid.edge)
-                        if plan.showsTasks(unreadable: unreadable) || terminals.isShown || plan.showsWorktrees {
-                            Divider()
+                        if ruleUnderOrchestrator {
+                            Divider().probed("navigator-divider")
+                                .padding(.vertical, NavigatorRhythm.rule)
                         }
                     }
-                    if plan.showsTasks(unreadable: unreadable) {
+                    if showsTasks {
                         section("Tasks", id: "tasks") {
                             tasks(plan, shown: shown, worktrees: worktrees)
                         }
@@ -943,8 +952,9 @@ struct TaskBoardView: View {
                     // them; Terminals and Worktrees, the two lists that
                     // aren't tasks, are set apart by space (ov-216's
                     // `Spacing.section`), not by another line.
-                    if plan.showsTasks(unreadable: unreadable) && (terminals.isShown || plan.showsWorktrees) {
-                        Divider()
+                    if ruleUnderTasks {
+                        Divider().probed("navigator-divider")
+                            .padding(.vertical, NavigatorRhythm.rule)
                     }
                     if terminals.isShown {
                         // No count when it only offers New Terminal: "0"
@@ -960,10 +970,10 @@ struct TaskBoardView: View {
                         section("Worktrees", id: "worktrees", count: worktrees.shown.count) {
                             BoardWorktreesSection(worktrees: worktrees, keyed: hasKeyboard)
                         }
-                        .padding(.top, terminals.isShown ? Spacing.section - ColumnGrid.rhythm : 0)
+                        .padding(.top, terminals.isShown ? NavigatorRhythm.section : 0)
                     }
                 }
-                .padding(.vertical, ColumnGrid.rhythm)
+                .padding(.vertical, NavigatorRhythm.band)
                 .unanimatedWhenFiltering(filter)
             }
             // The row selected stays in sight as ↑ and ↓ step past the edge,
@@ -1034,7 +1044,8 @@ struct TaskBoardView: View {
     /// The Tasks section's content: Unread, then each status.
     @ViewBuilder
     private func tasks(_ plan: NavigatorFiltering, shown: TaskBoardModel, worktrees: BoardWorktrees) -> some View {
-        VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
+        // Its groups, Unread and each status, a group gap apart.
+        VStack(alignment: .leading, spacing: NavigatorRhythm.group) {
             if store.hasRead, plan.showsUnread {
                 // Edge to edge, its own inset at column A.
                 BoardSummaryStrip(
@@ -1048,7 +1059,7 @@ struct TaskBoardView: View {
                 centered { ProgressView() }
             } else if let trouble = store.trouble, !store.hasRead {
                 centered {
-                    VStack(spacing: 10) {
+                    VStack(spacing: NavigatorRhythm.group) {
                         Text(trouble)
                         Button("Try Again") { Task { await store.reload() } }
                     }
@@ -1305,7 +1316,7 @@ private struct UnreadableColumnView: View {
     /// its rows as cards with their edges at A and their text at B.
     var body: some View {
         VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
                 Text("Not On This Version").font(WorkspaceStyle.sectionTitle)
                     .gridMark("unreadable", .text)
                 Text("This runner uses states this Far Cooler doesn’t have yet.")
@@ -1315,7 +1326,7 @@ private struct UnreadableColumnView: View {
             }
             .padding(.leading, NavigatorGrid.textInset)
             ForEach(rows) { row in
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
                     Text(row.key)
                         .font(
                             .system(

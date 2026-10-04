@@ -80,7 +80,7 @@ struct BoardWorktreesSection: View {
     static func rows(_ worktrees: BoardWorktrees) -> [Worktree] { worktrees.shown }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
+        VStack(alignment: .leading, spacing: NavigatorRhythm.row) {
             ForEach(Self.rows(worktrees)) { worktree in
                 BoardWorktreeRow(
                     worktree: worktree, selected: worktree.id == worktrees.selected, keyed: keyed,
@@ -91,6 +91,7 @@ struct BoardWorktreesSection: View {
             }
             if !worktrees.hidden.isEmpty {
                 hiddenGroup
+                    .padding(.top, NavigatorRhythm.subgroup)
             }
             if let onNew = worktrees.onNew {
                 Button(action: onNew) {
@@ -104,7 +105,8 @@ struct BoardWorktreesSection: View {
                         Spacer(minLength: 0)
                     }
                     .foregroundStyle(.secondary)
-                    .frame(minHeight: ColumnGrid.rowHeight)
+                    .padding(.vertical, NavigatorRhythm.air)
+                    .probed("board-new-worktree-line")
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -124,7 +126,7 @@ struct BoardWorktreesSection: View {
             "Hidden", id: "worktrees.hidden", style: .minor, isExpanded: $hiddenExpanded,
             count: worktrees.hidden.count
         ) {
-            VStack(alignment: .leading, spacing: ColumnGrid.rhythm / 2) {
+            VStack(alignment: .leading, spacing: NavigatorRhythm.row) {
                 ForEach(worktrees.hidden) { worktree in
                     HStack(spacing: SidebarGrid.gap) {
                         Text(worktree.task)
@@ -140,7 +142,7 @@ struct BoardWorktreesSection: View {
                         }
                     }
                     .padding(.leading, NavigatorGrid.textInset)
-                    .frame(minHeight: ColumnGrid.rowHeight)
+                    .padding(.vertical, NavigatorRhythm.air)
                 }
             }
         }
@@ -177,7 +179,7 @@ private struct BoardWorktreeRow: View {
                 .foregroundStyle(.secondary)
                 .gridMark("boardWorktree", .icon)
                 .glyphColumn()
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
                 Text(worktree.isMainCheckout ? "\(worktree.task) (main checkout)" : worktree.task)
                     .font(.system(size: WorkspaceStyle.PaneText.body))
                     .lineLimit(1)

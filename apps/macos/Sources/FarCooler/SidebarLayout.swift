@@ -1,3 +1,4 @@
+import AgentKit
 import SwiftUI
 
 /// The four columns the sidebar and the board column both lay out on, Finder
@@ -76,6 +77,54 @@ enum NavigatorGrid {
     static let boxEdge: CGFloat = edge - outset
     /// The x a chevron and every glyph in a box is centered on.
     static let glyphCenter: CGFloat = edge + mark / 2
+}
+
+/// The navigator's vertical rhythm (ov-243): the room over and under every
+/// level, so the space says what belongs to what. The owner, 3 October: "the
+/// gaps are inconsistent and don't make sense".
+///
+/// Every line in the navigator (a header's title, a row's text, "and 2
+/// more") sits in a slot with `air` over and under it, so two slots that
+/// touch read `2 * air` apart, the gap between two rows. A header sits that
+/// close to the first thing it labels, as Finder's and Xcode's sidebars set
+/// a section's title; the space between a header and what comes before it
+/// grows with its level. What the eye sees, text to text:
+///
+/// | Level                                   | Above | Below |
+/// |-----------------------------------------|-------|-------|
+/// | Section header: Tasks, Terminals        |  24   |   8   |
+/// | Group header: Unread, a task status     |  16   |   8   |
+/// | Subgroup header: Finished, New          |  12   |   8   |
+/// | Row, "and 2 more", New Terminal         |   8   |   —   |
+/// | Rule under the orchestrator             |  12   |  12   |
+///
+/// A rule stands in the middle of the section gap it replaces. The slot
+/// gaps below are what a view adds between slots to get those: the gap
+/// above, less the two slots' air. `NavigatorRhythmTests` measures them.
+enum NavigatorRhythm {
+    /// Over and under every line, inside its slot: a row's padding, a
+    /// header's room inside its hit target.
+    static let air: CGFloat = Spacing.tight
+    /// Between two lines of one row: a task's title and its status line,
+    /// the orchestrator's name and what it's doing.
+    static let lineGap: CGFloat = Spacing.tight / 2
+    /// Between two rows' slots, and between a header's slot and its
+    /// first child's: none, so they read `2 * air` apart.
+    static let row: CGFloat = 0
+    /// Over a subgroup header that follows another subgroup.
+    static let subgroup: CGFloat = Spacing.tight
+    /// Over a group header that follows another group.
+    static let group: CGFloat = Spacing.group
+    /// Over a section header that follows another section.
+    static let section: CGFloat = Spacing.section
+    /// Over and under a rule between sections: half the section gap each.
+    static let rule: CGFloat = (section + 2 * air) / 2 - air
+    /// The top band's margin: over the filter, and between the filter's box
+    /// and the orchestrator's row.
+    static let band: CGFloat = Spacing.group
+
+    /// What the eye reads between two lines whose slots are `slotGap` apart.
+    static func visible(_ slotGap: CGFloat) -> CGFloat { slotGap + 2 * air }
 }
 
 extension View {

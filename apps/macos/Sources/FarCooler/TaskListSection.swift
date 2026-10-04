@@ -110,7 +110,7 @@ struct SectionFootButton: View {
             .buttonStyle(.plain)
             .font(.system(size: WorkspaceStyle.PaneText.secondary))
             .foregroundStyle(.secondary)
-            .frame(minHeight: 2 * ColumnGrid.rhythm)
+            .padding(.vertical, NavigatorRhythm.air)
             .padding(.leading, NavigatorGrid.textInset)
             .accessibilityIdentifier(id)
     }
@@ -139,7 +139,7 @@ struct HistoryRow: View {
             }
             .padding(.leading, NavigatorGrid.textInset)
             .padding(.trailing, ColumnGrid.rhythm)
-            .frame(minHeight: ColumnGrid.rowHeight)
+            .padding(.vertical, NavigatorRhythm.air)
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(hovering ? 0.06 : 0)))
             .contentShape(Rectangle())
         }

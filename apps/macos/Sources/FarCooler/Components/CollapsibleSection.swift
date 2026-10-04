@@ -81,6 +81,10 @@ struct SectionMetrics: Equatable {
     /// the glyph column, so it shares an x with the glyphs in boxes.
     var chevronAlignment: Alignment = .leading
     var minHeight: CGFloat = ColumnGrid.rowHeight
+    /// Over and under the header's title, inside its hit target: the
+    /// navigator's `NavigatorRhythm.air`, so a header's slot is its line
+    /// and the same air a row has.
+    var headerAir: CGFloat = 0
     /// Around the header alone: the content keeps its own.
     var headerInsets = EdgeInsets()
     /// Whether its header is a heading for VoiceOver's rotor: a section's
@@ -88,8 +92,11 @@ struct SectionMetrics: Equatable {
     var isHeading = false
 
     /// The board's navigator: its sections, task statuses and groups.
+    /// Its header's slot is its title and `NavigatorRhythm.air`, and its
+    /// content's first slot touches it (ov-243).
     static let navigator = SectionMetrics(
-        spacing: ColumnGrid.rhythm, chevronWidth: NavigatorGrid.mark, chevronAlignment: .center, isHeading: true)
+        spacing: NavigatorRhythm.row, chevronWidth: NavigatorGrid.mark, chevronAlignment: .center, minHeight: 0,
+        headerAir: NavigatorRhythm.air, isHeading: true)
     /// A small disclosure in running text: a thought, a card's details, a
     /// settings row's.
     static let inline = SectionMetrics(spacing: 6, chevronWidth: 14, minHeight: 0)
@@ -380,6 +387,7 @@ struct CollapsibleSection<Label: View, Accessory: View, Content: View>: View {
     private func toggleButton<Face: View>(@ViewBuilder _ face: () -> Face) -> some View {
         Button { set(!expanded) } label: {
             face()
+                .padding(.vertical, metrics.headerAir)
                 .frame(minHeight: metrics.minHeight)
                 .contentShape(Rectangle())
         }
@@ -490,8 +498,8 @@ struct SectionCount: View {
 /// Set apart from the rows over it and close to its own (ov-177, the owner:
 /// "more vertical spacing around subheadings … it's a little hard to notice
 /// them"): a group that `follows` another has `above` more room over it
-/// than the rows have between them, and its title sits at the foot of its
-/// line, so less of the line's room is under it.
+/// than the rows have between them, and its first row touches its slot, as a
+/// row touches the next (`NavigatorRhythm`, ov-243).
 struct GroupHeader: View {
     let title: String
     let count: Int?
@@ -499,17 +507,17 @@ struct GroupHeader: View {
     /// section's header, which has room enough.
     var follows = false
 
-    /// The room a following group's header takes over it, more than the
-    /// list's own spacing.
-    static let above = ColumnGrid.rhythm
+    /// The room a following group's header takes over its slot: a
+    /// subgroup's (`NavigatorRhythm.subgroup`).
+    static let above = NavigatorRhythm.subgroup
 
     var body: some View {
         HStack(spacing: SidebarGrid.gap) {
-            SectionTitle(text: title, style: .minor)
+            SectionTitle(text: title, style: .minor).probed("subgroup-title")
             Spacer(minLength: 0)
             if let count { SectionCount(count: count) }
         }
-        .frame(minHeight: 2 * ColumnGrid.rhythm, alignment: .bottom)
+        .padding(.vertical, NavigatorRhythm.air)
         .padding(.top, follows ? Self.above : 0)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(count.map { "\(title), \($0)" } ?? title)
@@ -570,7 +578,7 @@ extension View {
     /// `NavigatorGrid.outset` past the row's content on both sides. `box`
     /// names the row for `GridGeometryTests`, which reads where it starts.
     func navigatorRow(
-        selected: Bool, keyed: Bool, minHeight: CGFloat = ColumnGrid.twoLineRowHeight,
+        selected: Bool, keyed: Bool, minHeight: CGFloat = 0,
         leading: CGFloat = NavigatorGrid.textInset, trailing: CGFloat = ColumnGrid.step, box: String? = nil
     ) -> some View {
         modifier(
@@ -582,6 +590,8 @@ extension View {
 struct NavigatorRowStyle: ViewModifier {
     let selected: Bool
     let keyed: Bool
+    /// None in the navigator: a row's slot is its lines and its air, so
+    /// every row reads `2 * NavigatorRhythm.air` from the next (ov-243).
     let minHeight: CGFloat
     /// Its content's inset from the content column's edge: the text
     /// column's (`NavigatorGrid.textInset`), or 0 for a row that draws its
@@ -599,7 +609,7 @@ struct NavigatorRowStyle: ViewModifier {
         content
             .padding(.leading, leading)
             .padding(.trailing, trailing)
-            .padding(.vertical, ColumnGrid.rhythm / 2)
+            .padding(.vertical, NavigatorRhythm.air)
             .frame(minHeight: minHeight)
             .background {
                 ZStack {

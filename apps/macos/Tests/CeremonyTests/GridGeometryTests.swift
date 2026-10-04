@@ -222,40 +222,25 @@ struct GridGeometryTests {
         if let title = titles.first { #expect(title > ColumnGrid.c, "a title at \(title) overlaps its key") }
     }
 
-    /// Closed, the strip is one row: its 24 pt line and 8 pt above and
-    /// below, whatever it has to say.
-    @Test("The collapsed strip is one row tall")
-    func theCollapsedStripIsOneRowTall() async {
+    /// Closed, the strip is one slot: its line and `NavigatorRhythm.air`
+    /// over and under it, and no room of its own (ov-243: the gap around
+    /// it is the Tasks section's group gap, `NavigatorRhythmTests`).
+    @Test("The collapsed strip is one slot tall")
+    func theCollapsedStripIsOneSlotTall() async {
         let store = await Self.store()
         let defaults = UserDefaults(suiteName: "strip-\(UUID().uuidString)")!
         defaults.set(true, forKey: "board.summary.collapsed.\(store.hostKey).\(store.workspace.id)")
         let host = NSHostingController(rootView: BoardSummaryStrip(store: store, defaults: defaults))
+        // The line measured here, in the same environment, not a constant.
+        let line = NSHostingController(
+            rootView: Text(BoardSummaryStrip.collapsedLine(count: 3)).font(.system(size: WorkspaceStyle.PaneText.body)))
+        let lineHeight = line.sizeThatFits(in: CGSize(width: 400, height: 400)).height
         for width in [WorkspaceColumns.navigatorMinimum, WorkspaceColumns.navigatorDefault] {
             let height = host.sizeThatFits(in: CGSize(width: width, height: 400)).height
-            #expect(height == ColumnGrid.rowHeight + 2 * ColumnGrid.rhythm, "\(height) tall at \(width)")
+            #expect(
+                abs(height - (lineHeight + 2 * NavigatorRhythm.air)) < 0.5,
+                "\(height) tall at \(width), its line \(lineHeight)")
         }
-    }
-
-    /// Open, the strip has as much room under its last line as over its
-    /// first, so it doesn't read as a scroll area cut off at the divider
-    /// (owner, 2 Oct); closed, its one row is centered. Measured too: the
-    /// open strip is its header row, its lines, and both insets.
-    @Test("The strip's room above its text equals the room below")
-    func theStripIsAFinishedBlock() async {
-        for collapsed in [false, true] {
-            let room = BoardSummaryStrip.visibleInsets(collapsed: collapsed)
-            #expect(room.top == room.bottom, "collapsed \(collapsed): \(room)")
-        }
-        let store = await Self.store()
-        let defaults = UserDefaults(suiteName: "strip-open-\(UUID().uuidString)")!
-        let host = NSHostingController(rootView: BoardSummaryStrip(store: store, defaults: defaults))
-        let height = host.sizeThatFits(in: CGSize(width: WorkspaceColumns.navigatorDefault, height: 800)).height
-        // Everything else in it is on the 8 pt rhythm, so what's over is
-        // the bottom inset's: drawn, not just declared.
-        let bottom = BoardSummaryStrip.insets(collapsed: false).bottom
-        #expect(
-            height.truncatingRemainder(dividingBy: ColumnGrid.rhythm)
-                == bottom.truncatingRemainder(dividingBy: ColumnGrid.rhythm), "\(height) tall")
     }
 
     // MARK: - No stray offsets
