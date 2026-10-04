@@ -358,11 +358,20 @@ pub struct Following {
     /// to one pane at once. Each would start a `pipe-pane`, the second
     /// closes the first's, and either can connect to the fanout that's
     /// exiting: its record dies at once, and the program's start is missed.
-    /// A pane id's entry is kept for reuse; tmux numbers few.
+    /// An entry is never removed: tmux doesn't reuse a pane id within a
+    /// server, so this gains one small entry per pane ever followed, and
+    /// a kept entry is never found again for a different pane.
     turns: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl Following {
+    /// Treat this runner's tmux as one that can't report the mode, so a test
+    /// follows panes on a tmux that could.
+    #[cfg(test)]
+    pub(crate) fn assume_tmux_cannot_report(&self) {
+        self.tmux_reports.store(2, Ordering::SeqCst);
+    }
+
     /// Whether tmux has been found to report the mode itself.
     pub fn tmux_reports(&self) -> bool {
         self.tmux_reports.load(Ordering::SeqCst) == 1

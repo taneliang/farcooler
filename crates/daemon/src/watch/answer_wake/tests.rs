@@ -741,6 +741,30 @@ fn waiting_on_an_unproven_paste_names_tmux() {
     assert!(Held::Unproven.now().contains("tmux is older than 3.7"), "{}", Held::Unproven.now());
 }
 
+/// The task's last word on an unproven paste says what to do, not only that
+/// it couldn't tell (ov-208): restart the agent in its pane.
+#[test]
+fn an_undelivered_answer_says_to_restart_the_agent() {
+    let why = Held::Unproven.why();
+    assert!(why.contains("started before Far Cooler followed this pane"), "{why}");
+    assert!(why.contains("Restart the agent in its pane"), "{why}");
+    assert!(Held::Unproven.now().contains("restart it there"), "{}", Held::Unproven.now());
+}
+
+/// A shell adopted as the orchestrator is followed for bracketed paste, and
+/// once it is demoted it isn't: its pipe and reader would otherwise stay
+/// until the pane died (ov-208, ov-201 review note 3). Forced to the tmux
+/// 3.4 path so it runs on any tmux.
+#[tokio::test]
+async fn a_demoted_orchestrator_is_no_longer_followed() {
+    let b = board().await;
+    b.svc.assume_tmux_cannot_report_paste_mode();
+    let orchestrator = b.adopted_shell().await;
+    assert!(b.followed(orchestrator.id).await, "an adopted orchestrator is followed");
+    let demoted = b.svc.set_terminal_role(orchestrator.id, TerminalRole::Shell).await.expect("demoted");
+    assert!(!b.svc.paste_mode_followed(demoted.id).await, "a demoted shell is still followed");
+}
+
 /// What the stream said about one program says nothing about the next:
 /// respawned by someone else, the new agent sets bracketing on the same
 /// pipe, and the record, kept for the program before, isn't used. The

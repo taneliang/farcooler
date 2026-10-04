@@ -5014,6 +5014,24 @@ impl Service {
             .is_some_and(|pane| self.paste_modes.wants(&pane.pane_id))
     }
 
+    /// Stop following `terminal`'s pane for bracketed paste if it no longer
+    /// may be typed answers: a shell adopted as the orchestrator and since
+    /// demoted or vacated (`answer_wake::may_be_typed_to`). Its pipe and its
+    /// reader process otherwise stay until the pane dies. A pane that never
+    /// was followed costs one map lookup.
+    pub fn stop_following_unwanted(&self, terminal: &models::Terminal) {
+        if crate::watch::answer_wake::may_be_typed_to(&terminal.command_preset, terminal.role) {
+            return;
+        }
+        let Some(pane) = self.inventory_snapshot().claimants(terminal.id).into_iter().find(|p| p.proves_life()).cloned()
+        else {
+            return;
+        };
+        if let Some(record) = self.paste_modes.record(&pane.pane_id) {
+            self.paste_modes.forget(&pane.pane_id, &record);
+        }
+    }
+
     /// Start following `id`'s pane output for bracketed paste (`paste_mode`),
     /// when it runs an agent in its terminal, or is an orchestrator adopted
     /// from a shell (`answer_wake::may_be_typed_to`), and this runner's tmux
@@ -5045,6 +5063,12 @@ impl Service {
         };
         let Ok(runtime) = tokio::runtime::Handle::try_current() else { return };
         runtime.spawn(self.paste_modes.clone().follow(self.runtime(), pane.pane_id));
+    }
+
+    /// Follow panes as on a tmux that can't report the mode, whatever this one does.
+    #[cfg(test)]
+    pub(crate) fn assume_tmux_cannot_report_paste_mode(&self) {
+        self.paste_modes.assume_tmux_cannot_report();
     }
 
     /// Whether a live record follows the program now in `id`'s pane.
@@ -5229,8 +5253,9 @@ impl Service {
         };
         let adopted = self.store.set_terminal_role_with(terminal, role, &vacated)?;
         // An adopted orchestrator may now be typed answers: follow it now
-        // rather than at the next sample.
+        // rather than at the next sample. A demoted one may not: stop.
         self.follow_paste_mode(terminal);
+        self.stop_following_unwanted(&adopted);
         Ok(adopted)
     }
 

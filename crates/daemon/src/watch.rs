@@ -4577,6 +4577,9 @@ impl Watcher {
                 if self.service.wants_paste_mode_followed(&terminal.terminal) {
                     self.service.follow_paste_mode(id);
                 }
+                // And one it follows but may no longer type to: a shell
+                // orchestrator since demoted or vacated.
+                self.service.stop_following_unwanted(&terminal.terminal);
                 // What is RUNNING, not what it was launched as — and with its
                 // arguments where there are any. `pane_current_command` is a
                 // process NAME, so `pnpm dev` arrives as `node`; the foreground

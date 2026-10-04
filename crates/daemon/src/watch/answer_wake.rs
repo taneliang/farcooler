@@ -227,7 +227,8 @@ impl Held {
             // Only a tmux older than 3.7 leaves it unproven: say so now,
             // not first at the deadline.
             Held::Unproven => {
-                "this runner's tmux is older than 3.7, so Far Cooler can't tell yet whether the agent takes a paste"
+                "this runner's tmux is older than 3.7, so Far Cooler can't tell yet whether the agent takes a paste. \
+                 If the agent was started before Far Cooler followed this pane, restart it there"
             }
         }
     }
@@ -241,8 +242,9 @@ impl Held {
             Held::NotAnAgent => "no agent was running in the pane",
             Held::Unfamiliar => "the agent's screen wasn't one Far Cooler recognizes",
             Held::Unproven => {
-                "Far Cooler couldn't tell whether the agent takes a paste. It can with tmux 3.7 or later, \
-                 or for an agent started after Far Cooler"
+                "Far Cooler couldn't tell whether the agent takes a paste. It was started before Far Cooler \
+                 followed this pane, and this runner's tmux (older than 3.7) can't say afterward. Restart the \
+                 agent in its pane, or update tmux to 3.7 or later"
             }
         }
     }
