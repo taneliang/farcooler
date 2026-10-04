@@ -79,7 +79,7 @@ extension BoardReads {
     /// word on it (`lastMoved`) and the newest note read (`latest`). No device
     /// clock, so a Mac running ahead can't hide what the runner writes next.
     public mutating func open(_ row: TaskRow, seenThrough latest: Date?) {
-        opened[row.id] = max(row.lastMoved, latest ?? .distantPast)
+        opened[row.id] = max(opened[row.id] ?? .distantPast, row.lastMoved, latest ?? .distantPast)
     }
 
     /// Mark All as Read through what was shown: the rows' last words and the
@@ -88,15 +88,6 @@ extension BoardReads {
     public mutating func markAllRead(rows: [TaskRow], seenThrough latest: Date?) {
         floor = max(floor, rows.map(\.lastMoved).max() ?? .distantPast, latest ?? .distantPast)
         opened = opened.filter { $0.value > floor }
-    }
-
-    /// What this has that `runner` doesn't yet: the floor if it is higher,
-    /// and each mark that is newer. Nil when the runner has it all.
-    public func raising(over runner: BoardReads) -> ReadsRaise? {
-        let marks = opened.filter { $0.value > runner.mark(for: $0.key) }
-        let raised = floor > runner.floor ? floor : nil
-        guard raised != nil || !marks.isEmpty else { return nil }
-        return ReadsRaise(floor: raised, opened: marks)
     }
 
     /// Milliseconds since 1970, the runner's unit.
@@ -112,6 +103,30 @@ public struct ReadsRaise: Equatable, Sendable {
     public init(floor: Date? = nil, opened: [String: Date] = [:]) {
         self.floor = floor
         self.opened = opened
+    }
+
+    public var isEmpty: Bool { floor == nil && opened.isEmpty }
+
+    /// Both, each value the later.
+    public func merging(_ other: ReadsRaise) -> ReadsRaise {
+        ReadsRaise(
+            floor: [floor, other.floor].compactMap { $0 }.max(),
+            opened: opened.merging(other.opened, uniquingKeysWith: max))
+    }
+
+    /// `reads` with this raised into it.
+    public func applied(to reads: BoardReads) -> BoardReads {
+        reads.merged(with: BoardReads(floor: floor ?? .distantPast, opened: opened))
+    }
+
+    /// What is left of this once `sent` has gone: nothing the runner was
+    /// told at or above its value.
+    public func without(_ sent: ReadsRaise) -> ReadsRaise {
+        var left = floor
+        if let f = floor, let told = sent.floor, f <= told { left = nil }
+        return ReadsRaise(
+            floor: left,
+            opened: opened.filter { $0.value > (sent.opened[$0.key] ?? .distantPast) })
     }
 
     /// The arguments after `board mark-read --repo R --workspace W`.

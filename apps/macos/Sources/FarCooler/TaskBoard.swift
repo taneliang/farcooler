@@ -122,8 +122,11 @@ final class TaskBoardStore: ObservableObject {
     var runnerKeepsReads = false
     /// The runner's state as last heard, from a read or an event.
     var runnerReads: BoardReads?
-    var heardReadsSink: AnyCancellable?
-    var flushChain: Task<Void, Never>?
+    /// Marks the runner hasn't acknowledged, kept in defaults.
+    var pendingReads = ReadsRaise()
+    /// What this Mac kept before this launch: all that is sent up.
+    var readsBeforeLaunch: BoardReads?
+    var heardReadsSink: AnyCancellable?, flushChain: Task<Void, Never>?
 
     /// Read the records of the tasks that moved since they were read, so
     /// Unread can list their notes. One `task show` each, remembered until
@@ -190,8 +193,8 @@ final class TaskBoardStore: ObservableObject {
         self.workspace = workspace
         self.seenGeneration = client.boardGeneration(for: workspace)
         self.readStore = readStore
-        self.reads = readStore.load(
-            host: client.target.isEmpty ? "local" : client.target, workspace: workspace.id, now: Date())
+        let start = Self.startingReads(readStore, host: client.target.isEmpty ? "local" : client.target, workspace: workspace.id)
+        (self.reads, pendingReads, readsBeforeLaunch) = start
         heardReadsSink = client.$heardReads.dropFirst().sink { [weak self] in self?.heard($0) }
     }
 
@@ -296,10 +299,7 @@ final class TaskBoardStore: ObservableObject {
         board = read
         // The board's read state, from a runner that keeps it (ov-113): this
         // Mac's own is sent up the first time, then it stops being kept here.
-        if let wire = WireBoardReads.decode(board: data) {
-            adopt(runner: wire.reads)
-            await flushReads()
-        }
+        adoptReads(from: data)
         // When each task starts and who works it (ov-212, ov-213), from the
         // same read: the title bar's queue and its activity panel.
         let reading = TaskStarts.decode(data)

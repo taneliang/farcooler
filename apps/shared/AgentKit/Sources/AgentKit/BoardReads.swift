@@ -71,6 +71,13 @@ public protocol BoardReadStore {
     /// (ov-113), once, so it isn't again.
     func isUploaded(host: String, workspace: String) -> Bool
     func markUploaded(host: String, workspace: String)
+    /// Whether this device kept read state for the board before now, as
+    /// opposed to the first look `load` makes up.
+    func hasState(host: String, workspace: String) -> Bool
+    /// Marks made and not yet acknowledged by the runner (ov-113), kept so
+    /// they survive a relaunch.
+    func loadPending(host: String, workspace: String) -> ReadsRaise
+    func savePending(_ pending: ReadsRaise, host: String, workspace: String)
 }
 
 /// The read state in this device's defaults, under
@@ -115,6 +122,25 @@ public struct DefaultsBoardReads: BoardReadStore {
 
     public func isUploaded(host: String, workspace: String) -> Bool {
         defaults.bool(forKey: Self.uploadedKey(host: host, workspace: workspace))
+    }
+
+    public func hasState(host: String, workspace: String) -> Bool {
+        defaults.object(forKey: Self.floorKey(host: host, workspace: workspace)) != nil
+    }
+
+    public func loadPending(host: String, workspace: String) -> ReadsRaise {
+        let key = "board.read.\(host).\(workspace).pending"
+        let floor = defaults.object(forKey: key + ".floor") as? Double
+        let raw = defaults.dictionary(forKey: key + ".opened") ?? [:]
+        return ReadsRaise(
+            floor: floor.map(Date.init(timeIntervalSince1970:)),
+            opened: raw.compactMapValues { ($0 as? Double).map(Date.init(timeIntervalSince1970:)) })
+    }
+
+    public func savePending(_ pending: ReadsRaise, host: String, workspace: String) {
+        let key = "board.read.\(host).\(workspace).pending"
+        defaults.set(pending.floor?.timeIntervalSince1970, forKey: key + ".floor")
+        defaults.set(pending.opened.mapValues(\.timeIntervalSince1970), forKey: key + ".opened")
     }
 
     public func markUploaded(host: String, workspace: String) {

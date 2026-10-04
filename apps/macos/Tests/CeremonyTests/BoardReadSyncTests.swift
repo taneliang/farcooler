@@ -16,7 +16,7 @@ struct BoardReadSyncTests {
 
     /// A runner, as far as these tests ask of one: the board it lists, with
     /// `reads` when it keeps them, and every `board mark-read` it was sent.
-    final class Runner {
+    @MainActor final class Runner {
         /// The state it keeps, as the real runner does: merged by max.
         var reads: String? {
             didSet { floor = reads.flatMap { WireBoardReads.decode(state: Data($0.utf8)) }.map(\.floorMs) ?? 0 }
@@ -25,6 +25,13 @@ struct BoardReadSyncTests {
         private var marks: [String: Int64] = [:]
         var sent: [[String]] = []
         var failMarks = false
+        /// While set, `board mark-read` waits for `letMarksThrough()`.
+        var holdMarks = false
+        private var held: [CheckedContinuation<Void, Never>] = []
+        func hold() async { await withCheckedContinuation { held.append($0) } }
+        func letMarksThrough() { holdMarks = false; held.forEach { $0.resume() }; held = [] }
+        /// Tasks it skips, as it does ones deleted or moved to another board.
+        var skips: Set<String> = []
 
         /// `board mark-read`'s answer, after merging what it was told.
         func merge(_ words: [String]) -> Data {
@@ -33,6 +40,7 @@ struct BoardReadSyncTests {
                 if words[i] == "--floor" { floor = max(floor, Int64(words[i + 1])!) }
                 if words[i] == "--task" {
                     let pair = words[i + 1].split(separator: ":")
+                    if skips.contains(String(pair[0])) { i += 1; continue }
                     marks[String(pair[0]), default: 0] = max(marks[String(pair[0])] ?? 0, Int64(pair[1])!)
                 }
                 i += 1
@@ -65,6 +73,7 @@ struct BoardReadSyncTests {
             if words.starts(with: ["task", "show"]) { return (Data(#"{"notes":[],"blocks":[]}"#.utf8), nil) }
             if words.starts(with: ["board", "mark-read"]) {
                 runner.sent.append(words)
+                if runner.holdMarks { await runner.hold() }
                 if runner.failMarks { return (nil, "no") }
                 return (runner.merge(words), nil)
             }
@@ -85,6 +94,14 @@ struct BoardReadSyncTests {
         return defaults
     }
 
+    final class Done { var value = false }
+
+    /// Read the board as the window does, and let the send that follows land.
+    private func load(_ store: TaskBoardStore) async {
+        await store.reload()
+        await store.flushChain?.value
+    }
+
     private func unread(_ store: TaskBoardStore) -> Bool {
         store.board.rows.contains { store.reads.finishedUnread($0) }
     }
@@ -94,7 +111,7 @@ struct BoardReadSyncTests {
         let runner = Runner()
         runner.reads = Self.state(floor: Self.moved + 1000)
         let store = store(runner, defaults: defaults())
-        await store.reload()
+        await load(store)
         #expect(store.runnerKeepsReads)
         #expect(!unread(store), "the runner says it's read")
         #expect(store.reads.floor == Date(timeIntervalSince1970: Double(Self.moved + 1000) / 1000))
@@ -105,7 +122,7 @@ struct BoardReadSyncTests {
         let runner = Runner()
         let defaults = defaults()
         let store = store(runner, defaults: defaults)
-        await store.reload()
+        await load(store)
         #expect(!store.runnerKeepsReads)
         #expect(unread(store))
         await store.open(try #require(store.board.rows.first))
@@ -120,7 +137,7 @@ struct BoardReadSyncTests {
         runner.reads = Self.state(floor: Self.moved - 5000)
         let defaults = defaults()
         let store = store(runner, defaults: defaults)
-        await store.reload()
+        await load(store)
         runner.sent = []
         #expect(unread(store))
         await store.open(try #require(store.board.rows.first))
@@ -131,24 +148,118 @@ struct BoardReadSyncTests {
         #expect(defaults.dictionary(forKey: DefaultsBoardReads.openedKey(host: "local", workspace: Self.ws))?[Self.task] == nil)
     }
 
-    /// A send the runner never answered stays owed, and goes with the next one.
+    /// A send the runner never answered stays owed, and the next board read
+    /// (the reconnect) sends it.
     @Test func aFailedSendIsSentAgain() async throws {
         let runner = Runner()
         runner.reads = Self.state(floor: Self.moved - 5000)
         let store = store(runner, defaults: defaults())
-        await store.reload()
+        await load(store)
         runner.sent = []
         runner.failMarks = true
         await store.open(try #require(store.board.rows.first))
-        await store.flushReads()
+        await store.flushChain?.value
         #expect(!unread(store), "read here at once")
         runner.failMarks = false
         runner.sent = []
-        await store.flushReads()
+        await load(store)
         #expect(runner.sent == [["board", "mark-read", "--repo", Self.repo, "--workspace", Self.ws, "--task", "\(Self.task):\(Self.moved)"]])
         runner.sent = []
-        await store.flushReads()
+        await load(store)
         #expect(runner.sent.isEmpty, "once told, not told again")
+    }
+
+    /// A send that is slow doesn't hold the board: the read lands, and the
+    /// send finishes behind it.
+    @Test func aSlowSendDoesNotHoldTheBoard() async throws {
+        let runner = Runner()
+        runner.reads = Self.state(floor: Self.moved - 5000)
+        let store = store(runner, defaults: defaults())
+        await load(store)
+        runner.failMarks = true
+        await store.open(try #require(store.board.rows.first))
+        await store.flushChain?.value
+        runner.failMarks = false
+        runner.holdMarks = true
+        let read = Task { await store.reload() }
+        let done = Done()
+        Task { await read.value; done.value = true }
+        try await Task.sleep(for: .milliseconds(300))
+        let landed = done.value
+        runner.letMarksThrough()
+        await store.flushChain?.value
+        #expect(landed, "the board read waited for the send")
+    }
+
+    /// A ticket the runner skipped (deleted, or moved to another board) is
+    /// answered for, not owed: it isn't sent again, and a board read doesn't
+    /// wait on it.
+    @Test func aSkippedMarkIsDropped() async throws {
+        let runner = Runner()
+        runner.reads = Self.state(floor: Self.moved - 5000)
+        let defaults = defaults()
+        let store = store(runner, defaults: defaults)
+        await load(store)
+        runner.skips = [Self.task]
+        runner.sent = []
+        await store.open(try #require(store.board.rows.first))
+        await store.flushChain?.value
+        #expect(runner.sent.count == 1)
+        #expect(store.pendingReads.isEmpty)
+        await load(store)
+        await load(store)
+        #expect(runner.sent.count == 1, "sent again though the runner answered")
+        #expect(DefaultsBoardReads(defaults).loadPending(host: "local", workspace: Self.ws).isEmpty)
+    }
+
+    /// A Mac that kept nothing has no floor worth sending: the one it makes
+    /// up on first look, a day back, would clear unread items on every
+    /// device.
+    @Test func emptyDefaultsUploadNothing() async {
+        let runner = Runner()
+        runner.reads = Self.state(floor: Self.moved - 9_000_000)
+        let store = store(runner, defaults: UserDefaults(suiteName: "ov113-\(UUID().uuidString)")!)
+        await load(store)
+        #expect(store.runnerKeepsReads)
+        #expect(runner.sent.isEmpty)
+        #expect(runner.state() == Self.state(floor: Self.moved - 9_000_000))
+    }
+
+    /// A mark whose send failed survives a relaunch, reads as read at once,
+    /// and goes up with the first board read.
+    @Test func aPendingMarkSurvivesARelaunch() async throws {
+        let runner = Runner()
+        runner.reads = Self.state(floor: Self.moved - 5000)
+        let defaults = defaults()
+        let first = store(runner, defaults: defaults)
+        await load(first)
+        runner.failMarks = true
+        await first.open(try #require(first.board.rows.first))
+        await first.flushChain?.value
+        runner.failMarks = false
+        runner.sent = []
+        let again = store(runner, defaults: defaults)
+        #expect(again.reads.opened[Self.task] != nil, "read before the first board read")
+        #expect(runner.sent.isEmpty)
+        await load(again)
+        #expect(!unread(again))
+        #expect(runner.sent == [["board", "mark-read", "--repo", Self.repo, "--workspace", Self.ws, "--task", "\(Self.task):\(Self.moved)"]])
+    }
+
+    /// A runner that stops keeping it (an older build back) hands the Mac
+    /// its own state again, and what it opens is saved here.
+    @Test func aRunnerThatStopsKeepingReadsFallsBack() async throws {
+        let runner = Runner()
+        runner.reads = Self.state(floor: Self.moved - 5000)
+        let defaults = defaults()
+        let store = store(runner, defaults: defaults)
+        await load(store)
+        #expect(store.runnerKeepsReads)
+        runner.reads = nil
+        await load(store)
+        #expect(!store.runnerKeepsReads)
+        await store.open(try #require(store.board.rows.first))
+        #expect(defaults.dictionary(forKey: DefaultsBoardReads.openedKey(host: "local", workspace: Self.ws))?[Self.task] != nil)
     }
 
     /// Mark All as Read sends a floor, which clears Unread.
@@ -156,7 +267,7 @@ struct BoardReadSyncTests {
         let runner = Runner()
         runner.reads = Self.state(floor: Self.moved - 5000)
         let store = store(runner, defaults: defaults())
-        await store.reload()
+        await load(store)
         runner.sent = []
         store.askToMarkAllRead(.granting)
         await store.flushChain?.value
@@ -169,7 +280,7 @@ struct BoardReadSyncTests {
         let runner = Runner()
         runner.reads = Self.state(floor: Self.moved - 5000)
         let store = store(runner, defaults: defaults())
-        await store.reload()
+        await load(store)
         #expect(unread(store))
         let heard = try #require(
             WireBoardReads.decode(state: Data(Self.state(floor: Self.moved - 5000, opened: [(Self.task, Self.moved)]).utf8)))
@@ -192,17 +303,18 @@ struct BoardReadSyncTests {
                 opened: [Self.task: Date(timeIntervalSince1970: Double(Self.moved + 1000) / 1000)]),
             host: "local", workspace: Self.ws)
         let store = store(runner, defaults: defaults)
-        await store.reload()
+        await load(store)
         #expect(runner.sent == [[
             "board", "mark-read", "--repo", Self.repo, "--workspace", Self.ws, "--task", "\(Self.task):\(Self.moved + 1000)",
             "--floor", "\(Self.moved - 5000)",
         ]])
         #expect(local.isUploaded(host: "local", workspace: Self.ws))
-        runner.sent = []
-        await store.reload()
-        // The runner kept it, as the real one does; a fresh launch finds it done.
-        let again = self.store(runner, defaults: defaults)
-        await again.reload()
-        #expect(runner.sent.isEmpty, "uploaded already")
+        // The runner lost it (a reset). A launch that follows must not send
+        // the Mac's old state again: it was sent once.
+        let reset = Runner()
+        reset.reads = Self.state(floor: Self.moved - 9_000_000)
+        let again = self.store(reset, defaults: defaults)
+        await load(again)
+        #expect(reset.sent.isEmpty, "uploaded already")
     }
 }

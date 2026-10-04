@@ -5,6 +5,34 @@ import Foundation
 // itself, and the stored properties these use, are in TaskBoard.swift.
 
 extension TaskBoardStore {
+    /// What a board starts with: what this Mac kept (`before`, nil when it
+    /// kept nothing and `load` made up a first look), with what was marked
+    /// and not yet told to the runner counted as read.
+    static func startingReads(_ store: BoardReadStore, host: String, workspace: String)
+        -> (reads: BoardReads, pending: ReadsRaise, before: BoardReads?)
+    {
+        let kept = store.hasState(host: host, workspace: workspace)
+        let loaded = store.load(host: host, workspace: workspace, now: Date())
+        let pending = store.loadPending(host: host, workspace: workspace)
+        return (pending.applied(to: loaded), pending, kept ? loaded : nil)
+    }
+
+    /// A board read's `reads`, if the runner sent any: adopted, this Mac's
+    /// own sent up once, and what is owed sent behind the read (never waited
+    /// for, so a slow send can't hold the board). If it sent none for a board
+    /// it used to, the runner went back to an older build: this Mac keeps it.
+    func adoptReads(from board: Data) {
+        if let wire = WireBoardReads.decode(board: board) {
+            adopt(runner: wire.reads)
+            seedFromThisMac()
+            queueFlush()
+        } else if workspace.boardWorkspace != nil, runnerKeepsReads {
+            runnerKeepsReads = false
+            runnerReads = nil
+            readStore.save(reads, host: hostKey, workspace: workspace.id)
+        }
+    }
+
     /// `row` was opened: everything on it so far is read, its notes up to
     /// the newest one read (`latest`).
     ///
@@ -20,13 +48,16 @@ extension TaskBoardStore {
         }
         guard next != reads else { return }
         reads = next
-        keepReads()
+        keepReads(ReadsRaise(opened: next.opened[row.id].map { [row.id: $0] } ?? [:]))
     }
 
-    /// Where a change to `reads` goes: to the runner, which keeps it for
-    /// every device (ov-113), or for a runner that can't, this Mac's defaults.
-    private func keepReads() {
+    /// Where a change to `reads` goes: for a runner that keeps it, owed to
+    /// the runner until it answers (`pendingReads`, kept in defaults so a
+    /// relaunch still owes it); for one that can't, this Mac's defaults.
+    private func keepReads(_ change: ReadsRaise) {
         if runnerKeepsReads {
+            pendingReads = pendingReads.merging(change)
+            readStore.savePending(pendingReads, host: hostKey, workspace: workspace.id)
             queueFlush()
         } else {
             readStore.save(reads, host: hostKey, workspace: workspace.id)
@@ -44,7 +75,7 @@ extension TaskBoardStore {
         } else {
             reads.markAllRead(rows: board.rows, now: now)
         }
-        keepReads()
+        keepReads(ReadsRaise(floor: reads.floor))
     }
 
     /// What the runner said about this board's read state: merged into
@@ -57,10 +88,20 @@ extension TaskBoardStore {
         if merged != reads { reads = merged }
     }
 
-    /// Send the runner what it hasn't got: at the upgrade, this Mac's floor
-    /// and marks from before (once, recorded by `readStore.markUploaded`), and after
-    /// that any mark a send missed. One after another, and each works out what
-    /// is unsent when its turn comes, so a repeat sends nothing.
+    /// The upgrade, once per board: what this Mac kept before this launch
+    /// (its floor and marks) is owed to the runner, which merges by max. A
+    /// Mac that kept nothing sends nothing, and never a first look it made
+    /// up, which nobody saw as Unread.
+    func seedFromThisMac() {
+        guard !readStore.isUploaded(host: hostKey, workspace: workspace.id) else { return }
+        if let kept = readsBeforeLaunch {
+            pendingReads = pendingReads.merging(ReadsRaise(floor: kept.floor, opened: kept.opened))
+            readStore.savePending(pendingReads, host: hostKey, workspace: workspace.id)
+        }
+        readStore.markUploaded(host: hostKey, workspace: workspace.id)
+    }
+
+    /// Send the runner what it is owed, and wait for it. One after another.
     func flushReads() async {
         await queueFlush().value
     }
@@ -72,26 +113,25 @@ extension TaskBoardStore {
         let previous = flushChain
         let task = Task { @MainActor in
             await previous?.value
-            await self.sendUnsentReads()
+            await self.sendPendingReads()
         }
         flushChain = task
         return task
     }
 
-    func sendUnsentReads() async {
-        guard runnerKeepsReads, let board = workspace.boardWorkspace else { return }
-        let runner = runnerReads ?? BoardReads(floor: .distantPast)
-        guard let raise = reads.raising(over: runner) else {
-            // Nothing this Mac holds is news to the runner.
-            readStore.markUploaded(host: hostKey, workspace: workspace.id)
-            return
-        }
+    /// Tell the runner `pendingReads`. Once it has answered, those are done,
+    /// whether it applied them or skipped a ticket that was deleted or moved:
+    /// resending a skipped one would never end. No answer keeps them owed.
+    func sendPendingReads() async {
+        guard runnerKeepsReads, let board = workspace.boardWorkspace, !pendingReads.isEmpty else { return }
+        let sent = pendingReads
         guard
-            let data = await client.markBoardRead(repository: repositoryID, workspace: board, raise: raise),
+            let data = await client.markBoardRead(repository: repositoryID, workspace: board, raise: sent),
             let answer = WireBoardReads.decode(state: data)
-        else { return }  // stays unsent, and goes with the next flush
+        else { return }
+        pendingReads = pendingReads.without(sent)
+        readStore.savePending(pendingReads, host: hostKey, workspace: workspace.id)
         adopt(runner: answer.reads)
-        readStore.markUploaded(host: hostKey, workspace: workspace.id)
     }
 
     /// The runner pushed this board's state: another device read something.
