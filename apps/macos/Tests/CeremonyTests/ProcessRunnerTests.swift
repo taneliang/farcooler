@@ -35,6 +35,15 @@ struct ProcessRunnerTests {
         #expect(Date().timeIntervalSince(started) < 10)
     }
 
+    /// SIGTERM is ignored here, so only the escalation ends it.
+    @Test func aChildThatIgnoresTermIsKilledShortlyAfterTheDeadline() async {
+        let started = Date()
+        let ran = await ProcessRunner.run(
+            Self.sh, ["-c", "trap '' TERM; exec sleep 30"], deadline: 0.3)
+        #expect(ran.timedOut)
+        #expect(Date().timeIntervalSince(started) < 10, "ran \(Date().timeIntervalSince(started)) s")
+    }
+
     @Test func cancellingTheTaskTerminatesTheChild() async {
         let started = Date()
         let task = Task {
@@ -105,11 +114,15 @@ struct ProcessRunnerTests {
         #expect(result.said.contains("could not reach box"))
     }
 
-    @Test func enrollmentReadsItsTokenFromStdoutWhenSshWarns() async throws {
+    /// What `Enrollment`'s default writer reads its token from: stdout, with
+    /// nothing of ssh's in it. Joined, the warning lines were in it too (the
+    /// token scan skips them, which is why this checks the text itself).
+    @Test func theTextAnEnrollmentReadsHasNoSshWarningInIt() async throws {
         let script = try Self.fakeCLI(
             "echo 'Warning: Permanently added x' >&2; echo '{\"connBlob\":\"tok\"}'")
         defer { try? FileManager.default.removeItem(atPath: script) }
         let result = await CLI.run(["client", "enroll"], executable: script, deadline: 20)
+        #expect(result.output == #"{"connBlob":"tok"}"#, "\(result.output)")
         #expect(Enrollment.token(in: result.output) == "tok")
     }
 

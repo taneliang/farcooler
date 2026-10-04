@@ -30,7 +30,7 @@ struct CloseTerminalGuardTests {
         let question = try #require(CloseTerminalGuard.question(for: terminal, at: Self.now))
         #expect(question.title == "Close “\(terminal.label)”?")
         #expect(question.message.contains("working for 4m"), Comment(rawValue: question.message))
-        #expect(question.message.contains("There’s no undo."), Comment(rawValue: question.message))
+        #expect(question.message.contains("You can’t undo this action."), Comment(rawValue: question.message))
         // The button names what happens, in title case.
         #expect(CloseTerminalGuard.confirm == "Stop Agent and Close")
     }

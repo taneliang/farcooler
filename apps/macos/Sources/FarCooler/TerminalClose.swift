@@ -44,7 +44,7 @@ enum CloseTerminalGuard {
             elapsed: terminal.displayDuration(at: now))
         return Question(
             title: "Close “\(terminal.label)”?",
-            message: "\(running) Closing stops it and removes the terminal. There’s no undo.")
+            message: "\(running) Closing stops it and removes the terminal. You can’t undo this action.")
     }
 }
 

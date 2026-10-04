@@ -2031,7 +2031,7 @@ private struct DiffGapControl: View {
                         refused
                             ? "\(count) unchanged lines — too many to show"
                             : failed
-                                ? "Couldn’t read these lines. Try Again"
+                                ? "Couldn’t read these lines. Click to try again."
                                 : (count == 1 ? "1 unchanged line" : "\(count) unchanged lines")
                     )
                     .font(font)

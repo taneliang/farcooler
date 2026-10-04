@@ -38,6 +38,9 @@ enum ProcessRunner {
     /// gone. What it wrote so far is the answer; waiting for its EOF is not.
     static let drainGrace: TimeInterval = 1
 
+    /// How long a terminated child that has not exited is given before SIGKILL.
+    static let killAfter: TimeInterval = 2
+
     /// Run `executable`, feed it `stdin`, and wait for it.
     /// - Parameters:
     ///   - stdin: written on its own thread and then closed, so a child that
@@ -202,6 +205,15 @@ enum ProcessRunner {
         private func terminateLocked() {
             guard !reaped, let process, process.isRunning else { return }
             process.terminate()
+            // A child that ignores SIGTERM would run past its deadline until it
+            // ended on its own. Killed if it is still there `killAfter` later;
+            // under the lock, for the reason above.
+            let pid = process.processIdentifier
+            DispatchQueue.global().asyncAfter(deadline: .now() + ProcessRunner.killAfter) { [self] in
+                lock.withLock {
+                    if !reaped, process.isRunning { kill(pid, SIGKILL) }
+                }
+            }
         }
     }
 }
