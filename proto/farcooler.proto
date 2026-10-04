@@ -424,6 +424,13 @@ message WorktreeDirRequest {
   bytes worktree_id = 1;
   // Empty is the root.
   string path = 2;
+  // One of the runner's extra read-only folders, by the name
+  // `Host.read_only_folders` gives it (ov-232), in place of a worktree:
+  // `worktree_id` is left empty, and `path` is relative to the folder. A name
+  // the runner's config doesn't list is not found; there is no way to name a
+  // folder by its path. A client that sets it names `read_only_folders` in
+  // `Request.required_capabilities`, since an older runner drops it.
+  string folder = 3;
 }
 
 enum WorktreeEntryKind {
@@ -458,6 +465,8 @@ message WorktreeDir {
 message WorktreeFileRequest {
   bytes worktree_id = 1;
   string path = 2;
+  // As `WorktreeDirRequest.folder` (ov-232).
+  string folder = 3;
 }
 
 enum WorktreeFileState {
@@ -817,6 +826,19 @@ message Host {
   // only under the `agents_found` capability, because a runner from before it
   // sends nothing, and an empty list from that runner is not "no agents".
   repeated string agents_found = 16;
+  // The extra folders this runner's config lets the file viewer read
+  // (ov-232), set only in its config file and read when it starts: a client
+  // can list them, never add one. Read only under the `read_only_folders`
+  // capability; an older runner sends none.
+  repeated ReadOnlyFolder read_only_folders = 17;
+}
+
+// One extra read-only folder (ov-232).
+message ReadOnlyFolder {
+  // What `WorktreeDirRequest.folder` and `WorktreeFileRequest.folder` name.
+  string name = 1;
+  // Its path as the config file wrote it, to show.
+  string path = 2;
 }
 
 enum SelfHealth {

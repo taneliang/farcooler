@@ -2072,6 +2072,9 @@ pub struct Service {
     /// a concurrent reload cannot change the rules underneath it halfway
     /// through. Editing the file BY HAND still needs a restart, unchanged.
     registry: std::sync::RwLock<Arc<farcooler_core::activity::Registry>>,
+    /// The config's extra read-only folders (ov-232), read once by `open`
+    /// and never changed after: no method adds one. See `read_only_folders`.
+    read_only_folders: Vec<crate::read_only_folders::Folder>,
     /// Every terminal's agent session: activity, cursor, and the fast-attach
     /// event window. See `agent_supervisor` for why the transcript itself is
     /// not here.
@@ -2180,7 +2183,23 @@ impl TerminalView {
 impl Service {
     /// Open the service at the user's runtime directory.
     pub async fn open() -> Result<Self> {
-        Self::open_in(paths::ensure_runtime_dir()?).await
+        let mut service = Self::open_in(paths::ensure_runtime_dir()?).await?;
+        // Here and not in `open_in`, so a test's service reads no folders
+        // from the config of whoever runs the suite.
+        service.read_only_folders = crate::read_only_folders::load(&service.root);
+        Ok(service)
+    }
+
+    /// A test's service with these folders, as `open` would have read them.
+    #[cfg(test)]
+    pub(crate) fn with_read_only_folders(mut self, folders: Vec<crate::read_only_folders::Folder>) -> Self {
+        self.read_only_folders = folders;
+        self
+    }
+
+    /// The extra read-only folders, fixed since startup (ov-232).
+    pub fn read_only_folders(&self) -> &[crate::read_only_folders::Folder] {
+        &self.read_only_folders
     }
 
     /// Open the service at an explicit directory.
@@ -2211,6 +2230,7 @@ impl Service {
             authorized_keys: default_authorized_keys(),
             sessions: crate::sessions::Sessions::new(),
             registry,
+            read_only_folders: Vec::new(),
             agents: agent_supervisor::AgentSupervisor::with_records(store.clone()),
             hooks: hook_ingress::HookIngress::new(store.clone(), Arc::new(inventory.clone()), claims.clone()),
             claims,

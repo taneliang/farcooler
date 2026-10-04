@@ -29,6 +29,7 @@ pub mod pastes;
 pub mod paths;
 pub mod proc_cwd;
 pub mod push;
+pub mod read_only_folders;
 pub mod reconcile;
 pub mod refusal;
 pub mod resync;

@@ -17,6 +17,9 @@ use std::path::{Path, PathBuf};
 
 use crate::activity::Registry;
 
+mod read_only;
+pub use read_only::{load_read_only_folders, read_only_folders_from};
+
 /// One `[adapters.<name>]` table.
 ///
 /// Detection fields as well as launch fields, because `⌃B a` chooses the

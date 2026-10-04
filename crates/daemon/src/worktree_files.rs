@@ -22,6 +22,10 @@
 //! terminal; so it is `control`, the scope that can read a terminal screen,
 //! and not `read` (`rpc::scope_of`).
 //!
+//! The same reads serve a runner's extra read-only folders (ov-232,
+//! `read_only_folders`), asked for by name, with every check above and the
+//! folder itself walked from `/` without following a link (`Base::Folder`).
+//!
 //! Nothing is hidden by name except `.git`, which is the repository's own
 //! record and not a file of the work. A `.env` is shown like any other file:
 //! the owner's ruling, 3 Oct, since the transport is ssh.
@@ -150,21 +154,47 @@ fn errno(e: rustix::io::Errno) -> Refusal {
     refusal(e.into())
 }
 
-/// The directory at `relative` beneath `root`, never through a link.
-fn open_dir(root: &Path, relative: &Path) -> std::result::Result<OwnedFd, Refusal> {
-    open_dir_beneath(root, relative, false).map_err(refusal)
+/// Where a walk starts.
+#[derive(Debug, Clone, Copy)]
+pub enum Base<'a> {
+    /// A worktree's root, opened the ordinary way (`beneath`'s reason: the
+    /// daemon made it or was given it, and an agent in it can't rename it).
+    Worktree(&'a Path),
+    /// An extra read-only folder's real path (ov-232,
+    /// `read_only_folders`), walked from `/` with `O_NOFOLLOW` at every
+    /// component: a link swapped in at the folder or above it since the
+    /// daemon started is refused, not followed.
+    Folder(&'a Path),
+}
+
+/// The directory at `relative` beneath `base`, never through a link.
+fn open_dir(base: Base, relative: &Path) -> std::result::Result<OwnedFd, Refusal> {
+    match base {
+        Base::Worktree(root) => open_dir_beneath(root, relative, false).map_err(refusal),
+        Base::Folder(real) => {
+            let below_root = real.strip_prefix("/").map_err(|_| Refusal::NotRelative)?;
+            open_dir_beneath(Path::new("/"), &below_root.join(relative), false).map_err(refusal)
+        }
+    }
 }
 
 /// What `relative`, a directory in the worktree at `root`, holds.
 pub fn list(root: &Path, relative: &str) -> std::result::Result<Listing, Refusal> {
-    let dir = open_dir(root, plain(relative)?)?;
+    list_in(Base::Worktree(root), relative)
+}
+
+/// What `relative`, a directory beneath `base`, holds. A worktree's own
+/// `.git` at its root is left out; a folder's is not, being nobody's record.
+pub fn list_in(base: Base, relative: &str) -> std::result::Result<Listing, Refusal> {
+    let dir = open_dir(base, plain(relative)?)?;
+    let hide_git = matches!(base, Base::Worktree(_)) && relative.is_empty();
     let mut read = rustix::fs::Dir::read_from(&dir).map_err(errno)?;
     let mut entries = Vec::new();
     let mut truncated = false;
     while let Some(next) = read.read() {
         let entry = next.map_err(errno)?;
         let raw = entry.file_name().to_bytes();
-        if raw == b"." || raw == b".." || (relative.is_empty() && raw == b".git") {
+        if raw == b"." || raw == b".." || (hide_git && raw == b".git") {
             continue;
         }
         if entries.len() == MAX_ENTRIES {
@@ -207,12 +237,17 @@ pub fn list(root: &Path, relative: &str) -> std::result::Result<Listing, Refusal
 
 /// The file at `relative` in the worktree at `root`.
 pub fn read(root: &Path, relative: &str) -> std::result::Result<Content, Refusal> {
+    read_in(Base::Worktree(root), relative)
+}
+
+/// The file at `relative` beneath `base`.
+pub fn read_in(base: Base, relative: &str) -> std::result::Result<Content, Refusal> {
     let path = plain(relative)?;
     if relative.is_empty() {
         return Err(Refusal::NotRelative);
     }
     let (dirs, name) = split(path).map_err(refusal)?;
-    let dir = open_dir(root, dirs)?;
+    let dir = open_dir(base, dirs)?;
     let stat = rustix::fs::statat(&dir, name, AtFlags::SYMLINK_NOFOLLOW).map_err(errno)?;
     match FileType::from_raw_mode(stat.st_mode) {
         FileType::Symlink => {
@@ -268,10 +303,35 @@ impl From<Refusal> for DomainError {
     }
 }
 
-/// The worktree's root on disk, by id.
-fn root_of(svc: &Service, worktree_id: &[u8]) -> Result<std::path::PathBuf> {
+/// Where a request's path is walked from, owned so it can cross to the
+/// blocking pool.
+enum Start {
+    Worktree(std::path::PathBuf),
+    Folder(std::path::PathBuf),
+}
+
+impl Start {
+    fn base(&self) -> Base<'_> {
+        match self {
+            Start::Worktree(root) => Base::Worktree(root),
+            Start::Folder(real) => Base::Folder(real),
+        }
+    }
+}
+
+/// The worktree's root on disk, by id; or, when `folder` is set, that
+/// configured read-only folder, by its exact name (ov-232). Both at once is
+/// refused, so a client can't mean one and be answered from the other.
+fn start_of(svc: &Service, worktree_id: &[u8], folder: &str) -> Result<Start> {
+    if !folder.is_empty() {
+        if !worktree_id.is_empty() {
+            return Err(DomainError::InvalidArgument { what: "folder" });
+        }
+        let found = crate::read_only_folders::find(svc.read_only_folders(), folder).ok_or(DomainError::NotFound)?;
+        return Ok(Start::Folder(found.real().to_path_buf()));
+    }
     let id = uuid::Uuid::from_slice(worktree_id).map_err(|_| DomainError::NotFound)?;
-    Ok(std::path::PathBuf::from(svc.store.get_worktree(id)?.worktree_path))
+    Ok(Start::Worktree(std::path::PathBuf::from(svc.store.get_worktree(id)?.worktree_path)))
 }
 
 /// Off the runtime's threads: a directory on a slow disk or a network mount
@@ -282,9 +342,9 @@ async fn blocking<T: Send + 'static>(work: impl FnOnce() -> std::result::Result<
 
 /// `worktree.list_dir`.
 pub async fn list_dir(svc: &Service, req: &pb::WorktreeDirRequest) -> Result<pb::WorktreeDir> {
-    let root = root_of(svc, &req.worktree_id)?;
+    let start = start_of(svc, &req.worktree_id, &req.folder)?;
     let path = req.path.clone();
-    let listing = blocking(move || list(&root, &path)).await?;
+    let listing = blocking(move || list_in(start.base(), &path)).await?;
     Ok(pb::WorktreeDir {
         path: req.path.clone(),
         entries: listing
@@ -308,9 +368,9 @@ pub async fn list_dir(svc: &Service, req: &pb::WorktreeDirRequest) -> Result<pb:
 
 /// `worktree.read_file`.
 pub async fn read_file(svc: &Service, req: &pb::WorktreeFileRequest) -> Result<pb::WorktreeFile> {
-    let root = root_of(svc, &req.worktree_id)?;
+    let start = start_of(svc, &req.worktree_id, &req.folder)?;
     let path = req.path.clone();
-    let content = blocking(move || read(&root, &path)).await?;
+    let content = blocking(move || read_in(start.base(), &path)).await?;
     let mut file = pb::WorktreeFile { path: req.path.clone(), ..Default::default() };
     let state = match content {
         Content::Text { text, size } => {

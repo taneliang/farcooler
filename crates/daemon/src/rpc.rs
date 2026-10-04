@@ -706,6 +706,7 @@ impl Rpc {
             crate::push::Pairing::load_in(svc.root_dir()).is_some(),
             svc.store.schema().ok(),
             agents_found_now().await,
+            svc.read_only_folders(),
         ))
     }
 
@@ -839,6 +840,7 @@ impl Rpc {
                     crate::push::Pairing::load_in(svc.root_dir()).is_some(),
                     svc.store.schema().ok(),
                     agents_found_now().await,
+                    svc.read_only_folders(),
                 )))
             }
 

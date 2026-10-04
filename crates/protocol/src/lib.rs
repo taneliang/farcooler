@@ -491,6 +491,15 @@ pub mod capability {
     /// serving: a client that reads it absent keeps the `web :PORT` text the
     /// name already carried and offers no Open in Browser.
     pub const TERMINAL_PORTS: &str = "terminal_ports";
+    /// Extra read-only folders for the file viewer (ov-232):
+    /// `Host.read_only_folders`, and `folder` on `worktree.list_dir` and
+    /// `worktree.read_file`.
+    ///
+    /// Its own capability because an older runner drops the field and sends
+    /// no list: a client that reads it absent shows no folders, and one that
+    /// asks for a folder names this in the request, so an older runner
+    /// refuses rather than answering from no worktree.
+    pub const READ_ONLY_FOLDERS: &str = "read_only_folders";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -504,6 +513,7 @@ pub mod capability {
             NEEDS_YOU, WAKE_ON_ANSWER, STREAM_SIZE_MARKERS, TASK_NOTICES, REPORT, AGENT_USAGE,
             AGENTS_FOUND,
             TASK_WAITS, TASK_WORKERS, NOTICE_TASK, BOARD_READS, WORKTREE_FILES, TERMINAL_NAMES, TERMINAL_PORTS,
+            READ_ONLY_FOLDERS,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
