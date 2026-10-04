@@ -619,7 +619,7 @@ private struct LockScreenCard: View {
                     state: state, leader: leader, ask: ask, trace: tail.leaderTrace,
                     stale: stale)
                 if let rest = tail.line {
-                    Divider()
+                    Divider()  // style-exempt: a rule between a widget's lines
                     Text(rest)
                         .font(.caption)
                         .foregroundStyle(.secondary)

@@ -93,7 +93,7 @@ struct BoardHistoryScreen: View {
                 .foregroundStyle(on ? Color.white : Color.primary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(on ? Color.accentColor : Color.primary.opacity(0.08), in: Capsule())
+                .background(on ? Color.accentColor : Fill.inset(), in: Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)

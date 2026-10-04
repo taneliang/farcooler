@@ -80,8 +80,8 @@ extension ShellRootView {
             // in the page's own — a shadow drawn before the scale would shrink
             // with the card and get tighter exactly as the card gets further
             // away, which is backwards.
-            .shadow(
-                color: .black.opacity(ShellMotion.liftShadowOpacity * offGlass),
+            .shadow(  // style-exempt: the lift shadow of a page in flight, whose radius is in screen points
+                color: .black.opacity(ShellMotion.liftShadowOpacity * offGlass),  // style-exempt: the lift shadow of a page in flight
                 radius: ShellMotion.liftShadowRadius, x: 0,
                 y: ShellMotion.liftShadowY * offGlass)
             .offset(x: flightOffset.width, y: flightOffset.height)

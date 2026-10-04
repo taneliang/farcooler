@@ -280,7 +280,7 @@ private struct ConnectThisDeviceStep: View {
                             .font(.caption2.weight(.semibold))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(Color.accentColor.opacity(0.15))
+                            .background(Fill.selection(active: true))
                             .clipShape(Capsule())
                     }
                 }

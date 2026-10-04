@@ -174,7 +174,7 @@ private struct SegmentBar: View {
             VStack(spacing: 2) { buttons(stacked: true) }
         }
         .padding(3)
-        .background(Capsule().fill(Color.primary.opacity(0.07)))
+        .background(Capsule().fill(Fill.inset()))
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .accessibilityElement(children: .contain)
@@ -198,7 +198,7 @@ private struct SegmentBar: View {
                     .padding(.vertical, 6)
                     .background {
                         if chosen {
-                            Capsule().fill(Color.primary.opacity(0.16))
+                            Capsule().fill(Fill.selection(active: true))
                         }
                     }
                     .contentShape(.capsule)
@@ -526,8 +526,8 @@ private struct OrchestratorTerminal: View {
             #if DEBUG
             .overlay(alignment: .topTrailing) {
                 Rectangle()
-                    .fill(Color.white.opacity(0.001))
-                    .frame(width: 1, height: 1)
+                    .fill(Color.white.opacity(0.001))  // style-exempt: DEBUG probe: a near-invisible hit target the UI tests read, not a fill
+                    .frame(width: 1, height: 1)  // style-exempt: DEBUG probe: a near-invisible hit target the UI tests read, not a fill
                     .accessibilityElement()
                     .accessibilityIdentifier("orchestrator-mount")
                     .accessibilityValue("mount=\(mount.serial)")

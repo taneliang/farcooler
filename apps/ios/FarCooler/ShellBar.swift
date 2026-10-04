@@ -686,7 +686,7 @@ struct ShellBar: View {
     }
 
     var body: some View {
-        GlassEffectContainer(spacing: 0) {
+        GlassEffectContainer(spacing: 0) {  // style-exempt: the one container the bar's floating members share, so their glass blends
             VStack(spacing: 0) {
                 columnWindow
                 barRow

@@ -144,11 +144,11 @@ struct QueuedRow: View {
             // from the composer it is attached to.
             .background {
                 RoundedRectangle.floating
-                    .fill(.regularMaterial)
+                    .fill(.regularMaterial)  // style-exempt: frosts the queued bubble over the composer stack
                     .overlay {
                         RoundedRectangle.floating
-                            .strokeBorder(
-                                Color.secondary.opacity(0.4),
+                            .strokeBorder(  // style-exempt: the dashed edge is what says "not sent yet"
+                                Color.secondary.opacity(0.4),  // style-exempt: the dashed edge's ink
                                 style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
                     }
             }

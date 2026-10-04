@@ -444,7 +444,7 @@ struct ShellPaneChromeModifier: ViewModifier {
                 .accessibilityIdentifier("pane-files")
             }
             if canRemove, let worktree {
-                Divider()
+                Divider()  // style-exempt: menu
                 Button(role: .destructive) {
                     removing = .confirming(worktree, on: connection)
                 } label: {

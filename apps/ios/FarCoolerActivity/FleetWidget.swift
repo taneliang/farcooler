@@ -700,7 +700,7 @@ private struct RowsFleet: View {
             // the agent actually said answers "what did it do while I was
             // away", which is the question a widget gets looked at to answer.
             if showFeed, let top = entry.snapshot.ranked.first, !top.feed.isEmpty {
-                Divider()
+                Divider()  // style-exempt: a rule between a widget's lines
                 ForEach(Array(top.feed.enumerated()), id: \.offset) { _, said in
                     Text(said).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
@@ -1132,6 +1132,6 @@ private struct StaleFooter: View {
             }
         }
         .padding()
-        .background(Color(white: 0.08))
+        .background(Color(white: 0.08))  // style-exempt: the preview's stand-in for the widget background
     }
 #endif

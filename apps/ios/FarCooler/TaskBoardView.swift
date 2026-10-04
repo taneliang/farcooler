@@ -179,7 +179,7 @@ struct WorkspaceBoardList: View {
             .fixedSize()
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
-            .background(Color.accentColor.opacity(0.18), in: Capsule())
+            .background(Fill.selection(active: true), in: Capsule())
     }
 
     private func list(_ board: TaskBoardModel) -> some View {

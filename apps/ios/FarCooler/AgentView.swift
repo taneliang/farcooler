@@ -345,16 +345,16 @@ struct AgentView: View {
                 // already been corrected for.
                 .foregroundStyle(.primary)
                 .frame(width: Self.jumpDiameter, height: Self.jumpDiameter)
-                .background(.regularMaterial, in: Circle())
+                .background(.regularMaterial, in: Circle())  // style-exempt: the jump button is a small floating control over the transcript; the material is its backing
                 .overlay {
-                    Circle().strokeBorder(Color.primary.opacity(0.12))
+                    Circle().strokeBorder(Color.primary.opacity(0.12))  // style-exempt: the jump button's hairline, lifting the circle off the transcript
                 }
                 .overlay(alignment: .topTrailing) {
                     if arrivedWhileAway {
                         Circle()
                             .fill(Color.accentColor)
                             .frame(width: 10, height: 10)
-                            .overlay { Circle().strokeBorder(TerminalPalette.background, lineWidth: 2) }
+                            .overlay { Circle().strokeBorder(TerminalPalette.background, lineWidth: 2) }  // style-exempt: a ring in the pane's own background that cuts the unread dot out of the button
                             .offset(x: 1, y: -1)
                     }
                 }
@@ -506,7 +506,7 @@ struct AgentView: View {
         // otherwise: two surfaces a few points apart both sample the background
         // on their own and neither knows the other is there, so they never
         // blend at the seam the way the platform's own stacked controls do.
-        GlassEffectContainer(spacing: PaneMetrics.step) {
+        GlassEffectContainer(spacing: PaneMetrics.step) {  // style-exempt: the one container the composer stack's floating members share, so their glass blends
             VStack(spacing: PaneMetrics.step) {
                 // The plan and the queue are ATTACHED to the composer, not
                 // scattered around the screen. The plan used to be pinned at the
@@ -846,7 +846,7 @@ struct AgentView: View {
                     // while a tool streams progress (see `Transcript`),
                     // so its id does not change and `scrollTo` would have
                     // nothing new to react to.
-                    Color.clear.frame(height: 1).id(Self.endOfTranscript)
+                    Color.clear.frame(height: 1).id(Self.endOfTranscript)  // style-exempt: a 1 pt scroll anchor, nothing drawn
                 }
                 .padding(PaneMetrics.card)
             }
@@ -1350,7 +1350,7 @@ private struct ToolRowView: View {
             // diff, waiting on approval, drew an empty padded strip between two
             // dividers.
             if showingDetail && hasDetail {
-                Divider()
+                Divider()  // style-exempt: a rule between a tool call's header and its detail, inside one card
                 VStack(alignment: .leading, spacing: PaneMetrics.step) {
                     if let content = tool.content, !content.isEmpty {
                         // Bounded, and for the same reason it is bounded on the
@@ -1373,7 +1373,7 @@ private struct ToolRowView: View {
             // says which call is waiting, and repeating it in words inside the
             // row it is drawn on is the same fact twice.
             if let pending, let onAnswer {
-                Divider()
+                Divider()  // style-exempt: a rule between a tool call's detail and its approval controls, inside one card
                 ApprovalControls(options: pending.options, onChoose: onAnswer)
                     .padding(PaneMetrics.card)
             }
@@ -1381,7 +1381,7 @@ private struct ToolRowView: View {
         .background(TranscriptFill.container, in: .card)
         .overlay {
             if pending != nil {
-                RoundedRectangle.card.strokeBorder(TranscriptFill.attentionRing)
+                RoundedRectangle.card.strokeBorder(TranscriptFill.attentionRing)  // style-exempt: the ring that says which tool call is waiting on the person (a state)
             }
         }
         // Driven by the model rather than a timer, exactly as the thought row
@@ -1451,7 +1451,7 @@ private struct ToolRowView: View {
 
 private func toolStatusColor(_ status: ToolStatus) -> Color {
     switch status {
-    case .pending: return .secondary.opacity(0.35)
+    case .pending: return .secondary.opacity(0.35)  // style-exempt: a status ink for a pending call, not a surface
     case .inProgress: return .secondary
     case .completed: return .green
     case .failed: return .red
@@ -1529,7 +1529,7 @@ private struct SubagentBlockView: View {
             .buttonStyle(.plain)
 
             if showing && !block.children.isEmpty {
-                Divider()
+                Divider()  // style-exempt: a rule between a block's header and its children, inside one card
                 VStack(alignment: .leading, spacing: PaneMetrics.step) {
                     if hidden > 0 {
                         Button("… \(hidden) more") { withAnimation(Self.motion) { showingAll = true } }
@@ -1735,7 +1735,7 @@ private struct PlanPanel: View {
         .padding(.vertical, PaneMetrics.card)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            .regularMaterial,
+            .regularMaterial,  // style-exempt: the composer stack's floating surface, frosted behind the keyboard
             in: .floating)
     }
 
@@ -1931,7 +1931,7 @@ struct ApprovalCard: View {
             in: .floating)
         .overlay(
             RoundedRectangle.floating
-                .strokeBorder(TranscriptFill.attentionEdge))
+                .strokeBorder(TranscriptFill.attentionEdge))  // style-exempt: the attention card's edge (a state)
     }
 
 
@@ -2709,7 +2709,7 @@ private struct AgentComposer: View {
                             } label: {
                                 Image(systemName: "xmark.circle.fill")
                                     .font(.system(size: 15))
-                                    .foregroundStyle(.white, .black.opacity(0.6))
+                                    .foregroundStyle(.white, .black.opacity(0.6))  // style-exempt: the glyph of a remove badge over an attachment thumbnail, on any image
                             }
                             .offset(x: 5, y: -5)
                         }
@@ -2840,12 +2840,12 @@ private struct SuggestionList: View {
                         .padding(.vertical, PaneMetrics.step)
                     }
                     .buttonStyle(.plain)
-                    Divider().padding(.leading, PaneMetrics.card)
+                    Divider().padding(.leading, PaneMetrics.card)  // style-exempt: a rule between two suggestion rows, inset to the text column
                 }
             }
         }
         .frame(maxHeight: 220)
-        .background(.thickMaterial)
+        .background(.thickMaterial)  // style-exempt: the suggestion list is frosted over the transcript it covers
     }
 }
 
@@ -3101,7 +3101,7 @@ struct GlassSurface: ViewModifier {
     var interactive: Bool = false
 
     func body(content: Content) -> some View {
-        content.glassEffect(
+        content.glassEffect(  // style-exempt: the one place the composer's glass is drawn, with its interactive variant
             interactive ? .regular.interactive() : .regular, in: .rect(cornerRadius: radius))
     }
 }

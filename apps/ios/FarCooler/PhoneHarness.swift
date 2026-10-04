@@ -167,8 +167,8 @@ struct PhoneHarness: View {
             .overlay(alignment: .topTrailing) {
                 if ready {
                     Rectangle()
-                        .fill(Color.white.opacity(0.001))
-                        .frame(width: 1, height: 1)
+                        .fill(Color.white.opacity(0.001))  // style-exempt: DEBUG probe: a near-invisible hit target the UI tests read, not a fill
+                        .frame(width: 1, height: 1)  // style-exempt: DEBUG probe: a near-invisible hit target the UI tests read, not a fill
                         .accessibilityElement()
                         .accessibilityIdentifier("phone-harness-ready")
                 }
@@ -189,8 +189,8 @@ extension PhoneHarness {
     private var snapshotProbe: some View {
         TimelineView(.periodic(from: .now, by: 0.5)) { _ in
             Rectangle()
-                .fill(Color.white.opacity(0.001))
-                .frame(width: 1, height: 1)
+                .fill(Color.white.opacity(0.001))  // style-exempt: DEBUG probe: a near-invisible hit target the UI tests read, not a fill
+                .frame(width: 1, height: 1)  // style-exempt: DEBUG probe: a near-invisible hit target the UI tests read, not a fill
                 .accessibilityElement()
                 .accessibilityIdentifier("snapshot-probe")
                 .accessibilityValue(
@@ -204,8 +204,8 @@ extension PhoneHarness {
     private var sentProbe: some View {
         TimelineView(.periodic(from: .now, by: 0.5)) { _ in
             Rectangle()
-                .fill(Color.white.opacity(0.001))
-                .frame(width: 1, height: 1)
+                .fill(Color.white.opacity(0.001))  // style-exempt: DEBUG probe: a near-invisible hit target the UI tests read, not a fill
+                .frame(width: 1, height: 1)  // style-exempt: DEBUG probe: a near-invisible hit target the UI tests read, not a fill
                 .accessibilityElement()
                 .accessibilityIdentifier("harness-sent")
                 .accessibilityValue(runner.sent.joined(separator: "\n"))

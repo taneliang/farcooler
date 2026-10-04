@@ -1737,7 +1737,7 @@ private struct TerminalKeyStyle: ButtonStyle {
     /// Pressed is one step UP the hierarchy, not a lower opacity: a key that
     /// fades under a finger looks like a key that did not take the press.
     private func fill(pressed: Bool) -> AnyShapeStyle {
-        if filled { return AnyShapeStyle(Color.accentColor.opacity(pressed ? 0.75 : 1)) }
+        if filled { return AnyShapeStyle(Color.accentColor.opacity(pressed ? 0.75 : 1)) }  // style-exempt: a filled key's pressed accent, a control state
         return pressed ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.quaternary)
     }
 }
@@ -2573,7 +2573,7 @@ struct TerminalBenchHarness: View {
                         .font(.system(size: 11, weight: .medium, design: .monospaced))
                         .foregroundStyle(.white)
                         .padding(6)
-                        .background(.black.opacity(0.7))
+                        .background(.black.opacity(0.7))  // style-exempt: the bench readout, DEBUG only
                         .accessibilityIdentifier("terminal-bench-readout")
                 }
             }

@@ -14,7 +14,7 @@ struct TaskSkeleton: View {
             ForEach(Self.widths.indices, id: \.self) { i in
                 HStack(alignment: .top, spacing: 12) {
                     Circle()
-                        .strokeBorder(.quaternary, lineWidth: 1.5)
+                        .strokeBorder(.quaternary, lineWidth: 1.5)  // style-exempt: a placeholder art ring in the onboarding illustration, not an edge
                         .frame(width: 10, height: 10)
                         .padding(.top, 1)
                     GeometryReader { geometry in

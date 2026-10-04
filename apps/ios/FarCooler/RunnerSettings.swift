@@ -595,7 +595,7 @@ struct ThemeStrip: View {
             }
         }
         .clipShape(.control)
-        .overlay(RoundedRectangle.control.strokeBorder(Color.primary.opacity(0.12)))
+        .overlay(RoundedRectangle.control.strokeBorder(Color.primary.opacity(0.12)))  // style-exempt: the hairline around the theme preview strip, whose swatches can match any background
     }
 
     private var preview: [UInt32] {

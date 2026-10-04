@@ -1164,8 +1164,8 @@ struct ShellScreen: View {
     private var watchProbe: some View {
         TimelineView(.periodic(from: .now, by: 0.25)) { _ in
             Rectangle()
-                .fill(Color.white.opacity(0.001))
-                .frame(width: 1, height: 1)
+                .fill(Color.white.opacity(0.001))  // style-exempt: DEBUG probe: a near-invisible hit target the UI tests read, not a fill
+                .frame(width: 1, height: 1)  // style-exempt: DEBUG probe: a near-invisible hit target the UI tests read, not a fill
                 .accessibilityElement()
                 .accessibilityIdentifier("shell-watch")
                 .accessibilityValue("watch=\(Notifier.shared.visibleTerminal ?? "")")

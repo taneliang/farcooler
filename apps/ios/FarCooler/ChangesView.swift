@@ -1092,7 +1092,7 @@ private struct ReviewBar: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                Divider()
+                Divider()  // style-exempt: a rule between the summary card's rows
             }
 
             HStack(spacing: 10) {
@@ -1158,7 +1158,7 @@ private struct ReviewBar: View {
             .padding(.leading, 16)
             .padding(.trailing, 6)
         }
-        .background(.bar)
+        .background(.bar)  // style-exempt: the system bar under a diff's file header
     }
 }
 
@@ -1331,7 +1331,7 @@ struct ChangesToolbarMenu: View {
                     Text(scope.label).tag(scope)
                 }
             }
-            Divider()
+            Divider()  // style-exempt: menu
             // The second way in to the history, for the reader who is already
             // a long way down a diff and would have to scroll back to the
             // summary card to find the first one.
@@ -1341,7 +1341,7 @@ struct ChangesToolbarMenu: View {
                 Label("History", systemImage: "clock")
             }
             .disabled(store.changeSet.commits.isEmpty)
-            Divider()
+            Divider()  // style-exempt: menu
             Button {
                 Task { await store.markRead() }
             } label: {
@@ -1386,8 +1386,8 @@ enum ChangesSurface {
         // light or dark, and only "slightly lighter than whatever is behind"
         // holds in both.
         Themes.shared.current.colorScheme == .dark
-            ? Color.white.opacity(0.06)
-            : Color.black.opacity(0.04)
+            ? Color.white.opacity(0.06)  // style-exempt: follows the terminal theme's scheme, which Fill.inset (the system's) cannot see
+            : Color.black.opacity(0.04)  // style-exempt: follows the terminal theme's scheme, which Fill.inset (the system's) cannot see
     }
 }
 
@@ -1475,7 +1475,7 @@ private struct ChangesFileHeading: View {
         // which is the shape the fold turns on. The tab strip has neither
         // problem: one surface, one radius, nothing lazy underneath it.
         .background(ChangesSurface.card, in: cardShape)
-        .background(.regularMaterial, in: cardShape)
+        .background(.regularMaterial, in: cardShape)  // style-exempt: frosts the card over the diff behind it
         // The gap between cards lives here rather than in the stack's spacing,
         // and it alone is still drawn opaque — which is not the old mistake
         // left in place, but the one strip where an opaque ground is the
@@ -1725,7 +1725,7 @@ private struct ChangesFileBody: View {
             // halves reading as one card costs, and cards are realized a few at
             // a time; this is not the per-row glass `ChangesSurface` rules out.
             .background(ChangesSurface.card, in: bodyShape)
-            .background(.regularMaterial, in: bodyShape)
+            .background(.regularMaterial, in: bodyShape)  // style-exempt: frosts the card body over the diff behind it
         }
     }
 }
@@ -1880,7 +1880,7 @@ private struct DiffHunks: View {
             #if DEBUG
             // How many lines are drawn, for the UI suite: rows past the screen
             // are not in the accessibility tree, so no row can say it.
-            Color.clear.frame(width: 1, height: 1)
+            Color.clear.frame(width: 1, height: 1)  // style-exempt: DEBUG probe: an invisible 1 pt element only the UI tests read
                 .accessibilityElement()
                 .accessibilityIdentifier("changes-patch-drawn")
                 .accessibilityValue("\(hunks.reduce(0) { $0 + $1.lines.count })")
@@ -2196,7 +2196,7 @@ private struct DiffLineRow: View {
         switch line.kind {
         case .added: return .green
         case .removed: return .red
-        case .context: return .primary.opacity(0.75)
+        case .context: return .primary.opacity(0.75)  // style-exempt: the ink of an unchanged diff line, not a surface
         }
     }
 

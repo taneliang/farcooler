@@ -268,7 +268,7 @@ struct FleetView: View {
                         onNotNow: { runner.connection.declineHostKey(runner.host) },
                         onEdit: { editing = runner.host },
                         onAuthorize: { authorizing = true })
-                    Divider().padding(.leading, 16)
+                    Divider().padding(.leading, 16)  // style-exempt: a rule between a host's warning card and the rows below, inset to the text column
                 }
 
                 // A device with runners, none of them connected yet, and a
@@ -440,7 +440,7 @@ struct HostSwitcherBar: View {
         // the bar is 44 rather than the 41 it was — three points for two targets
         // that clear the floor, on the one strip that is under every phase of
         // this screen including the ones you cannot otherwise leave.
-        .background(.bar)
+        .background(.bar)  // style-exempt: the system bar under the fleet's controls
     }
 }
 
@@ -488,7 +488,7 @@ struct RunnerMenu: View {
                     }
                 }
             }
-            Divider()
+            Divider()  // style-exempt: menu
             // One entry, not one per kind of adding. This said "Add a
             // Runner…" and went straight to the address form, which is the
             // long road — the ceremony that would have picked up a runner's
@@ -1134,7 +1134,7 @@ struct NewWorktreeView: View {
                     refusal(refused.title + ". " + refused.sentence)
                         .padding()
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.bar)
+                        .background(.bar)  // style-exempt: the system bar behind a refusal strip
                 }
             }
             .navigationTitle("New Worktree")
