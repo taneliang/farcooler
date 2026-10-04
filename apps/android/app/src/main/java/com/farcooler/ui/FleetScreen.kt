@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.ListItem
+import com.farcooler.model.FirstRunCopy
 import com.farcooler.model.GlancePalette
 import com.farcooler.model.NeedsYou
 import com.farcooler.model.WorkspaceRow
@@ -1327,6 +1328,17 @@ private fun rememberNow(ticking: Boolean): State<Long> =
 /** A scope with no worktrees: a lede and, where the list has them, icon rows (ov-245). */
 @Composable
 internal fun WorktreesEmpty(scope: WorktreeScope) {
+    val copy = scope.emptyCopy
+    if (copy != null) {
+        // Centered with a title, as every other empty state is (ov-266).
+        EmptyState(
+            title = FirstRunCopy.WORKTREES_TITLE,
+            detail = copy.lede,
+            icon = Icons.Outlined.AccountTree,
+            modifier = Modifier.testTag("worktrees-empty"),
+        ) { PhoneEmptyRows(copy) }
+        return
+    }
     Column(
         Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -1336,6 +1348,5 @@ internal fun WorktreesEmpty(scope: WorktreeScope) {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        scope.emptyCopy?.let { PhoneEmptyRows(it) }
     }
 }

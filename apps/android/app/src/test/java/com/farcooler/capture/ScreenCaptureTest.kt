@@ -5,7 +5,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.ui.Modifier
 import com.farcooler.model.HarnessAvailability
-import com.farcooler.model.PhoneEmptyStates
+import com.farcooler.model.RunnerCount
+import com.farcooler.model.RunnerLink
+import com.farcooler.model.idleWithoutOrchestrator
+import com.farcooler.model.reassurance
 import com.farcooler.ui.SeatAction
 import com.farcooler.model.TaskAcceptanceLine
 import com.farcooler.model.TaskBoard
@@ -54,9 +57,12 @@ class ScreenCaptureTest {
     }
 
     @Test fun needsYouNoAgentsWorking() = Capture.both("needs-you-no-agents-working") {
+        // What the screen computes, not a fake sentence: with no orchestrator it
+        // leads with "No agents are working yet." (ov-266).
+        val idle = listOf(RunnerCount(RunnerLink.ANSWERING, 0, true))
         ReassuranceBlock(
-            detail = "Nothing is running on studio-mac.",
-            showsAgentRows = true,
+            detail = reassurance(idle, " on studio-mac", worktrees = 1, noOrchestrator = true),
+            showsAgentRows = idleWithoutOrchestrator(idle, noOrchestrator = true),
             caveat = null,
         )
     }

@@ -23,6 +23,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.semantics.invisibleToUser
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -33,7 +34,11 @@ import androidx.compose.ui.unit.dp
 // pulses, because that would read as loading.
 
 @Composable
-private fun fill() = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f)
+private fun fill(): androidx.compose.ui.graphics.Color {
+    // A dark surface needs a stronger gray than a light one to read at all (ov-266).
+    val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    return MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (dark) 0.3f else 0.14f)
+}
 
 /** Placeholder task rows: the shape tasks will take, not a loading state. */
 @Composable

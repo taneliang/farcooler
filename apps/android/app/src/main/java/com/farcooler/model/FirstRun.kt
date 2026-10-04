@@ -125,6 +125,9 @@ object FirstRunCopy {
     const val NOT_INSTALLED = "Not installed"
     const val TRY_AGAIN = "Try again"
     const val BOARD_TITLE = "No tasks"
+
+    /** A workspace's Worktrees tab with none (ov-266). */
+    const val WORKTREES_TITLE = "No worktrees"
     const val SHOW_ORCHESTRATOR = "Show orchestrator"
     const val PUSH_BODY =
         "To hear from your agents while Far Cooler is closed, sign in. Until then, notifications arrive only while it’s open."

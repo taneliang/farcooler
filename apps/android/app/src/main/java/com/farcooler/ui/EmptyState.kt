@@ -40,7 +40,7 @@ fun EmptyState(
                 icon,
                 contentDescription = null,
                 modifier = Modifier.size(40.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         Text(title, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)

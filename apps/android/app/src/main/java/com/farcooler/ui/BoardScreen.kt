@@ -450,8 +450,11 @@ internal fun BoardBlank(led: Boolean, orchestratorRunning: Boolean, onShowOrches
         modifier = Modifier.fillMaxSize().testTag("board-empty"),
     ) {
         if (copy.rows.isNotEmpty()) PhoneEmptyRows(copy)
-        TaskSkeleton(Modifier.widthIn(max = 240.dp).padding(vertical = 8.dp))
-        if (PhoneFirstRun.offersOrchestrator(led, orchestratorRunning) && onShowOrchestrator != null) {
+        // The skeleton shows the shape of what will arrive, so where the rows say
+        // to start an orchestrator first, it only crowds them (ov-266).
+        val offers = PhoneFirstRun.offersOrchestrator(led, orchestratorRunning) && onShowOrchestrator != null
+        if (!offers) TaskSkeleton(Modifier.widthIn(max = 240.dp).padding(vertical = 8.dp))
+        if (offers && onShowOrchestrator != null) {
             OutlinedButton(
                 onClick = onShowOrchestrator,
                 modifier = Modifier.testTag("board-show-orchestrator"),
