@@ -126,8 +126,7 @@ jobs:
       - run: ./scripts/swallow-lint.py
       # No new hand-drawn corner radius, material, glass, rule, stroke, shadow or
       # gray in a Mac or AgentKit view (ov-216): the tokens in DesignTokens.swift
-      # draw them. Today's sites are grandfathered by count in
-      # scripts/visual-tokens-baseline.json, a ratchet that only shrinks.
+      # draw them. There is no baseline: any site fails.
       - run: ./scripts/visual-tokens-lint.py --self-test
       - run: ./scripts/visual-tokens-lint.py
 
