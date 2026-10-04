@@ -42,3 +42,37 @@ struct BackForwardControl: View {
         }
     }
 }
+
+/// Back and Forward from the mouse and the trackpad (ov-214): a mouse's
+/// side buttons (4 back, 5 forward) and the swipe between pages, as in
+/// Safari and Xcode. Worked out from the event alone, so a test pins which
+/// is which; the window takes them only for itself.
+enum BackForwardGesture {
+    enum Direction: Equatable { case back, forward }
+
+    /// The direction an event asks for, or nil for any other event. AppKit
+    /// numbers mouse buttons from 0, so button 4 is 3.
+    static func direction(type: NSEvent.EventType, button: Int = 0, deltaX: CGFloat = 0) -> Direction? {
+        switch type {
+        case .otherMouseDown:
+            switch button {
+            case 3: return .back
+            case 4: return .forward
+            default: return nil
+            }
+        case .swipe:
+            // A swipe's deltaX is positive going back, as WebKit reads it.
+            if deltaX > 0 { return .back }
+            if deltaX < 0 { return .forward }
+            return nil
+        default:
+            return nil
+        }
+    }
+
+    static func direction(of event: NSEvent) -> Direction? {
+        direction(
+            type: event.type, button: event.type == .otherMouseDown ? event.buttonNumber : 0,
+            deltaX: event.type == .swipe ? event.deltaX : 0)
+    }
+}

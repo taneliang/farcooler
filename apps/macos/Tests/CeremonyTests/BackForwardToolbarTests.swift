@@ -79,3 +79,19 @@ struct BackForwardToolbarTests {
         #expect(BackForwardControl.forwardHelp == "Go forward (⌃⌘→)")
     }
 }
+
+/// The mouse's side buttons and the swipe between pages go back and forward
+/// (ov-214), and nothing else does.
+struct BackForwardGestureTests {
+    @Test("Button 4 goes back, button 5 forward; a swipe goes the way it's swiped; nothing else navigates")
+    func directions() {
+        #expect(BackForwardGesture.direction(type: .otherMouseDown, button: 3) == .back)
+        #expect(BackForwardGesture.direction(type: .otherMouseDown, button: 4) == .forward)
+        #expect(BackForwardGesture.direction(type: .otherMouseDown, button: 2) == nil, "the middle button")
+        #expect(BackForwardGesture.direction(type: .swipe, deltaX: 1) == .back)
+        #expect(BackForwardGesture.direction(type: .swipe, deltaX: -1) == .forward)
+        #expect(BackForwardGesture.direction(type: .swipe, deltaX: 0) == nil, "a vertical swipe")
+        #expect(BackForwardGesture.direction(type: .leftMouseDown, button: 3) == nil)
+        #expect(BackForwardGesture.direction(type: .scrollWheel, deltaX: 5) == nil)
+    }
+}

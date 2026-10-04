@@ -181,6 +181,9 @@ struct ContentView: View {
     @State var changesFocus: String?
     /// The key monitor that turns Esc into Back. See `EscapeBack`.
     @State private var escapeMonitor: Any?
+    /// The mouse's side buttons and the swipe between pages, as Back and
+    /// Forward (`BackForwardGesture`), for this window only.
+    @State private var navigationMonitor: Any?
     /// ⌥⌘2 gave the board the keyboard: no terminal takes typed keys until
     /// a pane is clicked or chosen again.
     @State var keyboardOnBoard = false
@@ -315,11 +318,30 @@ struct ContentView: View {
             }
             if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
             escapeMonitor = nil
+            if let navigationMonitor { NSEvent.removeMonitor(navigationMonitor) }
+            navigationMonitor = nil
         }
         // Esc goes Back when nothing that needs it has the keyboard, in this
         // window, with no sheet or overlay up.
         .background(WindowReader(box: windowBox))
         .onAppear {
+            if navigationMonitor == nil {
+                navigationMonitor = NSEvent.addLocalMonitorForEvents(matching: [.otherMouseDown, .swipe]) { event in
+                    guard let window = event.window, window === windowBox.window, window.attachedSheet == nil,
+                        let direction = BackForwardGesture.direction(of: event)
+                    else { return event }
+                    let control = backForward
+                    switch direction {
+                    case .back:
+                        guard control.canGoBack else { return event }
+                        control.back()
+                    case .forward:
+                        guard control.canGoForward else { return event }
+                        control.forward()
+                    }
+                    return nil
+                }
+            }
             guard escapeMonitor == nil else { return }
             escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 guard event.keyCode == 53, event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
