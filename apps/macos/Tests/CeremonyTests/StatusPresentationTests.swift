@@ -48,6 +48,15 @@ struct StatusPresentationTests {
         #expect(Status.failedTurn.tone.color(.light) == Tint.failure)
     }
 
+    /// The board's Needs Decision header is amber like the row under it,
+    /// not the accent (review M1).
+    @Test func theNeedsDecisionHeaderIsAmber() {
+        let tone = TaskListSection.headerTone(.needsDecision, count: 1)
+        #expect(SectionTitle.color(style: .group, tone: tone, scheme: .dark) == Tint.attention(.dark))
+        #expect(TaskListSection.headerTone(.needsDecision, count: 0) == .quiet)
+        #expect(TaskListSection.headerTone(.inProgress, count: 2) == .primary)
+    }
+
     @Test func needsYouIsAmberEverywhereAndDoneIsDone() {
         let blocked = Self.seat(activity: "blocked")
         #expect(TaskColumnModel.agentLine(blocked)?.status?.tone == .needsYou)

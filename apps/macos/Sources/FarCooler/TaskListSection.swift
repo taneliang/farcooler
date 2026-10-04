@@ -42,8 +42,14 @@ struct TaskListSection: View {
     @Environment(\.boardMotionSlowdown) private var slowdown
 
     /// Needs Decision is the one status waiting on the person reading, and
-    /// the only one drawn in the accent color.
+    /// the only one drawn in the attention color.
     private var leads: Bool { section.status == .needsDecision }
+
+    /// Its header's tone: amber for Needs Decision with anything in it, as
+    /// the "Answer to unblock" under it is (ov-137); quiet when empty.
+    static func headerTone(_ status: TaskStatus, count: Int) -> SectionTitle.Tone {
+        count == 0 ? .quiet : status == .needsDecision ? .attention : .primary
+    }
 
     var body: some View {
         // On the board's tick, so Done's "today" turns over at midnight on a
@@ -59,7 +65,7 @@ struct TaskListSection: View {
         // (ov-83), through the board's one collapsible section (ov-92).
         CollapsibleSection(
             section.title, id: "status.\(section.status.rawValue)",
-            tone: section.count == 0 ? .quiet : leads ? .accent : .primary,
+            tone: Self.headerTone(section.status, count: section.count),
             isExpanded: Binding(get: { expanded }, set: { open in if open != expanded { onToggle() } }),
             canExpand: BoardForm.canExpand(section), count: section.count
         ) {

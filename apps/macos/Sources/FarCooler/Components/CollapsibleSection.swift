@@ -35,9 +35,13 @@ enum SectionHeaderStyle: Equatable {
 }
 
 /// A section's title in its style, and its tone: primary, quiet (an empty
-/// section, a navigator heading) or the accent (Needs Decision).
+/// section, a navigator heading) or attention (Needs Decision).
 struct SectionTitle: View {
-    enum Tone { case primary, quiet, accent }
+    /// `attention` is amber, `Tint.attention`, as every "needs you" is; the
+    /// accent is for controls (ov-137).
+    enum Tone { case primary, quiet, attention }
+
+    @Environment(\.colorScheme) private var scheme
 
     let text: String
     var style: SectionHeaderStyle = .group
@@ -59,12 +63,14 @@ struct SectionTitle: View {
             .truncationMode(.tail)
     }
 
-    private var color: Color {
+    private var color: Color { Self.color(style: style, tone: tone, scheme: scheme) }
+
+    static func color(style: SectionHeaderStyle, tone: Tone, scheme: ColorScheme) -> Color {
         if style != .group { return .secondary }
         switch tone {
         case .primary: return .primary
         case .quiet: return .secondary
-        case .accent: return .accentColor
+        case .attention: return Tint.attention(scheme)
         }
     }
 }
