@@ -3,7 +3,8 @@ import AppKit
 import SwiftUI
 
 struct ContentView: View {
-    @StateObject var store = FleetStore()
+    /// The app's one store: every window sees the same runners (ov-133).
+    @ObservedObject var store = FleetStore.shared
     /// This window's identity in `Notifier`'s per-window record of what is on
     /// screen, so a second window adds to it rather than overwriting it.
     @State var windowID = UUID()
@@ -297,6 +298,8 @@ struct ContentView: View {
         .animation(.snappy(duration: 0.22), value: outcomes.shown)
         .task {
             adoptSession()
+            // After `adoptSession`, which gives the window its id.
+            store.open(window: windowID)
             DestinationOpener.shared.register(window: windowID)
             Notifier.shared.requestAuthorization()
             PushRegistration.shared.label = { Host.current().localizedName ?? "Mac" }
@@ -317,16 +320,9 @@ struct ContentView: View {
             if let problem = await LocalDaemon.shared.ensure().problem {
                 store.clients[""]?.fleetError = problem
             }
-            // Every runner's own fleet, repositories, roots, and layouts are
-            // already being brought up by `FleetStore` — see `rebuild()`.
-            // Its event stream is a separate question: `rebuild()` starts
-            // one only the first time a client is added, and `.onDisappear`
-            // below stops every one of them on the way out. `resume()` is
-            // this `.task`'s half of that pair — without it, a window that
-            // closes and reopens (⌘W, then the Dock) comes back with every
-            // client's `state` still reading whatever it was, but nothing
-            // actually listening.
-            store.resume()
+            // Every runner's own fleet, repositories, roots, layouts and
+            // event stream were brought up, or brought back after the last
+            // window closed, by `store.open(window:)` above.
             settleLaunch()
         }
         .onDisappear {
@@ -335,10 +331,10 @@ struct ContentView: View {
             Notifier.shared.closeWindow(windowID)
             DestinationOpener.shared.unregister(window: windowID)
             closeSession()
-            for client in store.clients.values {
-                client.stopEvents()
-                client.reportWatching([])
-            }
+            // The streams stop only with the last window (`FleetStore.close`);
+            // each runner is told what the windows left still show.
+            for client in store.clients.values { client.reportWatching([]) }
+            store.close(window: windowID)
             if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
             escapeMonitor = nil
             if let navigationMonitor { NSEvent.removeMonitor(navigationMonitor) }
@@ -390,7 +386,7 @@ struct ContentView: View {
         // The key window's alone: with two windows, both heard every
         // command, and ⌘B toggled one sidebar twice (review m2).
         .onCommand { command in if isKeyWindow { run(command) } }
-        .onTileCommand { command in Task { await tile(command) } }
+        .onTileCommand(in: { windowBox.window }) { command in Task { await tile(command) } }
         .onSelectIndex { index in if isKeyWindow { selectTerminal(at: index) } }
         .onGoToHistory { spot in if isKeyWindow { go(to: spot) } }
         .onSelectWorkspace { number in

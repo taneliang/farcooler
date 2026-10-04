@@ -37,7 +37,27 @@ final class FleetStore: ObservableObject {
     /// nil, so `!= nil` here means "still bringing up", never "used to be".
     private var bringUpTasks: [String: Task<Void, Never>] = [:]
 
+    /// The app's one store, which every window shares (ov-133).
+    ///
+    /// Each window used to build its own, so two windows meant two clients
+    /// per runner, two event streams, two copies of every fleet, and the
+    /// newest window taking `Reachability`'s single wake and retry hook from
+    /// the others. What a window chooses (its selection, its panes) stays the
+    /// window's; what the runners say is the app's, once.
+    static let shared = FleetStore()
+
+    /// Whether this store dials its runners: the app's does, from the first
+    /// window that opens; a test's (`init(clients:)`) never does.
+    private let dials: Bool
+    /// Whether a window has opened yet. Nothing is dialed before one has, so
+    /// a store that's only been named, by a test or a Settings pane, starts
+    /// no process.
+    private var started = false
+    /// The windows open on this store. See `WindowSet`.
+    private(set) var windows = WindowSet()
+
     init() {
+        dials = true
         rebuild()
         runnersObserver = Runners.shared.objectWillChange.sink { [weak self] _ in
             // objectWillChange fires BEFORE the array is updated, so read it
@@ -50,26 +70,51 @@ final class FleetStore: ObservableObject {
         }
     }
 
+    /// A store over `clients`, for a test: it dials nothing, follows no
+    /// runner list, and leaves `Reachability`'s hook to the app's store.
+    init(clients: [String: DaemonClient]) {
+        dials = false
+        for (target, client) in clients {
+            self.clients[target] = client
+            clientObservers[target] = client.objectWillChange.sink { [weak self] _ in
+                Task { @MainActor in self?.scheduleRemerge() }
+            }
+        }
+        remerge()
+    }
+
+    /// A window opened on this store: the first one brings every runner up,
+    /// and any window brings back an event stream the last one to close
+    /// stopped.
+    func open(window: UUID) {
+        windows.open(window)
+        guard dials else { return }
+        if !started {
+            started = true
+            for target in clients.keys where bringUpTasks[target] == nil { bringUp(target) }
+        }
+        resume()
+    }
+
+    /// A window closed. Only the last one stops the streams: the others are
+    /// still showing what they bring.
+    func close(window: UUID) {
+        guard windows.close(window) else { return }
+        for client in clients.values { client.stopEvents() }
+    }
+
     /// Every runner, local first.
     var hosts: [String] { [""] + Runners.shared.all.map(\.target) }
 
-    /// Resume every client's event stream.
+    /// Resume every client's event stream, as each window opens.
     ///
-    /// `rebuild()` starts a fresh client's stream exactly once, at the
-    /// moment it is added — a client already running is none of its
-    /// business. But `ContentView`'s `.onDisappear` stops every stream on
-    /// the way out, and before this there was nothing symmetric on the way
-    /// back in: `.task` used to call `client.startEvents()` itself, and
-    /// delegating startup to `rebuild()` dropped that call along with the
-    /// rest of it. A window that closes and reopens while this store's own
-    /// lifetime spans both — the common case, since closing the last window
-    /// does not quit the app — came back with `state` still reading
-    /// `.connected` and a healthy-looking bar, but no stream, no retry and no
-    /// timer underneath it. `startEvents()`'s own `eventStream == nil` guard
-    /// makes this safe to call unconditionally: for the ordinary case, where
-    /// `rebuild()` already started every client, every one of these is a
-    /// no-op.
-    func resume() {
+    /// A fresh client's stream starts once, at its bring-up. The last window
+    /// to close stops every stream (`close(window:)`), and the next window to
+    /// open (⌘W, then the Dock) needs them back: without this it came back
+    /// with `state` still reading `.connected` and a healthy-looking bar, but
+    /// no stream, no retry and no timer underneath it. `startEvents()`'s own
+    /// `eventStream == nil` guard makes this safe to call unconditionally.
+    private func resume() {
         for client in clients.values { client.startEvents() }
     }
 
@@ -109,19 +154,8 @@ final class FleetStore: ObservableObject {
             clientObservers[target] = client.objectWillChange.sink { [weak self] _ in
                 Task { @MainActor in self?.scheduleRemerge() }
             }
-            bringUpTasks[target] = Task { @MainActor [weak self] in
-                // A daemon going away is also the moment another build could
-                // take the socket, so the local runner claims it back
-                // before its first read — the same rule `DaemonClient`'s own
-                // retry loop follows in `scheduleRetry()` and
-                // `reconnectNow()`. Skipped for a remote target: only this
-                // Mac bundles and starts its own daemon.
-                if target.isEmpty { await LocalDaemon.shared.ensure() }
-                await client.refresh()
-                guard !Task.isCancelled else { return }
-                client.startEvents()
-                self?.bringUpTasks[target] = nil
-            }
+            // Not before a window has opened: see `started`.
+            if started { bringUp(target) }
         }
 
         for (target, client) in clients where !wanted.contains(target) {
@@ -137,6 +171,25 @@ final class FleetStore: ObservableObject {
         }
 
         remerge()
+    }
+
+    /// Bring a freshly-added client up: its first `refresh()`, then its
+    /// event stream. See `bringUpTasks`.
+    private func bringUp(_ target: String) {
+        guard let client = clients[target] else { return }
+        bringUpTasks[target] = Task { @MainActor [weak self] in
+            // A daemon going away is also the moment another build could
+            // take the socket, so the local runner claims it back
+            // before its first read — the same rule `DaemonClient`'s own
+            // retry loop follows in `scheduleRetry()` and
+            // `reconnectNow()`. Skipped for a remote target: only this
+            // Mac bundles and starts its own daemon.
+            if target.isEmpty { await LocalDaemon.shared.ensure() }
+            await client.refresh()
+            guard !Task.isCancelled else { return }
+            client.startEvents()
+            self?.bringUpTasks[target] = nil
+        }
     }
 
     /// Re-read repositories, roots and layouts after a reconnection — the
@@ -593,5 +646,23 @@ final class FleetStore: ObservableObject {
             cancelBringUp(host)
             client.reconnectNow()
         }
+    }
+}
+
+/// The windows open on the app's one `FleetStore` (ov-133), by each window's
+/// id: what decides when the runners' event streams may stop. A window
+/// closing used to stop every stream on its way out, which was harmless only
+/// while each window had streams of its own.
+struct WindowSet: Equatable {
+    private(set) var ids: Set<UUID> = []
+
+    /// `window` opened.
+    mutating func open(_ window: UUID) { ids.insert(window) }
+
+    /// `window` closed: true when it was the last one open, and the streams
+    /// can stop. A window that closes twice, or never opened, ends nothing.
+    mutating func close(_ window: UUID) -> Bool {
+        guard ids.remove(window) != nil else { return false }
+        return ids.isEmpty
     }
 }

@@ -42,15 +42,33 @@ enum TileCommand: Equatable {
 
     static let notification = Notification.Name("farcooler.tile")
 
-    func post() {
-        NotificationCenter.default.post(name: Self.notification, object: Box(self))
+    /// Send this to `window`'s panes: the window the keystroke was typed in,
+    /// or for a menu item (`post()`), the key window. Only that window acts on it
+    /// (ov-133): with two open, ⌃B x closed a pane in each.
+    func post(to window: NSWindow?) {
+        NotificationCenter.default.post(name: Self.notification, object: Box(self, window: window))
     }
+
+    /// From a menu item: to the key window.
+    @MainActor func post() { post(to: NSApp.keyWindow) }
 
     /// A reference wrapper, because `NotificationCenter`'s object is `Any?` and
     /// an enum with associated values does not survive the round trip as one.
     final class Box: NSObject {
         let command: TileCommand
-        init(_ command: TileCommand) { self.command = command }
+        /// The window it's for. Weak: a command never keeps a window open.
+        weak var window: NSWindow?
+        init(_ command: TileCommand, window: NSWindow?) {
+            self.command = command
+            self.window = window
+        }
+
+        /// Whether `window` is the one it's for, or the one under the sheet
+        /// it was typed in. A command for no window reaches none.
+        func reaches(_ window: NSWindow?) -> Bool {
+            guard let target = self.window, let window else { return false }
+            return target === window || target.sheetParent === window
+        }
     }
 }
 
@@ -108,7 +126,7 @@ final class PrefixMode: ObservableObject {
         if !armed, tiledPanes > 1, Preferences.shared.directTraversal,
             let direction = Self.traversal(event)
         {
-            TileCommand.focus(direction).post()
+            TileCommand.focus(direction).post(to: event.window)
             return .handled
         }
 
@@ -125,7 +143,7 @@ final class PrefixMode: ObservableObject {
         // reads: Tab is 0x09 with or without Control, so intercepting it takes
         // nothing away from what is running in the pane.
         if !armed, let command = Self.tabSwitch(event) {
-            command.post()
+            command.post(to: event.window)
             return .handled
         }
 
@@ -142,7 +160,7 @@ final class PrefixMode: ObservableObject {
                 NSSound.beep()
                 return .handled
             }
-            command.post()
+            command.post(to: event.window)
             return .handled
         }
 
@@ -267,9 +285,11 @@ extension View {
         modifier(PrefixHintOverlay())
     }
 
-    func onTileCommand(_ perform: @escaping (TileCommand) -> Void) -> some View {
+    /// The tiling commands meant for `window`, the one this view is in
+    /// (`TileCommand.Box.reaches`). Every window hears every post.
+    func onTileCommand(in window: @escaping () -> NSWindow?, _ perform: @escaping (TileCommand) -> Void) -> some View {
         onReceive(NotificationCenter.default.publisher(for: TileCommand.notification)) { note in
-            guard let box = note.object as? TileCommand.Box else { return }
+            guard let box = note.object as? TileCommand.Box, box.reaches(window()) else { return }
             perform(box.command)
         }
     }

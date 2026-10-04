@@ -254,7 +254,7 @@ final class DaemonClient: ObservableObject {
     /// `stopEvents()` exists to end. This flag is the fact `retryTask` alone
     /// cannot carry, checked wherever a retry would arm, so being stopped
     /// wins regardless of which of the two racing paths gets there first.
-    private var isStopped = false
+    private(set) var isStopped = false
 
     private var backoffSeconds: Double {
         let base = min(30.0, pow(2.0, Double(attempt)))
