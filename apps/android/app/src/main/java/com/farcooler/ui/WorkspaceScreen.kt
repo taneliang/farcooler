@@ -45,6 +45,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.core.CoreException
 import com.farcooler.model.AgentHarness
 import com.farcooler.model.FirstRunCopy
+import com.farcooler.model.PhoneEmptyStates
 import com.farcooler.model.HarnessAvailability
 import com.farcooler.model.OrchestratorExit
 import com.farcooler.model.RunnerLink
@@ -408,13 +409,13 @@ private fun OrchestratorEmpty(
         when (seat) {
             is OrchestratorSeat.Empty -> {
                 Text(FirstRunCopy.ORCHESTRATOR_TITLE, style = MaterialTheme.typography.titleMedium)
-                OrchestratorVignette()
                 Text(
-                    FirstRunCopy.ORCHESTRATOR_BODY,
+                    PhoneEmptyStates.NO_ORCHESTRATOR.lede,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )
+                PhoneEmptyRows(PhoneEmptyStates.NO_ORCHESTRATOR)
                 val noneInstalled = availability.isKnown && availability.installed.isEmpty()
                 if (noneInstalled) {
                     Text(

@@ -79,19 +79,20 @@ func emptyStatusesAreNamedOnce() {
 /// for workspaces has no orchestrator to name. None offers to file a task.
 @Test("An empty board's line depends on whether an orchestrator leads it and is running")
 func anEmptyBoardPointsAtTheOrchestrator() {
-    let running = BoardForm.blankLine(ledByOrchestrator: true, orchestratorRunning: true)
-    let notRunning = BoardForm.blankLine(ledByOrchestrator: true, orchestratorRunning: false)
-    let implicit = BoardForm.blankLine(ledByOrchestrator: false, orchestratorRunning: false)
-    #expect(running == FirstRunCopy.Phone.boardWithOrchestrator)
-    #expect(notRunning == FirstRunCopy.Phone.boardNoOrchestrator)
-    #expect(notRunning.hasPrefix("Start the orchestrator"))
+    let running = BoardForm.blankCopy(ledByOrchestrator: true, orchestratorRunning: true)
+    let notRunning = BoardForm.blankCopy(ledByOrchestrator: true, orchestratorRunning: false)
+    let implicit = BoardForm.blankCopy(ledByOrchestrator: false, orchestratorRunning: false)
+    #expect(running == PhoneEmptyStates.boardWithOrchestrator)
+    #expect(notRunning == PhoneEmptyStates.boardNoOrchestrator)
+    #expect(notRunning.rows.first?.text.hasPrefix("Start the orchestrator") == true)
     #expect(running != notRunning)
-    #expect(!implicit.contains("orchestrator"))
-    for line in [running, notRunning, implicit] {
+    #expect(!implicit.lede.contains("orchestrator") && implicit.rows.isEmpty)
+    for copy in [running, notRunning, implicit] {
+        let line = ([copy.lede] + copy.rows.map(\.text)).joined(separator: " ")
         #expect(!line.localizedCaseInsensitiveContains("new task"))
         #expect(!line.localizedCaseInsensitiveContains("add a task"))
         #expect(!line.localizedCaseInsensitiveContains("grouped by"))
-        #expect(line.hasSuffix("."))
+        #expect(copy.lede.hasSuffix("."))
     }
 }
 

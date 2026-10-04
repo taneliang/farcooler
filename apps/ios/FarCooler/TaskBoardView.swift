@@ -120,8 +120,8 @@ struct WorkspaceBoardList: View {
                 } description: {
                     VStack(spacing: 16) {
                         TaskSkeleton().frame(maxWidth: 240)
-                        Text(
-                            BoardForm.blankLine(
+                        PhoneEmptyRows(
+                            copy: BoardForm.blankCopy(
                                 ledByOrchestrator: ledByOrchestrator,
                                 orchestratorRunning: orchestratorRunning))
                     }

@@ -53,30 +53,6 @@ fun TaskSkeleton(modifier: Modifier = Modifier) {
     }
 }
 
-/** What the orchestrator does: your request in a bubble, then the tasks it splits it into. */
-@Composable
-fun OrchestratorVignette(modifier: Modifier = Modifier) {
-    val fill = fill()
-    Row(modifier.semantics { invisibleToUser() }, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Icon(Icons.Outlined.Person, contentDescription = null, tint = fill, modifier = Modifier.size(22.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(
-                Modifier.width(104.dp).height(24.dp).border(1.dp, fill, RoundedCornerShape(9.dp)),
-                contentAlignment = Alignment.CenterStart,
-            ) {
-                Box(Modifier.padding(start = 10.dp).width(72.dp).height(6.dp).background(fill, RoundedCornerShape(3.dp)))
-            }
-            listOf(56, 38, 48).forEach { width ->
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Box(Modifier.width(10.dp).height(1.dp).background(fill))
-                    Box(Modifier.size(7.dp).border(1.2.dp, fill, CircleShape))
-                    Box(Modifier.width(width.dp).height(6.dp).background(fill, RoundedCornerShape(3.dp)))
-                }
-            }
-        }
-    }
-}
-
 /** This phone, three dots, and a runner: "this reaches that" without a word. */
 @Composable
 fun PhoneOnboardingMark(modifier: Modifier = Modifier) {

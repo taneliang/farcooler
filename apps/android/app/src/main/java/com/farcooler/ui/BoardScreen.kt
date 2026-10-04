@@ -230,11 +230,13 @@ fun BoardTab(
                 // tell, how to start one: the orchestrator owns the task list.
                 board.isEmpty && workspace.id !in unread -> {
                     val led = !workspace.isImplicit
+                    val copy = PhoneFirstRun.blankCopy(led, orchestratorRunning)
                     EmptyState(
                         title = FirstRunCopy.BOARD_TITLE,
-                        detail = PhoneFirstRun.blankLine(led, orchestratorRunning),
+                        detail = copy.lede,
                         modifier = Modifier.fillMaxSize().testTag("board-empty"),
                     ) {
+                        if (copy.rows.isNotEmpty()) PhoneEmptyRows(copy)
                         TaskSkeleton(Modifier.widthIn(max = 240.dp).padding(vertical = 8.dp))
                         if (PhoneFirstRun.offersOrchestrator(led, orchestratorRunning) && onShowOrchestrator != null) {
                             OutlinedButton(

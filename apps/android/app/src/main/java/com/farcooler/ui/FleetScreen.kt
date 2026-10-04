@@ -321,12 +321,18 @@ internal fun WorktreeList(
 
         if (visible.isEmpty()) {
             item(key = "empty") {
-                Text(
-                    scope.emptySentence,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                )
+                Column(
+                    Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        scope.emptySentence,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    // A lede and icon rows where the list has them (ov-245).
+                    scope.emptyCopy?.let { PhoneEmptyRows(it) }
+                }
             }
         }
 

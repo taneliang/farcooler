@@ -50,16 +50,18 @@ class PhoneFirstRunTest {
 
     @Test
     fun `a blank board's line depends on whether an orchestrator leads it and is running`() {
-        val up = PhoneFirstRun.blankLine(ledByOrchestrator = true, orchestratorRunning = true)
-        val down = PhoneFirstRun.blankLine(ledByOrchestrator = true, orchestratorRunning = false)
-        val implicit = PhoneFirstRun.blankLine(ledByOrchestrator = false, orchestratorRunning = false)
-        assertEquals(FirstRunCopy.BOARD_WITH_ORCHESTRATOR, up)
-        assertEquals(FirstRunCopy.BOARD_NO_ORCHESTRATOR, down)
-        assertTrue(down.startsWith("Start the orchestrator"))
-        assertFalse(implicit.contains("orchestrator"))
-        for (line in listOf(up, down, implicit)) {
+        val up = PhoneFirstRun.blankCopy(ledByOrchestrator = true, orchestratorRunning = true)
+        val down = PhoneFirstRun.blankCopy(ledByOrchestrator = true, orchestratorRunning = false)
+        val implicit = PhoneFirstRun.blankCopy(ledByOrchestrator = false, orchestratorRunning = false)
+        assertEquals(PhoneEmptyStates.BOARD_WITH_ORCHESTRATOR, up)
+        assertEquals(PhoneEmptyStates.BOARD_NO_ORCHESTRATOR, down)
+        assertTrue(down.rows.first().text.startsWith("Start the orchestrator"))
+        assertFalse(implicit.lede.contains("orchestrator"))
+        assertTrue(implicit.rows.isEmpty())
+        for (copy in listOf(up, down, implicit)) {
+            val line = (listOf(copy.lede) + copy.rows.map { it.text }).joinToString(" ")
             assertFalse(line.contains("grouped by", ignoreCase = true))
-            assertTrue(line.endsWith("."))
+            assertTrue(copy.lede.endsWith("."))
         }
     }
 
@@ -102,17 +104,21 @@ class PhoneFirstRunTest {
     fun `the front door says no agents are working when workspaces have no orchestrator`() {
         val idle = listOf(RunnerCount(RunnerLink.ANSWERING, 0, true))
         assertEquals(
-            FirstRunCopy.NO_ORCHESTRATOR_RUNNING,
+            PhoneEmptyStates.NO_AGENTS_WORKING.lede,
             reassurance(idle, "", worktrees = 1, noOrchestrator = true),
         )
+        assertTrue(idleWithoutOrchestrator(idle, noOrchestrator = true))
+        assertFalse(idleWithoutOrchestrator(idle, noOrchestrator = false))
+        assertFalse(idleWithoutOrchestrator(emptyList(), noOrchestrator = true))
         // Agents already working make that untrue.
         val busy = listOf(RunnerCount(RunnerLink.ANSWERING, 2, true))
         assertEquals("2 agents are working.", reassurance(busy, "", worktrees = 1, noOrchestrator = true))
+        assertFalse(idleWithoutOrchestrator(busy, noOrchestrator = true))
         assertEquals("Nothing is running.", reassurance(idle, "", worktrees = 1, noOrchestrator = false))
     }
 
     @Test
     fun `the no orchestrator sentence says what a workspace is for`() {
-        assertTrue(FirstRunCopy.NO_ORCHESTRATOR_RUNNING.contains("one line of work"))
+        assertTrue(PhoneEmptyStates.NO_AGENTS_WORKING.rows.any { it.text.contains("one line of work") })
     }
 }

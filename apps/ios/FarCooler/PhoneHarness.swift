@@ -33,6 +33,7 @@ import SwiftUI
 //   -phone-billing-blank     Billing's board has no task (Main's already has none)
 //   -phone-claude-missing    the runner found codex and cursor-agent, not claude
 //   -phone-none-installed    the runner found none of the three agents
+//   -phone-draft-refused     the runner won't paste Ask the Orchestrator's draft, so it's copied
 //   -phone-start-127         a started orchestrator's pane ends at once, exit 127
 //   -phone-webhooks-hidden   fc-3-webhooks is put away, in Billing's Hidden
 //   -phone-start-states     Billing's board also holds bil-11 (a subagent running,
@@ -454,6 +455,18 @@ final class HarnessRunner {
                 connection.standIn(on: fleet())
             }
             return try json(["id": Self.billingOrchestrator])
+        case "terminal.draft_prompt":
+            // Ask the Orchestrator's paste into a terminal orchestrator (ov-241).
+            // `-phone-draft-refused`: the runner can't prove the pane safe, so the
+            // phone copies the reference instead.
+            guard args["terminal"] as? String == Self.billingOrchestrator,
+                let text = args["text"] as? String, text.hasPrefix("About bil-")
+            else { throw ClientCore.CoreError.rejected("bad draft", word: "invalid-argument") }
+            if CommandLine.arguments.contains("-phone-draft-refused") {
+                throw ClientCore.CoreError.rejected("not safe to paste", word: "agent-not-connected")
+            }
+            sent.append("draft billing \(text)")
+            return try json([:])
         case "worktree.hide", "worktree.unhide":
             if CommandLine.arguments.contains("-phone-hide-fails") {
                 throw ClientCore.CoreError.rejected("unavailable", word: "unavailable")

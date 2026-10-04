@@ -164,6 +164,16 @@ fun liveSummary(runners: List<RunnerCount>): String {
 }
 
 /**
+ * Whether [reassurance] says "No agents are working yet.", which the screen
+ * follows with [PhoneEmptyStates.NO_AGENTS_WORKING]'s rows (ov-245): a runner
+ * answered, nothing is working, and workspaces exist with no orchestrator.
+ */
+fun idleWithoutOrchestrator(runners: List<RunnerCount>, noOrchestrator: Boolean): Boolean {
+    if (runners.isEmpty() || !noOrchestrator) return false
+    return (fleetReading(runners) as? FleetReading.Live)?.count == 0
+}
+
+/**
  * What is happening, given that nothing needs you: the front door's line under
  * "Nothing needs you".
  *
@@ -190,8 +200,9 @@ fun reassurance(
         is FleetReading.Live -> {
             val working = reading.count
             if (working == 0 && noOrchestrator) {
-                // Purpose first: no agents are working, and the way to change that.
-                FirstRunCopy.NO_ORCHESTRATOR_RUNNING
+                // Purpose first: no agents are working. The way to change that is
+                // the rows under it ([idleWithoutOrchestrator]).
+                PhoneEmptyStates.NO_AGENTS_WORKING.lede
             } else if (working == 0 && worktrees == 0) {
                 "Nothing is running$where yet."
             } else {

@@ -150,40 +150,22 @@ public enum FirstRunCopy {
         public static let onboardingTitle = "Connect to Your Agents"
         public static let onboardingPrimary = "Connect This Device"
         public static let onboardingSecondary = "More Ways to Add…"
-        public static let noRepositoriesBody =
-            "Add the Git repository you want agents to work on, here or on your Mac with File > Add Repository."
         public static let addRepository = "Add Repository…"
         public static let nothingNeedsYou = "Nothing Needs You"
-        public static let noOrchestratorRunning =
-            "No agents are working yet. Each workspace below is one line of work, like a feature or a cleanup. "
-            + "Open one and start its orchestrator to give agents something to do."
         public static let orchestratorTitle = "No Orchestrator Yet"
-        public static let orchestratorBody =
-            "Instead of running each agent yourself, tell the orchestrator what you want done. "
-            + "It splits the work into tasks and starts an agent on each. The first time, it asks how you like to work."
         public static let start = "Start Orchestrator"
         public static let tryAgain = "Try Again"
         public static let boardTitle = "No Tasks"
-        public static let boardNoOrchestrator =
-            "Start the orchestrator and tell it what you want done. Each piece of work it hands out appears here as a task."
-        /// Duplicates ov-184's `BoardForm.blankLine`; one of the two goes when both land.
-        public static let boardWithOrchestrator =
-            "Tell the orchestrator what you want done. Each piece of work it hands out appears here as a task."
         public static let showOrchestrator = "Show Orchestrator"
         /// Shown only while this device isn't signed in: signing in pairs every
         /// runner for push (the owner's ruling, 3 Oct), so it's the one step.
         public static let pushBody =
             "To hear from your agents while Far Cooler is closed, sign in. Until then, notifications arrive only while it’s open."
         public static let signIn = "Sign In"
-        /// A workspace's Worktrees with none: what a worktree is, by its job.
-        public static let worktreesNone =
-            "No worktrees yet. When the orchestrator starts an agent on a task, the agent gets its own folder and branch, listed here."
         /// The Add Repository sheet, from Needs You.
         public static let repositorySubtitle = "Choose a Git repository on this runner for agents to work on."
         /// The same sheet, from New Worktree.
         public static let repositorySubtitleForWorktree = "Choose the repository for the new worktree."
-        /// A board on a runner too old for workspaces: no orchestrator leads it.
-        public static let boardImplicit = "Each piece of work on this board appears here as a task."
 
         /// `device` is the model's name: "iPhone" or "iPad".
         public static func onboardingBody(device: String) -> String {
@@ -235,11 +217,9 @@ public enum FirstRunCopy {
             Conversation.useRunningTerminal, Conversation.startingTitle, Conversation.startingBody,
             Conversation.startingSlow, Conversation.tryAgain, Conversation.useAnotherAgent,
             Conversation.stoppedTitle,
-            Phone.onboardingTitle, Phone.onboardingPrimary, Phone.onboardingSecondary, Phone.noRepositoriesBody,
-            Phone.addRepository, Phone.nothingNeedsYou, Phone.noOrchestratorRunning, Phone.orchestratorTitle,
-            Phone.orchestratorBody, Phone.start, Phone.tryAgain, Phone.boardTitle, Phone.boardNoOrchestrator,
-            Phone.boardWithOrchestrator, Phone.showOrchestrator, Phone.pushBody, Phone.signIn,
-            Phone.worktreesNone, Phone.repositorySubtitle, Phone.repositorySubtitleForWorktree, Phone.boardImplicit,
+            Phone.onboardingTitle, Phone.onboardingPrimary, Phone.onboardingSecondary, Phone.addRepository, Phone.nothingNeedsYou, Phone.orchestratorTitle,
+            Phone.start, Phone.tryAgain, Phone.boardTitle, Phone.showOrchestrator, Phone.pushBody, Phone.signIn,
+            Phone.repositorySubtitle, Phone.repositorySubtitleForWorktree,
             Phone.onboardingBody(device: "iPhone"), Phone.noRepositoriesTitle("build-01"),
             NotificationAsk.title, NotificationAsk.message, NotificationAsk.allow, NotificationAsk.decline,
         ]
@@ -253,6 +233,6 @@ public enum FirstRunCopy {
             strings.append(Phone.notInstalledBody(harness, on: "build-01"))
             for place in places { strings.append(Conversation.notInstalledBody(harness, on: place)) }
         }
-        return strings
+        return strings + PhoneEmptyStates.allStrings
     }
 }

@@ -35,46 +35,6 @@ struct TaskSkeleton: View {
     }
 }
 
-/// What the orchestrator does: your request in a bubble, then the tasks it
-/// splits it into, each ending in the branch its agent works on. The first
-/// appearance fades the rows in once; Reduce Motion skips that.
-struct OrchestratorVignette: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var shown = false
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "person.wave.2")
-                .font(.system(size: 18))
-                .foregroundStyle(.tertiary)
-            VStack(alignment: .leading, spacing: 8) {
-                // style-exempt: a drawing of a speech bubble, not a surface
-                RoundedRectangle(cornerRadius: 9)
-                    .strokeBorder(.quaternary, lineWidth: 1)
-                    .overlay(alignment: .leading) {
-                        Capsule().fill(.quaternary).frame(width: 72, height: 6).padding(.leading, 10)
-                    }
-                    .frame(width: 104, height: 24)
-                ForEach(0..<3, id: \.self) { i in
-                    HStack(spacing: 6) {
-                        Rectangle().fill(.quaternary).frame(width: 10, height: 1)
-                        Circle().strokeBorder(.quaternary, lineWidth: 1.2).frame(width: 7, height: 7)
-                        Capsule().fill(.quaternary).frame(width: [56, 38, 48][i], height: 6)
-                        Image(systemName: "arrow.triangle.branch")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.quaternary)
-                    }
-                    .opacity(shown || reduceMotion ? 1 : 0)
-                    .animation(
-                        reduceMotion ? nil : .easeOut(duration: 0.2).delay(0.06 * Double(i)), value: shown)
-                }
-            }
-        }
-        .accessibilityHidden(true)
-        .onAppear { shown = true }
-    }
-}
-
 /// This phone, three dots, and a runner: "this reaches that" without a word.
 struct PhoneOnboardingMark: View {
     var body: some View {

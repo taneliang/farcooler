@@ -324,6 +324,9 @@ sealed interface WorktreeScope {
     /** What an empty list says. */
     val emptySentence: String
 
+    /** The same as a lede and icon rows, where the list has them (ov-245); null where one line does. */
+    val emptyCopy: PhoneEmptyCopy? get() = null
+
     /** A workspace's own worktrees: its Worktrees tab. See [NeedsYou.worktreesOf]. */
     data class OfWorkspace(override val hostId: String, val workspace: WorkspaceSummary) : WorktreeScope {
         override fun includes(worktree: Worktree, fleet: Fleet): Boolean =
@@ -331,7 +334,9 @@ sealed interface WorktreeScope {
             else worktree.workspace == workspace.id
 
         override val emptySentence: String
-            get() = FirstRunCopy.WORKTREES_NONE
+            get() = PhoneEmptyStates.NO_WORKTREES.lede
+
+        override val emptyCopy: PhoneEmptyCopy get() = PhoneEmptyStates.NO_WORKTREES
     }
 
     /**

@@ -38,7 +38,9 @@ final class FirstRunUITests: XCTestCase {
         let title = element(app, "no-repositories-title")
         XCTAssertTrue(title.waitForExistence(timeout: 30), "no block: \(app.debugDescription)")
         XCTAssertTrue(title.label.hasPrefix("No Repositories on "), title.label)
-        XCTAssertTrue(element(app, "no-repositories-body").label.contains("Git repository"))
+        // A lede and two icon rows, not a paragraph (ov-245).
+        XCTAssertTrue(app.staticTexts["Add the repository you want agents to work in."].exists)
+        XCTAssertEqual(element(app, "no-repositories-body").descendants(matching: .any).matching(identifier: "empty-row").count, 2)
         app.buttons["no-repositories-add"].tap()
         XCTAssertTrue(app.navigationBars["Add Repository"].waitForExistence(timeout: 10))
         XCTAssertTrue(
@@ -60,9 +62,9 @@ final class FirstRunUITests: XCTestCase {
         app.buttons["segment-board"].tap()
         XCTAssertTrue(element(app, "board-empty").waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["No Tasks"].exists)
-        XCTAssertTrue(
-            app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Tell the orchestrator'"))
-                .firstMatch.exists)
+        XCTAssertTrue(app.staticTexts["The orchestrator fills this board."].exists)
+        XCTAssertTrue(app.staticTexts["Tell it what you want done"].exists)
+        XCTAssertFalse(app.staticTexts["Start the orchestrator first"].exists)
         XCTAssertFalse(app.buttons["board-show-orchestrator"].exists)
     }
 
@@ -73,11 +75,57 @@ final class FirstRunUITests: XCTestCase {
         openWorkspace(app, "Billing")
         app.buttons["segment-board"].tap()
         XCTAssertTrue(element(app, "board-empty").waitForExistence(timeout: 10))
-        XCTAssertTrue(
-            app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Start the orchestrator'"))
-                .firstMatch.exists)
+        XCTAssertTrue(app.staticTexts["Start the orchestrator first"].exists)
         app.buttons["board-show-orchestrator"].tap()
         XCTAssertTrue(app.buttons["start-orchestrator"].waitForExistence(timeout: 10))
+    }
+
+    /// **No Orchestrator is a lede and three icon rows, not a paragraph**
+    /// (ov-245), above the Start Orchestrator button.
+    func testNoOrchestratorIsALedeAndIconRows() throws {
+        let app = launch(["-phone-billing-blank"])
+        openWorkspace(app, "Billing")
+        app.buttons["segment-orchestrator"].tap()
+        XCTAssertTrue(app.buttons["start-orchestrator"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["An orchestrator runs this workspace’s board."].exists)
+        let rows = element(app, "empty-rows").descendants(matching: .any).matching(identifier: "empty-row")
+        XCTAssertEqual(rows.count, 3)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Instead of running'")).firstMatch.exists)
+    }
+
+    private func openTask(_ app: XCUIApplication, _ key: String) {
+        openWorkspace(app, "Billing")
+        app.buttons["segment-board"].tap()
+        let card = element(app, "board-card-\(key)")
+        XCTAssertTrue(card.waitForExistence(timeout: 10), "no card: \(app.debugDescription)")
+        card.tap()
+        XCTAssertTrue(element(app, "task-screen").waitForExistence(timeout: 10))
+    }
+
+    /// **Ask the Orchestrator is off, saying what to do, with none running**
+    /// (ov-241): never hidden, and never starts one.
+    func testAskTheOrchestratorIsOffWithoutOne() throws {
+        let app = launch([])
+        openTask(app, "bil-9")
+        let ask = app.buttons["ask-orchestrator"]
+        XCTAssertTrue(ask.waitForExistence(timeout: 10), "no row: \(app.debugDescription)")
+        XCTAssertFalse(ask.isEnabled)
+        XCTAssertTrue(app.staticTexts["Start an orchestrator to ask about this task"].exists)
+    }
+
+    /// **With an orchestrator it's on, and when the runner won't paste into
+    /// its terminal the reference is copied and the screen says so** (ov-241).
+    func testAskTheOrchestratorCopiesWhenTheRunnerWontPaste() throws {
+        let app = launch(["-phone-billing-led", "-phone-draft-refused"])
+        openTask(app, "bil-9")
+        let ask = app.buttons["ask-orchestrator"]
+        XCTAssertTrue(ask.waitForExistence(timeout: 10), "no row: \(app.debugDescription)")
+        XCTAssertTrue(ask.isEnabled)
+        ask.tap()
+        XCTAssertTrue(
+            app.staticTexts["Copied a reference to bil-9. Paste it into the orchestrator."]
+                .waitForExistence(timeout: 10),
+            "no notice: \(app.debugDescription)")
     }
 
     /// **An agent the runner doesn't have is listed and can't be chosen.**

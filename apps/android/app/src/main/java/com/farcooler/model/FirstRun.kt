@@ -87,11 +87,11 @@ object PhoneFirstRun {
     fun offersOrchestrator(ledByOrchestrator: Boolean, orchestratorRunning: Boolean): Boolean =
         ledByOrchestrator && !orchestratorRunning
 
-    /** What an empty board says under "No tasks". The iPhone's `BoardForm.blankLine`. */
-    fun blankLine(ledByOrchestrator: Boolean, orchestratorRunning: Boolean): String = when {
-        !ledByOrchestrator -> FirstRunCopy.BOARD_IMPLICIT
-        orchestratorRunning -> FirstRunCopy.BOARD_WITH_ORCHESTRATOR
-        else -> FirstRunCopy.BOARD_NO_ORCHESTRATOR
+    /** What an empty board says under "No tasks". The iPhone's `BoardForm.blankCopy`. */
+    fun blankCopy(ledByOrchestrator: Boolean, orchestratorRunning: Boolean): PhoneEmptyCopy = when {
+        !ledByOrchestrator -> PhoneEmptyStates.BOARD_IMPLICIT
+        orchestratorRunning -> PhoneEmptyStates.BOARD_WITH_ORCHESTRATOR
+        else -> PhoneEmptyStates.BOARD_NO_ORCHESTRATOR
     }
 }
 
@@ -116,35 +116,20 @@ object FirstRunCopy {
             "Connect this phone to one to answer your agents while you’re away from it."
     const val ONBOARDING_PRIMARY = "Connect this device"
     const val ONBOARDING_SECONDARY = "Add a runner"
-    const val NO_REPOSITORIES_BODY =
-        "Add the Git repository you want agents to work on, here or on your Mac with File > Add Repository."
     const val ADD_REPOSITORY = "Add repository"
     const val NOTHING_NEEDS_YOU = "Nothing needs you"
-    const val NO_ORCHESTRATOR_RUNNING =
-        "No agents are working yet. Each workspace below is one line of work, like a feature or a cleanup. " +
-            "Open one and start its orchestrator to give agents something to do."
     const val ORCHESTRATOR_TITLE = "No orchestrator yet"
-    const val ORCHESTRATOR_BODY =
-        "Instead of running each agent yourself, tell the orchestrator what you want done. " +
-            "It splits the work into tasks and starts an agent on each. The first time, it asks how you like to work."
     const val START = "Start orchestrator"
 
     /** Under a harness the runner doesn't have, which is disabled. */
     const val NOT_INSTALLED = "Not installed"
     const val TRY_AGAIN = "Try again"
     const val BOARD_TITLE = "No tasks"
-    const val BOARD_NO_ORCHESTRATOR =
-        "Start the orchestrator and tell it what you want done. Each piece of work it hands out appears here as a task."
-    const val BOARD_WITH_ORCHESTRATOR =
-        "Tell the orchestrator what you want done. Each piece of work it hands out appears here as a task."
     const val SHOW_ORCHESTRATOR = "Show orchestrator"
     const val PUSH_BODY =
         "To hear from your agents while Far Cooler is closed, sign in. Until then, notifications arrive only while it’s open."
     const val SIGN_IN = "Sign in"
-    const val WORKTREES_NONE =
-        "No worktrees yet. When the orchestrator starts an agent on a task, the agent gets its own folder and branch, listed here."
     const val REPOSITORY_SUBTITLE = "Choose a Git repository on this runner for agents to work on."
-    const val BOARD_IMPLICIT = "Each piece of work on this board appears here as a task."
 
     /** The explainer before the permission request, after the first runner (iOS: `NotificationAsk`). */
     const val NOTIFY_TITLE = "Get notified when an agent needs you"
@@ -164,11 +149,11 @@ object FirstRunCopy {
     /** Every string above, each function at every harness, for the voice check. */
     internal val all: List<String>
         get() = listOf(
-            ONBOARDING_TITLE, ONBOARDING_BODY, ONBOARDING_PRIMARY, ONBOARDING_SECONDARY, NO_REPOSITORIES_BODY,
-            ADD_REPOSITORY, NOTHING_NEEDS_YOU, NO_ORCHESTRATOR_RUNNING, ORCHESTRATOR_TITLE, ORCHESTRATOR_BODY,
-            START, NOT_INSTALLED, TRY_AGAIN, BOARD_TITLE, BOARD_NO_ORCHESTRATOR, BOARD_WITH_ORCHESTRATOR,
-            SHOW_ORCHESTRATOR, PUSH_BODY, SIGN_IN, WORKTREES_NONE, REPOSITORY_SUBTITLE,
-            BOARD_IMPLICIT, NOTIFY_TITLE, NOTIFY_BODY, NOTIFY_ALLOW, NOTIFY_DECLINE,
+            ONBOARDING_TITLE, ONBOARDING_BODY, ONBOARDING_PRIMARY, ONBOARDING_SECONDARY,
+            ADD_REPOSITORY, NOTHING_NEEDS_YOU, ORCHESTRATOR_TITLE,
+            START, NOT_INSTALLED, TRY_AGAIN, BOARD_TITLE,
+            SHOW_ORCHESTRATOR, PUSH_BODY, SIGN_IN, REPOSITORY_SUBTITLE,
+            NOTIFY_TITLE, NOTIFY_BODY, NOTIFY_ALLOW, NOTIFY_DECLINE,
             noRepositoriesTitle("build-01"),
-        ) + AgentHarness.entries.flatMap { listOf(it.title, notInstalledTitle(it), notInstalledBody(it, "build-01")) }
+        ) + PhoneEmptyStates.allStrings + AgentHarness.entries.flatMap { listOf(it.title, notInstalledTitle(it), notInstalledBody(it, "build-01")) }
 }

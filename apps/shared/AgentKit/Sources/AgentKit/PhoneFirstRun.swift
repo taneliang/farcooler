@@ -23,11 +23,11 @@ enum PhoneFirstRun {
         return !rows.isEmpty && rows.allSatisfy { $0.orchestrator == nil }
     }
 
-    /// The sentence for no orchestrator, under an empty Needs You: nil when
+    /// What to say for no orchestrator, under an empty Needs You: nil when
     /// one is running somewhere, or when `working` agents are at it anyway
     /// (a person's own), since "No agents are working yet" would be untrue.
-    static func noOrchestratorLine(sections: [PhoneRepositorySection], working: Int = 0) -> String? {
+    static func noOrchestratorCopy(sections: [PhoneRepositorySection], working: Int = 0) -> PhoneEmptyCopy? {
         guard working == 0, noOrchestratorAnywhere(sections) else { return nil }
-        return FirstRunCopy.Phone.noOrchestratorRunning
+        return PhoneEmptyStates.noAgentsWorking
     }
 }

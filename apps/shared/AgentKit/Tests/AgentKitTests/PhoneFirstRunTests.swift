@@ -34,13 +34,13 @@ private func section(_ repository: String, _ rows: [PhoneWorkspaceRow]) -> Phone
     #expect(!PhoneFirstRun.noOrchestratorAnywhere([section("a", [row("a", orchestrator: nil, implicit: true)])]))
 }
 
-@Test func theNoOrchestratorLineTeachesWhatAWorkspaceIsFor() {
-    let line = PhoneFirstRun.noOrchestratorLine(sections: [section("a", [row("main", orchestrator: nil)])])
-    #expect(line == FirstRunCopy.Phone.noOrchestratorRunning)
-    #expect(line?.contains("one line of work") == true)
-    #expect(PhoneFirstRun.noOrchestratorLine(sections: []) == nil)
+@Test func theNoOrchestratorCopyTeachesWhatAWorkspaceIsFor() {
+    let copy = PhoneFirstRun.noOrchestratorCopy(sections: [section("a", [row("main", orchestrator: nil)])])
+    #expect(copy == PhoneEmptyStates.noAgentsWorking)
+    #expect(copy?.rows.contains { $0.text.contains("one line of work") } == true)
+    #expect(PhoneFirstRun.noOrchestratorCopy(sections: []) == nil)
     // Agents already working make "no agents are working yet" untrue.
-    #expect(PhoneFirstRun.noOrchestratorLine(sections: [section("a", [row("main", orchestrator: nil)])], working: 2) == nil)
+    #expect(PhoneFirstRun.noOrchestratorCopy(sections: [section("a", [row("main", orchestrator: nil)])], working: 2) == nil)
 }
 
 @Test func aQuickExit127NamesTheAgentThatWasAskedFor() {

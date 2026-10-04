@@ -306,8 +306,7 @@ struct OrchestratorSegment: View {
             Label(FirstRunCopy.Phone.orchestratorTitle, systemImage: "person.crop.circle.badge.plus")
         } description: {
             VStack(spacing: 14) {
-                OrchestratorVignette()
-                Text(FirstRunCopy.Phone.orchestratorBody)
+                PhoneEmptyRows(copy: PhoneEmptyStates.noOrchestrator)
                 if availability.isKnown && availability.installed.isEmpty {
                     Text(FirstRunCopy.Conversation.noneInstalled(on: .runner(connection.hostLabel)))
                         .accessibilityIdentifier("orchestrator-none-installed")
@@ -564,8 +563,9 @@ private struct WorkspaceWorktrees: View {
         List {
             if owned.isEmpty {
                 Section {
-                    Text(FirstRunCopy.Phone.worktreesNone)
-                        .foregroundStyle(.secondary)
+                    PhoneEmptyRows(copy: PhoneEmptyStates.noWorktrees, compact: true)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
                         .accessibilityIdentifier("worktrees-empty")
                 }
             } else {

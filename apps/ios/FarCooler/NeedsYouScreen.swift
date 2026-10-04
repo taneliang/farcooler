@@ -130,10 +130,9 @@ struct NeedsYouScreen: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Label(FirstRunCopy.Phone.nothingNeedsYou, systemImage: "checkmark.circle")
                         .foregroundStyle(.secondary)
-                    if let line = PhoneFirstRun.noOrchestratorLine(sections: allSections, working: workingAgents) {
-                        Text(line)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                    if let copy = PhoneFirstRun.noOrchestratorCopy(sections: allSections, working: workingAgents) {
+                        PhoneEmptyRows(copy: copy, compact: true)
+                            .padding(.top, 4)
                             .accessibilityIdentifier("needs-you-no-orchestrator")
                     }
                     if let caveat = PhoneInbox.caveat(unanswered: unanswered) {
@@ -328,10 +327,7 @@ struct NeedsYouScreen: View {
                     .font(.headline)
                     .multilineTextAlignment(.center)
                     .accessibilityIdentifier("no-repositories-title")
-                Text(FirstRunCopy.Phone.noRepositoriesBody)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+                PhoneEmptyRows(copy: PhoneEmptyStates.noRepositories, compact: true)
                     .accessibilityIdentifier("no-repositories-body")
                 if fleet.connection(for: runner.id)?.daemon?.mayAct ?? true {
                     Button(FirstRunCopy.Phone.addRepository) { addingRepository = runner }

@@ -58,6 +58,7 @@ import com.farcooler.data.Runner
 import com.farcooler.model.AgentActivity
 import com.farcooler.model.FirstRunCopy
 import com.farcooler.model.GlancePalette
+import com.farcooler.model.PhoneEmptyStates
 import com.farcooler.model.PhoneFirstRun
 import com.farcooler.model.NeedsYou
 import com.farcooler.model.NeedsYouAnswer
@@ -65,6 +66,7 @@ import com.farcooler.model.NeedsYouButton
 import com.farcooler.model.NeedsYouKind
 import com.farcooler.model.NeedsYouRow
 import com.farcooler.model.RunnerCount
+import com.farcooler.model.idleWithoutOrchestrator
 import com.farcooler.model.reassurance
 import com.farcooler.net.Connection
 import com.farcooler.net.rethrowIfCancellation
@@ -238,9 +240,10 @@ fun NeedsYouScreen(model: AppModel, onOpenDrawer: () -> Unit) {
                 items(withoutRepositories, key = { "no-repositories/${it.host.id}" }) { connection ->
                     EmptyState(
                         title = FirstRunCopy.noRepositoriesTitle(connection.host.displayLabel),
-                        detail = FirstRunCopy.NO_REPOSITORIES_BODY,
+                        detail = PhoneEmptyStates.NO_REPOSITORIES.lede,
                         modifier = Modifier.testTag("no-repositories"),
                     ) {
+                        PhoneEmptyRows(PhoneEmptyStates.NO_REPOSITORIES)
                         if (connection.daemon.value?.grantedScope != "read") {
                             Button(
                                 onClick = { addingRepositoryTo = connection },
@@ -554,6 +557,10 @@ private fun Reassurance(
         detail = reassurance(runners, where, worktrees, noOrchestrator),
         icon = Icons.Outlined.CheckCircleOutline,
     ) {
+        // "No agents are working yet." and what to do about it (ov-245).
+        if (idleWithoutOrchestrator(runners, noOrchestrator)) {
+            PhoneEmptyRows(PhoneEmptyStates.NO_AGENTS_WORKING)
+        }
         if (caveat != null) {
             Text(
                 caveat,
