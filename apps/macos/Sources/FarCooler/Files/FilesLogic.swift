@@ -1,3 +1,4 @@
+import AgentKit
 import Foundation
 
 /// The Files tab's rules, as values (ov-189): which rows the tree draws, what
@@ -20,9 +21,7 @@ enum FilesLogic {
     }
 
     /// `parent`'s child named `name`, as a path from the root.
-    static func join(_ parent: String, _ name: String) -> String {
-        parent.isEmpty ? name : "\(parent)/\(name)"
-    }
+    static func join(_ parent: String, _ name: String) -> String { FilesPaths.join(parent, name) }
 
     /// The rows a tree draws: each directory read so far, its children under
     /// it when it's expanded, depth first. A directory not read yet draws as
@@ -57,84 +56,26 @@ enum FilesLogic {
     // MARK: - Paths from elsewhere
 
     /// `location`, a path an agent's tool call named, as a path inside the
-    /// worktree at `root`, or nil when it's somewhere else.
-    ///
-    /// Agents name absolute paths (ACP's `locations`). Lexical only, and the
-    /// runner walks it again without following links, so a path that only
-    /// looks inside is still refused there.
+    /// worktree at `root`, or nil when it's somewhere else (`FilesPaths`).
     static func relative(_ location: String, in root: String) -> String? {
-        let root = trimmedRoot(root)
-        guard !root.isEmpty else { return nil }
-        let path: String
-        if location.hasPrefix("/") {
-            let candidates = [root, "/private" + root].filter { location.hasPrefix($0 + "/") }
-            guard let match = candidates.first else { return nil }
-            path = String(location.dropFirst(match.count + 1))
-        } else {
-            path = location
-        }
-        return normalized(path)
+        FilesPaths.relative(location, in: root)
     }
 
     /// Where a link at `path` leads, as a path inside the worktree at `root`,
     /// or nil when it leaves the worktree.
     static func linkDestination(_ path: String, target: String, root: String) -> String? {
-        if target.hasPrefix("/") { return relative(target, in: root) }
-        let parent = (path as NSString).deletingLastPathComponent
-        return normalized(join(parent, target))
+        FilesPaths.linkDestination(path, target: target, root: root)
     }
 
     /// `path` with `.` and `..` worked out, or nil when `..` climbs above the
     /// root or nothing is left.
-    static func normalized(_ path: String) -> String? {
-        var parts: [Substring] = []
-        for part in path.split(separator: "/", omittingEmptySubsequences: true) {
-            switch part {
-            case ".": continue
-            case "..":
-                guard !parts.isEmpty else { return nil }
-                parts.removeLast()
-            default: parts.append(part)
-            }
-        }
-        return parts.isEmpty ? nil : parts.joined(separator: "/")
-    }
-
-    private static func trimmedRoot(_ root: String) -> String {
-        var root = root
-        while root.count > 1 && root.hasSuffix("/") { root.removeLast() }
-        return root
-    }
+    static func normalized(_ path: String) -> String? { FilesPaths.normalized(path) }
 
     // MARK: - Text
 
-    /// A file's lines, as the viewer numbers them: broken at `\n`, `\r\n`
-    /// and a bare `\r` (an old Mac file), none of them shown, and no phantom
-    /// empty line after a final break.
-    ///
-    /// By scalar, not by `Character`: Swift reads `\r\n` as ONE character,
-    /// so splitting on `"\n"` never split a Windows file at all, and it drew
-    /// as one line.
-    static func lines(of text: String) -> [String] {
-        var lines: [String] = []
-        var current = String.UnicodeScalarView()
-        var afterReturn = false
-        for scalar in text.unicodeScalars {
-            if afterReturn {
-                afterReturn = false
-                if scalar == "\n" { continue }
-            }
-            if scalar == "\n" || scalar == "\r" {
-                lines.append(String(current))
-                current = String.UnicodeScalarView()
-                afterReturn = scalar == "\r"
-            } else {
-                current.append(scalar)
-            }
-        }
-        if !current.isEmpty { lines.append(String(current)) }
-        return lines
-    }
+    /// A file's lines, as the viewer numbers them: `\n`, `\r\n` and a bare
+    /// `\r` end one, and a final break adds no empty line (`FilesText`).
+    static func lines(of text: String) -> [String] { FilesText.lines(of: text) }
 
     /// One place a find matched: a line, and a range in it.
     struct Match: Equatable {
@@ -193,9 +134,7 @@ enum FilesLogic {
     }
 
     /// A file's size the way Finder says it.
-    static func size(_ bytes: UInt64) -> String {
-        ByteCountFormatter.string(fromByteCount: Int64(clamping: bytes), countStyle: .file)
-    }
+    static func size(_ bytes: UInt64) -> String { FilesText.size(bytes) }
 
     /// The width the longest line needs, in characters, for a horizontal
     /// scroller whose width is stated rather than measured (`ChangesPane`'s

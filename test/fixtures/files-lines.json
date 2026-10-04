@@ -1,0 +1,25 @@
+{
+  "_comment": "How a file's text is numbered and cut for the Files viewers (ov-189, ov-259). Read by AgentKit's FilesBrowserTests and Android's FilesTest. `lines`: text broken at LF, CRLF and a lone CR, none of them shown, and no empty line after a final break. `display`: a line is text = prefix + repeat * count; limit is in UTF-16 code units, the unit both languages count strings in; a line over the limit is cut at it, never inside a surrogate pair, and ends with an ellipsis; `keeps` is how many code units survive before the ellipsis.",
+  "lines": [
+    { "text": "", "lines": [] },
+    { "text": "a", "lines": ["a"] },
+    { "text": "a\n", "lines": ["a"] },
+    { "text": "a\nb", "lines": ["a", "b"] },
+    { "text": "a\n\nb", "lines": ["a", "", "b"] },
+    { "text": "a\r\nb\r\n", "lines": ["a", "b"] },
+    { "text": "a\rb\r", "lines": ["a", "b"] },
+    { "text": "a\r\n\r\nb", "lines": ["a", "", "b"] },
+    { "text": "\n", "lines": [""] },
+    { "text": "a\n\n", "lines": ["a", ""] },
+    { "text": "tab\there", "lines": ["tab\there"] }
+  ],
+  "display": [
+    { "prefix": "", "repeat": "a", "count": 10, "limit": 2000, "keeps": 10, "cut": false },
+    { "prefix": "", "repeat": "a", "count": 2000, "limit": 2000, "keeps": 2000, "cut": false },
+    { "prefix": "", "repeat": "a", "count": 2001, "limit": 2000, "keeps": 2000, "cut": true },
+    { "prefix": "", "repeat": "a", "count": 500000, "limit": 2000, "keeps": 2000, "cut": true },
+    { "prefix": "", "repeat": "😀", "count": 1500, "limit": 2000, "keeps": 2000, "cut": true },
+    { "prefix": "a", "repeat": "😀", "count": 1500, "limit": 2000, "keeps": 1999, "cut": true },
+    { "prefix": "", "repeat": "😀", "count": 1000, "limit": 2000, "keeps": 2000, "cut": false }
+  ]
+}

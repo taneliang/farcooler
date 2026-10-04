@@ -214,6 +214,12 @@ AGENTKIT_SOURCES = [
     # Here for the same reason: an orchestrator drawn as one more terminal of
     # the worktree it runs in looks fine on screen. See `ShellWorkspacesTests`.
     "ShellWorkspaces.swift",
+    # The read-only Files browser's wire shapes, path rules and sentences, and
+    # its screens' model (ov-259). The Mac's Files tab reads the same types;
+    # the iOS target has no unit tests, so the rules live where `swift test`
+    # reaches them. See `FilesBrowserTests`.
+    "Files.swift",
+    "FilesBrowser.swift",
     # What a phone says before it closes a terminal, and the rule for when it
     # says anything at all. Here for `ShellNavigation.swift`'s reason and for
     # one of its own: closing is irreversible — the pane is killed and the

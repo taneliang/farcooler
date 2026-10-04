@@ -148,13 +148,18 @@ public struct DaemonBuild: Equatable, Sendable {
     /// reads as offering every harness (ov-205).
     public let agentsFound: [String]?
 
+    /// The names of the runner's extra read-only folders (`Host.read_only_folders`,
+    /// ov-232), or nil when it didn't say: a runner too old to have them
+    /// (ov-259). Names only: a phone never learns the path.
+    public let readOnlyFolders: [String]?
+
     /// Which orchestrator harnesses this runner can start.
     public var availability: HarnessAvailability { HarnessAvailability(agentsFound: agentsFound) }
 
     public init(
         version: String, matches: Bool, platform: String, capabilities: Set<String> = [],
         grantedScope: String = "unspecified", runnerId: String? = nil, pushPaired: Bool = false,
-        runnerIsNewer: Bool = false, agentsFound: [String]? = nil
+        runnerIsNewer: Bool = false, agentsFound: [String]? = nil, readOnlyFolders: [String]? = nil
     ) {
         self.version = version
         self.matches = matches
@@ -165,6 +170,7 @@ public struct DaemonBuild: Equatable, Sendable {
         self.pushPaired = pushPaired
         self.runnerIsNewer = runnerIsNewer
         self.agentsFound = agentsFound
+        self.readOnlyFolders = readOnlyFolders
     }
 
     /// Whether this connection may ask for the calls that change the runner
