@@ -8,7 +8,7 @@
   "apps/macos/Sources/FarCooler/ColumnHeader.swift": {"separator": 1},
   "apps/macos/Sources/FarCooler/Commands.swift": {"separator": 13},
   "apps/macos/Sources/FarCooler/Components/CompactTaskRow.swift": {"fill": 1},
-  "apps/macos/Sources/FarCooler/ContentView.swift": {"material": 1, "separator": 1},
+  "apps/macos/Sources/FarCooler/ContentView+WorkspaceDetail.swift": {"material": 1, "separator": 1},
   "apps/macos/Sources/FarCooler/DaemonSkew.swift": {"separator": 1},
   "apps/macos/Sources/FarCooler/DiffView.swift": {"fill": 1, "radius": 1},
   "apps/macos/Sources/FarCooler/GroupBar.swift": {"fill": 1, "radius": 1},
