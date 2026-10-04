@@ -110,7 +110,7 @@ struct JumpBarKeysTests {
     @Test("Typing a key highlights that task, not the one above it whose key it begins")
     func typedKey() {
         func task(_ key: String, _ title: String) -> JumpItem {
-            JumpItem(id: key, title: "\(key) \(title)", key: key, target: .go(place(key)))
+            JumpItem(id: key, title: "\(key) \(title)", key: key, target: .go(Self.place(key)))
         }
         let menus = [JumpMenu([JumpSection(title: "Backlog", items: [
             task("lo-37", "Remove the legacy aliases"), task("lo-3", "Coordinator agreement"), task("lo-13", "Tidy"),
@@ -119,7 +119,7 @@ struct JumpBarKeysTests {
         for c in "lo-3" { _ = JumpBarKeys.handle(.character(c), state: &state, menus: menus) }
         #expect(state.highlighted == "lo-3")
         #expect(menus[0].filtered(state.query).items.first?.id == "lo-37")
-        #expect(JumpBarKeys.handle(.return, state: &state, menus: menus) == .jump(.go(place("lo-3"))))
+        #expect(JumpBarKeys.handle(.return, state: &state, menus: menus) == .jump(.go(Self.place("lo-3"))))
     }
 
     @Test("Keys with ⌘ or ⌃ pass through to the menu bar; the rest are the bar's")

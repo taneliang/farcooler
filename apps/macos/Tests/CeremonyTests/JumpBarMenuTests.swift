@@ -212,10 +212,10 @@ struct JumpBarMenuTests {
 
     @Test("A menu is as wide as its widest row, within bounds")
     func width() {
-        let narrow = JumpMenu([JumpSection(title: "", items: [JumpItem(id: "a", title: "a", target: .go(task("a")))])])
+        let narrow = JumpMenu([JumpSection(title: "", items: [JumpItem(id: "a", title: "a", target: .go(Self.task("a")))])])
         #expect(JumpMenuView.width(for: narrow) == JumpMenuView.minWidth)
         #expect(JumpMenuView.width(for: Self.keyed) == JumpMenuView.maxWidth)
-        let middle = JumpMenu([JumpSection(title: "", items: [JumpItem(id: "a", title: "lo-3 Coordinator agreement", subtitle: "pdf", target: .go(task("a")))])])
+        let middle = JumpMenu([JumpSection(title: "", items: [JumpItem(id: "a", title: "lo-3 Coordinator agreement", subtitle: "pdf", target: .go(Self.task("a")))])])
         let w = JumpMenuView.width(for: middle)
         #expect(w > JumpMenuView.minWidth && w < JumpMenuView.maxWidth)
     }
