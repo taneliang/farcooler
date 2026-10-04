@@ -185,6 +185,7 @@ final class Connection: ObservableObject {
     /// (`FocusMemory`). The `@SceneStorage` copy went with the navigation it
     /// belonged to, so a worktree reopened on the rule's answer.
     @Published private(set) var lastFocus: [String: PaneFocus] = [:]
+    private var focusLedger = FocusLedger<PaneFocus>()
 
     /// The fallback poll. See `startPolling` for what it is now a fallback TO.
     private var poller: Task<Void, Never>?
@@ -337,7 +338,7 @@ final class Connection: ObservableObject {
         newsRefresh?.cancel()
         reconnectTask?.cancel()
         self.host = host
-        loadRememberedFocus(runner: host.id.uuidString)
+        adoptFocusMemory(runner: host.id.uuidString)
         // The watch is no longer handed a connection here.
         //
         // It used to be: the phone ran one session and this was the one place
@@ -907,32 +908,8 @@ final class Connection: ObservableObject {
             let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             link == daemonLink
         else { return }
-        let build = DaemonBuild(
-            version: body["daemonVersion"] as? String ?? "unknown",
-            matches: body["buildsMatch"] as? Bool ?? true,
-            platform: body["platform"] as? String ?? "",
-            // Absent from a daemon older than capabilities. `DaemonBuild.can`
-            // reads an empty set as the features that existed then, so an old
-            // runner keeps working rather than going dark.
-            capabilities: Set(body["capabilities"] as? [String] ?? []),
-            // What THIS session may ask for, computed by the daemon from the
-            // real grant and carried in the handshake, so it costs no round
-            // trip on top of the one this call already makes.
-            //
-            // Absent — and "unspecified" — both mean "no answer", never "no
-            // permission". `DaemonBuild.mayAdministerRunner` reads either as
-            // "keep offering what we offer today", so a runner newer than this
-            // build cannot silently strip controls off it.
-            grantedScope: body["grantedScope"] as? String ?? "unspecified",
-            // Which runner this is, by its own id (ov-71). See
-            // `FleetSnapshot.Agent.hostRunner`.
-            runnerId: body["runnerId"] as? String,
-            // Whether its task notices reach this phone as pushes (ov-107).
-            // See `TaskLink.taskNoticeReachesPhone`.
-            pushPaired: body["pushPaired"] as? Bool ?? false,
-            // Which of claude, codex and cursor-agent it found (ov-205). Null
-            // from a runner too old to say, which offers every harness.
-            agentsFound: body["agentsFound"] as? [String])
+        // The `host` call's JSON as a build: every key and its default in `DaemonBuild(host:)`.
+        let build = DaemonBuild(host: body)
         daemon = build
         lastDaemon = build
         // Kept for the next launch, when a push names this runner before it
@@ -2272,23 +2249,20 @@ final class Connection: ObservableObject {
         // of choices must never hold: storing it would mean "the person picked
         // no opinion", and reading it back would beat the rule with nothing.
         if case .none = focus { return }
-        lastFocus[worktree] = focus
-        if let host { FocusMemory<PaneFocus>.save(lastFocus, runner: host.id.uuidString) }
+        focusLedger.remember(focus, in: worktree)
+        lastFocus = focusLedger.memory
     }
 
     /// The choices kept for `runner`, read at launch (the harness calls it too).
-    func loadRememberedFocus(runner: String) {
-        if lastFocus.isEmpty { lastFocus = FocusMemory<PaneFocus>.load(runner: runner) }
+    func adoptFocusMemory(runner: String) {
+        focusLedger.adopt(runner: runner)
+        lastFocus = focusLedger.memory
     }
 
-    /// Forget choices in worktrees a loaded fleet no longer has. Not on an empty
-    /// one: that is a runner that hasn't answered, and would forget them all.
+    /// Forget choices in worktrees a loaded fleet no longer has.
     private func pruneFocus(to fleet: Fleet) {
-        guard !fleet.worktrees.isEmpty, let host else { return }
-        let kept = FocusMemory<PaneFocus>.pruned(lastFocus, keeping: Set(fleet.worktrees.map(\.id)))
-        guard kept.count != lastFocus.count else { return }
-        lastFocus = kept
-        FocusMemory<PaneFocus>.save(kept, runner: host.id.uuidString)
+        focusLedger.prune(keeping: Set(fleet.worktrees.map(\.id)))
+        lastFocus = focusLedger.memory
     }
 
     #if DEBUG

@@ -296,7 +296,7 @@ final class HarnessRunner {
     }
 
     func stand() async {
-        connection.loadRememberedFocus(runner: Self.host.id.uuidString)
+        connection.adoptFocusMemory(runner: Self.host.id.uuidString)
         connection.standInCalls = { [weak self] method, args in
             guard let self else { throw ClientCore.CoreError.notStarted }
             return try await self.answer(method, args)

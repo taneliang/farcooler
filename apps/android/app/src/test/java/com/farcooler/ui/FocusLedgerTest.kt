@@ -88,4 +88,27 @@ class FocusLedgerTest {
         assertEquals(setOf("a/w1"), next.ledger.focus.value.keys)
         assertTrue(next.kept.read(Backstack.FOCUS_KEY)!!.contains("a/w1"))
     }
+
+    /**
+     * `AppModel` needs an `Application`, so a JVM test can't build it; these read
+     * its source for the three calls that make the ledger the app's. Each goes
+     * red when its call is removed, which is the restore going quietly dead.
+     */
+    private fun appModel(): String {
+        var dir: java.io.File? = java.io.File(System.getProperty("user.dir") ?: ".").absoluteFile
+        while (dir != null) {
+            val f = java.io.File(dir, "app/src/main/java/com/farcooler/ui/AppModel.kt")
+            if (f.isFile) return f.readText()
+            dir = dir.parentFile
+        }
+        throw AssertionError("no AppModel.kt above ${System.getProperty("user.dir")}")
+    }
+
+    @Test
+    fun `the model restores the ledger at launch, records into it and prunes it`() {
+        val source = appModel()
+        assertTrue(source.contains("focusLedger.restore()"))
+        assertTrue(source.substringAfter("private fun record(").substringBefore("keepDestination()").contains("focusLedger.record("))
+        assertTrue(source.substringAfter("private fun settle()").substringBefore("\n    }\n").contains("focusLedger.prune("))
+    }
 }

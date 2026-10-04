@@ -193,6 +193,18 @@ struct FilesItemModelTests {
         #expect(FilesLocation(place: .worktree("w"), path: "src/lib").title == "lib")
     }
 
+    /// A Linux runner's two names that differ only in bytes UTF-8 can't read
+    /// both arrive as "x\u{FFFD}"; a list keyed by name would repeat an id.
+    @Test func twoNamesThatDecodeAlikeAreTwoRowsWithTwoIds() {
+        let dir = FilesItemModel.directory(
+            FileListing(
+                path: "", entries: [entry("x\u{FFFD}", .file), entry("x\u{FFFD}", .file), entry("y", .directory)],
+                truncated: false),
+            at: FilesLocation(place: wt), root: "")
+        #expect(dir.rows.count == 3)
+        #expect(Set(dir.rows.map(\.id)).count == 3)
+    }
+
     @Test func aTruncatedListingAndAnEmptyOneSaySo() {
         let cut = FilesItemModel.directory(
             FileListing(path: "", entries: (0..<5_000).map { entry("f\($0)", .file) }, truncated: true),
@@ -314,5 +326,31 @@ struct FilesDoorTests {
         #expect(build(both, folders: nil).sharedFolders.isEmpty)
         #expect(build(["worktree_files"], folders: ["logs"]).sharedFolders.isEmpty, "names without the capability")
         #expect(build(both, scope: "read", folders: ["logs"]).sharedFolders.isEmpty)
+    }
+}
+
+struct HostBuildTests {
+    /// What the client core's `host` answers for a runner that shares a folder
+    /// (`crates/client/src/ffi/files_phone_tests.rs` pins the Rust side).
+    private let wire = """
+        {"runnerId":"r1","pushPaired":false,"agentsFound":["claude"],"daemonVersion":"1","buildsMatch":true,
+         "capabilities":["worktree_files","read_only_folders"],"grantedScope":"control","platform":"linux",
+         "readOnlyFolders":["logs","notes"]}
+        """
+
+    @Test func theRealHostAnswerShowsTheRunnersFolders() throws {
+        let body = try #require(
+            JSONSerialization.jsonObject(with: Data(wire.utf8)) as? [String: Any])
+        let build = DaemonBuild(host: body)
+        #expect(build.readOnlyFolders == ["logs", "notes"])
+        #expect(build.sharedFolders == ["logs", "notes"])
+        #expect(build.offersFiles)
+        #expect(build.agentsFound == ["claude"] && build.runnerId == "r1")
+    }
+
+    @Test func aRunnerThatSaysNothingOffersNothing() {
+        let build = DaemonBuild(host: [:])
+        #expect(build.readOnlyFolders == nil && build.sharedFolders.isEmpty && !build.offersFiles)
+        #expect(build.grantedScope == "unspecified" && build.version == "unknown")
     }
 }

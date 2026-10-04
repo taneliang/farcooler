@@ -39,3 +39,49 @@ public enum FocusMemory<Value: Codable & Sendable> {
         memory.filter { worktrees.contains($0.key) }
     }
 }
+
+/// One runner's chosen tabs as a `Connection` holds them: loaded when the
+/// connection starts, saved on every choice, pruned to a loaded fleet (ov-233).
+///
+/// A value, so a test reaches the save, the load and the prune without a
+/// runner. `Connection` holds one and `FocusLedgerWiringTests` pins that its
+/// `start` adopts and its `rememberFocus` remembers.
+public struct FocusLedger<Value: Codable & Sendable>: Sendable {
+    public private(set) var memory: [String: Value] = [:]
+    private var runner: String?
+    private let defaults: UserDefaultsBox
+
+    /// `UserDefaults` isn't `Sendable`; this carries one.
+    private struct UserDefaultsBox: @unchecked Sendable { let defaults: UserDefaults }
+
+    public init(defaults: UserDefaults = .standard) {
+        self.defaults = UserDefaultsBox(defaults: defaults)
+    }
+
+    /// The runner this is for is known: read what was kept for it. A choice made
+    /// before this wins over the kept one for its worktree, and the merge is
+    /// written back, so an early choice doesn't overwrite the rest.
+    public mutating func adopt(runner: String) {
+        self.runner = runner
+        let before = memory
+        memory = FocusMemory<Value>.load(runner: runner, from: defaults.defaults)
+            .merging(before) { _, new in new }
+        if !before.isEmpty { FocusMemory<Value>.save(memory, runner: runner, to: defaults.defaults) }
+    }
+
+    /// Somebody chose `value` in `worktree`. Written at once when the runner is known.
+    public mutating func remember(_ value: Value, in worktree: String) {
+        memory[worktree] = value
+        if let runner { FocusMemory<Value>.save(memory, runner: runner, to: defaults.defaults) }
+    }
+
+    /// Forget choices in worktrees a loaded fleet no longer has. Not on an empty
+    /// one: that is a runner that hasn't answered, and would forget them all.
+    public mutating func prune(keeping worktrees: Set<String>) {
+        guard !worktrees.isEmpty else { return }
+        let kept = FocusMemory<Value>.pruned(memory, keeping: worktrees)
+        guard kept.count != memory.count else { return }
+        memory = kept
+        if let runner { FocusMemory<Value>.save(memory, runner: runner, to: defaults.defaults) }
+    }
+}

@@ -111,7 +111,10 @@ extension FilesPlace {
 
 /// One row of a directory.
 public struct FilesRow: Identifiable, Equatable, Sendable {
-    public var id: String { name }
+    /// Unique within its directory: the runner sends names through a lossy
+    /// UTF-8 decode, so two names on disk can arrive as one string, and a list
+    /// keyed by name drops or misdraws one of them.
+    public var id: String
     public var name: String
     public var kind: FileEntry.Kind
     /// A file's size, a link's "→ target", nothing for a directory.
@@ -202,24 +205,25 @@ public final class FilesItemModel: ObservableObject {
     }
 
     nonisolated static func directory(_ listing: FileListing, at here: FilesLocation, root: String) -> FilesDirectory {
-        let rows = listing.entries.map { entry -> FilesRow in
+        let rows = listing.entries.enumerated().map { index, entry -> FilesRow in
+            let id = "\(index)/\(entry.name)"
             let path = FilesPaths.join(here.path, entry.name)
             switch entry.kind {
             case .directory:
                 return FilesRow(
-                    name: entry.name, kind: .directory, detail: "",
+                    id: id, name: entry.name, kind: .directory, detail: "",
                     destination: FilesLocation(place: here.place, path: path, expecting: .directory))
             case .file:
                 return FilesRow(
-                    name: entry.name, kind: .file, detail: FilesText.size(entry.size),
+                    id: id, name: entry.name, kind: .file, detail: FilesText.size(entry.size),
                     destination: FilesLocation(place: here.place, path: path, expecting: .file))
             case .link:
                 let inside = FilesPaths.linkDestination(path, target: entry.linkTarget, root: root)
                 return FilesRow(
-                    name: entry.name, kind: .link, detail: "→ \(entry.linkTarget)",
+                    id: id, name: entry.name, kind: .link, detail: "→ \(entry.linkTarget)",
                     destination: inside.map { FilesLocation(place: here.place, path: $0, expecting: .either) })
             case .other:
-                return FilesRow(name: entry.name, kind: .other, detail: "", destination: nil)
+                return FilesRow(id: id, name: entry.name, kind: .other, detail: "", destination: nil)
             }
         }
         return FilesDirectory(
@@ -266,5 +270,29 @@ extension DaemonBuild {
     public var sharedFolders: [String] {
         guard offersFiles, can(.readOnlyFolders) else { return [] }
         return readOnlyFolders ?? []
+    }
+}
+
+extension DaemonBuild {
+    /// A build from the client core's `host` answer, as the phone parses it.
+    ///
+    /// Here and not in `Connection` so a test can feed it the wire's own JSON:
+    /// a key left out of this list is a fact a phone never learns, and the
+    /// harness's stand-in builds skip it (`readOnlyFolders` was left out once,
+    /// so a real device never showed a shared folder). Absent keys read as
+    /// they do from an older runner: no capabilities (`can(_:)` reads that as
+    /// the features that existed then), `unspecified` scope (no answer, never
+    /// no permission), no agents list (every harness offered), no folders.
+    public init(host body: [String: Any]) {
+        self.init(
+            version: body["daemonVersion"] as? String ?? "unknown",
+            matches: body["buildsMatch"] as? Bool ?? true,
+            platform: body["platform"] as? String ?? "",
+            capabilities: Set(body["capabilities"] as? [String] ?? []),
+            grantedScope: body["grantedScope"] as? String ?? "unspecified",
+            runnerId: body["runnerId"] as? String,
+            pushPaired: body["pushPaired"] as? Bool ?? false,
+            agentsFound: body["agentsFound"] as? [String],
+            readOnlyFolders: body["readOnlyFolders"] as? [String])
     }
 }
