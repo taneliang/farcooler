@@ -1862,20 +1862,9 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
     })
 }
 
-/// A refused message for a pane's agent, in this CLI's words when its agent
-/// has stopped (ov-174), with the command that restarts it. The code is kept
-/// for `--json`. Any other refusal is left as it was.
-pub(crate) fn agent_refused(terminal: &str) -> impl FnOnce(ClientError) -> Box<dyn std::error::Error> + '_ {
-    move |e| match &e {
-        ClientError::Daemon { code, .. } if farcooler_core::error::word_for(*code) == "agent-stopped" => {
-            let said = format!(
-                "the agent in this pane stopped. restart it with `farcooler terminal set-pane-mode {terminal} agent`, then try again"
-            );
-            Box::new(Refused::new(said, Some(*code)))
-        }
-        _ => Box::new(e),
-    }
-}
+#[path = "agent_refusal.rs"]
+mod agent_refusal;
+pub(crate) use agent_refusal::agent_refused;
 
 /// A refusal from the runner, in this CLI's own words.
 ///
@@ -3924,24 +3913,6 @@ mod tests {
         let other = refused(pb::ErrorCode::InvalidArgument, "other_repository");
         assert!(!other.to_string().contains("no longer"), "{other}");
         assert_eq!(other.word(), Some("invalid-argument"));
-    }
-
-    /// A prompt to a stopped agent says how to restart it and keeps its word;
-    /// the retryable "not connected yet" is left as the runner said it.
-    #[test]
-    fn a_stopped_agent_is_told_how_to_restart_it() {
-        let refused = |code: pb::ErrorCode| {
-            agent_refused("ab12")(ClientError::Daemon {
-                code: code as i32,
-                retryable: false,
-                message: "runner's words".into(),
-                what: String::new(),
-            })
-        };
-        let stopped = refused(pb::ErrorCode::AgentStopped);
-        assert!(stopped.to_string().contains("set-pane-mode ab12 agent"), "{stopped}");
-        assert_eq!(stopped.downcast_ref::<Refused>().and_then(Refused::word), Some("agent-stopped"));
-        assert_eq!(refused(pb::ErrorCode::AgentNotConnected).to_string(), "runner's words");
     }
 
     /// The prompt a task's agent opens on names commands, and they are this

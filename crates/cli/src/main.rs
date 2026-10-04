@@ -848,7 +848,7 @@ enum TerminalCmd {
     /// disagreement this design exists to prevent.
     SetPaneMode {
         terminal: String,
-        /// "terminal" or "agent".
+        /// "terminal" or "agent". Agent on a chat whose agent stopped restarts it.
         mode: String,
         /// Needed to leave agent mode mid-turn: `claude --resume` cannot
         /// reattach to a turn discarded out from under it, so the daemon
@@ -998,7 +998,7 @@ async fn answer_agent<L: tasks::DispatchLink>(
         }),
     ))
     .await
-    .map_err(answer_refused)?;
+    .map_err(|e| answer_refused(e, &short(terminal)))?;
     Ok(())
 }
 
@@ -1008,14 +1008,14 @@ async fn answer_agent<L: tasks::DispatchLink>(
 /// Both are `resource-conflict`, and the runner's own message is the apps'
 /// capitalized sentence. `said_about` holds this CLI's line for each, in
 /// clap's style. Anything else is left as it was.
-fn answer_refused(e: farcooler_transport::ClientError) -> Box<dyn std::error::Error> {
+fn answer_refused(e: farcooler_transport::ClientError, terminal: &str) -> Box<dyn std::error::Error> {
     if let farcooler_transport::ClientError::Daemon { code, what, .. } = &e
         && matches!(what.as_str(), "not_held" | "not_delivered")
         && let Some(said) = tasks::said_about(what)
     {
         return Box::new(tasks::Refused::naming(said.to_string(), *code, what.clone()));
     }
-    tasks::agent_refused("<terminal>")(e)
+    tasks::agent_refused(terminal)(e)
 }
 
 /// What a runner too old for Needs You is told.
@@ -4339,7 +4339,7 @@ mod tests {
             retryable: false,
             message: "resource not found".into(),
             what: String::new(),
-        });
+        }, "ab12");
         assert_eq!(other.to_string(), farcooler_transport::ClientError::Daemon {
             code: farcooler_protocol::v1::ErrorCode::NotFound as i32,
             retryable: false,
