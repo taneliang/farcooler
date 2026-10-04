@@ -47,7 +47,7 @@ fn gh_behind_a_shim_is_started_by_the_path_it_was_found_at() {
     let git = git_at(&root.join("git/git"));
     let (launch, watched) = build_gh_launch(gh.clone(), &git, root.join("bin").as_os_str());
     assert_eq!(launch.program, gh, "started as the shim, not as what it resolves to");
-    assert_eq!(watched, [gh.clone()]);
+    assert_eq!(watched, std::slice::from_ref(&gh));
     let sandbox = launch.sandbox.as_ref().expect("an exec sandbox on this host");
     assert!(sandbox.allowed().contains(&gh), "the shim path: {:?}", sandbox.allowed());
     assert!(sandbox.allowed().contains(&target), "its target: {:?}", sandbox.allowed());
