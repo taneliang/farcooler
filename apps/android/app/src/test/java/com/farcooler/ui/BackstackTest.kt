@@ -629,4 +629,32 @@ class BackstackTest {
         assertEquals(listOf(Route.NeedsYou, b), Backstack.goTo(listOf(Route.NeedsYou, a), b))
         assertEquals(listOf(Route.NeedsYou, a), Backstack.goTo(listOf(Route.NeedsYou, a, Route.Settings), a))
     }
+
+    /**
+     * A relaunch restores the Changes tab (ov-233): with no process-death copy
+     * the kept one is read, and it names Changes for the worktree it was chosen
+     * in. Goes red when the kept copy isn't read, or isn't written.
+     */
+    @Test
+    fun `a relaunch with no saved copy restores the tab chosen in each worktree from what was kept`() {
+        val kept = com.farcooler.data.InMemoryReviewStorage()
+        val chosen = mapOf(
+            "host-a/w1" to Focus(Pane.Changes, chosen = true),
+            "host-a/w2" to Focus(tab("t-chosen"), chosen = true),
+        )
+        Backstack.keepFocus(chosen, kept)
+        // The relaunch: the saved state handle is empty.
+        assertEquals(chosen, Backstack.restoreFocus(null, kept))
+        // A process death keeps its own copy, which wins.
+        val saved = Backstack.encodeFocus(mapOf("host-a/w1" to Focus(tab("t-other"), chosen = true)))
+        assertEquals(mapOf("host-a/w1" to Focus(tab("t-other"), chosen = true)), Backstack.restoreFocus(saved, kept))
+        // Nothing kept is no memory, and the rule decides.
+        assertEquals(emptyMap<String, Focus>(), Backstack.restoreFocus(null, com.farcooler.data.InMemoryReviewStorage()))
+    }
+
+    @Test
+    fun `a kept focus that cannot be read is no memory`() {
+        val kept = com.farcooler.data.InMemoryReviewStorage(mutableMapOf(Backstack.FOCUS_KEY to "not json"))
+        assertEquals(emptyMap<String, Focus>(), Backstack.restoreFocus(null, kept))
+    }
 }

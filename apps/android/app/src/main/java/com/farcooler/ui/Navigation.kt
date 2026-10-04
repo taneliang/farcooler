@@ -452,6 +452,22 @@ object Backstack {
         return json.encodeToString(focusFormat, chosen)
     }
 
+    /** Where the chosen tabs are kept across a relaunch, in the app's own preferences (ov-233). */
+    const val FOCUS_KEY = "nav.focus.v1"
+
+    /**
+     * The chosen tabs a launch starts with: the process-death copy when there
+     * is one, else what the last run kept. The saved copy dies with the
+     * process's task, so a relaunch has only [kept]; without it a worktree
+     * reopens on the rule's answer and never on the Changes tab it was left on.
+     */
+    fun restoreFocus(saved: String?, kept: com.farcooler.data.ReviewStorage): Map<String, Focus> =
+        if (saved != null) decodeFocus(saved) else decodeFocus(kept.read(FOCUS_KEY))
+
+    /** Write the chosen tabs down for the next launch. */
+    fun keepFocus(focus: Map<String, Focus>, kept: com.farcooler.data.ReviewStorage) =
+        kept.write(FOCUS_KEY, encodeFocus(focus))
+
     fun decodeFocus(saved: String?): Map<String, Focus> {
         if (saved.isNullOrBlank()) return emptyMap()
         val decoded = runCatching { json.decodeFromString(focusFormat, saved) }

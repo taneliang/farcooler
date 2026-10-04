@@ -175,7 +175,7 @@ class AppModel(
         // itself. Nothing here is checked against a fleet yet — there is no
         // fleet at this point in a launch — which is what `settle` is for.
         Backstack.decodeStack(saved[STACK])?.let { install(it, persist = false) }
-        _focus.value = Backstack.decodeFocus(saved[FOCUS])
+        _focus.value = Backstack.restoreFocus(saved[FOCUS], reviewStorage)
         // A real relaunch has no saved stack: it goes back to where the last
         // run was, whatever is waiting on Needs You (ov-182, the owner's ruling).
         if (!launchDecided) requestRestore()
@@ -665,7 +665,10 @@ class AppModel(
         // copy. What that trades is narrow and deliberate: a pane you were sent
         // to and never confirmed does not come back after a process death — the
         // one you last chose in that worktree does.
-        if (chosen) saved[FOCUS] = Backstack.encodeFocus(_focus.value)
+        if (chosen) {
+            saved[FOCUS] = Backstack.encodeFocus(_focus.value)
+            Backstack.keepFocus(_focus.value, reviewStorage)
+        }
         keepDestination()
     }
 
@@ -694,6 +697,7 @@ class AppModel(
         if (pruned != _focus.value) {
             _focus.value = pruned
             saved[FOCUS] = Backstack.encodeFocus(pruned)
+            Backstack.keepFocus(pruned, reviewStorage)
         }
     }
 
