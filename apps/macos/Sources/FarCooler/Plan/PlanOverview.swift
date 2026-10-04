@@ -302,6 +302,10 @@ struct PlanThemeCard: View {
     @Environment(\.colorScheme) private var scheme
     @State private var hovering = false
 
+    /// How many lines of the outcome the card shows.
+    static let outcomeLines = 3
+    static let outcomeFont = Font.system(size: WorkspaceStyle.PaneText.secondary)
+
     var body: some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: Spacing.tight) {
@@ -317,11 +321,14 @@ struct PlanThemeCard: View {
                     }
                 }
                 if !theme.outcome.isEmpty {
+                    // Up to three lines, the owner's ruling (ov-273): an
+                    // outcome is one sentence, and two lines cut most of them.
                     Text(theme.outcome)
-                        .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                        .font(Self.outcomeFont)
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        .lineLimit(Self.outcomeLines)
                         .fixedSize(horizontal: false, vertical: true)
+                        .probed("plan-theme-outcome")
                 }
                 PlanBar(counts: theme.counts)
                     .padding(.top, Spacing.tight)
