@@ -716,6 +716,9 @@ struct TaskBoardView: View {
         /// (`Navigator.items`), and the board they're on.
         var items: [NavigatorItem] = []
         weak var store: TaskBoardStore?
+        /// A rule between the navigator's panes has the keyboard: ↑ and ↓
+        /// are its (`NavigatorSplitRule`).
+        var ruleFocused = false
         var onStep: ((NavigatorItem) -> Void)?
         /// An Unread line stepped to, or nil for any other row: the view
         /// lights it there.
@@ -950,7 +953,7 @@ struct TaskBoardView: View {
                 }
                 NavigatorSplitView(panes: panes(
                     showsTasks: showsTasks, plan: plan, shown: shown, worktrees: worktrees, terminals: terminals),
-                    kept: split)
+                    kept: split, onRuleFocus: { heard.ruleFocused = $0 })
             }
             .padding(.top, NavigatorRhythm.band)
             .unanimatedWhenFiltering(filter)
@@ -1169,7 +1172,7 @@ struct TaskBoardView: View {
         let heard = heard
         let box = windowBox
         arrowMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            guard heard.keyed, let window = event.window, window === box.window, window.attachedSheet == nil,
+            guard heard.keyed, !heard.ruleFocused, let window = event.window, window === box.window, window.attachedSheet == nil,
                 !EscapeBack.keepsEscape(window.firstResponder),
                 let by = BoardKeys.arrow(keyCode: event.keyCode, modifiers: event.modifierFlags)
             else { return event }

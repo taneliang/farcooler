@@ -176,7 +176,7 @@ private struct ProjectTerminalRow: View {
         .accessibilityLabel(terminal.label)
         .accessibilityValue(terminal.status.label)
         .accessibilityAddTraits(selected ? .isSelected : [])
-        .accessibilityIdentifier("navigator-terminal-\(terminal.id)")
+        .identified("navigator-terminal-\(terminal.id)")
     }
 
     /// Open, with its port Open in Browser on this Mac, Rename… and Close, and

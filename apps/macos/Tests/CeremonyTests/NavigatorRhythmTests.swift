@@ -32,6 +32,8 @@ struct NavigatorRhythmTests {
     final class Box {
         var marks: [(GridMark, CGRect)] = []
         var probes: [(String, CGRect)] = []
+        /// The split's rules, with their handlers (`NavigatorRuleReport`).
+        var rules: [NavigatorRuleReport] = []
     }
 
     struct Probe<Content: View>: View {
@@ -51,6 +53,10 @@ struct NavigatorRhythmTests {
                         let _ = box.probes = probes.map { ($0.id, proxy[$0.bounds]) }
                         Color.clear
                     }
+                }
+                .overlayPreferenceValue(NavigatorRulesKey.self) { rules in
+                    let _ = box.rules = rules
+                    Color.clear
                 }
         }
     }
@@ -306,22 +312,22 @@ struct NavigatorRhythmTests {
     @Test func theScanCatchesABareGap() {
         #expect(Self.strays(in: "x\n    .padding(.top, 5)\n").map(\.line) == [2])
         #expect(Self.strays(in: "VStack(alignment: .leading, spacing: 2) {").count == 1)
-        #expect(Self.strays(in: "VStack(spacing: 0) {").isEmpty)
-        #expect(Self.strays(in: ".padding(.vertical, NavigatorRhythm.air)").isEmpty)
-        #expect(Self.strays(in: ".padding(.top, 3)  // rhythm-exempt: a badge").isEmpty)
-    }
-
-    // MARK: - Captures
         #expect(Self.strays(in: "LazyVStack(spacing: 0.5) {").count == 1)
         #expect(Self.strays(in: "VStack(spacing: ColumnGrid.rhythm / 2) {").count == 1)
         #expect(Self.strays(in: ".padding(.vertical, ColumnGrid.rhythm)").count == 1)
         #expect(Self.strays(in: ".padding(12)").count == 1)
         #expect(Self.strays(in: ".frame(maxWidth: .infinity, minHeight: 6 * ColumnGrid.rhythm)").count == 1)
-
+        #expect(Self.strays(in: "VStack(spacing: 0) {").isEmpty)
         #expect(Self.strays(in: "HStack(spacing: 6) {").isEmpty)
         #expect(Self.strays(in: ".padding(.horizontal, NavigatorGrid.edge)").isEmpty)
-    /// Write the captures and the measured gaps, when asked to
+        #expect(Self.strays(in: ".padding(.vertical, NavigatorRhythm.air)").isEmpty)
         #expect(Self.strays(in: ".padding(.top, -NavigatorRhythm.air)").isEmpty)
+        #expect(Self.strays(in: ".padding(.top, 3)  // rhythm-exempt: a badge").isEmpty)
+    }
+
+    // MARK: - Captures
+
+    /// Write the captures and the measured gaps, when asked to
     /// (`FARCOOLER_RHYTHM_OUT`). Not a check: the checks are below.
     @Test("Write the navigator's rhythm captures")
     func writeCaptures() async throws {
