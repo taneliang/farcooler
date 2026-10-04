@@ -43,8 +43,10 @@ object TaskLink {
      * The id of the task [pane]'s own notifications fold into, or null when
      * it notifies as itself (ov-94, ov-107). Not [taskId]: that names a top
      * bar, and this decides whether an agent's banner is left to its task's
-     * notice, so it gives the runner's answer (`task_link::task_of`). The same
-     * cases as AgentKit's `TaskLink.noticeTask`.
+     * notice, so it gives the runner's answer. The runner now sends it
+     * ([Terminal.noticeTaskId], `task_link::notice_task`, ov-112), so this is
+     * only the fallback for a runner too old to: the same cases as AgentKit's
+     * `TaskLink.noticeTask`.
      *
      * Where this phone can't see what the runner sees, it doesn't fold: a
      * duplicate banner beats an agent nobody hears about.
@@ -56,9 +58,9 @@ object TaskLink {
      * - Not by lane for a pane that names its workspace: the runner refuses
      *   another workspace's task, and `open_tasks` doesn't say whose it is.
      * - Never by lane in the repository's main checkout, where ad hoc agents
-     *   run and one dispatched task would take in all of them. The runner's
-     *   `task_of` still folds there (ov-107 report), so an agent there gets
-     *   both banners until it doesn't, never neither.
+     *   run and one dispatched task would take in all of them. A runner older
+     *   than ov-112 still folds there, so an agent there gets both banners,
+     *   never neither.
      */
     fun noticeTaskId(pane: Terminal, worktree: Worktree?): String? {
         if (pane.isOrchestrator) return null
@@ -72,9 +74,23 @@ object TaskLink {
      * Whether [pane]'s own banner is left to its task's notice: it folds into
      * a task, and that task's notice reaches this phone ([noticeReachesHere],
      * from [taskNoticeReachesPhone]). Otherwise its own banner is all there is.
+     *
+     * [runnerAnswers] is whether the runner decides which task that is
+     * (`notice_task`): then [Terminal.noticeTaskId] is the whole answer, and
+     * absent means it notifies as itself. A runner that doesn't answer sends no
+     * field, so [noticeTaskId] stands in; it folds no more than any runner of
+     * that age does, so the worst case is a duplicate banner (ov-112).
      */
-    fun leavesBannerToTask(pane: Terminal, worktree: Worktree?, noticeReachesHere: Boolean): Boolean =
-        noticeReachesHere && noticeTaskId(pane, worktree) != null
+    fun leavesBannerToTask(
+        pane: Terminal,
+        worktree: Worktree?,
+        noticeReachesHere: Boolean,
+        runnerAnswers: Boolean,
+    ): Boolean = when {
+        !noticeReachesHere -> false
+        runnerAnswers -> !pane.noticeTaskId.isNullOrEmpty()
+        else -> noticeTaskId(pane, worktree) != null
+    }
 
     /**
      * Whether a task notice from the runner [daemon] describes reaches this
@@ -93,9 +109,10 @@ object TaskLink {
      */
     fun agentReports(fleet: Fleet, daemon: DaemonBuild?, registered: Boolean): List<AgentReport> {
         val reaches = taskNoticeReachesPhone(daemon, registered)
+        val answers = daemon?.can("notice_task") == true
         return fleet.worktrees.flatMap { worktree ->
             worktree.terminals.map { terminal ->
-                AgentReport(terminal, worktree.task, leavesBannerToTask(terminal, worktree, reaches))
+                AgentReport(terminal, worktree.task, leavesBannerToTask(terminal, worktree, reaches, answers))
             }
         }
     }

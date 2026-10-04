@@ -371,6 +371,15 @@ data class Terminal(
      */
     val taskId: String? = null,
     /**
+     * The task this pane's own notifications fold into, as the runner decided
+     * it (`notice_task`), or null when it notifies as itself. Sent as
+     * `noticeTaskId` by `Session::fleet` (`notice_task_of` in
+     * `crates/client/src/session.rs`); null too from a runner without
+     * `notice_task`, which [TaskLink.leavesBannerToTask] tells apart by the
+     * capability, never by this.
+     */
+    val noticeTaskId: String? = null,
+    /**
      * Whose work this pane is doing, as a workspace id: not always the owner
      * of the worktree it runs in, since an orchestrator may run in a checkout
      * another workspace owns. Null in an unclaimed worktree and from a runner

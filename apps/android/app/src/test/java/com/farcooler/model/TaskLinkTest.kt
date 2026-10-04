@@ -118,9 +118,41 @@ class TaskLinkTest {
     fun `a banner is left to the task only where the task's notice arrives`() {
         val agent = Terminal(id = "p", preset = "claude", state = "running", taskId = "t-4")
         val loose = Terminal(id = "l", preset = "claude", state = "running")
-        org.junit.Assert.assertTrue(TaskLink.leavesBannerToTask(agent, worktree(retries), true))
-        org.junit.Assert.assertFalse(TaskLink.leavesBannerToTask(agent, worktree(retries), false))
-        org.junit.Assert.assertFalse(TaskLink.leavesBannerToTask(loose, worktree(), true))
+        // An older runner (no `notice_task`): the mirror above decides.
+        org.junit.Assert.assertTrue(TaskLink.leavesBannerToTask(agent, worktree(retries), true, false))
+        org.junit.Assert.assertFalse(TaskLink.leavesBannerToTask(agent, worktree(retries), false, false))
+        org.junit.Assert.assertFalse(TaskLink.leavesBannerToTask(loose, worktree(), true, false))
+    }
+
+    // The runner's own answer (`Terminal.noticeTaskId`, ov-112): once a runner
+    // sends `notice_task`, the field decides and the mirror is not asked.
+
+    @Test
+    fun `a runner that answers decides by the field alone`() {
+        val lane = worktree(invoice)
+        // The field names a task: fold, though the mirror would not (a pane
+        // that names a workspace, in a lane whose task it was not opened for).
+        val told = Terminal(id = "p", preset = "claude", state = "running", workspace = "ws-a", noticeTaskId = "t-9")
+        assertNull(TaskLink.noticeTaskId(told, lane))
+        org.junit.Assert.assertTrue(TaskLink.leavesBannerToTask(told, lane, true, true))
+        // No field: the runner said it notifies as itself, though the mirror
+        // would fold a pane in a single-task lane outside the main checkout.
+        val own = Terminal(id = "p", preset = "claude", state = "running")
+        assertEquals("t-9", TaskLink.noticeTaskId(own, lane))
+        org.junit.Assert.assertFalse(TaskLink.leavesBannerToTask(own, lane, true, true))
+        // An empty id is no id.
+        val empty = Terminal(id = "p", preset = "claude", state = "running", taskId = "t-4", noticeTaskId = "")
+        org.junit.Assert.assertFalse(TaskLink.leavesBannerToTask(empty, worktree(retries), true, true))
+        // The field is read only where the notice arrives at all.
+        org.junit.Assert.assertFalse(TaskLink.leavesBannerToTask(told, lane, false, true))
+    }
+
+    @Test
+    fun `a runner that doesn't answer is not read through the field`() {
+        // Absent means "notifies as itself" from a runner that answers and
+        // "too old to say" from one that doesn't; only the capability tells them apart.
+        val stray = Terminal(id = "p", preset = "claude", state = "running", workspace = "ws-a", noticeTaskId = "t-9")
+        org.junit.Assert.assertFalse(TaskLink.leavesBannerToTask(stray, worktree(invoice), true, false))
     }
 
     @Test
@@ -148,5 +180,19 @@ class TaskLinkTest {
         assertEquals("lane", reports.getValue("a").worktree)
         org.junit.Assert.assertFalse(TaskLink.agentReports(fleet, null, registered = true).single { it.terminal.id == "a" }.leftToTask)
     }
-}
 
+    /** A runner that sends `notice_task` is believed over this app's mirror, in the fleet loop too. */
+    @Test
+    fun `the fleet's reports follow the runner's notice task when it sends one`() {
+        val told = Terminal(id = "t", preset = "claude", state = "running", activity = "blocked", noticeTaskId = "t-9")
+        val own = Terminal(id = "o", preset = "claude", state = "running", activity = "blocked")
+        val checkout = worktree(invoice, terminals = listOf(told, own)).copy(task = "lane", isMainCheckout = true)
+        val fleet = Fleet(worktrees = listOf(checkout))
+        val answers = DaemonBuild(
+            "v", true, "linux", capabilities = setOf("tasks", "task_notices", "notice_task"), pushPaired = true,
+        )
+        val reports = TaskLink.agentReports(fleet, answers, registered = true).associateBy { it.terminal.id }
+        org.junit.Assert.assertTrue(reports.getValue("t").leftToTask)
+        org.junit.Assert.assertFalse(reports.getValue("o").leftToTask)
+    }
+}
