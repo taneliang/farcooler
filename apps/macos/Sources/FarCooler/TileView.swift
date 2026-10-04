@@ -565,11 +565,12 @@ struct TilePane: View {
     private var dropIndicator: some View {
         if let landing {
             let half = landing.half
-            // style-exempt: a drop target's state, drawn at the card's own radius
             RoundedRectangle.card
+                // style-exempt: a drop target's state, at the card's own radius
                 .fill(Color.accentColor.opacity(0.28))
                 .overlay(
                     RoundedRectangle.card
+                        // style-exempt: a drop target's state
                         .strokeBorder(Color.accentColor.opacity(0.8), lineWidth: 1.5)
                 )
                 .frame(width: size.width * half.width, height: size.height * half.height)
@@ -691,7 +692,7 @@ struct TilePane: View {
     /// below “Changes” and gives every pane one clear piece of chrome.
     private var changesControls: some View {
         HStack(spacing: 7) {
-            Divider().frame(height: 14).padding(.horizontal, 2)
+            Color.clear.frame(width: Spacing.group)
 
             Picker(
                 "Comparison",
@@ -800,11 +801,11 @@ struct TilePane: View {
             // what it is can be read without stopping. The tooltip has the rest.
             let lines = changes.generatedInsertions + changes.generatedDeletions
             var apart = AttributedString("  \(lines.formatted()) generated")
-            // A dimmed secondary rather than `.tertiary`, which is a
+            // The tertiary label color rather than `.tertiary`, which is a
             // `ShapeStyle` and not a `Color` — and this is one attributed
             // string, on purpose, so the whole strip shares one baseline the
             // way `WorktreeSection`'s own pair does.
-            apart.foregroundColor = .secondary.opacity(0.7)
+            apart.foregroundColor = Color(nsColor: .tertiaryLabelColor)
             value.append(apart)
         }
         return Text(value)

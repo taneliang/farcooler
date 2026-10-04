@@ -87,7 +87,7 @@ struct DiffView: View {
         }
         .textSelection(.enabled)
         .padding(.vertical, 4)
-        .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 6))
+        .surface(.inset, in: .control)
     }
 }
 

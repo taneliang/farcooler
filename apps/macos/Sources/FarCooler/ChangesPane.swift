@@ -26,6 +26,7 @@ import SwiftUI
 /// of those belongs to tmux and the diff was not in tmux. It is now, and all of
 /// that arrived for free.
 struct ChangesPane: View {
+    @Environment(\.colorScheme) private var scheme
     @ObservedObject var changes: ChangesStore
 
     /// Whether this is the pane the keyboard is aimed at.
@@ -87,17 +88,17 @@ struct ChangesPane: View {
                 if geo.size.width >= Self.wideEnough {
                     HStack(spacing: 0) {
                         fileColumn.frame(width: fileColumnWidth(for: geo.size.width))
-                        Divider()
+                            // The one split in the pane: between the two halves
+                            // the reader can resize.
+                            .separator(.split, edge: .trailing)
                         VStack(spacing: 0) {
                             diffNavigator(compact: false)
-                            Divider()
                             diffBody
                         }
                     }
                 } else {
                     VStack(spacing: 0) {
                         diffNavigator(compact: true)
-                        Divider()
                         diffBody
                     }
                 }
@@ -181,7 +182,9 @@ struct ChangesPane: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(9)
-        .background(.orange.opacity(0.12))
+        .background(Tint.attentionFill(scheme), in: .control)
+        .padding(.horizontal, Spacing.group)
+        .padding(.top, Spacing.tight)
     }
 
     /// Said only when the base was GUESSED, and only under Branch.
@@ -220,11 +223,13 @@ struct ChangesPane: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
             }
-            .foregroundStyle(.orange)
+            .foregroundStyle(Tint.attention(scheme))
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.orange.opacity(0.12))
+            .background(Tint.attentionFill(scheme), in: .control)
+            .padding(.horizontal, Spacing.group)
+            .padding(.vertical, Spacing.tight)
             .help(guessedBaseDetail)
         }
     }
@@ -342,7 +347,7 @@ struct ChangesPane: View {
             // room for.
             commitPicker(compact: compact)
             commitWalk(compact: compact)
-            Divider().frame(height: 14).padding(.horizontal, 2)
+            Color.clear.frame(width: Spacing.group)
 
             if compact {
                 navButton("chevron.up", help: "Previous file") { moveFile(-1) }
@@ -365,7 +370,7 @@ struct ChangesPane: View {
 
             Spacer(minLength: 4)
 
-            Divider().frame(height: 14).padding(.horizontal, 2)
+            Color.clear.frame(width: Spacing.group)
             let hunks = hunkTargets.count
             if hunks > 0 {
                 Text(hunks == 1 ? "1 hunk" : "\(hunks) hunks")
@@ -376,7 +381,7 @@ struct ChangesPane: View {
             navButton("arrow.up.to.line", help: "Previous hunk or file") { moveHunk(-1) }
             navButton("arrow.down.to.line", help: "Next hunk or file") { moveHunk(1) }
 
-            Divider().frame(height: 14).padding(.horizontal, 2)
+            Color.clear.frame(width: Spacing.group)
             // Last on the strip, because it is where a review ENDS: the notes
             // are written down the diff and leave from one place.
             ReviewOutboxButton(
@@ -764,8 +769,6 @@ struct ChangesPane: View {
             .padding(.horizontal, 5)
             .padding(.bottom, 5)
 
-            Divider()
-
             if commits.isEmpty {
                 // Not a failure, and it must not read as one. A branch cut a
                 // minute ago has no commits of its own and can still be full of
@@ -781,7 +784,7 @@ struct ChangesPane: View {
                 .padding(9)
             } else {
                 commitFilterField
-                Divider()
+                    .separator(.listEdge)
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 1) {
@@ -808,8 +811,6 @@ struct ChangesPane: View {
                     }
                 }
             }
-
-            Divider()
 
             // Said once, here, rather than worked out per commit — the client
             // cannot tell a merge from an ordinary commit anyway, since the
@@ -951,11 +952,9 @@ struct ChangesPane: View {
             // about what is already on screen.
             .background(
                 highlighted
-                    ? AnyShapeStyle(Color.accentColor.opacity(0.18))
-                    : (changes.selectedCommit == c.sha
-                        ? AnyShapeStyle(WorkspaceStyle.navigatorSelection)
-                        : AnyShapeStyle(Color.clear)),
-                in: RoundedRectangle(cornerRadius: 4))
+                    ? Fill.selection(active: true)
+                    : (changes.selectedCommit == c.sha ? Fill.selection(active: false) : Color.clear),
+                in: .control)
         }
         .buttonStyle(.plain)
         .help(rowHelp(c))
@@ -997,7 +996,7 @@ struct ChangesPane: View {
                 .onAppear { filtering = true }
                 .onChange(of: query) { _, _ in highlighted = 0 }
                 .onSubmit { openHighlighted() }
-            Divider()
+                .separator(.listEdge)
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 1) {
@@ -1027,10 +1026,7 @@ struct ChangesPane: View {
                                 .padding(.vertical, 3)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .contentShape(Rectangle())
-                                .background(
-                                    i == highlighted
-                                        ? Color.accentColor.opacity(0.18) : .clear,
-                                    in: RoundedRectangle(cornerRadius: 4))
+                                .background(i == highlighted ? Fill.selection(active: true) : Color.clear, in: .control)
                             }
                             .buttonStyle(.plain)
                             .id(f.path)
@@ -1133,26 +1129,18 @@ struct ChangesPane: View {
     /// The same list as the combo box, with room to show it.
     private var fileColumn: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 5) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(.tertiary)
+            HStack(spacing: 6) {
                 TextField("Filter files", text: $query)
-                    .textFieldStyle(.plain)
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.small)
                     .font(.system(size: WorkspaceStyle.PaneText.body))
                 Text("\(matches.count)")
                     .font(.system(size: WorkspaceStyle.PaneText.minimum, design: .monospaced))
                     .foregroundStyle(.tertiary)
                     .monospacedDigit()
             }
-            .padding(.horizontal, 7)
-            .frame(height: 22)
-            .background(
-                RoundedRectangle(cornerRadius: 5)
-                    .fill(Color.primary.opacity(0.045)))
             .padding(.horizontal, 6)
             .frame(height: WorkspaceStyle.paneHeaderHeight)
-            Divider()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                         ForEach(matches) { f in
@@ -1188,9 +1176,8 @@ struct ChangesPane: View {
                             // nothing at all.
                             .contentShape(Rectangle())
                             .background(
-                                changes.selectedFile == f.path
-                                    ? WorkspaceStyle.navigatorSelection : .clear,
-                                in: RoundedRectangle(cornerRadius: 4))
+                                changes.selectedFile == f.path ? Fill.selection(active: true) : Color.clear,
+                                in: .control)
                             // Only on the rows that raise the question. A
                             // lockfile sitting under files it comes before in
                             // the daemon's order is the one thing in this
@@ -1701,9 +1688,7 @@ struct ChangesPane: View {
         .background(
             WorkspaceStyle.fileHeader
         )
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(WorkspaceStyle.hairline).frame(height: 1)
-        }
+        .separator(.grid)
     }
 
     /// One line of the patch, and the way to say something about that line.
@@ -1825,7 +1810,7 @@ private struct DiffHunkRow: View {
         HStack(spacing: 0) {
             Color.clear.frame(width: gutter * 2 + 12)
             Text("@@")
-                .foregroundStyle(Color.accentColor.opacity(0.72))
+                .foregroundStyle(Color.accentColor)
             Text("  \(mark.old ?? 0) → \(mark.new ?? 0)")
                 .foregroundStyle(.secondary)
             // Reserved rather than conditional, so the rule beside it does not
@@ -1834,9 +1819,7 @@ private struct DiffHunkRow: View {
                 anchor: anchor, comments: comments, box: CGSize(width: 15, height: 14))
                 .opacity(hovering ? 1 : 0)
                 .padding(.leading, 4)
-            Rectangle()
-                .fill(WorkspaceStyle.hairline.opacity(0.72))
-                .frame(height: 1)
+            GridRule()
                 .padding(.leading, 6)
                 .padding(.trailing, 8)
         }
@@ -1880,7 +1863,7 @@ private struct ReviewNoteButton: View {
                 .contentShape(Rectangle())
                 .background(
                     onGutter ? AnyShapeStyle(WorkspaceStyle.disclosureHover) : AnyShapeStyle(.clear),
-                    in: RoundedRectangle(cornerRadius: 3))
+                    in: .control)
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
@@ -1919,14 +1902,10 @@ private struct ReviewNoteComposer: View {
         VStack(alignment: .leading, spacing: 7) {
             about
             TextField("What should the agent do about this?", text: $text, axis: .vertical)
-                .textFieldStyle(.plain)
+                .textFieldStyle(.roundedBorder)
                 .font(.system(size: WorkspaceStyle.PaneText.body))
                 .lineLimit(3...10)
                 .focused($typing)
-                .padding(6)
-                .background(WorkspaceStyle.document, in: RoundedRectangle(cornerRadius: 5))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 5).strokeBorder(WorkspaceStyle.hairline))
             HStack(spacing: 6) {
                 // Says the thing that makes collecting worth the wait, and says
                 // it where the wait is being agreed to.
@@ -2045,11 +2024,9 @@ private struct DiffGapControl: View {
                 .frame(height: 20)
                 .background(
                     hovering && !refused ? WorkspaceStyle.disclosureHover : .clear,
-                    in: RoundedRectangle(cornerRadius: 4))
+                    in: .control)
 
-                Rectangle()
-                    .fill(WorkspaceStyle.hairline.opacity(0.72))
-                    .frame(height: 1)
+                GridRule()
                     .padding(.leading, 8)
                     .padding(.trailing, 8)
             }
@@ -2139,6 +2116,7 @@ private struct ReviewOutboxButton: View {
 /// point the missing receipt stops mattering because the transcript shows what
 /// happened. See `ComposerHandoff`.
 private struct ReviewOutbox: View {
+    @Environment(\.colorScheme) private var scheme
     @ObservedObject var comments: ReviewCommentQueue
     let agents: [ReviewAgentTarget]
     let branch: String
@@ -2151,15 +2129,13 @@ private struct ReviewOutbox: View {
     private var composerTargets: [ReviewAgentTarget] { agents.filter(\.showsChat) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: Spacing.tight) {
             header
-            Divider()
             // Above the scroll rather than in it. A failure is about the whole
             // queue, and one that scrolls out of sight while the reader looks
             // at what it kept is a failure the app stopped saying.
             if let failure = comments.failure {
                 trouble(failure)
-                Divider()
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
@@ -2181,7 +2157,6 @@ private struct ReviewOutbox: View {
             }
             .frame(maxHeight: 320)
             if !comments.pending.isEmpty {
-                Divider()
                 sendControls
             }
         }
@@ -2223,7 +2198,7 @@ private struct ReviewOutbox: View {
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .foregroundStyle(.orange)
+            .foregroundStyle(Tint.attention(scheme))
             // The runner's own words, where the app has no account of its own —
             // the shape `ChangesPane.problem` already uses for exactly this.
             if let transcript = failure.transcript, !transcript.isEmpty {
@@ -2232,7 +2207,9 @@ private struct ReviewOutbox: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(9)
-        .background(.orange.opacity(0.12))
+        .background(Tint.attentionFill(scheme), in: .control)
+        .padding(.horizontal, Spacing.group)
+        .padding(.vertical, Spacing.tight)
     }
 
     private func row(_ note: ReviewComment) -> some View {
@@ -2275,7 +2252,7 @@ private struct ReviewOutbox: View {
     /// the whole of what can honestly be said — see `SentReviewBatch`.
     private var receipts: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Divider().padding(.vertical, 4)
+            Color.clear.frame(height: Spacing.group)
             Text("Sent")
                 .font(.system(size: WorkspaceStyle.PaneText.minimum, weight: .semibold))
                 .foregroundStyle(.tertiary)
@@ -2602,5 +2579,14 @@ struct HeadingTops: PreferenceKey {
         value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]
     ) {
         value.merge(nextValue()) { _, newer in newer }
+    }
+}
+
+/// A grid rule that fills the rest of a row and sits on its center line: the
+/// system separator, one pixel (`Separator.grid`). The hunk heading's and the
+/// folded gap's.
+private struct GridRule: View {
+    var body: some View {
+        Color.clear.frame(maxWidth: .infinity).frame(height: 0).separator(.grid, edge: .top)
     }
 }
