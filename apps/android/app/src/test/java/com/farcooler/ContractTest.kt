@@ -52,14 +52,16 @@ class ContractTest {
             body = "auth-refactor — Do you want to run git push --force-with-lease?",
             terminal = "term-01999a8f2c4e",
             channel = Notifier.CHANNEL_BLOCKED,
-            kind = null, task = null, runner = null,
+            // The runner rides with a pane too (ov-183): a tap looks there first.
+            kind = null, task = null, runner = runner,
         ),
         "agent-done-failed" to PushMessage.Card(
             title = "codex failed",
             body = "pdf-export — Its last turn didn’t finish",
             terminal = "term-01999a90aa10",
             channel = Notifier.CHANNEL_DONE,
-            kind = null, task = null, runner = null,
+            // The runner rides with a pane too (ov-183): a tap looks there first.
+            kind = null, task = null, runner = runner,
         ),
         "decision-legacy" to PushMessage.Task(
             TaskNotice("ov-90", runner, "decision", noticeId, listOf("pdfkit", "pdf.js")),
