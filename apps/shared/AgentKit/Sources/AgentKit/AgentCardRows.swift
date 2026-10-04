@@ -971,23 +971,9 @@ extension FleetSnapshot {
     /// drawn as ✗ would be the same bug in `accessoryCircular`, which draws
     /// only the glyph.
     public func clearingFailures(vouchedBy rows: [AgentCardRow], at now: Date) -> FleetSnapshot? {
-        var next = self
-        var changed = false
-        for row in rows where row.status == "done" && row.failed == false {
-            guard var agent = next.agents.first(where: { $0.id == row.terminal }),
-                agent.turnFailed,
-                // Only a success NEWER than the failure. The card can hold the
-                // previous turn's success row while this turn's failure is
-                // already on disk, and clearing on that would erase a real
-                // failure that nothing writes again until the app polls.
-                let said = row.updatedAt,
-                said > (agent.observedAt ?? agent.activityChangedAt ?? .distantPast)
-            else { continue }
-            agent.turnFailed = false
-            if agent.glyph == "✗" { agent.glyph = "✓" }
-            next = next.merging(agent, at: now)
-            changed = true
-        }
-        return changed ? next : nil
+        clearingFailures(
+            resolved: rows.filter { $0.status == "done" && $0.failed == false }
+                .map { ($0.terminal, $0.updatedAt) },
+            at: now)
     }
 }

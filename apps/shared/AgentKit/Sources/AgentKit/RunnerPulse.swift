@@ -91,8 +91,10 @@ public struct RunnerPulse: Codable, Sendable, Equatable {
     public enum Reading: Sendable, Equatable {
         /// No pulse credential on this phone: never registered, or signed out.
         case noCredential
-        /// The relay answered, naming every runner that beats.
-        case answered([RunnerPulse])
+        /// The relay answered, naming every runner that beats, and how each
+        /// finished agent's last turn ended (`turns`, ov-239; none from an
+        /// older relay).
+        case answered([RunnerPulse], turns: [PulseTurn] = [])
         /// The relay doesn't know this token: signed out elsewhere, the device
         /// revoked, or moved to another account. Asking again won't help.
         case refused
@@ -112,6 +114,9 @@ public struct RunnerPulse: Codable, Sendable, Equatable {
         /// runners' working agents, and any agent that can't be told apart
         /// from theirs (ov-71). `FleetSnapshot.quietened` draws them.
         public var unstated: Set<String> = []
+        /// How finished agents' turns ended, as the relay last said
+        /// (`FleetSnapshot.settled(by:at:)`). Empty when the relay didn't say.
+        public var turns: [PulseTurn] = []
     }
 
     /// The widget's whole decision, kept here where it can be tested, so
@@ -140,7 +145,7 @@ public struct RunnerPulse: Codable, Sendable, Equatable {
             return Plan(quiet: [], nextLook: nil)
         case .failed:
             return Plan(quiet: [], nextLook: now.addingTimeInterval(every))
-        case .answered(let pulses):
+        case .answered(let pulses, let turns):
             let heardByApp = snapshot.complete && (snapshot.lostRunners ?? []).isEmpty
             let stale = pulses.filter { pulse in
                 !(heardByApp
@@ -149,7 +154,8 @@ public struct RunnerPulse: Codable, Sendable, Equatable {
             return Plan(
                 quiet: quiet(stale),
                 nextLook: pulses.isEmpty ? nil : now.addingTimeInterval(every),
-                unstated: unstated(snapshot, quiet: stale.filter(\.isQuiet), account: account))
+                unstated: unstated(snapshot, quiet: stale.filter(\.isQuiet), account: account),
+                turns: turns)
         }
     }
 
@@ -224,7 +230,7 @@ public struct RunnerPulse: Codable, Sendable, Equatable {
         else { return .failed }
         if status == 401 { return .refused }
         guard status == 200, let pulses = decode(data) else { return .failed }
-        return .answered(pulses)
+        return .answered(pulses, turns: decodeTurns(data))
     }
 }
 
