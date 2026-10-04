@@ -28,6 +28,27 @@ object DestinationWorld {
         val boards: Map<String, TaskBoard> = emptyMap(),
     )
 
+    /**
+     * One [Source] per paired runner: the connected ones as [connected] reads
+     * them (a live id over a remembered one), the rest seated idle with the id
+     * they said when last connected ([known], by host id), so a push naming
+     * one finds it and connects it (ov-231). A runner never connected here has
+     * no id, and a tap never dials it to look.
+     */
+    fun sources(
+        paired: List<String>,
+        connected: Map<String, Source>,
+        known: Map<String, String>,
+        everyRunner: Boolean,
+        selected: String?,
+    ): List<Source> = paired.map { host ->
+        connected[host]?.let { it.copy(runnerId = it.runnerId ?: known[host]) }
+            ?: Source(
+                hostId = host, runnerId = known[host], ready = false,
+                idle = !everyRunner && host != selected, fleet = null,
+            )
+    }
+
     fun world(sources: List<Source>, lastWorkspace: Pair<String, String>? = null): World = World(
         seats = sources.map(::seat),
         lastWorkspace = lastWorkspace?.let { World.Last(it.first, it.second) },

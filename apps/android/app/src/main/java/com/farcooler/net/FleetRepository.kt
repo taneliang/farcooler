@@ -141,6 +141,9 @@ class FleetRepository(
             connections[host.id] = connection
             starts[host.id] = scope.launch { connection.start() }
             watchers[host.id] = listOf(
+                // Kept for a push that names this runner when it isn't
+                // connected (ov-231).
+                scope.launch { connection.lastDaemon.collect { hosts.rememberRunnerId(host.id, it?.runnerId) } },
                 scope.launch { connection.fleet.collect { publish() } },
                 scope.launch { connection.phase.collect { publish() } },
                 // The counts arrive on their own cadence — one read per

@@ -498,21 +498,25 @@ class AppModel(
     private fun destinationWorld(): DestinationResolver.World {
         val everyRunner = settings.allRunnersAtOnce.value
         val selected = hosts.selectedId.value
-        val sources = hosts.hosts.value.map { host ->
-            val connection = fleet.connection(host.id)
-            val daemon = connection?.lastDaemon?.value
-            DestinationWorld.Source(
+        val connected = hosts.hosts.value.mapNotNull { host ->
+            val connection = fleet.connection(host.id) ?: return@mapNotNull null
+            val daemon = connection.lastDaemon.value
+            host.id to DestinationWorld.Source(
                 hostId = host.id,
                 runnerId = daemon?.runnerId,
-                ready = connection != null && connection.phase.value is Connection.Phase.Connected && daemon != null,
-                // A runner nothing is connecting: not selected, and the
-                // phone isn't holding every runner. Anything else is on its way.
-                idle = connection == null && !everyRunner && host.id != selected,
-                fleet = connection?.fleet?.value,
-                boardList = connection?.boardList().orEmpty(),
-                boards = connection?.boards?.value.orEmpty(),
+                ready = connection.phase.value is Connection.Phase.Connected && daemon != null,
+                idle = false,
+                fleet = connection.fleet.value,
+                boardList = connection.boardList(),
+                boards = connection.boards.value,
             )
-        }
+        }.toMap()
+        // A runner nothing is connecting: not selected, and the phone isn't
+        // holding every runner. Anything else is on its way.
+        val sources = DestinationWorld.sources(
+            paired = hosts.hosts.value.map { it.id }, connected = connected, known = hosts.runnerIds(),
+            everyRunner = everyRunner, selected = selected,
+        )
         val last = settings.lastWorkspace?.let { it.substringBefore('/') to it.substringAfter('/', "") }
             ?.takeIf { it.first.isNotEmpty() && it.second.isNotEmpty() }
         return DestinationWorld.world(sources, last)

@@ -342,8 +342,21 @@ class RunnerStore(context: Context) {
         save()
     }
 
+    /** The runner ids remembered on connect, by [Runner.id] (ov-231). See [RunnerIds]. */
+    fun runnerIds(): Map<String, String> = RunnerIds.decode(preferences.getString(KEY_RUNNER_IDS, null))
+
+    /** Keep the id a runner said on connect, for a push that names it before it is connected. */
+    fun rememberRunnerId(host: String, runnerId: String?) {
+        val ids = runnerIds()
+        val next = RunnerIds.remember(ids, host, runnerId)
+        if (next != ids) preferences.edit().putString(KEY_RUNNER_IDS, RunnerIds.encode(next)).apply()
+    }
+
     fun remove(host: Runner) {
         _hosts.value = _hosts.value.filterNot { it.id == host.id }
+        RunnerIds.forget(runnerIds(), host.id).let {
+            preferences.edit().putString(KEY_RUNNER_IDS, RunnerIds.encode(it)).apply()
+        }
         // The theme catalog is a fold over the runners, so a removed one stops
         // contributing to it. Here and not where a connection ends, which also
         // happens on an edit, where the runner still exists. See [Themes.forget].
@@ -373,5 +386,6 @@ class RunnerStore(context: Context) {
     private companion object {
         const val KEY_HOSTS = "hosts"
         const val KEY_LAST = "hosts.last"
+        const val KEY_RUNNER_IDS = "hosts.runnerIds"
     }
 }
