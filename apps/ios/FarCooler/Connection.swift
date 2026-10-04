@@ -464,12 +464,14 @@ final class Connection: ObservableObject {
                 switch event {
                 case "task":
                     guard let moved else { break }
-                    for board in RunnerBoards.touched(by: moved, among: self.boardList) {
-                        await self.readBoard(board)
-                    }
+                    let touched = RunnerBoards.touched(by: moved, among: self.boardList)
+                    for board in touched { await self.readBoard(board) }
+                    await self.rereadPlans(for: touched)
                 case "resync":
                     await self.loadNeedsYou()
                     await self.loadBoards()
+                    await self.rereadPlans(for: self.boardList)
+                case "plan": await self.hearPlan(notice)
                 // The rollup moved: an ask held or settled, a decision asked
                 // or answered, a review in or out. See `loadNeedsYou`.
                 case "needs_you": await self.loadNeedsYou()
@@ -1300,6 +1302,9 @@ final class Connection: ObservableObject {
     /// by `readsKeepers`, in Connection+BoardReads.swift.
     @Published var boardReads: [String: BoardReads] = [:]
     var readsKeepers: [String: BoardReadsKeeper] = [:]
+
+    /// The plan layer, read on request (ov-274); see ConnectionPlan.swift.
+    let plans = PlanReads()
 
     /// Every board this runner keeps, in the order the screens draw them:
     /// each repository's workspaces, or its one implicit board on a runner

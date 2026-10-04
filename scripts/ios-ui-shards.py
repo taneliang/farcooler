@@ -58,6 +58,7 @@ SHARDS = {
         "DynamicTypeTests",  # -agent-layout-harness
         "RunnerReachTests",  # seeded -hosts at an address that never answers
         "FirstRunUITests",  # -phone-harness (ov-205 lane P, placed by integ-9)
+        "PlanUITests",  # -phone-harness -phone-plan (ov-274)
     ],
 }
 

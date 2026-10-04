@@ -48,6 +48,9 @@ import SwiftUI
 //                            Changes chosen in it (ov-233); implies -phone-keep-stack
 //   -phone-no-kept-focus     with -phone-reopen-worktree, nothing was chosen in it: the rule decides
 //   -phone-files-old         the runner is older than Files: no worktree_files, no read_only_folders
+//   -phone-plan, -phone-plan-fails, -phone-plan-hangs, -phone-plan-timeout N,
+//                            -phone-plan-file <path>: the plan layer (ov-274), see
+//                            PhonePlanHarness.swift
 //   -phone-board-first       Billing opens on its Board segment, for a capture that sends no input
 //   -phone-terminal-key      the shell terminal (d003) opens with a line naming bil-9, a task on
 //                            Billing's board, for a long press to land on (ov-215)
@@ -123,7 +126,7 @@ struct PhoneHarness: View {
         }
         for key in UserDefaults.standard.dictionaryRepresentation().keys
         where key.hasPrefix("workspace.segment.") || key.hasPrefix("board.collapsed.")
-            || key.hasPrefix("board.read.")
+            || key.hasPrefix("board.read.") || key.hasPrefix("board.plan.")
         {
             UserDefaults.standard.removeObject(forKey: key)
         }
@@ -324,6 +327,7 @@ final class HarnessRunner {
                     ["tasks", "needs_you", "workstreams", "terminal_task"]
                         + (Self.keepsReads ? ["board_reads"] : [])
                         + (CommandLine.arguments.contains("-phone-files-old") ? [] : ["worktree_files", "read_only_folders"])
+                        + (HarnessPlan.advertised ? ["board_plan"] : [])
                         + (CommandLine.arguments.contains("-phone-usage-old") ? [] : ["agent_usage"])
                         + (CommandLine.arguments.contains("-phone-queue-old") ? [] : ["agent_queue"])),
                 grantedScope: Self.readOnly ? "read" : "control",
@@ -556,6 +560,11 @@ final class HarnessRunner {
             sent.append("\(method) fc-3-webhooks")
             connection.standIn(on: fleet())
             return try json([:])
+        case "plan.get", "plan.events":
+            guard let plan = HarnessPlan(),
+                let data = try await plan.answer(method, args, boards: [Self.main, Self.billing])
+            else { throw ClientCore.CoreError.rejected("not in the harness", word: "unimplemented") }
+            return data
         default:
             throw ClientCore.CoreError.rejected("not in the harness", word: "unimplemented")
         }

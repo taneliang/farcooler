@@ -116,7 +116,8 @@ struct WorkspaceScreen: View {
                     onMarkAllRead: { latest in
                         guard let rows = connection.boards[summary.id]?.rows else { return }
                         connection.markAllRead(rows: rows, latest: latest, workspace: summary.id)
-                    })
+                    },
+                    plan: planHook(summary))
                 .task { await connection.readBoard(summary) }
             case .worktrees:
                 WorkspaceWorktrees(connection: connection, summary: summary, place: place)
@@ -131,6 +132,18 @@ struct WorkspaceScreen: View {
                 selection: $segment)
         }
         .onChange(of: segment) { _, chosen in chosen.remember(for: place) }
+    }
+
+    /// The board's plan (ov-274): what its Plan view reads and where a lane
+    /// or theme opens.
+    private func planHook(_ summary: WorkspaceSummary) -> PlanBoardHook {
+        PlanBoardHook(
+            summary: summary, place: place, reads: connection.plans, keeps: connection.keepsPlan,
+            read: { await connection.readPlan(summary) },
+            onOpen: { page in navigator?.open(.plan(place, page: page)) },
+            statuses: Dictionary(
+                (connection.boards[summary.id]?.rows ?? []).map { ($0.id, $0.status) },
+                uniquingKeysWith: { first, _ in first }))
     }
 
     /// Whether the workspace has an orchestrator that isn't dead.

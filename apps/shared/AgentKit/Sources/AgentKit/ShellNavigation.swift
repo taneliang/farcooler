@@ -1774,6 +1774,9 @@ enum PhoneRoute: Hashable, Codable, Sendable {
     /// A finished status's History page on that workspace's board (ov-103):
     /// `done` or `cancelled`, the status's wire word.
     case history(PhoneWorkspace, status: String)
+    /// A theme's or lane's page of the plan layer on that workspace's board
+    /// (ov-274). Not reopened by a relaunch: the workspace is.
+    case plan(PhoneWorkspace, page: PhonePlanPage)
     /// One worktree, scoped: its panes and nothing else. By the runner's id
     /// and the daemon's own worktree id.
     case worktree(runner: String, worktree: String, landing: WorktreeLanding)

@@ -78,7 +78,13 @@ struct WorkspaceBoardList: View {
     let readsAreShared: () -> Bool
     /// Mark All as Read, once asked, through the newest note read.
     let onMarkAllRead: (Date?) -> Void
+    /// The plan layer's hook (ov-274), nil where there is none. With a
+    /// runner that keeps a plan, a Tasks | Plan control switches this list's
+    /// task sections; nothing else on the board moves.
+    let plan: PlanBoardHook?
 
+    /// Whether this person chose Plan on this board; Tasks until they do.
+    @State private var planChosen: Bool
     @State private var collapsed: Set<TaskStatus>
     /// The long sections showing every task, not just ten.
     @State private var showingMore: Set<TaskStatus> = []
@@ -92,7 +98,8 @@ struct WorkspaceBoardList: View {
         ledByOrchestrator: Bool = false, orchestratorRunning: Bool = true,
         onShowOrchestrator: (() -> Void)? = nil, onHistory: @escaping (TaskStatus) -> Void = { _ in },
         reads: BoardReads = .firstLook(now: Date()), readNotes: @escaping (TaskRow) async -> [TaskNoteRow]? = { _ in nil },
-        readsAreShared: @escaping () -> Bool = { false }, onMarkAllRead: @escaping (Date?) -> Void = { _ in }
+        readsAreShared: @escaping () -> Bool = { false }, onMarkAllRead: @escaping (Date?) -> Void = { _ in },
+        plan: PlanBoardHook? = nil
     ) {
         self.board = board
         self.unread = unread
@@ -112,6 +119,9 @@ struct WorkspaceBoardList: View {
         self.readNotes = readNotes
         self.readsAreShared = readsAreShared
         self.onMarkAllRead = onMarkAllRead
+        self.plan = plan
+        _planChosen = State(
+            initialValue: PlanChoice.shown(host: place.runner, workspace: place.workspace))
         _collapsed = State(
             initialValue: BoardForm.collapsed(host: place.runner, workspace: place.workspace))
     }
@@ -167,7 +177,10 @@ struct WorkspaceBoardList: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .refreshable { await onRefresh() }
+        .refreshable {
+            await onRefresh()
+            if showsPlan { await plan?.read() }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("board")
     }
@@ -182,8 +195,25 @@ struct WorkspaceBoardList: View {
             .background(Fill.selection(active: true), in: Capsule())
     }
 
+    /// Whether the list draws the plan: only where the runner keeps one and
+    /// this person chose it. A runner without `board_plan` draws its tasks
+    /// and no control, whatever was chosen before.
+    private var showsPlan: Bool {
+        PlanChoice.showing(runnerKeepsPlan: plan?.keeps == true, chosen: planChosen)
+    }
+
     private func list(_ board: TaskBoardModel) -> some View {
         List {
+            if let plan, plan.keeps {
+                Section {
+                    PlanSwitch(showsPlan: $planChosen)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                        .onChange(of: planChosen) { _, chosen in
+                            PlanChoice.set(chosen, host: place.runner, workspace: place.workspace)
+                        }
+                }
+            }
             if unread {
                 Section {
                     Label(
@@ -217,96 +247,110 @@ struct WorkspaceBoardList: View {
                     .accessibilityIdentifier("board-waiting")
                 }
             }
-            ForEach(board.sections.filter { BoardForm.canExpand($0) }) { section in
-                let open = BoardForm.isExpanded(section, collapsed: collapsed)
-                Section {
-                    if open {
-                        let cut = section.cut(
-                            reads: reads, showingAll: showingMore.contains(section.status), now: Date())
-                        ForEach(cut.rows) { row in
-                            let live = speaksOfAgents ? agents(row) : []
-                            TaskBoardCardRow(
-                                row: row,
-                                live: live,
-                                orchestrator: orchestrator(row),
-                                speaksOfAgents: speaksOfAgents,
-                                presence: row.agentPresence(
-                                    livePanes: live.count, runnerRecordsTasks: speaksOfAgents),
-                                onOpen: { onOpen(row) },
-                                onJump: onJump)
-                        }
-                        if cut.hidden > 0 {
-                            Button(BoardSectionCut.showMoreTitle(cut.hidden)) {
-                                withAnimation { _ = showingMore.insert(section.status) }
-                            }
-                            .font(.footnote)
-                            .accessibilityIdentifier("board-show-more-\(section.id)")
-                        } else if showingMore.contains(section.status), !section.status.isFinished,
-                            section.rows.count > BoardSectionCut.limit
-                        {
-                            Button("Show Fewer") {
-                                withAnimation { _ = showingMore.remove(section.status) }
-                            }
-                            .font(.footnote)
-                            .accessibilityIdentifier("board-show-fewer-\(section.id)")
-                        }
-                        if let total = cut.history {
-                            // "All Done  94 ›": the History page, pushed.
-                            Button { onHistory(section.status) } label: {
-                                HStack {
-                                    Text(BoardDone.historyTitle(section.status))
-                                    Spacer()
-                                    Text("\(total)")
-                                        .monospacedDigit()
-                                        .foregroundStyle(.tertiary)
-                                    Image(systemName: "chevron.forward")
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.tertiary)
-                                }
-                                .contentShape(.rect)
-                            }
-                            .buttonStyle(.plain)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .accessibilityLabel("\(BoardDone.historyTitle(section.status)), \(total)")
-                            .accessibilityIdentifier("board-history-\(section.id)")
-                        }
-                    }
-                } header: {
-                    header(section, open: open)
-                }
-            }
-            // The statuses with nothing in them, once, rather than a dim header
-            // each.
-            if let note = BoardForm.emptyNote(board) {
-                Section {
-                    Text(note)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("board-empty-statuses")
-                }
-            }
-            // Rows this build has no status for: carried and shown under a
-            // heading that says it is this app that is behind, never dropped
-            // and never filed under a status they are not in.
-            if !board.unreadable.isEmpty {
-                Section("Not On This Version") {
-                    ForEach(board.unreadable) { row in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(row.key)
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                            Text(row.title)
-                            Text(row.status)
-                                .font(.system(.caption2, design: .monospaced))
-                                .foregroundStyle(.tertiary)
-                        }
-                        .accessibilityElement(children: .combine)
-                    }
-                }
+            if showsPlan, let plan {
+                PlanBoardSections(hook: plan)
+            } else {
+                taskSections(board)
             }
         }
         .listStyle(.insetGrouped)
+        .task(id: showsPlan) {
+            if showsPlan { await plan?.read() }
+        }
+    }
+
+    /// The board's tasks by status: the sections the Plan view stands in
+    /// for, and nothing else of the list.
+    @ViewBuilder
+    private func taskSections(_ board: TaskBoardModel) -> some View {
+            ForEach(board.sections.filter { BoardForm.canExpand($0) }) { section in
+            let open = BoardForm.isExpanded(section, collapsed: collapsed)
+            Section {
+                if open {
+                    let cut = section.cut(
+                        reads: reads, showingAll: showingMore.contains(section.status), now: Date())
+                    ForEach(cut.rows) { row in
+                        let live = speaksOfAgents ? agents(row) : []
+                        TaskBoardCardRow(
+                            row: row,
+                            live: live,
+                            orchestrator: orchestrator(row),
+                            speaksOfAgents: speaksOfAgents,
+                            presence: row.agentPresence(
+                                livePanes: live.count, runnerRecordsTasks: speaksOfAgents),
+                            onOpen: { onOpen(row) },
+                            onJump: onJump)
+                    }
+                    if cut.hidden > 0 {
+                        Button(BoardSectionCut.showMoreTitle(cut.hidden)) {
+                            withAnimation { _ = showingMore.insert(section.status) }
+                        }
+                        .font(.footnote)
+                        .accessibilityIdentifier("board-show-more-\(section.id)")
+                    } else if showingMore.contains(section.status), !section.status.isFinished,
+                        section.rows.count > BoardSectionCut.limit
+                    {
+                        Button("Show Fewer") {
+                            withAnimation { _ = showingMore.remove(section.status) }
+                        }
+                        .font(.footnote)
+                        .accessibilityIdentifier("board-show-fewer-\(section.id)")
+                    }
+                    if let total = cut.history {
+                        // "All Done  94 ›": the History page, pushed.
+                        Button { onHistory(section.status) } label: {
+                            HStack {
+                                Text(BoardDone.historyTitle(section.status))
+                                Spacer()
+                                Text("\(total)")
+                                    .monospacedDigit()
+                                    .foregroundStyle(.tertiary)
+                                Image(systemName: "chevron.forward")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .contentShape(.rect)
+                        }
+                        .buttonStyle(.plain)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("\(BoardDone.historyTitle(section.status)), \(total)")
+                        .accessibilityIdentifier("board-history-\(section.id)")
+                    }
+                }
+            } header: {
+                header(section, open: open)
+            }
+        }
+        // The statuses with nothing in them, once, rather than a dim header
+        // each.
+        if let note = BoardForm.emptyNote(board) {
+            Section {
+                Text(note)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("board-empty-statuses")
+            }
+        }
+        // Rows this build has no status for: carried and shown under a
+        // heading that says it is this app that is behind, never dropped
+        // and never filed under a status they are not in.
+        if !board.unreadable.isEmpty {
+            Section("Not On This Version") {
+                ForEach(board.unreadable) { row in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(row.key)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                        Text(row.title)
+                        Text(row.status)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            }
+        }
     }
 
     /// "In Progress 3", with a chevron when it opens. An empty status's

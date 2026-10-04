@@ -78,6 +78,13 @@ SOURCES = [
     "TaskBoardView.swift",
     # A finished status's History page, pushed from the board (ov-103).
     "BoardHistoryScreen.swift",
+    # The plan layer on a phone (ov-274), experimental and opt-in: the Plan
+    # view in the board's list, a theme's and a lane's page, and what the
+    # connection reads of it. Deleting the layer deletes these three.
+    "PlanBoardSections.swift",
+    "PlanPageScreens.swift",
+    "ConnectionPlan.swift",
+    "PhonePlanHarness.swift",
     "EmptyState.swift",
     # The drawings behind first run and the empty states: task skeleton,
     # orchestrator vignette, onboarding mark (ov-205).
@@ -555,6 +562,9 @@ AGENTKIT_SOURCES = [
     # `TerminalAskCardTests` and `PermissionAnsweringTests`.
     "TerminalAskCard.swift",
     "PermissionAnswering.swift",
+    # The plan layer as a client reads it, and how a phone reads it (ov-274).
+    "PlanModel.swift",
+    "PlanReading.swift",
     # The board: its model, which agent is on which card, and which
     # repositories get a Board row in the overview. The Mac has drawn the first
     # two since card -19; the phone draws the same cards off the same rules, so
@@ -800,6 +810,9 @@ UI_TEST_SOURCES = [
     # First run and the empty states over the same canned runner (ov-205): no
     # runner, a runner with no repository, blank boards, a missing agent.
     "FirstRunUITests.swift",
+    # The plan layer's view on the canned runner (ov-274): opt-in, the
+    # overview, its pages, and a read that is refused or never answered.
+    "PlanUITests.swift",
     "DynamicTypeTests.swift",
     # A task's agent and back, a notification landing with its workspace and
     # task under it, and a decision answered from Needs You. Needs no runner,

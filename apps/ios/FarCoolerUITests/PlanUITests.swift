@@ -1,0 +1,198 @@
+import XCTest
+
+/// The plan layer on a phone (ov-274), over the canned runner, whose plan is a
+/// real board's: `test/fixtures/plan-seeded.json` is the CLI's own output for
+/// the board `.claude/agent/reports/ov-273/seed.sh` seeds.
+///
+/// Opt-in, so a runner without `board_plan` shows nothing new; Tasks the
+/// default, with the control switching only the task list; each theme legible
+/// on its own and each Next Up lane naming its theme; an outcome wrapping to
+/// three lines; and a read that is refused or never answered says so, with Try
+/// Again, instead of spinning. Each attaches a screenshot, kept, for the light
+/// and dark sheets.
+final class PlanUITests: XCTestCase {
+    override func setUp() {
+        continueAfterFailure = false
+    }
+
+    /// `test/fixtures/plan-seeded.json`, from this file's own place.
+    private static var fixture: String {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { root.deleteLastPathComponent() }
+        return root.appendingPathComponent("test/fixtures/plan-seeded.json").path
+    }
+
+    private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
+        app.descendants(matching: .any)[id]
+    }
+
+    private func keep(_ app: XCUIApplication, _ name: String) {
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = name
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
+    /// Billing's board, on a runner that advertises `board_plan` unless
+    /// `extra` says otherwise.
+    private func openBoard(_ extra: [String] = ["-phone-plan"]) -> XCUIApplication {
+        let app = XCUIApplication.phoneHarness(
+            ["-phone-empty-inbox", "-phone-board-reads", "-phone-plan-file", Self.fixture] + extra)
+        let billing = app.buttons["workspace-row-Billing"]
+        XCTAssertTrue(billing.waitForExistence(timeout: 30), "no Billing row")
+        billing.tap()
+        app.buttons["segment-board"].tap()
+        XCTAssertTrue(element(app, "board").waitForExistence(timeout: 10), "no board")
+        return app
+    }
+
+    private func showPlan(_ app: XCUIApplication) {
+        let control = app.segmentedControls["plan-switch"]
+        XCTAssertTrue(control.waitForExistence(timeout: 10), "no Tasks | Plan control: \(app.debugDescription)")
+        control.buttons["Plan"].tap()
+    }
+
+    func testARunnerWithoutBoardPlanShowsNothingNew() {
+        let app = openBoard([])
+        XCTAssertTrue(element(app, "board-section-needs_decision").waitForExistence(timeout: 10), "no tasks")
+        XCTAssertFalse(app.segmentedControls["plan-switch"].exists, "a control on a runner with no plan")
+        XCTAssertFalse(element(app, "plan-next-up").exists)
+    }
+
+    func testTasksIsTheDefaultAndPlanSwitchesOnlyTheTaskList() {
+        let app = openBoard()
+        let control = app.segmentedControls["plan-switch"]
+        XCTAssertTrue(control.waitForExistence(timeout: 10), "no control on a runner with a plan")
+        XCTAssertTrue(element(app, "board-section-needs_decision").waitForExistence(timeout: 10), "no tasks by default")
+        XCTAssertTrue(element(app, "board-unread").exists, "no Unread strip")
+        XCTAssertFalse(element(app, "plan-next-up").exists, "the plan is up by default")
+
+        control.buttons["Plan"].tap()
+        XCTAssertTrue(element(app, "plan-next-up").waitForExistence(timeout: 10), "no Next Up: \(app.debugDescription)")
+        XCTAssertFalse(element(app, "board-section-needs_decision").exists, "the task list stayed under the plan")
+        XCTAssertTrue(element(app, "board-unread").exists, "the Unread strip went with the tasks")
+        XCTAssertTrue(control.exists, "the control went")
+        keep(app, "plan-overview")
+
+        control.buttons["Tasks"].tap()
+        XCTAssertTrue(element(app, "board-section-needs_decision").waitForExistence(timeout: 10), "tasks didn't return")
+        XCTAssertFalse(element(app, "plan-next-up").exists)
+    }
+
+    func testEachLaneNamesItsThemeAndEachThemeReadsOnItsOwn() {
+        let app = openBoard()
+        showPlan(app)
+        XCTAssertTrue(element(app, "plan-next-up").waitForExistence(timeout: 10))
+        let lane = element(app, "plan-lane-plan-phones")
+        XCTAssertTrue(lane.waitForExistence(timeout: 5), "no plan-phones in Next Up")
+        XCTAssertTrue(lane.label.contains("Plan layer"), "the lane doesn't name its theme: \(lane.label)")
+        XCTAssertTrue(lane.label.hasPrefix("1st up"), lane.label)
+
+        let theme = element(app, "plan-theme-Visual language")
+        for _ in 0..<8 where !(theme.exists && theme.isHittable) { app.swipeUp() }
+        XCTAssertTrue(theme.exists, "no theme card: \(app.debugDescription)")
+        for part in [
+            "Every Mac surface reads as one app", "4 of 18 done", "Next: mac-vis finishes",
+            "Needs you: Should the sidebar tint",
+        ] {
+            XCTAssertTrue(theme.label.contains(part), "the theme doesn't say \(part): \(theme.label)")
+        }
+        keep(app, "plan-themes")
+    }
+
+    func testAnOutcomeWrapsToThreeLines() {
+        let app = openBoard(["-phone-plan", "-phone-plan-outcomes"])
+        showPlan(app)
+        let rows = ["Visual language", "Mac navigation", "Reliability"].map { element(app, "plan-theme-\($0)") }
+        XCTAssertTrue(element(app, "plan-next-up").waitForExistence(timeout: 10))
+        for _ in 0..<8 where !rows.allSatisfy({ $0.exists && $0.isHittable }) { app.swipeUp() }
+        XCTAssertTrue(rows.allSatisfy(\.exists), "the three themes aren't on screen together: \(app.debugDescription)")
+        let heights = rows.map(\.frame.height)
+        let line = heights[1] - heights[0]
+        XCTAssertGreaterThan(line, 8, "one line and two lines are the same height: \(heights)")
+        // Far too many words show three lines: two more than the short one.
+        XCTAssertEqual(
+            heights[2] - heights[0], 2 * line, accuracy: line * 0.6, "the outcome isn't three lines: \(heights)")
+        keep(app, "plan-outcome-lines")
+    }
+
+    func testALaneAndAThemeOpenTheirPages() {
+        let app = openBoard()
+        showPlan(app)
+        let lane = element(app, "plan-lane-plan-phones")
+        XCTAssertTrue(lane.waitForExistence(timeout: 10))
+        lane.tap()
+        XCTAssertTrue(element(app, "plan-lane-page").waitForExistence(timeout: 10), "no lane page: \(app.debugDescription)")
+        XCTAssertTrue(element(app, "plan-lane-theme").exists, "the lane page doesn't name its theme")
+        keep(app, "plan-lane-page")
+        element(app, "plan-lane-theme").tap()
+        XCTAssertTrue(element(app, "plan-theme-page").waitForExistence(timeout: 10), "no theme page")
+        XCTAssertTrue(app.staticTexts["Plan layer"].exists)
+        keep(app, "plan-theme-page")
+        app.navigationBars.buttons["BackButton"].firstMatch.tap()
+        app.navigationBars.buttons["BackButton"].firstMatch.tap()
+        XCTAssertTrue(element(app, "plan-next-up").waitForExistence(timeout: 10), "Back didn't return to the plan")
+        XCTAssertTrue(app.segmentedControls["plan-switch"].buttons["Plan"].isSelected, "the choice was forgotten")
+    }
+
+    func testAThemePageShowsWhatChanged() {
+        let app = openBoard()
+        showPlan(app)
+        let theme = element(app, "plan-theme-Visual language")
+        for _ in 0..<8 where !(theme.exists && theme.isHittable) { app.swipeUp() }
+        theme.tap()
+        XCTAssertTrue(element(app, "plan-theme-page").waitForExistence(timeout: 10))
+        let change = element(app, "plan-what-changed")
+        XCTAssertTrue(change.waitForExistence(timeout: 10), "no What Changed: the record wasn't read")
+        change.tap()
+        XCTAssertTrue(element(app, "plan-previous-story").waitForExistence(timeout: 5), "the old story isn't shown")
+        keep(app, "plan-what-changed")
+    }
+
+    func testARefusedReadSaysSoAndOffersTryAgain() {
+        let app = openBoard(["-phone-plan-fails"])
+        showPlan(app)
+        XCTAssertTrue(element(app, "plan-unavailable").waitForExistence(timeout: 10), "no unavailable state")
+        XCTAssertEqual(element(app, "plan-unavailable").label, "Far Cooler couldn’t read this board’s plan.")
+        XCTAssertTrue(element(app, "plan-retry").exists)
+        XCTAssertFalse(element(app, "plan-loading").exists)
+        keep(app, "plan-unavailable")
+    }
+
+    func testAnUnansweredReadEndsInTheUnavailableStateNotASpinner() {
+        let app = openBoard(["-phone-plan-hangs", "-phone-plan-timeout", "2"])
+        showPlan(app)
+        // The runner never answers; the phone gives up after two seconds. (No
+        // look at the spinner on the way: XCUITest waits for the app to idle
+        // before it looks, and a spinner holds it from idling until it's gone.)
+        XCTAssertTrue(
+            element(app, "plan-unavailable").waitForExistence(timeout: 15), "the spinner never ended: \(app.debugDescription)")
+        XCTAssertEqual(app.activityIndicators.matching(identifier: "plan-loading").count, 0, "still spinning")
+        XCTAssertFalse(element(app, "plan-loading").exists, "still spinning")
+        XCTAssertTrue(element(app, "plan-retry").exists)
+    }
+
+    /// The sheets: the overview, its themes, a lane and a theme, light and dark.
+    func testCaptures() {
+        for (name, appearance) in [("light", XCUIDevice.Appearance.light), ("dark", .dark)] {
+            XCUIDevice.shared.appearance = appearance
+            let app = openBoard()
+            showPlan(app)
+            XCTAssertTrue(element(app, "plan-next-up").waitForExistence(timeout: 10))
+            keep(app, "capture-overview-\(name)")
+            let theme = element(app, "plan-theme-Visual language")
+            for _ in 0..<8 where !(theme.exists && theme.isHittable) { app.swipeUp() }
+            keep(app, "capture-themes-\(name)")
+            theme.tap()
+            XCTAssertTrue(element(app, "plan-theme-page").waitForExistence(timeout: 10))
+            keep(app, "capture-theme-page-\(name)")
+            app.navigationBars.buttons["BackButton"].firstMatch.tap()
+            let lane = element(app, "plan-lane-mac-vis")
+            for _ in 0..<8 where !(lane.exists && lane.isHittable) { app.swipeDown() }
+            lane.tap()
+            XCTAssertTrue(element(app, "plan-lane-page").waitForExistence(timeout: 10))
+            keep(app, "capture-lane-page-\(name)")
+            app.terminate()
+        }
+    }
+}

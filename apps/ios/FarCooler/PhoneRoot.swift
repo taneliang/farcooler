@@ -196,6 +196,12 @@ struct PhoneRoot: View {
             } else {
                 RunnerGone()
             }
+        case .plan(let place, let page):
+            if let connection = fleet.connection(for: place) {
+                PlanPageScreen(connection: connection, place: place, page: page)
+            } else {
+                RunnerGone()
+            }
         case .worktree:
             // Never pushed: a worktree covers the stack. See
             // `PhoneNavigator.worktree`.
