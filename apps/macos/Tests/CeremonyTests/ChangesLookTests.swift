@@ -29,8 +29,11 @@ struct ChangesLookTests {
         return rep
     }
 
+    /// The color at a point, in the bitmap's own scale: 2 on a Retina Mac,
+    /// 1 on CI's headless runner, where a hard-coded 2 samples the wrong pixel.
     private func color(_ rep: NSBitmapImageRep, _ x: Int, _ y: Int) throws -> NSColor {
-        try #require(rep.colorAt(x: x * 2, y: y * 2)).usingColorSpace(.sRGB)!
+        let scale = max(1, rep.pixelsWide / Int(rep.size.width.rounded()))
+        return try #require(rep.colorAt(x: x * scale, y: y * scale)).usingColorSpace(.sRGB)!
     }
 
     @Test("The guessed-base warning is an amber row inset from the pane's edges, not a band across it")
