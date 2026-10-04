@@ -210,9 +210,14 @@ fn home(h: &Harness, workspace: &str) -> PathBuf {
 }
 
 /// What the stand-in wrote for each launch in `workspace`, oldest first,
-/// waiting up to ten seconds for there to be `count`.
+/// waiting up to a minute for there to be `count`.
+///
+/// The wait ends the moment the records are there, so the minute costs
+/// nothing at rest. It was ten seconds, which a machine under several lanes'
+/// builds outlasted: tmux, a shell and the stand-in each wait their turn for
+/// a core, and a launch took longer than that (ov-277).
 async fn records(h: &Harness, workspace: &str, count: usize) -> Vec<Vec<(String, String)>> {
-    for _ in 0..100 {
+    for _ in 0..600 {
         let mut found: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(home(h, workspace))
             .unwrap()
             .flatten()
@@ -412,15 +417,30 @@ async fn layout_call(
     worktree: &bytes::Bytes,
     update: farcooler_protocol::v1::LayoutUpdate,
 ) -> farcooler_protocol::v1::PaneGroupList {
-    let mut r = request(method);
-    r.target_resource_id = Some(worktree.clone());
-    r.payload = Some(request::Payload::LayoutUpdate(update));
-    let Some(result::Value::PaneGroupList(list)) =
-        client.call(r).await.unwrap_or_else(|e| panic!("{method}: {e:?}")).value
-    else {
-        panic!("{method} returned the wrong resource")
-    };
-    list
+    // A layout verb is an ordinary tmux command, which the daemon gives one
+    // second (`deadline_for`) and answers "tmux did not answer in time",
+    // marked retryable, when a loaded machine takes longer: the build lanes'
+    // load did that to `layout.focus` (ov-277). The verb was only abandoned,
+    // so a client does what the answer says and asks again, a few times.
+    let mut asked = 0;
+    loop {
+        let mut r = request(method);
+        r.target_resource_id = Some(worktree.clone());
+        r.payload = Some(request::Payload::LayoutUpdate(update.clone()));
+        match client.call(r).await {
+            Err(ClientError::Daemon { retryable: true, .. }) if asked < 5 => {
+                asked += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            }
+            Err(e) => panic!("{method}: {e:?}"),
+            Ok(reply) => {
+                let Some(result::Value::PaneGroupList(list)) = reply.value else {
+                    panic!("{method} returned the wrong resource")
+                };
+                return list;
+            }
+        }
+    }
 }
 
 /// The window holding `terminal`.
