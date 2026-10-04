@@ -170,3 +170,17 @@ private func b(_ s: String) -> [UInt8] { Array(s.utf8) }
         RunnerRefusal.word(inAnswerLine: ["code": "not-found", "timed_out": true]) == "not-found")
     #expect(RunnerRefusal.word(inAnswerLine: ["ok": false, "timed_out": false]) == nil)
 }
+
+@MainActor
+@Test func keysTypedDuringATryAgainFlightShareTheCap() async {
+    let hold = InputHold()
+    let runner = FakeRunner([.neverSent(.disconnected), .written, .written])
+    await hold.type(b("a"), send: runner.write)
+    runner.onSend = {
+        runner.onSend = nil
+        await hold.type([UInt8](repeating: 0x79, count: 10_000), send: runner.write)
+    }
+    await hold.retry(send: runner.write)
+    #expect(runner.sent.last?.count == InputHold.cap, "the flight's keys are capped: \(runner.sent.map(\.count))")
+    #expect(hold.maybeLost, "dropped keys are admitted, not silent")
+}

@@ -69,6 +69,8 @@ public final class InputHold: ObservableObject {
     @Published public private(set) var maybeLost = false
 
     private var pending: [UInt8] = []
+    /// Typed while a Try Again was in flight, past `cap`, and dropped.
+    private var droppedPending = false
     private var sending = false
     private var epoch = 0
 
@@ -84,7 +86,7 @@ public final class InputHold: ObservableObject {
             absorb(bytes)
             return
         }
-        pending += bytes
+        keepPending(bytes)
         if sending { return }
         await drain(send)
     }
@@ -104,18 +106,24 @@ public final class InputHold: ObservableObject {
             reason = why
             absorb(pending)
             pending = []
+            if droppedPending { truncated = true }
+            droppedPending = false
             return
         case .maybeSent:
             clearHeld()
             maybeLost = true
         }
         await drain(send)
+        // Keys past the cap are gone whatever the retry did; say so.
+        if droppedPending { maybeLost = true }
+        droppedPending = false
     }
 
     /// Discard: drop what is held.
     public func discard() {
         clearHeld()
         pending = []
+        droppedPending = false
     }
 
     /// Dismiss the "may not have reached" line.
@@ -127,6 +135,7 @@ public final class InputHold: ObservableObject {
         sending = false
         clearHeld()
         pending = []
+        droppedPending = false
         maybeLost = false
     }
 
@@ -168,6 +177,14 @@ public final class InputHold: ObservableObject {
             }
         }
         sending = false
+    }
+
+    /// Queue typed keys behind a write in flight, at most `cap` bytes of them:
+    /// the earliest are kept, as in `absorb`.
+    private func keepPending(_ bytes: [UInt8]) {
+        let room = max(0, Self.cap - pending.count)
+        if bytes.count > room { droppedPending = true }
+        pending += bytes.prefix(room)
     }
 
     private func absorb(_ bytes: [UInt8]) {

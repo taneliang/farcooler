@@ -76,6 +76,8 @@ class InputHold {
     private var truncated = false
     private var maybeLost = false
     private var pending = ByteArray(0)
+    /** Typed while a Try again was in flight, past [CAP], and dropped. */
+    private var droppedPending = false
     private var sending = false
     private var epoch = 0
 
@@ -95,7 +97,7 @@ class InputHold {
             publish()
             return
         }
-        pending += bytes
+        keepPending(bytes)
         if (sending) return
         drain(send)
     }
@@ -118,6 +120,8 @@ class InputHold {
                 reason = outcome.reason
                 absorb(pending)
                 pending = ByteArray(0)
+                if (droppedPending) truncated = true
+                droppedPending = false
                 publish()
                 return
             }
@@ -128,12 +132,17 @@ class InputHold {
         }
         publish()
         drain(send)
+        // Keys past the cap are gone whatever the retry did; say so.
+        if (droppedPending) maybeLost = true
+        droppedPending = false
+        publish()
     }
 
     /** Discard: drop what is held. */
     fun discard() {
         clearHeld()
         pending = ByteArray(0)
+        droppedPending = false
         publish()
     }
 
@@ -149,6 +158,7 @@ class InputHold {
         sending = false
         clearHeld()
         pending = ByteArray(0)
+        droppedPending = false
         maybeLost = false
         publish()
     }
@@ -179,6 +189,13 @@ class InputHold {
         } finally {
             if (mine == epoch) sending = false
         }
+    }
+
+    /** Queue typed keys behind a write in flight, at most [CAP] bytes, the earliest kept. */
+    private fun keepPending(bytes: ByteArray) {
+        val room = maxOf(0, CAP - pending.size)
+        if (bytes.size > room) droppedPending = true
+        pending += bytes.copyOf(minOf(room, bytes.size))
     }
 
     private fun absorb(bytes: ByteArray) {

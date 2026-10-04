@@ -134,6 +134,17 @@ class InputHoldTest {
     }
 
     @Test
+    fun keysTypedDuringATryAgainFlightShareTheCap() = runBlocking {
+        val hold = InputHold()
+        val runner = FakeRunner(never, WriteOutcome.Written, WriteOutcome.Written)
+        hold.type(b("a"), runner::write)
+        runner.onSend = { hold.type(ByteArray(10_000) { 'y'.code.toByte() }, runner::write) }
+        hold.retry(runner::write)
+        assertEquals("the flight's keys are capped", InputHold.CAP, runner.sent.last()!!.size)
+        assertEquals("dropped keys are admitted, not silent", "Some typing may not have reached the runner.", hold.line.value?.sentence)
+    }
+
+    @Test
     fun aClosedPaneDropsTheHoldAndAnythingInFlight() = runBlocking {
         val hold = InputHold()
         val runner = FakeRunner(never, WriteOutcome.Written)
