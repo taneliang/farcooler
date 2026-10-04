@@ -48,6 +48,7 @@ SHARDS = {
         "ChangesPullRequestTests",  # -changes-layout-harness
         "ChangesPatchNoticeTests",  # -changes-layout-harness
         "AgentRetrySendTests",  # -agent-layout-harness
+        "AgentStoppedTests",  # -agent-layout-harness -stopped
         "ActionFailureTests",  # -phone-harness and -agent-layout-harness
         "ComposerKeyboardTests",  # -agent-layout-harness
         "DynamicTypeTests",  # -agent-layout-harness
