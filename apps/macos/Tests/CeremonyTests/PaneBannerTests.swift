@@ -79,4 +79,34 @@ struct PaneBannerTests {
         #expect(removed.contains(PaneBanner.identifier(forPane: "t-2")), "\(removed)")
         #expect(!removed.contains("t-1"), "a pane still there keeps its banner")
     }
+
+    /// With "Remove terminals when they exit" on, the pane is reaped within a
+    /// second of a failed command, and its banner is all that is left of the
+    /// failure. Reaping must not take it down.
+    @Test func aFailedCommandsBannerOutlivesTheReapOfItsPane() async throws {
+        let failed = try JSONDecoder().decode(
+            Terminal.self,
+            from: Data(
+                """
+                {"id":"t-fail","short":"s","title":"cargo","preset":"cargo","state":"exited",
+                "exitCode":101,"epoch":0}
+                """.utf8))
+        #expect(failed.status == .failedRun)
+        var removed: [String] = []
+        let original = Notifier.shared.removeDelivered
+        Notifier.shared.removeDelivered = { removed += $0 }
+        defer { Notifier.shared.removeDelivered = original }
+
+        Preferences.shared.notifyOnAttention = true
+        let worktree = try JSONDecoder().decode(
+            Worktree.self,
+            from: Data(#"{"id":"w","short":"w","task":"t","branch":"b","worktree":"/tmp/w","state":"active","terminals":[]}"#.utf8))
+        Notifier.shared.report(terminal: failed, place: "lane", in: worktree, runner: nil)
+        Notifier.shared.forget("t-fail")  // what `reapIfExited` and the closed-pane loop call
+        #expect(removed.isEmpty, "the failure banner was taken down: \(removed)")
+
+        // A pane that never failed is still cleaned up.
+        Notifier.shared.forget("t-other")
+        #expect(removed.contains("t-other"))
+    }
 }

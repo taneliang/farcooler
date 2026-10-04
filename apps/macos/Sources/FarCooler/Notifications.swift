@@ -464,7 +464,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     func forget(_ terminalID: String) {
         announced.removeValue(forKey: terminalID)
         lastReport.removeValue(forKey: terminalID)
-        announcedFailure.remove(terminalID)
+        // A failed command's banner is the one trace of the failure once the
+        // pane is reaped, which the default setting does within a second of
+        // the exit. It stays until it is dismissed or the pane's next banner
+        // replaces it, so the reap and a closed pane leave it alone.
+        let keepsFailure = announcedFailure.remove(terminalID) != nil
+        if keepsFailure { return }
         removeDelivered(PaneBanner.removing(pane: terminalID))
     }
 
