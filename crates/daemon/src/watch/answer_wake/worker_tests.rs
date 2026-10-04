@@ -68,6 +68,7 @@ async fn an_answer_on_a_subagents_task_names_the_subagent_to_the_orchestrator() 
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     b.answer("Drill in");
     b.pump().await;
+    si.submits(1).await;
     let told = si.submitted();
     assert_eq!(told.len(), 1, "{}", si.log());
     assert_eq!(
@@ -91,6 +92,7 @@ async fn a_subagent_that_ended_is_not_named() {
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     b.answer("Drill in");
     b.pump().await;
+    si.submits(1).await;
     assert_eq!(si.submitted(), [b.told("Drill in")], "{}", si.log());
 }
 
@@ -137,6 +139,7 @@ async fn a_hold_that_ended_is_told_to_the_idle_orchestrator() {
     b.hold_ended();
     assert!(b.watcher.wakes_hint.load(Ordering::SeqCst), "the pump is asked to look");
     b.pump().await;
+    si.submits(1).await;
     assert_eq!(si.submitted(), [b.hold_told()], "{}", si.log());
     assert!(si.log().contains("PASTE "), "a bracketed paste: {}", si.log());
     assert_eq!(b.progress(), ["Told the orchestrator the hold ended"]);
@@ -159,6 +162,7 @@ async fn a_hold_that_ended_waits_for_a_busy_orchestrator() {
     assert_eq!(b.progress(), ["Waiting to tell the orchestrator the hold ended: it's busy."]);
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     b.pump().await;
+    si.submits(1).await;
     assert_eq!(si.submitted(), [b.hold_told()], "{}", si.log());
 }
 
@@ -177,6 +181,7 @@ async fn a_hold_that_ended_is_not_typed_over_someone_typing() {
     b.hold_untouched(&si);
     std::fs::remove_file(&mark).unwrap();
     b.pump().await;
+    si.submits(1).await;
     assert_eq!(si.submitted(), [b.hold_told()], "{}", si.log());
 }
 
@@ -223,6 +228,7 @@ async fn a_hold_that_ended_is_not_pasted_without_bracketed_paste() {
     si.show("idle").await;
     b.stream_says(orchestrator.id, Some(true)).await;
     b.pump().await;
+    si.submits(1).await;
     assert_eq!(si.submitted(), [b.hold_told()], "{}", si.log());
 }
 
@@ -272,6 +278,7 @@ async fn an_answer_does_not_replace_a_hold_that_ended() {
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     tokio::time::sleep(Duration::from_millis(TOLD_SPACING_MS as u64 + 100)).await;
     b.pump().await;
+    si.submits(1).await;
     let said = si.submitted();
     assert_eq!(said.len(), 2, "{said:?}");
     assert!(said.contains(&b.hold_told()) && said.contains(&b.told("Drill in")), "{said:?}");
