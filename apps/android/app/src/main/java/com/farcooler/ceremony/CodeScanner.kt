@@ -121,6 +121,20 @@ class CodeScanner {
     }
 }
 
+/** The scan screen's sentences about the camera, worded for whether pasting a key is open here. */
+internal object ScanCopy {
+    private fun orPaste(canPaste: Boolean) =
+        if (canPaste) ", or add this device by pasting its key instead." else "."
+
+    fun cameraFailed(canPaste: Boolean) =
+        "The camera didn’t start. Another app may be using it. Go back and try again" +
+            orPaste(canPaste)
+
+    fun cameraOff(canPaste: Boolean) =
+        "The camera is turned off for Far Cooler. You can turn it on in Settings" +
+            orPaste(canPaste)
+}
+
 /**
  * Point the camera at a code, having said why the camera is on.
  *
@@ -134,6 +148,8 @@ fun ScanScreen(
     scanner: CodeScanner,
     instruction: String,
     onCancel: () -> Unit,
+    /** False on the device that's already signed in: only the device being added can paste its key. */
+    canPaste: Boolean = true,
 ) {
     val context = LocalContext.current
     var granted by remember {
@@ -173,8 +189,7 @@ fun ScanScreen(
             val cameraFailed by scanner.cameraFailed.collectAsStateWithLifecycle()
             Text(
                 if (cameraFailed) {
-                    "The camera didn’t start. Another app may be using it. Go back and try " +
-                        "again, or add this device by pasting its key instead."
+                    ScanCopy.cameraFailed(canPaste)
                 } else {
                     instruction
                 },
@@ -198,8 +213,7 @@ fun ScanScreen(
                 // the manual path is still there, which is what the second
                 // sentence says.
                 Text(
-                    "The camera is turned off for Far Cooler. You can turn it on in Settings, " +
-                        "or add this device by pasting its key instead.",
+                    ScanCopy.cameraOff(canPaste),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,

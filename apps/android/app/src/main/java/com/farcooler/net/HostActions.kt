@@ -26,6 +26,19 @@ class HostActions(private val core: TerminalTransport, val notices: ActionNotice
         notices.run(context) { core.call(method, Connection.args("terminal" to terminalId)) }
     }
 
+    /**
+     * Stop, then remove. The stop's own refusal isn't reported: a terminal that
+     * can't be stopped can't be removed either, and the remove says so in the
+     * runner's terms ("Something is still running there"); one that is already
+     * dead refuses the stop and still removes fine.
+     */
+    suspend fun close(terminalId: String) {
+        notices.run("Couldn’t close this terminal.") {
+            attempt { core.call("terminal.stop", Connection.args("terminal" to terminalId)) }
+            core.call("terminal.remove", Connection.args("terminal" to terminalId))
+        }
+    }
+
     suspend fun setHidden(worktreeId: String, hidden: Boolean) {
         val method = if (hidden) "worktree.hide" else "worktree.unhide"
         val context =
@@ -43,7 +56,12 @@ class HostActions(private val core: TerminalTransport, val notices: ActionNotice
     suspend fun setPaneMode(terminalId: String, mode: String) {
         val context = "Couldn’t switch this pane to its " +
             (if (mode == "terminal") "terminal." else "chat.")
-        notices.run(context) {
+        // `confirmation-required` is `guard_toggle` refusing while a turn runs;
+        // the shared table has no sentence for it.
+        val turnRunning = mapOf(
+            "confirmation-required" to "A turn is still running. Wait for it to finish, then try again."
+        )
+        notices.run(context, turnRunning) {
             core.call(
                 "terminal.set_pane_mode",
                 Connection.args("terminal" to terminalId, "paneMode" to mode),

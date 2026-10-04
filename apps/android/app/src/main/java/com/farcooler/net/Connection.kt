@@ -1462,15 +1462,13 @@ class Connection(
      * Calling through [core] directly keeps that intermediate state off the
      * phone entirely: what a person sees is the chip, and then no chip.
      *
-     * Failures are swallowed for [act]'s reason, and it is stronger here: what
-     * comes back from a refused remove is `RunningProcesses`, a Rust enum's
-     * name, and no raw runner error reaches a screen in this app. What a person
-     * sees instead is the tab still there — which is the truth, and the same
-     * thing they would see if the connection had dropped.
+     * A refusal is said through [notices], like [act]'s: a remove refused for a
+     * running process comes back as a plain sentence from the shared table. A
+     * refused stop alone is not reported, because the remove that follows it
+     * refuses too and says why.
      */
     suspend fun close(terminal: Terminal) {
-        attempt { core.call("terminal.stop", args("terminal" to terminal.id)) }
-        attempt { core.call("terminal.remove", args("terminal" to terminal.id)) }
+        actions.close(terminal.id)
         refresh()
     }
 

@@ -142,6 +142,7 @@ fun AddDeviceScreen(model: AppModel, onBack: () -> Unit) {
                         scanner = scanner,
                         instruction = "Point the camera at the code on the device you’re adding.",
                         onCancel = onBack,
+                        canPaste = false,
                     )
 
                 is CeremonyStore.Phase.Mismatch -> MismatchScreen(email, onDone = onBack)

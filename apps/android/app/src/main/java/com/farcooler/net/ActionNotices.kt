@@ -26,8 +26,16 @@ class ActionNotices {
 
     val sentences: SharedFlow<String> = _sentences.asSharedFlow()
 
-    /** Make [call]; if it fails, say [context] and return false. */
-    suspend fun run(context: String, call: suspend () -> Unit): Boolean {
+    /**
+     * Make [call]; if it fails, say [context] and return false. [because] holds
+     * this call's own plain reasons by the runner's word, for refusals the
+     * shared table has no sentence for.
+     */
+    suspend fun run(
+        context: String,
+        because: Map<String, String> = emptyMap(),
+        call: suspend () -> Unit,
+    ): Boolean {
         try {
             call()
             return true
@@ -35,6 +43,7 @@ class ActionNotices {
             e.rethrowIfCancellation()
             _sentences.tryEmit(
                 if (e is DisconnectedException) "$context The connection to this runner dropped."
+                else if (e.refusalWord in because) "$context ${because.getValue(e.refusalWord!!)}"
                 else troubleAfter(e.refusalWord, e.message, context).sentence
             )
             return false

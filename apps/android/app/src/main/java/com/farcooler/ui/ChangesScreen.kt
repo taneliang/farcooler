@@ -65,7 +65,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.platform.testTag
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -577,7 +576,11 @@ private fun FileCard(
     ) {
         FileHeading(file, expanded, onClick = { store.toggle(file.path) })
         if (expanded) {
-            FileBody(file, state, fontFamily, fontSize, { scope.launch { store.ensure(file.path) } }, onComment)
+            FileBody(
+                file, state, fontFamily, fontSize,
+                onRetry = { scope.launch { store.ensure(file.path) } },
+                onComment = onComment,
+            )
         }
     }
 }
@@ -757,7 +760,7 @@ private fun FileBody(
                     color = MaterialTheme.colorScheme.error,
                 )
                 // `ensure` is the retry: a failure leaves the path unread.
-                TextButton(onClick = onRetry, modifier = Modifier.testTag("file-retry")) {
+                TextButton(onClick = onRetry) {
                     Text("Try Again")
                 }
             }

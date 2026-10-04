@@ -101,4 +101,39 @@ class HostActionsTest {
         assertEquals(emptyList<String>(), said)
         assertEquals(listOf("terminal.restart"), core.calls)
     }
+
+    @Test
+    fun `a refused mid-turn pane switch says a turn is running`() = runTest {
+        val core = Core(CoreException("x", word = "confirmation-required"))
+        val said = said(core) { it.setPaneMode("t", "agent") }
+        assertEquals(
+            listOf(
+                "Couldn’t switch this pane to its chat. " +
+                    "A turn is still running. Wait for it to finish, then try again."
+            ),
+            said,
+        )
+    }
+
+    /** The remove is what the person asked for, and its refusal is the one said. */
+    @Test
+    fun `a refused close says so and a dead pane still closes quietly`() = runTest {
+        val refused = Core(CoreException("x", word = "running-processes"))
+        val said = said(refused) { it.close("t") }
+        assertEquals(1, said.size)
+        assertTrue(said[0], said[0].startsWith("Couldn’t close this terminal. Something is still running"))
+        assertEquals(listOf("terminal.stop", "terminal.remove"), refused.calls)
+
+        val dead = object : TerminalTransport by Core() {
+            val calls = mutableListOf<String>()
+            override suspend fun call(method: String, args: JsonObject): JsonObject {
+                calls += method
+                if (method == "terminal.stop") throw CoreException("not running")
+                return JsonObject(emptyMap())
+            }
+        }
+        val actions = HostActions(dead, ActionNotices())
+        actions.close("t")
+        assertEquals(listOf("terminal.stop", "terminal.remove"), dead.calls)
+    }
 }

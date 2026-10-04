@@ -18,7 +18,7 @@
 2993 apps/ios/FarCooler/ChangesView.swift
 2798 apps/ios/FarCooler/TerminalView.swift
 2633 apps/macos/Sources/FarCooler/ChangesPane.swift
-2333 apps/android/app/src/main/java/com/farcooler/net/Connection.kt
+2331 apps/android/app/src/main/java/com/farcooler/net/Connection.kt
 2317 apps/ios/FarCooler/Connection.swift
 2266 apps/shared/AgentKit/Sources/AgentKit/ShellNavigation.swift
 2251 apps/ios/FarCooler/TerminalSession.swift
