@@ -541,6 +541,14 @@ final class DaemonClient: ObservableObject {
                     Notifier.shared.post(notice: notice, from: self)
                 }
             },
+            onReads: { [weak self] reads in
+                Task { @MainActor in
+                    // Stale-guarded like every other arm here, for the reason
+                    // `onEvent` states.
+                    guard let self, self.streamGeneration == generation else { return }
+                    self.readsChanged(reads)
+                }
+            },
             onEnd: { [weak self] in
                 Task { @MainActor in
                     // Stale: either this stream was deliberately stopped, or
@@ -1179,6 +1187,11 @@ final class DaemonClient: ObservableObject {
             fromWorkspace: notice.fromWorkspace)
         boardNews[news, default: 0] += 1
     }
+
+    /// The newest read state the runner has pushed for each board it keeps one
+    /// for (`reads` events, ov-113), by workspace id. Boards watch it, so a
+    /// ticket read on another device clears here without a re-read.
+    @Published var heardReads: [String: WireBoardReads] = [:]
 
     /// One board, as `task list --json` prints it: a workspace's, or with no
     /// workspace the whole repository's, which is what a runner without

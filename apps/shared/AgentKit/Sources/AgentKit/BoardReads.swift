@@ -67,6 +67,10 @@ public struct BoardReads: Equatable, Sendable {
 public protocol BoardReadStore {
     func load(host: String, workspace: String, now: Date) -> BoardReads
     func save(_ reads: BoardReads, host: String, workspace: String)
+    /// Whether this device's state was sent up to a runner that keeps it
+    /// (ov-113), once, so it isn't again.
+    func isUploaded(host: String, workspace: String) -> Bool
+    func markUploaded(host: String, workspace: String)
 }
 
 /// The read state in this device's defaults, under
@@ -103,6 +107,18 @@ public struct DefaultsBoardReads: BoardReadStore {
         let raw = defaults.dictionary(forKey: Self.openedKey(host: host, workspace: workspace)) ?? [:]
         let opened = raw.compactMapValues { ($0 as? Double).map(Date.init(timeIntervalSince1970:)) }
         return BoardReads(floor: floor, opened: opened)
+    }
+
+    public static func uploadedKey(host: String, workspace: String) -> String {
+        "board.read.\(host).\(workspace).synced"
+    }
+
+    public func isUploaded(host: String, workspace: String) -> Bool {
+        defaults.bool(forKey: Self.uploadedKey(host: host, workspace: workspace))
+    }
+
+    public func markUploaded(host: String, workspace: String) {
+        defaults.set(true, forKey: Self.uploadedKey(host: host, workspace: workspace))
     }
 
     public func save(_ reads: BoardReads, host: String, workspace: String) {

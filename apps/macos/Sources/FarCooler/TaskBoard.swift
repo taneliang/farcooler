@@ -1,4 +1,5 @@
 import AgentKit
+import Combine
 import SwiftUI
 
 // A workspace's board.
@@ -95,22 +96,12 @@ final class TaskBoardStore: ObservableObject {
     /// What this person has read on this board, on this device: what the
     /// Unread section lists and the Done rule keeps (ov-103). Loaded with
     /// the store, and written as tickets are opened.
-    @Published private(set) var reads: BoardReads
+    @Published var reads: BoardReads
     /// Where `reads` is kept: this Mac's defaults, until a runner keeps it.
     let readStore: BoardReadStore
     /// Notes read for the summary, by task id.
     @Published private(set) var summaryNotes: [String: [TaskNoteRow]] = [:]
     private var noteCache: [String: (updatedAt: Date?, notes: [TaskNoteRow])] = [:]
-
-    /// `row` was opened: everything on it so far is read, its notes up to
-    /// the newest one read (`latest`).
-    func markRead(_ row: TaskRow, latest: Date? = nil, now: Date = Date()) {
-        var next = reads
-        next.open(row, latest: latest, now: now)
-        guard next != reads else { return }
-        reads = next
-        readStore.save(reads, host: hostKey, workspace: workspace.id)
-    }
 
     /// The task selected, and the reads it was selected under (ov-177):
     /// Unread lists it by those (`BoardSummary.make(…held:)`), so opening it,
@@ -125,12 +116,14 @@ final class TaskBoardStore: ObservableObject {
         held = taskID.map { HeldRead(taskID: $0, reads: reads) }
     }
 
-    /// Mark All as Read: everything on the board so far, once the person
-    /// said yes (`MarkReadConfirmation`, ov-210).
-    func markAllRead(_ granted: MarkReadGrant, now: Date = Date()) {
-        reads.markAllRead(rows: board.rows, now: now)
-        readStore.save(reads, host: hostKey, workspace: workspace.id)
-    }
+    // MARK: Read state on the runner (ov-113), worked in TaskBoard+Reads.swift
+    /// Whether the runner keeps this board's read state: it sent it with the
+    /// board. Until it has, `reads` is this Mac's own.
+    var runnerKeepsReads = false
+    /// The runner's state as last heard, from a read or an event.
+    var runnerReads: BoardReads?
+    var heardReadsSink: AnyCancellable?
+    var flushChain: Task<Void, Never>?
 
     /// Read the records of the tasks that moved since they were read, so
     /// Unread can list their notes. One `task show` each, remembered until
@@ -199,6 +192,7 @@ final class TaskBoardStore: ObservableObject {
         self.readStore = readStore
         self.reads = readStore.load(
             host: client.target.isEmpty ? "local" : client.target, workspace: workspace.id, now: Date())
+        heardReadsSink = client.$heardReads.dropFirst().sink { [weak self] in self?.heard($0) }
     }
 
     /// The repository this board is in, by its uuid: what `task show` and
@@ -300,6 +294,12 @@ final class TaskBoardStore: ObservableObject {
         }
         trouble = nil
         board = read
+        // The board's read state, from a runner that keeps it (ov-113): this
+        // Mac's own is sent up the first time, then it stops being kept here.
+        if let wire = WireBoardReads.decode(board: data) {
+            adopt(runner: wire.reads)
+            await flushReads()
+        }
         // When each task starts and who works it (ov-212, ov-213), from the
         // same read: the title bar's queue and its activity panel.
         let reading = TaskStarts.decode(data)

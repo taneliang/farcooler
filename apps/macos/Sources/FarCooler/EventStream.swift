@@ -266,6 +266,8 @@ final class EventStream {
     private let onNeedsYou: @Sendable () -> Void
     /// A task notice to post (`notice`, ov-94).
     private let onNotice: @Sendable (NoticeEvent) -> Void
+    /// A board's read state moved on another device (`reads`, ov-113).
+    private let onReads: @Sendable (WireBoardReads) -> Void
     private let onEnd: @Sendable () -> Void
 
     init(
@@ -277,6 +279,7 @@ final class EventStream {
         onMissed: @escaping @Sendable () -> Void = {},
         onNeedsYou: @escaping @Sendable () -> Void = {},
         onNotice: @escaping @Sendable (NoticeEvent) -> Void = { _ in },
+        onReads: @escaping @Sendable (WireBoardReads) -> Void = { _ in },
         onEnd: @escaping @Sendable () -> Void = {}
     ) {
         self.onEvent = onEvent
@@ -287,6 +290,7 @@ final class EventStream {
         self.onMissed = onMissed
         self.onNeedsYou = onNeedsYou
         self.onNotice = onNotice
+        self.onReads = onReads
         self.onEnd = onEnd
     }
 
@@ -313,7 +317,7 @@ final class EventStream {
         let handle = out.fileHandleForReading
         outputHandle = handle
         handle.readabilityHandler = {
-            [onEvent, onLayout, onFleet, onChangeSet, onTask, onMissed, onNeedsYou, onNotice] h in
+            [onEvent, onLayout, onFleet, onChangeSet, onTask, onMissed, onNeedsYou, onNotice, onReads] h in
             let chunk = h.availableData
             if chunk.isEmpty { return }
             let decoder = JSONDecoder()
@@ -321,7 +325,7 @@ final class EventStream {
                 Self.dispatch(
                     line, decoder: decoder, onEvent: onEvent, onLayout: onLayout,
                     onFleet: onFleet, onChangeSet: onChangeSet, onTask: onTask,
-                    onMissed: onMissed, onNeedsYou: onNeedsYou, onNotice: onNotice)
+                    onMissed: onMissed, onNeedsYou: onNeedsYou, onNotice: onNotice, onReads: onReads)
             }
         }
 
@@ -355,7 +359,8 @@ final class EventStream {
         onTask: (TaskEvent) -> Void = { _ in },
         onMissed: () -> Void = {},
         onNeedsYou: () -> Void = {},
-        onNotice: (NoticeEvent) -> Void = { _ in }
+        onNotice: (NoticeEvent) -> Void = { _ in },
+        onReads: (WireBoardReads) -> Void = { _ in }
     ) {
         // Dispatched on `kind` rather than by trying each shape in turn.
         // Guessing worked while there was one shape; with two, a layout
@@ -391,6 +396,11 @@ final class EventStream {
         case "notice":
             if let notice = try? decoder.decode(NoticeEvent.self, from: line) {
                 onNotice(notice)
+            }
+        // A board's read state, whole, from another device (ov-113).
+        case "reads":
+            if let reads = try? decoder.decode(WireBoardReads.self, from: line) {
+                onReads(reads)
             }
         // Resources this app does not track yet are skipped, not an error.
         default: return
