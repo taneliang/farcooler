@@ -67,3 +67,34 @@ pub(crate) fn task_event_json(t: &farcooler_protocol::v1::TaskChanged) -> serde_
         "from_workspace": crate::workspaces_json::workspace_of(t.from_workspace_id.as_deref()),
     })
 }
+
+/// The plan layer on a board moved (ov-268): a theme, a lane or the plan was
+/// written. The Mac's Plan view re-reads `plan --json` on it. Not `task`: no
+/// task moved, and that line makes every board re-read.
+pub(crate) fn plan_event_json(p: &pb::PlanChanged) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "plan",
+        "workspace": uuid_of(&p.workspace_id).to_string(),
+        "actor": p.actor,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **A plan line names the board it's about** (ov-273): the Mac's
+    /// `EventStream` reads `workspace` to re-read that board's plan and no
+    /// other, so a key renamed here is a Plan view that never moves.
+    #[test]
+    fn a_plan_line_names_its_board_and_actor() {
+        let ws = uuid::Uuid::now_v7();
+        let line = plan_event_json(&pb::PlanChanged {
+            workspace_id: bytes::Bytes::copy_from_slice(ws.as_bytes()),
+            actor: "manager".into(),
+        });
+        assert_eq!(line["kind"], "plan");
+        assert_eq!(line["workspace"], ws.to_string());
+        assert_eq!(line["actor"], "manager");
+    }
+}

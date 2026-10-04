@@ -3796,6 +3796,7 @@ fn event_json(payload: farcooler_protocol::v1::event::Payload) -> Option<serde_j
         // the relay won't, under `notice_id`. See `notice_json`.
         farcooler_protocol::v1::event::Payload::Notice(n) => event_lines::notice_json(&n),
         farcooler_protocol::v1::event::Payload::BoardReadsChanged(r) => event_lines::reads_event_json(&r),
+        farcooler_protocol::v1::event::Payload::PlanChanged(p) => event_lines::plan_event_json(&p),
         // Other resources have no events yet. `None` is right: a client that
         // reacted to a line it cannot read would be worse. What is NOT right
         // is a resource that HAS a reader landing here by omission, which is
@@ -4825,6 +4826,7 @@ mod tests {
             (Payload::NeedsYouChanged(farcooler_protocol::v1::Empty {}), "needs_you"),
             (Payload::Notice(Default::default()), "notice"),
             (Payload::BoardReadsChanged(Default::default()), "reads"),
+            (Payload::PlanChanged(Default::default()), "plan"),
         ];
         for (payload, kind) in kinds {
             let line = event_json(payload)
@@ -4959,9 +4961,9 @@ mod tests {
         use farcooler_protocol::v1::Event;
         use prost::Message;
         // Dropped on purpose: `host_changed`, `repository_root_changed`,
-        // `repository_changed`, `operation_changed`, `agent_events`, `terminal_frame`
-        // and `plan_changed` (27, until a Plan view reads it). See `a_payload_with_no_reader_is_still_dropped`.
-        const NO_READER: &[u32] = &[10, 11, 12, 15, 17, 20, 27];
+        // `repository_changed`, `operation_changed`, `agent_events` and
+        // `terminal_frame`. See `a_payload_with_no_reader_is_still_dropped`.
+        const NO_READER: &[u32] = &[10, 11, 12, 15, 17, 20];
         let mut kinds = 0;
         // From 3: tags 1 and 2 are `event_id` and `sequence`, not payloads.
         for tag in 3..256 {
