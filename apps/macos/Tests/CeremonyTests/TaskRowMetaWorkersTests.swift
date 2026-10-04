@@ -12,12 +12,12 @@ struct TaskRowMetaWorkersTests {
 
     private static func worker(
         _ state: TaskWorkerState = .running, minutes: Double = 12, doing: String = "Running cargo test",
-        orchestrator: String? = nil
+        orchestrator: String? = nil, model: String = ""
     ) -> TaskWorker {
         TaskWorker(
             harness: "claude", state: state, startedAt: now.addingTimeInterval(-minutes * 60),
             endedAt: state == .finished ? now.addingTimeInterval(-minutes * 60) : nil, doing: doing,
-            orchestratorTerminalID: orchestrator)
+            orchestratorTerminalID: orchestrator, model: model)
     }
 
     private static func row(
@@ -110,6 +110,13 @@ struct TaskRowMetaWorkersTests {
         let gone = worktree([terminal("o1", state: "exited")])
         #expect(TaskWorkers.orchestrator(of: row, in: [gone]) == nil)
         #expect(TaskWorkers.orchestrator(of: Self.row(workers: [Self.worker()]), in: [live]) == nil)
+    }
+
+    @Test("The task view names a subagent's model, and only there")
+    func modelInTheTaskView() {
+        let row = Self.row(workers: [Self.worker(doing: "", model: "opus")])
+        #expect(TaskWorkers.lines(of: row, at: Self.now) == ["Claude subagent working, 12 min · Opus"])
+        #expect(Self.text(row) == "Claude subagent working, 12 min")
     }
 
     @Test("The task view lists each subagent in AgentKit's words, open ones first")

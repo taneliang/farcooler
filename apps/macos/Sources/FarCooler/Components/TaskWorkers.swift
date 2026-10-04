@@ -23,6 +23,11 @@ enum TaskWorkers {
         return nil
     }
 
+    /// `opus` as `Opus`: the model is a name, shown in the task view only.
+    static func modelName(_ model: String) -> String {
+        model.prefix(1).uppercased() + model.dropFirst()
+    }
+
     /// One sentence per subagent, the ones still at it first, then the most
     /// recently closed. Each is `startLine`'s own worker sentence for that one
     /// worker, so "Claude subagent working, 12 min · Running cargo test" is
@@ -37,7 +42,8 @@ enum TaskWorkers {
             alone.status = .inProgress
             alone.wait = nil
             alone.workers = [worker]
-            return alone.startLine(at: now)
+            guard let line = alone.startLine(at: now) else { return nil }
+            return worker.model.isEmpty ? line : "\(line) · \(modelName(worker.model))"
         }
     }
 }

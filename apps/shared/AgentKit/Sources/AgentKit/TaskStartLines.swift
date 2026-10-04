@@ -61,11 +61,14 @@ public struct TaskWorker: Equatable, Sendable, Hashable {
     public var doing: String
     /// The pane its orchestrator runs in: where the subagent lives.
     public var orchestratorTerminalID: String?
+    /// The model as the runner states or observes it (`opus`), or empty.
+    public var model: String
 
     public init(
         harness: String, state: TaskWorkerState, startedAt: Date? = nil, endedAt: Date? = nil,
-        doing: String = "", orchestratorTerminalID: String? = nil
+        doing: String = "", orchestratorTerminalID: String? = nil, model: String = ""
     ) {
+        self.model = model
         self.harness = harness
         self.state = state
         self.startedAt = startedAt
@@ -301,9 +304,10 @@ struct WireWorker: Decodable {
     var endedAt: Int64?
     var doing: String?
     var orchestratorTerminal: String?
+    var model: String?
 
     enum CodingKeys: String, CodingKey {
-        case harness, state, doing
+        case harness, state, doing, model
         case startedAt = "started_at"
         case endedAt = "ended_at"
         case orchestratorTerminal = "orchestrator_terminal"
@@ -318,6 +322,6 @@ struct WireWorker: Decodable {
         TaskWorker(
             harness: harness, state: TaskWorkerState(rawValue: state) ?? .unobserved,
             startedAt: Self.date(startedAt), endedAt: Self.date(endedAt), doing: doing ?? "",
-            orchestratorTerminalID: orchestratorTerminal)
+            orchestratorTerminalID: orchestratorTerminal, model: model ?? "")
     }
 }
