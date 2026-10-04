@@ -1071,6 +1071,14 @@ final class ComposerTextView: NSTextView {
     var placeholder: String = "" { didSet { needsDisplay = true } }
 
     override func keyDown(with event: NSEvent) {
+        // An input method is composing (Japanese, Chinese, Korean) and Return
+        // commits its candidate: that Return is the input method's, and taking
+        // it would send half-composed text (ov-162). Nothing below is for a key
+        // the input method owns, so it is first.
+        if hasMarkedText() {
+            super.keyDown(with: event)
+            return
+        }
         if MainActor.assumeIsolated({ PrefixMode.shared.handle(event) }) == .handled {
             return
         }
@@ -1127,6 +1135,9 @@ final class ComposerTextView: NSTextView {
             super.insertNewline(sender)
             return
         }
+        // The same Return by the other route: composing, it is the input
+        // method's.
+        guard !hasMarkedText() else { return }
         if pickerOpen { onAccept?() } else { onSubmit?() }
     }
 
