@@ -378,6 +378,10 @@ AGENTKIT_SOURCES = [
     # anything.
     "WatchLink.swift",
     "DiffComputation.swift",
+    # One file's diff as the daemon sends it, with the notices a cut-off patch
+    # and a first-parent merge owe the reader, and the 600-line budget (ov-149).
+    # In AgentKit so `swift test` can decode a fixture of the wire's bytes.
+    "ChangesFileDiff.swift",
     # Which changed files a tool wrote. Only in THIS list: the watch and the
     # two extensions show a count and a status, never a file list, so nothing
     # there has a reading order to put a lockfile at the end of. It is here
@@ -668,6 +672,7 @@ UI_TEST_SOURCES = [
     # `-agent-layout-harness`, so it cannot skip itself green.
     "ComposerKeyboardTests.swift",
     "ChangesPullRequestTests.swift",
+    "ChangesPatchNoticeTests.swift",
     # A runner saved before `Runner.reach` existed still loads. Needs no runner
     # and no daemon: it seeds the old shape through the argument domain and
     # reads the screen the app puts up before any connection resolves, so it

@@ -527,6 +527,10 @@ final class ChangesStore: ObservableObject {
     /// rather than being a control that does nothing when tapped.
     @Published var unsupported: [String: String] = [:]
 
+    /// What to say above a file's patch: that the daemon cut it off, or that
+    /// it is a merge shown against its first parent only (ov-149).
+    @Published var fileNotices: [String: [String]] = [:]
+
     @Published var scope: DiffScope = .branch {
         didSet {
             guard oldValue != scope else { return }
@@ -539,6 +543,7 @@ final class ChangesStore: ObservableObject {
             // Mac needs a second reset written out inside `select(commit:)`.
             fileDiffs = [:]
             unsupported = [:]
+            fileNotices = [:]
             // Every scope is a different file list, so the open file goes with
             // it rather than being carried across — the same path can exist in
             // both and mean two different patches, which is the one way this
@@ -697,6 +702,7 @@ final class ChangesStore: ObservableObject {
         scope: DiffScope = .branch,
         commitFiles: [ChangedFile] = [],
         diffs: [String: [DiffComputation.Line]] = [:],
+        notices: [String: [String]] = [:],
         expanded: String? = nil
     ) {
         hasLoaded = true
@@ -705,6 +711,7 @@ final class ChangesStore: ObservableObject {
         changeSet = set
         self.commitFiles = commitFiles
         fileDiffs = diffs
+        fileNotices = notices
         expandedFile = expanded
     }
     #endif
@@ -832,6 +839,7 @@ final class ChangesStore: ObservableObject {
         // have just moved, and a stale hunk is worse than a missing one.
         fileDiffs = [:]
         unsupported = [:]
+        fileNotices = [:]
         // Before the commit is re-read, so the read below records the
         // generation it will be checked against rather than the one it
         // replaced.
@@ -1376,13 +1384,18 @@ final class ChangesStore: ObservableObject {
                 // The sha IS the scope for a commit — see `DiffScope.wire`,
                 // which is the only place that rule is spelled out.
                 ["worktree": worktree, "path": path, "scope": scope.wire])
-            let diff = try JSONDecoder().decode(FileDiff.self, from: data)
+            let diff = try JSONDecoder().decode(ChangesFileDiff.self, from: data)
             // What was being compared changed while this was in flight, so
             // these lines answer a question nobody is asking any more. Stored
             // anyway they would file perfectly, under a heading that is now
             // showing a different commit — a wrong diff that looks exactly like
             // a right one.
             guard asked == generation else { return }
+            // Recorded whichever way the patch went: they are about the patch,
+            // not about whether there is one, so a merge the daemon also
+            // declined to render is still a merge shown against its first
+            // parent.
+            if !diff.notices.isEmpty { fileNotices[path] = diff.notices }
             if let why = diff.unsupported {
                 unsupported[path] = Self.reason(why)
                 fileDiffs[path] = []
@@ -1539,61 +1552,4 @@ final class ChangesStores {
 /// paid for by every current runner losing badges it computed correctly.
 private struct CommitFiles: Decodable {
     var files: [ChangedFile]
-}
-
-// MARK: - One file's patch
-
-/// The daemon's answer for one file, before it becomes drawable lines.
-///
-/// Structured hunks rather than unified text: taking the numbers the daemon
-/// already computed beats re-deriving them from `@@` headers, which can
-/// silently be off by one.
-///
-/// The Mac parsed that text until `c2f1117` gave `changes diff` a `--json`
-/// and both clients one builder, so it now decodes this same object. The
-/// sentence that used to sit here — that scraping was "the one part of the
-/// Mac's path that can silently be off by one" — described a gap that is
-/// closed, and it is recorded rather than deleted because it is why the
-/// shared builder exists.
-private struct FileDiff: Decodable {
-    var hunks: [Hunk]
-    var unsupported: String?
-
-    struct Hunk: Decodable {
-        var lines: [Line]
-    }
-
-    struct Line: Decodable {
-        var kind: String
-        var oldNumber: Int?
-        var newNumber: Int?
-        var text: String
-    }
-
-    /// Flattened into the same line model the agent transcript's diffs use.
-    ///
-    /// Hunk boundaries are not drawn: a phone has no room for a `@@` header,
-    /// and the jump in line numbers between two hunks already says a gap is
-    /// there — which is what `DiffLayout.hunks` cuts a file up on.
-    func lines() -> [DiffComputation.Line] {
-        var out: [DiffComputation.Line] = []
-        for hunk in hunks {
-            for line in hunk.lines {
-                out.append(
-                    DiffComputation.Line(
-                        id: out.count,
-                        kind: {
-                            switch line.kind {
-                            case "added": return .added
-                            case "removed": return .removed
-                            default: return .context
-                            }
-                        }(),
-                        oldNumber: line.oldNumber,
-                        newNumber: line.newNumber,
-                        text: line.text))
-            }
-        }
-        return out
-    }
 }

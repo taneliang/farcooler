@@ -46,6 +46,7 @@ SHARDS = {
         "PhoneReopenTests",  # -phone-harness
         "AgentDraftTests",  # -agent-layout-harness
         "ChangesPullRequestTests",  # -changes-layout-harness
+        "ChangesPatchNoticeTests",  # -changes-layout-harness
         "ComposerKeyboardTests",  # -agent-layout-harness
         "DynamicTypeTests",  # -agent-layout-harness
         "RunnerReachTests",  # seeded -hosts at an address that never answers

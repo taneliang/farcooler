@@ -1649,6 +1649,21 @@ private struct ChangesFileBody: View {
     var body: some View {
         if expanded {
             VStack(alignment: .leading, spacing: 0) {
+                // Above the patch and not instead of it: a cut-off patch or a
+                // merge's first-parent view is a patch that is really there,
+                // so these say what kind of patch it is and the hunks follow.
+                ForEach(store.fileNotices[file.path] ?? [], id: \.self) { notice in
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .accessibilityHidden(true)
+                        Text(notice)
+                            .accessibilityIdentifier("changes-file-notice")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                }
                 if store.loadingFiles.contains(file.path) {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
@@ -1855,10 +1870,30 @@ private struct DiffHunks: View {
     let commit: String?
     let onComment: (ReviewAnchor) -> Void
 
+    /// The reader asked for every line, past `PatchBudget.lines`.
+    @State private var whole = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(DiffLayout.hunks(lines)) { hunk in
+            ForEach(DiffLayout.hunks(PatchBudget.visible(lines, whole: whole))) { hunk in
                 HunkView(hunk: hunk, file: file, commit: commit, onComment: onComment)
+            }
+            // Said rather than silently done: a patch that stops early
+            // without saying so is one somebody can draw the wrong
+            // conclusion from. Fires on a lockfile or a generated client, and
+            // on almost nothing a person wrote.
+            if let more = PatchBudget.moreLabel(total: lines.count, whole: whole) {
+                Button {
+                    whole = true
+                } label: {
+                    Label(more, systemImage: "chevron.up.chevron.down")
+                        .font(.footnote)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .accessibilityIdentifier("changes-show-more-lines")
             }
         }
         .padding(.bottom, 4)
@@ -2751,6 +2786,7 @@ struct ChangesLayoutHarness: View {
             on: Self.changeSet,
             scope: CommandLine.arguments.contains("-commit") ? .commit(commit.sha) : .branch,
             diffs: Self.diffs,
+            notices: Self.notices,
             expanded: CommandLine.arguments.contains("-commit")
                 ? nil : "crates/daemon/src/file_diff.rs")
     }
@@ -2820,6 +2856,22 @@ struct ChangesLayoutHarness: View {
         return nil
     }
 
+    /// `-diff-truncated` and `-diff-merge`: the notices above the patch, from
+    /// the same decode the store uses, so a fixture of the wire's bytes is
+    /// what is on screen.
+    private static var notices: [String: [String]] {
+        let args = CommandLine.arguments
+        let json = """
+            {"unsupported":null,"truncated":\(args.contains("-diff-truncated")),\
+            "firstParentOfMerge":\(args.contains("-diff-merge")),"hunks":[]}
+            """
+        guard
+            let diff = try? JSONDecoder().decode(ChangesFileDiff.self, from: Data(json.utf8)),
+            !diff.notices.isEmpty
+        else { return [:] }
+        return ["crates/daemon/src/file_diff.rs": diff.notices]
+    }
+
     private static let changeSet = ChangeSet(
         branch: "feat/handle-retries-on-429",
         baseRef: "origin/main",
@@ -2867,7 +2919,16 @@ struct ChangesLayoutHarness: View {
     /// nowhere to go. `ShellPaneScrollTests` is what needed it; the change set
     /// above has always claimed +96 −12 for this file, and now the diff under
     /// it is at least the same order of thing.
-    private static let diffs: [String: [DiffComputation.Line]] = [
+    private static var diffs: [String: [DiffComputation.Line]] {
+        guard CommandLine.arguments.contains("-diff-long") else { return cannedDiffs }
+        // A lockfile's worth of added lines, past `PatchBudget.lines`.
+        let long = (1...700).map { "line \($0)" }.joined(separator: "\n")
+        return [
+            "crates/daemon/src/file_diff.rs": DiffComputation.compute(old: "", new: long)
+        ]
+    }
+
+    private static let cannedDiffs: [String: [DiffComputation.Line]] = [
         "crates/daemon/src/file_diff.rs": DiffComputation.compute(
             old: """
                 fn backoff(attempt: u32) -> Duration {
