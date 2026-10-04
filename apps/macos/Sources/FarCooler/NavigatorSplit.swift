@@ -405,3 +405,29 @@ private struct NavigatorRuleProbe: ViewModifier {
         }
     }
 }
+
+/// The list's ↑ and ↓ as the window's key monitor sends them
+/// (`TaskBoardView.Heard.arrow`), for a test: nil while a rule has them.
+struct NavigatorArrowsReport {
+    let arrow: (Int) -> KeyPress.Result?
+}
+
+struct NavigatorArrowsKey: PreferenceKey {
+    static var defaultValue: [NavigatorArrowsReport] { [] }
+    static func reduce(value: inout [NavigatorArrowsReport], nextValue: () -> [NavigatorArrowsReport]) {
+        value += nextValue()
+    }
+}
+
+struct NavigatorArrowsProbe: ViewModifier {
+    let arrow: (Int) -> KeyPress.Result?
+    @Environment(\.gridProbing) private var probing
+
+    func body(content: Content) -> some View {
+        if probing {
+            content.transformPreference(NavigatorArrowsKey.self) { $0.append(NavigatorArrowsReport(arrow: arrow)) }
+        } else {
+            content
+        }
+    }
+}

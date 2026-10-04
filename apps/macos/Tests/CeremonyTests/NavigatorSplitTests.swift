@@ -190,7 +190,7 @@ struct NavigatorSplitTests {
     static func view(
         _ store: TaskBoardStore, terminals: Int = 2, kept: Binding<String>? = nil, closed: [String] = [],
         defaults: UserDefaults = UserDefaults(suiteName: "split-\(UUID().uuidString)")!,
-        current: NavigatorItem? = nil
+        current: NavigatorItem? = nil, onStep: ((NavigatorItem) -> Void)? = nil
     ) -> TaskBoardView {
         var shell = ProjectTerminals(
             terminals: (0..<terminals).map {
@@ -209,7 +209,7 @@ struct NavigatorSplitTests {
             store: store, client: store.client, agents: .none, onGoTo: { _ in }, defaults: defaults,
             hasKeyboard: current != nil, worktrees: { _ in loose },
             orchestrator: NavigatorOrchestrator(state: .working, agent: "claude", status: .working, nowDoing: "Reading"),
-            current: current, split: kept)
+            current: current, onStep: onStep, split: kept)
     }
 
     /// A board drawn in an unshown window `height` tall.
@@ -426,6 +426,37 @@ struct NavigatorSplitTests {
         #expect(try rule().press(.leftArrow) == .ignored)
         // The lower rule names the pane under it.
         #expect(drawn.box.rules.first { $0.rule.index == 2 }?.rule.label == "Resize Worktrees")
+    }
+
+    final class Steps { var items: [NavigatorItem] = [] }
+
+    /// A rule had the keyboard, then a row was selected without the rule
+    /// hearing it lost focus (a click on a task): ↓ steps through the rows
+    /// again, rather than resizing.
+    @Test("Selecting a row takes the arrows back from a rule")
+    func selectingARowTakesTheArrowsBack() async throws {
+        let store = await Self.store(tasks: 120)
+        let defaults = UserDefaults(suiteName: "split-\(UUID().uuidString)")!
+        let tasks = BoardKeys.rows(
+            store.board, collapsed: BoardForm.collapsed(host: store.hostKey, workspace: store.workspace.id, from: defaults),
+            reads: store.reads, now: Date())
+        let steps = Steps()
+        func view(_ current: NavigatorItem) -> TaskBoardView {
+            Self.view(store, terminals: 3, defaults: defaults, current: current, onStep: { steps.items.append($0) })
+        }
+        let drawn = Drawn(view(.task(tasks[0])), height: 800)
+        await drawn.settle()
+        let rule = try #require(drawn.box.rules.first { $0.rule.index == 1 }).rule
+        rule.onFocus(true)
+        let arrows = try #require(drawn.box.arrows.first)
+        #expect(arrows.arrow(1) == nil, "the rule has the keyboard; the list should stand aside")
+        #expect(steps.items.isEmpty)
+        // The window selects another task, as a click on its row does.
+        drawn.show(view(.task(tasks[3])))
+        await drawn.settle()
+        let after = try #require(drawn.box.arrows.first)
+        #expect(after.arrow(1) == .handled, "↓ after selecting a row didn't step")
+        #expect(steps.items == [.task(tasks[4])], "stepped to \(steps.items)")
     }
 
     /// At the window's least height, 400 pt, each open pane keeps its least

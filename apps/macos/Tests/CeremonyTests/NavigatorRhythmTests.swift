@@ -34,6 +34,8 @@ struct NavigatorRhythmTests {
         var probes: [(String, CGRect)] = []
         /// The split's rules, with their handlers (`NavigatorRuleReport`).
         var rules: [NavigatorRuleReport] = []
+        /// The list's arrows (`NavigatorArrowsReport`).
+        var arrows: [NavigatorArrowsReport] = []
     }
 
     struct Probe<Content: View>: View {
@@ -56,6 +58,10 @@ struct NavigatorRhythmTests {
                 }
                 .overlayPreferenceValue(NavigatorRulesKey.self) { rules in
                     let _ = box.rules = rules
+                    Color.clear
+                }
+                .overlayPreferenceValue(NavigatorArrowsKey.self) { arrows in
+                    let _ = box.arrows = arrows
                     Color.clear
                 }
         }

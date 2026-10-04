@@ -717,8 +717,17 @@ struct TaskBoardView: View {
         var items: [NavigatorItem] = []
         weak var store: TaskBoardStore?
         /// A rule between the navigator's panes has the keyboard: ↑ and ↓
-        /// are its (`NavigatorSplitRule`).
+        /// are its (`NavigatorSplitRule`). Let go of whenever the
+        /// selection moves or the list takes the keyboard, however the rule
+        /// lost it: a click on a row needn't tell the rule it lost focus.
         var ruleFocused = false
+
+        /// What the window's ↑ or ↓ does: a step through the rows, or
+        /// nothing (nil) while a rule has the keyboard and takes it itself.
+        @MainActor
+        func arrow(_ by: Int) -> KeyPress.Result? {
+            ruleFocused ? nil : step(by)
+        }
         var onStep: ((NavigatorItem) -> Void)?
         /// An Unread line stepped to, or nil for any other row: the view
         /// lights it there.
@@ -996,6 +1005,8 @@ struct TaskBoardView: View {
         .onChange(of: place, initial: true) { _, now in
             heard.stepped = nil
             heard.selected = now
+            // A row selected, however: the rows have the arrows again.
+            heard.ruleFocused = false
         }
         // The selection moved off the line's task: the line is let go of,
         // so coming back to the task from elsewhere lights its row.
@@ -1005,7 +1016,12 @@ struct TaskBoardView: View {
         // What's selected holds its Unread lines in place, however it was
         // chosen: here, from a notice, from the palette (ov-177).
         .onChange(of: selected, initial: true) { _, id in store.hold(id) }
-        .onChange(of: listFocused) { _, focused in if focused { onKeyboard() } }
+        .onChange(of: listFocused) { _, focused in
+            if focused {
+                heard.ruleFocused = false
+                onKeyboard()
+            }
+        }
         .onChange(of: hasKeyboard, initial: true) { _, keyed in heard.keyed = keyed }
         .onChange(of: items(worktrees: worktreesOf(store.board)), initial: true) { _, items in heard.items = items }
         .onChange(of: ObjectIdentifier(store), initial: true) { _, _ in
@@ -1018,6 +1034,7 @@ struct TaskBoardView: View {
             let _ = heard.onLine = { unreadLine = $0 }
             Color.clear
         }
+        .modifier(NavigatorArrowsProbe(arrow: { [heard] in heard.arrow($0) }))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("board-list")
     }
@@ -1172,11 +1189,11 @@ struct TaskBoardView: View {
         let heard = heard
         let box = windowBox
         arrowMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            guard heard.keyed, !heard.ruleFocused, let window = event.window, window === box.window, window.attachedSheet == nil,
+            guard heard.keyed, let window = event.window, window === box.window, window.attachedSheet == nil,
                 !EscapeBack.keepsEscape(window.firstResponder),
                 let by = BoardKeys.arrow(keyCode: event.keyCode, modifiers: event.modifierFlags)
             else { return event }
-            return heard.step(by) == .handled ? nil : event
+            return heard.arrow(by) == .handled ? nil : event
         }
     }
 
