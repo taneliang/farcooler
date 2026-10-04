@@ -39,29 +39,50 @@ public enum PlanReadState: Equatable, Sendable {
         fetch: @escaping @Sendable () async throws -> Data
     ) async -> PlanReadState {
         if runnerCan == false { return .needsUpdate }
-        let outcome = await withTaskGroup(of: PlanReadState?.self) { group in
-            group.addTask {
+        // Whichever comes first, the answer or the timer, resumes this once.
+        // Not a task group: a group waits for every child, and a call into the
+        // client core can't be cancelled (`ClientCore.submit` holds a
+        // continuation under a ticket), so a runner that never answers would
+        // hold the group, and the spinner, open for good. The late answer, if
+        // one ever comes, is dropped.
+        return await withCheckedContinuation { (continuation: CheckedContinuation<PlanReadState, Never>) in
+            let first = FirstOnly(continuation)
+            let work = Task {
                 do {
-                    return .loaded(try PlanModel.decode(try await fetch()))
+                    first.resume(.loaded(try PlanModel.decode(try await fetch())))
                 } catch {
-                    return isUnsupported(error) ? .needsUpdate : .unavailable
+                    first.resume(isUnsupported(error) ? .needsUpdate : .unavailable)
                 }
             }
-            group.addTask {
+            Task {
                 try? await Task.sleep(for: timeout)
-                return nil
+                first.resume(.unavailable)
+                work.cancel()
             }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
         }
-        return outcome ?? .unavailable
     }
 
     /// The plan, once read.
     public var plan: PlanModel? {
         if case .loaded(let plan) = self { return plan }
         return nil
+    }
+}
+
+/// A continuation resumed by whichever caller gets there first; the rest are
+/// ignored.
+private final class FirstOnly: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<PlanReadState, Never>?
+
+    init(_ continuation: CheckedContinuation<PlanReadState, Never>) { self.continuation = continuation }
+
+    func resume(_ state: PlanReadState) {
+        lock.lock()
+        let held = continuation
+        continuation = nil
+        lock.unlock()
+        held?.resume(returning: state)
     }
 }
 

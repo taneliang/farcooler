@@ -59,6 +59,32 @@ struct PlanReadingTests {
         #expect(ContinuousClock.now - started < .seconds(5), "it waited out the runner instead of the timeout")
     }
 
+    @Test(
+        "A runner that never answers, through a call nothing can cancel, is still unavailable once the wait is up",
+        .timeLimit(.minutes(1)))
+    func unansweredAndUncancellable() async {
+        let started = ContinuousClock.now
+        // The client core's own shape: a continuation held under a ticket that
+        // cancellation can't wake, and that nothing ever resumes.
+        let state = await PlanReadState.read(runnerCan: true, timeout: .milliseconds(100)) {
+            try await withCheckedThrowingContinuation { (_: CheckedContinuation<Data, Error>) in }
+        }
+        #expect(state == .unavailable)
+        #expect(ContinuousClock.now - started < .seconds(5))
+    }
+
+    @Test("A late answer after the timeout changes nothing")
+    func lateAnswerDropped() async throws {
+        let data = try Self.fixtureData()
+        let state = await PlanReadState.read(runnerCan: true, timeout: .milliseconds(50)) {
+            try await withCheckedThrowingContinuation { (c: CheckedContinuation<Data, Error>) in
+                DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { c.resume(returning: data) }
+            }
+        }
+        #expect(state == .unavailable)
+        try await Task.sleep(for: .milliseconds(400))
+    }
+
     @Test("Tasks is the default, kept per board, and a runner without the layer draws tasks whatever was chosen")
     func theChoice() throws {
         let defaults = try #require(UserDefaults(suiteName: "plan-reading-\(UUID().uuidString)"))
