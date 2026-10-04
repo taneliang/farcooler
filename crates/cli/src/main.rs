@@ -35,7 +35,7 @@ mod files;
 mod clients;
 mod draft_prompt;
 mod board_reads;
-mod event_lines;
+mod event_lines; mod plan;
 mod images;
 mod tell;
 use images::mime_for;
@@ -110,8 +110,7 @@ enum Command {
     #[command(subcommand)]
     Repo(RepoCmd),
     /// List the color schemes available on this runner.
-    #[command(subcommand)]
-    Theme(ThemeCmd),
+    #[command(subcommand)] Theme(ThemeCmd),
     /// Read and change what this runner's config.toml holds.
     ///
     /// The same writes the apps' runner-settings screens make, for scripting
@@ -155,8 +154,9 @@ enum Command {
     #[command(subcommand)]
     Task(tasks::TaskCmd),
     /// What is read on a board, shared by every device on this runner.
-    #[command(subcommand)]
-    Board(board_reads::BoardCmd),
+    #[command(subcommand)] Board(board_reads::BoardCmd),
+    /// The plan (experimental): themes, lanes, and what's next. Run bare for the overview.
+    Plan(plan::PlanArgs),
     /// Arrange terminals on screen: tile, zoom, focus, switch groups.
     ///
     /// Everything the Mac app's tiling does, because it is the same calls. An
@@ -1238,6 +1238,7 @@ async fn run() -> Fallible {
         Command::NeedsYou => needs_you(runner, cli.json).await,
         Command::Report(args) => report::report(runner, args, cli.json).await,
         Command::Board(c) => board_reads::board(runner, c, cli.json).await,
+        Command::Plan(a) => plan::plan(runner, a, cli.json).await,
         Command::Attach { worktree } => attach(runner, &worktree).await,
         Command::Events => events(runner).await,
         Command::Push(c) => push(runner, c).await,

@@ -1314,7 +1314,7 @@ fn actor_from(given: Option<&str>) -> Result<Actor, String> {
     })
 }
 
-fn actor_for(given: Option<&str>) -> Result<Actor, String> {
+pub(crate) fn actor_for(given: Option<&str>) -> Result<Actor, String> {
     match given {
         Some(word) => actor_from(Some(word)),
         None => {
