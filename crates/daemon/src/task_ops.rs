@@ -584,6 +584,11 @@ pub fn note(svc: &Service, watcher: &Watcher, req: &pb::TaskNoteAppend) -> Resul
     let kind =
         note_kind_from_wire(req.kind).ok_or(DomainError::InvalidArgument { what: "kind" })?;
     let extra = extra_from_wire(&req.extra_json)?;
+    // `rejected` belongs to a decision. On an answer it is another card's
+    // options drawn under the owner's words, so it is refused, not stored.
+    if kind != NoteKind::Decision && extra.get("rejected").is_some() {
+        return Err(DomainError::InvalidArgument { what: "extra_json" });
+    }
     if req.body.trim().is_empty() {
         return Err(DomainError::InvalidArgument { what: "body" });
     }
@@ -895,5 +900,35 @@ mod tests {
             optional_id(Some(&bytes::Bytes::from_static(b"nope")), "worktree_id"),
             Err(DomainError::InvalidArgument { what: "worktree_id" })
         ));
+    }
+
+    /// `rejected` is a decision's field. An answer that carries one shows a
+    /// stranger's options under it (ov-122's answer wore another card's), so
+    /// the write is refused rather than stored.
+    #[tokio::test]
+    async fn only_a_decision_can_carry_rejected_options() {
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
+        let watcher = Watcher::new(svc.clone());
+        let task = svc.store.create_task(workspace, "Pick", farcooler_store::models::Actor::User).unwrap();
+        let write = |kind: pb::TaskNoteKind| {
+            note(
+                &svc,
+                &watcher,
+                &pb::TaskNoteAppend {
+                    task_id: crate::wire::id_bytes(task.id),
+                    kind: kind as i32,
+                    actor: "user".into(),
+                    body: "Deploy now".into(),
+                    extra_json: r#"{"rejected":["Leave them"]}"#.into(),
+                    ..Default::default()
+                },
+            )
+        };
+        assert!(matches!(
+            write(pb::TaskNoteKind::Answer),
+            Err(DomainError::InvalidArgument { what: "extra_json" })
+        ));
+        assert!(write(pb::TaskNoteKind::Decision).is_ok());
     }
 }

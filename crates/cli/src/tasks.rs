@@ -728,6 +728,9 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
                 }
                 None => None,
             };
+            if !rejected.is_empty() && kind != NoteKind::Decision {
+                return Err("--rejected goes with a decision note, not any other kind".into());
+            }
             let extra = if rejected.is_empty() {
                 String::new()
             } else {
