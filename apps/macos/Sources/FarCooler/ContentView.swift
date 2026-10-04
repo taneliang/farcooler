@@ -1267,7 +1267,7 @@ struct ContentView: View {
 
     /// The status area with no workspace on screen: no orchestrator and no
     /// board, so just the field, for Go to Anything.
-    static let noWorkspaceSource = TitleStatusSource(orchestrator: nil, status: nil, nowDoing: nil)
+    static var noWorkspaceSource: TitleStatusSource { TitleStatusSource(orchestrator: nil, status: nil, nowDoing: nil) }
 
     /// What the title bar's field does (slice 4): finds with the palette's
     /// index and runs what's chosen as the palette did; sends to this
