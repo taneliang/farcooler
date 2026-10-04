@@ -100,6 +100,10 @@ and, when any agent failed, failed each open a menu of those tasks or agents. A 
 glyph and a number, then only the state's word, then only the orchestrator's
 mark and the need-you count.
 
+Back and Forward sit after the switcher when the window is wide enough
+for them and the status area's longer form; ⌃⌘← and ⌃⌘→ do the same at any
+width.
+
 The tray at the right of the title bar is Needs You, counting every workspace.
 When a runner can't be reached, has
 lost tmux, or runs an older Far Cooler, a banner across the top of the window

@@ -32,7 +32,17 @@ enum TitleBarHarness {
         let words: Words
         /// The tray's count, every workspace's.
         var trayCount = 11
+        /// Whether the window offers Back and Forward (slice 3).
+        var backForward = false
         let content: Content
+
+        @State private var width: CGFloat = 0
+
+        private var room: TitleStatusRoom {
+            TitleStatusRoom(
+                switcherTitle: words.title, switcherRepository: words.repository, editor: true,
+                changes: true, trouble: nil, needsYou: trayCount, backForward: backForward)
+        }
 
         var body: some View {
             content
@@ -52,17 +62,16 @@ enum TitleBarHarness {
                     TitleStatusSource(
                         orchestrator: .working, status: .working, nowDoing: words.nowDoing,
                         waiting: { [needYou = words.needYou] _ in needYou }),
-                    room: TitleStatusRoom(
-                        switcherTitle: words.title, switcherRepository: words.repository, editor: true,
-                        changes: true, trouble: nil, needsYou: trayCount),
-                    actions: TitleStatusActions())
+                    room: room, actions: TitleStatusActions(), width: $width)
                 .toolbar(removing: .title)
                 .toolbar {
                     LeadingToolbar(
                         switcher: WorkspaceSwitcherButton(
                             title: words.title, repository: words.repository, entries: [], openRequest: 0,
                             perform: { _ in }),
-                        navigator: NavigatorToggle(hidden: false, available: true, toggle: {}))
+                        navigator: NavigatorToggle(hidden: false, available: true, toggle: {}),
+                        backForward: room.layout(window: width).backForward
+                            ? BackForwardControl(canGoBack: true, canGoForward: false, back: {}, forward: {}) : nil)
                 }
                 .mainWindowChrome()
         }
@@ -123,6 +132,12 @@ enum TitleBarHarness {
         guard let anchor = first(TitleStatusAnchor.View.self, in: window.contentView?.superview) else { return nil }
         guard let item = hostingItem(of: anchor) else { return nil }
         return Status(width: anchor.frame.width, item: item.frame.width, frame: anchor.convert(anchor.bounds, to: nil))
+    }
+
+    /// Back and Forward's frame in the window, or nil where they aren't drawn.
+    static func backForward(in window: NSWindow) -> CGRect? {
+        guard let anchor = first(BackForwardControl.Anchor.View.self, in: window.contentView?.superview) else { return nil }
+        return anchor.convert(anchor.bounds, to: nil)
     }
 
     /// The switcher's frame in the window: its menu anchor's.

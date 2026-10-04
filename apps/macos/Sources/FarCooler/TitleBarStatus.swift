@@ -541,23 +541,41 @@ struct TitleStatusRoom: Equatable {
     var trouble: String?
     /// The tray's count, every workspace's.
     var needsYou: Int = 0
+    /// Whether the window offers Back and Forward in its leading group
+    /// (slice 3); they're drawn only where they leave the status area
+    /// room for its medium form (`layout`).
+    var backForward = false
 
-    func form(window: CGFloat) -> TitleStatus.Form {
-        TitleStatus.form(
-            available: TitleStatus.available(
-                window: window,
-                leading: TitleStatus.leading(switcher: switcherTitle, repository: switcherRepository),
-                trailing: TitleStatus.trailing(editor: editor, changes: changes, trouble: trouble, needsYou: needsYou)))
+    /// What Back and Forward take beside the switcher: their own capsule,
+    /// two 28 pt buttons, and the space before it.
+    static let backForwardWidth: CGFloat = 64 + 12
+
+    /// The status area's form in a window `window` wide, and whether Back
+    /// and Forward are drawn: with them while the area keeps its medium
+    /// form or wider, else without them, since what the orchestrator is
+    /// doing is worth more than two buttons ⌃⌘← and ⌃⌘→ already press.
+    func layout(window: CGFloat) -> (form: TitleStatus.Form, backForward: Bool) {
+        let trailing = TitleStatus.trailing(editor: editor, changes: changes, trouble: trouble, needsYou: needsYou)
+        let leading = TitleStatus.leading(switcher: switcherTitle, repository: switcherRepository)
+        if backForward {
+            let with = TitleStatus.form(
+                available: TitleStatus.available(
+                    window: window, leading: leading + Self.backForwardWidth, trailing: trailing))
+            if with >= .medium { return (with, true) }
+        }
+        return (TitleStatus.form(available: TitleStatus.available(window: window, leading: leading, trailing: trailing)), false)
     }
+
+    func form(window: CGFloat) -> TitleStatus.Form { layout(window: window).form }
 }
 
 private struct TitleStatusModifier: ViewModifier {
     let source: TitleStatusSource?
     let room: TitleStatusRoom
     let actions: TitleStatusActions
-
-    /// The window's width: this is applied to the window's root view.
-    @State private var width: CGFloat = 0
+    /// The window's width, kept where the window can read it too (Back and
+    /// Forward are drawn by it): this is applied to the window's root view.
+    @Binding var width: CGFloat
 
     func body(content: Content) -> some View {
         content
@@ -572,9 +590,12 @@ private struct TitleStatusModifier: ViewModifier {
 
 extension View {
     /// The title bar's status area, for the window this is the root of.
-    /// Nothing with no workspace on screen (`source` nil).
-    func titleBarStatus(_ source: TitleStatusSource?, room: TitleStatusRoom, actions: TitleStatusActions) -> some View {
-        modifier(TitleStatusModifier(source: source, room: room, actions: actions))
+    /// Nothing with no workspace on screen (`source` nil). `width` is the
+    /// window's, measured here.
+    func titleBarStatus(
+        _ source: TitleStatusSource?, room: TitleStatusRoom, actions: TitleStatusActions, width: Binding<CGFloat>
+    ) -> some View {
+        modifier(TitleStatusModifier(source: source, room: room, actions: actions, width: width))
     }
 }
 

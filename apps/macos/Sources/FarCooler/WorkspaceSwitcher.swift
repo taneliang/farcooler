@@ -304,6 +304,9 @@ enum TitleBar {
 struct LeadingToolbar: ToolbarContent {
     let switcher: WorkspaceSwitcherButton
     let navigator: NavigatorToggle
+    /// Back and Forward, in a capsule of their own after the switcher, where
+    /// the window has room for them (ov-214).
+    var backForward: BackForwardControl? = nil
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .navigation) { navigator }
@@ -318,6 +321,10 @@ struct LeadingToolbar: ToolbarContent {
         // A change once it's on screen was always measured
         // (`SwitcherWidthTests`).
         ToolbarItem(placement: .navigation) { switcher.id(switcher.measuredIdentity) }
+        if let backForward {
+            ToolbarSpacer(.fixed, placement: .navigation)
+            ToolbarItem(placement: .navigation) { backForward }
+        }
         // The room the title held, which pushes what follows to the
         // trailing end. `.primaryAction` items stay before it whatever
         // their order, so the window's other items are `.automatic`, and

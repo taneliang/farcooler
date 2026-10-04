@@ -198,6 +198,9 @@ struct ContentView: View {
     /// last window left it, and out the first time. See
     /// `NavigatorVisibility`.
     @State var navigatorHidden = NavigatorVisibility.hiddenAtLaunch()
+    /// The window's width, as the title bar's status area measures it
+    /// (ov-214): what decides its form and whether Back and Forward fit.
+    @State var windowWidth: CGFloat = 0
     /// Bumped by ⌘0 (Switch Workspace…): the title bar's switcher opens.
     @State private var switcherRequest = 0
     /// When each workspace's orchestrator start began, by `host|workspace`:
@@ -239,7 +242,7 @@ struct ContentView: View {
                 editor: detailWorktree, onEditorError: { editorError = $0 },
                 changes: changesToolbarState, onChanges: { ws in toggleChangesPane(in: ws) })
         }
-        .titleBarStatus(titleStatusSource, room: titleStatusRoom, actions: titleStatusActions)
+        .titleBarStatus(titleStatusSource, room: titleStatusRoom, actions: titleStatusActions, width: $windowWidth)
         // The title would repeat the switcher or the breadcrumb
         // (`TitleBar`); the window keeps it for the Window menu.
         .toolbar(removing: TitleBar.showsTitle(for: selection) ? nil : .title)
@@ -248,7 +251,8 @@ struct ContentView: View {
                 switcher: workspaceSwitcher,
                 navigator: NavigatorToggle(
                     hidden: navigatorHidden, available: selection.flatMap(workspaceScene)?.board != nil,
-                    toggle: { toggleNavigator() }))
+                    toggle: { toggleNavigator() }),
+                backForward: titleStatusRoom.layout(window: windowWidth).backForward ? backForward : nil)
         }
         // The compact toolbar (ov-214), on whatever made the window.
         .mainWindowChrome()
@@ -1284,7 +1288,7 @@ struct ContentView: View {
             switcherTitle: switcher.title, switcherRepository: switcher.repository,
             editor: detailWorktree != nil, changes: changesToolbarState != nil,
             trouble: RunnerStatusItem.label(troubles: runnerTroubles, stale: store.staleHosts, ahead: store.aheadHosts),
-            needsYou: store.needsYou.count)
+            needsYou: store.needsYou.count, backForward: selection != nil)
     }
 
     /// What the status area's parts do, by the routes the window already
@@ -1369,6 +1373,17 @@ struct ContentView: View {
                 return nil
             },
             onStart: { harness in startOrchestrator(workspace, host: host, harness: harness, replace: false) })
+    }
+
+    /// Back and Forward in the title bar (slice 3), gated as the menu items
+    /// are. Forward has nowhere to go until ov-192's history lands; then
+    /// `canGoForward` is `jumpBar.history.canGoForward` and `forward` its
+    /// step, and Back's `canGoBack` adds `jumpBar.history.canGoBack`.
+    private var backForward: BackForwardControl {
+        let scene = selection.flatMap(workspaceScene)
+        return BackForwardControl(
+            canGoBack: Self.goesBack(focus: focusColumn, from: selection, trail: trail, board: scene?.board),
+            canGoForward: false, back: { goBack() }, forward: {})
     }
 
     /// What a switcher item does, by the routes the rest of the window uses.
