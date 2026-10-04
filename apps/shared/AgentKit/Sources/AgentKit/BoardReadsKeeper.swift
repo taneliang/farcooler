@@ -18,11 +18,18 @@ import Foundation
 @MainActor
 public final class BoardReadsKeeper {
     /// What's read, as this phone shows it now.
-    public private(set) var reads: BoardReads
+    public private(set) var reads: BoardReads {
+        didSet { if reads != oldValue { onChange?(reads) } }
+    }
+    /// Called with the new state whenever it changes, however it did.
+    public var onChange: (@MainActor (BoardReads) -> Void)?
     /// Whether the runner keeps this board's state: it sent it with the board.
     public private(set) var runnerKeepsReads = false
 
     private var runnerReads: BoardReads?
+    /// Whether this phone's floor was somebody's doing (a Mark All as Read, or
+    /// state from before floors were noted) and not the first look `load` made up.
+    private var keptARealFloor: Bool { (beforeLaunch?.floor ?? .distantPast) > .distantPast }
     private var pending: ReadsRaise
     private let beforeLaunch: BoardReads?
     private let store: BoardReadStore
@@ -98,6 +105,12 @@ public final class BoardReadsKeeper {
     public func flush() async { await queueFlush().value }
 
     private func adopt(runner state: BoardReads) {
+        if !runnerKeepsReads, !keptARealFloor {
+            // The floor this phone made up on its first look hid nothing
+            // from the runner and must not hide what the runner shows: the
+            // runner's state stands in for it, with the marks this phone has.
+            reads = pending.applied(to: BoardReads(floor: .distantPast, opened: reads.opened))
+        }
         runnerKeepsReads = true
         let known = runnerReads.map { $0.merged(with: state) } ?? state
         runnerReads = known

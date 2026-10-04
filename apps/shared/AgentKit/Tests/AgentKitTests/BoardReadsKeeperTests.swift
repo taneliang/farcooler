@@ -215,6 +215,25 @@ struct BoardReadsKeeperTests {
         #expect(runner.floor == 0)
     }
 
+    @Test func aFirstLookThePhoneMadeUpDoesNotHideWhatTheRunnerShows() {
+        let runner = Runner()
+        let now = ms(Self.moved + 90_000_000)  // a day and a bit after the row moved
+        let k = keeper(runner, defaults(), now: now)
+        #expect(k.reads.floor == now.addingTimeInterval(-86_400), "alone, the last day counts unread")
+        k.adopt(board: runner.board())  // the runner's floor is 0: nothing is read
+        #expect(k.reads.finishedUnread(row()), "the runner says it's unread")
+    }
+
+    @Test func aFloorThePhoneKeptStillStandsOnARunnerThatKeepsState() {
+        let runner = Runner()
+        let store = defaults()
+        store.save(BoardReads(floor: ms(Self.moved + 1000)), host: Self.host, workspace: Self.ws)
+        store.save(BoardReads(floor: ms(Self.moved + 2000)), host: Self.host, workspace: Self.ws)  // moved: somebody's doing
+        let k = keeper(runner, store)
+        k.adopt(board: runner.board())
+        #expect(k.reads.floor == ms(Self.moved + 2000))
+    }
+
     @Test func anOlderRunnerKeepsThePhonesOwnStateOnTheDeviceClock() async {
         let runner = Runner()
         let store = defaults()
@@ -240,6 +259,19 @@ struct BoardReadsKeeperTests {
         #expect(store.load(host: Self.host, workspace: Self.ws, now: Date()).opened[Self.task] == ms(Self.moved))
     }
 
+    @Test func aChangeIsAnnouncedHoweverItCame() async {
+        let runner = Runner()
+        let k = keeper(runner, defaults())
+        k.adopt(board: runner.board())
+        var told: [BoardReads] = []
+        k.onChange = { told.append($0) }
+        k.heard(WireBoardReads(workspaceID: Self.ws, floorMs: Self.moved))
+        k.heard(WireBoardReads(workspaceID: Self.ws, floorMs: Self.moved - 1))
+        k.open(row("b", movedMs: Self.moved + 10))
+        #expect(told.map(\.floor) == [ms(Self.moved), ms(Self.moved)], "a repeat or a lower state says nothing")
+        #expect(told.last?.opened["b"] == ms(Self.moved + 10))
+    }
+
     @Test func theArgumentsAreTheFFIs() {
         let raise = ReadsRaise(floor: ms(5000), opened: ["b": ms(7000), "a": ms(6000)])
         let args = raise.rpcArguments(workspace: "w")
@@ -250,4 +282,29 @@ struct BoardReadsKeeperTests {
         #expect(opened?.first?["opened_ms"] as? Int64 == 6000)
         #expect(ReadsRaise(opened: ["a": ms(1)]).rpcArguments(workspace: "w")["floor_ms"] == nil)
     }
+}
+
+@Test("The Unread lines say what happened and when, in the Mac's words")
+func unreadLinesSayWhen() {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    func item(_ id: String, _ detail: String?, _ ago: TimeInterval) -> BoardSummary.Item {
+        .init(id: id, taskID: "t", key: "k", title: "T", detail: detail, at: now.addingTimeInterval(-ago))
+    }
+    #expect(item("t/done", nil, 7300).when(now: now) == "Done 2h ago")
+    #expect(item("t/created", nil, 200).when(now: now) == "Added 3m ago")
+    #expect(item("t/needs_decision", "Needs Decision", 10).when(now: now) == "Needs Decision just now")
+    let note = BoardSummary.Activity(
+        taskID: "t", key: "k", title: "T", noteID: "n", kind: .finding, text: "x", at: now.addingTimeInterval(-720), more: 2)
+    #expect(note.foot(now: now) == "12m ago · +2 more")
+}
+
+@Test("Mark All as Read counts a task once, and says it clears every device only when it does")
+func markAllReadMessage() {
+    let at = Date(timeIntervalSince1970: 1)
+    let done = BoardSummary.Item(id: "a/done", taskID: "a", key: "k", title: "T", at: at)
+    let note = BoardSummary.Activity(taskID: "a", key: "k", title: "T", noteID: "n", kind: .finding, text: "x", at: at, more: 0)
+    let both = BoardSummary(finished: [done], activity: [note])
+    #expect(both.taskCount == 1)
+    #expect(BoardSummary.markAllReadMessage(tasks: 1, everywhere: false) == "1 task will be marked as read.")
+    #expect(BoardSummary.markAllReadMessage(tasks: 68, everywhere: true) == "68 tasks will be marked as read on all your devices.")
 }
