@@ -3446,6 +3446,18 @@ fn task_of(t: &farcooler_protocol::v1::Terminal) -> Option<String> {
     t.task_id.as_deref().and_then(|b| Uuid::from_slice(b).ok()).map(|u| u.to_string())
 }
 
+/// The board task `t`'s own notifications fold into, as a uuid string, or
+/// nothing: the runner's `task_link::notice_task`, which no client keeps a copy
+/// of. Nothing for a pane that notifies as itself, for a runner without
+/// `capability::NOTICE_TASK`, and for bytes that are not a uuid or are the nil one.
+fn notice_task_of(t: &farcooler_protocol::v1::Terminal) -> Option<String> {
+    t.notice_task_id
+        .as_deref()
+        .and_then(|b| Uuid::from_slice(b).ok())
+        .filter(|u| !u.is_nil())
+        .map(|u| u.to_string())
+}
+
 /// The terminal `t` was split from, as a uuid string, or nothing: for a pane
 /// opened in a window of its own, one recorded before splits were, and a
 /// runner too old to say. Never the nil uuid, for `task_of`'s reason.
@@ -3624,6 +3636,7 @@ fn worktree_list_terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_js
         // The pane this one was split from, if a split made it: what keeps a
         // pane somebody split beside the orchestrator out of its Move to Its
         // Own Window notice. Null when not known to be a split.
+        "noticeTaskId": notice_task_of(t),
         "splitOf": split_of(t),
         // Whether that pane was the orchestrator when the split was made, so
         // a shell split beside a claude later made the orchestrator still
@@ -3902,6 +3915,7 @@ fn terminal_event_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Valu
         // The pane this one was split from, if a split made it: what keeps a
         // pane somebody split beside the orchestrator out of its Move to Its
         // Own Window notice. Null when not known to be a split.
+        "noticeTaskId": notice_task_of(t),
         "splitOf": split_of(t),
         // Whether that pane was the orchestrator when the split was made, so
         // a shell split beside a claude later made the orchestrator still
@@ -5306,6 +5320,7 @@ mod tests {
             "turnFailed",
             "agentFailure",
             "taskId",
+            "noticeTaskId",
             "workspace",
             "role",
             "splitOf",
@@ -5334,6 +5349,25 @@ mod tests {
         };
         assert_eq!(worktree_list_terminal_json(&t)["taskId"], task.to_string());
         assert_eq!(terminal_event_json(&t)["taskId"], task.to_string());
+    }
+
+    /// The task a pane's own notifications fold into crosses both projections
+    /// as the runner decided it, and a runner that decided nothing sends null:
+    /// the Mac folds a banner into a task only on this key (ov-112).
+    #[test]
+    fn a_terminal_names_the_task_its_notices_fold_into_in_both_projections() {
+        let task = uuid::Uuid::now_v7();
+        let t = farcooler_protocol::v1::Terminal {
+            notice_task_id: Some(bytes::Bytes::copy_from_slice(task.as_bytes())),
+            ..Default::default()
+        };
+        assert_eq!(worktree_list_terminal_json(&t)["noticeTaskId"], task.to_string());
+        assert_eq!(terminal_event_json(&t)["noticeTaskId"], task.to_string());
+        for bytes in [None, Some(bytes::Bytes::new()), Some(bytes::Bytes::from_static(&[0; 16]))] {
+            let t = farcooler_protocol::v1::Terminal { notice_task_id: bytes, ..Default::default() };
+            assert_eq!(worktree_list_terminal_json(&t)["noticeTaskId"], serde_json::json!(null));
+            assert_eq!(terminal_event_json(&t)["noticeTaskId"], serde_json::json!(null));
+        }
     }
 
     /// A split names the pane it was split from in both projections, and

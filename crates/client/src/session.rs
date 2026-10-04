@@ -2294,6 +2294,18 @@ fn task_of(t: &Terminal) -> Option<String> {
     t.task_id.as_deref().and_then(|b| Uuid::from_slice(b).ok()).map(|u| u.to_string())
 }
 
+/// The board task `t`'s own notifications fold into, as a uuid string, or
+/// nothing: the runner's `task_link::notice_task`, which no client keeps a copy
+/// of. Nothing for a pane that notifies as itself, for a runner without
+/// `capability::NOTICE_TASK`, and for bytes that are not a uuid or are the nil one.
+fn notice_task_of(t: &Terminal) -> Option<String> {
+    t.notice_task_id
+        .as_deref()
+        .and_then(|b| Uuid::from_slice(b).ok())
+        .filter(|u| !u.is_nil())
+        .map(|u| u.to_string())
+}
+
 /// The terminal `t` was split from, as a uuid string, or nothing: a pane in
 /// a window of its own, one from before splits were recorded, and an older
 /// runner all say nothing. Never the nil uuid, for `task_of`'s reason.
@@ -2580,6 +2592,9 @@ fn with_workspaces(
             // recursion limit. The CLI's two projections carry the same key.
             out["splitOf"] = json!(split_of(t));
             out["splitOfOrchestrator"] = json!(split_of(t).and(t.split_of_orchestrator));
+            // The task its own notifications fold into, decided by the
+            // runner (ov-112): the phones keep no copy of the rule.
+            out["noticeTaskId"] = json!(notice_task_of(t));
         }
     }
     row
@@ -2810,6 +2825,28 @@ mod tests {
         assert_eq!(super::task_of(&t), None, "empty bytes are not the nil uuid");
         t.task_id = Some(bytes::Bytes::from_static(b"short"));
         assert_eq!(super::task_of(&t), None);
+    }
+
+    /// The task a pane's own notifications fold into is a uuid string or
+    /// nothing, never the nil uuid: the phones fold a banner into a task only
+    /// on this key (ov-112).
+    #[test]
+    fn a_pane_names_the_task_its_notices_fold_into_or_nothing() {
+        let task = uuid::Uuid::now_v7();
+        let pane = |notice_task_id| farcooler_protocol::v1::Terminal { notice_task_id, ..Default::default() };
+        let terminals = [
+            pane(Some(bytes::Bytes::copy_from_slice(task.as_bytes()))),
+            pane(None),
+            pane(Some(bytes::Bytes::from_static(&[0; 16]))),
+            pane(Some(bytes::Bytes::from_static(b"short"))),
+        ];
+        let w = farcooler_protocol::v1::Worktree::default();
+        let row = serde_json::json!({ "terminals": [{}, {}, {}, {}] });
+        let row = super::with_workspaces(row, &w, &terminals, &[]);
+        assert_eq!(row["terminals"][0]["noticeTaskId"], task.to_string(), "{row}");
+        for n in 1..4 {
+            assert_eq!(row["terminals"][n]["noticeTaskId"], serde_json::json!(null), "{n}: {row}");
+        }
     }
 
     /// A split names the pane it was split from, and anything else names
