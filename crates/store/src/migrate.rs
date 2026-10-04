@@ -55,6 +55,10 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     // Refused: the schema is additive, but the `wait` and `worker` notes
     // written into it fail an older build's reads. See its doc.
     (crate::waits::migration_0021_waits_and_workers, Older::Refused),
+    // Two new tables (ov-113) only board_reads.rs touches, whose rows go with
+    // their workspace or task by cascade, whichever build deletes it. An older
+    // build never reads or writes read state.
+    (crate::board_reads::migration_0022_board_reads, Older::Welcome),
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -928,6 +932,8 @@ mod tests {
             "terminals",
             "idempotency",
             "meta",
+            "board_read_floors",
+            "task_reads",
         ]
         {
             assert!(names.iter().any(|n| n == expected), "missing table {expected}");

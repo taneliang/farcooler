@@ -15,6 +15,7 @@
 //! `compatible_down_to` at or below this build's schema. See `compat`.
 
 mod backup;
+pub mod board_reads;
 mod compat;
 mod error;
 mod migrate;
