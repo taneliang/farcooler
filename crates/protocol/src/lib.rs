@@ -500,6 +500,16 @@ pub mod capability {
     /// asks for a folder names this in the request, so an older runner
     /// refuses rather than answering from no worktree.
     pub const READ_ONLY_FOLDERS: &str = "read_only_folders";
+    /// Editing, cancelling and sending now a queued agent prompt (ov-171):
+    /// `terminal.agent_edit_queued`, `terminal.agent_cancel_queued` and
+    /// `terminal.agent_steer_queued`.
+    ///
+    /// Its own capability because a runner from before the queue's controls
+    /// advertises `agent` and refuses all three as an unknown method, so
+    /// `agent` could not say whether Edit, Cancel and Send Now would work. A
+    /// client that reads it absent says the runner needs an update to manage
+    /// queued messages, rather than offering controls that can only fail.
+    pub const AGENT_QUEUE: &str = "agent_queue";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -513,7 +523,7 @@ pub mod capability {
             NEEDS_YOU, WAKE_ON_ANSWER, STREAM_SIZE_MARKERS, TASK_NOTICES, REPORT, AGENT_USAGE,
             AGENTS_FOUND,
             TASK_WAITS, TASK_WORKERS, NOTICE_TASK, BOARD_READS, WORKTREE_FILES, TERMINAL_NAMES, TERMINAL_PORTS,
-            READ_ONLY_FOLDERS,
+            READ_ONLY_FOLDERS, AGENT_QUEUE,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
@@ -618,9 +628,9 @@ pub mod method {
         TerminalAgentSetMode = "terminal.agent_set_mode" => AGENT,
         TerminalAgentSetModel = "terminal.agent_set_model" => AGENT,
         TerminalAgentSetConfig = "terminal.agent_set_config" => AGENT,
-        TerminalAgentEditQueued = "terminal.agent_edit_queued" => AGENT,
-        TerminalAgentCancelQueued = "terminal.agent_cancel_queued" => AGENT,
-        TerminalAgentSteerQueued = "terminal.agent_steer_queued" => AGENT,
+        TerminalAgentEditQueued = "terminal.agent_edit_queued" => AGENT_QUEUE,
+        TerminalAgentCancelQueued = "terminal.agent_cancel_queued" => AGENT_QUEUE,
+        TerminalAgentSteerQueued = "terminal.agent_steer_queued" => AGENT_QUEUE,
         TerminalAgentCancel = "terminal.agent_cancel" => AGENT,
         ChangesChangeSet = "changes.change_set" => CHANGES,
         ChangesCommitFiles = "changes.commit_files" => CHANGES,
@@ -1210,8 +1220,22 @@ mod tests {
         // The agent queue's three, which the daemon's own scope table was
         // missing while this table had them.
         for name in ["terminal.agent_edit_queued", "terminal.agent_cancel_queued", "terminal.agent_steer_queued"] {
+            assert_eq!(capability::for_method(name), Some(capability::AGENT_QUEUE), "{name}");
+        }
+        // And the ones they act on stay under `agent`: an older runner has
+        // both, and only the three above are missing there.
+        for name in ["terminal.agent_prompt", "terminal.agent_cancel"] {
             assert_eq!(capability::for_method(name), Some(capability::AGENT), "{name}");
         }
+    }
+
+    /// A runner advertises the queue's capability, and the queue's methods are
+    /// the only ones that need it.
+    #[test]
+    fn the_queue_capability_is_advertised_and_apart_from_agent() {
+        assert!(capability::ALL.contains(&capability::AGENT_QUEUE), "the daemon would not advertise it");
+        assert_ne!(capability::AGENT_QUEUE, capability::AGENT);
+        assert_eq!(capability::AGENT_QUEUE, "agent_queue");
     }
 
     #[test]

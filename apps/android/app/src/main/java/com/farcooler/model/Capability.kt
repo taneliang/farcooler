@@ -42,5 +42,6 @@ enum class Capability(val wire: String) {
     WORKTREE_FILES("worktree_files"),
     TERMINAL_NAMES("terminal_names"),
     TERMINAL_PORTS("terminal_ports"),
-    READ_ONLY_FOLDERS("read_only_folders");
+    READ_ONLY_FOLDERS("read_only_folders"),
+    AGENT_QUEUE("agent_queue");
 }
