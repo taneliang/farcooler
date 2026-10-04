@@ -46,7 +46,7 @@ struct FleetPlaceholder: View {
     /// orchestrator does, never where anything sits on screen. Rows, not the
     /// five-line paragraph the owner found "too many words" (ov-205).
     static let workspaceCopy = EmptyStateCopy(
-        lede: "A workspace is where you work on one feature or fix.",
+        lede: "A workspace holds one feature or fix.",
         rows: [
             .init(symbol: "bubble.left", text: "Tell the orchestrator what you want"),
             .init(symbol: "checklist", text: "Agents start on the tasks it makes"),

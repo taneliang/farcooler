@@ -23,8 +23,10 @@ struct EmptyStateCopy: Equatable {
 }
 
 /// `EmptyStateCopy`, drawn: the lede centered, then the rows as one
-/// leading-aligned block, centered under it, each symbol in a fixed-width
-/// column so the words line up. A column too narrow for a row wraps it.
+/// leading-aligned block, each symbol in a fixed-width column so the words
+/// line up. The block is as wide as its cap allows, not as wide as its longest
+/// row, so every state's symbols share one left edge (ov-266). A column too
+/// narrow for a row wraps it.
 struct EmptyStateRows: View {
     let copy: EmptyStateCopy
 
@@ -46,6 +48,15 @@ struct EmptyStateRows: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // More room under the lede than between rows, so it doesn't read
+            // as another row.
+            .padding(.top, copy.lede == nil ? 0 : Spacing.group)
         }
+        .frame(minWidth: 0, idealWidth: Self.width, maxWidth: Self.width)
     }
+
+    /// The block's width, where the column allows it: wide enough that no lede
+    /// or row wraps to a one-word line.
+    static let width: CGFloat = 360
 }

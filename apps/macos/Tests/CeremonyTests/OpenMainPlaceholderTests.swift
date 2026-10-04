@@ -51,7 +51,7 @@ struct OpenMainPlaceholderTests {
     @Test("No Workspace Selected leads with purpose, then short rows, never a paragraph")
     func explainerLeadsWithPurpose() {
         let copy = FleetPlaceholder.workspaceCopy
-        #expect(copy.lede?.hasPrefix("A workspace is where you work on one feature or fix") == true)
+        #expect(copy.lede?.hasPrefix("A workspace holds one feature or fix") == true)
         #expect(copy.rows.map(\.symbol) == ["bubble.left", "checklist"])
         EmptyStateCopyTests.expectScannable(copy)
     }
