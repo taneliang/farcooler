@@ -1,0 +1,16 @@
+{
+  "v": 1,
+  "title": "Risks",
+  "summary": "One blocked, one waiting on the owner",
+  "blocks": [
+    { "type": "heading", "text": "Risks" },
+    { "type": "list", "items": [
+        { "text": "Sidebar tint vs. terminal theme is undecided", "state": "blocked",
+          "detail": "Holds ov-222's last pass", "ref": { "ask": "ov-222" } },
+        { "text": "iOS, Android and AgentKit are still in the lint baseline", "state": "waiting",
+          "detail": "ov-228 split; the Mac is clear", "ref": { "task": "ov-228" } },
+        { "text": "Frosted plane on a 1x display is unmeasured", "state": "active",
+          "detail": "CI's runner is 1x (da7da7ab); captures pending" },
+        { "text": "Increase Contrast outline on attention cards", "state": "done" } ] }
+  ]
+}

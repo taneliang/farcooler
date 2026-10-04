@@ -1,0 +1,11 @@
+{
+ "v": 1,
+ "title": "Refused",
+ "blocks": [
+  {
+   "type": "text",
+   "md": "x",
+   "tone": "danger"
+  }
+ ]
+}

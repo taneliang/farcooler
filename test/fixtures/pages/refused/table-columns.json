@@ -1,0 +1,39 @@
+{
+ "v": 1,
+ "title": "Refused",
+ "blocks": [
+  {
+   "type": "table",
+   "columns": [
+    {
+     "title": "c0"
+    },
+    {
+     "title": "c1"
+    },
+    {
+     "title": "c2"
+    },
+    {
+     "title": "c3"
+    },
+    {
+     "title": "c4"
+    },
+    {
+     "title": "c5"
+    },
+    {
+     "title": "c6"
+    },
+    {
+     "title": "c7"
+    },
+    {
+     "title": "c8"
+    }
+   ],
+   "rows": []
+  }
+ ]
+}

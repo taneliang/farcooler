@@ -1,0 +1,165 @@
+{
+  "blocks": [
+    {
+      "text": "Heading",
+      "type": "heading"
+    },
+    {
+      "md": "A paragraph with **bold**, *italic* and `code`.\n\n- one\n- two",
+      "tone": "attention",
+      "type": "text"
+    },
+    {
+      "items": [
+        {
+          "label": "A",
+          "value": "1"
+        },
+        {
+          "detail": "two",
+          "label": "B",
+          "tone": "attention",
+          "value": "2"
+        }
+      ],
+      "type": "stats"
+    },
+    {
+      "detail": "since Monday",
+      "done": 3,
+      "label": "Parts",
+      "parts": [
+        {
+          "count": 3,
+          "label": "Done"
+        },
+        {
+          "count": 2,
+          "label": "Active"
+        },
+        {
+          "count": 1,
+          "label": "Waiting"
+        }
+      ],
+      "total": 10,
+      "type": "progress"
+    },
+    {
+      "columns": [
+        {
+          "title": "Name"
+        },
+        {
+          "align": "end",
+          "title": "Count"
+        },
+        {
+          "align": "center",
+          "grow": true,
+          "title": "Note"
+        }
+      ],
+      "rows": [
+        [
+          "alpha",
+          "1",
+          ""
+        ],
+        [
+          {
+            "mono": true,
+            "text": "beta"
+          },
+          {
+            "text": "2",
+            "tone": "attention"
+          },
+          "second"
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "items": [
+        {
+          "state": "done",
+          "text": "Done"
+        },
+        {
+          "state": "active",
+          "text": "Active"
+        },
+        {
+          "state": "waiting",
+          "text": "Waiting"
+        },
+        {
+          "state": "blocked",
+          "text": "Blocked",
+          "tone": "attention"
+        },
+        {
+          "detail": "exit 1",
+          "state": "failed",
+          "text": "Failed"
+        },
+        {
+          "state": "todo",
+          "text": "To do"
+        },
+        {
+          "text": "No state"
+        }
+      ],
+      "type": "list"
+    },
+    {
+      "entries": [
+        {
+          "at": 1791151320250,
+          "text": "With a fraction and an offset"
+        },
+        {
+          "at": 1791150000000,
+          "text": "As milliseconds"
+        },
+        {
+          "at": 1791158400000,
+          "text": "In UTC"
+        }
+      ],
+      "order": "given",
+      "type": "timeline"
+    },
+    {
+      "steps": [
+        {
+          "label": "One",
+          "state": "done"
+        },
+        {
+          "label": "Two",
+          "state": "active"
+        },
+        {
+          "label": "Three",
+          "state": "none"
+        }
+      ],
+      "type": "steps"
+    },
+    {
+      "items": [
+        {
+          "page": "train"
+        }
+      ],
+      "type": "links"
+    }
+  ],
+  "glance": "nine blocks",
+  "summary": "Each of the nine blocks once, with each state and both tones",
+  "title": "Every block",
+  "v": 1
+}

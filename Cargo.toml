@@ -78,6 +78,9 @@ toml = "0.8"
 # lock as `toml`'s own dependency, so this is a direct dep and no new tree.
 toml_edit = "0.22"
 libc = "0.2"
+# NFC for the text of an orchestrator page (ov-281). Already in the lock as the
+# URL parser's dependency, so this is a direct dep and no new tree.
+icu_normalizer = "2"
 
 [profile.release]
 lto = "thin"

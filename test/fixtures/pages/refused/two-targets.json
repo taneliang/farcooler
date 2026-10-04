@@ -1,0 +1,15 @@
+{
+ "v": 1,
+ "title": "Refused",
+ "blocks": [
+  {
+   "type": "links",
+   "items": [
+    {
+     "lane": "a",
+     "task": "ov-1"
+    }
+   ]
+  }
+ ]
+}

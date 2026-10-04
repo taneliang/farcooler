@@ -1,0 +1,63 @@
+{
+ "v": 1,
+ "title": "Refused",
+ "blocks": [
+  {
+   "type": "steps",
+   "steps": [
+    {
+     "label": "s",
+     "state": "todo"
+    },
+    {
+     "label": "s",
+     "state": "todo"
+    },
+    {
+     "label": "s",
+     "state": "todo"
+    },
+    {
+     "label": "s",
+     "state": "todo"
+    },
+    {
+     "label": "s",
+     "state": "todo"
+    },
+    {
+     "label": "s",
+     "state": "todo"
+    },
+    {
+     "label": "s",
+     "state": "todo"
+    },
+    {
+     "label": "s",
+     "state": "todo"
+    },
+    {
+     "label": "s",
+     "state": "todo"
+    },
+    {
+     "label": "s",
+     "state": "todo"
+    },
+    {
+     "label": "s",
+     "state": "todo"
+    },
+    {
+     "label": "s",
+     "state": "todo"
+    },
+    {
+     "label": "s",
+     "state": "todo"
+    }
+   ]
+  }
+ ]
+}

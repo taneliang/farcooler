@@ -1,0 +1,25 @@
+{
+ "v": 1,
+ "title": "Refused",
+ "blocks": [
+  {
+   "type": "table",
+   "columns": [
+    {
+     "title": "c0"
+    }
+   ],
+   "rows": [
+    [
+     {
+      "text": "x",
+      "ref": {
+       "lane": "a"
+      },
+      "show": "state"
+     }
+    ]
+   ]
+  }
+ ]
+}

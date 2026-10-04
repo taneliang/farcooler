@@ -1,0 +1,21 @@
+{
+ "v": 1,
+ "title": "Refused",
+ "blocks": [
+  {
+   "type": "table",
+   "columns": [
+    {
+     "title": "c0"
+    }
+   ],
+   "rows": [
+    [
+     {
+      "tone": "attention"
+     }
+    ]
+   ]
+  }
+ ]
+}

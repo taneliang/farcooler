@@ -1,0 +1,136 @@
+{
+  "blocks": [
+    {
+      "items": [
+        {
+          "ref": {
+            "task": "ov-113"
+          },
+          "text": "A card"
+        },
+        {
+          "ref": {
+            "ask": "ov-269"
+          },
+          "text": "A card's question"
+        },
+        {
+          "ref": {
+            "label": "Mac UX",
+            "lane": "mac-ux"
+          },
+          "text": "A lane"
+        },
+        {
+          "ref": {
+            "theme": "Visual language"
+          },
+          "text": "A theme"
+        },
+        {
+          "ref": {
+            "page": "spend"
+          },
+          "text": "A page"
+        },
+        {
+          "ref": {
+            "worktree": "integ-10"
+          },
+          "text": "A worktree"
+        },
+        {
+          "ref": {
+            "terminal": {
+              "name": "build",
+              "worktree": "integ-10"
+            }
+          },
+          "text": "A terminal"
+        },
+        {
+          "ref": {
+            "label": "Pull request",
+            "url": "https://github.com/example/overnight/pull/12"
+          },
+          "text": "A link"
+        },
+        {
+          "ref": {
+            "lane": "dropped-lane"
+          },
+          "text": "A name nothing on the board has"
+        }
+      ],
+      "type": "list"
+    },
+    {
+      "columns": [
+        {
+          "title": "Lane"
+        },
+        {
+          "title": "State"
+        },
+        {
+          "title": "Spend"
+        },
+        {
+          "title": "Card"
+        },
+        {
+          "title": "Note"
+        }
+      ],
+      "rows": [
+        [
+          {
+            "ref": {
+              "lane": "mac-ux"
+            }
+          },
+          {
+            "ref": {
+              "lane": "mac-ux"
+            },
+            "show": "state"
+          },
+          {
+            "ref": {
+              "lane": "mac-ux"
+            },
+            "show": "spend"
+          },
+          {
+            "ref": {
+              "task": "ov-113"
+            }
+          },
+          "five columns draw stacked on a phone"
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "items": [
+        {
+          "task": "ov-113"
+        },
+        {
+          "lane": "mac-ux"
+        },
+        {
+          "label": "Theme",
+          "theme": "Visual language"
+        },
+        {
+          "url": "https://example.com/path?q=1#top"
+        }
+      ],
+      "type": "links"
+    }
+  ],
+  "summary": "Each reference target, live and as plain text",
+  "title": "Every reference",
+  "v": 1
+}

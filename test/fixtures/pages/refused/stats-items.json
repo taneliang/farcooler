@@ -1,0 +1,39 @@
+{
+ "v": 1,
+ "title": "Refused",
+ "blocks": [
+  {
+   "type": "stats",
+   "items": [
+    {
+     "label": "a",
+     "value": "1"
+    },
+    {
+     "label": "a",
+     "value": "1"
+    },
+    {
+     "label": "a",
+     "value": "1"
+    },
+    {
+     "label": "a",
+     "value": "1"
+    },
+    {
+     "label": "a",
+     "value": "1"
+    },
+    {
+     "label": "a",
+     "value": "1"
+    },
+    {
+     "label": "a",
+     "value": "1"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,14 @@
+{
+ "v": 1,
+ "title": "Refused",
+ "blocks": [
+  {
+   "type": "links",
+   "items": [
+    {
+     "url": "javascript:alert(1)"
+    }
+   ]
+  }
+ ]
+}

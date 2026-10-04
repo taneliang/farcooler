@@ -1,0 +1,22 @@
+{
+  "v": 1,
+  "title": "Every reference",
+  "summary": "Each reference target, live and as plain text",
+  "blocks": [
+    { "type": "list", "items": [
+        { "text": "A card", "ref": { "task": "ov-113" } },
+        { "text": "A card's question", "ref": { "ask": "ov-269" } },
+        { "text": "A lane", "ref": { "lane": "mac-ux", "label": "Mac UX" } },
+        { "text": "A theme", "ref": { "theme": "Visual language" } },
+        { "text": "A page", "ref": { "page": "spend" } },
+        { "text": "A worktree", "ref": { "worktree": "integ-10" } },
+        { "text": "A terminal", "ref": { "terminal": { "worktree": "integ-10", "name": "build" } } },
+        { "text": "A link", "ref": { "url": "https://github.com/example/overnight/pull/12", "label": "Pull request" } },
+        { "text": "A name nothing on the board has", "ref": { "lane": "dropped-lane" } } ] },
+    { "type": "table", "columns": [ { "title": "Lane" }, { "title": "State" }, { "title": "Spend" }, { "title": "Card" }, { "title": "Note" } ],
+      "rows": [ [ { "ref": { "lane": "mac-ux" } }, { "ref": { "lane": "mac-ux" }, "show": "state" },
+                  { "ref": { "lane": "mac-ux" }, "show": "spend" }, { "ref": { "task": "ov-113" } }, "five columns draw stacked on a phone" ] ] },
+    { "type": "links", "items": [ { "task": "ov-113" }, { "lane": "mac-ux" }, { "theme": "Visual language", "label": "Theme" },
+                                  { "url": "https://example.com/path?q=1#top" } ] }
+  ]
+}

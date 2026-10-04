@@ -1,0 +1,43 @@
+{
+  "v": 1,
+  "title": "Train integ-10",
+  "summary": "In review · 3 of 4 lanes green",
+  "stale_after_min": 120,
+  "blocks": [
+    { "type": "text", "md": "Phones' Plan view and the LFS record, one build, one review." },
+    { "type": "stats", "items": [
+        { "label": "Lanes", "value": "4" },
+        { "label": "Green", "value": "3" },
+        { "label": "Fixing", "value": "1", "tone": "attention" },
+        { "label": "Build", "value": "41 min", "detail": "one Mac slot" } ] },
+    { "type": "steps", "steps": [
+        { "label": "Pick", "state": "done" }, { "label": "Build", "state": "done" },
+        { "label": "Review", "state": "active" }, { "label": "Land", "state": "todo" } ] },
+    { "type": "heading", "text": "Lanes" },
+    { "type": "table",
+      "columns": [ { "title": "Lane" }, { "title": "Cards" },
+                   { "title": "Gate", "grow": true }, { "title": "State" } ],
+      "rows": [
+        [ { "ref": { "lane": "ov-274-phones" } }, { "ref": { "task": "ov-274" } },
+          "iOS UI class, Android captures", { "ref": { "lane": "ov-274-phones" }, "show": "state" } ],
+        [ { "ref": { "lane": "ov-199-lfs" } }, { "ref": { "task": "ov-199" } },
+          "store tests, migration 0024", { "ref": { "lane": "ov-199-lfs" }, "show": "state" } ],
+        [ { "ref": { "lane": "ov-275-cost" } }, { "ref": { "task": "ov-275" } },
+          "usage totals match report", { "ref": { "lane": "ov-275-cost" }, "show": "state" } ],
+        [ { "ref": { "lane": "ov-181-review" } }, { "ref": { "task": "ov-181" } },
+          "relay contract fixtures", { "text": "Fixing · round 1", "tone": "attention" } ] ] },
+    { "type": "heading", "text": "Waiting On" },
+    { "type": "list", "items": [
+        { "text": "Owner: should Plan hide Unread on phones?", "state": "waiting",
+          "ref": { "ask": "ov-274" } },
+        { "text": "CI on the pushed branch", "state": "active", "detail": "run 812",
+          "ref": { "url": "https://github.com/example/overnight/actions/runs/812" } } ] },
+    { "type": "timeline", "entries": [
+        { "at": "2026-10-04T15:02:00-07:00", "text": "Picked four lanes" },
+        { "at": "2026-10-04T16:40:00-07:00", "text": "Review: one high finding", "ref": { "task": "ov-274" } } ] },
+    { "type": "progress", "label": "Cards closed", "done": 2, "total": 4 },
+    { "type": "links", "items": [
+        { "terminal": { "worktree": "integ-10", "name": "build" }, "label": "Build terminal" },
+        { "page": "spend" }, { "theme": "Visual language" } ] }
+  ]
+}

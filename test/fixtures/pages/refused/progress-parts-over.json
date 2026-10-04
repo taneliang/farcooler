@@ -1,0 +1,22 @@
+{
+ "v": 1,
+ "title": "Refused",
+ "blocks": [
+  {
+   "type": "progress",
+   "label": "p",
+   "done": 1,
+   "total": 3,
+   "parts": [
+    {
+     "label": "a",
+     "count": 2
+    },
+    {
+     "label": "b",
+     "count": 2
+    }
+   ]
+  }
+ ]
+}

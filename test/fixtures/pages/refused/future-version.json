@@ -1,0 +1,16 @@
+{
+ "v": 2,
+ "title": "From the future",
+ "summary": "A block this build doesn't know",
+ "blocks": [
+  {
+   "type": "heading",
+   "text": "Known"
+  },
+  {
+   "type": "gauge",
+   "alt": "Disk is 80% full.",
+   "value": 0.8
+  }
+ ]
+}

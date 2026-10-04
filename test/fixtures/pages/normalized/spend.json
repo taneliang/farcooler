@@ -1,0 +1,107 @@
+{
+  "blocks": [
+    {
+      "items": [
+        {
+          "label": "Week used",
+          "value": "62%"
+        },
+        {
+          "label": "Left",
+          "value": "2.1M"
+        },
+        {
+          "label": "Resets",
+          "value": "Thu 9am"
+        }
+      ],
+      "type": "stats"
+    },
+    {
+      "done": 62,
+      "label": "Week used",
+      "total": 100,
+      "type": "progress"
+    },
+    {
+      "text": "By Lane",
+      "type": "heading"
+    },
+    {
+      "columns": [
+        {
+          "grow": true,
+          "title": "Lane"
+        },
+        {
+          "align": "end",
+          "title": "Tokens"
+        },
+        {
+          "align": "end",
+          "title": "Cards"
+        },
+        {
+          "align": "end",
+          "title": "Fix rounds"
+        }
+      ],
+      "rows": [
+        [
+          {
+            "ref": {
+              "lane": "mac-ux"
+            }
+          },
+          {
+            "ref": {
+              "lane": "mac-ux"
+            },
+            "show": "spend"
+          },
+          "5 · 94k each",
+          "0"
+        ],
+        [
+          {
+            "ref": {
+              "lane": "ov-274-phones"
+            }
+          },
+          {
+            "mono": true,
+            "text": "310k"
+          },
+          "1",
+          "0"
+        ],
+        [
+          {
+            "ref": {
+              "lane": "android-caps"
+            }
+          },
+          {
+            "mono": true,
+            "text": "180k"
+          },
+          "0",
+          {
+            "text": "1",
+            "tone": "attention"
+          }
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "md": "Opus reviews were 41% of this week. The next train reviews low-risk lanes with Sonnet.",
+      "type": "text"
+    }
+  ],
+  "glance": "Week 62% used, resets Thu 9am",
+  "stale_after_min": 240,
+  "summary": "62% of the week used, 2.1M left",
+  "title": "Spend",
+  "v": 1
+}

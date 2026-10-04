@@ -1,0 +1,26 @@
+{
+ "v": 1,
+ "title": "Refused",
+ "blocks": [
+  {
+   "type": "table",
+   "columns": [
+    {
+     "title": "c0"
+    },
+    {
+     "title": "c1"
+    },
+    {
+     "title": "c2"
+    }
+   ],
+   "rows": [
+    [
+     "a",
+     "b"
+    ]
+   ]
+  }
+ ]
+}

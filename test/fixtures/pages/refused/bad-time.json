@@ -1,0 +1,15 @@
+{
+ "v": 1,
+ "title": "Refused",
+ "blocks": [
+  {
+   "type": "timeline",
+   "entries": [
+    {
+     "at": "yesterday",
+     "text": "x"
+    }
+   ]
+  }
+ ]
+}

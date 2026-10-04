@@ -1,0 +1,458 @@
+[
+ {
+  "file": "refused/document-bytes.json",
+  "path": "",
+  "says": "bytes once written out",
+  "cap": "document_bytes"
+ },
+ {
+  "file": "refused/blocks.json",
+  "path": "blocks[60]",
+  "says": "at most 60 blocks",
+  "cap": "blocks"
+ },
+ {
+  "file": "refused/md-chars.json",
+  "path": "blocks[0].md",
+  "says": "at most 2000 characters",
+  "cap": "md_chars"
+ },
+ {
+  "file": "refused/string-chars.json",
+  "path": "blocks[0].text",
+  "says": "at most 200 characters",
+  "cap": "string_chars"
+ },
+ {
+  "file": "refused/title-chars.json",
+  "path": "title",
+  "says": "at most 60 characters",
+  "cap": "title_chars"
+ },
+ {
+  "file": "refused/summary-chars.json",
+  "path": "summary",
+  "says": "at most 120 characters",
+  "cap": "summary_chars"
+ },
+ {
+  "file": "refused/glance-chars.json",
+  "path": "glance",
+  "says": "at most 60 characters",
+  "cap": "glance_chars"
+ },
+ {
+  "file": "refused/table-columns.json",
+  "path": "blocks[0].columns[8]",
+  "says": "a table has at most 8 columns",
+  "cap": "table_columns"
+ },
+ {
+  "file": "refused/table-rows.json",
+  "path": "blocks[0].rows[50]",
+  "says": "a table has at most 50 rows",
+  "cap": "table_rows"
+ },
+ {
+  "file": "refused/list-items.json",
+  "path": "blocks[0].items[50]",
+  "says": "a list has at most 50 items",
+  "cap": "list_items"
+ },
+ {
+  "file": "refused/timeline-entries.json",
+  "path": "blocks[0].entries[50]",
+  "says": "a timeline has at most 50 entries",
+  "cap": "timeline_entries"
+ },
+ {
+  "file": "refused/stats-items.json",
+  "path": "blocks[0].items[6]",
+  "says": "a stats row has at most 6 figures",
+  "cap": "stats_items"
+ },
+ {
+  "file": "refused/steps.json",
+  "path": "blocks[0].steps[12]",
+  "says": "a pipeline has at most 12 steps",
+  "cap": "steps"
+ },
+ {
+  "file": "refused/links-items.json",
+  "path": "blocks[0].items[12]",
+  "says": "a links block has at most 12 links",
+  "cap": "links_items"
+ },
+ {
+  "file": "refused/progress-parts.json",
+  "path": "blocks[0].parts[6]",
+  "says": "a bar has at most 6 parts",
+  "cap": "progress_parts"
+ },
+ {
+  "file": "refused/refs.json",
+  "path": "blocks[4].items[0].ref",
+  "says": "at most 200 references",
+  "cap": "refs"
+ },
+ {
+  "file": "refused/unknown-block.json",
+  "path": "blocks[0].type",
+  "says": "there's no block called diagram. The blocks are heading, text, stats, progress, table, list, timeline, steps and links.",
+  "fix": [
+   {
+    "pointer": "/blocks/0",
+    "value": {
+     "type": "heading",
+     "text": "x"
+    }
+   }
+  ]
+ },
+ {
+  "file": "refused/unknown-field.json",
+  "path": "blocks[0].colour",
+  "says": "there's no field called colour",
+  "fix": [
+   {
+    "pointer": "/blocks/0/colour",
+    "remove": true
+   }
+  ]
+ },
+ {
+  "file": "refused/unknown-field-top.json",
+  "path": "layout",
+  "says": "there's no field called layout",
+  "fix": [
+   {
+    "pointer": "/layout",
+    "remove": true
+   }
+  ]
+ },
+ {
+  "file": "refused/missing-version.json",
+  "path": "v",
+  "says": "needs the version",
+  "fix": [
+   {
+    "pointer": "/v",
+    "value": 1
+   }
+  ]
+ },
+ {
+  "file": "refused/missing-title.json",
+  "path": "title",
+  "says": "is required",
+  "fix": [
+   {
+    "pointer": "/title",
+    "value": "T"
+   }
+  ]
+ },
+ {
+  "file": "refused/no-blocks.json",
+  "path": "blocks",
+  "says": "needs 1 or more blocks",
+  "fix": [
+   {
+    "pointer": "/blocks",
+    "value": [
+     {
+      "type": "heading",
+      "text": "x"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "file": "refused/bad-tone.json",
+  "path": "blocks[0].tone",
+  "says": "neutral or attention",
+  "fix": [
+   {
+    "pointer": "/blocks/0/tone",
+    "value": "attention"
+   }
+  ]
+ },
+ {
+  "file": "refused/bad-state.json",
+  "path": "blocks[0].items[0].state",
+  "says": "there's no state called green",
+  "fix": [
+   {
+    "pointer": "/blocks/0/items/0/state",
+    "value": "done"
+   }
+  ]
+ },
+ {
+  "file": "refused/control-character.json",
+  "path": "blocks[0].text",
+  "says": "control character (U+0007)",
+  "fix": [
+   {
+    "pointer": "/blocks/0/text",
+    "value": "ab"
+   }
+  ]
+ },
+ {
+  "file": "refused/bidi-override.json",
+  "path": "blocks[0].text",
+  "says": "text-direction override (U+202E)",
+  "fix": [
+   {
+    "pointer": "/blocks/0/text",
+    "value": "evil"
+   }
+  ]
+ },
+ {
+  "file": "refused/http-link.json",
+  "path": "blocks[0].items[0].url",
+  "says": "has to start with https://",
+  "fix": [
+   {
+    "pointer": "/blocks/0/items/0/url",
+    "value": "https://example.com/"
+   }
+  ]
+ },
+ {
+  "file": "refused/javascript-link.json",
+  "path": "blocks[0].items[0].url",
+  "says": "has to start with https://",
+  "fix": [
+   {
+    "pointer": "/blocks/0/items/0/url",
+    "value": "https://example.com/"
+   }
+  ]
+ },
+ {
+  "file": "refused/userinfo-link.json",
+  "path": "blocks[0].items[0].url",
+  "says": "isn't one a page can show",
+  "fix": [
+   {
+    "pointer": "/blocks/0/items/0/url",
+    "value": "https://github.com/x"
+   }
+  ]
+ },
+ {
+  "file": "refused/row-width.json",
+  "path": "blocks[0].rows[0]",
+  "says": "this row has 2 cells and the table has 3 columns",
+  "fix": [
+   {
+    "pointer": "/blocks/0/rows/0",
+    "value": [
+     "a",
+     "b",
+     "c"
+    ]
+   }
+  ]
+ },
+ {
+  "file": "refused/bad-time.json",
+  "path": "blocks[0].entries[0].at",
+  "says": "RFC 3339",
+  "fix": [
+   {
+    "pointer": "/blocks/0/entries/0/at",
+    "value": "2026-10-04T15:02:00-07:00"
+   }
+  ]
+ },
+ {
+  "file": "refused/two-targets.json",
+  "path": "blocks[0].items[0]",
+  "says": "exactly one thing",
+  "fix": [
+   {
+    "pointer": "/blocks/0/items/0/task",
+    "remove": true
+   }
+  ]
+ },
+ {
+  "file": "refused/no-target.json",
+  "path": "blocks[0].items[0]",
+  "says": "exactly one thing",
+  "fix": [
+   {
+    "pointer": "/blocks/0/items/0",
+    "value": {
+     "page": "spend"
+    }
+   }
+  ]
+ },
+ {
+  "file": "refused/show-needs-a-lane.json",
+  "path": "blocks[0].rows[0][0].show",
+  "says": "can only be drawn for a ref to a lane",
+  "fix": [
+   {
+    "pointer": "/blocks/0/rows/0/0/show",
+    "remove": true
+   }
+  ]
+ },
+ {
+  "file": "refused/show-hides-text.json",
+  "path": "blocks[0].rows[0][0].show",
+  "says": "Take out the text",
+  "fix": [
+   {
+    "pointer": "/blocks/0/rows/0/0/text",
+    "remove": true
+   }
+  ]
+ },
+ {
+  "file": "refused/cell-is-empty.json",
+  "path": "blocks[0].rows[0][0]",
+  "says": "needs text, or a ref",
+  "fix": [
+   {
+    "pointer": "/blocks/0/rows/0/0",
+    "value": {
+     "text": "x"
+    }
+   }
+  ]
+ },
+ {
+  "file": "refused/progress-over.json",
+  "path": "blocks[0].done",
+  "says": "only 3",
+  "fix": [
+   {
+    "pointer": "/blocks/0/done",
+    "value": 3
+   }
+  ]
+ },
+ {
+  "file": "refused/progress-parts-over.json",
+  "path": "blocks[0].parts",
+  "says": "add up to 4",
+  "fix": [
+   {
+    "pointer": "/blocks/0/parts/1/count",
+    "value": 1
+   }
+  ]
+ },
+ {
+  "file": "refused/bad-slot.json",
+  "path": "blocks[0].items[0].page",
+  "says": "named by its slot",
+  "fix": [
+   {
+    "pointer": "/blocks/0/items/0/page",
+    "value": "a-slot"
+   }
+  ]
+ },
+ {
+  "file": "refused/bad-task-key.json",
+  "path": "blocks[0].items[0].task",
+  "says": "looks like ov-113",
+  "fix": [
+   {
+    "pointer": "/blocks/0/items/0/task",
+    "value": "ov-113"
+   }
+  ]
+ },
+ {
+  "file": "refused/empty-text.json",
+  "path": "blocks[0].text",
+  "says": "can't be empty",
+  "fix": [
+   {
+    "pointer": "/blocks/0/text",
+    "value": "x"
+   }
+  ]
+ },
+ {
+  "file": "refused/stale-too-long.json",
+  "path": "stale_after_min",
+  "says": "minutes from 1 to 10080",
+  "fix": [
+   {
+    "pointer": "/stale_after_min",
+    "value": 60
+   }
+  ]
+ },
+ {
+  "file": "refused/steps-too-few.json",
+  "path": "blocks[0].steps",
+  "says": "needs 2 or more steps",
+  "fix": [
+   {
+    "pointer": "/blocks/0/steps",
+    "value": [
+     {
+      "label": "a",
+      "state": "done"
+     },
+     {
+      "label": "b",
+      "state": "todo"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "file": "refused/not-an-object.json",
+  "path": "",
+  "says": "expected an object",
+  "fix": [
+   {
+    "pointer": "",
+    "value": {
+     "v": 1,
+     "title": "x",
+     "blocks": [
+      {
+       "type": "heading",
+       "text": "x"
+      }
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "file": "refused/future-version.json",
+  "path": "v",
+  "says": "draws pages up to version 1",
+  "fix": [
+   {
+    "pointer": "/v",
+    "value": 1
+   },
+   {
+    "pointer": "/blocks/1",
+    "value": {
+     "type": "heading",
+     "text": "x"
+    }
+   }
+  ]
+ }
+]

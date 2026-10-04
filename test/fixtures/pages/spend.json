@@ -1,0 +1,23 @@
+{
+  "v": 1,
+  "title": "Spend",
+  "summary": "62% of the week used, 2.1M left",
+  "glance": "Week 62% used, resets Thu 9am",
+  "stale_after_min": 240,
+  "blocks": [
+    { "type": "stats", "items": [
+        { "label": "Week used", "value": "62%" },
+        { "label": "Left", "value": "2.1M" },
+        { "label": "Resets", "value": "Thu 9am" } ] },
+    { "type": "progress", "label": "Week used", "done": 62, "total": 100 },
+    { "type": "heading", "text": "By Lane" },
+    { "type": "table",
+      "columns": [ { "title": "Lane", "grow": true }, { "title": "Tokens", "align": "end" },
+                   { "title": "Cards", "align": "end" }, { "title": "Fix rounds", "align": "end" } ],
+      "rows": [
+        [ { "ref": { "lane": "mac-ux" } }, { "ref": { "lane": "mac-ux" }, "show": "spend" }, "5 · 94k each", "0" ],
+        [ { "ref": { "lane": "ov-274-phones" } }, { "text": "310k", "mono": true }, "1", "0" ],
+        [ { "ref": { "lane": "android-caps" } }, { "text": "180k", "mono": true }, "0", { "text": "1", "tone": "attention" } ] ] },
+    { "type": "text", "md": "Opus reviews were 41% of this week. The next train reviews low-risk lanes with Sonnet." }
+  ]
+}

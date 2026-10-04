@@ -14,6 +14,8 @@ pub mod feed;
 pub mod inventory;
 pub mod local_time;
 pub mod names;
+pub mod page_doc;
+pub mod page_schema;
 pub mod ports;
 pub mod preconditions;
 pub mod programs;

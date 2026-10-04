@@ -1,0 +1,15 @@
+{
+ "v": 1,
+ "title": "Refused",
+ "blocks": [
+  {
+   "type": "steps",
+   "steps": [
+    {
+     "label": "only",
+     "state": "done"
+    }
+   ]
+  }
+ ]
+}

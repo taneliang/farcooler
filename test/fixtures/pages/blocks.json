@@ -1,0 +1,26 @@
+{
+  "v": 1,
+  "title": "Every block",
+  "summary": "Each of the nine blocks once, with each state and both tones",
+  "glance": "nine blocks",
+  "blocks": [
+    { "type": "heading", "text": "Heading" },
+    { "type": "text", "md": "A paragraph with **bold**, *italic* and `code`.\n\n- one\n- two", "tone": "attention" },
+    { "type": "stats", "items": [ { "label": "A", "value": "1" }, { "label": "B", "value": "2", "detail": "two", "tone": "attention" } ] },
+    { "type": "progress", "label": "Parts", "done": 3, "total": 10, "detail": "since Monday",
+      "parts": [ { "label": "Done", "count": 3 }, { "label": "Active", "count": 2 }, { "label": "Waiting", "count": 1 } ] },
+    { "type": "table", "columns": [ { "title": "Name" }, { "title": "Count", "align": "end" }, { "title": "Note", "align": "center", "grow": true } ],
+      "rows": [ [ "alpha", "1", "" ], [ { "text": "beta", "mono": true }, { "text": "2", "tone": "attention" }, "second" ] ] },
+    { "type": "list", "items": [
+        { "text": "Done", "state": "done" }, { "text": "Active", "state": "active" },
+        { "text": "Waiting", "state": "waiting" }, { "text": "Blocked", "state": "blocked", "tone": "attention" },
+        { "text": "Failed", "state": "failed", "detail": "exit 1" }, { "text": "To do", "state": "todo" },
+        { "text": "No state" } ] },
+    { "type": "timeline", "order": "given", "entries": [
+        { "at": "2026-10-04T15:02:00.250-07:00", "text": "With a fraction and an offset" },
+        { "at": 1791150000000, "text": "As milliseconds" },
+        { "at": "2026-10-05T00:00:00Z", "text": "In UTC" } ] },
+    { "type": "steps", "steps": [ { "label": "One", "state": "done" }, { "label": "Two", "state": "active" }, { "label": "Three", "state": "none" } ] },
+    { "type": "links", "items": [ { "page": "train" } ] }
+  ]
+}
