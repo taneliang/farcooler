@@ -138,6 +138,31 @@ enum MacDestination {
         }
     }
 
+    /// The selection a kept `destination` is, with no fleet to ask: for a
+    /// history that loads before any runner has answered (ov-248). A worktree
+    /// is under the workspace it was kept in, else loose. Nil for a terminal,
+    /// which no window keeps as a place. Unlike `selection(for:in:)`, a pane
+    /// isn't turned into its task.
+    static func place(_ destination: Destination) -> Selection? {
+        let host = destination.runner.host ?? ""
+        switch destination.place {
+        case .needsYou:
+            return .needsYou
+        case .terminal:
+            return nil
+        case .workspace(let id), .orchestrator(let id):
+            return .workspace(host: host, workspace: id, focus: nil)
+        case .history(let id, let status):
+            return TaskStatus(rawValue: status).map { .workspace(host: host, workspace: id, focus: .history($0)) }
+        case .task(let workspace, let task):
+            guard let workspace, let id = task.id else { return nil }
+            return .workspace(host: host, workspace: workspace, focus: .task(id))
+        case .worktree(let id, let workspace):
+            guard let workspace else { return .looseWorktree(host: host, worktree: id, terminal: destination.pane) }
+            return .workspace(host: host, workspace: workspace, focus: .worktree(id, terminal: destination.pane))
+        }
+    }
+
     /// What a window holds, as the resolver reads it.
     @MainActor
     static func world(of store: FleetStore) -> World {

@@ -94,6 +94,64 @@ struct NavigationHistory: Equatable {
 }
 
 extension NavigationHistory {
+    /// Where a row of the history list sits: a step away from the place the
+    /// window is at. The distance counts every stop on that side, 0 for the
+    /// nearest, including any a list leaves out as gone, since that is what
+    /// `go(toBack:)` and `go(toForward:)` take.
+    enum Spot: Equatable {
+        case forward(Int)
+        case current
+        case back(Int)
+    }
+
+    struct Row: Equatable {
+        var spot: Spot
+        var stop: Stop
+    }
+
+    /// How many places a side of the list shows.
+    static let rowsPerSide = 15
+
+    /// The list a long press on Back or Forward shows, one for both buttons:
+    /// Forward's stops, farthest first, then the place the window is at, then
+    /// Back's, nearest first, up to `rowsPerSide` each side. A stop that's
+    /// known to be gone (`resolves`) is left out.
+    func rows(current: Selection?, trail: Selection?, resolves: (Selection) -> Bool) -> [Row] {
+        func side(_ stops: [Stop], _ spot: (Int) -> Spot) -> [Row] {
+            let near = stops.reversed().enumerated().filter { resolves($0.element.place) }.prefix(Self.rowsPerSide)
+            return near.map { Row(spot: spot($0.offset), stop: $0.element) }
+        }
+        var rows = side(forward) { .forward($0) }.reversed() as [Row]
+        if let current { rows.append(Row(spot: .current, stop: Stop(current, trail: trail))) }
+        return rows + side(back) { .back($0) }
+    }
+
+    /// A row of Back's side chosen: the stop `distance` away (0 the nearest)
+    /// in one move. The stops passed over, and `current`, go onto Forward in
+    /// the order they'd be walked back through, as Safari does. Nil, and
+    /// nothing moved, for a distance there's nothing at.
+    mutating func go(toBack distance: Int, from current: Selection?, trail: Selection?) -> Stop? {
+        jump(distance, from: current, trail: trail, take: \.back, give: \.forward)
+    }
+
+    /// `go(toBack:from:trail:)`, the other way.
+    mutating func go(toForward distance: Int, from current: Selection?, trail: Selection?) -> Stop? {
+        jump(distance, from: current, trail: trail, take: \.forward, give: \.back)
+    }
+
+    private mutating func jump(
+        _ distance: Int, from current: Selection?, trail: Selection?, take: WritableKeyPath<Self, [Stop]>,
+        give: WritableKeyPath<Self, [Stop]>
+    ) -> Stop? {
+        guard distance >= 0, distance < self[keyPath: take].count else { return nil }
+        let passed = Array(self[keyPath: take].suffix(distance + 1).reversed())
+        self[keyPath: take].removeLast(distance + 1)
+        if let current { self[keyPath: give].append(Stop(current, trail: trail)) }
+        self[keyPath: give].append(contentsOf: passed.dropLast())
+        stepping = passed.last?.place
+        return passed.last
+    }
+
     /// Whether `place` is still somewhere to go in `fleet`: its workspace
     /// listed, its worktree there. A task's own presence is the board's,
     /// which the window checks when it opens one.

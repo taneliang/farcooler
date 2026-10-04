@@ -127,6 +127,25 @@ struct MacDestinationTests {
         #expect(MacDestination.destination(nil) == nil)
     }
 
+    @Test("A kept place is a selection again with no fleet to ask, panes and all")
+    func placeNeedsNoFleet() {
+        for selection: Selection in [
+            .needsYou,
+            .workspace(host: "", workspace: Self.billing, focus: nil),
+            .workspace(host: "studio", workspace: Self.billing, focus: .task(Self.task)),
+            .workspace(host: "", workspace: Self.billing, focus: .history(.cancelled)),
+            .workspace(host: "", workspace: Self.billing, focus: .worktree("lane", terminal: nil)),
+            .workspace(host: "", workspace: Self.billing, focus: .worktree("lane", terminal: "agent")),
+            .looseWorktree(host: "", worktree: "stray", terminal: nil),
+            .looseWorktree(host: "studio", worktree: "stray", terminal: "stray-shell"),
+        ] {
+            let kept = MacDestination.destination(selection)
+            #expect(kept.flatMap { MacDestination.place($0) } == selection, "\(selection)")
+        }
+        #expect(MacDestination.place(Destination(runner: .init(host: ""), place: .terminal("t"))) == nil)
+        #expect(MacDestination.place(Destination(runner: .init(host: ""), place: .task(workspace: nil, task: .init(key: "bil-1")))) == nil)
+    }
+
     @Test("A pane the keyboard was in comes back, and opens where going to it always has")
     func aPaneComesBack() throws {
         let fleet = Self.fleet()
