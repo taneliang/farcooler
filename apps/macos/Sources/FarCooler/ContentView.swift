@@ -2512,6 +2512,9 @@ struct ContentView: View {
             phase: FleetPlaceholder.phase(
                 hasWorktrees: !store.fleet.worktrees.isEmpty, localLoaded: local?.hasLoaded == true,
                 localError: local?.fleetError, hasRepositories: !store.repositories.isEmpty),
+            onOpenMain: FleetPlaceholder.mainToOpen(in: store.repositories, fleet: store.fleet).map { target in
+                { selection = .workspace(host: target.host, workspace: target.workspace.id, focus: nil) }
+            },
             onNewWorkspace: workspaceRepositories.isEmpty ? nil : { newWorkspaceName = NewWorkspaceName(name: "") },
             onAddRepository: { showAddRepository = true },
             onNewWorktree: { newWorktreeIntent = NewWorktreeIntent() },

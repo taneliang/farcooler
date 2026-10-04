@@ -102,7 +102,7 @@ struct NeedsYouView: View {
                 ContentUnavailableView {
                     Label("Nothing Needs You", systemImage: "tray")
                 } description: {
-                    Text("Asks, decisions, and reviews from every workspace show up here.")
+                    Text("When an orchestrator or agent needs an answer, a decision, or a review, it waits here until you’ve dealt with it.")
                 }
             } else {
                 ScrollView {
