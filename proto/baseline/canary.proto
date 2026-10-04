@@ -1,4 +1,4 @@
-// Shipped by Canary at fa579569570a7f0bf5224c973203aea966f1e2a8. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 2d3c6df9807712cfc6397e3c7d98b5b023a9a104. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -194,6 +194,11 @@ message Request {
     // from 120 so a lane adding board methods beside it cannot collide.
     UsageQuery usage_report = 120;
     TaskUsageRequest usage_task = 121;
+    // When a task will start (ov-212), behind `task_waits`, and who works it
+    // (ov-213), behind `task_workers`. Tags from 130, for 120's reason.
+    TaskSetWait task_set_wait = 130;
+    TaskSetLine task_set_line = 131;
+    TaskWorkerSet task_worker_set = 132;
   }
 }
 
@@ -2731,6 +2736,12 @@ enum TaskNoteKind {
   TASK_NOTE_KIND_COMMENT = 6;
   TASK_NOTE_KIND_STATUS_CHANGE = 7;
   TASK_NOTE_KIND_CREATED = 8;
+  // A task's start changed: put in a line, held, parked, or let go (ov-212).
+  // Written only by the runner, like STATUS_CHANGE; `task.note` refuses it.
+  TASK_NOTE_KIND_WAIT = 9;
+  // A subagent started, ended or resumed on the task (ov-213). Written only
+  // by the runner; `task.note` refuses it.
+  TASK_NOTE_KIND_WORKER = 10;
 }
 
 // One checkable thing, and whether it holds.
@@ -2774,6 +2785,112 @@ message Task {
   // a runner with the `workstreams` capability; empty from an older one.
   // `task.move` changes it, and the key stays the same.
   bytes workspace_id = 15;
+  // When it will start, if anyone said (ov-212). Absent when nothing was
+  // said, when what was said doesn't fit the status (a held card that
+  // started anyway), and from a runner without `task_waits`.
+  optional TaskWait wait = 16;
+  // The keys of the tasks it is blocked on that are neither done nor
+  // cancelled, in the order the blocks were written. Derived: a finished
+  // blocker stops counting, and its edge stays as history in `task.get`'s
+  // `blocks`. Empty from a runner without `task_waits`.
+  repeated string waiting_on = 17;
+  // Subagents recorded working it (ov-213): every open one, then the most
+  // recently closed one. Empty from a runner without `task_workers`.
+  repeated TaskWorker workers = 18;
+}
+
+// What a task is waiting for before it starts. Words the runner sends; each
+// app has its own copy for them.
+enum TaskWaitKind {
+  TASK_WAIT_KIND_UNSPECIFIED = 0;
+  // In one of the board's lines, at `position`.
+  TASK_WAIT_KIND_IN_LINE = 1;
+  // Held until `until`. The runner clears it when that time comes.
+  TASK_WAIT_KIND_UNTIL = 2;
+  // Held until `event` happens. Only the orchestrator clears it.
+  TASK_WAIT_KIND_AFTER = 3;
+  // Nobody plans to start it.
+  TASK_WAIT_KIND_PARKED = 4;
+}
+
+// Which line. AGENT is for tasks not yet started (backlog, todo): the order
+// they get a free agent in. BUILD is for tasks started (in progress, in
+// review) that wait for the one build slot.
+enum TaskLine {
+  TASK_LINE_UNSPECIFIED = 0;
+  TASK_LINE_AGENT = 1;
+  TASK_LINE_BUILD = 2;
+}
+
+// What a task held for an event waits for. The details stay in the intent.
+enum TaskWaitEvent {
+  TASK_WAIT_EVENT_UNSPECIFIED = 0;
+  // The next release.
+  TASK_WAIT_EVENT_RELEASE = 1;
+  // Whatever it's about happening again.
+  TASK_WAIT_EVENT_RECURRENCE = 2;
+  // Nothing else on the board waiting.
+  TASK_WAIT_EVENT_CLEAR_BOARD = 3;
+}
+
+message TaskWait {
+  TaskWaitKind kind = 1;
+  // IN_LINE: which line.
+  TaskLine line = 2;
+  // IN_LINE, derived on every read: 1 is next. Counts only the tasks in the
+  // same line on the same board whose status fits the line.
+  uint32 position = 3;
+  // IN_LINE, derived: the keys of the first three tasks in the line ahead
+  // of this one, in line order (all of them, when fewer).
+  repeated string ahead = 4;
+  // UNTIL: Unix milliseconds.
+  int64 until = 5;
+  // AFTER: which event.
+  TaskWaitEvent event = 6;
+  // Unix milliseconds, from when this wait was set.
+  int64 since = 7;
+}
+
+// A subagent's state, as far as the runner knows it.
+enum TaskWorkerState {
+  TASK_WORKER_STATE_UNSPECIFIED = 0;
+  TASK_WORKER_STATE_RUNNING = 1;
+  TASK_WORKER_STATE_FINISHED = 2;
+  // Failed, killed or stopped; the worker note says which.
+  TASK_WORKER_STATE_STOPPED = 3;
+  // Open, and the runner can't see it: show what was recorded and nothing
+  // more.
+  TASK_WORKER_STATE_UNOBSERVED = 4;
+}
+
+// One subagent working a task, from inside another agent's session (ov-213).
+// A pane working a task is `terminals.task_id`, as before; this is the other
+// kind of worker.
+message TaskWorker {
+  bytes id = 1;
+  // `claude` or `codex`: a stable word each app has its own name for.
+  string harness = 2;
+  // Claude's `agentId`, or codex's agent path. For the runner and the CLI,
+  // never for a screen.
+  string agent_id = 3;
+  // The orchestrator's words for it, or its description.
+  string label = 4;
+  string model = 5;
+  // Unix milliseconds.
+  int64 started_at = 6;
+  // Unix milliseconds; 0 while open.
+  int64 ended_at = 7;
+  TaskWorkerState state = 8;
+  // Unix milliseconds; 0 when unobserved.
+  int64 last_activity_at = 9;
+  // What it is doing now, in a line; empty when unobserved.
+  string doing = 10;
+  // Linked by the runner from a key at the start of its description, rather
+  // than recorded by the orchestrator.
+  bool linked_by_description = 11;
+  // The pane whose session it runs in, when the runner knows it: where a
+  // client goes to see it.
+  optional bytes orchestrator_terminal = 12;
 }
 
 message TaskList { repeated Task items = 1; }
@@ -3015,6 +3132,90 @@ message TaskBlockSet {
   // is not an error: the state afterward is the same either way.
   bool clear = 4;
   string actor = 5;
+}
+
+// Say when a task will start (ov-212): hold it until a time or an event,
+// park it, or clear what was said. `task.set_wait`, behind `task_waits`.
+//
+// For a task that hasn't started. A TODO task held or parked moves to
+// BACKLOG in the same write: a held task isn't ready. A task that has
+// started is refused (`wait_status`); a started task waits in the build
+// line, `task.set_line`. IN_LINE is refused here too (`kind`): a line is
+// set whole. UNSPECIFIED clears whatever wait the task has, a place in a
+// line included. Answers with the task.
+//
+// Refusals, as `Error.what`:
+//   `wait_status`  the task has started, or finished
+//   `until`        UNTIL with a time that isn't in the future
+//   `event`        AFTER with no event
+//   `kind`         IN_LINE, or a kind this runner doesn't know
+message TaskSetWait {
+  bytes task_id = 1;
+  TaskWaitKind kind = 2;
+  // UNTIL: Unix milliseconds.
+  int64 until = 3;
+  // AFTER: which event.
+  TaskWaitEvent event = 4;
+  string actor = 5;
+}
+
+// Replace one of a board's lines, whole, in order: the first task is next.
+// `task.set_line`, behind `task_waits`.
+//
+// Whole rather than one task at a time, because the line is what goes
+// stale: a task in it that isn't named here loses its place. A task named
+// here loses any other wait it had. An empty list empties the line. Answers
+// with the line's tasks in order.
+//
+// Refusals, as `Error.what`:
+//   `line`           no line named
+//   `task_twice`     a task named twice
+//   `task_ids`       an id that isn't one
+//   `other_board`    a task on another board than `workspace_id`
+//   `line_status`    a task whose status doesn't fit the line: AGENT takes
+//                    backlog and todo, BUILD in progress and in review
+message TaskSetLine {
+  bytes workspace_id = 1;
+  TaskLine line = 2;
+  repeated bytes task_ids = 3;
+  string actor = 4;
+}
+
+// Record a subagent working a task, or that it ended (ov-213). `task.worker`,
+// behind `task_workers`.
+//
+// Recording one that is already recorded on the task is the same row: its
+// session fields are filled in, and an ended one is reopened (a resume).
+// The orchestrator's record wins over a link the runner made from a
+// subagent's description: that row becomes the orchestrator's, and a link
+// still open on another task is closed there. A
+// BACKLOG or TODO task moves to IN_PROGRESS in the same write, since a
+// subagent at work means it started. A task that is done or cancelled is
+// refused (`task_closed`), and so is ending one never recorded (NOT_FOUND).
+// Answers with the task.
+message TaskWorkerSet {
+  bytes task_id = 1;
+  // `claude` or `codex`.
+  string harness = 2;
+  // Claude's `agentId` from the launch result, or codex's agent path.
+  string agent_id = 3;
+  // The orchestrator's session (`CLAUDE_CODE_SESSION_ID`), when known.
+  optional string session_id = 4;
+  // The directory the orchestrator's session runs in, when known.
+  optional string session_cwd = 5;
+  // The tmux pane the orchestrator runs in (`TMUX_PANE`), with the socket
+  // path from `TMUX`. The runner names the pane only when that socket is its
+  // own.
+  optional string tmux_pane = 6;
+  optional string tmux_socket = 7;
+  optional string label = 8;
+  optional string model = 9;
+  // Record that it ended, rather than that it started. With `end`, an empty
+  // `agent_id` ends every subagent open on the task (NOT_FOUND when none is).
+  bool end = 10;
+  // With `end`: `finished` (the default), `failed` or `stopped`.
+  string end_reason = 11;
+  string actor = 12;
 }
 
 // Every note in a repository whose body contains `query` literally.
