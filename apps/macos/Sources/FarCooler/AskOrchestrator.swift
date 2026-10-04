@@ -125,7 +125,7 @@ enum AskOrchestrator {
         var available = false
         var perform: (TaskRow) -> Void = { _ in }
 
-        static let unavailable = Action()
+        static var unavailable: Action { Action() }
     }
 }
 
