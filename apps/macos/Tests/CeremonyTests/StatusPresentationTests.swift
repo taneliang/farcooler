@@ -54,6 +54,10 @@ struct StatusPresentationTests {
         #expect(TaskRowMetaView.color(.attention, scheme: .dark) == Tint.attention(.dark))
         #expect(OrchestratorRow.State.needsYou.status?.tone.color(.dark) == Tint.attention(.dark))
         #expect(TaskRowMeta.word(.done) == "done")
+        // The feature's name, title case, on the orchestrator's row and in
+        // the title bar; "claude needs you" inside a sentence.
+        #expect(OrchestratorRow.word(.needsYou) == "Needs You")
+        #expect(TaskColumnModel.agentLine(blocked)?.text == "claude needs you")
         #expect(Status.done.tone.color(.light) == .secondary, "a finished turn's word stays neutral")
     }
 }

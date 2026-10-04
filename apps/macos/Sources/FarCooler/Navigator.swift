@@ -144,6 +144,9 @@ enum OrchestratorRow {
         switch state {
         case .none: "No Orchestrator"
         case .stopped: "Stopped"
+        // Needs You is a feature's name, title case wherever the Mac shows
+        // it; its tone and mark still come from the status.
+        case .needsYou: "Needs You"
         default: state.status?.label ?? ""
         }
     }
