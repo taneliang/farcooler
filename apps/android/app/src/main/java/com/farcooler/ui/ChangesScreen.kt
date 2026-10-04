@@ -53,6 +53,7 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -64,6 +65,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.testTag
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -555,6 +557,7 @@ private fun FileCard(
     onComment: (ReviewAnchor) -> Unit,
 ) {
     val expanded = state.isExpanded(file.path)
+    val scope = rememberCoroutineScope()
 
     // The scroll decides what gets read: a file's patch is fetched when the file
     // is opened, not when the change set loads. Keyed on the GENERATION as well
@@ -574,7 +577,7 @@ private fun FileCard(
     ) {
         FileHeading(file, expanded, onClick = { store.toggle(file.path) })
         if (expanded) {
-            FileBody(file, state, fontFamily, fontSize, onComment)
+            FileBody(file, state, fontFamily, fontSize, { scope.launch { store.ensure(file.path) } }, onComment)
         }
     }
 }
@@ -716,6 +719,7 @@ private fun FileBody(
     state: ChangesState,
     fontFamily: FontFamily,
     fontSize: Float,
+    onRetry: () -> Unit,
     onComment: (ReviewAnchor) -> Unit,
 ) {
     val path = file.path
@@ -744,12 +748,19 @@ private fun FileBody(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             )
 
-            state.fileFailures[path] != null -> Text(
-                state.fileFailures.getValue(path),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            )
+            state.fileFailures[path] != null -> Column(
+                Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    state.fileFailures.getValue(path),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                // `ensure` is the retry: a failure leaves the path unread.
+                TextButton(onClick = onRetry, modifier = Modifier.testTag("file-retry")) {
+                    Text("Try Again")
+                }
+            }
 
             else -> Patch(
                 lines = state.fileDiffs[path].orEmpty(),

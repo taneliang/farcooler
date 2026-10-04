@@ -343,14 +343,14 @@ class ChangesStoreTest {
         store.load()
         store.ensure("a.rs")
         assertEquals(
-            "This file’s changes couldn’t be read. Open it again to retry.",
+            "This file’s changes couldn’t be read.",
             store.state.value.fileFailures["a.rs"],
         )
 
         source.diffFails = DisconnectedException("gone")
         store.ensure("a.rs")
         assertEquals(
-            "The connection to this runner dropped. Open the file again once it’s back.",
+            "The connection to this runner dropped.",
             store.state.value.fileFailures["a.rs"],
         )
 

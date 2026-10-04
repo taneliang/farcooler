@@ -777,12 +777,12 @@ class ChangesStore(
             else -> "This patch couldn’t be read"
         }
 
-        /** Why one file's patch isn't on screen, when reading it failed. */
+        /** Why one file's patch isn't on screen, when reading it failed. The row's Try Again button is the way on. */
         internal fun fileTrouble(e: Exception): String =
             if (e is DisconnectedException) {
-                "The connection to this runner dropped. Open the file again once it’s back."
+                "The connection to this runner dropped."
             } else {
-                "This file’s changes couldn’t be read. Open it again to retry."
+                "This file’s changes couldn’t be read."
             }
 
         /**
@@ -799,6 +799,11 @@ class ChangesStore(
          * over would send somebody looking for a screen that does not exist.
          */
         internal fun loadTrouble(e: Exception): Trouble {
+            // A dropped link is a known cause with no runner word at all, so it
+            // fell through to the generic arm and its raw transcript (ov-148).
+            if (e is DisconnectedException) {
+                return Trouble("The connection to this runner dropped. Try again once it’s back.")
+            }
             // **Rewritten to read the runner's word rather than guess at its
             // prose.** The guess was wrong in both directions. "unknown method"
             // was never a string the daemon sends — an unimplemented method
