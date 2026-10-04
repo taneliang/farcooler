@@ -1,0 +1,186 @@
+{
+  "cards": [
+    {
+      "key": "ov-1",
+      "status": "In Progress",
+      "task": "00000000-0000-0000-0000-000000001001",
+      "title": "Title of ov-1"
+    },
+    {
+      "key": "ov-2",
+      "status": "Backlog",
+      "task": "00000000-0000-0000-0000-000000001002",
+      "title": "Title of ov-2"
+    },
+    {
+      "key": "ov-3",
+      "status": "Done",
+      "task": "00000000-0000-0000-0000-000000001003",
+      "title": "Title of ov-3"
+    }
+  ],
+  "landed_not_closed": [],
+  "lanes": [
+    {
+      "agents": [],
+      "branch": "",
+      "cards": [
+        {
+          "key": "ov-2",
+          "slice": "",
+          "task": "00000000-0000-0000-0000-000000001002"
+        }
+      ],
+      "fix_rounds": 0,
+      "harness": "",
+      "id": "00000000-0000-0000-0000-000000002001",
+      "landed_sha": null,
+      "model": "",
+      "name": "mac-fu3",
+      "plan_rank": 1,
+      "reason": "Frees the Mac slot",
+      "short": "00002001",
+      "spend": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_micros": null,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "runs": 0,
+        "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "queued",
+      "state_since": 1799999400000,
+      "train": null,
+      "worktree_path": ""
+    },
+    {
+      "agents": [
+        {
+          "agent_id": "a1",
+          "ended_at": 1799996400000,
+          "harness": "claude",
+          "model": "opus",
+          "role": "build",
+          "started_at": 1799989200000
+        },
+        {
+          "agent_id": "a2",
+          "ended_at": null,
+          "harness": "claude",
+          "model": "sonnet",
+          "role": "review",
+          "started_at": 1799998500000
+        }
+      ],
+      "branch": "mac-ux",
+      "cards": [
+        {
+          "key": "ov-1",
+          "slice": "Mac",
+          "task": "00000000-0000-0000-0000-000000001001"
+        }
+      ],
+      "fix_rounds": 1,
+      "harness": "claude",
+      "id": "00000000-0000-0000-0000-000000002002",
+      "landed_sha": null,
+      "model": "opus",
+      "name": "mac-ux",
+      "plan_rank": null,
+      "reason": "Five small Mac fixes, batched",
+      "short": "00002002",
+      "spend": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_micros": 31000000,
+        "input_tokens": 300000,
+        "output_tokens": 170000,
+        "runs": 2,
+        "unmeasured_agents": 1
+      },
+      "stale": false,
+      "state": "review",
+      "state_since": 1799999400000,
+      "train": "integ-9",
+      "worktree_path": ".claude/worktrees/mac-ux"
+    },
+    {
+      "agents": [],
+      "branch": "",
+      "cards": [
+        {
+          "key": "ov-3",
+          "slice": "",
+          "task": "00000000-0000-0000-0000-000000001003"
+        }
+      ],
+      "fix_rounds": 0,
+      "harness": "",
+      "id": "00000000-0000-0000-0000-000000002003",
+      "landed_sha": "4d3c8cb1e2",
+      "model": "",
+      "name": "fix-ac84",
+      "plan_rank": null,
+      "reason": "",
+      "short": "00002003",
+      "spend": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_micros": null,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "runs": 0,
+        "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "landed",
+      "state_since": 1799996400000,
+      "train": null,
+      "worktree_path": ""
+    }
+  ],
+  "no_lane": [],
+  "now_ms": 1800000000000,
+  "order": [
+    "00000000-0000-0000-0000-000000002001"
+  ],
+  "themes": [
+    {
+      "cards": [
+        {
+          "key": "ov-1",
+          "task": "00000000-0000-0000-0000-000000001001"
+        },
+        {
+          "key": "ov-2",
+          "task": "00000000-0000-0000-0000-000000001002"
+        },
+        {
+          "key": "ov-3",
+          "task": "00000000-0000-0000-0000-000000001003"
+        }
+      ],
+      "counts": {
+        "backlog": 2,
+        "cancelled": 0,
+        "done": 1,
+        "in_progress": 0,
+        "in_review": 0,
+        "needs_decision": 0,
+        "todo": 0
+      },
+      "id": "00000000-0000-0000-0000-000000003001",
+      "name": "Visual language",
+      "next": "Frosted window plane",
+      "ordinal": 0,
+      "outcome": "Every Mac surface reads as one app.",
+      "owner_ask": "Should the sidebar tint follow the terminal theme?",
+      "short": "00003001",
+      "state": "active",
+      "story": "Tokens are on main.",
+      "story_at": 1799996400000
+    }
+  ]
+}

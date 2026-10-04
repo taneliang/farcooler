@@ -523,3 +523,45 @@ async fn a_refused_move_says_where_the_lane_can_go() {
     assert!(link.sent.iter().all(|r| r.method != "lane.update"), "refused before the wire");
     say(&mut link, "lane set mac-ux --state landed --sha abc").await.expect("review lands in one command");
 }
+
+/// **`plan --json` is the shape the Mac decodes** (ov-273):
+/// `test/fixtures/plan.json` is this output byte for byte, and AgentKit's
+/// `PlanModelTests` decode the same file. A key renamed here fails this test
+/// until the fixture is rewritten (`FARCOOLER_WRITE_FIXTURES=1`), which then
+/// fails the Mac's.
+#[test]
+fn plan_json_is_the_shape_the_mac_reads() {
+    let mut plan = the_plan();
+    let review = &mut plan.lanes[1];
+    review.reason = "Five small Mac fixes, batched".into();
+    review.worktree_path = ".claude/worktrees/mac-ux".into();
+    review.branch = "mac-ux".into();
+    review.harness = "claude".into();
+    review.model = "opus".into();
+    review.fix_rounds = 1;
+    review.cards[0].slice = "Mac".into();
+    review.spend = Some(pb::LaneSpend {
+        input_tokens: 300_000, output_tokens: 170_000, cost_micros: Some(31_000_000), runs: 2, unmeasured_agents: 1,
+        ..Default::default()
+    });
+    review.agents = vec![
+        pb::LaneAgent { harness: "claude".into(), agent_id: "a1".into(), role: pb::LaneAgentRole::Build as i32,
+            model: "opus".into(), started_at: NOW - 3 * HOUR, ended_at: Some(NOW - HOUR) },
+        pb::LaneAgent { harness: "claude".into(), agent_id: "a2".into(), role: pb::LaneAgentRole::Review as i32,
+            model: "sonnet".into(), started_at: NOW - 25 * 60_000, ended_at: None },
+    ];
+    plan.lanes[2].landed_sha = Some("4d3c8cb1e2".into());
+    let theme = plan.themes[0].theme.as_mut().unwrap();
+    theme.outcome = "Every Mac surface reads as one app.".into();
+    theme.story = "Tokens are on main.".into();
+    theme.story_at = NOW - HOUR;
+    theme.next = "Frosted window plane".into();
+    theme.owner_ask = "Should the sidebar tint follow the terminal theme?".into();
+    let out = serde_json::to_string_pretty(&plan_json(&plan, &Keys::of_plan(&plan))).unwrap() + "\n";
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test/fixtures/plan.json");
+    if std::env::var_os("FARCOOLER_WRITE_FIXTURES").is_some() {
+        std::fs::write(&path, &out).unwrap();
+    }
+    let fixture = std::fs::read_to_string(&path).expect("test/fixtures/plan.json is missing");
+    assert_eq!(out, fixture, "plan --json no longer matches test/fixtures/plan.json, which the Mac decodes");
+}
