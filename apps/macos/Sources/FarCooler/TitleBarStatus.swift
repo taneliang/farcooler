@@ -115,6 +115,10 @@ enum TitleStatus {
         return 96 + 39 + textWidth(label) + 43 + 8
     }
 
+    /// How far the orchestrator's menu sits below center so its label's
+    /// baseline meets the borderless buttons' beside it (integ-9).
+    static let menuBaselineNudge: CGFloat = 1
+
     /// What the trailing items take: the window's edge, the tray and its
     /// count, the space before them, then Open in Editor and Changes, and
     /// the runner trouble's words while there's any. Measured as `leading`
@@ -322,6 +326,12 @@ struct TitleStatusView: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+        // A borderless menu draws its label 1 pt higher than a borderless
+        // button draws its title in the regular bar (integ-9, measured at
+        // 2x: baseline row 59 against the switcher's and the activity's 61,
+        // at every width). Padded above by twice that and still centered,
+        // its words come down to the same baseline.
+        .padding(.top, 2 * TitleStatus.menuBaselineNudge)
         .help("Show the orchestrator")
         .accessibilityLabel(TitleStatus.orchestratorLabel(model) ?? "Orchestrator")
         .accessibilityIdentifier("title-status-orchestrator")
