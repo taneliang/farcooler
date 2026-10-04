@@ -71,9 +71,11 @@ public protocol BoardReadStore {
     /// (ov-113), once, so it isn't again.
     func isUploaded(host: String, workspace: String) -> Bool
     func markUploaded(host: String, workspace: String)
-    /// Whether this device kept read state for the board before now, as
-    /// opposed to the first look `load` makes up.
-    func hasState(host: String, workspace: String) -> Bool
+    /// What this device kept for the board, as opposed to what `load` made
+    /// up: marks, and a floor only if someone set it (Mark All as Read, or
+    /// state from before the floor's origin was noted). A first look nobody
+    /// saw as Unread is no floor here. Nil when nothing real is kept.
+    func keptReads(host: String, workspace: String) -> BoardReads?
     /// Marks made and not yet acknowledged by the runner (ov-113), kept so
     /// they survive a relaunch.
     func loadPending(host: String, workspace: String) -> ReadsRaise
@@ -106,8 +108,11 @@ public struct DefaultsBoardReads: BoardReadStore {
             // weeks ago would otherwise call every task finished since
             // unread, and Done would list them all (ov-104 review).
             let visit = BoardVisit.read(host: host, workspace: workspace, from: defaults)
-            let first = BoardReads(floor: max(visit ?? .distantPast, BoardReads.firstLook(now: now).floor))
+            let look = BoardReads.firstLook(now: now).floor
+            let first = BoardReads(floor: max(visit ?? .distantPast, look))
             save(first, host: host, workspace: workspace)
+            // Made up here, not read by anyone, unless it is a real visit.
+            defaults.set(first.floor == look, forKey: Self.inventedKey(host: host, workspace: workspace))
             return first
         }
         let floor = Date(timeIntervalSince1970: defaults.double(forKey: floorKey))
@@ -124,8 +129,16 @@ public struct DefaultsBoardReads: BoardReadStore {
         defaults.bool(forKey: Self.uploadedKey(host: host, workspace: workspace))
     }
 
-    public func hasState(host: String, workspace: String) -> Bool {
-        defaults.object(forKey: Self.floorKey(host: host, workspace: workspace)) != nil
+    static func inventedKey(host: String, workspace: String) -> String {
+        "board.read.\(host).\(workspace).floor.invented"
+    }
+
+    public func keptReads(host: String, workspace: String) -> BoardReads? {
+        guard defaults.object(forKey: Self.floorKey(host: host, workspace: workspace)) != nil else { return nil }
+        let state = load(host: host, workspace: workspace, now: Date())
+        guard defaults.bool(forKey: Self.inventedKey(host: host, workspace: workspace)) else { return state }
+        let marks = BoardReads(floor: .distantPast, opened: state.opened)
+        return marks.opened.isEmpty ? nil : marks
     }
 
     public func loadPending(host: String, workspace: String) -> ReadsRaise {
@@ -149,6 +162,11 @@ public struct DefaultsBoardReads: BoardReadStore {
 
     public func save(_ reads: BoardReads, host: String, workspace: String) {
         let kept = reads.pruned()
+        // A floor that moved is somebody's doing, no longer made up.
+        let floorKey = Self.floorKey(host: host, workspace: workspace)
+        if defaults.object(forKey: floorKey) as? Double != kept.floor.timeIntervalSince1970 {
+            defaults.removeObject(forKey: Self.inventedKey(host: host, workspace: workspace))
+        }
         defaults.set(kept.floor.timeIntervalSince1970, forKey: Self.floorKey(host: host, workspace: workspace))
         defaults.set(
             kept.opened.mapValues(\.timeIntervalSince1970), forKey: Self.openedKey(host: host, workspace: workspace))

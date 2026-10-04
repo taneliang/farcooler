@@ -225,6 +225,39 @@ struct BoardReadSyncTests {
         #expect(runner.state() == Self.state(floor: Self.moved - 9_000_000))
     }
 
+    /// The first look an old runner's Mac made up is not its state: launch 2,
+    /// on a runner that keeps reads, uploads nothing.
+    @Test func aMadeUpFloorIsNeverUploaded() async {
+        let defaults = UserDefaults(suiteName: "ov113-\(UUID().uuidString)")!
+        let old = Runner()
+        await load(store(old, defaults: defaults))
+        let runner = Runner()
+        runner.reads = Self.state(floor: Self.moved - 9_000_000)
+        await load(store(runner, defaults: defaults))
+        #expect(runner.sent.isEmpty)
+        #expect(runner.state() == Self.state(floor: Self.moved - 9_000_000))
+    }
+
+    /// A real Mark All as Read made offline, on an old runner, goes up at
+    /// the next launch on one that keeps reads.
+    @Test func aRealMarkAllAsReadOfflineIsUploadedLater() async throws {
+        let defaults = UserDefaults(suiteName: "ov113-\(UUID().uuidString)")!
+        let old = Runner()
+        let first = store(old, defaults: defaults)
+        await load(first)
+        // What Mark All as Read leaves in defaults on a runner that keeps
+        // nothing. (The board's one row is from 2023, so there is nothing
+        // unread for the confirmation to ask about; the write is the same.)
+        DefaultsBoardReads(defaults).save(
+            BoardReads(floor: first.reads.floor.addingTimeInterval(7200)), host: "local", workspace: Self.ws)
+        let runner = Runner()
+        runner.reads = Self.state(floor: Self.moved - 9_000_000)
+        await load(store(runner, defaults: defaults))
+        let words = try #require(runner.sent.first)
+        let floor = try #require(words.firstIndex(of: "--floor").flatMap { Int64(words[$0 + 1]) })
+        #expect(floor > Self.moved + 3_600_000, "the floor Mark All as Read set")
+    }
+
     /// A mark whose send failed survives a relaunch, reads as read at once,
     /// and goes up with the first board read.
     @Test func aPendingMarkSurvivesARelaunch() async throws {

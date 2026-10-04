@@ -84,14 +84,27 @@ func owedMarksPersist() {
     #expect(store.loadPending(host: "h", workspace: "w") == owed)
     store.savePending(ReadsRaise(), host: "h", workspace: "w")
     #expect(store.loadPending(host: "h", workspace: "w").isEmpty)
-    #expect(!store.hasState(host: "h", workspace: "w"))
+    #expect(store.keptReads(host: "h", workspace: "w") == nil)
     store.save(BoardReads(floor: t0), host: "h", workspace: "w")
-    #expect(store.hasState(host: "h", workspace: "w"))
+    #expect(store.keptReads(host: "h", workspace: "w")?.floor == t0, "state from before the origin was noted is real")
 }
 
-@Test("The arguments are board mark-read's, in the runner's milliseconds")
-func raiseArguments() {
-    let raise = ReadsRaise(
-        floor: Date(timeIntervalSince1970: 2), opened: ["b": Date(timeIntervalSince1970: 1.5), "a": Date(timeIntervalSince1970: 3)])
-    #expect(raise.arguments == ["--task", "a:3000", "--task", "b:1500", "--floor", "2000"])
+@Test("A floor made up on first look is no kept state, until a mark or a real floor")
+func inventedFloorIsNotKept() {
+    let defaults = UserDefaults(suiteName: "ov113-\(UUID().uuidString)")!
+    let store = DefaultsBoardReads(defaults)
+    let first = store.load(host: "h", workspace: "w", now: t0)
+    #expect(store.keptReads(host: "h", workspace: "w") == nil)
+    _ = store.load(host: "h", workspace: "w", now: t0.addingTimeInterval(60))
+    #expect(store.keptReads(host: "h", workspace: "w") == nil, "still made up on the next launch")
+    var marked = first
+    marked.opened["a"] = t0.addingTimeInterval(10)
+    store.save(marked, host: "h", workspace: "w")
+    let kept = store.keptReads(host: "h", workspace: "w")
+    #expect(kept?.opened == ["a": t0.addingTimeInterval(10)])
+    #expect(kept?.floor == .distantPast, "a mark doesn't make the floor real")
+    var all = marked
+    all.floor = t0.addingTimeInterval(500)
+    store.save(all, host: "h", workspace: "w")
+    #expect(store.keptReads(host: "h", workspace: "w")?.floor == t0.addingTimeInterval(500))
 }

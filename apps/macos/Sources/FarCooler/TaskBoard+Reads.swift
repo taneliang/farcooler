@@ -11,10 +11,10 @@ extension TaskBoardStore {
     static func startingReads(_ store: BoardReadStore, host: String, workspace: String)
         -> (reads: BoardReads, pending: ReadsRaise, before: BoardReads?)
     {
-        let kept = store.hasState(host: host, workspace: workspace)
+        let kept = store.keptReads(host: host, workspace: workspace)
         let loaded = store.load(host: host, workspace: workspace, now: Date())
         let pending = store.loadPending(host: host, workspace: workspace)
-        return (pending.applied(to: loaded), pending, kept ? loaded : nil)
+        return (pending.applied(to: loaded), pending, kept)
     }
 
     /// A board read's `reads`, if the runner sent any: adopted, this Mac's
@@ -95,7 +95,7 @@ extension TaskBoardStore {
     func seedFromThisMac() {
         guard !readStore.isUploaded(host: hostKey, workspace: workspace.id) else { return }
         if let kept = readsBeforeLaunch {
-            pendingReads = pendingReads.merging(ReadsRaise(floor: kept.floor, opened: kept.opened))
+            pendingReads = pendingReads.merging(ReadsRaise(floor: kept.floor > .distantPast ? kept.floor : nil, opened: kept.opened))
             readStore.savePending(pendingReads, host: hostKey, workspace: workspace.id)
         }
         readStore.markUploaded(host: hostKey, workspace: workspace.id)
