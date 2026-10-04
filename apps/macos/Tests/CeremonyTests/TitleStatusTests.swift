@@ -57,7 +57,7 @@ struct TitleStatusTests {
         #expect(TitleStatus.orchestratorLine(Self.model(.working, doing: "Reading the diff")) == "Working — Reading the diff")
         #expect(TitleStatus.orchestratorLine(Self.model(.idle)) == "Idle")
         #expect(TitleStatus.orchestratorLine(Self.model(OrchestratorRow.State.none)) == "No Orchestrator")
-        #expect(TitleStatus.orchestratorLine(Self.model(.needsYou, doing: "Ship it?")) == "Needs You — Ship it?")
+        #expect(TitleStatus.orchestratorLine(Self.model(.needsYou, doing: "Ship it?")) == "Needs you — Ship it?")
         #expect(TitleStatus.orchestratorLine(Self.model(.unread)) == "Done")
         #expect(TitleStatus.orchestratorLine(Self.model(.starting)) == "Starting")
         #expect(TitleStatus.orchestratorLine(Self.model(.stopped)) == "Stopped")

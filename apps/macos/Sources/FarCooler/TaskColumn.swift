@@ -114,13 +114,15 @@ enum TaskColumnModel {
 
     /// The agent's state in the header, "claude working", or nil with no
     /// agent: its name and the navigator's own state word
-    /// (`OrchestratorRow`), so the two can't come to say it differently.
-    static func agentLine(_ pane: BoardPane?) -> (text: String, needsYou: Bool, working: Bool)? {
+    /// (`OrchestratorRow`), so the two can't come to say it differently, and
+    /// the status behind the word, whose mark and ink the header draws
+    /// (`Status.tone`, ov-137). A failed turn reads "claude failed", in red.
+    static func agentLine(_ pane: BoardPane?) -> (text: String, status: Status?, working: Bool)? {
         guard let pane else { return nil }
         let state = OrchestratorRow.state(seat: pane)
         let name = Terminal.name(of: pane.terminal.preset)
         return (
-            "\(name) \(OrchestratorRow.word(state).lowercased())", state == .needsYou,
+            "\(name) \(OrchestratorRow.word(state).lowercased())", state.status,
             state == .working || state == .starting
         )
     }
@@ -250,6 +252,7 @@ extension TaskColumnCard where Card == TaskCard {
 /// A task's header, which never scrolls away: key and title, the agent's
 /// state, its status, and Ask the Orchestrator.
 struct TaskViewHeader: View {
+    @Environment(\.colorScheme) private var scheme
     let row: TaskRow
     var ask: AskOrchestrator.Action = .unavailable
     /// The agent working it, if any (`TaskColumnModel.agentLine`).
@@ -274,12 +277,12 @@ struct TaskViewHeader: View {
                         // The app's agent status mark, never the system's
                         // spinner (ov-177).
                         StatusGlyph(status: agent.terminal.status)
-                    } else if line.needsYou {
-                        Circle().fill(Color.accentColor).frame(width: 6, height: 6)
+                    } else if let status = line.status, status.tone != .quiet {
+                        StatusGlyph(status: status)
                     }
                     Text(line.text)
                         .font(TaskTypography.meta)
-                        .foregroundStyle(line.needsYou ? Color.accentColor : Color.secondary)
+                        .foregroundStyle(line.status?.tone.color(scheme) ?? Color.secondary)
                 }
                 .fixedSize()
                 .accessibilityElement(children: .combine)

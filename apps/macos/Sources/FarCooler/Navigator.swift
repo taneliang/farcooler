@@ -101,9 +101,25 @@ enum OrchestratorRow {
         case needsYou
         /// It finished a turn nobody has seen.
         case unread
+        /// Its last turn died, or its pane did (ov-137).
+        case failed
         case idle
-        /// Its pane exited, was lost, or can't be read.
+        /// Its pane exited, or can't be read.
         case stopped
+
+        /// The terminal status it reads as, for its word and its ink
+        /// (`Status.label`, `Status.tone`): one table, the one every row uses.
+        var status: Status? {
+            switch self {
+            case .none, .stopped: nil
+            case .starting: .starting
+            case .working: .working
+            case .needsYou: .blocked
+            case .unread: .done
+            case .failed: .failedTurn
+            case .idle: .idle
+            }
+        }
     }
 
     /// Its state, from its seat alone: the tasks waiting on you are on their
@@ -112,11 +128,13 @@ enum OrchestratorRow {
         guard let seat else { return .none }
         let status = seat.terminal.status
         if status == .blocked { return .needsYou }
+        // Before unread: a turn that died is `done` too, and reads failed.
+        if status.tone == .failed { return .failed }
         if ConversationColumn.unread(seat) { return .unread }
         switch status {
         case .starting: return .starting
         case .working: return .working
-        case .lost, .exited, .failed, .failedRun, .unreadable: return .stopped
+        case .exited, .unreadable: return .stopped
         default: return .idle
         }
     }
@@ -125,12 +143,8 @@ enum OrchestratorRow {
     static func word(_ state: State) -> String {
         switch state {
         case .none: "No Orchestrator"
-        case .starting: "Starting"
-        case .working: "Working"
-        case .needsYou: "Needs You"
-        case .unread: "Done"
-        case .idle: "Idle"
         case .stopped: "Stopped"
+        default: state.status?.label ?? ""
         }
     }
 
@@ -163,6 +177,8 @@ enum OrchestratorRow {
             return nil
         case .needsYou:
             return text(terminal.blockedQuestion) ?? signal
+        case .failed:
+            return text(terminal.lastSaid)
         case .working:
             return signal ?? text(terminal.lastSaid)
         case .idle, .unread:
@@ -260,8 +276,9 @@ struct OrchestratorRowView: View {
                             .gridMark("orchestrator", .text)
                         Text(OrchestratorRow.word(model.state))
                             .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                            // Amber, as every "needs you" is; the accent is for controls.
-                            .foregroundStyle(model.state == .needsYou ? Tint.attention(scheme) : Color.secondary)
+                            // Its status's ink (`Status.tone`): amber for needs you, red
+                            // for failed; the accent is for controls.
+                            .foregroundStyle(model.state.status?.tone.color(scheme) ?? Color.secondary)
                             .lineLimit(1)
                     }
                     if let doing = model.nowDoing {

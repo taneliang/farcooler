@@ -12,15 +12,19 @@ enum TaskRowMeta {
     enum Tone: Equatable {
         /// Secondary, the row's ordinary metadata.
         case quiet
-        /// The accent: the row needs the person.
+        /// Amber: the row needs the person.
         case attention
+        /// Red: its agent's turn, or its pane, failed (`Status.tone`).
+        case failed
     }
 
     /// Who's on the task, in a word: "claude working", "codex needs you",
     /// "2 agents working", "Subagent", "No Agent".
     struct Agent: Equatable {
         var word: String
-        var needsYou = false
+        /// The most urgent status among its agents, whose ink the line takes.
+        var status: Status?
+        var needsYou: Bool { status == .blocked }
         /// Subagents, whose sentence the lead usually says already.
         var isSubagent = false
     }
@@ -73,7 +77,8 @@ enum TaskRowMeta {
         let repeated = agent?.isSubagent == true && startLine?.localizedCaseInsensitiveContains("subagent") == true
         return Line(
             lead: lead, agent: repeated ? nil : agent, progress: progress(row),
-            tone: needsAttention(row) || agent?.needsYou == true ? .attention : .quiet)
+            tone: needsAttention(row) || agent?.needsYou == true
+                ? .attention : agent?.status?.tone == .failed ? .failed : .quiet)
     }
 
     /// "No movement for 3d", or nil for a row still moving.
@@ -97,21 +102,12 @@ enum TaskRowMeta {
         let statuses = live.map(\.terminal.status)
         let status = Status.mostUrgent(in: statuses) ?? statuses[0]
         let who = live.count == 1 ? Terminal.name(of: live[0].terminal.preset) : "\(live.count) agents"
-        return Agent(word: [who, word(status)].compactMap { $0 }.joined(separator: " "), needsYou: status == .blocked)
+        return Agent(word: [who, word(status)].compactMap { $0 }.joined(separator: " "), status: status)
     }
 
-    /// What an agent's state reads as beside its name.
-    static func word(_ status: Status) -> String? {
-        switch status {
-        case .working: "working"
-        case .blocked: "needs you"
-        case .starting: "starting"
-        case .idle, .done: "idle"
-        case .failed, .failedRun, .failedTurn: "failed"
-        case .exited, .lost: "stopped"
-        default: nil
-        }
-    }
+    /// What an agent's state reads as beside its name: the status table's
+    /// word (`Status.word`), so "done" isn't "idle" here alone (ov-137).
+    static func word(_ status: Status) -> String? { status.word }
 }
 
 /// The second line, drawn: one size, one quiet color unless the row needs
@@ -126,10 +122,15 @@ struct TaskRowMetaView: View {
     /// start line and leaves the board's own wait.
     var speaksOfAgents = true
 
-    static func color(_ tone: TaskRowMeta.Tone) -> Color {
+    @Environment(\.colorScheme) private var scheme
+
+    /// The status table's inks (`GlanceState.Tone.color`): amber, not the
+    /// accent, which is for controls (ov-137).
+    static func color(_ tone: TaskRowMeta.Tone, scheme: ColorScheme) -> Color {
         switch tone {
-        case .quiet: .secondary
-        case .attention: .accentColor
+        case .quiet: GlanceState.Tone.quiet.color(scheme)
+        case .attention: GlanceState.Tone.needsYou.color(scheme)
+        case .failed: GlanceState.Tone.failed.color(scheme)
         }
     }
 
@@ -143,7 +144,7 @@ struct TaskRowMetaView: View {
                     words(Self.without(line))
                 }
                 .font(.system(size: WorkspaceStyle.PaneText.minimum))
-                .foregroundStyle(Self.color(line.tone))
+                .foregroundStyle(Self.color(line.tone, scheme: scheme))
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(line.text)
             }

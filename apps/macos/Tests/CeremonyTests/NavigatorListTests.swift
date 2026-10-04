@@ -161,7 +161,7 @@ struct NavigatorListTests {
         let row = Self.row("w", .inProgress, ago: 60)
         #expect(TaskRowMeta.line(row, agent: working, at: Self.now).text == "claude working")
         #expect(TaskRowMeta.line(row, at: Self.now).text == "Added 1m ago")
-        let asked = TaskRowMeta.line(row, agent: .init(word: "codex needs you", needsYou: true), at: Self.now)
+        let asked = TaskRowMeta.line(row, agent: .init(word: "codex needs you", status: .blocked), at: Self.now)
         #expect(asked.tone == .attention)
         #expect(TaskRowMeta.line(Self.row("n", .needsDecision, ago: 60), at: Self.now).lead == "Answer to unblock")
         #expect(TaskRowMeta.word(.blocked) == "needs you")

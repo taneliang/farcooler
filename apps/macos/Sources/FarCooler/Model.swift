@@ -871,7 +871,7 @@ enum AgentFailure: String, CaseIterable {
 /// Shape carries the meaning and color reinforces it, never the other way
 /// round: a color-only indicator says nothing to a colorblind reader and
 /// nothing at all in a screenshot.
-enum Status: Equatable {
+enum Status: Equatable, CaseIterable {
     case starting, running, idle, working, blocked, done, exited, failed, lost
     /// The command ended badly.
     ///

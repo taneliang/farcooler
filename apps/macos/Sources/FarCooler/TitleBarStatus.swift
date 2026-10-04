@@ -515,13 +515,11 @@ struct TitleActivityPopover: View {
 
 /// The orchestrator's state as a mark, the one the navigator's row and the
 /// status area both draw: the app's own agent status mark while it works or
-/// starts (ov-177: never the system's spinner), a dot when it needs you or
-/// has news, else its glyph, dimmed when nothing runs.
+/// starts (ov-177: never the system's spinner), its status's mark when it
+/// needs you, failed or has news, else its glyph, dimmed when nothing runs.
 struct OrchestratorMark: View {
     let state: OrchestratorRow.State
     let status: Status?
-
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         switch state {
@@ -539,15 +537,15 @@ struct OrchestratorMark: View {
                     StatusGlyph(status: status ?? (state == .starting ? .starting : .working))
                         .gridMark("orchestratorDot", .icon)
                 }
-        case .needsYou, .unread:
+        case .needsYou, .unread, .failed:
             // Over the resting icon's frame too, so it takes the icon's place
             // rather than sitting on its own baseline (ov-260 review, L4).
+            // The status's own mark (ov-137): needs you was the accent here
+            // and a finished turn amber, the reverse of every other row.
             restingIcon
                 .hidden()
                 .overlay {
-                    Circle()
-                        .fill(state == .needsYou ? Color.accentColor : GlancePalette.amber(scheme))
-                        .frame(width: 7, height: 7)
+                    StatusGlyph(status: state.status ?? .idle)
                         .gridMark("orchestratorDot", .icon)
                 }
         case .idle:

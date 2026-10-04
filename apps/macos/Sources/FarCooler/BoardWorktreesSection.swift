@@ -217,7 +217,9 @@ private struct BoardWorktreeRow: View {
             Spacer(minLength: SidebarGrid.gap)
             if let status = worktree.attentionStatus {
                 Circle()
-                    .fill(status.wantsAttention ? GlancePalette.amber(scheme) : Color.secondary)
+                    // The status table's ink (ov-137): a failed agent is red,
+                    // not the amber that means it needs you.
+                    .fill(status.tone.color(scheme))
                     .frame(width: 7, height: 7)
                     .gridMark("boardWorktree", .trailing)
                     .help(status.label)

@@ -55,7 +55,7 @@ struct TaskRowMetaTests {
         // A task that hasn't moved in a day says so quietly: no accent, no
         // semantic color.
         let stale = TaskRowMeta.line(Self.row(.inProgress, daysAgo: 3), at: Self.now)
-        #expect(stale.tone == .quiet && TaskRowMetaView.color(stale.tone) == .secondary)
+        #expect(stale.tone == .quiet && TaskRowMetaView.color(stale.tone, scheme: .light) == .secondary)
         #expect(stale.lead == "No movement for 3d")
     }
 }

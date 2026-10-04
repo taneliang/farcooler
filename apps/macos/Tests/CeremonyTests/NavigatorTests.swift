@@ -124,7 +124,7 @@ struct NavigatorTests {
         #expect(OrchestratorRow.state(seat: Self.seat(activity: nil, state: "lost")) == .stopped)
         #expect(
             [OrchestratorRow.State.working, .idle, .needsYou, .stopped].map(OrchestratorRow.word)
-                == ["Working", "Idle", "Needs You", "Stopped"])
+                == ["Working", "Idle", "Needs you", "Stopped"])
         #expect(OrchestratorRow.word(.none) == "No Orchestrator")
         #expect(OrchestratorRow.accessibilityLabel(agent: "claude", state: .working) == "Orchestrator, claude, Working")
     }
