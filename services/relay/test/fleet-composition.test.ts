@@ -14,6 +14,8 @@ import { composeFleet, countsOf, quietOf, type AgentRow, type Machine } from '..
 interface Runner {
   id: string
   needsYou: number | null
+  /// Worktrees to review, as the runner sent them; absent or null when it sent none.
+  reviews?: number | null
   quiet: boolean
 }
 
@@ -34,6 +36,7 @@ interface Case {
     order: string[]
     blocked: number
     review: number
+    reviewsWaiting?: number | null
     working: number
     needsYou: number | null
     header: number
@@ -55,6 +58,7 @@ function machine(runner: Runner): Machine {
     install_id: null,
     needs_you: runner.needsYou,
     needs_you_at: runner.needsYou === null ? null : now,
+    reviews: runner.reviews ?? null,
     last_seen_at: runner.quiet ? now - 20 * 60 * 1000 : now,
     beat_every: 300,
     expires_at: null,
@@ -101,6 +105,13 @@ describe('the shared fleet table', () => {
       expect(fleet.all.map(each => each.terminal)).toEqual(each.expect.order)
       expect(fleet.blocked).toBe(each.expect.blocked)
       expect(fleet.review).toBe(each.expect.review)
+      // The card's "to review" and the app's `reviewsWaiting` count worktrees
+      // (ov-181): the same number whenever every runner counted them, which is
+      // every case that names `reviewsWaiting` but the one that mixes in a
+      // runner that did not.
+      if (each.runners.length > 0 && each.runners.every(runner => runner.reviews != null)) {
+        expect(fleet.review).toBe(each.expect.reviewsWaiting)
+      }
       expect(fleet.working).toBe(each.expect.working)
       expect(fleet.needsYou).toBe(each.expect.needsYou)
       // `fleetHeader`'s and the card's `headerCount`: the count when any

@@ -1,0 +1,18 @@
+-- How many worktrees on each runner have a diff that moved since anyone
+-- reviewed it, as that runner last said (ov-181).
+--
+-- Additive only, same as 0002 through 0018: the previous worker is still
+-- serving requests while a deploy rolls out, and it never reads or writes this
+-- column. A runner older than it never sends `reviews`, and NULL is what such a
+-- runner has: the card then counts that runner's `done` rows as "to review", as
+-- every card did before this migration.
+--
+-- **On `daemons`, beside `needs_you`**, for the same reason: it is the runner's
+-- own number, the one the app's `reviewsWaiting` sums over runners, and a
+-- worktree is not a roster row (several terminals share one).
+--
+-- Overwritten, never added to, and only by a notice that carries it: a notice
+-- from a runner that could not read its inbox leaves the last one where it
+-- was. It is cleared wherever `needs_you` is, so a silent runner stops
+-- counting in both together.
+ALTER TABLE daemons ADD COLUMN reviews INTEGER;

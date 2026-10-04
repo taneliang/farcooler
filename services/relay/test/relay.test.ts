@@ -4454,6 +4454,35 @@ describe('/v1/notify and Live Activities', () => {
       expect(card.blocked).toBe(2)
     })
 
+    it("shows a runner's worktrees to review, not its done agents, once it sends the count (ov-181)", async () => {
+      // The app counts worktrees whose diff moved since they were reviewed, and
+      // the card used to count agents that were done: a done agent in a
+      // reviewed worktree was "1 to review" on the lock screen and nothing in
+      // the app. A runner that sends `reviews` is believed over its rows.
+      const calls = watchFetch()
+      await ready()
+      await running('term-1')
+      // A card starts on a block, and stays up while another agent holds it
+      // when the first finishes: a card whose last block is done is ended.
+      await post('/v1/notify', { title: 'claude needs you', terminal: 'term-1', status: 'blocked' }, 'mine')
+      await post('/v1/notify', { title: 'claude needs you', terminal: 'term-2', status: 'blocked' }, 'mine')
+      await post('/v1/notify', { title: 'claude is done', terminal: 'term-1', status: 'done' }, 'mine')
+      // An old runner: no `reviews`, so its done agent is what it has to say.
+      expect(lastCard(calls).body.aps['content-state'].review).toBe(1)
+
+      await post('/v1/notify', { kind: 'count', needsYou: 0, reviews: 3 }, 'mine')
+      expect(lastCard(calls).body.aps['content-state'].review).toBe(3)
+
+      // Overwritten, and zero is a count.
+      await post('/v1/notify', { kind: 'count', needsYou: 0, reviews: 0 }, 'mine')
+      expect(lastCard(calls).body.aps['content-state'].review).toBe(0)
+
+      // A notice that could not read its inbox leaves the last one standing.
+      await post('/v1/notify', { kind: 'count', needsYou: 1, reviews: 2 }, 'mine')
+      await post('/v1/notify', { kind: 'count', needsYou: 0 }, 'mine')
+      expect(lastCard(calls).body.aps['content-state'].review).toBe(2)
+    })
+
     it("heads the start alert with a mixed fleet's per-runner total", async () => {
       // The same rule on the one sentence the relay writes itself.
       const calls = watchFetch()

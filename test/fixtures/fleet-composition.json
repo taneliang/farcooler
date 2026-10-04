@@ -5,7 +5,7 @@
     "Times are seconds before `now`: `sinceS` is how long the agent has been in its status, `heardS` how long since anything said so. `sinceMs`, where given, is `sinceS` to the millisecond, and wins. `rank` is what the daemon sends for that status and `sinceS`; the relay ignores it and sorts on the status and its own clock, which is what this table holds the two to.",
     "A runner's `needsYou` is the count (relay) or the length of the list (app) it sent, null when it sent none. `quiet` is a runner that stopped beating (relay) or whose link was lost (app).",
     "Expected: `order` every agent, as each side ranks them. `blocked`, `working` and `needsYou` as the card's header and the widgets count them, and `header` the number they lead with: `needsYou` when any runner counted, else `blocked`. `shown` (the card's lines, at most four) is the relay's alone: the app's widgets draw every agent.",
-    "`review` is the relay's alone too, and it is a known disagreement, not a choice. The card counts done AGENTS; the app counts WORKTREES whose diff moved since it was reviewed (`reviewsWaiting`, from each runner's `changes.inbox`). The relay can't count worktrees: no notice carries that number (an agent notice has its terminal, status and diff totals, a `count` notice only `needsYou`; see `Outgoing` in crates/daemon/src/push.rs), the `daemons` table has nowhere to keep it, and nothing tells the relay when a diff moves or is reviewed. Closing it needs the runner to send its review count, a migration to keep it per runner, and `composeFleet` to sum it the way it sums `needsYou`. When that lands, `review` belongs on both sides of this table.",
+    "`review` is the card's \"to review\" and `reviewsWaiting` the app's (from each runner's `changes.inbox`: worktrees whose diff moved since it was reviewed). Both are WORKTREES (ov-181): a runner sends `reviews` beside `needsYou` on its notices, the relay keeps it per runner (migration 0019) and sums it as it sums `needsYou`, and the app sums what each runner's inbox said. A runner's `reviews` is null when it sent none; the app then has nothing from it (`reviewsWaiting` is null when no runner sent one, and so on every case that does not name it), and the card falls back to that runner's `done` agents, the count it made before. So `review` and `reviewsWaiting` are equal whenever every runner counted, and differ only in a fleet that mixes runners which do and do not, which is the one disagreement left and lasts a rollout. A failed turn is never left out of `review`: the card adds it on top of a counting runner's worktrees, because `failed` is a subset of `review`.",
     "No `failed` agent yet: ov-125 adds the relay's failed outcome and should add its cases here."
   ],
   "now": 1790000000000,
@@ -129,6 +129,83 @@
         "order": ["w6", "w5", "w4", "w3", "w2", "w1"],
         "blocked": 0, "review": 0, "working": 6, "needsYou": null, "header": 0,
         "shown": ["w6", "w5", "w4", "w3"]
+      }
+    },
+    {
+      "name": "to review counts worktrees as the runner counted them, not the agents that are done (ov-181)",
+      "runners": [
+        { "id": "studio", "needsYou": 0, "reviews": 3, "quiet": false }
+      ],
+      "agents": [
+        { "terminal": "d-new", "runner": "studio", "status": "done", "sinceS": 100, "heardS": 5, "rank": 199999899 },
+        { "terminal": "d-old", "runner": "studio", "status": "done", "sinceS": 300, "heardS": 5, "rank": 199999699 },
+        { "terminal": "w", "runner": "studio", "status": "working", "sinceS": 30, "heardS": 5, "rank": 299999969 }
+      ],
+      "expect": {
+        "order": ["d-old", "d-new", "w"],
+        "blocked": 0, "review": 3, "reviewsWaiting": 3, "working": 1, "needsYou": 0, "header": 0,
+        "shown": ["d-old", "d-new", "w"]
+      }
+    },
+    {
+      "name": "a worktree to review needs no agent, and a done agent whose worktree was reviewed is not counted (ov-181)",
+      "runners": [
+        { "id": "studio", "needsYou": 0, "reviews": 2, "quiet": false },
+        { "id": "laptop", "needsYou": 0, "reviews": 0, "quiet": false }
+      ],
+      "agents": [
+        { "terminal": "d", "runner": "laptop", "status": "done", "sinceS": 100, "heardS": 5, "rank": 199999899 }
+      ],
+      "expect": {
+        "order": ["d"],
+        "blocked": 0, "review": 2, "reviewsWaiting": 2, "working": 0, "needsYou": 0, "header": 0,
+        "shown": ["d"]
+      }
+    },
+    {
+      "name": "a runner that sent no review count keeps its done agents as to review; the app can only say what the others counted (ov-181)",
+      "runners": [
+        { "id": "studio", "needsYou": 0, "reviews": 1, "quiet": false },
+        { "id": "laptop", "needsYou": 0, "reviews": null, "quiet": false }
+      ],
+      "agents": [
+        { "terminal": "s-new", "runner": "studio", "status": "done", "sinceS": 100, "heardS": 5, "rank": 199999899 },
+        { "terminal": "s-old", "runner": "studio", "status": "done", "sinceS": 300, "heardS": 5, "rank": 199999699 },
+        { "terminal": "l", "runner": "laptop", "status": "done", "sinceS": 200, "heardS": 5, "rank": 199999799 }
+      ],
+      "expect": {
+        "order": ["s-old", "l", "s-new"],
+        "blocked": 0, "review": 2, "reviewsWaiting": 1, "working": 0, "needsYou": 0, "header": 0,
+        "shown": ["s-old", "l", "s-new"]
+      }
+    },
+    {
+      "name": "with no runner counting worktrees the card counts done agents as it always did, and the app says nothing (ov-181)",
+      "runners": [
+        { "id": "studio", "needsYou": 0, "reviews": null, "quiet": false }
+      ],
+      "agents": [
+        { "terminal": "d-new", "runner": "studio", "status": "done", "sinceS": 100, "heardS": 5, "rank": 199999899 },
+        { "terminal": "d-old", "runner": "studio", "status": "done", "sinceS": 300, "heardS": 5, "rank": 199999699 }
+      ],
+      "expect": {
+        "order": ["d-old", "d-new"],
+        "blocked": 0, "review": 2, "reviewsWaiting": null, "working": 0, "needsYou": 0, "header": 0,
+        "shown": ["d-old", "d-new"]
+      }
+    },
+    {
+      "name": "zero worktrees to review is a count, and outranks the done agent beside it (ov-181)",
+      "runners": [
+        { "id": "studio", "needsYou": 0, "reviews": 0, "quiet": false }
+      ],
+      "agents": [
+        { "terminal": "d", "runner": "studio", "status": "done", "sinceS": 100, "heardS": 5, "rank": 199999899 }
+      ],
+      "expect": {
+        "order": ["d"],
+        "blocked": 0, "review": 0, "reviewsWaiting": 0, "working": 0, "needsYou": 0, "header": 0,
+        "shown": ["d"]
       }
     }
   ]

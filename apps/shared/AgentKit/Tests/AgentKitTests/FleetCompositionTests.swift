@@ -14,6 +14,8 @@ private struct Table: Decodable, Sendable {
     struct Runner: Decodable, Sendable {
         var id: String
         var needsYou: Int?
+        /// Worktrees to review, as the runner's inbox said; nil when it sent none.
+        var reviews: Int?
         var quiet: Bool
     }
 
@@ -33,6 +35,9 @@ private struct Table: Decodable, Sendable {
         var working: Int
         var needsYou: Int?
         var header: Int
+        /// What the app's widgets say is waiting on review: the sum of what the
+        /// runners counted, nil when none did (ov-181). Absent in a case where none did.
+        var reviewsWaiting: Int?
     }
 
     struct Case: Decodable, Sendable, CustomTestStringConvertible {
@@ -79,7 +84,8 @@ private func published(_ fleet: Table.Case, now: Date) -> FleetSnapshot {
         }
         publication.record(
             runner: runner.id,
-            snapshot: FleetSnapshot(agents: agents, capturedAt: now, complete: true),
+            snapshot: FleetSnapshot(
+                agents: agents, capturedAt: now, complete: true, reviewsWaiting: runner.reviews),
             named: runner.id)
     }
     publication.keeping(
@@ -118,10 +124,13 @@ private func theAppRanksAndCountsTheFleetAsTheTableSays(_ fleet: Table.Case) thr
     #expect(snapshot.working(at: now) == fleet.expect.working)
     #expect(snapshot.needsYou?.count == fleet.expect.needsYou)
     #expect(snapshot.needingYou == fleet.expect.header)
+    // Worktrees, as each runner counted them. The relay's card holds the same
+    // number for the same fleet, in `fleet-composition.test.ts`.
+    #expect(snapshot.reviewsWaiting == fleet.expect.reviewsWaiting)
 
     // The one thing a small widget or a complication says: the header's count
-    // when anything needs you, else what's working, else nothing. No reviews
-    // in the table: the app counts those by worktree, which the relay can't.
+    // when anything needs you, else what's working, else nothing. Reviews
+    // are the `reviewsWaiting` line above.
     let glance: FleetSnapshot.Glance? =
         fleet.expect.header > 0 ? .blocked(fleet.expect.header)
         : fleet.expect.working > 0 ? .working(fleet.expect.working) : nil

@@ -658,7 +658,7 @@ async function pairDaemon(request: Request, env: Env): Promise<Response> {
   // every Mac pairs as "This Mac". Its count is left alone.
   if (install === null) {
     await env.DB.prepare(
-      `UPDATE daemons SET needs_you = NULL, needs_you_at = NULL
+      `UPDATE daemons SET needs_you = NULL, needs_you_at = NULL, reviews = NULL
        WHERE account_id = ? AND label = ? AND install_id IS NULL`,
     )
       .bind(account, label)
@@ -825,6 +825,16 @@ interface Notification {
   /// Absent is not zero here either. A runner too old to send it leaves the
   /// machine's last count, or none, where it was — see `numeric`.
   needsYou?: number
+  /// How many of this runner's worktrees have a diff that moved since anyone
+  /// reviewed it, at the moment of sending: what the app's `reviewsWaiting`
+  /// counts, and what the card's "to review" says (ov-181). Sent beside
+  /// `needsYou`, overwrites this runner's last one and is summed over runners
+  /// (migration 0019).
+  ///
+  /// Absent is not zero. A runner too old to send it, or one that could not
+  /// read its inbox, leaves the last one, or none, and the card counts that
+  /// runner's `done` rows instead — see `composeFleet`.
+  reviews?: number
   /// The task a decision notice is about, by its key (`bil-7`). Forwarded to
   /// the phone so a tap can open the task; never stored.
   task?: string
@@ -1026,6 +1036,7 @@ async function notify(request: Request, env: Env): Promise<Response> {
   // count — a runner older than the rollup, or a value that is not a count —
   // leaves the last one where it was.
   const needsYou = numeric(body.needsYou)
+  const reviews = numeric(body.reviews)
   // Which runner this token is, stamped before the count so the count is read
   // as that runner's. Written only when it changes, which is once per token.
   const install = await installKey(daemon.account_id, body.install)
@@ -1044,8 +1055,10 @@ async function notify(request: Request, env: Env): Promise<Response> {
         .first<{ needs_you: number | null }>())?.needs_you ?? null
     : null
   if (needsYou !== null) {
-    await env.DB.prepare(`UPDATE daemons SET needs_you = ?, needs_you_at = ? WHERE id = ?`)
-      .bind(needsYou, Date.now(), daemon.id)
+    await env.DB.prepare(
+      `UPDATE daemons SET needs_you = ?, needs_you_at = ?, reviews = COALESCE(?, reviews) WHERE id = ?`,
+    )
+      .bind(needsYou, Date.now(), reviews, daemon.id)
       .run()
     // Re-pairing replaces, never adds. Every other token of this install is
     // this runner under an older pairing, and this count is its whole truth
@@ -1053,7 +1066,7 @@ async function notify(request: Request, env: Env): Promise<Response> {
     // the table holding a count nobody will read.
     if (install !== null) {
       await env.DB.prepare(
-        `UPDATE daemons SET needs_you = NULL, needs_you_at = NULL
+        `UPDATE daemons SET needs_you = NULL, needs_you_at = NULL, reviews = NULL
          WHERE account_id = ? AND install_id = ? AND id != ?`,
       )
         .bind(daemon.account_id, install, daemon.id)
@@ -1842,7 +1855,15 @@ interface Fleet {
   /// The ones that get a line. See `ROWS_SHOWN` and `STATE_BUDGET`.
   shown: AgentRow[]
   blocked: number
-  /// Every `done` row, failed or not. See `failed`.
+  /// The worktrees waiting on review, as each runner counted them (ov-181),
+  /// plus the `done` rows of a runner that did not send a count, and the
+  /// failed turns of every runner. The app's `reviewsWaiting` counts the first;
+  /// the card counted only the last two, and the two disagreed.
+  ///
+  /// A failed turn is added on top of a counting runner's worktrees because
+  /// `failed` is a subset of this number: the card says "N failed" and then
+  /// `review - failed` "to review", and a worktree count that already left the
+  /// failed agent out would have it taken out twice. See `failed`.
   review: number
   /// The `done` rows whose turn failed: a subset of `review`, not a fourth tier,
   /// so an app too old to know this count still counts them somewhere.
@@ -1895,7 +1916,7 @@ async function readFleet(
       .bind(account, now - ROW_RETENTION_MS)
       .run()
     await env.DB.prepare(
-      `UPDATE daemons SET needs_you = NULL, needs_you_at = NULL
+      `UPDATE daemons SET needs_you = NULL, needs_you_at = NULL, reviews = NULL
        WHERE account_id = ? AND needs_you_at < ?`,
     )
       .bind(account, now - ROW_RETENTION_MS)
@@ -1924,7 +1945,7 @@ async function readFleet(
   // attributing it to a runner needs that token's install id whether or not
   // the token has a count.
   const paired = await env.DB.prepare(
-    `SELECT id, label, name, install_id, needs_you, needs_you_at, last_seen_at, beat_every,
+    `SELECT id, label, name, install_id, needs_you, needs_you_at, reviews, last_seen_at, beat_every,
             expires_at
      FROM daemons WHERE account_id = ?`,
   )
@@ -1948,6 +1969,9 @@ export interface Machine {
   install_id: string | null
   needs_you: number | null
   needs_you_at: number | null
+  /// Worktrees to review, as the runner last said. See migration 0019. Absent
+  /// reads as NULL: a runner that never sent one.
+  reviews?: number | null
   last_seen_at: number | null
   /// How often it promised to beat, in seconds; NULL for a runner too old to
   /// beat, or one unpaired on purpose.
@@ -2067,16 +2091,30 @@ export function countsOf(machines: Machine[], now: number): Counts | null {
     under.add(runnerOf(machine))
     writers.set(machine.label, under)
   }
-  const labels = new Set<string>()
-  for (const [label, under] of writers) {
-    if ([...under].every(runner => counting.has(runner))) labels.add(label)
+  const labelled = (who: Set<string>) => {
+    const labels = new Set<string>()
+    for (const [label, under] of writers) {
+      if ([...under].every(runner => who.has(runner))) labels.add(label)
+    }
+    return labels
   }
+
+  // The runners that also said how many worktrees await review, which is a
+  // subset of the counting ones, and what they said. A runner that did not
+  // (older than migration 0019, or its inbox was unreadable) is not summed
+  // here: `composeFleet` counts its `done` rows instead, the way it counts a
+  // non-counting runner's blocked ones.
+  const reviewers = [...newest.entries()].filter(([, machine]) => (machine.reviews ?? null) !== null)
+  const reviewing = new Set(reviewers.map(([runner]) => runner))
 
   return {
     total: [...newest.values()].reduce((sum, machine) => sum + machine.needs_you!, 0),
     runners,
     counting,
-    labels,
+    labels: labelled(counting),
+    reviews: reviewers.reduce((sum, [, machine]) => sum + machine.reviews!, 0),
+    reviewing,
+    reviewLabels: labelled(reviewing),
   }
 }
 
@@ -2102,6 +2140,12 @@ interface Counts {
   runners: Map<string, string>
   counting: Set<string>
   labels: Set<string>
+  /// Worktrees to review, summed over the runners in `reviewing`; and which
+  /// rows those runners already account for, as `counting` and `labels` say
+  /// for needs-you (ov-181).
+  reviews: number
+  reviewing: Set<string>
+  reviewLabels: Set<string>
 }
 
 /// Write down what one notice said about one agent.
@@ -2480,7 +2524,12 @@ export function composeFleet(
     all,
     shown: all.filter(row => speaks(row, now, quiet)).slice(0, ROWS_SHOWN),
     blocked: all.filter(row => row.status === 'blocked').length,
-    review: all.filter(row => row.status === 'done').length,
+    // Worktrees where the runner counted them, which is what the app shows;
+    // the `done` rows of a runner that did not, which is all it can say. A
+    // failed turn stays inside the total either way: `failed` is a subset of
+    // `review`, and the card subtracts it for its own clause. See `Fleet.review`.
+    review: (counts?.reviews ?? 0) +
+      all.filter(row => row.status === 'done' && !(reviewed(row, counts) && failedOf(row) !== true)).length,
     failed: all.filter(row => failedOf(row) === true).length,
     // Only the working rows that still speak. Working is the one tier that is
     // a claim about now, and a row quiet for `ROW_QUIET_AFTER_MS` is one
@@ -2525,6 +2574,15 @@ function covered(row: AgentRow, counts: Counts): boolean {
   if (row.daemon_id === null) return counts.labels.has(row.machine ?? '')
   const runner = counts.runners.get(row.daemon_id) ?? `daemon:${row.daemon_id}`
   return counts.counting.has(runner)
+}
+
+/// Whether a row's runner has already counted it in its own `reviews`: the
+/// same attribution as `covered`, against the runners that sent a review count.
+function reviewed(row: AgentRow, counts: Counts | null): boolean {
+  if (counts === null) return false
+  if (row.daemon_id === null) return counts.reviewLabels.has(row.machine ?? '')
+  const runner = counts.runners.get(row.daemon_id) ?? `daemon:${row.daemon_id}`
+  return counts.reviewing.has(runner)
 }
 
 /// The header, in the words the lock screen shows: `2 need you · 3 in flight`.
