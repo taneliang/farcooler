@@ -41,6 +41,8 @@ pub(super) fn resolved(path: &Path) -> PathBuf {
 
 /// The identities of `path` and every directory above it, by its parents as
 /// written and by `..` from the directory itself.
+// `st_dev` and `st_ino` are different widths on macOS and Linux.
+#[allow(clippy::unnecessary_cast)]
 fn chain(path: &Path) -> HashSet<Id> {
     let mut ids: HashSet<Id> = path.ancestors().filter_map(id_of).collect();
     let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC;
