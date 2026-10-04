@@ -812,6 +812,18 @@ enum AgentFailure: String, CaseIterable {
         }
     }
 
+    /// What a person reads, for a pane whose conversation has started or not.
+    ///
+    /// The runner sends `adapter-failed` both for an agent that never started
+    /// and for one that died mid-conversation, and "The agent could not start"
+    /// over a conversation is wrong about the one thing it says (ov-174). The
+    /// two words with no fix of their own read as stopped once there is a
+    /// conversation; a sign-in or a missing adapter is still the advice.
+    func sentence(started: Bool) -> String {
+        guard started, self == .adapterFailed || self == .adapterSilent else { return sentence }
+        return "The agent stopped"
+    }
+
     /// What to do about it, when there is something specific to do.
     ///
     /// Nil where the honest answer is "nobody here knows" — inventing advice

@@ -170,6 +170,7 @@ struct ActionOutcomeTests {
             ("code: resource-conflict\nwhat: not_held", "It changed while you were doing that. Try again."),
             ("code: host-offline", "The runner is offline."),
             ("code: agent-not-connected", "Its agent isn’t connected right now."),
+            ("code: agent-stopped", "Its agent stopped. Restart it, then try again."),
             ("code: attachment-limit", "That’s more than the runner takes at once."),
             ("code: diff-too-large", "The changes are too large to show."),
             ("code: diff-unsupported", "The runner can’t show these changes."),

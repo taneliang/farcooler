@@ -268,3 +268,20 @@ import Testing
     #expect(!slow.lowercased().contains("install"), "\(slow)")
     #expect(RunnerRefusal(rawValue: "tmux-timed-out") == .tmuxTimedOut)
 }
+
+/// A prompt to a pane whose agent stopped says so (ov-174). It fell back to
+/// the caller's generic, which on both phones is "Couldn’t reach this runner",
+/// about a runner that had answered.
+@Test func aStoppedAgentIsNotAnUnreachableRunner() {
+    let generic = "Couldn’t reach this runner. Your message wasn’t sent."
+    let stopped = RunnerRefusal.trouble(
+        forWord: "agent-stopped", message: "The agent stopped. Restart it, then try again.",
+        otherwise: generic)
+    #expect(stopped.sentence == "The agent stopped. Restart it, then try again.")
+    #expect(stopped.transcript == nil)
+    let connecting = RunnerRefusal.trouble(
+        forWord: "agent-not-connected", message: "no agent is connected to this pane",
+        otherwise: generic)
+    #expect(!connecting.sentence.contains("reach this runner"))
+    #expect(connecting.sentence != stopped.sentence)
+}

@@ -132,3 +132,26 @@ import Testing
     #expect(terminal.agentFailure == nil)
     #expect(terminal.chatFailure == nil)
 }
+
+/// An agent that died mid-conversation says it stopped, not that it couldn't
+/// start (ov-174): the runner sends `adapter-failed` for both, and only the
+/// transcript on screen tells them apart.
+@Test func anAgentThatStartedAndDiedSaysItStopped() {
+    let stopped = AgentFailureCopy.forWord("adapter-failed", started: true)
+    #expect(stopped?.title == "The agent stopped")
+    #expect(stopped != AgentFailureCopy.copy(for: .adapterFailed))
+    #expect(AgentFailureCopy.forWord("adapter-silent", started: true) == stopped)
+    #expect(AgentFailureCopy.forWord("from-the-future", started: true) == stopped)
+    // Before a conversation, the four sentences stand.
+    for failure in AgentFailure.allCases {
+        #expect(
+            AgentFailureCopy.forWord(failure.rawValue, started: false)
+                == AgentFailureCopy.copy(for: failure))
+    }
+    // A sign-in or a missing adapter is still the advice, mid-conversation.
+    #expect(
+        AgentFailureCopy.forWord("not-authenticated", started: true)
+            == AgentFailureCopy.copy(for: .notAuthenticated))
+    #expect(AgentFailureCopy.forWord(nil, started: true) == nil)
+    #expect(AgentFailureCopy.restart == "Restart")
+}

@@ -483,6 +483,25 @@ final class AgentStream: ObservableObject {
     /// Put the failure away without trying again.
     func dismissFailure() { failure = nil }
 
+    /// Start this pane's agent again, in place (ov-174): `set-pane-mode
+    /// agent` on a pane already in agent mode respawns its shim, and what was
+    /// queued is sent once the new one is up. A refusal is said like any
+    /// other action's.
+    func restart() async {
+        await perform(.restart)
+    }
+
+    /// The line a pane whose agent stopped or never started shows beside the
+    /// composer, whatever the transcript holds; nil while nothing has said it
+    /// failed.
+    ///
+    /// Read here rather than in the view, so a test can hold it: it was drawn
+    /// only over an empty transcript, so an agent that died after its first
+    /// reply left nothing on screen but a turn that stopped (ov-174).
+    func stoppedLine(for terminal: Terminal) -> String? {
+        terminal.chatFailure?.sentence(started: !transcript.rows.isEmpty)
+    }
+
     /// One mutating call other than a send or an answer, said if it fails.
     private func perform(_ action: AgentAction) async {
         guard !refusedHere() else {
@@ -611,6 +630,8 @@ enum AgentAction: Equatable {
     case editQueued(id: String, text: String)
     case steerQueued(id: String)
     case cancelQueued(id: String)
+    /// Start the pane's agent again, in place.
+    case restart
 
     /// The CLI call. For `.send` only its start: `AgentStream.send` adds the
     /// composer's words and pictures.
@@ -623,6 +644,7 @@ enum AgentAction: Equatable {
         case let .editQueued(id, text): return ["terminal", "agent-edit-queued", terminal, id, "--", text]
         case let .steerQueued(id): return ["terminal", "agent-steer-queued", terminal, id]
         case let .cancelQueued(id): return ["terminal", "agent-cancel-queued", terminal, id]
+        case .restart: return ["terminal", "set-pane-mode", terminal, "agent"]
         }
     }
 
@@ -640,6 +662,7 @@ enum AgentAction: Equatable {
         case .editQueued: return "Your edit to the queued message wasn’t saved."
         case .steerQueued: return "The queued message wasn’t sent."
         case .cancelQueued: return "The queued message wasn’t removed."
+        case .restart: return "The agent wasn’t restarted."
         }
     }
 
@@ -647,7 +670,7 @@ enum AgentAction: Equatable {
     var queuedID: String? {
         switch self {
         case let .editQueued(id, _), let .steerQueued(id), let .cancelQueued(id): return id
-        case .send, .config: return nil
+        case .send, .config, .restart: return nil
         }
     }
 }

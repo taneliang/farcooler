@@ -111,6 +111,35 @@ public struct AgentFailureCopy: Equatable, Sendable {
         }
     }
 
+    /// The copy for a word off the wire, for a pane whose conversation has
+    /// already started or not.
+    ///
+    /// **An agent that stopped is not one that couldn't start** (ov-174). The
+    /// runner sends `adapter-failed` for both, and a pane with a conversation
+    /// on screen that read "The agent couldn't start" was wrong about the one
+    /// thing it said: it had started, and then it died. The two words with no
+    /// fix of their own (`adapter-failed`, `adapter-silent`, and a word from
+    /// the future) read as stopped once there is a conversation; the two whose
+    /// fix is on the runner keep their own copy, which is still the advice.
+    public static func forWord(_ word: String?, started: Bool) -> AgentFailureCopy? {
+        guard let copy = forWord(word) else { return nil }
+        guard started else { return copy }
+        switch AgentFailure(rawValue: word ?? "") ?? .adapterFailed {
+        case .noAdapter, .notAuthenticated: return copy
+        case .adapterSilent, .adapterFailed:
+            return AgentFailureCopy(
+                title: "The agent stopped",
+                message:
+                    "Restart it to carry on. Messages waiting to send go once it’s back.",
+                action: showTheTerminal)
+        }
+    }
+
+    /// The label on the button that starts the pane's agent again, in place:
+    /// `terminal.set_pane_mode` to agent on a pane already in agent mode.
+    /// Title case, because it is a button.
+    public static let restart = "Restart"
+
     /// One label for one action, spelled once.
     ///
     /// Byte for byte the overflow item in `ShellPaneBar.paneModeItem` and in

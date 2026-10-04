@@ -181,6 +181,8 @@ struct AgentFailureLine: View {
     let sentence: String
     var onRetry: (() -> Void)?
     var onDismiss: (() -> Void)?
+    /// What the retry is called. Restart, on a pane whose agent stopped.
+    var retryLabel = "Try Again"
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -191,7 +193,7 @@ struct AgentFailureLine: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 6)
             if let onRetry {
-                Button("Try Again", action: onRetry)
+                Button(retryLabel, action: onRetry)
                     .controlSize(.small)
             }
             if let onDismiss {

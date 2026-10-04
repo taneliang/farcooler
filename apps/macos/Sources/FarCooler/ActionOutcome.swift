@@ -295,6 +295,8 @@ enum ActionCopy {
             "The runner is offline."
         case "agent-not-connected":
             "Its agent isn’t connected right now."
+        case "agent-stopped":
+            "Its agent stopped. Restart it, then try again."
         case "attachment-limit":
             "That’s more than the runner takes at once."
         case "diff-too-large":
