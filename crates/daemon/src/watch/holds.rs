@@ -3,8 +3,8 @@
 //! On the watcher's tick: the store answers the earliest hold from an index,
 //! so asking every second costs nothing, and a hold is let go within a
 //! second of its time. The store writes the note and queues the
-//! orchestrator's wake in the same transaction; telling it is ov-212's
-//! lane B, on the answer pump.
+//! orchestrator's wake in the same transaction; the answer pump tells it
+//! (`answer_wake`, as a hold that ended).
 
 use farcooler_store::models::Actor;
 
@@ -26,6 +26,10 @@ impl Watcher {
         }
         match store.release_due_holds(now) {
             Ok(released) => {
+                if !released.is_empty() {
+                    // Each is a wake to tell its orchestrator (`answer_wake`).
+                    self.wakes_hint.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
                 for (task, _) in released {
                     self.announce_task_changed(&task, None, Actor::Runner);
                 }

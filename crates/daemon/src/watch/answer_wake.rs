@@ -73,6 +73,18 @@
 //!
 //! **Bounded.** An answer not told within `GIVE_UP_AFTER_MS` is noted "Not
 //! delivered: <why it last waited>" and dropped.
+//!
+//! **A subagent's task.** A task a subagent works (ov-213) has no pane, so
+//! the orchestrator is told, and the message names the subagent open on it
+//! so the orchestrator can pass the decision on with `SendMessage`.
+//!
+//! **A hold that ended** (ov-212) is told through the same pump and under the
+//! same five checks, from its own queue (`hold_wakes`, kind `HoldEnded`):
+//! "Hold ended on ov-12 (“…”): Held until Oct 5, 9:00 AM. That time has
+//! come. Start it when you're ready." It is never superseded by an answer
+//! or by another hold, is dropped silently if the task has left Backlog
+//! since, and is given up on after the same half hour. The workspace's
+//! wake-on-answer switch covers it: it's what allows typing into a pane.
 
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -81,8 +93,8 @@ use farcooler_agent::link::DaemonMessage;
 use farcooler_core::composer::{self, Composer};
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1::AgentActivity;
-use farcooler_store::PendingWake;
-use farcooler_store::models::{Actor, NoteKind, PaneMode, Task, TaskNote, Terminal, TerminalRole};
+use farcooler_store::{PendingWake, WakeKind};
+use farcooler_store::models::{Actor, NoteKind, PaneMode, Task, TaskNote, TaskStatus, Terminal, TerminalRole};
 use uuid::Uuid;
 
 use super::{Watcher, anyone_watching, now_millis};
@@ -115,7 +127,19 @@ const NOBODY: &str = "Nobody to tell about the decision";
 const WAITING: &str = "Waiting to tell";
 
 /// What the agent is told.
+#[cfg(test)]
 pub(crate) fn message(key: &str, title: &str, answer: &str) -> String {
+    message_for(key, title, answer, &[])
+}
+
+/// A subagent working a task: its id, which `SendMessage` names, and its
+/// label.
+pub(crate) type Subagent = (String, String);
+
+/// What the agent is told, when `subagents` are working the task it was asked
+/// about: the orchestrator is the one told (a subagent has no pane), and it
+/// passes the decision on to the subagent by name.
+pub(crate) fn message_for(key: &str, title: &str, answer: &str, subagents: &[Subagent]) -> String {
     let full = one_line(answer, usize::MAX);
     let cut = one_line(answer, LONGEST_ANSWER);
     let title = one_line(title, LONGEST_TITLE);
@@ -123,7 +147,32 @@ pub(crate) fn message(key: &str, title: &str, answer: &str) -> String {
     let more = if cut != full { format!(" (Full answer: farcooler task show {key}.)") } else { String::new() };
     // Curly quotes: in fish, `("…")` left at a prompt is a command
     // substitution, and these are no quote to any shell.
-    format!("Decision on {key} (“{title}”): {cut}{stop}{more} Continue.")
+    let then = match subagents {
+        [] => "Continue.".to_string(),
+        [(id, label)] => format!("Its subagent ({}) is working on it: pass this on, then continue.", named(id, label)),
+        many => {
+            let names: Vec<String> = many.iter().map(|(id, label)| named(id, label)).collect();
+            format!("Its subagents ({}) are working on it: pass this on, then continue.", names.join("; "))
+        }
+    };
+    format!("Decision on {key} (“{title}”): {cut}{stop}{more} {then}")
+}
+
+/// What the agent is told when a task held until a time reaches it.
+pub(crate) fn hold_message(key: &str, title: &str, said: &str) -> String {
+    let title = one_line(title, LONGEST_TITLE);
+    let said = one_line(said, LONGEST_ANSWER);
+    format!("Hold ended on {key} (“{title}”): {said} Start it when you're ready.")
+}
+
+/// A subagent as the message names it: `a3fd8fceef581c787, “ov-12 Mac polish”`, or the
+/// id alone when it has no label.
+fn named(id: &str, label: &str) -> String {
+    let id = one_line(id, LONGEST_TITLE);
+    match one_line(label, LONGEST_TITLE).as_str() {
+        "" => id,
+        label => format!("{id}, “{label}”"),
+    }
 }
 
 /// `raw` on one line, safe to type: line breaks and tabs become spaces, runs
@@ -235,9 +284,14 @@ impl Watcher {
         // Cleared before the read, so an answer queued during this pass sets
         // it again and the next tick reads it.
         self.wakes_hint.store(false, Ordering::SeqCst);
-        let pending = match self.service.store.pending_answer_wakes() {
-            Ok(pending) => pending,
-            Err(e) => {
+        let store = &self.service.store;
+        let pending = match (store.pending_answer_wakes(), store.pending_hold_wakes()) {
+            (Ok(mut pending), Ok(holds)) => {
+                pending.extend(holds);
+                pending.sort_by_key(|wake| wake.enqueued_at);
+                pending
+            }
+            (Err(e), _) | (_, Err(e)) => {
                 tracing::warn!(error = %e, "couldn't read the answers waiting to be told");
                 self.wakes_hint.store(true, Ordering::SeqCst);
                 return;
@@ -245,7 +299,11 @@ impl Watcher {
         };
         for (n, wake) in pending.iter().enumerate() {
             // A newer answer on the same task is waiting too: tell only it.
-            if wake.claimed_at.is_none() && pending[n + 1..].iter().any(|later| later.task == wake.task) {
+            // Holds aren't answers, and one that ended is told on its own.
+            if wake.kind == WakeKind::Answer
+                && wake.claimed_at.is_none()
+                && pending[n + 1..].iter().any(|later| later.kind == WakeKind::Answer && later.task == wake.task)
+            {
                 self.settle(wake, None, Some(SUPERSEDED.into()));
                 continue;
             }
@@ -260,7 +318,7 @@ impl Watcher {
         // Claimed and never finished: the daemon stopped mid-typing. It may
         // have reached the agent, so it's never typed again.
         if wake.claimed_at.is_some() {
-            return self.settle(wake, None, Some(COULDNT_CONFIRM.into()));
+            return self.settle(wake, None, Some(couldnt_confirm(wake.kind)));
         }
         let store = &self.service.store;
         let task = match store.get_task(wake.task) {
@@ -268,8 +326,15 @@ impl Watcher {
             Err(DomainError::NotFound) => return self.settle(wake, None, None),
             Err(_) => return Pass::Waiting(Held::Busy),
         };
-        // Turned off since it was queued: let it go, saying nothing.
+        // Turned off since it was queued: let it go, saying nothing. The one
+        // switch covers a hold that ended: it's what lets this runner type
+        // into an agent's pane at all.
         if !store.get_workspace(task.workspace_id).is_ok_and(|w| w.wake_on_answer) {
+            return self.settle(wake, None, None);
+        }
+        // A hold that ended is news only while the task is still waiting to be
+        // started: one started or closed since has nothing to be told.
+        if wake.kind == WakeKind::HoldEnded && task.status != TaskStatus::Backlog {
             return self.settle(wake, None, None);
         }
         if now_millis() - wake.enqueued_at > GIVE_UP_AFTER_MS {
@@ -278,12 +343,17 @@ impl Watcher {
             return self.settle(wake, Some(&task), Some(format!("Not delivered: {why}.")));
         }
         let Some(to) = self.recipient(&task).await else {
-            return self.settle(wake, Some(&task), Some(NOBODY.into()));
+            return self.settle(wake, Some(&task), Some(nobody(wake.kind)));
         };
         let pass = match self.ready(&to).await {
             Err(held) => Pass::Waiting(held),
             Ok(()) => {
-                let text = message(&task.key, &task.title, &wake.body);
+                let text = match wake.kind {
+                    WakeKind::Answer => {
+                        message_for(&task.key, &task.title, &wake.body, &self.subagents_to_pass_on(&task, &to))
+                    }
+                    WakeKind::HoldEnded => hold_message(&task.key, &task.title, &wake.body),
+                };
                 if to.pane_mode == PaneMode::Agent {
                     self.prompt(wake, &task, &to, &text).await
                 } else {
@@ -310,7 +380,10 @@ impl Watcher {
         if notes.iter().any(|n| n.actor == Actor::Runner && n.at >= wake.enqueued_at && n.body.starts_with(WAITING)) {
             return;
         }
-        let body = format!("{WAITING} {} about the decision: {}.", spoken_name(to), held.now());
+        let body = match wake.kind {
+            WakeKind::Answer => format!("{WAITING} {} about the decision: {}.", spoken_name(to), held.now()),
+            WakeKind::HoldEnded => format!("{WAITING} {} the hold ended: {}.", spoken_name(to), held.now()),
+        };
         match store.add_note(task.id, NoteKind::Progress, Actor::Runner, &body, serde_json::json!({})) {
             Ok(_) => self.announce_task_changed(task, None, Actor::Runner),
             Err(e) => tracing::warn!(note = %wake.note, error = %e, "couldn't say an answer is waiting"),
@@ -338,15 +411,15 @@ impl Watcher {
 
     /// A chat pane: the answer as a prompt on its agent channel.
     async fn prompt(&self, wake: &PendingWake, task: &Task, to: &Terminal, text: &str) -> Pass {
-        if !matches!(self.service.store.claim_answer_wake(wake.note), Ok(true)) {
+        if !matches!(self.service.store.claim_wake(wake), Ok(true)) {
             return Pass::Settled;
         }
         let prompt = DaemonMessage::Prompt { text: text.to_string(), images: Vec::new() };
         if !self.service.agents().send(to.id, prompt) {
-            return self.settle(wake, Some(task), Some(COULDNT_CONFIRM.into()));
+            return self.settle(wake, Some(task), Some(couldnt_confirm(wake.kind)));
         }
         self.mark_told(to.id);
-        self.settle(wake, Some(task), Some(format!("Told {} about the decision", spoken_name(to))))
+        self.settle(wake, Some(task), Some(told(wake.kind, to)))
     }
 
     /// A TUI pane: checks 3 to 5, then claim, paste, read back, Enter.
@@ -389,7 +462,7 @@ impl Watcher {
         if !bracketed {
             return Pass::Waiting(Held::Unfamiliar);
         }
-        match self.service.store.claim_answer_wake(wake.note) {
+        match self.service.store.claim_wake(wake) {
             Ok(true) => {}
             Ok(false) => return Pass::Settled,
             Err(_) => return Pass::Waiting(Held::Busy),
@@ -399,7 +472,7 @@ impl Watcher {
         let paste: String = crate::pastes::encode_paste(true, text).iter().map(|b| format!("{b:02x}")).collect();
         let started = now_millis();
         if self.fail_sends_for_tests() || runtime.send_bytes_hex(to.id, &paste).await.is_err() {
-            return self.settle(wake, Some(task), Some(COULDNT_CONFIRM.into()));
+            return self.settle(wake, Some(task), Some(couldnt_confirm(wake.kind)));
         }
         let deadline = tokio::time::Instant::now() + PASTE_SETTLES;
         let mut held_exactly = false;
@@ -428,10 +501,10 @@ impl Watcher {
             return self.settle(wake, Some(task), Some(PASTE_LEFT.into()));
         }
         if runtime.send_bytes_hex(to.id, "0d").await.is_err() {
-            return self.settle(wake, Some(task), Some(COULDNT_CONFIRM.into()));
+            return self.settle(wake, Some(task), Some(couldnt_confirm(wake.kind)));
         }
         self.mark_told(to.id);
-        self.settle(wake, Some(task), Some(format!("Told {} about the decision", spoken_name(to))))
+        self.settle(wake, Some(task), Some(told(wake.kind, to)))
     }
 
     /// The pane's box as a fresh capture shows it, or why it's no box to
@@ -464,7 +537,7 @@ impl Watcher {
     /// so its feed shows the note.
     fn settle(&self, wake: &PendingWake, task: Option<&Task>, record: Option<String>) -> Pass {
         self.wake_holds.lock().unwrap_or_else(|e| e.into_inner()).remove(&wake.note);
-        match self.service.store.finish_answer_wake(wake.note, record.as_deref()) {
+        match self.service.store.finish_wake(wake, record.as_deref()) {
             Ok(Some(Some(_))) => {
                 if let Some(task) = task {
                     self.announce_task_changed(task, None, Actor::Runner);
@@ -477,6 +550,17 @@ impl Watcher {
                 Pass::Waiting(Held::Busy)
             }
         }
+    }
+
+    /// The subagents to name in an answer to the orchestrator: those open on
+    /// the task, when it's the orchestrator that's told. A pane told about
+    /// its own task has no subagent to pass anything to.
+    fn subagents_to_pass_on(&self, task: &Task, to: &Terminal) -> Vec<Subagent> {
+        if to.role != TerminalRole::Orchestrator {
+            return Vec::new();
+        }
+        let workers = self.service.store.workers_for(task.id).unwrap_or_default();
+        workers.into_iter().filter(|w| w.ended_at.is_none()).take(3).map(|w| (w.agent_id, w.label)).collect()
     }
 
     /// Whom to tell about an answer on `task`. See this module's docs.
@@ -643,6 +727,28 @@ pub(crate) fn in_front(listing: &str) -> Option<(i32, String)> {
         return None;
     }
     Some((*pid, comm.clone()))
+}
+
+/// "Told the orchestrator about the decision", or that the hold ended.
+fn told(kind: WakeKind, to: &Terminal) -> String {
+    match kind {
+        WakeKind::Answer => format!("Told {} about the decision", spoken_name(to)),
+        WakeKind::HoldEnded => format!("Told {} the hold ended", spoken_name(to)),
+    }
+}
+
+fn couldnt_confirm(kind: WakeKind) -> String {
+    match kind {
+        WakeKind::Answer => COULDNT_CONFIRM.into(),
+        WakeKind::HoldEnded => "Couldn't confirm the agent got the news that the hold ended".into(),
+    }
+}
+
+fn nobody(kind: WakeKind) -> String {
+    match kind {
+        WakeKind::Answer => NOBODY.into(),
+        WakeKind::HoldEnded => "Nobody to tell the hold ended".into(),
+    }
 }
 
 /// How the record names a terminal: the orchestrator as such, an agent by

@@ -49,6 +49,11 @@ pub fn backdate_answer_wakes(store: &crate::Store, by_ms: i64) {
     store.conn().execute("UPDATE answer_wakes SET enqueued_at = enqueued_at - ?1", params![by_ms]).unwrap();
 }
 
+/// The same for every queued hold that ended.
+pub fn backdate_hold_wakes(store: &crate::Store, by_ms: i64) {
+    store.conn().execute("UPDATE hold_wakes SET enqueued_at = enqueued_at - ?1", params![by_ms]).unwrap();
+}
+
 /// The store's own clock, for a test that sets a time relative to it.
 pub fn now_millis() -> i64 {
     crate::tasks::now_millis()

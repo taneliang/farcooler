@@ -1198,3 +1198,6 @@ fn an_unreadable_mark_is_typing_now() {
     crate::runtime::mark_input(dir.path(), terminal);
     assert!(last_input(dir.path(), terminal).is_some_and(|at| now_millis() - at < 1_000));
 }
+
+#[path = "worker_tests.rs"]
+mod worker_tests;
