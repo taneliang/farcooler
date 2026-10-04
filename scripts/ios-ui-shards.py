@@ -52,6 +52,7 @@ SHARDS = {
         "ComposerKeyboardTests",  # -agent-layout-harness
         "DynamicTypeTests",  # -agent-layout-harness
         "RunnerReachTests",  # seeded -hosts at an address that never answers
+        "FirstRunUITests",  # -phone-harness (ov-205 lane P, placed by integ-9)
     ],
 }
 
