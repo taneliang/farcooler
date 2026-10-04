@@ -47,7 +47,40 @@ final class FilesModel: ObservableObject {
         var serial: Int
     }
 
-    let worktree: Worktree
+    /// What these files belong to: a worktree, or a runner's extra
+    /// read-only folder (ov-232).
+    struct Place: Hashable {
+        var id: String
+        /// What the pane calls it before a file is open.
+        var title: String
+        /// Where its root is on the runner; empty for a folder, which a
+        /// read-scoped client can't see the path of.
+        var root: String
+        /// Its worktree; nil for a folder.
+        var worktree: Worktree?
+
+        init(worktree: Worktree) {
+            self.init(id: worktree.id, title: worktree.task, root: worktree.path, worktree: worktree)
+        }
+
+        init(folder name: String, host: String) {
+            self.init(
+                id: "folder:\(host)/\(name)", title: ReadOnlyFolders.title(name, host: host), root: "", worktree: nil)
+        }
+
+        private init(id: String, title: String, root: String, worktree: Worktree?) {
+            self.id = id
+            self.title = title
+            self.root = root
+            self.worktree = worktree
+        }
+    }
+
+    let place: Place
+    /// Its worktree; nil for an extra folder.
+    var worktree: Worktree? { place.worktree }
+    /// Whether the runner can search it: a worktree's files, not a folder's.
+    let canFilter: Bool
     private let source: Source
 
     @Published private(set) var listings: [String: FileListing] = [:]
@@ -83,8 +116,30 @@ final class FilesModel: ObservableObject {
     }
 
     init(worktree: Worktree, source: Source) {
-        self.worktree = worktree
+        self.place = Place(worktree: worktree)
+        self.canFilter = true
         self.source = source
+    }
+
+    /// An extra read-only folder's files: listed and read, never searched.
+    init(place: Place, source: Source) {
+        self.place = place
+        self.canFilter = place.worktree != nil
+        self.source = source
+    }
+
+    /// The extra read-only folder `name` on `client`'s runner.
+    convenience init(folder name: String, client: DaemonClient) {
+        self.init(
+            place: Place(folder: name, host: client.target),
+            source: Source(
+                list: { [weak client] path in
+                    await client?.listFiles(inFolder: name, path: path) ?? .failure(.failed)
+                },
+                read: { [weak client] path in
+                    await client?.readFile(inFolder: name, path: path) ?? .failure(.failed)
+                },
+                search: { _ in [] }))
     }
 
     convenience init(worktree: Worktree, client: DaemonClient) {
@@ -189,7 +244,7 @@ final class FilesModel: ObservableObject {
             case .link:
                 content = .link(
                     target: read.linkTarget,
-                    inside: FilesLogic.linkDestination(path, target: read.linkTarget, root: worktree.path))
+                    inside: FilesLogic.linkDestination(path, target: read.linkTarget, root: place.root))
             case .unknown: content = .failed(.failed)
             }
         case .failure(let why):

@@ -37,7 +37,7 @@ struct FilesPane: View {
             }
         }
         .background(WorkspaceStyle.document)
-        .task(id: model.worktree.id) { await model.loadIfNeeded() }
+        .task(id: model.place.id) { await model.loadIfNeeded() }
         .simultaneousGesture(TapGesture().onEnded { onFocus() })
         .onChange(of: model.finding) { _, on in findFocused = on }
         .onChange(of: model.goingToLine) { _, on in lineFocused = on }
@@ -69,7 +69,7 @@ struct FilesPane: View {
                         .fixedSize()
                 }
             } else {
-                Text(model.worktree.task)
+                Text(model.place.title)
                     .font(WorkspaceStyle.paneTitle)
                     .foregroundStyle(.secondary)
             }
@@ -100,8 +100,12 @@ struct FilesPane: View {
                 Button("Copy Lines") { copy(model.copiedText ?? "") }
                     .disabled(model.copiedText == nil)
                 Divider()  // style-exempt: menu
-                Button("Open in Editor") { openInEditor() }
-                    .disabled(model.opened == nil)
+                // A folder's files are read here only: its path isn't one the
+                // editor is told.
+                if model.worktree != nil {
+                    Button("Open in Editor") { openInEditor() }
+                        .disabled(model.opened == nil)
+                }
                 Button("Reload") { Task { await model.reload() } }
             } label: {
                 Image(systemName: "ellipsis.circle")
@@ -245,7 +249,7 @@ struct FilesPane: View {
                 PaneNotice(
                     title: "Link",
                     detail: inside == nil
-                        ? "This links to \(target), which is outside this worktree."
+                        ? "This links to \(target), which is outside this \(model.worktree == nil ? "folder" : "worktree")."
                         : "This links to \(target).")
                     .fixedSize(horizontal: false, vertical: true)
                 if let inside {
@@ -269,7 +273,9 @@ struct FilesPane: View {
         VStack(spacing: 10) {
             PaneNotice(title: title, detail: detail)
                 .fixedSize(horizontal: false, vertical: true)
-            Button("Open in Editor") { openInEditor() }
+            // A folder's files are read here only: its path isn't one the
+            // editor is told.
+            if model.worktree != nil { Button("Open in Editor") { openInEditor() } }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -283,8 +289,7 @@ struct FilesPane: View {
     }
 
     private func openInEditor() {
-        guard let path = model.opened?.path else { return }
-        let worktree = model.worktree
+        guard let path = model.opened?.path, let worktree = model.worktree else { return }
         Task { editorFailure = await Editors.shared.open(path, in: worktree) }
     }
 }
@@ -295,10 +300,14 @@ private struct FilesTree: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            TextField("Filter", text: $model.filter)
-                .textFieldStyle(.roundedBorder)
-                .controlSize(.small)
-                .padding(8)
+            // Searching is the runner's, over a worktree: an extra folder has
+            // nothing to search, so it has no filter.
+            if model.canFilter {
+                TextField("Filter", text: $model.filter)
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.small)
+                    .padding(8)
+            }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if model.filter.trimmingCharacters(in: .whitespaces).isEmpty {

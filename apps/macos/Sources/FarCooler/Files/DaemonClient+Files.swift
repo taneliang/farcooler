@@ -55,6 +55,11 @@ enum FileReadFailure: Error, Equatable {
     case missing
     /// A directory, a FIFO, a socket.
     case notAFile
+    /// Nothing at that path in an extra folder.
+    case missingInFolder
+    /// The runner won't show this extra folder at all anymore: it was taken
+    /// out of its config, or the runner now refuses it.
+    case folderGone
     /// Anything else: the runner couldn't be reached, or said something new.
     case failed
 
@@ -62,6 +67,8 @@ enum FileReadFailure: Error, Equatable {
         switch self {
         case .runnerTooOld: return "Update Far Cooler on this runner to see its files."
         case .missing: return "This file isn’t in the worktree anymore."
+        case .missingInFolder: return "This isn’t in the folder anymore."
+        case .folderGone: return "This runner doesn’t share this folder anymore."
         case .notAFile: return "This isn’t a file Far Cooler can show."
         case .failed: return "Couldn’t read this file. Check that the runner is reachable, then try again."
         }
@@ -77,6 +84,17 @@ enum FileReadFailure: Error, Equatable {
             // carries no runner code.
             return (message ?? "").contains("needs an update") ? .runnerTooOld : .failed
         }
+    }
+}
+
+extension FileReadFailure {
+    /// As `from(cli:)`, for a read in an extra read-only folder (ov-232): the
+    /// runner answers a name it no longer shares, and a path it refuses, as
+    /// "not found", so nothing at the folder's root means the folder is gone.
+    static func from(cli message: String?, inFolder atRoot: Bool) -> FileReadFailure {
+        let why = from(cli: message)
+        guard why == .missing else { return why }
+        return atRoot ? .folderGone : .missingInFolder
     }
 }
 
@@ -101,6 +119,25 @@ extension DaemonClient {
     func readFile(in worktree: Worktree, path: String) async -> Result<FileRead, FileReadFailure> {
         let (data, message) = await runRaw(["files", "cat", worktree.short, path, "--json"], background: true)
         guard let data else { return .failure(.from(cli: message)) }
+        guard let read = try? JSONDecoder().decode(FileRead.self, from: data) else { return .failure(.failed) }
+        return .success(read)
+    }
+}
+
+extension DaemonClient {
+    /// One directory of the extra read-only folder `name`, `path` relative to
+    /// it ("" is its root). `files folder-ls`.
+    func listFiles(inFolder name: String, path: String) async -> Result<FileListing, FileReadFailure> {
+        let (data, message) = await runRaw(["files", "folder-ls", name, path, "--json"], background: true)
+        guard let data else { return .failure(.from(cli: message, inFolder: path.isEmpty)) }
+        guard let listing = try? JSONDecoder().decode(FileListing.self, from: data) else { return .failure(.failed) }
+        return .success(listing)
+    }
+
+    /// One file of the extra read-only folder `name`. `files folder-cat`.
+    func readFile(inFolder name: String, path: String) async -> Result<FileRead, FileReadFailure> {
+        let (data, message) = await runRaw(["files", "folder-cat", name, path, "--json"], background: true)
+        guard let data else { return .failure(.from(cli: message, inFolder: false)) }
         guard let read = try? JSONDecoder().decode(FileRead.self, from: data) else { return .failure(.failed) }
         return .success(read)
     }

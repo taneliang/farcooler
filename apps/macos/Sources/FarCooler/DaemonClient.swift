@@ -975,6 +975,7 @@ final class DaemonClient: ObservableObject {
             // which then reads as before.
             runnerIsNewer: body["runnerIsNewer"] as? Bool ?? false)
         servedNeedsYou = daemonBuild?.can(.needsYou) == true
+        readOnlyFolders = ReadOnlyFolders.names(in: body, offered: daemonBuild?.can(.readOnlyFolders) == true)
         pushPaired = body["pushPaired"] as? Bool ?? false
     }
 
@@ -983,6 +984,10 @@ final class DaemonClient: ObservableObject {
     /// (`Notifier.postsLocally`). False until read, and from a runner too old
     /// to say: then the Mac posts, as it always has.
     private(set) var pushPaired = false
+
+    /// The extra read-only folders this runner shares with Files (ov-232),
+    /// by name; none from a runner without `read_only_folders`.
+    @Published private(set) var readOnlyFolders: [String] = []
 
     /// Replace the daemon on this runner with the build this app ships.
     ///

@@ -59,6 +59,36 @@ struct FilesSpecimenTests {
                 search: { _ in ["crates/daemon/src/main.rs", "crates/cli/src/main.rs", "apps/macos/Sources/FarCooler/FarCoolerApp.swift"] }))
     }
 
+    /// A runner's extra read-only folder (ov-232): `logs`, with a file open,
+    /// or refused by the runner since it was listed.
+    private static func folderModel(refused: Bool) -> FilesModel {
+        let entry = { (name: String, kind: FileEntry.Kind, size: UInt64) in
+            FileEntry(name: name, kind: kind, size: size, linkTarget: "")
+        }
+        return FilesModel(
+            place: FilesModel.Place(folder: "logs", host: ""),
+            source: FilesModel.Source(
+                list: { path in
+                    if refused { return .failure(.folderGone) }
+                    switch path {
+                    case "": return .success(FileListing(
+                        path: "", entries: [entry("nginx", .directory, 0), entry("syslog", .file, 4_200),
+                                            entry("auth.log", .file, 1_900)], truncated: false))
+                    case "nginx": return .success(FileListing(
+                        path: "nginx", entries: [entry("access.log", .file, 90_000), entry("error.log", .file, 700)],
+                        truncated: false))
+                    default: return .failure(.missingInFolder)
+                    }
+                },
+                read: { path in
+                    .success(FileRead(
+                        path: path, state: .text, size: 220,
+                        text: "Oct  4 06:49:01 runner sshd[311]: Accepted publickey for farcoolerd\nOct  4 06:49:07 runner cron[402]: (farcoolerd) CMD (backup)\n",
+                        linkTarget: ""))
+                },
+                search: { _ in [] }))
+    }
+
     @Test("Write the Files sheets")
     func writeSheets() async throws {
         let directory = URL(
@@ -82,6 +112,15 @@ struct FilesSpecimenTests {
         await filtered.runFilter()
         #expect(filtered.found.count == 3)
 
+        let folder = Self.folderModel(refused: false)
+        await folder.loadIfNeeded()
+        await folder.toggle("nginx")
+        await folder.open("syslog", line: nil, reveal: false)
+        #expect(folder.lines.count == 2)
+        let refused = Self.folderModel(refused: true)
+        await refused.loadIfNeeded()
+        #expect(refused.folders[""] == .failed(.folderGone))
+
         let diff = Diff(
             path: "crates/daemon/src/worktree_files.rs",
             oldText: "let dir = open(root)?;\nlet name = n;\n",
@@ -93,6 +132,10 @@ struct FilesSpecimenTests {
                       to: directory.appendingPathComponent("files-open-\(suffix).png"))
             try write(FilesPane(model: filtered).frame(width: 980, height: 300), dark: dark,
                       to: directory.appendingPathComponent("files-filtered-\(suffix).png"))
+            try write(FilesPane(model: folder).frame(width: 980, height: 320), dark: dark,
+                      to: directory.appendingPathComponent("files-folder-\(suffix).png"))
+            try write(FilesPane(model: refused).frame(width: 980, height: 220), dark: dark,
+                      to: directory.appendingPathComponent("files-folder-refused-\(suffix).png"))
             try write(DiffView(diff: diff).padding(12).frame(width: 620), dark: dark,
                       to: directory.appendingPathComponent("diff-shared-row-\(suffix).png"))
         }

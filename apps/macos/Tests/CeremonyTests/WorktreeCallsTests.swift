@@ -38,15 +38,18 @@ struct WorktreeCallsTests {
         var needsYouFails = false
         /// Whether `needs-you` answers with nothing in it.
         var needsYouEmpty = false
+        /// The extra read-only folders `status` lists (ov-232), by name.
+        var folders: [String]?
 
         func answer(_ args: [String]) -> (data: Data?, message: String?) {
             calls.append(args)
             let words = args.filter { $0 != "--json" }
             if words == ["status"], let capabilities {
-                let body: [String: Any] = [
+                var body: [String: Any] = [
                     "daemonVersion": "0.1.0", "buildsMatch": true, "platform": "macos",
                     "capabilities": capabilities,
                 ]
+                if let folders { body["readOnlyFolders"] = folders.map { ["name": $0, "path": ""] } }
                 return (try? JSONSerialization.data(withJSONObject: body), nil)
             }
             if words.first == "needs-you", needsYouFails {
@@ -149,6 +152,13 @@ struct WorktreeCallsTests {
         }
         await record("readFile", ["files", "cat", "w1", "src/main.rs", "--json"]) {
             _ = await $0.readFile(in: Self.worktree, path: "src/main.rs")
+        }
+        // An extra read-only folder's two reads (ov-232): by name, never by id.
+        await record("listFiles in a folder", ["files", "folder-ls", "logs", "nginx", "--json"]) {
+            _ = await $0.listFiles(inFolder: "logs", path: "nginx")
+        }
+        await record("readFile in a folder", ["files", "folder-cat", "logs", "nginx/a.log", "--json"]) {
+            _ = await $0.readFile(inFolder: "logs", path: "nginx/a.log")
         }
         await record("assign", ["worktree", "assign", "w1", "--to", Self.billing.id, "--json"]) {
             _ = await $0.assignWorktree(Self.worktree, to: Self.billing)

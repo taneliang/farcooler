@@ -1096,7 +1096,7 @@ struct ContentView: View {
 
     /// The Files clicked into, while on screen: what ⌘F and ⇧⌘L act on.
     private var focusedFiles: FilesModel? {
-        files.focused(shown: taskTab(for: selection) == .files ? openTaskLane?.worktree : files.inspector?.id)
+        files.focused(shown: taskTab(for: selection) == .files ? openTaskLane?.worktree : files.inspectorID)
     }
 
     /// The task open, and the worktree its Files tab reads, if it has one.
@@ -1200,9 +1200,17 @@ struct ContentView: View {
             // Files beside a worktree opened whole (ov-189). A task has its
             // own Files tab instead.
             .inspector(
-                isPresented: Binding(get: { files.inspector != nil }, set: { if !$0 { files.inspector = nil } })
+                isPresented: Binding(
+                    get: { files.inspectorOpen },
+                    set: {
+                        if !$0 {
+                            files.inspector = nil
+                            files.inspectorFolder = nil
+                        }
+                    })
             ) {
-                FilesInspector(routing: files, client: { store.client(for: $0) })
+                FilesInspector(
+                    routing: files, client: { store.client(for: $0) }, folderClient: { store.clients[$0] })
                     .inspectorColumnWidth(min: 420, ideal: 760, max: 1400)
             }
             .environment(\.openInFiles, OpenInFiles { ws, path, line in showInFiles(path, line: line, in: ws) })
@@ -1322,7 +1330,8 @@ struct ContentView: View {
             current: scene.flatMap { s in s.board.map { (s.host, $0) } },
             waiting: { place in WorkspaceCounts.count(for: place.workspace, host: place.host, in: store.needsYou) },
             showsHosts: showHosts, needsYou: store.needsYou.count, offersNewWorkspace: !workspaceRepositories.isEmpty,
-            status: store.reading.sentence, statusTrouble: store.reading.isTrouble, troubled: store.unhealthyHosts)
+            status: store.reading.sentence, statusTrouble: store.reading.isTrouble, troubled: store.unhealthyHosts,
+            folders: ReadOnlyFolders.groups(store.hosts.map { ($0, store.clients[$0]?.readOnlyFolders ?? []) }))
         return WorkspaceSwitcherButton(
             title: title, repository: scene?.summary == nil ? "" : repository, entries: entries,
             openRequest: switcherRequest, perform: { perform($0) })
@@ -1541,6 +1550,7 @@ struct ContentView: View {
     func perform(_ command: SwitcherCommand) {
         switch command {
         case .go(let target): selection = target
+        case .openFolder(let host, let name): files.openFolder(host: host, name: name)
         case .needsYou: selection = .needsYou
         case .newWorkspace: newWorkspaceName = NewWorkspaceName(name: "")
         case .newWorktree: run(.newWorktree)

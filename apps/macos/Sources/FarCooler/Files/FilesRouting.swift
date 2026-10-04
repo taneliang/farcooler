@@ -14,6 +14,21 @@ final class FilesRouting: ObservableObject {
     private var models: [String: FilesModel] = [:]
     /// The worktree whose Files the inspector shows; nil while it's closed.
     @Published var inspector: Worktree?
+    /// A runner's extra read-only folder (ov-232): which one, by its runner
+    /// and name. Shown in the same inspector, one at a time with `inspector`.
+    struct FolderRef: Hashable {
+        var host: String
+        var name: String
+        var id: String { FilesModel.Place(folder: name, host: host).id }
+    }
+
+    /// The extra folder whose Files the inspector shows; nil while it's not.
+    @Published var inspectorFolder: FolderRef?
+    /// Whether the inspector is open on anything.
+    var inspectorOpen: Bool { inspector != nil || inspectorFolder != nil }
+    /// What the inspector shows, by `FilesModel.Place.id`.
+    var inspectorID: String? { inspector?.id ?? inspectorFolder?.id }
+
     /// The worktree whose Files was clicked into last: what ⌘F and ⇧⌘L act
     /// on while that Files is on screen.
     @Published var focus: String?
@@ -27,11 +42,30 @@ final class FilesRouting: ObservableObject {
         return made
     }
 
+    /// `ref`'s Files, made the first time it's asked for and kept.
+    func model(for ref: FolderRef, client: DaemonClient) -> FilesModel {
+        let key = "\(ObjectIdentifier(client).hashValue)/\(ref.id)"
+        if let existing = models[key] { return existing }
+        let made = FilesModel(folder: ref.name, client: client)
+        models[key] = made
+        return made
+    }
+
+    /// Open the inspector on a runner's extra folder, in place of any
+    /// worktree's Files.
+    func openFolder(host: String, name: String) {
+        let ref = FolderRef(host: host, name: name)
+        inspector = nil
+        inspectorFolder = ref
+        focus = ref.id
+    }
+
     /// The toolbar's Show Files: open the inspector on `ws`, or close it.
     func toggleInspector(for ws: Worktree) {
         if inspector?.id == ws.id {
             inspector = nil
         } else {
+            inspectorFolder = nil
             inspector = ws
             focus = ws.id
         }
@@ -42,7 +76,10 @@ final class FilesRouting: ObservableObject {
     /// in the inspector.
     func show(_ path: String, line: Int?, in ws: Worktree, client: DaemonClient, onTaskTab: Bool) {
         let model = self.model(for: ws, client: client)
-        if !onTaskTab { inspector = ws }
+        if !onTaskTab {
+            inspectorFolder = nil
+            inspector = ws
+        }
         focus = ws.id
         Task { await model.open(path, line: line) }
     }
@@ -51,7 +88,7 @@ final class FilesRouting: ObservableObject {
     /// and has a file open: what ⌘F and ⇧⌘L act on.
     func focused(shown: String?) -> FilesModel? {
         guard let focus, shown == focus else { return nil }
-        return models.values.first { $0.worktree.id == focus && !$0.lines.isEmpty }
+        return models.values.first { $0.place.id == focus && !$0.lines.isEmpty }
     }
 
     /// Going somewhere else closes the inspector: Files is beside the
@@ -78,9 +115,19 @@ final class FilesRouting: ObservableObject {
 struct FilesInspector: View {
     @ObservedObject var routing: FilesRouting
     let client: (Worktree) -> DaemonClient?
+    /// The runner a folder is on, by its host.
+    let folderClient: (String) -> DaemonClient?
 
     var body: some View {
-        if let ws = routing.inspector, let client = client(ws) {
+        if let ref = routing.inspectorFolder {
+            if let client = folderClient(ref.host) {
+                FilesPane(
+                    model: routing.model(for: ref, client: client), onFocus: { routing.focus = ref.id },
+                    onClose: { routing.inspectorFolder = nil })
+            } else {
+                PaneNotice(title: "No Runner", detail: "This folder’s runner isn’t connected.")
+            }
+        } else if let ws = routing.inspector, let client = client(ws) {
             FilesPane(
                 model: routing.model(for: ws, client: client), onFocus: { routing.focus = ws.id },
                 onClose: { routing.inspector = nil })

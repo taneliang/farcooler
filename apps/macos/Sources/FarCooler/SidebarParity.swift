@@ -127,6 +127,8 @@ enum WorktreeMenu {
 /// What the title bar's switcher asks the window to do.
 enum SwitcherCommand: Hashable {
     case go(ContentView.Selection)
+    /// Open a runner's extra read-only folder in Files (ov-232).
+    case openFolder(host: String, name: String)
     case needsYou
     case newWorkspace
     case newWorktree
@@ -140,7 +142,7 @@ enum SwitcherCommand: Hashable {
 
     var action: SidebarAction {
         switch self {
-        case .go: return .switchWorkspace
+        case .go, .openFolder: return .switchWorkspace
         case .needsYou: return .needsYou
         case .newWorkspace: return .newWorkspace
         case .newWorktree: return .newWorktree
@@ -187,7 +189,7 @@ enum WorkspaceSwitcherMenu {
     static func entries(
         groups: [WorkspaceNumbers.Group], current: (host: String, workspace: String)?,
         waiting: (WorkspaceNumbers.Place) -> Int, showsHosts: Bool, needsYou: Int, offersNewWorkspace: Bool,
-        status: String, statusTrouble: Bool, troubled: [String]
+        status: String, statusTrouble: Bool, troubled: [String], folders: [ReadOnlyFolders.Group] = []
     ) -> [SwitcherEntry] {
         var out: [SwitcherEntry] = []
         for group in groups {
@@ -221,6 +223,17 @@ enum WorkspaceSwitcherMenu {
                                         host: group.host, repositoryID: group.repositoryID, repository: group.repository)),
                             ])
                     }))
+        }
+        if !folders.isEmpty {
+            // Each runner's own, under its name once there's more than one.
+            var lines: [SwitcherEntry] = []
+            for group in folders {
+                if folders.count > 1 { lines.append(.header(RunnerStatusItem.name(group.host))) }
+                lines += group.names.map {
+                    .item(title: $0, symbol: "folder", command: .openFolder(host: group.host, name: $0))
+                }
+            }
+            out.append(.submenu(title: "Folders", symbol: "folder.badge.gearshape", entries: lines))
         }
         out.append(.separator)
         out.append(.status(status, trouble: statusTrouble))
