@@ -9,33 +9,26 @@ import Testing
 /// pills that state a filter (ov-225).
 @MainActor
 struct NeedsYouLookTests {
-    private func bitmap<V: View>(_ view: V, size: CGSize, _ name: NSAppearance.Name = .aqua) throws -> NSBitmapImageRep {
+    private func bitmap<V: View>(_ view: V, size: CGSize, _ name: NSAppearance.Name = .aqua, scale: Int) throws -> NSBitmapImageRep {
         let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height, alignment: .topLeading))
         host.appearance = NSAppearance(named: name)
         host.frame = CGRect(origin: .zero, size: size)
         host.layoutSubtreeIfNeeded()
-        let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-        host.cacheDisplay(in: host.bounds, to: rep)
-        return rep
+        return try #require(host.lookBitmap(scale: scale))
     }
 
-    /// The color at a point, in the bitmap's own scale: 2 on a Retina Mac,
-    /// 1 on CI's headless runner, where a hard-coded 2 sampled the wrong row.
-    private func color(_ rep: NSBitmapImageRep, _ x: Int, _ y: Int) throws -> NSColor {
-        let scale = max(1, rep.pixelsWide / Int(rep.size.width.rounded()))
-        return try #require(rep.colorAt(x: x * scale, y: y * scale)).usingColorSpace(.sRGB)!
-    }
+    private func color(_ rep: NSBitmapImageRep, _ x: Int, _ y: Int) throws -> NSColor { rep.color(atPoint: x, y) }
 
     private let item = NeedsYouItem(
         id: "ask:x", kind: .ask, rank: 1, since: nil, workspaceID: "ws", workspaceName: "Billing", repositoryID: "r",
         task: nil, terminal: nil, question: "Allow touch x?", askID: nil, actions: [])
 
-    @Test("A Needs You card has no stroke: its edge is the paper's color")
-    func noStroke() throws {
+    @Test("A Needs You card has no stroke: its edge is the paper's color", arguments: lookScales)
+    func noStroke(scale: Int) throws {
         for name in [NSAppearance.Name.aqua, .darkAqua] {
             let row = NeedsYouItemRow(
                 item: item, canAct: true, onOpen: {}, onAnswerAsk: { _ in nil }, onDecide: { _ in true })
-            let rep = try bitmap(row, size: CGSize(width: 400, height: 90), name)
+            let rep = try bitmap(row, size: CGSize(width: 400, height: 90), name, scale: scale)
             // On the left edge at mid height, against just inside it.
             #expect(try color(rep, 0, 40) == color(rep, 4, 40), "an edge is drawn in \(name.rawValue)")
         }
@@ -46,9 +39,9 @@ struct NeedsYouLookTests {
         var body: some View { AreaChips(areas: ["Mac", "iOS"], chosen: $chosen).padding(8) }
     }
 
-    @Test("The chosen chip is a pill in the selection's wash, not a solid accent fill")
-    func theChosenChipIsAWash() throws {
-        let rep = try bitmap(Chips(), size: CGSize(width: 160, height: 40))
+    @Test("The chosen chip is a pill in the selection's wash, not a solid accent fill", arguments: lookScales)
+    func theChosenChipIsAWash(scale: Int) throws {
+        let rep = try bitmap(Chips(), size: CGSize(width: 160, height: 40), scale: scale)
         var solid = 0
         for x in 0..<rep.pixelsWide {
             for y in 0..<rep.pixelsHeight {

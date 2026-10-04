@@ -9,14 +9,12 @@ import Testing
 /// ink, not a wash (ov-221).
 @MainActor
 struct PaneCardTests {
-    private func bitmap<V: View>(_ view: V, size: CGSize, _ name: NSAppearance.Name = .aqua) throws -> NSBitmapImageRep {
+    private func bitmap<V: View>(_ view: V, size: CGSize, _ name: NSAppearance.Name = .aqua, scale: Int) throws -> NSBitmapImageRep {
         let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height))
         host.appearance = NSAppearance(named: name)
         host.frame = CGRect(origin: .zero, size: size)
         host.layoutSubtreeIfNeeded()
-        let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-        host.cacheDisplay(in: host.bounds, to: rep)
-        return rep
+        return try #require(host.lookBitmap(scale: scale))
     }
 
     private func color(_ rep: NSBitmapImageRep, _ x: Int, _ y: Int) throws -> NSColor {
@@ -24,10 +22,10 @@ struct PaneCardTests {
             .usingColorSpace(.sRGB)!
     }
 
-    @Test("A card's edge is its own color change: no stroke at standard contrast")
-    func noStroke() throws {
+    @Test("A card's edge is its own color change: no stroke at standard contrast", arguments: lookScales)
+    func noStroke(scale: Int) throws {
         let size = CGSize(width: 80, height: 60)
-        let rep = try bitmap(Color.clear.paneCard(), size: size)
+        let rep = try bitmap(Color.clear.paneCard(), size: size, scale: scale)
         // On the left edge, and in the middle: the same paper.
         let edge = try color(rep, 0, 30)
         let middle = try color(rep, 40, 30)
@@ -55,11 +53,11 @@ struct PaneCardTests {
             onSwitchPaneMode: { _ in }, title: "Main", subtitle: "", setsTitle: false)
     }
 
-    @Test("The focused pane's header has no wash: it's the same color as another pane's")
-    func focusIsNotAWash() throws {
+    @Test("The focused pane's header has no wash: it's the same color as another pane's", arguments: lookScales)
+    func focusIsNotAWash(scale: Int) throws {
         let size = CGSize(width: 900, height: 420)
         for name in [NSAppearance.Name.aqua, .darkAqua] {
-            let rep = try bitmap(Self.tiles(), size: size, name)
+            let rep = try bitmap(Self.tiles(), size: size, name, scale: scale)
             let y = Int(Pane.inset + WorkspaceStyle.paneHeaderHeight / 2)
             // Well clear of the number, the title and the status glyph.
             let focused = try color(rep, Int(Pane.inset) + 300, y)

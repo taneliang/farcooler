@@ -9,7 +9,7 @@ import Testing
 /// full-bleed orange bands, and the file filter is the system field.
 @MainActor
 struct ChangesLookTests {
-    private func bitmap(_ appearance: NSAppearance.Name) throws -> NSBitmapImageRep {
+    private func bitmap(_ appearance: NSAppearance.Name, scale: Int) throws -> NSBitmapImageRep {
         let worktree = Worktree(
             id: "co", short: "co", task: "overnight", branch: "main", repository: "overnight", host: "",
             path: "/tmp/overnight", state: "active", terminals: [])
@@ -24,37 +24,34 @@ struct ChangesLookTests {
         host.appearance = NSAppearance(named: appearance)
         host.frame = CGRect(origin: .zero, size: size)
         host.layoutSubtreeIfNeeded()
-        let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-        host.cacheDisplay(in: host.bounds, to: rep)
-        return rep
+        return try #require(host.lookBitmap(scale: scale))
     }
 
-    /// The color at a point, in the bitmap's own scale: 2 on a Retina Mac,
-    /// 1 on CI's headless runner, where a hard-coded 2 samples the wrong pixel.
-    private func color(_ rep: NSBitmapImageRep, _ x: Int, _ y: Int) throws -> NSColor {
-        let scale = max(1, rep.pixelsWide / Int(rep.size.width.rounded()))
-        return try #require(rep.colorAt(x: x * scale, y: y * scale)).usingColorSpace(.sRGB)!
-    }
-
-    @Test("The guessed-base warning is an amber row inset from the pane's edges, not a band across it")
-    func theWarningIsAnInsetRow() throws {
+    @Test("The guessed-base warning is an amber row inset from the pane's edges, not a band across it", arguments: lookScales)
+    func theWarningIsAnInsetRow(scale: Int) throws {
         for name in [NSAppearance.Name.aqua, .darkAqua] {
-            let rep = try bitmap(name)
+            let rep = try bitmap(name, scale: scale)
             // The row sits in the first 30 pt: 8 pt in from the left edge.
-            let edge = try color(rep, 2, 14)
-            let inside = try color(rep, 40, 14)
-            #expect(edge != inside, "the warning reaches the pane's edge in \(name.rawValue)")
+            let edge = rep.color(atPoint: 2, 14)
+            let inside = rep.color(atPoint: 40, 14)
+            #expect(edge != inside, "the warning reaches the pane's edge in \(name.rawValue) at \(scale)x")
             // And it is amber over the paper: warmer than the paper beside it.
-            #expect(inside.redComponent > inside.blueComponent, "\(name.rawValue)")
+            #expect(inside.redComponent > inside.blueComponent, "\(name.rawValue) at \(scale)x")
         }
     }
 
-    @Test("The file filter is the system's rounded field: a white well in light, not a gray wash")
-    func theFilterIsTheSystemField() throws {
-        let rep = try bitmap(.aqua)
+    @Test("The file filter is the system's rounded field: a well lighter than the paper around it, not a gray wash", arguments: lookScales)
+    func theFilterIsTheSystemField(scale: Int) throws {
+        let rep = try bitmap(.aqua, scale: scale)
+        // The paper beside the column's left edge, below the field. Measured at
+        // 0.98 here; the well is 1.00, a 0.02 step that holds at both scales
+        // because the field's fill is a solid color, not a gradient or a hairline.
+        let paper = rep.color(atPoint: 2, 70).brightnessComponent
         // The field is the first thing under the strip, at the column's left.
         var wells = 0
-        for y in 30..<90 where try color(rep, 100, y).brightnessComponent > 0.97 { wells += 1 }
-        #expect(wells > 8, "no system text field was drawn")
+        for y in 30..<90 where rep.color(atPoint: 100, y).brightnessComponent > paper + 0.01 { wells += 1 }
+        // A gray wash is darker than the paper, so it never counts; the real
+        // well is about 22 pt tall, and 8 is well under that.
+        #expect(wells > 8, "no system text field was drawn at \(scale)x: \(wells) rows lighter than the paper (\(paper))")
     }
 }
