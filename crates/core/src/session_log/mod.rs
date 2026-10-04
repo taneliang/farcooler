@@ -27,6 +27,14 @@ pub mod tail;
 
 pub mod usage;
 
+pub mod worker_follow;
+
+#[cfg(test)]
+mod claude_workers_tests;
+
+#[cfg(test)]
+mod worker_follow_tests;
+
 /// One thing that happened in a session.
 ///
 /// Deliberately small. Three formats with nothing in common map onto this, and
@@ -160,6 +168,27 @@ pub enum TurnEvent {
     /// what takes it off the row is the turn ending. See `codex::
     /// sub_agent_activity` for why that is the honest limit rather than a bug.
     Subagent { id: String, description: String, running: bool },
+    /// A subagent's id, learned from its launch: the `agentId` on the
+    /// `Agent` call's result, which `id` (the call's `tool_use` id, the same
+    /// one `Subagent` carries) ties to the spawn and its description.
+    ///
+    /// Claude's alone. `agentId` is what `SendMessage` names, what the
+    /// `subagents/agent-<agentId>.jsonl` transcript is named after and what a
+    /// `<task-notification>` calls its `task-id`, so it is the one key a
+    /// subagent keeps for its whole life, resumes included.
+    SubagentLaunched { id: String, agent_id: String },
+    /// A subagent that had stopped was sent a message and is working again:
+    /// `toolUseResult.resumedAgentId` on the `SendMessage` result.
+    SubagentResumed { agent_id: String },
+    /// A subagent stopped, as its `<task-notification>` says (a
+    /// `queue-operation`, an `attachment` and a `user` record each carry the
+    /// same one), or as its foreground result says.
+    ///
+    /// The notification fires each time the agent stops, so one `agent_id`
+    /// ends again after every resume. A background shell or a monitor
+    /// notifies with the same tags and a `task-id` that is no subagent's:
+    /// the consumer matches ids against the subagents it knows.
+    SubagentEnded { agent_id: String, status: SubagentStatus },
     /// The turn is over, however it went.
     Ended { at_ms: Option<i64>, duration_ms: Option<i64>, outcome: TurnOutcome },
     /// The agent's own name for this session's work.
@@ -179,6 +208,34 @@ pub enum TaskStatus {
     InProgress,
     Completed,
     Deleted,
+}
+
+/// How a subagent stopped: the four `<status>` values a notification has
+/// carried in the coordinator's own session (2,683 `completed`, 127 `killed`,
+/// 116 `failed` and 8 `stopped` among its `queue-operation` records, shells
+/// and monitors included), and no fifth.
+///
+/// A fifth value claude invents tomorrow reads as `Stopped`, not as nothing:
+/// a notification means the agent stopped, and a subagent left running
+/// forever is the worse mistake.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubagentStatus {
+    Completed,
+    Failed,
+    Killed,
+    Stopped,
+}
+
+impl SubagentStatus {
+    /// A notification's `<status>` word.
+    pub fn parse(word: &str) -> SubagentStatus {
+        match word.trim() {
+            "completed" => SubagentStatus::Completed,
+            "failed" => SubagentStatus::Failed,
+            "killed" => SubagentStatus::Killed,
+            _ => SubagentStatus::Stopped,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -30,6 +30,7 @@ paths and message text cut down, not synthesized records.
 | `claude-task-list.jsonl` | a task list being created, worked and listed | 2.1.227 |
 | `claude-subagents.jsonl` | one subagent spawned and finished, one spawned in the background | 2.1.223 |
 | `claude-subagent-transcript.jsonl` | a subagent's own transcript, for spend | 2.1.263 |
+| `claude-subagent-notifications.jsonl` | a background launch, a notification for each of `completed`, `failed`, `killed` and `stopped`, a monitor's, the same notification as an `attachment` and a `user` turn, and a resume | 2.1.251 |
 
 **`claude-complete-turn.jsonl`** (7 lines) is drawn from a real session under
 `~/.claude/projects/`, a `Write a haiku... then tell me what 'esc to
@@ -286,3 +287,17 @@ capture — it does exist, in one of the four files, and this is it, unedited.
 
 Redacted: nothing. The line is the whole file, and it contains no path or
 message text beyond the plan-limit error string itself.
+
+**`claude-subagent-notifications.jsonl`** (10 lines) is cut from the
+coordinator's own session (one of 850 subagents' worth of notifications), one
+record of each shape: the `Agent` call and its `async_launched` result; four
+`queue-operation` notifications, one per `<status>`; a monitor's, which has an
+`<event>` and no status; an `attachment` and a `user` turn carrying the same
+notification; and the `SendMessage` result with `resumedAgentId`. Every line
+is a real record's structure with every piece of model or person text removed:
+the prompt, each `<summary>` and `<result>` and the tool-result text read
+`removed`, the output file is `/tmp/example/agent.output`, and the description
+is a made-up `ov-12: polish the sidebar`. The ids are synthetic, and the same
+agent keeps the same id across its launch, its notification and its resume.
+The times are synthetic too, a minute apart, because the real ones came from
+ten different days.

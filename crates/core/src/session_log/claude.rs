@@ -6,7 +6,7 @@
 
 use serde_json::Value;
 
-use super::{TaskStatus, TurnEvent, TurnOutcome};
+use super::{SubagentStatus, TaskStatus, TurnEvent, TurnOutcome};
 
 /// Parse one line of a claude transcript into the shared turn vocabulary.
 ///
@@ -29,6 +29,7 @@ pub fn parse_line(line: &str) -> Vec<TurnEvent> {
         Some("assistant") => assistant_record(&record),
         Some("system") => turn_end(&record),
         Some("ai-title") => title(&record).into_iter().collect(),
+        Some("queue-operation" | "attachment") => notified(&record).into_iter().collect(),
         _ => Vec::new(),
     }
 }
@@ -41,6 +42,7 @@ pub fn parse_line(line: &str) -> Vec<TurnEvent> {
 /// ends, and there is nothing to gain from making that choice again here.
 fn user_record(record: &Value) -> Vec<TurnEvent> {
     let mut events: Vec<TurnEvent> = turn_start(record).into_iter().collect();
+    events.extend(notified(record));
     events.extend(answered(record));
     events.extend(tool_result(record));
     events
@@ -338,8 +340,11 @@ fn tool_result(record: &Value) -> Vec<TurnEvent> {
     let Some(result) = record.get("toolUseResult").filter(|value| value.is_object()) else {
         return Vec::new();
     };
-    if result.get("agentId").is_some() {
-        return finished_subagent(record, result).into_iter().collect();
+    if let Some(agent_id) = result.get("agentId").and_then(Value::as_str) {
+        return subagent_result(record, result, agent_id);
+    }
+    if let Some(agent_id) = result.get("resumedAgentId").and_then(Value::as_str) {
+        return vec![TurnEvent::SubagentResumed { agent_id: agent_id.to_string() }];
     }
     if let Some(id) = created_task_id(result) {
         // Id and nothing else. A create result carries no `status` and no
@@ -395,23 +400,79 @@ fn created_task_id(result: &Value) -> Option<String> {
 /// Any other status is read as the end. An unknown status leaving a subagent
 /// running forever is the worse half: the count only ever grows, and no
 /// tool_result at all is what a genuinely running agent already looks like.
-fn finished_subagent(record: &Value, result: &Value) -> Option<TurnEvent> {
-    let id = record
-        .get("message")?
-        .get("content")?
-        .as_array()?
-        .iter()
-        .find(|block| block.get("type").and_then(Value::as_str) == Some("tool_result"))?
-        .get("tool_use_id")?
-        .as_str()?
-        .to_string();
-    let running = result.get("status").and_then(Value::as_str) == Some("async_launched");
+fn subagent_result(record: &Value, result: &Value, agent_id: &str) -> Vec<TurnEvent> {
+    let Some(id) = record
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(Value::as_array)
+        .and_then(|blocks| blocks.iter().find(|b| b.get("type").and_then(Value::as_str) == Some("tool_result")))
+        .and_then(|block| block.get("tool_use_id"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    else {
+        return Vec::new();
+    };
+    let status = result.get("status").and_then(Value::as_str);
+    let running = status == Some("async_launched");
     // Only a background launch restates the description; a completed one
     // carries `agentType` instead. Empty is honest -- the spawn already named
     // it, under the same id.
     let description =
         result.get("description").and_then(Value::as_str).unwrap_or_default().to_string();
-    Some(TurnEvent::Subagent { id, description, running })
+    let mut events = vec![
+        TurnEvent::Subagent { id: id.clone(), description, running },
+        TurnEvent::SubagentLaunched { id, agent_id: agent_id.to_string() },
+    ];
+    // A foreground run's result IS its end, and says how: the one place a
+    // subagent's stop is written without a notification.
+    if !running {
+        let status = SubagentStatus::parse(status.unwrap_or_default());
+        events.push(TurnEvent::SubagentEnded { agent_id: agent_id.to_string(), status });
+    }
+    events
+}
+
+/// A `<task-notification>`: the harness saying a background task stopped.
+///
+/// Three records carry each one with the same text, in the order they are
+/// written: a `queue-operation` (`operation: "enqueue"`, the text in
+/// `content`; its `remove` twin has none), an `attachment` (`queued_command`,
+/// the text in `prompt`) and, when the model takes it as a turn, a `user`
+/// record whose `message.content` is the text itself. All three are read, so
+/// a transcript missing one still says it, and the consumer treats a repeat
+/// as the same fact. The text opens with the tag; a user's prompt that merely
+/// quotes one doesn't.
+///
+/// The `task-id` is a subagent's `agentId` for an `Agent` launch (`a` and 16
+/// hex) and a shell's or monitor's own id otherwise. Only a notification with
+/// a `<status>` is read: a monitor's carries an `<event>` instead.
+fn notified(record: &Value) -> Option<TurnEvent> {
+    let text = match record.get("type").and_then(Value::as_str)? {
+        "queue-operation" => {
+            if record.get("operation").and_then(Value::as_str) != Some("enqueue") {
+                return None;
+            }
+            record.get("content")?.as_str()?
+        }
+        "attachment" => record.get("attachment")?.get("prompt")?.as_str()?,
+        "user" => record.get("message")?.get("content")?.as_str()?,
+        _ => return None,
+    };
+    let text = text.trim_start().strip_prefix("<task-notification>")?;
+    let agent_id = tag(text, "task-id")?.trim();
+    let status = tag(text, "status")?;
+    (!agent_id.is_empty()).then(|| TurnEvent::SubagentEnded {
+        agent_id: agent_id.to_string(),
+        status: SubagentStatus::parse(status),
+    })
+}
+
+/// The text between `<name>` and `</name>`, the first time it appears.
+fn tag<'a>(text: &'a str, name: &str) -> Option<&'a str> {
+    let open = format!("<{name}>");
+    let from = text.find(&open)? + open.len();
+    let len = text[from..].find(&format!("</{name}>"))?;
+    Some(&text[from..from + len])
 }
 
 /// A turn end is `type: "system"`, `subtype: "turn_duration"` -- not the
@@ -459,6 +520,20 @@ fn turn_end(record: &Value) -> Vec<TurnEvent> {
 /// case which `ai-title` line in a session "counts".
 fn title(record: &Value) -> Option<TurnEvent> {
     Some(TurnEvent::Title(record.get("aiTitle")?.as_str()?.to_string()))
+}
+
+/// When a line says it was written, in unix milliseconds. Parses the line
+/// again, so callers ask it only of the few they already picked out.
+pub fn timestamp_ms(line: &str) -> Option<i64> {
+    at_ms(&serde_json::from_str::<Value>(line).ok()?)
+}
+
+/// The model an assistant line says it came from, or `None`.
+pub fn model_of(line: &str) -> Option<String> {
+    let record = serde_json::from_str::<Value>(line).ok()?;
+    let model = record.get("message")?.get("model")?.as_str()?;
+    // `<synthetic>` is claude's stand-in for a message it wrote itself.
+    (!model.is_empty() && !model.starts_with('<')).then(|| model.to_string())
 }
 
 fn at_ms(record: &Value) -> Option<i64> {
@@ -911,11 +986,16 @@ mod tests {
         // "completed"`. The id is the SAME `tool_use_id`, which is what lets a
         // fold that never saw the two lines together pair them.
         match parse_line(line(SUBAGENTS, 1)).as_slice() {
-            [TurnEvent::Answered { .. }, TurnEvent::Subagent { id, running, .. }] => {
+            [
+                TurnEvent::Answered { .. },
+                TurnEvent::Subagent { id, running, .. },
+                TurnEvent::SubagentLaunched { .. },
+                TurnEvent::SubagentEnded { status: SubagentStatus::Completed, .. },
+            ] => {
                 assert_eq!(id, "toolu_01V5MTb3GuRtNbUVUSkSgWDz");
                 assert!(!*running);
             }
-            other => panic!("expected [Answered, Subagent], got {other:?}"),
+            other => panic!("expected [Answered, Subagent, Launched, Ended], got {other:?}"),
         }
     }
 
@@ -937,12 +1017,16 @@ mod tests {
             other => panic!("expected [Did, Subagent], got {other:?}"),
         }
         match parse_line(line(SUBAGENTS, 3)).as_slice() {
-            [TurnEvent::Answered { .. }, TurnEvent::Subagent { id, description, running }] => {
+            [
+                TurnEvent::Answered { .. },
+                TurnEvent::Subagent { id, description, running },
+                TurnEvent::SubagentLaunched { .. },
+            ] => {
                 assert_eq!(id, "toolu_015abdB6hcuQYTnrL45JDDYm");
                 assert!(*running, "the agent is still going; only its launch came back");
                 assert_eq!(description, "Document the native backend", "restated on an async launch");
             }
-            other => panic!("expected [Answered, Subagent], got {other:?}"),
+            other => panic!("expected [Answered, Subagent, Launched] with no end, got {other:?}"),
         }
     }
 
@@ -956,6 +1040,11 @@ mod tests {
             vec![
                 TurnEvent::Answered { id: "toolu_x".to_string() },
                 TurnEvent::Subagent { id: "toolu_x".to_string(), description: String::new(), running: false },
+                TurnEvent::SubagentLaunched { id: "toolu_x".to_string(), agent_id: "a000000000000000c".to_string() },
+                TurnEvent::SubagentEnded {
+                    agent_id: "a000000000000000c".to_string(),
+                    status: SubagentStatus::Stopped,
+                },
             ]
         );
     }
