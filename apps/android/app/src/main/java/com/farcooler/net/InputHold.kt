@@ -78,6 +78,8 @@ class InputHold {
     private var pending = ByteArray(0)
     /** Typed while a Try again was in flight, past [CAP], and dropped. */
     private var droppedPending = false
+    /** A Try again is in flight. Only then is [pending] capped. */
+    private var retrying = false
     private var sending = false
     private var epoch = 0
 
@@ -106,7 +108,16 @@ class InputHold {
     suspend fun retry(send: suspend (ByteArray) -> WriteOutcome) {
         if (held.isEmpty() || sending) return
         sending = true
+        retrying = true
         val mine = epoch
+        try {
+            retryFlight(send, mine)
+        } finally {
+            if (mine == epoch) retrying = false
+        }
+    }
+
+    private suspend fun retryFlight(send: suspend (ByteArray) -> WriteOutcome, mine: Int) {
         val outcome = try {
             send(held)
         } finally {
@@ -156,6 +167,7 @@ class InputHold {
     fun paneClosed() {
         epoch++
         sending = false
+        retrying = false
         clearHeld()
         pending = ByteArray(0)
         droppedPending = false
@@ -191,8 +203,17 @@ class InputHold {
         }
     }
 
-    /** Queue typed keys behind a write in flight, at most [CAP] bytes, the earliest kept. */
+    /**
+     * Queue typed keys behind a write in flight. During a Try again flight at
+     * most [CAP] bytes of them are kept, the earliest, because they may become
+     * held. Otherwise there is no cap: a paste over 4 KB goes out whole, and its
+     * closing bracketed-paste marker with it.
+     */
     private fun keepPending(bytes: ByteArray) {
+        if (!retrying) {
+            pending += bytes
+            return
+        }
         val room = maxOf(0, CAP - pending.size)
         if (bytes.size > room) droppedPending = true
         pending += bytes.copyOf(minOf(room, bytes.size))

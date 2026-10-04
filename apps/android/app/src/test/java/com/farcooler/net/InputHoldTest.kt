@@ -145,6 +145,25 @@ class InputHoldTest {
     }
 
     @Test
+    fun anIdleHoldWritesAllOfAPasteOverTheCap() = runBlocking {
+        val hold = InputHold()
+        val runner = FakeRunner()
+        hold.type(ByteArray(10_000) { 'y'.code.toByte() }, runner::write)
+        assertEquals("a paste is not a retry's flight; none of it is cut", listOf(10_000), runner.sent.map { it.size })
+        assertNull("nothing was dropped, so nothing is said", hold.line.value)
+    }
+
+    @Test
+    fun keysTypedDuringAnOrdinaryWriteAreNotCapped() = runBlocking {
+        val hold = InputHold()
+        val runner = FakeRunner()
+        runner.onSend = { hold.type(ByteArray(10_000) { 'y'.code.toByte() }, runner::write) }
+        hold.type(b("a"), runner::write)
+        assertEquals(listOf(1, 10_000), runner.sent.map { it.size })
+        assertNull(hold.line.value)
+    }
+
+    @Test
     fun aClosedPaneDropsTheHoldAndAnythingInFlight() = runBlocking {
         val hold = InputHold()
         val runner = FakeRunner(never, WriteOutcome.Written)

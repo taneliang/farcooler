@@ -71,6 +71,8 @@ public final class InputHold: ObservableObject {
     private var pending: [UInt8] = []
     /// Typed while a Try Again was in flight, past `cap`, and dropped.
     private var droppedPending = false
+    /// A Try Again is in flight. Only then is `pending` capped.
+    private var retrying = false
     private var sending = false
     private var epoch = 0
 
@@ -95,7 +97,9 @@ public final class InputHold: ObservableObject {
     public func retry(send: ([UInt8]) async -> WriteOutcome) async {
         guard !held.isEmpty, !sending else { return }
         sending = true
+        retrying = true
         let mine = epoch
+        defer { if mine == epoch { retrying = false } }
         let outcome = await send(held)
         sending = false
         guard mine == epoch else { return }
@@ -133,6 +137,7 @@ public final class InputHold: ObservableObject {
     public func paneClosed() {
         epoch += 1
         sending = false
+        retrying = false
         clearHeld()
         pending = []
         droppedPending = false
@@ -179,9 +184,15 @@ public final class InputHold: ObservableObject {
         sending = false
     }
 
-    /// Queue typed keys behind a write in flight, at most `cap` bytes of them:
-    /// the earliest are kept, as in `absorb`.
+    /// Queue typed keys behind a write in flight. During a Try Again flight at
+    /// most `cap` bytes of them are kept, the earliest, as in `absorb`, because
+    /// they may become held. Otherwise there is no cap: a paste over 4 KB goes
+    /// out whole, and its closing bracketed-paste marker with it.
     private func keepPending(_ bytes: [UInt8]) {
+        guard retrying else {
+            pending += bytes
+            return
+        }
         let room = max(0, Self.cap - pending.count)
         if bytes.count > room { droppedPending = true }
         pending += bytes.prefix(room)
