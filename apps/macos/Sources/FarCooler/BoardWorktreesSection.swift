@@ -109,7 +109,7 @@ struct BoardWorktreesSection: View {
                 .id(NavigatorItem.worktree(worktree.id))
                 ForEach(worktrees.worktreeTerminals[worktree.id] ?? []) { terminal in
                     BoardWorktreeTerminalRow(
-                        terminal: terminal, selected: terminal.id == worktrees.selectedTerminal, keyed: keyed,
+                        terminal: terminal, name: worktree.name(of: terminal), selected: terminal.id == worktrees.selectedTerminal, keyed: keyed,
                         onOpen: { worktrees.onOpenTerminal(worktree, terminal) })
                 }
             }
@@ -231,6 +231,8 @@ private struct BoardWorktreeRow: View {
 /// and name at the worktree's text column, and its status.
 private struct BoardWorktreeTerminalRow: View {
     let terminal: Terminal
+    /// Its label, numbered from the second alike (`Worktree.name(of:)`).
+    let name: String
     let selected: Bool
     let keyed: Bool
     let onOpen: () -> Void
@@ -242,10 +244,11 @@ private struct BoardWorktreeTerminalRow: View {
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.secondary)
                     .glyphColumn()
-                Text(terminal.label)
+                Text(name)
                     .font(.system(size: WorkspaceStyle.PaneText.body))
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    .identified("board-worktree-terminal-name-\(terminal.id)")
                 Spacer(minLength: SidebarGrid.gap)
                 StatusGlyph(status: terminal.status)
                     .help(terminal.status.label)
@@ -253,7 +256,7 @@ private struct BoardWorktreeTerminalRow: View {
             .navigatorRow(selected: selected, keyed: keyed)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(terminal.label)
+        .accessibilityLabel(name)
         .accessibilityValue(terminal.status.label)
         .accessibilityAddTraits(selected ? .isSelected : [])
         .identified("board-worktree-terminal-\(terminal.id)")

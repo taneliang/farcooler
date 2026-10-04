@@ -310,7 +310,7 @@ enum PaletteIndex {
         PaletteEntry(
             id: "terminal:\(terminal.id)",
             action: .openTerminal(worktree: worktree.id, terminal: terminal.id),
-            title: terminal.label,
+            title: worktree.name(of: terminal),
             detail: path(to: worktree),
             terminal: terminal,
             kind: "terminal")

@@ -279,7 +279,7 @@ enum JumpMenus {
         func pane(_ t: Terminal) -> PaneRef { PaneRef(host: host, worktree: worktree.id, terminal: t.id) }
         func item(_ t: Terminal) -> JumpItem {
             JumpItem(
-                id: "term|\(t.id)", title: t.label, subtitle: Terminal.name(of: t.preset), status: t.status,
+                id: "term|\(t.id)", title: worktree.name(of: t), subtitle: Terminal.name(of: t.preset), status: t.status,
                 current: named == pane(t), target: .go(ContentView.opening(worktree, terminal: t.id, in: fleet)))
         }
         func isLost(_ t: Terminal) -> Bool { LostPane.Kind(state: t.state) == .lost }

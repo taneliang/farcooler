@@ -33,7 +33,7 @@ struct TerminalCrumb: Equatable {
                     return item
                 }, more: section.more)
         }
-        return TerminalCrumb(title: terminal.label, siblings: sections)
+        return TerminalCrumb(title: worktree.name(of: terminal), siblings: sections)
     }
 }
 
