@@ -43,7 +43,7 @@ struct TitleStatusWidthTests {
         let window = try await Harness.window(Self.root(Harness.Words()), width: width)
         defer { window.close() }
         let status = try #require(Harness.status(in: window), "no status area in the toolbar at \(width)")
-        #expect(status.width == form.width, "at \(width): \(status.width) wide, not \(form)'s \(form.width)")
+        #expect(status.width == form.width, "at \(width): \(status.width) wide, not \(form)'s \(form.width); window \(window.frame), content \(window.contentLayoutRect), screens \(NSScreen.screens.map(\.frame))")
         #expect(status.item >= status.width, "at \(width): the item is \(status.item), its content \(status.width)")
         #expect(Harness.itemsShown(in: window) == everything, "at \(width) an item went to the overflow menu")
         let switcher = try #require(Harness.switcher(in: window))
