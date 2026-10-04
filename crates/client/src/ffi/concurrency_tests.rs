@@ -13,13 +13,25 @@ use farcooler_transport::{Connection, HandshakeConfig, Handler, Peer, serve_conn
 
 use super::*;
 
-/// A runner that answers everything at once, except `changes.file_diff`,
-/// which waits until `release` is notified. Keeps what was typed, in the
-/// order it ran — which for one pane is the order it arrived.
-struct Stalling {
-    release: Arc<tokio::sync::Notify>,
-    typed: Arc<std::sync::Mutex<Vec<u8>>>,
+/// What the stand-in runner is holding back, and what it has seen.
+#[derive(Default)]
+struct Stalls {
+    /// Releases `changes.file_diff`.
+    release: tokio::sync::Notify,
+    /// Set once a diff has reached the runner.
+    diffing: std::sync::atomic::AtomicBool,
+    /// Releases `terminal.paste_file`.
+    paste: tokio::sync::Notify,
+    /// Set once a paste has reached the runner.
+    pasting: std::sync::atomic::AtomicBool,
+    /// What was typed, in the order it ran — for one pane, the order it
+    /// arrived. A finished paste shows as `<paste>`.
+    typed: std::sync::Mutex<Vec<u8>>,
 }
+
+/// A runner that answers everything at once, except a diff and a paste,
+/// which wait until they are released.
+struct Stalling(Arc<Stalls>);
 
 impl Handler for Stalling {
     fn peer(&self) -> Peer {
@@ -27,14 +39,37 @@ impl Handler for Stalling {
     }
 
     async fn handle(&self, req: Request) -> Response {
+        let stalls = &self.0;
         if let Some(pb::request::Payload::TerminalWrite(w)) = &req.payload {
-            locked(&self.typed).extend_from_slice(&w.payload);
+            locked(&stalls.typed).extend_from_slice(&w.payload);
         }
-        let value = if req.method == "changes.file_diff" {
-            self.release.notified().await;
-            result::Value::FileDiff(pb::FileDiff::default())
-        } else {
-            result::Value::Empty(pb::Empty {})
+        let value = match req.method.as_str() {
+            "changes.file_diff" => {
+                stalls.diffing.store(true, std::sync::atomic::Ordering::SeqCst);
+                stalls.release.notified().await;
+                result::Value::FileDiff(pb::FileDiff::default())
+            }
+            // The first chunk waits to be released. The last one "types" the
+            // path, as the daemon does.
+            "terminal.paste_file" => {
+                let Some(pb::request::Payload::TerminalFilePut(put)) = &req.payload else {
+                    panic!("a paste with no chunk");
+                };
+                if put.offset == 0 {
+                    stalls.pasting.store(true, std::sync::atomic::Ordering::SeqCst);
+                    stalls.paste.notified().await;
+                }
+                let stored = put.offset + put.chunk.len() as u64;
+                let done = stored == put.total_size;
+                if done {
+                    locked(&stalls.typed).extend_from_slice(b"<paste>");
+                }
+                result::Value::TerminalFilePut(pb::TerminalFilePutResult {
+                    stored,
+                    path: done.then(|| "/tmp/pasted.png".to_string()),
+                })
+            }
+            _ => result::Value::Empty(pb::Empty {}),
         };
         Response {
             request_id: req.request_id,
@@ -43,28 +78,11 @@ impl Handler for Stalling {
     }
 }
 
-/// Serve one connection on `socket` with `Stalling`. Aborting the handle
-/// drops the connection, as a runner that went away does.
-async fn a_runner_that_stalls_diffs(
-    socket: &std::path::Path,
-    release: Arc<tokio::sync::Notify>,
-    typed: Arc<std::sync::Mutex<Vec<u8>>>,
-) -> tokio::task::JoinHandle<()> {
-    let listener = tokio::net::UnixListener::bind(socket).expect("bind");
-    tokio::spawn(async move {
-        let Ok((stream, _)) = listener.accept().await else { return };
-        let (read, write) = stream.into_split();
-        let mut conn = Connection::new(read, write);
-        let cfg = HandshakeConfig { daemon_version: "stalling".into() };
-        let _ = serve_connection(&mut conn, &cfg, &Stalling { release, typed }).await;
-    })
-}
-
-/// A handle connected to a `Stalling` runner.
+/// A handle connected to a `Stalling` runner. Aborting `runner` drops the
+/// connection, as a runner that went away does.
 struct Rig {
     handle: *mut c_void,
-    release: Arc<tokio::sync::Notify>,
-    typed: Arc<std::sync::Mutex<Vec<u8>>>,
+    stalls: Arc<Stalls>,
     runner: tokio::task::JoinHandle<()>,
     _dir: tempfile::TempDir,
 }
@@ -73,15 +91,31 @@ fn rig() -> Rig {
     let handle = farcooler_client_new();
     let dir = tempfile::tempdir().unwrap();
     let socket = dir.path().join("runner.sock");
-    let release = Arc::new(tokio::sync::Notify::new());
-    let typed = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let stalls = Arc::new(Stalls::default());
     let h = unsafe { as_handle(handle) }.unwrap();
+    let serving = Arc::clone(&stalls);
     let (runner, session) = h.runtime.block_on(async {
-        let runner = a_runner_that_stalls_diffs(&socket, Arc::clone(&release), Arc::clone(&typed)).await;
+        let listener = tokio::net::UnixListener::bind(&socket).expect("bind");
+        let runner = tokio::spawn(async move {
+            let Ok((stream, _)) = listener.accept().await else { return };
+            let (read, write) = stream.into_split();
+            let mut conn = Connection::new(read, write);
+            let cfg = HandshakeConfig { daemon_version: "stalling".into() };
+            let _ = serve_connection(&mut conn, &cfg, &Stalling(serving)).await;
+        });
         (runner, Session::connect_local(&socket).await.expect("connect"))
     });
     h.put_session(session);
-    Rig { handle, release, typed, runner, _dir: dir }
+    Rig { handle, stalls, runner, _dir: dir }
+}
+
+/// Wait until `flag` is set. A bound for a hang, not a measurement.
+fn until(flag: &std::sync::atomic::AtomicBool) {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while !flag.load(std::sync::atomic::Ordering::SeqCst) {
+        assert!(Instant::now() < deadline, "the runner never saw it");
+        std::thread::sleep(Duration::from_millis(2));
+    }
 }
 
 fn call(handle: *mut c_void, method: &str, args: Value) -> u64 {
@@ -94,9 +128,10 @@ fn a_diff(handle: *mut c_void) -> u64 {
     call(handle, "changes.file_diff", json!({ "worktree": uuid::Uuid::now_v7().to_string(), "path": "big.rs" }))
 }
 
-/// Whether `line` answers `ticket`.
+/// Whether `line` answers `ticket` — the answer, not a paste's progress.
 fn is_for(line: &str, ticket: u64) -> bool {
-    serde_json::from_str::<Value>(line).ok().and_then(|v| v["ticket"].as_u64()) == Some(ticket)
+    let Ok(v) = serde_json::from_str::<Value>(line) else { return false };
+    v["ticket"].as_u64() == Some(ticket) && v.get("progress").is_none()
 }
 
 /// The first line on `handle`'s queue for `ticket`, or `None` by `deadline`.
@@ -120,22 +155,63 @@ fn a_keystroke_is_answered_while_a_slow_diff_is_outstanding() {
     let terminal = uuid::Uuid::now_v7();
 
     let slow = a_diff(rig.handle);
-    // Let the diff reach the runner first, so the keystroke really is behind it.
-    std::thread::sleep(Duration::from_millis(50));
-    let started = Instant::now();
+    // Not typed until the runner is working on the diff, so the key really is
+    // behind it.
+    until(&rig.stalls.diffing);
     let typed = call(rig.handle, "terminal.write", json!({ "terminal": terminal.to_string(), "hex": "6c73" }));
 
-    let answer = answer_for(rig.handle, typed, started + Duration::from_secs(3));
-    let took = started.elapsed();
+    // No clock in the verdict: the diff is released only after the key is
+    // answered, so a key queued behind it is never answered. The bound turns
+    // that into a failure, and is generous because reaching it IS the failure.
+    let answer = answer_for(rig.handle, typed, Instant::now() + Duration::from_secs(60));
     let answer = answer.expect("the keystroke waited behind the diff");
     assert!(answer.contains("\"ok\":true"), "got {answer}");
-    assert!(took < Duration::from_secs(1), "the keystroke took {took:?}");
 
     // The diff is still outstanding, and still answered once released.
-    rig.release.notify_one();
-    let diff = answer_for(rig.handle, slow, Instant::now() + Duration::from_secs(5)).expect("the diff answered");
+    rig.stalls.release.notify_one();
+    let diff = answer_for(rig.handle, slow, Instant::now() + Duration::from_secs(60)).expect("the diff answered");
     assert!(diff.contains("\"ok\":true"), "got {diff}");
 
+    unsafe { farcooler_client_free(rig.handle) };
+}
+
+#[test]
+fn a_key_typed_during_a_paste_arrives_after_it() {
+    // The path a paste types is the end of the paste, and a key typed while
+    // the image uploads was typed after it. The runner keeps one pane's
+    // requests in order, but a paste is several: a key sent while the first
+    // chunk is with the runner would land between two chunks, ahead of the
+    // path.
+    let rig = rig();
+    let terminal = uuid::Uuid::now_v7();
+    let image = vec![7u8; farcooler_protocol::PASTE_CHUNK_BYTES * 2 + 1];
+    let pasted = unsafe {
+        farcooler_client_paste_file(
+            rig.handle,
+            std::ffi::CString::new(terminal.to_string()).unwrap().as_ptr(),
+            c"shot.png".as_ptr(),
+            c"image/png".as_ptr(),
+            image.as_ptr(),
+            image.len(),
+        )
+    };
+    until(&rig.stalls.pasting);
+    let typed = call(rig.handle, "terminal.write", json!({ "terminal": terminal.to_string(), "hex": "78" }));
+    rig.stalls.paste.notify_one();
+
+    let mut waiting = vec![pasted, typed];
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while !waiting.is_empty() {
+        assert!(Instant::now() < deadline, "unanswered: {waiting:?}");
+        match unsafe { farcooler_client_poll(rig.handle).as_ref() } {
+            Some(line) => {
+                let line = unsafe { CStr::from_ptr(line) }.to_str().unwrap();
+                waiting.retain(|t| !is_for(line, *t));
+            }
+            None => std::thread::sleep(Duration::from_millis(2)),
+        }
+    }
+    assert_eq!(String::from_utf8(locked(&rig.stalls.typed).clone()).unwrap(), "<paste>x");
     unsafe { farcooler_client_free(rig.handle) };
 }
 
@@ -151,12 +227,12 @@ fn keys_arrive_in_the_order_they_were_sent() {
         last = call(rig.handle, "terminal.write", json!({ "terminal": terminal, "hex": format!("{byte:02x}") }));
     }
     // Answers come back in any order; the last key's is not the last answer.
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while locked(&rig.typed).len() < sent.len() && Instant::now() < deadline {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while locked(&rig.stalls.typed).len() < sent.len() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(5));
     }
     assert_ne!(last, 0);
-    assert_eq!(String::from_utf8(locked(&rig.typed).clone()).unwrap(), String::from_utf8(sent).unwrap());
+    assert_eq!(String::from_utf8(locked(&rig.stalls.typed).clone()).unwrap(), String::from_utf8(sent).unwrap());
     unsafe { farcooler_client_free(rig.handle) };
 }
 
@@ -165,10 +241,12 @@ fn a_runner_that_goes_away_fails_every_waiting_call_promptly() {
     let rig = rig();
     let first = a_diff(rig.handle);
     let second = a_diff(rig.handle);
-    std::thread::sleep(Duration::from_millis(50));
+    until(&rig.stalls.diffing);
 
     rig.runner.abort();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    // Well inside the diffs' own two-minute deadline, which is what they
+    // would otherwise wait out.
+    let deadline = Instant::now() + Duration::from_secs(60);
     let mut answers = vec![];
     while answers.len() < 2 && Instant::now() < deadline {
         if let Some(line) = unsafe { farcooler_client_poll(rig.handle).as_ref() } {

@@ -71,6 +71,8 @@ pub struct ClientHandle {
     /// functions a caller interleaves freely, and one slot would mean a poll
     /// invalidating an event's pointer under a caller that had not read it yet.
     event_scratch: Option<std::ffi::CString>,
+    /// Each terminal's input, in the order it was sent. See `calls::Lanes`.
+    lanes: calls::Lanes,
 }
 
 /// The largest number of distinct notices held for a client that is not
@@ -273,6 +275,7 @@ pub extern "C" fn farcooler_client_new() -> *mut c_void {
             streams: Arc::new(Mutex::new(std::collections::HashMap::new())),
             events: Arc::new(Mutex::new(EventQueue::default())),
             event_scratch: None,
+            lanes: calls::Lanes::default(),
         });
         Box::into_raw(handle) as *mut c_void
     })
@@ -369,13 +372,15 @@ pub unsafe extern "C" fn farcooler_client_call(
         let finished = Arc::clone(&h.finished);
         let current = locked(&slot).clone();
         let parsed: Value = serde_json::from_str(&args).unwrap_or(json!({}));
-        // Input goes on the wire here, before this returns. See `calls::queue`.
-        let queued = current.as_deref().and_then(|s| calls::queue(s, &method, &parsed));
+        // Input takes its turn here, before this returns. See `calls::Lanes`.
+        let queued = current
+            .as_ref()
+            .and_then(|s| calls::queue_in_turn(&h.lanes, h.runtime.handle(), s, &method, &parsed));
 
         h.runtime.spawn(async move {
             let outcome = match (current.as_deref(), queued) {
                 (None, _) => Err(Lost::Already),
-                (Some(_), Some(queued)) => calls::answered(queued).await.map_err(Lost::Call),
+                (Some(_), Some(queued)) => calls::answered_in_turn(queued).await.map_err(Lost::Call),
                 (Some(session), None) => dispatch(session, &method, &parsed).await.map_err(Lost::Call),
             };
 
@@ -453,8 +458,15 @@ pub unsafe extern "C" fn farcooler_client_paste_file(
         let slot = Arc::clone(&h.session);
         let finished = Arc::clone(&h.finished);
         let current = locked(&slot).clone();
+        // The terminal's input lane, taken in turn: keys typed after this
+        // paste wait for it. See `calls::Lanes`.
+        let turn = terminal.parse::<uuid::Uuid>().ok().map(|t| h.lanes.hold(h.runtime.handle(), t));
 
         h.runtime.spawn(async move {
+            let held = match turn {
+                Some(turn) => turn.await.ok(),
+                None => None,
+            };
             let outcome = match (current.as_deref(), terminal.parse::<uuid::Uuid>().ok()) {
                 (None, _) => Err(Lost::Already),
                 (Some(_), None) => {
@@ -475,6 +487,7 @@ pub unsafe extern "C" fn farcooler_client_paste_file(
                 }
             };
 
+            drop(held);
             // Same rule as `farcooler_client_call`: a dead link is every future
             // call's problem, not just this one's.
             let lost = match &outcome {
