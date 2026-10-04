@@ -510,6 +510,17 @@ pub mod capability {
     /// client that reads it absent says the runner needs an update to manage
     /// queued messages, rather than offering controls that can only fail.
     pub const AGENT_QUEUE: &str = "agent_queue";
+    /// The plan layer (ov-268): `plan.get`, `plan.set`, `plan.events`,
+    /// `board_theme.*`, `lane.*` and the `plan_changed` event.
+    ///
+    /// **Experimental, and it may be withdrawn.** Themes, lanes and the plan
+    /// sit beside the board, never in it: no task carries a field of the layer,
+    /// so removing it changes nothing a task says. Its own capability because
+    /// no runner before this one has any of the methods: a client that reads it
+    /// absent hides the Plan view and a CLI refuses before sending, saying the
+    /// runner needs an update to keep a plan. Needs `workstreams`, since a board
+    /// here is a workspace's.
+    pub const BOARD_PLAN: &str = "board_plan";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -523,7 +534,7 @@ pub mod capability {
             NEEDS_YOU, WAKE_ON_ANSWER, STREAM_SIZE_MARKERS, TASK_NOTICES, REPORT, AGENT_USAGE,
             AGENTS_FOUND,
             TASK_WAITS, TASK_WORKERS, NOTICE_TASK, BOARD_READS, WORKTREE_FILES, TERMINAL_NAMES, TERMINAL_PORTS,
-            READ_ONLY_FOLDERS, AGENT_QUEUE,
+            READ_ONLY_FOLDERS, AGENT_QUEUE, BOARD_PLAN,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
@@ -699,6 +710,16 @@ pub mod method {
         WorktreeListDir = "worktree.list_dir" => WORKTREE_FILES,
         WorktreeReadFile = "worktree.read_file" => WORKTREE_FILES,
         TerminalRename = "terminal.rename" => TERMINAL_NAMES,
+        PlanGet = "plan.get" => BOARD_PLAN,
+        PlanSet = "plan.set" => BOARD_PLAN,
+        PlanEvents = "plan.events" => BOARD_PLAN,
+        BoardThemeCreate = "board_theme.create" => BOARD_PLAN,
+        BoardThemeUpdate = "board_theme.update" => BOARD_PLAN,
+        BoardThemeCards = "board_theme.cards" => BOARD_PLAN,
+        LaneCreate = "lane.create" => BOARD_PLAN,
+        LaneUpdate = "lane.update" => BOARD_PLAN,
+        LaneCards = "lane.cards" => BOARD_PLAN,
+        LaneAgent = "lane.agent" => BOARD_PLAN,
     }
 }
 
@@ -748,6 +769,8 @@ pub const MAX_ROWS: u32 = 200;
 
 #[cfg(test)]
 mod board_reads_tests;
+#[cfg(test)]
+mod plan_layer_tests;
 #[cfg(test)]
 mod task_starts_tests;
 

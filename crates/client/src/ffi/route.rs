@@ -137,6 +137,20 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         | Method::TerminalSetRole
         // Naming a terminal (ov-234): the phones show the name and do not set it.
         | Method::TerminalRename => None,
+        // The plan layer (ov-268) is experimental and has no phone screen yet:
+        // the CLI writes it and the Mac's Plan view reads it. The phones' Plan
+        // view (P5) routes `plan.get` and `plan.events`; neither will ever
+        // route a write, since the orchestrator is the layer's one writer.
+        Method::PlanGet
+        | Method::PlanSet
+        | Method::PlanEvents
+        | Method::BoardThemeCreate
+        | Method::BoardThemeUpdate
+        | Method::BoardThemeCards
+        | Method::LaneCreate
+        | Method::LaneUpdate
+        | Method::LaneCards
+        | Method::LaneAgent => None,
         // The CLI reads it today; the Summary page (ov-188 phase 3) will
         // route it here.
         Method::ReportGet => None,

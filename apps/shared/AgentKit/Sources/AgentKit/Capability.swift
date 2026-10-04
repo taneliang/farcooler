@@ -41,4 +41,5 @@ public enum Capability: String, CaseIterable, Sendable {
     case terminalPorts = "terminal_ports"
     case readOnlyFolders = "read_only_folders"
     case agentQueue = "agent_queue"
+    case boardPlan = "board_plan"
 }

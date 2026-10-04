@@ -54,5 +54,9 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::BoardReads(_) => "board_reads",
         result::Value::WorktreeDir(_) => "worktree_dir",
         result::Value::WorktreeFile(_) => "worktree_file",
+        result::Value::BoardThemeView(_) => "board_theme_view",
+        result::Value::Lane(_) => "lane",
+        result::Value::Plan(_) => "plan",
+        result::Value::PlanEventList(_) => "plan_event_list",
     }
 }

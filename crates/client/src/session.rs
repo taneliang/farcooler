@@ -335,6 +335,10 @@ impl FleetEvent {
             // A task notice (ov-94): the phones hear it as a push from the
             // relay, which their notification code draws; nothing to re-read.
             Payload::Notice(_) => None,
+            // The plan layer (ov-268) is the Mac's and the CLI's for now: no
+            // phone screen reads it, so there is nothing to re-read. The
+            // phones' Plan view (P5) turns this into news.
+            Payload::PlanChanged(_) => None,
             // Reserved arms no daemon emits yet. Named one by one rather than
             // swept up by `_` so that the day a NEW variant is added to this
             // oneof, this match stops compiling (E0004) and somebody decides

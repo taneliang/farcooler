@@ -207,6 +207,20 @@ message Request {
     // `terminal.rename` (ov-234), behind `terminal_names`. Tags from 140, so a
     // lane adding methods beside the 130s cannot collide.
     TerminalRename terminal_rename = 140;
+    // The plan layer (ov-268), behind `board_plan`: themes, lanes and the
+    // plan. Experimental: it may be withdrawn, and 160-169 are reserved for
+    // it so withdrawing it never frees a tag for another meaning. Tags from
+    // 160 because 120, 130, 140 and 150 are taken by other lanes' methods.
+    PlanGetRequest plan_get = 160;
+    BoardThemeCreate board_theme_create = 161;
+    BoardThemeUpdate board_theme_update = 162;
+    BoardThemeCards board_theme_cards = 163;
+    LaneCreate lane_create = 164;
+    LaneUpdate lane_update = 165;
+    LaneCards lane_cards = 166;
+    LaneAgentSet lane_agent_set = 167;
+    PlanSet plan_set = 168;
+    PlanEventsRequest plan_events = 169;
   }
 }
 
@@ -303,6 +317,13 @@ message Result {
     // `worktree.list_dir` and `worktree.read_file`, behind `worktree_files`.
     WorktreeDir worktree_dir = 150;
     WorktreeFile worktree_file = 151;
+    // The plan layer (ov-268), behind `board_plan`. `board_theme.*` answer
+    // with the theme, `lane.*` with the lane, `plan.get` and `plan.set` with
+    // the whole plan, and `plan.events` with a timeline.
+    BoardThemeView board_theme_view = 160;
+    Lane lane = 161;
+    Plan plan = 162;
+    PlanEventList plan_event_list = 163;
   }
 }
 
@@ -628,6 +649,12 @@ message Event {
     // Not `task_changed`: nothing about a task moved, and that event wakes
     // managers and makes every board re-read.
     BoardReads board_reads_changed = 26;
+    // The plan layer on a board changed (ov-268), behind `board_plan`: a
+    // theme, a lane or the plan was written. Not `task_changed`: nothing about
+    // a task moved, and that event wakes managers. A client with the Plan view
+    // open re-reads `plan.get`; one without it ignores this. A runner without
+    // the capability never sends it.
+    PlanChanged plan_changed = 27;
   }
 }
 
@@ -3784,4 +3811,327 @@ message TaskUsage {
   // The same, by harness and model.
   repeated UsageGroup by_harness_model = 3;
   string price_table = 4;
+}
+
+// ---------------------------------------------------------------------------
+// The plan layer (ov-268)
+//
+// Themes, lanes and the plan, beside the board and not in it, behind the
+// `board_plan` capability, which is EXPERIMENTAL and may be withdrawn. Every
+// message here is new, and none of them is a field of an existing message: a
+// task carries nothing about the layer, because the layer points at tasks and
+// tasks never point back. That is what lets it be removed (the removal marks
+// request tags 160-169, result tags 160-163 and event tag 27 `reserved`).
+//
+// A THEME is why a group of cards exists: a one-sentence outcome, a short
+// story the orchestrator rewrites at checkpoints, what is next, and what needs
+// the owner. A card is in at most one theme. A LANE is one unit of execution:
+// an agent, or a chain of them, in one worktree on one branch, working whole
+// cards or slices of them. The PLAN is the ordered list of queued lanes.
+//
+// Named `BoardTheme` here because `Theme` is the terminal color theme. Refusals
+// are `Error.what` words: `name`, `name_taken`, `other_board`, `lane_state`,
+// `lane_closed`, `lane_twice`, `plan_state`, `harness`, `agent_id`, `actor`,
+// `outcome`, `story`, `next`, `owner_ask`, `reason`, `train`, `sha`, `path`,
+// `branch`, `model`, `slice`.
+// ---------------------------------------------------------------------------
+
+enum BoardThemeState {
+  BOARD_THEME_STATE_UNSPECIFIED = 0;
+  BOARD_THEME_STATE_ACTIVE = 1;
+  BOARD_THEME_STATE_PAUSED = 2;
+  BOARD_THEME_STATE_DONE = 3;
+  // Given up; its name is free again and it leaves the plan read.
+  BOARD_THEME_STATE_DROPPED = 4;
+}
+
+// Where a lane is. Moves go forward, with two loops: review to fixing and
+// back, and landing to fixing. Any live state may be dropped.
+enum LaneState {
+  LANE_STATE_UNSPECIFIED = 0;
+  LANE_STATE_QUEUED = 1;
+  LANE_STATE_BUILDING = 2;
+  LANE_STATE_REVIEW = 3;
+  LANE_STATE_FIXING = 4;
+  LANE_STATE_LANDING = 5;
+  LANE_STATE_LANDED = 6;
+  LANE_STATE_DROPPED = 7;
+}
+
+enum LaneAgentRole {
+  LANE_AGENT_ROLE_UNSPECIFIED = 0;
+  LANE_AGENT_ROLE_BUILD = 1;
+  LANE_AGENT_ROLE_REVIEW = 2;
+  LANE_AGENT_ROLE_FIX = 3;
+}
+
+message BoardTheme {
+  bytes id = 1;
+  bytes workspace_id = 2;
+  string name = 3;
+  // One sentence: the world when it is done.
+  string outcome = 4;
+  // Where it stands, in a few sentences, rewritten at checkpoints. The old
+  // story is kept in `plan.events`.
+  string story = 5;
+  // What happens next, in one line.
+  string next = 6;
+  // What needs the owner, in one line; empty when nothing does.
+  string owner_ask = 7;
+  BoardThemeState state = 8;
+  int64 ordinal = 9;
+  // When `story` was last written, in ms; 0 if never.
+  int64 story_at = 10;
+  int64 created_at = 11;
+  uint64 resource_version = 12;
+}
+
+// How many of a theme's cards are in each status, using the board's own.
+message PlanStatusCounts {
+  uint32 backlog = 1;
+  uint32 todo = 2;
+  uint32 needs_decision = 3;
+  uint32 in_progress = 4;
+  uint32 in_review = 5;
+  uint32 done = 6;
+  uint32 cancelled = 7;
+}
+
+// A theme with its cards and how far along they are. Derived on read.
+message BoardThemeView {
+  BoardTheme theme = 1;
+  repeated bytes task_ids = 2;
+  PlanStatusCounts counts = 3;
+}
+
+// A card a lane works, or one slice of it.
+message LaneCard {
+  bytes task_id = 1;
+  // Empty when the lane works the whole card.
+  string slice = 2;
+}
+
+message LaneAgent {
+  // `claude` or `codex`.
+  string harness = 1;
+  string agent_id = 2;
+  LaneAgentRole role = 3;
+  string model = 4;
+  int64 started_at = 5;
+  optional int64 ended_at = 6;
+}
+
+// What a lane's agents have spent, from the runner's own record of their
+// turns. Tokens first: dollars are notional on a subscription. An agent the
+// runner has read no turn of (every codex agent, and a Claude one before its
+// first turn) is counted in `unmeasured_agents`: a client says "Not reported"
+// for it, never zero.
+message LaneSpend {
+  uint64 input_tokens = 1;
+  uint64 output_tokens = 2;
+  uint64 cache_read_tokens = 3;
+  uint64 cache_write_tokens = 4;
+  // Millionths of a US dollar; absent when no model's price is known.
+  optional int64 cost_micros = 5;
+  uint32 runs = 6;
+  uint32 unmeasured_agents = 7;
+}
+
+message Lane {
+  bytes id = 1;
+  bytes workspace_id = 2;
+  string name = 3;
+  LaneState state = 4;
+  // One line: why it is in the plan, or why it is where it is now.
+  string reason = 5;
+  // 1 is next up; absent outside the plan.
+  optional uint32 plan_rank = 6;
+  optional bytes worktree_id = 7;
+  // The worktree's path as the orchestrator gave it. Empty below `host_admin`.
+  string worktree_path = 8;
+  string branch = 9;
+  string harness = 10;
+  string model = 11;
+  // The train it is landing in, by name.
+  optional string train = 12;
+  optional string landed_sha = 13;
+  int64 state_since = 14;
+  int64 created_at = 15;
+  uint64 resource_version = 16;
+  // From here on, derived on read.
+  repeated LaneCard cards = 17;
+  repeated LaneAgent agents = 18;
+  // How many times it moved into fixing.
+  uint32 fix_rounds = 19;
+  LaneSpend spend = 20;
+  // Sat in one live state for over an hour.
+  bool stale = 21;
+}
+
+// A card a theme or lane names, enough to draw its row.
+message PlanCard {
+  bytes task_id = 1;
+  string key = 2;
+  string title = 3;
+  TaskStatus status = 4;
+}
+
+// One card's lanes: what the reconciliation's NO-LANE and LANDED-NOT-CLOSED
+// are derived from. `live` lanes are not landed or dropped.
+message PlanCoverage {
+  bytes task_id = 1;
+  uint32 live = 2;
+  uint32 landed = 3;
+}
+
+// One read draws every Plan surface.
+message Plan {
+  // The runner's clock, so ages and `stale` agree across devices.
+  int64 now_ms = 1;
+  repeated BoardThemeView themes = 2;
+  // Live lanes, and finished ones from the last week (all of them when the
+  // request said so).
+  repeated Lane lanes = 3;
+  // The queued lanes in the plan, first is next up.
+  repeated bytes order = 4;
+  // Every card any theme or lane names, once.
+  repeated PlanCard cards = 5;
+  repeated PlanCoverage coverage = 6;
+}
+
+// `plan.get`, at `read`.
+message PlanGetRequest {
+  bytes workspace_id = 1;
+  // Include every finished lane, not only the last week's.
+  bool include_closed = 2;
+}
+
+// `board_theme.create`, at `control`. A card already in another theme moves.
+message BoardThemeCreate {
+  bytes workspace_id = 1;
+  string name = 2;
+  string outcome = 3;
+  repeated bytes task_ids = 4;
+  string actor = 5;
+}
+
+// `board_theme.update`, at `control`. Each field present is written; absent
+// is left alone. Writing `story` keeps the old one in `plan.events`. An empty
+// `owner_ask` clears it.
+message BoardThemeUpdate {
+  bytes theme_id = 1;
+  optional string name = 2;
+  optional string outcome = 3;
+  optional string story = 4;
+  optional string next = 5;
+  optional string owner_ask = 6;
+  optional BoardThemeState state = 7;
+  optional int64 ordinal = 8;
+  string actor = 9;
+}
+
+// `board_theme.cards`, at `control`.
+message BoardThemeCards {
+  bytes theme_id = 1;
+  repeated bytes add = 2;
+  repeated bytes remove = 3;
+  string actor = 4;
+}
+
+// An agent to record on a lane, or to fill in what is new about.
+message LaneAgentRecord {
+  string harness = 1;
+  string agent_id = 2;
+  LaneAgentRole role = 3;
+  optional string model = 4;
+  // It finished. Recording it again without this reopens it.
+  bool ended = 5;
+}
+
+// `lane.create`, at `control`. With an agent the lane starts building;
+// without one it starts queued. The agent is also recorded as a worker on
+// the lane's first card that is still open (`task.worker`), which is what
+// makes the runner read its spend.
+message LaneCreate {
+  bytes workspace_id = 1;
+  string name = 2;
+  string reason = 3;
+  repeated LaneCard cards = 4;
+  string worktree_path = 5;
+  string branch = 6;
+  string harness = 7;
+  string model = 8;
+  optional bytes worktree_id = 9;
+  optional LaneAgentRecord agent = 10;
+  string actor = 11;
+}
+
+// `lane.update`, at `control`. Each field present is written. A move must
+// follow the arrows in `LaneState`; a lane that leaves queued loses its place
+// in the plan. An empty `train` takes it out of its train.
+message LaneUpdate {
+  bytes lane_id = 1;
+  optional LaneState state = 2;
+  optional string reason = 3;
+  optional string train = 4;
+  optional string landed_sha = 5;
+  optional string worktree_path = 6;
+  optional string branch = 7;
+  optional bytes worktree_id = 8;
+  // Recorded in the same write as the move, like `lane.agent`.
+  optional LaneAgentRecord agent = 9;
+  string actor = 10;
+}
+
+// `lane.cards`, at `control`.
+message LaneCards {
+  bytes lane_id = 1;
+  repeated LaneCard add = 2;
+  repeated LaneCard remove = 3;
+  string actor = 4;
+}
+
+// `lane.agent`, at `control`: record an agent on a lane, or that it ended.
+message LaneAgentSet {
+  bytes lane_id = 1;
+  LaneAgentRecord agent = 2;
+  string actor = 3;
+}
+
+// `plan.set`, at `control`: replace the plan whole. These queued lanes in
+// this order, and every other lane out of it. Answers with the new `Plan`.
+message PlanSet {
+  bytes workspace_id = 1;
+  repeated bytes lane_ids = 2;
+  string actor = 3;
+}
+
+// `plan.events`, at `read`: one theme's or lane's timeline, oldest first.
+message PlanEventsRequest {
+  oneof subject {
+    bytes theme_id = 1;
+    bytes lane_id = 2;
+  }
+  int64 since_ms = 3;
+}
+
+message PlanEvent {
+  bytes id = 1;
+  int64 at = 2;
+  string actor = 3;
+  // `story`, `state`, `plan`, `cards` or `agent`.
+  string kind = 4;
+  // The sentence a timeline shows; for `story`, the story it replaced.
+  string body = 5;
+  // JSON; for `story`, `{"to": <the new story>}`.
+  string extra_json = 6;
+}
+
+message PlanEventList { repeated PlanEvent events = 1; }
+
+// The plan layer on a board changed; see `Event.plan_changed`.
+message PlanChanged {
+  bytes workspace_id = 1;
+  // As `TaskChanged.actor`, so a manager does not answer its own write.
+  string actor = 2;
 }

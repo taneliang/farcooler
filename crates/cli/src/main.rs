@@ -4991,9 +4991,9 @@ mod tests {
         use farcooler_protocol::v1::Event;
         use prost::Message;
         // Dropped on purpose: `host_changed`, `repository_root_changed`,
-        // `repository_changed`, `operation_changed`, `agent_events` and
-        // `terminal_frame`. See `a_payload_with_no_reader_is_still_dropped`.
-        const NO_READER: &[u32] = &[10, 11, 12, 15, 17, 20];
+        // `repository_changed`, `operation_changed`, `agent_events`, `terminal_frame`
+        // and `plan_changed` (27, until a Plan view reads it). See `a_payload_with_no_reader_is_still_dropped`.
+        const NO_READER: &[u32] = &[10, 11, 12, 15, 17, 20, 27];
         let mut kinds = 0;
         // From 3: tags 1 and 2 are `event_id` and `sequence`, not payloads.
         for tag in 3..256 {
