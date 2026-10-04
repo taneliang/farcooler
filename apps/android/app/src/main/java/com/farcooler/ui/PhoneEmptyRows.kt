@@ -3,7 +3,6 @@ package com.farcooler.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -40,16 +39,15 @@ fun EmptyIcon.vector(): ImageVector = when (this) {
 /**
  * An empty state's icon rows (ov-245): the iPhone's `PhoneEmptyRows`. Each icon
  * sits in a fixed-width column so the words line up, the rows as one
- * leading-aligned block that is always as wide as the cap allows, so every
- * screen's icons share one left edge instead of centering a block as wide as
- * its longest row (ov-266). The lede is the caller's `EmptyState` detail, so it
+ * leading-aligned block as wide as its widest row, centered under the lede
+ * and capped so nothing wraps to a one-word line (ov-266). The lede is the caller's `EmptyState` detail, so it
  * stays where every other empty state's sentence is, with a little more room
  * under it than the rows have between them, so it doesn't read as another row.
  */
 @Composable
 fun PhoneEmptyRows(copy: PhoneEmptyCopy, modifier: Modifier = Modifier) {
     Column(
-        modifier.padding(top = 8.dp).widthIn(max = 320.dp).fillMaxWidth().testTag("empty-rows"),
+        modifier.padding(top = 8.dp).widthIn(max = 320.dp).testTag("empty-rows"),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         copy.rows.forEach { row ->

@@ -23,10 +23,12 @@ struct EmptyStateCopy: Equatable {
 }
 
 /// `EmptyStateCopy`, drawn: the lede centered, then the rows as one
-/// leading-aligned block, each symbol in a fixed-width column so the words
-/// line up. The block is as wide as its cap allows, not as wide as its longest
-/// row, so every state's symbols share one left edge (ov-266). A column too
-/// narrow for a row wraps it.
+/// leading-aligned block, centered under it, each symbol in a fixed-width
+/// column so the words line up. The block is as wide as its widest row, so a
+/// short row never sits off-center under the title and lede (owner, 4 October:
+/// screens are never seen side by side, so a shared left edge across them buys
+/// nothing). `width` caps it so nothing wraps to a one-word line; a column
+/// narrower than a row wraps it.
 struct EmptyStateRows: View {
     let copy: EmptyStateCopy
 
@@ -48,7 +50,6 @@ struct EmptyStateRows: View {
                     }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
             // More room under the lede than between rows, so it doesn't read
             // as another row.
             .padding(.top, copy.lede == nil ? 0 : Spacing.group)
@@ -56,7 +57,31 @@ struct EmptyStateRows: View {
         .frame(minWidth: 0, idealWidth: Self.width, maxWidth: Self.width)
     }
 
-    /// The block's width, where the column allows it: wide enough that no lede
-    /// or row wraps to a one-word line.
+    /// The most the block is wide, where the column allows it: wide enough that
+    /// no lede or row wraps to a one-word line.
     static let width: CGFloat = 360
+}
+
+/// An empty state's title and symbol, for a `ContentUnavailableView`'s label.
+///
+/// The view draws its whole label in the secondary color, and a title that is
+/// as grey as the sentence under it reads as part of it. The title is the one
+/// thing that says what this is, so it's primary (owner, 4 October); the symbol
+/// stays secondary, as the system draws it.
+struct EmptyStateTitle: View {
+    let title: String
+    let symbol: String
+
+    init(_ title: String, symbol: String) {
+        self.title = title
+        self.symbol = symbol
+    }
+
+    var body: some View {
+        Label {
+            Text(title).foregroundStyle(.primary)
+        } icon: {
+            Image(systemName: symbol)
+        }
+    }
 }

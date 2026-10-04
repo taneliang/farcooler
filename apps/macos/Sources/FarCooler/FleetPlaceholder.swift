@@ -116,7 +116,7 @@ struct FleetPlaceholder: View {
             }
         case .noRepositories:
             ContentUnavailableView {
-                Label("No Repositories", systemImage: "rectangle.stack")
+                EmptyStateTitle("No Repositories", symbol: "rectangle.stack")
             } description: {
                 EmptyStateRows(copy: Self.noRepositoriesCopy)
             } actions: {
@@ -124,7 +124,7 @@ struct FleetPlaceholder: View {
             }
         case .noWorktrees:
             ContentUnavailableView {
-                Label("No Worktrees", systemImage: "rectangle.stack")
+                EmptyStateTitle("No Worktrees", symbol: "rectangle.stack")
             } description: {
                 EmptyStateRows(copy: Self.noWorktreesCopy)
             } actions: {
@@ -132,7 +132,7 @@ struct FleetPlaceholder: View {
             }
         case .chooseWorkspace:
             ContentUnavailableView {
-                Label("No Workspace Selected", systemImage: "square.stack.3d.up")
+                EmptyStateTitle("No Workspace Selected", symbol: "square.stack.3d.up")
             } description: {
                 EmptyStateRows(copy: Self.workspaceCopy)
             } actions: {

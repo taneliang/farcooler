@@ -109,7 +109,7 @@ struct NeedsYouView: View {
         Group {
             if items.isEmpty {
                 ContentUnavailableView {
-                    Label("Nothing Needs You", systemImage: "tray")
+                    EmptyStateTitle("Nothing Needs You", symbol: "tray")
                 } description: {
                     EmptyStateRows(copy: Self.emptyCopy)
                 }

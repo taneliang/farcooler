@@ -34,11 +34,13 @@ struct EmptyStateSpecimenTests {
                         onAnswerAsk: { _, _ in nil }, onDecide: { _, _ in false }))),
             Specimen(
                 name: "no-orchestrator",
+                // As `ConversationColumn` draws it: a headline over the rows.
                 view: AnyView(
-                    ContentUnavailableView {
-                        Label("No Orchestrator", systemImage: "person.crop.circle.badge.questionmark")
-                    } description: {
+                    VStack(spacing: 10) {
+                        Text("No Orchestrator").font(.headline)
                         EmptyStateRows(copy: ConversationColumn.emptyCopy)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
                     })),
             Specimen(name: "board-blank", view: AnyView(BoardBlankState())),
         ]
