@@ -957,9 +957,11 @@ fn spend_words(spend: &pb::LaneSpend) -> String {
     said
 }
 
+/// "1 of 2 done": the cancelled cards left out, as the Mac's `PlanWords.total`
+/// leaves them (ov-273).
 fn done_of(view: &pb::BoardThemeView) -> String {
     let c = view.counts.unwrap_or_default();
-    let total = c.backlog + c.todo + c.needs_decision + c.in_progress + c.in_review + c.done + c.cancelled;
+    let total = c.backlog + c.todo + c.needs_decision + c.in_progress + c.in_review + c.done;
     format!("{} of {} done", c.done, total)
 }
 

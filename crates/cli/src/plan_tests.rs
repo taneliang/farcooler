@@ -622,3 +622,15 @@ async fn plan_show_json_is_the_record_the_mac_reads() {
         assert_eq!(out, fixture, "plan {args} --json no longer matches test/fixtures/{file}, which the Mac decodes");
     }
 }
+
+/// A theme's progress leaves its cancelled cards out, as the Mac's does
+/// (`PlanWords.total`, ov-273): a card nobody will do isn't one left to do.
+#[test]
+fn progress_leaves_cancelled_cards_out() {
+    let mut view = theme(1, "Visual language", &[1, 2, 3, 4], 1);
+    view.counts = Some(pb::PlanStatusCounts { done: 1, backlog: 1, cancelled: 2, ..Default::default() });
+    assert_eq!(done_of(&view), "1 of 2 done");
+    assert_eq!(theme_row(&view), "Visual language  1 of 2 done · active");
+    view.counts = Some(pb::PlanStatusCounts { cancelled: 3, ..Default::default() });
+    assert_eq!(done_of(&view), "0 of 0 done", "only cancelled cards: nothing to do, as the Mac says");
+}
