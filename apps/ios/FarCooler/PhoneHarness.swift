@@ -226,7 +226,7 @@ final class HarnessRunner {
     /// Whether Billing has an orchestrator yet. It starts without one,
     /// unless `-phone-billing-led`.
     private var billingLed =
-        CommandLine.arguments.contains("-phone-billing-led") || Self.startStates
+        CommandLine.arguments.contains("-phone-billing-led") || HarnessRunner.startStates
     /// Whether fc-3-webhooks is put away, as the runner keeps it: starts so
     /// under `-phone-webhooks-hidden`, and `worktree.unhide` clears it.
     private var webhooksHidden = CommandLine.arguments.contains("-phone-webhooks-hidden")

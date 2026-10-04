@@ -164,6 +164,36 @@ final class TaskScreenTests: XCTestCase {
         answer.tap()
         XCTAssertTrue(counted(1), "the snapshot kept the answered decision: \(probe.value ?? "")")
     }
+
+    /// **A card says who is on it and when it starts** (ov-212, ov-213), from
+    /// the one fixture's words: a running subagent is "Subagent", not "No
+    /// Agent", and opens the orchestrator's pane; a card second in the build
+    /// line says why it stopped and raises no alarm; a blocked card names its
+    /// blocker. The task screen carries the same lines and a way to the
+    /// orchestrator.
+    func testACardSaysWhoIsOnItAndWhenItStarts() throws {
+        let app = launch(["-phone-empty-inbox", "-phone-start-states"])
+        let billing = app.buttons["workspace-row-Billing"]
+        XCTAssertTrue(billing.waitForExistence(timeout: 30), "no Billing row")
+        billing.tap()
+        app.buttons["segment-board"].tap()
+
+        XCTAssertTrue(element(app, "board-card-bil-11").waitForExistence(timeout: 10))
+        let subagent = element(app, "board-subagent-bil-11")
+        XCTAssertTrue(subagent.exists, "a running subagent should read Subagent")
+        XCTAssertFalse(element(app, "board-no-agent-bil-11").exists, "No Agent beside a subagent")
+        XCTAssertTrue(
+            element(app, "board-start-bil-11").label.hasPrefix("Claude subagent working, "),
+            element(app, "board-start-bil-11").label)
+
+        XCTAssertEqual(element(app, "board-start-bil-12").label, "Waiting to build, 2nd in line")
+        XCTAssertFalse(element(app, "board-no-agent-bil-12").exists, "a ranked wait is no alarm")
+        XCTAssertEqual(element(app, "board-blocked-bil-13").label, "Waiting on bil-9")
+
+        element(app, "board-card-bil-11").tap()
+        XCTAssertTrue(element(app, "task-heading").waitForExistence(timeout: 10))
+        XCTAssertTrue(element(app, "task-orchestrator").exists, "no way to the orchestrator")
+    }
 }
 
 /// A phone with a Read grant (ov-55 4A fix): it sees what needs you and
@@ -197,35 +227,5 @@ final class ReadScopeTests: XCTestCase {
             app.descendants(matching: .any)["task-question"].waitForExistence(timeout: 10),
             "the question isn't shown")
         XCTAssertFalse(app.buttons["task-answer-pdfkit"].exists, "an answer is offered")
-    }
-
-    /// **A card says who is on it and when it starts** (ov-212, ov-213), from
-    /// the one fixture's words: a running subagent is "Subagent", not "No
-    /// Agent", and opens the orchestrator's pane; a card second in the build
-    /// line says why it stopped and raises no alarm; a blocked card names its
-    /// blocker. The task screen carries the same lines and a way to the
-    /// orchestrator.
-    func testACardSaysWhoIsOnItAndWhenItStarts() throws {
-        let app = launch(["-phone-empty-inbox", "-phone-start-states"])
-        let billing = app.buttons["workspace-row-Billing"]
-        XCTAssertTrue(billing.waitForExistence(timeout: 30), "no Billing row")
-        billing.tap()
-        app.buttons["segment-board"].tap()
-
-        XCTAssertTrue(element(app, "board-card-bil-11").waitForExistence(timeout: 10))
-        let subagent = element(app, "board-subagent-bil-11")
-        XCTAssertTrue(subagent.exists, "a running subagent should read Subagent")
-        XCTAssertFalse(element(app, "board-no-agent-bil-11").exists, "No Agent beside a subagent")
-        XCTAssertTrue(
-            element(app, "board-start-bil-11").label.hasPrefix("Claude subagent working, "),
-            element(app, "board-start-bil-11").label)
-
-        XCTAssertEqual(element(app, "board-start-bil-12").label, "Waiting to build, 2nd in line")
-        XCTAssertFalse(element(app, "board-no-agent-bil-12").exists, "a ranked wait is no alarm")
-        XCTAssertEqual(element(app, "board-blocked-bil-13").label, "Waiting on bil-9")
-
-        element(app, "board-card-bil-11").tap()
-        XCTAssertTrue(element(app, "task-heading").waitForExistence(timeout: 10))
-        XCTAssertTrue(element(app, "task-orchestrator").exists, "no way to the orchestrator")
     }
 }
