@@ -483,6 +483,8 @@ AGENTKIT_SOURCES = [
     # What a task's agents spent, in the words the CLI and Android use (ov-195).
     "TaskUsage.swift",
     "TaskBoardAgents.swift",
+    # The start line, who is on a card, and what blocks it (ov-212, ov-213).
+    "TaskStartLines.swift",
     "RunnerBoards.swift",
     # Repository, then workspace, then its worktrees: the one grouping rule
     # the Mac and the phone share, and the board notice that says which
