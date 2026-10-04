@@ -16,7 +16,7 @@ struct BackForwardToolbarTests {
         switcherTitle: "Main", switcherRepository: "overnight", editor: true, changes: true, trouble: nil,
         needsYou: 11, backForward: true)
 
-    static let cases: [(CGFloat, TitleStatus.Form, Bool)] = [
+    nonisolated static let cases: [(CGFloat, TitleStatus.Form, Bool)] = [
         (1790, .wide, true), (1200, .medium, true), (900, .medium, false), (600, .ring, false),
     ]
 
