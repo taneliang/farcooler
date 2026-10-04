@@ -582,6 +582,14 @@ async fn read_replies<R: AsyncRead + Unpin>(mut reader: FrameReader<R>, shared: 
                 if shared.ignore_events.load(Ordering::Relaxed) {
                     continue;
                 }
+                // Unbounded only while a call waits, and that is bounded in
+                // practice: it holds what arrives during one call's life,
+                // every phone call has a deadline, the connections that read
+                // events (a terminal stream, the fleet channel) make one call
+                // before streaming, and the phones' control connection
+                // ignores its events. A client that waits on a call with no
+                // deadline while a runner streams at it is the case left, and
+                // before ov-147 it buffered the same events the same way.
                 lock(&shared.events).queue.push_back(e);
                 shared.arrived.notify_one();
                 // Holds off reading while the backlog is full and no call is

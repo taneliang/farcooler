@@ -69,8 +69,9 @@ pub enum SessionError {
     Disconnected(String),
     /// No answer by the call's deadline (see `deadlines`). Not a disconnect:
     /// one slow answer is not a dead link, and the ssh keepalive is what
-    /// decides that one.
-    #[error("the runner took longer than {after:?} to answer {method}")]
+    /// decides that one. The message crosses the FFI as `error`, so it is a
+    /// sentence; `method` and `after` are for logs.
+    #[error("The runner took too long to answer. Try again.")]
     TimedOut { method: String, after: std::time::Duration },
 }
 

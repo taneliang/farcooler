@@ -79,6 +79,9 @@ mod tests {
         .into();
         assert!(matches!(late, SessionError::TimedOut { .. }), "{late:?}");
         assert_eq!(late.word(), "timed_out");
+        // A sentence a person can read, with no method name or Rust duration
+        // in it: the FFI hands this over as `error`.
+        assert_eq!(late.to_string(), "The runner took too long to answer. Try again.");
         assert!(!late.is_disconnect(), "a slow answer must not empty the session slot");
     }
 
