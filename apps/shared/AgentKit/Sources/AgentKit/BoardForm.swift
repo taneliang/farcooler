@@ -37,13 +37,20 @@ public enum BoardForm {
         board.rows.isEmpty && board.unreadable.isEmpty
     }
 
-    /// What an empty board says under "No Tasks". The orchestrator owns the
-    /// task list (ov-184), so on a workspace that has one, the line points
-    /// at it; Main has none, and says only what the board is for.
-    public static func blankLine(ledByOrchestrator: Bool) -> String {
-        ledByOrchestrator
-            ? "Ask your orchestrator to plan the work. Its tasks appear here, grouped by status."
-            : "Tasks on this workspace’s board appear here, grouped by status."
+    /// What an empty board says under "No Tasks" (ov-205). The orchestrator
+    /// owns the task list (ov-184), so a board it leads says to tell it what
+    /// you want done, and, with none running, to start it first. A board on a
+    /// runner too old for workspaces has no orchestrator to name.
+    public static func blankLine(ledByOrchestrator: Bool, orchestratorRunning: Bool = true) -> String {
+        guard ledByOrchestrator else { return FirstRunCopy.Phone.boardImplicit }
+        return orchestratorRunning
+            ? FirstRunCopy.Phone.boardWithOrchestrator : FirstRunCopy.Phone.boardNoOrchestrator
+    }
+
+    /// Whether a blank board offers Show Orchestrator: it's led by one, and
+    /// there isn't one running to tell.
+    public static func offersOrchestrator(ledByOrchestrator: Bool, orchestratorRunning: Bool) -> Bool {
+        ledByOrchestrator && !orchestratorRunning
     }
 
     /// Whether a section is drawn open, given the statuses this board has

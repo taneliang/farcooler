@@ -28,6 +28,12 @@ import SwiftUI
 //                            than forgetting it
 //   -phone-saved-gone        the last launch kept a stack whose task is gone
 //   -phone-billing-led       Billing has its orchestrator from the start
+//   -phone-onboarding        no runners: the onboarding screen, as a fresh install
+//   -phone-no-repositories   the runner lists no repository, workspace or worktree
+//   -phone-billing-blank     Billing's board has no task (Main's already has none)
+//   -phone-claude-missing    the runner found codex and cursor-agent, not claude
+//   -phone-none-installed    the runner found none of the three agents
+//   -phone-start-127         a started orchestrator's pane ends at once, exit 127
 //   -phone-webhooks-hidden   fc-3-webhooks is put away, in Billing's Hidden
 //   -phone-start-states     Billing's board also holds bil-11 (a subagent running,
 //                            in the orchestrator's pane), bil-12 (second in the
@@ -44,6 +50,7 @@ import SwiftUI
 
 struct PhoneHarness: View {
     static var isRequested: Bool { CommandLine.arguments.contains("-phone-harness") }
+    private static var onboarding: Bool { CommandLine.arguments.contains("-phone-onboarding") }
 
     @StateObject private var hosts = RunnerStore()
     @StateObject private var fleet: FleetStore
@@ -110,7 +117,13 @@ struct PhoneHarness: View {
     }
 
     var body: some View {
-        PhoneRoot(fleet: fleet, hosts: hosts, pendingDestination: $pendingDestination)
+        Group {
+            if Self.onboarding {
+                HostOnboardingView(hosts: hosts)
+            } else {
+                PhoneRoot(fleet: fleet, hosts: hosts, pendingDestination: $pendingDestination)
+            }
+        }
             .overlay(alignment: .topLeading) { snapshotProbe }
             .overlay(alignment: .bottomLeading) { sentProbe }
             // A notification tapped while the app is open: an agent's, by
@@ -232,6 +245,9 @@ final class HarnessRunner {
     /// Whether fc-3-webhooks is put away, as the runner keeps it: starts so
     /// under `-phone-webhooks-hidden`, and `worktree.unhide` clears it.
     private var webhooksHidden = CommandLine.arguments.contains("-phone-webhooks-hidden")
+    /// Whether a started orchestrator's pane has ended at once, exit 127
+    /// (`-phone-start-127`).
+    private var billingDead = false
     /// The items still waiting, by id.
     private var waiting: [String]
     /// Every write the screens made, as `harness-sent` shows it:
@@ -252,16 +268,19 @@ final class HarnessRunner {
         }
         connection.standIn(
             on: fleet(),
-            repositories: [
-                Repository(
-                    id: Self.repository, short: "a001", displayName: "overnight", remote: "")
-            ],
+            repositories: CommandLine.arguments.contains("-phone-no-repositories")
+                ? []
+                : [
+                    Repository(
+                        id: Self.repository, short: "a001", displayName: "overnight", remote: "")
+                ],
             build: DaemonBuild(
                 version: "harness", matches: true, platform: "harness",
                 capabilities: Set(
                     ["tasks", "needs_you", "workstreams", "terminal_task"]
                         + (CommandLine.arguments.contains("-phone-usage-old") ? [] : ["agent_usage"])),
-                grantedScope: Self.readOnly ? "read" : "control"))
+                grantedScope: Self.readOnly ? "read" : "control",
+                agentsFound: Self.agentsFound))
         // What a poll does with a fleet: the runner's projection for the
         // glances, which they need before they'll take a Needs You list.
         FleetSnapshotWriter.write(
@@ -273,7 +292,17 @@ final class HarnessRunner {
 
     // MARK: - What it has
 
+    /// What the runner says it found: all three unless a flag takes some away.
+    private static var agentsFound: [String] {
+        if CommandLine.arguments.contains("-phone-none-installed") { return [] }
+        if CommandLine.arguments.contains("-phone-claude-missing") { return ["codex", "cursor-agent"] }
+        return ["claude", "codex", "cursor-agent"]
+    }
+
     private func fleet() -> Fleet {
+        if CommandLine.arguments.contains("-phone-no-repositories") {
+            return Fleet(runtimeHealthy: true, livePanes: 0, worktrees: [], workspaces: [])
+        }
         let now = Date().timeIntervalSince1970 * 1000
         var checkoutTerminals = [
             Terminal(
@@ -286,7 +315,8 @@ final class HarnessRunner {
             checkoutTerminals.append(
                 Terminal(
                     id: Self.billingOrchestrator, short: "d004", title: "claude",
-                    preset: "claude", state: "running", activity: "idle", epoch: 1,
+                    preset: "claude", state: billingDead ? "exited" : "running",
+                    exitCode: billingDead ? 127 : nil, activity: "idle", epoch: 1,
                     paneMode: "terminal", chatCapable: false, workspace: Self.billing,
                     role: "orchestrator"))
         }
@@ -420,6 +450,7 @@ final class HarnessRunner {
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(6))
                 billingLed = true
+                billingDead = CommandLine.arguments.contains("-phone-start-127")
                 connection.standIn(on: fleet())
             }
             return try json(["id": Self.billingOrchestrator])
@@ -516,7 +547,8 @@ final class HarnessRunner {
     }
 
     private func tasks(_ workspace: String?) -> [[String: Any]] {
-        guard workspace == Self.billing else { return [] }
+        guard workspace == Self.billing, !CommandLine.arguments.contains("-phone-billing-blank")
+        else { return [] }
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         func startStates() -> [[String: Any]] {
             guard Self.startStates else { return [] }

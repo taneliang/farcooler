@@ -913,7 +913,10 @@ final class Connection: ObservableObject {
             runnerId: body["runnerId"] as? String,
             // Whether its task notices reach this phone as pushes (ov-107).
             // See `TaskLink.taskNoticeReachesPhone`.
-            pushPaired: body["pushPaired"] as? Bool ?? false)
+            pushPaired: body["pushPaired"] as? Bool ?? false,
+            // Which of claude, codex and cursor-agent it found (ov-205). Null
+            // from a runner too old to say, which offers every harness.
+            agentsFound: body["agentsFound"] as? [String])
         daemon = build
         lastDaemon = build
         // Boards this link never read — `loadBoards` refused them while the

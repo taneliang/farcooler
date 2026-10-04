@@ -935,6 +935,9 @@ extension View {
 /// sheet, which also offers a local file picker.
 struct AddRepositorySheet: View {
     let connection: Connection
+    /// What the sheet says under the field: what a repository is for, from
+    /// where the sheet was opened.
+    var subtitle = FirstRunCopy.Phone.repositorySubtitle
     /// Called with the new repository's id after a successful registration,
     /// so the caller can select it immediately.
     let onRegistered: (String) -> Void
@@ -953,7 +956,7 @@ struct AddRepositorySheet: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 Section {
-                    Text("Choose an existing repository on this runner for the new worktree.")
+                    Text(subtitle)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -1165,7 +1168,9 @@ struct NewWorktreeView: View {
                 }
             }
             .sheet(isPresented: $showAddRepository) {
-                AddRepositorySheet(connection: connection) { newId in
+                AddRepositorySheet(
+                    connection: connection, subtitle: FirstRunCopy.Phone.repositorySubtitleForWorktree
+                ) { newId in
                     repository = newId
                 }
             }

@@ -73,6 +73,9 @@ SOURCES = [
     # A finished status's History page, pushed from the board (ov-103).
     "BoardHistoryScreen.swift",
     "EmptyState.swift",
+    # The drawings behind first run and the empty states: task skeleton,
+    # orchestrator vignette, onboarding mark (ov-205).
+    "FirstRunArt.swift",
     "ShellRootView.swift",
     # The other two thirds of what `ShellRootView.swift` used to be. One type,
     # three files: the container, the page's own layer, and the finger. The
@@ -429,6 +432,8 @@ AGENTKIT_SOURCES = [
     # before `FirstRunCopy`, which reads its `AgentHarness`.
     "FirstRun.swift",
     "FirstRunCopy.swift",
+    # What Needs You says with no repository, or no orchestrator (ov-205).
+    "PhoneFirstRun.swift",
     # The five task notice classes, a task push read off its payload, and a
     # decision's answer buttons (ov-94). Here and in `notify_build_ids`: the
     # service extension makes a decision's category from its options.
@@ -704,6 +709,9 @@ UI_TEST_SOURCES = [
     # its worktrees that every live-runner suite starts with.
     "LiveRunner.swift",
     "WorkspaceScreenTests.swift",
+    # First run and the empty states over the same canned runner (ov-205): no
+    # runner, a runner with no repository, blank boards, a missing agent.
+    "FirstRunUITests.swift",
     "DynamicTypeTests.swift",
     # A task's agent and back, a notification landing with its workspace and
     # task under it, and a decision answered from Needs You. Needs no runner,

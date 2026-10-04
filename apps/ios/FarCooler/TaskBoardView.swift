@@ -61,6 +61,11 @@ struct WorkspaceBoardList: View {
     /// Whether this workspace has an orchestrator to plan its work (not
     /// Main), which is what an empty board points at (ov-184).
     let ledByOrchestrator: Bool
+    /// Whether one is up to tell, which decides what a blank board says and
+    /// whether it offers Show Orchestrator (ov-205).
+    let orchestratorRunning: Bool
+    /// Switches the workspace to its Orchestrator segment.
+    let onShowOrchestrator: (() -> Void)?
     /// A finished status's History page, pushed (ov-103).
     let onHistory: (TaskStatus) -> Void
 
@@ -77,7 +82,8 @@ struct WorkspaceBoardList: View {
         orchestrator: @escaping (TaskRow) -> BoardAgent? = { _ in nil },
         onOpen: @escaping (TaskRow) -> Void,
         onJump: @escaping (BoardAgent) -> Void, onRefresh: @escaping () async -> Void,
-        ledByOrchestrator: Bool = false, onHistory: @escaping (TaskStatus) -> Void = { _ in }
+        ledByOrchestrator: Bool = false, orchestratorRunning: Bool = true,
+        onShowOrchestrator: (() -> Void)? = nil, onHistory: @escaping (TaskStatus) -> Void = { _ in }
     ) {
         self.board = board
         self.unread = unread
@@ -90,6 +96,8 @@ struct WorkspaceBoardList: View {
         self.onJump = onJump
         self.onRefresh = onRefresh
         self.ledByOrchestrator = ledByOrchestrator
+        self.orchestratorRunning = orchestratorRunning
+        self.onShowOrchestrator = onShowOrchestrator
         self.onHistory = onHistory
         _collapsed = State(
             initialValue: BoardForm.collapsed(host: place.runner, workspace: place.workspace))
@@ -99,13 +107,29 @@ struct WorkspaceBoardList: View {
     var body: some View {
         Group {
             if let board, BoardForm.isBlank(board), !unread {
-                // Seven headers each reading zero is a blank page. Say what
-                // the board is for, and who fills it: the orchestrator owns
-                // the task list (ov-184), so there's no button here.
+                // Seven headers each reading zero is a blank page. Show the
+                // shape of what will appear, say who fills it, and, with no
+                // orchestrator to tell, the way to start one: the orchestrator
+                // owns the task list (ov-184), so there's no Add Task here.
                 ContentUnavailableView {
-                    Label("No Tasks", systemImage: "checklist")
+                    Label(FirstRunCopy.Phone.boardTitle, systemImage: "checklist")
                 } description: {
-                    Text(BoardForm.blankLine(ledByOrchestrator: ledByOrchestrator))
+                    VStack(spacing: 16) {
+                        TaskSkeleton().frame(maxWidth: 240)
+                        Text(
+                            BoardForm.blankLine(
+                                ledByOrchestrator: ledByOrchestrator,
+                                orchestratorRunning: orchestratorRunning))
+                    }
+                } actions: {
+                    if BoardForm.offersOrchestrator(
+                        ledByOrchestrator: ledByOrchestrator, orchestratorRunning: orchestratorRunning),
+                        let onShowOrchestrator
+                    {
+                        Button(FirstRunCopy.Phone.showOrchestrator, action: onShowOrchestrator)
+                            .buttonStyle(.bordered)
+                            .accessibilityIdentifier("board-show-orchestrator")
+                    }
                 }
                 .accessibilityIdentifier("board-empty")
             } else if let board {

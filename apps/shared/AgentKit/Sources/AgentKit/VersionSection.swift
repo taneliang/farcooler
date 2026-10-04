@@ -143,10 +143,18 @@ public struct DaemonBuild: Equatable, Sendable {
     /// that was a downgrade. False from a CLI or runner too old to say.
     public let runnerIsNewer: Bool
 
+    /// The programs the runner found (`Host.agents_found`), or nil when it
+    /// didn't say: a runner too old to send the list, which `availability`
+    /// reads as offering every harness (ov-205).
+    public let agentsFound: [String]?
+
+    /// Which orchestrator harnesses this runner can start.
+    public var availability: HarnessAvailability { HarnessAvailability(agentsFound: agentsFound) }
+
     public init(
         version: String, matches: Bool, platform: String, capabilities: Set<String> = [],
         grantedScope: String = "unspecified", runnerId: String? = nil, pushPaired: Bool = false,
-        runnerIsNewer: Bool = false
+        runnerIsNewer: Bool = false, agentsFound: [String]? = nil
     ) {
         self.version = version
         self.matches = matches
@@ -156,6 +164,7 @@ public struct DaemonBuild: Equatable, Sendable {
         self.runnerId = runnerId
         self.pushPaired = pushPaired
         self.runnerIsNewer = runnerIsNewer
+        self.agentsFound = agentsFound
     }
 
     /// Whether this connection may ask for the calls that change the runner

@@ -216,7 +216,7 @@ final class ReadScopeTests: XCTestCase {
         XCTAssertTrue(app.buttons["segment-orchestrator"].waitForExistence(timeout: 10))
         app.buttons["segment-orchestrator"].tap()
         XCTAssertTrue(
-            app.staticTexts["No Orchestrator"].waitForExistence(timeout: 10), "no empty state")
+            app.staticTexts["No Orchestrator Yet"].waitForExistence(timeout: 10), "no empty state")
         XCTAssertFalse(app.buttons["start-orchestrator"].exists, "Start Orchestrator offered")
 
         app.buttons["segment-board"].tap()

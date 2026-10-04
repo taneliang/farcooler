@@ -155,7 +155,8 @@ public enum FirstRunCopy {
         public static let addRepository = "Add Repository…"
         public static let nothingNeedsYou = "Nothing Needs You"
         public static let noOrchestratorRunning =
-            "No agents are working yet. To give them work, open a workspace below and start its orchestrator."
+            "No agents are working yet. Each workspace below is one line of work, like a feature or a cleanup. "
+            + "Open one and start its orchestrator to give agents something to do."
         public static let orchestratorTitle = "No Orchestrator Yet"
         public static let orchestratorBody =
             "Instead of running each agent yourself, tell the orchestrator what you want done. "
@@ -174,6 +175,15 @@ public enum FirstRunCopy {
         public static let pushBody =
             "To hear from your agents while Far Cooler is closed, sign in. Until then, notifications arrive only while it’s open."
         public static let signIn = "Sign In"
+        /// A workspace's Worktrees with none: what a worktree is, by its job.
+        public static let worktreesNone =
+            "No worktrees yet. When the orchestrator starts an agent on a task, the agent gets its own folder and branch, listed here."
+        /// The Add Repository sheet, from Needs You.
+        public static let repositorySubtitle = "Choose a Git repository on this runner for agents to work on."
+        /// The same sheet, from New Worktree.
+        public static let repositorySubtitleForWorktree = "Choose the repository for the new worktree."
+        /// A board on a runner too old for workspaces: no orchestrator leads it.
+        public static let boardImplicit = "Each piece of work on this board appears here as a task."
 
         /// `device` is the model's name: "iPhone" or "iPad".
         public static func onboardingBody(device: String) -> String {
@@ -229,6 +239,7 @@ public enum FirstRunCopy {
             Phone.addRepository, Phone.nothingNeedsYou, Phone.noOrchestratorRunning, Phone.orchestratorTitle,
             Phone.orchestratorBody, Phone.start, Phone.tryAgain, Phone.boardTitle, Phone.boardNoOrchestrator,
             Phone.boardWithOrchestrator, Phone.showOrchestrator, Phone.pushBody, Phone.signIn,
+            Phone.worktreesNone, Phone.repositorySubtitle, Phone.repositorySubtitleForWorktree, Phone.boardImplicit,
             Phone.onboardingBody(device: "iPhone"), Phone.noRepositoriesTitle("build-01"),
             NotificationAsk.title, NotificationAsk.message, NotificationAsk.allow, NotificationAsk.decline,
         ]

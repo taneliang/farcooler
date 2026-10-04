@@ -18,6 +18,10 @@ struct NeedsYouScreen: View {
     @State private var authorizing = false
     @State private var showSettings = false
     @State private var showAdd = false
+    /// The runner whose Add Repository sheet is open (a runner with none).
+    @State private var addingRepository: Runner?
+    /// Whether this device is signed in: the push note shows until it is.
+    @ObservedObject private var account = Account.shared
     /// The Unclaimed and Hidden groups open right now, by runner and title.
     @State private var openGroups: Set<String> = []
     /// The mark column, which grows with the text so the mark never touches the name.
@@ -68,6 +72,11 @@ struct NeedsYouScreen: View {
             }
         }
         .sheet(isPresented: $showAdd) { AddView(runners: hosts) }
+        .sheet(item: $addingRepository) { runner in
+            if let connection = fleet.connection(for: runner.id) {
+                AddRepositorySheet(connection: connection) { _ in }
+            }
+        }
         .accessibilityIdentifier("needs-you")
     }
 
@@ -114,13 +123,19 @@ struct NeedsYouScreen: View {
                         onAnswerDecision: { text in await answerDecision(item, with: text) })
                 }
             } footer: {
-                olderRunners
+                footer
             }
         } else if fleet.needsYouReadings.contains(.read) {
             Section {
                 VStack(alignment: .leading, spacing: 4) {
-                    Label("Nothing needs you", systemImage: "checkmark.circle")
+                    Label(FirstRunCopy.Phone.nothingNeedsYou, systemImage: "checkmark.circle")
                         .foregroundStyle(.secondary)
+                    if let line = PhoneFirstRun.noOrchestratorLine(sections: allSections) {
+                        Text(line)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("needs-you-no-orchestrator")
+                    }
                     if let caveat = PhoneInbox.caveat(unanswered: unanswered) {
                         Text(caveat)
                             .font(.footnote)
@@ -131,7 +146,7 @@ struct NeedsYouScreen: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("needs-you-nothing")
             } footer: {
-                olderRunners
+                footer
             }
         } else if !fleet.runners.isEmpty {
             Section {
@@ -140,6 +155,39 @@ struct NeedsYouScreen: View {
                     Text("Checking what needs you…").foregroundStyle(.secondary)
                 }
             }
+        }
+    }
+
+    /// Under the items, or under the empty state: the older-runner notes and,
+    /// until this device is signed in, why notifications stop with the app.
+    @ViewBuilder
+    private var footer: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            olderRunners
+            if !account.isSignedIn {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(FirstRunCopy.Phone.pushBody)
+                    Button(FirstRunCopy.Phone.signIn) {
+                        Task {
+                            await Account.shared.signIn()
+                            await AccountSection.afterSignIn?()
+                        }
+                    }
+                    .font(.footnote.weight(.semibold))
+                    .accessibilityIdentifier("needs-you-sign-in")
+                }
+                .accessibilityIdentifier("needs-you-push")
+            }
+        }
+    }
+
+    /// Every runner's sections, as the workspaces below are drawn from them.
+    private var allSections: [PhoneRepositorySection] {
+        fleet.runners.filter { $0.connection.hasFleet }.flatMap { runner in
+            let id = runner.host.id.uuidString
+            return runner.connection.fleet.phoneSections(
+                runner: id, names: runner.connection.repositoryNames,
+                items: fleet.needsYou.filter { $0.runner == id })
         }
     }
 
@@ -236,6 +284,9 @@ struct NeedsYouScreen: View {
             let sections = connection.fleet.phoneSections(
                 runner: id, names: connection.repositoryNames,
                 items: fleet.needsYou.filter { $0.runner == id })
+            if PhoneFirstRun.hasNoRepositories(sections) {
+                noRepositories(runner.host)
+            }
             ForEach(sections) { section in
                 Section {
                     ForEach(section.workspaces) { row in
@@ -255,6 +306,34 @@ struct NeedsYouScreen: View {
                     Text(heading(section, runner: runner.host, sections: sections.count))
                 }
             }
+        }
+    }
+
+    /// A runner that's answering but lists no repository: what to add, and the
+    /// button for it. Phones had no door to this before (ov-205).
+    private func noRepositories(_ runner: Runner) -> some View {
+        Section {
+            VStack(spacing: 8) {
+                Text(FirstRunCopy.Phone.noRepositoriesTitle(runner.host.label))
+                    .font(.headline)
+                    .multilineTextAlignment(.center)
+                    .accessibilityIdentifier("no-repositories-title")
+                Text(FirstRunCopy.Phone.noRepositoriesBody)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .accessibilityIdentifier("no-repositories-body")
+                if fleet.connection(for: runner.id)?.daemon?.mayAct ?? true {
+                    Button(FirstRunCopy.Phone.addRepository) { addingRepository = runner }
+                        .buttonStyle(.borderedProminent)
+                        .padding(.top, 4)
+                        .accessibilityIdentifier("no-repositories-add")
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("no-repositories")
         }
     }
 

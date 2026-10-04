@@ -151,7 +151,7 @@ final class WorkspaceScreenTests: XCTestCase {
         XCTAssertTrue(start.waitForExistence(timeout: 10), "no Start Orchestrator")
         XCTAssertFalse(element(app, "orchestrator-pane").exists)
         start.tap()
-        let claude = app.buttons["Claude"]
+        let claude = app.buttons["Claude Code"]
         XCTAssertTrue(claude.waitForExistence(timeout: 5), "no harness menu")
         // A menu's rows report themselves unhittable while it opens.
         claude.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()

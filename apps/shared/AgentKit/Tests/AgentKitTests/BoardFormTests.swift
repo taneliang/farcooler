@@ -73,18 +73,31 @@ func emptyStatusesAreNamedOnce() {
     #expect(BoardForm.emptyNote(TaskBoardModel(columns: [todo])) == nil)
 }
 
-/// **An empty board points at the orchestrator** (ov-184): it owns the task
-/// list, so a workspace with one says to ask it; Main, with none, says only
-/// what the board is for. Neither offers to file a task.
-@Test("An empty board points at the orchestrator, or on Main says what it's for")
+/// **An empty board says what to do about the orchestrator** (ov-184, ov-205):
+/// it owns the task list, so a board it leads says to tell it what you want
+/// done, and with none running, to start it first. A board on a runner too old
+/// for workspaces has no orchestrator to name. None offers to file a task.
+@Test("An empty board's line depends on whether an orchestrator leads it and is running")
 func anEmptyBoardPointsAtTheOrchestrator() {
-    let led = BoardForm.blankLine(ledByOrchestrator: true)
-    #expect(led.hasPrefix("Ask your orchestrator to plan the work."))
-    let main = BoardForm.blankLine(ledByOrchestrator: false)
-    #expect(!main.contains("orchestrator"))
-    for line in [led, main] {
+    let running = BoardForm.blankLine(ledByOrchestrator: true, orchestratorRunning: true)
+    let notRunning = BoardForm.blankLine(ledByOrchestrator: true, orchestratorRunning: false)
+    let implicit = BoardForm.blankLine(ledByOrchestrator: false, orchestratorRunning: false)
+    #expect(running == FirstRunCopy.Phone.boardWithOrchestrator)
+    #expect(notRunning == FirstRunCopy.Phone.boardNoOrchestrator)
+    #expect(notRunning.hasPrefix("Start the orchestrator"))
+    #expect(running != notRunning)
+    #expect(!implicit.contains("orchestrator"))
+    for line in [running, notRunning, implicit] {
         #expect(!line.localizedCaseInsensitiveContains("new task"))
         #expect(!line.localizedCaseInsensitiveContains("add a task"))
+        #expect(!line.localizedCaseInsensitiveContains("grouped by"))
         #expect(line.hasSuffix("."))
     }
+}
+
+@Test("Show Orchestrator is offered only when one leads the board and none is running")
+func showOrchestratorIsOfferedOnlyWithoutOne() {
+    #expect(BoardForm.offersOrchestrator(ledByOrchestrator: true, orchestratorRunning: false))
+    #expect(!BoardForm.offersOrchestrator(ledByOrchestrator: true, orchestratorRunning: true))
+    #expect(!BoardForm.offersOrchestrator(ledByOrchestrator: false, orchestratorRunning: false))
 }

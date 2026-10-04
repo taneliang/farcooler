@@ -77,7 +77,8 @@ object FirstRunCopy {
     const val ADD_REPOSITORY = "Add repository"
     const val NOTHING_NEEDS_YOU = "Nothing needs you"
     const val NO_ORCHESTRATOR_RUNNING =
-        "No agents are working yet. To give them work, open a workspace below and start its orchestrator."
+        "No agents are working yet. Each workspace below is one line of work, like a feature or a cleanup. " +
+            "Open one and start its orchestrator to give agents something to do."
     const val ORCHESTRATOR_TITLE = "No orchestrator yet"
     const val ORCHESTRATOR_BODY =
         "Instead of running each agent yourself, tell the orchestrator what you want done. " +
@@ -96,6 +97,11 @@ object FirstRunCopy {
     const val PUSH_BODY =
         "To hear from your agents while Far Cooler is closed, sign in. Until then, notifications arrive only while it’s open."
     const val SIGN_IN = "Sign in"
+    const val WORKTREES_NONE =
+        "No worktrees yet. When the orchestrator starts an agent on a task, the agent gets its own folder and branch, listed here."
+    const val REPOSITORY_SUBTITLE = "Choose a Git repository on this runner for agents to work on."
+    const val REPOSITORY_SUBTITLE_FOR_WORKTREE = "Choose the repository for the new worktree."
+    const val BOARD_IMPLICIT = "Each piece of work on this board appears here as a task."
 
     /** The explainer before the permission request, after the first runner (iOS: `NotificationAsk`). */
     const val NOTIFY_TITLE = "Get notified when an agent needs you"
@@ -118,7 +124,8 @@ object FirstRunCopy {
             ONBOARDING_TITLE, ONBOARDING_BODY, ONBOARDING_PRIMARY, ONBOARDING_SECONDARY, NO_REPOSITORIES_BODY,
             ADD_REPOSITORY, NOTHING_NEEDS_YOU, NO_ORCHESTRATOR_RUNNING, ORCHESTRATOR_TITLE, ORCHESTRATOR_BODY,
             START, NOT_INSTALLED, TRY_AGAIN, BOARD_TITLE, BOARD_NO_ORCHESTRATOR, BOARD_WITH_ORCHESTRATOR,
-            SHOW_ORCHESTRATOR, PUSH_BODY, SIGN_IN, NOTIFY_TITLE, NOTIFY_BODY, NOTIFY_ALLOW, NOTIFY_DECLINE,
+            SHOW_ORCHESTRATOR, PUSH_BODY, SIGN_IN, WORKTREES_NONE, REPOSITORY_SUBTITLE,
+            REPOSITORY_SUBTITLE_FOR_WORKTREE, BOARD_IMPLICIT, NOTIFY_TITLE, NOTIFY_BODY, NOTIFY_ALLOW, NOTIFY_DECLINE,
             noRepositoriesTitle("build-01"),
         ) + AgentHarness.entries.flatMap { listOf(it.title, notInstalledTitle(it), notInstalledBody(it, "build-01")) }
 }

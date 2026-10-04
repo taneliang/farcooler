@@ -251,26 +251,22 @@ struct HostOnboardingView: View {
             VStack(spacing: 0) {
                 Spacer()
 
-                Image(systemName: "server.rack")
-                    .font(.system(size: 42, weight: .thin))
-                    .foregroundStyle(.tertiary)
+                PhoneOnboardingMark()
                     .padding(.bottom, 22)
 
-                // One statement of what to do, not a status line ("No runners
-                // yet") followed by a paragraph restating it followed by two
-                // rows restating it again.
-                Text("Connect a Runner")
+                // The promise, then the body names a runner by its job.
+                Text(FirstRunCopy.Phone.onboardingTitle)
                     .font(.title2.weight(.semibold))
+                    .multilineTextAlignment(.center)
                     .padding(.bottom, 8)
+                    .accessibilityIdentifier("onboarding-title")
 
-                Text(
-                    "Far Cooler runs coding agents on runners you reach over SSH. "
-                        + "Connect this device to one to get started."
-                )
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 300)
+                Text(FirstRunCopy.Phone.onboardingBody(device: DeviceKind.current))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 300)
+                    .accessibilityIdentifier("onboarding-body")
 
                 Spacer()
 
@@ -283,12 +279,12 @@ struct HostOnboardingView: View {
                         addStep = .connectThisDevice
                         showAdd = true
                     } label: {
-                        Text("Connect This Device").frame(maxWidth: .infinity)
+                        Text(FirstRunCopy.Phone.onboardingPrimary).frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
 
-                    Button("More Ways to Add…") {
+                    Button(FirstRunCopy.Phone.onboardingSecondary) {
                         addStep = nil
                         showAdd = true
                     }

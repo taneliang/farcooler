@@ -107,6 +107,8 @@ struct WorkspaceScreen: View {
                     onRefresh: { await connection.readBoard(summary) },
                     ledByOrchestrator: WorkspaceSegment.offered(implicit: summary.isImplicit)
                         .contains(.orchestrator),
+                    orchestratorRunning: Self.orchestratorIsUp(in: connection, summary: summary),
+                    onShowOrchestrator: { segment = .orchestrator },
                     onHistory: { status in navigator?.open(.history(place, status: status.rawValue)) })
                 .task { await connection.readBoard(summary) }
             case .worktrees:
@@ -122,6 +124,15 @@ struct WorkspaceScreen: View {
                 selection: $segment)
         }
         .onChange(of: segment) { _, chosen in chosen.remember(for: place) }
+    }
+
+    /// Whether the workspace has an orchestrator that isn't dead.
+    static func orchestratorIsUp(in connection: Connection, summary: WorkspaceSummary) -> Bool {
+        guard let terminal = OrchestratorSegment.terminal(in: connection, summary: summary) else { return false }
+        switch StateKind.parse(terminal.state) {
+        case .lost, .exited, .error: return false
+        default: return true
+        }
     }
 
     /// A card's Agent button: the agent's worktree, on its pane, pushed over
@@ -195,7 +206,7 @@ private struct SegmentBar: View {
 // MARK: - Orchestrator
 
 /// The workspace's orchestrator, or what to do about not having one.
-private struct OrchestratorSegment: View {
+struct OrchestratorSegment: View {
     @ObservedObject var connection: Connection
     let summary: WorkspaceSummary
     let place: PhoneWorkspace
@@ -208,11 +219,18 @@ private struct OrchestratorSegment: View {
     /// What the runner said when it refused, in this app's words.
     @State private var refusal: String?
     @State private var replacing = false
+    /// When this phone asked for the start, and which agent, kept past the
+    /// pane's arrival so a quick exit 127 can be called "not installed".
+    @State private var asked: Date?
+    @State private var askedHarness: AgentHarness?
+    /// How long after asking the pane was first seen ended, once it was.
+    @State private var endedAfter: TimeInterval?
 
-    /// The harnesses an orchestrator can run on.
-    static let harnesses: [(id: String, name: String)] = [
-        ("claude", "Claude"), ("codex", "Codex"), ("cursor", "Cursor"),
-    ]
+    /// Which harnesses this runner can start: all of them from a runner that
+    /// doesn't say which it has (`DaemonBuild.availability`).
+    private var availability: HarnessAvailability {
+        connection.daemon?.availability ?? HarnessAvailability(agentsFound: nil)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -231,9 +249,9 @@ private struct OrchestratorSegment: View {
         .confirmationDialog(
             "Replace the Orchestrator?", isPresented: $replacing, titleVisibility: .visible
         ) {
-            ForEach(Self.harnesses, id: \.id) { harness in
-                Button("Replace with \(harness.name)", role: .destructive) {
-                    start(harness.id, replace: true)
+            ForEach(availability.installed, id: \.rawValue) { harness in
+                Button("Replace with \(harness.title)", role: .destructive) {
+                    start(harness, replace: true)
                 }
             }
             Button("Cancel", role: .cancel) {}
@@ -243,11 +261,18 @@ private struct OrchestratorSegment: View {
         .onChange(of: orchestrator?.id) { _, id in
             if id != nil { startedAt = nil }
         }
+        .onChange(of: orchestrator.map { StateKind.parse($0.state) }) { _, kind in
+            if let asked, endedAfter == nil, kind == .lost || kind == .exited || kind == .error {
+                endedAfter = Date().timeIntervalSince(asked)
+            }
+        }
     }
 
     /// The orchestrator's pane, as the fleet has it: the workspace's own
     /// word, else the pane that says it leads this workspace.
-    private var orchestrator: Terminal? {
+    private var orchestrator: Terminal? { Self.terminal(in: connection, summary: summary) }
+
+    static func terminal(in connection: Connection, summary: WorkspaceSummary) -> Terminal? {
         let all = connection.fleet.worktrees.lazy.flatMap(\.terminals)
         if let id = summary.orchestrator, let found = all.first(where: { $0.id == id }) {
             return found
@@ -278,19 +303,30 @@ private struct OrchestratorSegment: View {
 
     private var none: some View {
         ContentUnavailableView {
-            Label("No Orchestrator", systemImage: "person.crop.circle.badge.plus")
+            Label(FirstRunCopy.Phone.orchestratorTitle, systemImage: "person.crop.circle.badge.plus")
         } description: {
-            Text(
-                "An orchestrator runs this workspace’s board. It reads the charter, dispatches "
-                    + "agents, and asks you when it needs a decision.")
+            VStack(spacing: 14) {
+                OrchestratorVignette()
+                Text(FirstRunCopy.Phone.orchestratorBody)
+                if availability.isKnown && availability.installed.isEmpty {
+                    Text(FirstRunCopy.Conversation.noneInstalled(on: .runner(connection.hostLabel)))
+                        .accessibilityIdentifier("orchestrator-none-installed")
+                }
+            }
         } actions: {
             if mayAct {
-                Menu("Start Orchestrator") {
-                    ForEach(Self.harnesses, id: \.id) { harness in
-                        Button(harness.name) { start(harness.id, replace: false) }
+                Menu(FirstRunCopy.Phone.start) {
+                    ForEach(AgentHarness.allCases, id: \.rawValue) { harness in
+                        if availability.isInstalled(harness) {
+                            Button(harness.title) { start(harness, replace: false) }
+                        } else {
+                            Button("\(harness.title) · \(FirstRunCopy.Navigator.notInstalled)") {}
+                                .disabled(true)
+                        }
                     }
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(availability.isKnown && availability.installed.isEmpty)
                 .accessibilityIdentifier("start-orchestrator")
             }
         }
@@ -324,7 +360,44 @@ private struct OrchestratorSegment: View {
     /// stick (spec §8), and Replace is the way past it.
     private static let slowStart: TimeInterval = 30
 
+    /// The agent a quick exit 127 says isn't installed, when this phone can
+    /// say which: the one it asked for, else the pane's own preset.
+    private func missingAgent(_ terminal: Terminal) -> AgentHarness? {
+        guard let endedAfter,
+            OrchestratorExit.classify(exitCode: terminal.exitCode, ranFor: endedAfter) == .notInstalled
+        else { return nil }
+        return askedHarness ?? AgentHarness(rawValue: terminal.preset)
+    }
+
+    @ViewBuilder
     private func lost(_ terminal: Terminal) -> some View {
+        if let harness = missingAgent(terminal) {
+            notInstalled(harness, terminal)
+        } else {
+            stopped(terminal)
+        }
+    }
+
+    private func notInstalled(_ harness: AgentHarness, _ terminal: Terminal) -> some View {
+        ContentUnavailableView {
+            Label(FirstRunCopy.Conversation.notInstalledTitle(harness), systemImage: "exclamationmark.triangle")
+        } description: {
+            Text(FirstRunCopy.Phone.notInstalledBody(harness, on: connection.hostLabel))
+        } actions: {
+            if mayAct {
+                Button(FirstRunCopy.Phone.tryAgain) {
+                    endedAfter = nil
+                    asked = Date()
+                    Task { await connection.act(.restart, on: terminal) }
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("orchestrator-try-again")
+            }
+        }
+        .accessibilityIdentifier("orchestrator-not-installed")
+    }
+
+    private func stopped(_ terminal: Terminal) -> some View {
         ContentUnavailableView {
             Label("Orchestrator Stopped", systemImage: "exclamationmark.triangle")
         } description: {
@@ -343,13 +416,16 @@ private struct OrchestratorSegment: View {
         }
     }
 
-    private func start(_ harness: String, replace: Bool) {
+    private func start(_ harness: AgentHarness, replace: Bool) {
         refusal = nil
         startedAt = Date()
+        asked = startedAt
+        askedHarness = harness
+        endedAfter = nil
         Task {
             do {
                 _ = try await connection.startOrchestrator(
-                    workspace: summary.id, harness: harness, replace: replace)
+                    workspace: summary.id, harness: harness.rawValue, replace: replace)
             } catch {
                 startedAt = nil
                 refusal = ClientCore.trouble(error, after: "The runner didn’t start the orchestrator.")
@@ -489,7 +565,7 @@ private struct WorkspaceWorktrees: View {
         List {
             if owned.isEmpty {
                 Section {
-                    Text("No worktrees yet. The orchestrator makes them as it dispatches tasks.")
+                    Text(FirstRunCopy.Phone.worktreesNone)
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("worktrees-empty")
                 }
