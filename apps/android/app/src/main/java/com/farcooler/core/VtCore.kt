@@ -14,7 +14,7 @@ package com.farcooler.core
  * every renderer. [com.farcooler.net.TerminalSession] confines it to one
  * dispatcher.
  */
-class VtCore(columns: Int, rows: Int) {
+class VtCore(columns: Int, rows: Int) : CellLinks {
     private var handle: Long =
         if (NativeLibrary.loaded) NativeVt.nativeNew(columns, rows) else 0
 
@@ -115,7 +115,7 @@ class VtCore(columns: Int, rows: Int) {
      * terminal output is not trusted input, and keeping the allowlist there
      * makes it one list rather than three.
      */
-    fun urlAt(row: Int, column: Int): String? =
+    override fun urlAt(row: Int, column: Int): String? =
         if (handle == 0L || row < 0 || column < 0) null
         else NativeVt.nativeUrlAt(handle, row, column)
 
@@ -124,7 +124,7 @@ class VtCore(columns: Int, rows: Int) {
      * in UTF-16 units, or null on a blank. Soft wraps are followed. A link rule
      * the core cannot know, such as a task key, reads it (ov-215).
      */
-    fun wordAt(row: Int, column: Int): Pair<String, Int>? {
+    override fun wordAt(row: Int, column: Int): Pair<String, Int>? {
         if (handle == 0L || row < 0 || column < 0) return null
         val raw = NativeVt.nativeWordAt(handle, row, column) ?: return null
         val cut = raw.indexOf('\n')
@@ -161,6 +161,20 @@ class VtCore(columns: Int, rows: Int) {
         if (handle == 0L) return ByteArray(0)
         return NativeVt.nativeEncodePaste(handle, text) ?: ByteArray(0)
     }
+}
+
+/**
+ * What a cell of the screen as shown links to, as the terminal core answers
+ * it: a URL, or the word a task key is read from (ov-215). [VtCore] is the
+ * real one; a JVM test, which has no native core, stands in for it through
+ * [com.farcooler.net.TerminalSession]'s `links`.
+ */
+interface CellLinks {
+    /** The URL under the cell, or null. */
+    fun urlAt(row: Int, column: Int): String?
+
+    /** The whitespace-delimited word under the cell and the cell's offset in it, or null. */
+    fun wordAt(row: Int, column: Int): Pair<String, Int>?
 }
 
 /**

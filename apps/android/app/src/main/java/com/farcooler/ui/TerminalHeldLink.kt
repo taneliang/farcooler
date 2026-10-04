@@ -7,7 +7,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalUriHandler
-import com.farcooler.model.LinkOpen
 import com.farcooler.model.TaskKeyLinks
 
 /**
@@ -41,14 +40,9 @@ fun HeldLinkDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                if (key != null) {
-                    linker.follow(link)
-                    onOpen(null)
-                } else {
-                    onOpen(LinkOpen.open(link, uri::openUri))
-                }
-            }) { Text(if (key != null) "Open task" else "Open") }
+            TextButton(onClick = { onOpen(TerminalPress.open(link, linker, uri::openUri)) }) {
+                Text(if (key != null) "Open task" else "Open")
+            }
         },
         dismissButton = { TextButton(onClick = { onCopy(key ?: link) }) { Text("Copy") } },
     )

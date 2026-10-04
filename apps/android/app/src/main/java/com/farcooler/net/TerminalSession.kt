@@ -68,6 +68,12 @@ class TerminalSession(
      * a test passes a test dispatcher so the retry waits run on virtual time.
      */
     dispatcher: CoroutineDispatcher? = null,
+    /**
+     * What a long press asks for the link under a cell. Null, as in the app,
+     * is this session's own emulator; a JVM test, with no native core, passes
+     * a stand-in, and a device test the real core it fed (ov-215).
+     */
+    private val links: com.farcooler.core.CellLinks? = null,
 ) {
     sealed interface Phase {
         data object Connecting : Phase
@@ -1052,14 +1058,14 @@ class TerminalSession(
      * Private: the long press asks [linkAt], so no caller can read a URL and
      * skip the task keys (ov-215).
      */
-    private fun urlAt(row: Int, column: Int): String? = vt?.urlAt(row, column)
+    private fun urlAt(row: Int, column: Int): String? = (links ?: vt)?.urlAt(row, column)
 
     /**
      * What a long press on a cell holds: the URL there, else a task key's link
      * ([index]'s runner), else null (ov-215).
      */
     fun linkAt(row: Int, column: Int, index: com.farcooler.model.TaskKeyIndex): String? =
-        com.farcooler.model.TerminalLinks.resolve({ urlAt(row, column) }, { vt?.wordAt(row, column) }, index)
+        com.farcooler.model.TerminalLinks.resolve({ urlAt(row, column) }, { (links ?: vt)?.wordAt(row, column) }, index)
 
     /**
      * "resource not found" is the host's answer for a terminal that is not

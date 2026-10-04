@@ -398,7 +398,7 @@ fun TerminalPane(
                         // So the new behavior only appears where there is
                         // something to act on, and the old one is untouched
                         // everywhere else.
-                        val link = session.linkAt(row, column, taskKeys.index)
+                        val link = TerminalPress.linkAt(session, taskKeys, column, row)
                         if (link != null) {
                             heldLink = link
                             linkFailure = null
