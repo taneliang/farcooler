@@ -120,7 +120,7 @@ struct GridGeometryTests {
     }
 
     /// ov-230: every box reaches `outset` past the edge, every chevron
-    /// starts at the edge, every word at the text column, and every glyph in
+    /// is centered in the glyph column, every word at the text column, and every glyph in
     /// a box is centered on the carets' x.
     private func checkTheLines(_ found: [Mark]) {
         let boxes = Set(found.filter { $0.role == .box }.map(\.x))
@@ -128,7 +128,10 @@ struct GridGeometryTests {
         let words = Set(found.filter { $0.role == .text && $0.row != "summary.title" }.map(\.x))
         #expect(NavigatorGrid.outset == NavigatorGrid.edge / 2, "an outset of half the margin")
         #expect(boxes == [NavigatorGrid.edge - NavigatorGrid.outset], "boxes at \(boxes.sorted())")
-        #expect(chevrons == [NavigatorGrid.edge], "chevrons at \(chevrons.sorted())")
+        // The caret is marked on its glyph, which is centered in the glyph
+        // column, so its left edge is not the margin; its center is
+        // checked below.
+        #expect(chevrons.allSatisfy { $0 > NavigatorGrid.edge }, "chevrons at \(chevrons.sorted())")
         #expect(words == [NavigatorGrid.text], "text starts at \(words.sorted())")
         let carets = Set(found.filter { $0.role == .chevron }.map(\.midX))
         #expect(carets == [NavigatorGrid.glyphCenter], "caret centers at \(carets.sorted())")
