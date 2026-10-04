@@ -23,7 +23,8 @@
 //! What that brings with it, each decided here once:
 //!
 //! - **Deadlines.** `call_with` takes one, and a call that outlives it fails
-//!   with `TimedOut` naming the method. `call` has none, as before: the CLI
+//!   with `TimedOut` naming the method. An urgent call's starts when it is
+//!   written. `call` has none, as before: the CLI
 //!   and the tests wait as long as the daemon takes.
 //! - **Urgent calls.** The writer sends urgent frames before ordinary ones that
 //!   are still queued, so a keystroke never waits behind a large upload in the
@@ -32,7 +33,8 @@
 //! - **Cancellation.** A caller that gives up — its future dropped, or its
 //!   deadline passed — is forgotten at once. If its request had not reached the
 //!   wire yet it never does; if it had, the answer arrives for nobody and is
-//!   dropped.
+//!   dropped. Urgent requests are the exception: input is never taken out of
+//!   the queue, so no key goes missing ahead of one that was sent.
 //! - **A reply for nobody** is dropped, logged, and counted
 //!   (`stray_replies`), never handed to the next caller.
 //! - **Disconnect.** When either half fails, every waiting call fails at once
@@ -97,9 +99,18 @@ pub enum ClientError {
 /// deadline, and queued in turn.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CallOptions {
-    /// Fail with `TimedOut` if no answer has arrived by then.
+    /// Fail with `TimedOut` if no answer has arrived by then. For an urgent
+    /// call, counted from when the request was written, not queued.
     pub deadline: Option<Duration>,
-    /// Put the request on the wire ahead of ordinary requests still queued.
+    /// Input: put the request on the wire ahead of ordinary requests still
+    /// queued, and never take it out of the queue.
+    ///
+    /// An ordinary request whose caller gives up is never written. That is
+    /// wrong for keys: on a writer stalled past the deadline, the oldest keys
+    /// would be dropped while newer ones, Enter among them, still went out. So
+    /// an urgent request, once queued, is written in its turn whatever its
+    /// caller does, and its deadline starts only once it is on the wire. If
+    /// the connection ends first, every queued one fails together.
     pub urgent: bool,
 }
 
@@ -162,6 +173,10 @@ struct Table {
 struct Outgoing {
     request_id: Bytes,
     frame: Vec<u8>,
+    /// Urgent: written even if its caller has gone. See `CallOptions::urgent`.
+    keep: bool,
+    /// Told when the frame is on the wire, for a deadline that starts there.
+    written: Option<oneshot::Sender<()>>,
 }
 
 /// Why the connection ended, kept in a form every waiting call can be handed
@@ -243,18 +258,32 @@ impl Shared {
 /// Returned by `Client::send` once the request is queued for the wire, which
 /// is what lets a caller fix the ORDER of two requests synchronously and wait
 /// for their answers however it likes. Dropping it is giving up: the call is
-/// forgotten at once, and a request not yet written is never written.
+/// forgotten at once, and a request not yet written is never written — unless
+/// it is urgent (input), which keeps its place in the queue.
 pub struct Answer {
     shared: Arc<Shared>,
     request_id: Bytes,
     method: String,
     deadline: Option<Duration>,
     answer: oneshot::Receiver<Result<Response, Gone>>,
+    /// For an urgent call: fires once the request is on the wire, which is
+    /// where its deadline starts.
+    written: Option<oneshot::Receiver<()>>,
 }
 
 impl Answer {
     /// Wait for the answer, until the deadline the call was sent with.
     pub async fn answer(mut self) -> Result<farcooler_protocol::v1::Result, ClientError> {
+        if let Some(written) = self.written.take() {
+            // No deadline while it waits its turn. An answer can beat the
+            // signal; a dropped signal means the writer stopped, and the
+            // connection's end is what answers then.
+            tokio::select! {
+                biased;
+                answered = &mut self.answer => return settle(answered),
+                _ = written => {}
+            }
+        }
         let answered = match self.deadline {
             None => (&mut self.answer).await,
             Some(after) => match tokio::time::timeout(after, &mut self.answer).await {
@@ -265,13 +294,19 @@ impl Answer {
                 }
             },
         };
-        match answered {
-            Ok(Ok(response)) => unwrap_response(response),
-            Ok(Err(gone)) => Err(gone.error()),
-            // The sender went without a word, which only the reader being
-            // aborted does: the client is being dropped.
-            Err(_) => Err(ClientError::Closed),
-        }
+        settle(answered)
+    }
+}
+
+fn settle(
+    answered: Result<Result<Response, Gone>, oneshot::error::RecvError>,
+) -> Result<farcooler_protocol::v1::Result, ClientError> {
+    match answered {
+        Ok(Ok(response)) => unwrap_response(response),
+        Ok(Err(gone)) => Err(gone.error()),
+        // The sender went without a word. `end` answers every waiter, so
+        // only a client torn down mid-call gets here.
+        Err(_) => Err(ClientError::Closed),
     }
 }
 
@@ -380,9 +415,11 @@ where
 
 impl<R, W> Drop for Client<R, W> {
     fn drop(&mut self) {
-        // The writer ends by itself once both queues' senders are gone, after
-        // sending what was queued; the reader would wait on the socket.
+        // Every waiter fails now, rather than an `Answer` that outlived its
+        // client waiting forever; the writer stops at that, and ends once both
+        // queues' senders are gone. The reader would wait on the socket.
         self.reader.abort();
+        self.shared.end(Gone::Closed);
     }
 }
 
@@ -483,12 +520,20 @@ impl<R, W> Client<R, W> {
         // A reader holding off for a full event backlog must read this
         // call's answer regardless. See `EVENT_BACKLOG`.
         self.shared.room.notify_one();
+        let (written_tx, written) = match how.urgent {
+            true => {
+                let (tx, rx) = oneshot::channel();
+                (Some(tx), Some(rx))
+            }
+            false => (None, None),
+        };
         let waiting = Answer {
             shared: Arc::clone(&self.shared),
             request_id: request_id.clone(),
             method,
             deadline: how.deadline,
             answer,
+            written,
         };
 
         // Encoded here rather than in the writer, so a request too large to
@@ -499,7 +544,8 @@ impl<R, W> Client<R, W> {
             body: Some(wire_envelope::Body::Request(request)),
         })?;
         let queue = if how.urgent { &self.urgent } else { &self.ordinary };
-        if queue.send(Outgoing { request_id, frame }).is_err() {
+        let outgoing = Outgoing { request_id, frame, keep: how.urgent, written: written_tx };
+        if queue.send(outgoing).is_err() {
             // The writer has stopped, and `end` has said why.
             return Err(self.shared.table().gone.clone().unwrap_or(Gone::Closed).error());
         }
@@ -579,14 +625,27 @@ async fn write_requests<W: AsyncWrite + Unpin>(
             Some(next) = ordinary.recv() => next,
             else => break,
         };
+        let (ended, waited_for) = {
+            let table = shared.table();
+            (table.gone.is_some(), table.waiting.contains_key(&next.request_id))
+        };
+        // Every queued call was failed when the connection ended; writing one
+        // now would deliver what its caller was told did not go.
+        if ended {
+            break;
+        }
         // Its caller has gone, so nothing is waiting for this answer: a
-        // request cancelled before it was sent is never sent.
-        if !shared.table().waiting.contains_key(&next.request_id) {
+        // request cancelled before it was sent is never sent — unless it is
+        // input, which keeps its place. See `CallOptions::urgent`.
+        if !waited_for && !next.keep {
             continue;
         }
         if let Err(e) = writer.write_raw(&next.frame).await {
             shared.end(Gone::of(e));
             break;
+        }
+        if let Some(written) = next.written {
+            let _ = written.send(());
         }
     }
 }

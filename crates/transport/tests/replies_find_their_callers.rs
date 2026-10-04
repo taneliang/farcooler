@@ -25,10 +25,11 @@ type Writes = FrameWriter<tokio::io::WriteHalf<Duplex>>;
 type Script = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
 
 /// Answers every call at once with its own method name, except `slow`, which
-/// waits until the test releases it.
+/// waits until the test releases it, and says it has started.
 #[derive(Clone)]
 struct Runner {
     slow: Arc<tokio::sync::Semaphore>,
+    started: Arc<tokio::sync::Semaphore>,
 }
 
 impl Handler for Runner {
@@ -38,8 +39,10 @@ impl Handler for Runner {
 
     fn handle(&self, req: Request) -> impl std::future::Future<Output = Response> + Send {
         let slow = self.slow.clone();
+        let started = self.started.clone();
         async move {
             if req.method == "slow" {
+                started.add_permits(1);
                 let _ = slow.acquire().await;
             } else if let Some(ms) = req.method.strip_prefix("sleep:").and_then(|r| r.split(':').next()) {
                 tokio::time::sleep(Duration::from_millis(ms.parse().unwrap())).await;
@@ -78,8 +81,15 @@ fn answered_as(outcome: Result<v1::Result, ClientError>) -> String {
 /// A client connected to `Runner` through `serve_connection`, the daemon's own
 /// loop, and the semaphore that releases `slow`.
 async fn connected() -> (TestClient, Arc<tokio::sync::Semaphore>) {
+    let (client, slow, _) = connected_seeing_starts().await;
+    (client, slow)
+}
+
+/// `connected`, plus a semaphore that gains a permit as each `slow` starts.
+async fn connected_seeing_starts() -> (TestClient, Arc<tokio::sync::Semaphore>, Arc<tokio::sync::Semaphore>) {
     let slow = Arc::new(tokio::sync::Semaphore::new(0));
-    let runner = Runner { slow: slow.clone() };
+    let started = Arc::new(tokio::sync::Semaphore::new(0));
+    let runner = Runner { slow: slow.clone(), started: started.clone() };
     let (server_io, client_io) = tokio::io::duplex(64 * 1024);
     tokio::spawn(async move {
         let (r, w) = tokio::io::split(server_io);
@@ -88,7 +98,7 @@ async fn connected() -> (TestClient, Arc<tokio::sync::Semaphore>) {
         let _ = serve_connection(&mut conn, &cfg, &runner).await;
     });
     let (r, w) = tokio::io::split(client_io);
-    (Client::over(r, w, "test", "0").await.expect("handshake"), slow)
+    (Client::over(r, w, "test", "0").await.expect("handshake"), slow, started)
 }
 
 /// A hand-rolled runner for what `serve_connection` would never do: answer an
@@ -133,29 +143,28 @@ async fn next_request(reader: &mut Reads) -> Option<Request> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_slow_call_does_not_delay_a_fast_one() {
-    let (client, slow) = connected().await;
+    let (client, slow, started) = connected_seeing_starts().await;
 
     let slow_call = client.call_with(request("slow"), CallOptions::default());
     let fast_call = async {
-        // Behind the slow one on the wire, so it really is queued after it.
-        tokio::time::sleep(Duration::from_millis(20)).await;
-        let started = Instant::now();
+        // Not sent until the runner is working on the slow one, so it really
+        // is behind it.
+        started.acquire().await.expect("open").forget();
         let outcome = client.call_with(aimed("fast", "a pane"), CallOptions::default()).await;
-        let took = started.elapsed();
         // Released only now: the slow call is still outstanding until here.
         slow.add_permits(1);
-        (answered_as(outcome), took)
+        answered_as(outcome)
     };
-    // Bounded, so a client that queues the fast call behind the slow one
-    // fails here rather than hanging: the slow one is released only after
-    // the fast one is answered.
-    let (slow_answer, (fast_answer, took)) =
-        tokio::time::timeout(Duration::from_secs(5), async { tokio::join!(slow_call, fast_call) })
+    // No clock in the verdict: the slow call is released only after the fast
+    // one is answered, so a client that queues the fast one behind it never
+    // finishes, and the bound turns that into a failure. Generous, because
+    // reaching it is the failure, not a slow runner.
+    let (slow_answer, fast_answer) =
+        tokio::time::timeout(Duration::from_secs(60), async { tokio::join!(slow_call, fast_call) })
             .await
             .expect("the fast call waited behind the slow one");
 
     assert_eq!(fast_answer, "fast");
-    assert!(took < Duration::from_millis(500), "the fast call waited {took:?} behind the slow one");
     assert_eq!(answered_as(slow_answer), "slow", "and the slow one still got its own answer");
 }
 
@@ -178,11 +187,13 @@ async fn a_reply_for_an_unknown_id_is_dropped_and_counted() {
     assert_eq!(client.stray_replies(), 1);
 }
 
-#[tokio::test]
+// A paused clock: the deadline fires when everything else is idle, at
+// exactly its time, however slow the machine.
+#[tokio::test(start_paused = true)]
 async fn a_deadline_fires_and_leaves_the_connection_working() {
     let (client, slow) = connected().await;
 
-    let started = Instant::now();
+    let started = tokio::time::Instant::now();
     let how = CallOptions { deadline: Some(Duration::from_millis(100)), urgent: false };
     let outcome = tokio::time::timeout(Duration::from_secs(5), client.call_with(request("slow"), how))
         .await
@@ -195,7 +206,7 @@ async fn a_deadline_fires_and_leaves_the_connection_working() {
         }
         other => panic!("expected a timeout, got {other:?}"),
     }
-    assert!(took < Duration::from_secs(2), "the deadline fired after {took:?}");
+    assert_eq!(took, Duration::from_millis(100), "the deadline fired after {took:?}");
     let shown = ClientError::TimedOut { method: "slow".into(), after: Duration::from_millis(100) };
     assert_eq!(shown.to_string(), "slow got no answer within 100ms");
 
@@ -367,7 +378,10 @@ async fn events_never_hold_up_an_answer() {
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+// A paused clock: it moves only once every task is waiting, so the sleep
+// below ends either when the runner has written everything (no pushback) or
+// when it is stuck mid-stream (pushback) — never because the machine is slow.
+#[tokio::test(start_paused = true)]
 async fn unread_events_push_back_on_the_runner_between_calls() {
     // The pushback a terminal stream depends on: a viewer that stops reading
     // leaves the backlog with the runner, where its limits see it, rather
@@ -384,15 +398,106 @@ async fn unread_events_push_back_on_the_runner_between_calls() {
     })
     .await;
 
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    tokio::time::sleep(Duration::from_secs(10)).await;
     let stalled_at = written.load(std::sync::atomic::Ordering::SeqCst);
     assert!(stalled_at < 20_000, "nothing pushed back: the runner wrote all {stalled_at}");
 
     for i in 0..20_000u64 {
-        let event = tokio::time::timeout(Duration::from_secs(5), client.next_event())
+        let event = tokio::time::timeout(Duration::from_secs(60), client.next_event())
             .await
             .expect("the reader never resumed")
             .expect("an event");
         assert_eq!(event.event_id, Bytes::from(i.to_be_bytes().to_vec()));
     }
+}
+
+/// Keys queued behind a writer that is stuck for longer than their deadline —
+/// a link that stalls and recovers, a large frame ahead of them — all arrive,
+/// in order. None is dropped from the queue because its caller stopped
+/// waiting, which would lose the start of what was typed while the end of it,
+/// Enter included, still went.
+#[tokio::test(start_paused = true)]
+async fn input_behind_a_stalled_writer_all_arrives_in_order() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let kept = seen.clone();
+    // A pipe too small for the keys, read by nobody for a minute.
+    let (server_io, client_io) = tokio::io::duplex(512);
+    tokio::spawn(async move {
+        let (r, w) = tokio::io::split(server_io);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        let Ok(Some(_hello)) = reader.read_frame().await else { return };
+        let hello = envelope(wire_envelope::Body::ServerHello(v1::ServerHello {
+            selected_protocol_version: PROTOCOL_VERSION,
+            ..Default::default()
+        }));
+        if writer.write_frame(&hello).await.is_err() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        while let Some(req) = next_request(&mut reader).await {
+            kept.lock().unwrap().push(req.method.clone());
+            let reply = answer(req.request_id, &req.method);
+            if writer.write_frame(&envelope(wire_envelope::Body::Response(reply))).await.is_err() {
+                return;
+            }
+        }
+    });
+    let (r, w) = tokio::io::split(client_io);
+    let client = Client::over(r, w, "test", "0").await.expect("handshake");
+
+    let input = CallOptions { deadline: Some(Duration::from_secs(15)), urgent: true };
+    let keys: Vec<String> = (0..200).map(|i| format!("key {i}")).collect();
+    let waiting: Vec<_> = keys
+        .iter()
+        .map(|k| tokio::spawn(client.send(aimed(k, "a pane"), input).expect("queued").answer()))
+        .collect();
+    // The keys the pipe took before it filled time out, rightly: they were
+    // written and not answered within 15 s. The rest waited to be written,
+    // and their deadlines started only then.
+    let mut timed_out = 0;
+    for (key, answer) in keys.iter().zip(waiting) {
+        match answer.await.unwrap() {
+            Err(ClientError::TimedOut { .. }) => timed_out += 1,
+            answered => assert_eq!(answered_as(answered), *key),
+        }
+    }
+    assert!(timed_out < 20, "{timed_out} keys timed out while queued behind the stall");
+    for _ in 0..600 {
+        if seen.lock().unwrap().len() >= keys.len() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    assert_eq!(*seen.lock().unwrap(), keys, "every key arrived, in order");
+}
+
+/// A key whose caller gave up before it was written still goes, in its turn.
+#[tokio::test]
+async fn input_given_up_before_it_was_written_still_goes_in_order() {
+    let (seen, script) = recording();
+    let client = scripted(script).await;
+
+    let input = CallOptions { deadline: None, urgent: true };
+    // On this single-threaded runtime the writer has not run yet.
+    drop(client.send(request("l"), input).expect("queued"));
+    let s = client.send(request("s"), input).expect("queued");
+    assert_eq!(answered_as(s.answer().await), "s");
+    assert_eq!(*seen.lock().unwrap(), vec!["l", "s"]);
+}
+
+#[tokio::test]
+async fn dropping_a_client_fails_what_was_waiting_on_it() {
+    let client = scripted(|reader, _writer| async move {
+        // Reads nothing and answers nothing, and keeps the pipe open.
+        let _reader = reader;
+        std::future::pending::<()>().await;
+    })
+    .await;
+    let answer = client.send(request("never"), CallOptions::default()).expect("queued");
+    drop(client);
+    let outcome = tokio::time::timeout(Duration::from_secs(60), answer.answer())
+        .await
+        .expect("an answer outlived its client and waited forever");
+    assert!(matches!(outcome, Err(ClientError::Closed)), "got {outcome:?}");
 }
