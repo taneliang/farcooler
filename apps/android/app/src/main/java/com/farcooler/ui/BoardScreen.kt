@@ -276,10 +276,7 @@ fun BoardTab(
                         }
                     }
                     val more = showingMore.mapNotNull(TaskStatus::parse).toSet()
-                    // With Plan chosen only the task sections go: Unread and the
-                    // waiting count above stay, and the plan takes their place.
-                    val entries = BoardList.entries(board, flipped, reads = reads, showingMore = more, unread = summary)
-                        .filter { !showsPlan || it.isUnread }
+                    val entries = BoardList.entries(board, flipped, reads = reads, showingMore = more, unread = summary, showsPlan = showsPlan)
                     for (entry in entries) {
                         when (entry) {
                             is BoardListEntry.UnreadHeader -> item(key = entry.key) {

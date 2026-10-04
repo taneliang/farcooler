@@ -23,11 +23,6 @@ import com.farcooler.model.Worktree
 sealed interface BoardListEntry {
     val key: String
 
-    /** Part of the Unread section, which stays above the task sections and the Plan view alike. */
-    val isUnread: Boolean
-        get() = this is UnreadHeader || this === UnreadNothing || this is UnreadGroup || this is UnreadLine ||
-            this is UnreadNote || this is UnreadMore
-
     /**
      * A status and its count. An empty status is a header reading
      * "Backlog 0" that can't be expanded (spec §5, owner decision 3): never
@@ -127,7 +122,12 @@ object BoardList {
         showingMore: Set<TaskStatus> = emptySet(),
         /** What's unread, to list first (ov-113); null leaves the section out. */
         unread: BoardSummary? = null,
-    ): List<BoardListEntry> =
+        /**
+         * Plan chosen (ov-274): it stands in for the whole task list, Unread with it, as on the Mac, so
+         * the plan is the first thing seen. `BoardTab` passes it (`PlanWiringTest` holds the call).
+         */
+        showsPlan: Boolean = false,
+    ): List<BoardListEntry> = if (showsPlan) emptyList() else
         unread?.let(::unreadEntries).orEmpty() + board.sections.flatMap { section ->
             val count = section.rows.size
             val expanded = count > 0 && ((section.status !in COLLAPSED_AT_FIRST) != (section.status in toggled))

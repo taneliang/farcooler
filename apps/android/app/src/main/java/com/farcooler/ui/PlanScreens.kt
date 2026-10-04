@@ -42,6 +42,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -95,7 +97,7 @@ fun LazyListScope.planItems(
     when (state) {
         null, PlanReadState.Loading -> item(key = "plan/loading") {
             Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(Modifier.testTag("plan-loading"))
+                CircularProgressIndicator(Modifier.testTag("plan-loading").semantics { contentDescription = "Reading the plan" })
             }
         }
         PlanReadState.NeedsUpdate -> item(key = "plan/needs-update") {
@@ -187,14 +189,13 @@ fun PlanHeader(title: String, count: Int, modifier: Modifier = Modifier, open: B
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
             .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .then(if (onClick != null) Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onClick) else Modifier)
             .heightIn(min = 48.dp)
             .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp)
             .semantics(mergeDescendants = true) {
-                contentDescription = buildString {
-                    append("$title, $count")
-                    if (open != null) append(if (open) ", expanded" else ", collapsed")
-                }
+                heading()
+                contentDescription = "$title, $count"
+                if (open != null) stateDescription = if (open) "Expanded" else "Collapsed"
             },
     ) {
         Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
@@ -286,7 +287,7 @@ fun PlanLaneRow(lane: PlanLane, theme: PlanTheme?, rank: Int?, now: Long, waitsO
         trailingContent = {
             Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.outline)
         },
-        modifier = Modifier.clickable(onClick = onClick).testTag("plan-lane-${lane.name}").semantics(mergeDescendants = true) { contentDescription = spoken },
+        modifier = Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onClick).testTag("plan-lane-${lane.name}").semantics(mergeDescendants = true) { contentDescription = spoken },
     )
 }
 
@@ -305,7 +306,7 @@ fun PlanThemeRow(theme: PlanTheme, onClick: () -> Unit) {
         verticalAlignment = Alignment.Top,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp)
             .testTag("plan-theme-${theme.name}")
             .semantics(mergeDescendants = true) { contentDescription = spoken },

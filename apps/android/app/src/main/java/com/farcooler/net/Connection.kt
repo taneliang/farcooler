@@ -713,7 +713,7 @@ class Connection(
             needsYouOwed = true
             if (isForeground) scope.launch { readNeedsYou() }
         }
-        com.farcooler.model.PlanNews.board(notice)?.let { if (isForeground) scope.launch { plans.heard(it, boardList()) } }
+        scope.launch { plans.noticed(notice, boardList(), isForeground) }
         if (event != "task" && event != "resync") return
         scope.launch {
             // Boards are not read in the background — the fleet poll stops

@@ -78,6 +78,42 @@ class PlanReadsTest {
     }
 
     @Test
+    fun `a plan notice reads the record of the page on screen only, not every page opened`() = runBlocking {
+        val eventCalls = mutableListOf<String>()
+        val record = Json.parseToJsonElement("""{"events":[]}""").jsonObject
+        val plans = PlanReads({ method, args ->
+            if (method == "plan.events") { eventCalls += (args["theme"] ?: args["lane"]).toString(); record } else plan
+        }, runnerCan = { true })
+        plans.read(workspace)
+        plans.readRecord(PlanPage.Theme("a"))
+        plans.readRecord(PlanPage.Lane("b"))
+        plans.readRecord(PlanPage.Theme("c"))
+        eventCalls.clear()
+        plans.openPage = PlanPage.Lane("b")
+        plans.heard("w1", listOf(workspace))
+        assertEquals(listOf("\"b\""), eventCalls)
+        eventCalls.clear()
+        plans.openPage = null
+        plans.heard("w1", listOf(workspace))
+        assertEquals("no page on screen, no record read", emptyList<String>(), eventCalls)
+    }
+
+    @Test
+    fun `a notice is read only while the app is in front, and only a plan notice is plan news`() = runBlocking {
+        var reads = 0
+        val plans = PlanReads({ _, _ -> reads++; plan }, runnerCan = { true })
+        plans.read(workspace)
+        reads = 0
+        val line = Json.parseToJsonElement("""{"event":"plan","workspace":"w1"}""").jsonObject
+        plans.noticed(line, listOf(workspace), foreground = false)
+        assertEquals(0, reads)
+        plans.noticed(Json.parseToJsonElement("""{"event":"task","workspace":"w1"}""").jsonObject, listOf(workspace), foreground = true)
+        assertEquals(0, reads)
+        plans.noticed(line, listOf(workspace), foreground = true)
+        assertEquals(1, reads)
+    }
+
+    @Test
     fun `a record is read for its page, and one that fails leaves the page without`() = runBlocking {
         val sent = mutableListOf<JsonObject>()
         val record = Json.parseToJsonElement("""{"events":[{"at":1,"actor":"m","kind":"state","body":"Started."}]}""").jsonObject

@@ -79,6 +79,10 @@ fun PlanPageScreen(
     val workspace = connection.board(workspaceId)
     val state = states[workspaceId]
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+    androidx.compose.runtime.DisposableEffect(page) {
+        connection.plans.openPage = page
+        onDispose { if (connection.plans.openPage == page) connection.plans.openPage = null }
+    }
     LaunchedEffect(page) {
         if (states[workspaceId] !is PlanReadState.Loaded) connection.plans.read(workspace)
         connection.plans.readRecord(page)

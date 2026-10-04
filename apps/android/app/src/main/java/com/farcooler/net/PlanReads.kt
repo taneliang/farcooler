@@ -43,8 +43,15 @@ class PlanReads(
     /** Whether this runner keeps a plan: only then is there a control. */
     val keeps: Boolean get() = runnerCan() == true
 
+
     private val reading = mutableSetOf<String>()
     private val movedAgain = mutableSetOf<String>()
+
+    /**
+     * The theme's or lane's page on screen, if one is: the only record a plan
+     * notice reads again, rather than every page opened since.
+     */
+    @Volatile var openPage: PlanPage? = null
 
     /** Read [workspace]'s board's plan. One at a time per board, and once more after it if news came meanwhile. */
     suspend fun read(workspace: WorkspaceSummary) {
@@ -59,7 +66,8 @@ class PlanReads(
                 movedAgain -= key
                 val board = workspace.boardWorkspace
                 if (board == null) {
-                    set(key, PlanReadState.NeedsUpdate)
+                    // An implicit board has no plan to ask for: not an old runner, so not "needs an update".
+                    set(key, PlanReadState.Unavailable)
                     return
                 }
                 val state = PlanReadState.read(
@@ -101,9 +109,14 @@ class PlanReads(
         for (workspace in boards) {
             if (workspace.id.equals(board, ignoreCase = true) && _states.value.containsKey(workspace.id)) {
                 read(workspace)
-                _records.value.keys.toList().forEach { readRecord(it) }
+                openPage?.let { readRecord(it) }
             }
         }
+    }
+
+    /** A runner notice, as [Connection] hands it over: a plan notice reads that board's plan again, while the app is in front. */
+    suspend fun noticed(notice: JsonObject, boards: List<WorkspaceSummary>, foreground: Boolean) {
+        com.farcooler.model.PlanNews.board(notice)?.let { if (foreground) heard(it, boards) }
     }
 
     /** Boards a task or resync notice moved: their counts and "needs you" are the board's statuses, derived on read. */
