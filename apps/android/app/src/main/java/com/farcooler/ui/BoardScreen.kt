@@ -225,22 +225,7 @@ fun BoardTab(
                 // what will appear, say who fills it and, with no orchestrator to
                 // tell, how to start one: the orchestrator owns the task list.
                 board.isEmpty && workspace.id !in unread -> {
-                    val led = !workspace.isImplicit
-                    val copy = PhoneFirstRun.blankCopy(led, orchestratorRunning)
-                    EmptyState(
-                        title = FirstRunCopy.BOARD_TITLE,
-                        detail = copy.lede,
-                        modifier = Modifier.fillMaxSize().testTag("board-empty"),
-                    ) {
-                        if (copy.rows.isNotEmpty()) PhoneEmptyRows(copy)
-                        TaskSkeleton(Modifier.widthIn(max = 240.dp).padding(vertical = 8.dp))
-                        if (PhoneFirstRun.offersOrchestrator(led, orchestratorRunning) && onShowOrchestrator != null) {
-                            OutlinedButton(
-                                onClick = onShowOrchestrator,
-                                modifier = Modifier.testTag("board-show-orchestrator"),
-                            ) { Text(FirstRunCopy.SHOW_ORCHESTRATOR) }
-                        }
-                    }
+                    BoardBlank(!workspace.isImplicit, orchestratorRunning, onShowOrchestrator)
                 }
                 else -> LazyColumn(Modifier.fillMaxSize().testTag("board")) {
                     if (workspace.id in unread) {
@@ -367,7 +352,7 @@ fun BoardTab(
  * show or hide. An empty one says 0 and does nothing when tapped.
  */
 @Composable
-private fun SectionHeader(header: BoardListEntry.Header, onToggle: () -> Unit) {
+internal fun SectionHeader(header: BoardListEntry.Header, onToggle: () -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -455,6 +440,26 @@ private fun boardJump(
     else onJump(TerminalRef(hostId, worktree, terminal.id))
 }
 
+/** A board with no tasks: what it is, who fills it, and the shape of a card (ov-205, ov-245). */
+@Composable
+internal fun BoardBlank(led: Boolean, orchestratorRunning: Boolean, onShowOrchestrator: (() -> Unit)?) {
+    val copy = PhoneFirstRun.blankCopy(led, orchestratorRunning)
+    EmptyState(
+        title = FirstRunCopy.BOARD_TITLE,
+        detail = copy.lede,
+        modifier = Modifier.fillMaxSize().testTag("board-empty"),
+    ) {
+        if (copy.rows.isNotEmpty()) PhoneEmptyRows(copy)
+        TaskSkeleton(Modifier.widthIn(max = 240.dp).padding(vertical = 8.dp))
+        if (PhoneFirstRun.offersOrchestrator(led, orchestratorRunning) && onShowOrchestrator != null) {
+            OutlinedButton(
+                onClick = onShowOrchestrator,
+                modifier = Modifier.testTag("board-show-orchestrator"),
+            ) { Text(FirstRunCopy.SHOW_ORCHESTRATOR) }
+        }
+    }
+}
+
 @Composable
 private fun Empty(title: String, detail: String) {
     EmptyState(title, detail, Modifier.fillMaxSize())
@@ -462,7 +467,7 @@ private fun Empty(title: String, detail: String) {
 
 /** One card: key, title, what it asks, how long it has sat, acceptance, and its agent. */
 @Composable
-private fun TaskCardRow(
+internal fun TaskCardRow(
     row: TaskRow,
     agents: List<Pair<Terminal, String>>,
     orchestrator: Pair<Terminal, String>?,

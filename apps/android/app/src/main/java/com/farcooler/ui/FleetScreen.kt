@@ -321,18 +321,7 @@ internal fun WorktreeList(
 
         if (visible.isEmpty()) {
             item(key = "empty") {
-                Column(
-                    Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Text(
-                        scope.emptySentence,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    // A lede and icon rows where the list has them (ov-245).
-                    scope.emptyCopy?.let { PhoneEmptyRows(it) }
-                }
+                WorktreesEmpty(scope)
             }
         }
 
@@ -1334,3 +1323,19 @@ private fun rememberNow(ticking: Boolean): State<Long> =
         }
     }
 
+
+/** A scope with no worktrees: a lede and, where the list has them, icon rows (ov-245). */
+@Composable
+internal fun WorktreesEmpty(scope: WorktreeScope) {
+    Column(
+        Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            scope.emptySentence,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        scope.emptyCopy?.let { PhoneEmptyRows(it) }
+    }
+}

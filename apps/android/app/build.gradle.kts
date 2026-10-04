@@ -208,6 +208,58 @@ android {
     // `instrumented` is `initWith(debug)`.
     testBuildType = "instrumented"
 
+    // Screen captures (ov-245): Roborazzi over Robolectric, native graphics,
+    // drawing the real composables offscreen. They RECORD pictures for a person
+    // to look at and compare nothing, so there is no golden-image gate.
+    //
+    // They are off unless `-Pfarcooler.captures` is given, and then they are the
+    // only tests that run: Robolectric 4.17 runs SDK 37 (this app's `minSdk`)
+    // only on Java 21 and the build and CI run Java 17, so the captures need
+    // `-Pfarcooler.captureJdk=<a JDK 21 home>`. Without the flag the package is
+    // excluded, nothing here is loaded, and `testInstrumentedUnitTest` costs what
+    // it did.
+    //
+    //     ./gradlew testInstrumentedUnitTest -Pfarcooler.captures \
+    //         -Pfarcooler.captureJdk=/path/to/jdk-21 -Pfarcooler.captureDir=/path/to/out
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            all { test ->
+                val capturing = project.hasProperty("farcooler.captures")
+                if (capturing) {
+                    test.filter.includeTestsMatching("com.farcooler.capture.*")
+                    (project.findProperty("farcooler.captureJdk") as String?)?.let {
+                        test.executable = "$it/bin/java"
+                    }
+                    // What Robolectric's sandbox reaches into on Java 21.
+                    test.jvmArgs(
+                        "--add-exports=java.base/jdk.internal.access=ALL-UNNAMED",
+                        "--add-opens=java.base/java.lang=ALL-UNNAMED",
+                        "--add-opens=java.base/java.util=ALL-UNNAMED",
+                        "--add-opens=java.base/java.io=ALL-UNNAMED",
+                        "--add-opens=java.base/java.nio=ALL-UNNAMED",
+                        "--add-opens=java.base/java.net=ALL-UNNAMED",
+                        "--add-opens=java.base/java.text=ALL-UNNAMED",
+                        "--add-opens=java.base/java.security=ALL-UNNAMED",
+                        "--add-opens=java.base/sun.security.x509=ALL-UNNAMED",
+                        "--add-opens=java.base/jdk.internal.access=ALL-UNNAMED",
+                        "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
+                    )
+                    test.systemProperty("roborazzi.test.record", "true")
+                    test.systemProperty(
+                        "farcooler.captureDir",
+                        (project.findProperty("farcooler.captureDir") as String?)
+                            ?: layout.buildDirectory.dir("captures").get().asFile.path,
+                    )
+                    // A capture is a picture, never an up-to-date result.
+                    test.outputs.upToDateWhen { false }
+                } else {
+                    test.filter.excludeTestsMatching("com.farcooler.capture.*")
+                }
+            }
+        }
+    }
+
     buildFeatures {
         compose = true
         buildConfig = true
@@ -348,6 +400,14 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    // The empty `ComponentActivity` the Compose test rule launches. In the build
+    // type the unit tests compile against, so it never reaches a shipped APK.
+    "instrumentedImplementation"(libs.androidx.compose.ui.test.manifest)
     androidTestImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)

@@ -238,19 +238,11 @@ fun NeedsYouScreen(model: AppModel, onOpenDrawer: () -> Unit) {
                 }
 
                 items(withoutRepositories, key = { "no-repositories/${it.host.id}" }) { connection ->
-                    EmptyState(
-                        title = FirstRunCopy.noRepositoriesTitle(connection.host.displayLabel),
-                        detail = PhoneEmptyStates.NO_REPOSITORIES.lede,
-                        modifier = Modifier.testTag("no-repositories"),
-                    ) {
-                        PhoneEmptyRows(PhoneEmptyStates.NO_REPOSITORIES)
-                        if (connection.daemon.value?.grantedScope != "read") {
-                            Button(
-                                onClick = { addingRepositoryTo = connection },
-                                modifier = Modifier.testTag("no-repositories-add"),
-                            ) { Text(FirstRunCopy.ADD_REPOSITORY) }
-                        }
-                    }
+                    NoRepositories(
+                        runner = connection.host.displayLabel,
+                        canAdd = connection.daemon.value?.grantedScope != "read",
+                        onAdd = { addingRepositoryTo = connection },
+                    )
                 }
 
                 if (sections.isNotEmpty()) {
@@ -552,13 +544,23 @@ private fun Reassurance(
     }
     val where = if (connections.size == 1) " on ${connections[0].host.displayLabel}" else ""
 
+    ReassuranceBlock(
+        detail = reassurance(runners, where, worktrees, noOrchestrator),
+        showsAgentRows = idleWithoutOrchestrator(runners, noOrchestrator),
+        caveat = caveat,
+    )
+}
+
+/** The empty Needs You: its sentence, and under it what to do when no agents are working. */
+@Composable
+internal fun ReassuranceBlock(detail: String, showsAgentRows: Boolean, caveat: String?) {
     EmptyState(
         title = FirstRunCopy.NOTHING_NEEDS_YOU,
-        detail = reassurance(runners, where, worktrees, noOrchestrator),
+        detail = detail,
         icon = Icons.Outlined.CheckCircleOutline,
     ) {
         // "No agents are working yet." and what to do about it (ov-245).
-        if (idleWithoutOrchestrator(runners, noOrchestrator)) {
+        if (showsAgentRows) {
             PhoneEmptyRows(PhoneEmptyStates.NO_AGENTS_WORKING)
         }
         if (caveat != null) {
@@ -586,3 +588,21 @@ private fun Checking() {
     }
 }
 
+
+/** A runner that lists no repository: what one is for, and the way to add one. */
+@Composable
+internal fun NoRepositories(runner: String, canAdd: Boolean, onAdd: () -> Unit) {
+    EmptyState(
+        title = FirstRunCopy.noRepositoriesTitle(runner),
+        detail = PhoneEmptyStates.NO_REPOSITORIES.lede,
+        modifier = Modifier.testTag("no-repositories"),
+    ) {
+        PhoneEmptyRows(PhoneEmptyStates.NO_REPOSITORIES)
+        if (canAdd) {
+            Button(
+                onClick = onAdd,
+                modifier = Modifier.testTag("no-repositories-add"),
+            ) { Text(FirstRunCopy.ADD_REPOSITORY) }
+        }
+    }
+}

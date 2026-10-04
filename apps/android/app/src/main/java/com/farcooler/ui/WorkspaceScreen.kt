@@ -390,7 +390,7 @@ private fun OrchestratorActions(
  * or one whose pane was lost.
  */
 @Composable
-private fun OrchestratorEmpty(
+internal fun OrchestratorEmpty(
     seat: OrchestratorSeat,
     actions: Set<SeatAction>,
     refusal: String?,
