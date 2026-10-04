@@ -140,16 +140,16 @@ struct GridGeometryTests {
         #expect(!carets.isEmpty, "no caret was drawn")
         #expect(drawn.isSuperset(of: ["filter", "orchestrator"]), "glyphs drawn: \(drawn.sorted())")
         for icon in found where icon.role == .icon {
-            #expect(abs(icon.midX - NavigatorGrid.glyphCenter) < 0.5, "\(icon) isn't centered on the carets")
+            #expect(abs(icon.midX - NavigatorGrid.glyphCenter) < 0.5, "\(icon) isn't centered on the carets: icon.midX \(icon.midX), glyphCenter \(NavigatorGrid.glyphCenter), glyph width \(icon.width)")
             for caret in found where caret.role == .chevron {
-                #expect(abs(icon.midX - caret.midX) < 0.5, "\(icon) vs \(caret)")
+                #expect(abs(icon.midX - caret.midX) < 0.5, "\(icon) vs \(caret): icon.midX \(icon.midX), caret.midX \(caret.midX), glyphCenter \(NavigatorGrid.glyphCenter), icon width \(icon.width), caret width \(caret.width)")
             }
         }
     }
 
     /// The Terminals and Worktrees sections follow the same lines (ov-230):
     /// each row's box past the edge, its glyph over the carets, its name at B.
-    @Test("Terminals and worktrees rows sit on the same lines", .disabled("ov-235: glyph bounds differ on CI's macOS runner"))
+    @Test("Terminals and worktrees rows sit on the same lines")
     func terminalsAndWorktreesAreOnTheGrid() async {
         let store = await Self.store()
         var terminals = ProjectTerminals(

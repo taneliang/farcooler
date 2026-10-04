@@ -1,0 +1,26 @@
+name: ov-235 grid probe
+on:
+  push:
+    branches: [ov-235]
+  workflow_dispatch:
+jobs:
+  grid:
+    runs-on: xcode-27
+    timeout-minutes: 35
+    steps:
+      - run: xcodebuild -version
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: crates/tailcat/go/go.mod
+      - run: apps/macos/build-app.sh
+      - name: GridGeometryTests, three runs
+        run: |
+          for i in 1 2 3; do
+            echo "=== run $i"
+            swift test --package-path apps/macos --filter GridGeometry 2>&1 | tail -40
+          done
