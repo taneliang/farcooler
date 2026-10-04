@@ -23,7 +23,10 @@ class LfsNoticeTest {
     @Test
     fun `the words are the card's`() {
         assertEquals("Some large files weren't downloaded.", LfsNotice.TITLE)
-        assertTrue(LfsNotice.DETAIL.contains("git lfs pull"))
+        // A pull in the main checkout misses another branch's objects.
+        assertTrue(LfsNotice.DETAIL.contains("\"git lfs pull\" in this worktree"))
+        // The runner never fetches; it copies from its own store.
+        assertFalse(LfsNotice.RETRYING.contains("Download"))
         assertEquals("Try again", LfsNotice.RETRY)
     }
 }

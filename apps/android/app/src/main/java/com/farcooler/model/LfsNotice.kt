@@ -26,8 +26,16 @@ data class LfsNotice(
             if (pointers == null || pointers <= 0) null else LfsNotice(pointers, mayAct)
 
         const val TITLE = "Some large files weren't downloaded."
-        const val DETAIL = "If they aren't on this runner yet, run \"git lfs pull\" in the repository, then try again."
+        /**
+         * What Try again can do and what it can't. The runner never
+         * downloads: it fills in files whose objects are already in the
+         * repository's LFS store on the runner. `git lfs pull` run in this
+         * worktree fetches the objects of the worktree's own commit, whatever
+         * branch it's on, which a pull in the main checkout would not.
+         */
+        const val DETAIL = "Try again fills in any that are already on this runner. To download the rest, run \"git lfs pull\" in this worktree."
         const val RETRY = "Try again"
-        const val RETRYING = "Downloading…"
+        /** Not "Downloading…": the runner only copies from its own LFS store. */
+        const val RETRYING = "Trying again…"
     }
 }

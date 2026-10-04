@@ -22,7 +22,8 @@ struct LfsNoticeTests {
     @Test("The words are the card's")
     func words() {
         #expect(LfsNotice.title == "Some large files weren’t downloaded.")
-        #expect(LfsNotice.detail.contains("git lfs pull"))
+        #expect(LfsNotice.detail.contains("“git lfs pull” in this worktree"), "a pull in the main checkout misses another branch's objects")
+        #expect(!LfsNotice.retrying.contains("Download"), "the runner never fetches; it copies from its own store")
         #expect(LfsNotice.retry == "Try Again")
     }
 

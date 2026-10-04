@@ -26,7 +26,7 @@ final class ChangesLfsNoticeTests: XCTestCase {
         XCTAssertEqual(retry.label, "Try Again")
         retry.tap()
         // The call is in flight: the button says so and can't be pressed twice.
-        let working = NSPredicate(format: "label == %@ AND isEnabled == false", "Downloading\u{2026}")
+        let working = NSPredicate(format: "label == %@ AND isEnabled == false", "Trying Again\u{2026}")
         XCTAssertEqual(
             XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: working, object: retry)], timeout: 5),
             .completed, "Try Again did not start a retry")

@@ -32,10 +32,16 @@ public struct LfsNotice: Equatable, Sendable {
     }
 
     public static let title = "Some large files weren’t downloaded."
+    /// What Try Again can do and what it can't. The runner never downloads:
+    /// it fills in files whose objects are already in the repository's LFS
+    /// store on the runner. `git lfs pull` run in this worktree fetches the
+    /// objects of the worktree's own commit, whatever branch it's on, which
+    /// a pull in the main checkout would not.
     public static let detail =
-        "If they aren’t on this runner yet, run “git lfs pull” in the repository, then try again."
+        "Try Again fills in any that are already on this runner. To download the rest, run “git lfs pull” in this worktree."
     /// Said in place of the detail when the runner couldn’t be asked.
     public static let unreachable = "Couldn’t ask the runner to try again. Check that it’s connected."
     public static let retry = "Try Again"
-    public static let retrying = "Downloading…"
+    /// Not "Downloading…": the runner only copies from its own LFS store.
+    public static let retrying = "Trying Again…"
 }
