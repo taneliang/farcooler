@@ -1015,7 +1015,7 @@ fn answer_refused(e: farcooler_transport::ClientError) -> Box<dyn std::error::Er
     {
         return Box::new(tasks::Refused::naming(said.to_string(), *code, what.clone()));
     }
-    Box::new(e)
+    tasks::agent_refused("<terminal>")(e)
 }
 
 /// What a runner too old for Needs You is told.
@@ -3009,7 +3009,7 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
                     blocks,
                 }),
             ))
-            .await?;
+            .await.map_err(tasks::agent_refused(&terminal))?;
             println!("sent to {}", short(id));
         }
 
@@ -3071,7 +3071,7 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
                     text: text.clone(),
                 }),
             ))
-            .await?;
+            .await.map_err(tasks::agent_refused(&terminal))?;
             println!("edited queued message {queued_id} on {}", short(id));
         }
 
@@ -3084,7 +3084,7 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
                     queued_id: queued_id.clone(),
                 }),
             ))
-            .await?;
+            .await.map_err(tasks::agent_refused(&terminal))?;
             println!("withdrew queued message {queued_id} on {}", short(id));
         }
 
@@ -3097,7 +3097,7 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
                     queued_id: queued_id.clone(),
                 }),
             ))
-            .await?;
+            .await.map_err(tasks::agent_refused(&terminal))?;
             println!("sent queued message {queued_id} into the running turn on {}", short(id));
         }
 
@@ -3109,7 +3109,7 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
                     terminal_id: id_bytes(id),
                 }),
             ))
-            .await?;
+            .await.map_err(tasks::agent_refused(&terminal))?;
             println!("cancelled {}", short(id));
         }
 

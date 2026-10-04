@@ -4685,13 +4685,21 @@ impl Service {
         // guessing at one adapter for everything, and the preset it is handed
         // has to be this same value or the daemon's chat-capability check below
         // and the shim's own resolution could disagree.
-        let harness = self
-            .registry()
-            .identify(
-                &pane.command,
-                &self.screen(id).await.map(|(text, _, _)| text).unwrap_or_default(),
-            )
-            .map(|rules| rules.preset.clone());
+        //
+        // Except a RESTART: a chat asked into agent mode again (ov-174). Its
+        // pane runs the shim, which names no agent by process or by screen, so
+        // asking it would refuse with "nothing in this pane is an agent". The
+        // record names the agent the shim was started for (`preset_after_adopting`
+        // below), so that is the agent this restarts.
+        let restart = term.pane_mode == models::PaneMode::Agent && pane_mode == models::PaneMode::Agent;
+        let harness = if restart {
+            let preset = term.command_preset.split_once(':').map_or(term.command_preset.as_str(), |(a, _)| a);
+            Some(preset.to_string())
+        } else {
+            self.registry()
+                .identify(&pane.command, &self.screen(id).await.map(|(text, _, _)| text).unwrap_or_default())
+                .map(|rules| rules.preset.clone())
+        };
 
         // Where the pane restarts: its worktree, or an orchestrator's own
         // directory when it comes back as a terminal (`orchestrate`).
@@ -4842,7 +4850,14 @@ impl Service {
         // the supervisor that, so everything it held for this terminal went on
         // answering for a process that no longer exists — see
         // `left_agent_mode` for what is dropped and what deliberately is not.
-        if pane_mode != models::PaneMode::Agent {
+        //
+        // A restart drops it too, keeping what the old shim had queued for the
+        // new one (`AgentSupervisor::restarting`). After the respawn, not
+        // before: a shim whose link was dropped while it was still alive would
+        // reconnect and be handed them.
+        if restart {
+            self.agents.restarting(id);
+        } else if pane_mode != models::PaneMode::Agent {
             self.agents.left_agent_mode(id);
         }
         let Some(harness) = harness.filter(|_| pane_mode == models::PaneMode::Agent) else {
@@ -12642,3 +12657,7 @@ mod submodule_skill_tests;
 
 #[path = "service_terminal_names.rs"]
 mod terminal_names;
+
+#[cfg(test)]
+#[path = "service_agent_restart_tests.rs"]
+mod agent_restart_tests;

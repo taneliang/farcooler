@@ -292,14 +292,11 @@ fn error_response(request_id: bytes::Bytes, err: DomainError) -> Response {
 ///
 /// `AgentNotConnected` and not `OperationFailed`, so a client can say which
 /// thing happened; retryable, because the usual cause is a chat whose shim has
-/// not finished dialing. The runner sends the word and the app owns the
-/// sentence, as with every other code here.
+/// not finished dialing. `AgentStopped` for a pane whose agent is gone, which
+/// no retry fixes (ov-174); see `AgentSupervisor::deliver`. The runner sends
+/// the word and the app owns the sentence, as with every other code here.
 fn to_the_shim(svc: &Service, terminal: Uuid, message: DaemonMessage) -> Result<()> {
-    if svc.agents().send(terminal, message) {
-        Ok(())
-    } else {
-        Err(DomainError::AgentNotConnected)
-    }
+    svc.agents().deliver(terminal, message)
 }
 
 /// The name a deny carries for the device that sent it: "Denied from iPhone".
@@ -3056,6 +3053,24 @@ mod hook_answer_tests {
             Some(code(DomainError::InvalidArgument { what: "option_id" }))
         );
         assert!(r.svc.hooks().asks().is_holding(r.terminal), "the ask stays held");
+    }
+
+    /// A prompt to a pane whose agent stopped says so, and is not the
+    /// retryable "still connecting" the apps tried again forever (ov-174).
+    #[tokio::test]
+    async fn a_prompt_to_a_stopped_agent_is_refused_as_stopped() {
+        let r = a_runner("iPhone").await;
+        r.svc.agents().stopped_for_test(r.terminal);
+        let prompt = Request {
+            method: "terminal.agent_prompt".into(),
+            payload: Some(request::Payload::AgentPrompt(farcooler_protocol::v1::AgentPrompt {
+                terminal_id: crate::wire::id_bytes(r.terminal),
+                blocks: Vec::new(),
+            })),
+            ..Default::default()
+        };
+        let phone = handler(&r.svc, Some("phone-1"));
+        assert_eq!(refusal(&phone, prompt).await, Some(code(DomainError::AgentStopped)));
     }
 
     #[test]

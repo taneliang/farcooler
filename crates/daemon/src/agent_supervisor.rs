@@ -154,6 +154,8 @@ struct SessionState {
     /// a pane that is starting normally is also what it looks like, so a
     /// client draws the spinner until this is set or the transcript arrives.
     failure: Option<AgentFailure>,
+    /// Queued prompts a restart hands the next shim (`stranded.rs`).
+    resend: Vec<farcooler_agent::event::QueuedPrompt>,
     /// The last turn ended `EndReason::Failed`. Held until the next turn
     /// ends, and read only while the row is `Done` (`wire::failure_narrowed`).
     turn_failed: bool,
@@ -627,6 +629,7 @@ impl AgentSupervisor {
                     // something else now.
                     entry.epoch += 1;
                 }
+                self.resend_stranded(terminal);
                 return;
             }
             ShimMessage::Failed { failure } => {
@@ -905,6 +908,7 @@ impl AgentSupervisor {
                 entry.session_id = None;
                 entry.agent_mode = None;
                 entry.available_modes = Vec::new();
+                entry.resend.clear();
             }
         }
         if let Ok(mut writers) = self.writers.lock() {
@@ -1612,6 +1616,9 @@ mod tests {
 }
 
 mod failure;
+mod stranded;
+#[cfg(test)]
+mod stranded_tests;
 
 #[cfg(test)]
 mod failed_turn_tests;
