@@ -55,6 +55,26 @@ const NEEDS_YOU: [&str; 3] = ["needs_you", "task.note", "workspace.start_orchest
 /// the pane and left it standing, dead, with the error swallowed.
 const TERMINALS: [&str; 2] = ["terminal.stop", "terminal.remove"];
 
+/// The agent screen's calls. Both phones send every one of them, and the
+/// header listed none (ov-115's review): an app developer reading it could not
+/// learn that a pane's prompt, picker or queued message has a method at all.
+/// `terminal.agent_subscribe` is the poll behind the live stream.
+const AGENT: [&str; 13] = [
+    "terminal.set_pane_mode",
+    "terminal.agent_subscribe",
+    "terminal.agent_prompt",
+    "terminal.draft_prompt",
+    "terminal.agent_answer",
+    "terminal.agent_set_mode",
+    "terminal.agent_set_model",
+    "terminal.agent_set_config",
+    "terminal.agent_edit_queued",
+    "terminal.agent_cancel_queued",
+    "terminal.agent_steer_queued",
+    "terminal.agent_cancel",
+    "agent_queue",
+];
+
 /// The header says so: an app developer reads that file to find out what may
 /// be passed to `farcooler_client_call`.
 #[test]
@@ -66,6 +86,7 @@ fn the_header_tells_an_app_developer_these_exist() {
         .chain(BOARD.iter())
         .chain(TERMINALS.iter())
         .chain(NEEDS_YOU.iter())
+        .chain(AGENT.iter())
         .copied()
     {
         assert!(

@@ -1,0 +1,152 @@
+//! The names an app passes `farcooler_client_call`, one per wire method.
+//!
+//! In its own file, outside `#[cfg(test)]`, so the exhaustive match below is
+//! compiled into every build (ov-171). `dispatch` matches wire names as
+//! strings and the compiler cannot check those; this match is the half it can.
+
+use farcooler_protocol::method::Method;
+
+/// The name an app passes `farcooler_client_call` to reach each wire method,
+/// or `None` where no app can.
+///
+/// A match on `Method` with no wildcard, so a method added to the protocol's
+/// table does not build here, in any profile, until somebody decides whether
+/// apps reach it. It was test-only (ov-115), so `cargo build` and a release
+/// build passed a method nobody had decided on; `dispatch`'s last arm now
+/// calls it, which is what keeps it in every build. Deciding `None` is
+/// allowed; forgetting is not. `every_route_has_an_arm` then calls each name.
+pub(super) fn route(method: Method) -> Option<&'static str> {
+    match method {
+        // An arm under its own wire name.
+        Method::HostHealth
+        | Method::DaemonVersion
+        | Method::RepositoryRegister
+        | Method::RepositoryRootList
+        | Method::RepositoryRootAdd
+        | Method::RepositoryRootRemove
+        | Method::WorktreeCreate
+        | Method::WorktreeHide
+        | Method::WorktreeUnhide
+        | Method::WorktreeRemove
+        | Method::BranchList
+        | Method::WorktreeFileSearch
+        | Method::TerminalCreate
+        | Method::TerminalScreen
+        | Method::TerminalWrite
+        | Method::TerminalResize
+        | Method::TerminalStop
+        | Method::TerminalSeen
+        | Method::TerminalRemove
+        | Method::TerminalDismissLost
+        | Method::TerminalRestart
+        | Method::TerminalSetPaneMode
+        | Method::TerminalAgentSubscribe
+        | Method::TerminalAgentPrompt
+        | Method::TerminalDraftPrompt
+        | Method::TerminalAgentAnswer
+        | Method::TerminalAgentSetMode
+        | Method::TerminalAgentSetModel
+        | Method::TerminalAgentSetConfig
+        | Method::TerminalAgentEditQueued
+        | Method::TerminalAgentCancelQueued
+        | Method::TerminalAgentCancel
+        | Method::TerminalAgentSteerQueued
+        | Method::ChangesChangeSet
+        | Method::ChangesCommitFiles
+        | Method::ChangesFileDiff
+        | Method::ChangesSetBase
+        | Method::ChangesMarkRead
+        | Method::ChangesInbox
+        | Method::StackGet
+        | Method::PrRefresh
+        | Method::AdapterUpsert
+        | Method::AdapterDelete
+        | Method::AdapterTest
+        | Method::ThemeUpsert
+        | Method::ThemeDelete
+        | Method::SettingsSetBranchPrefix
+        | Method::ClientList
+        | Method::ClientEnroll
+        | Method::ClientRevoke
+        | Method::WorktreeReorder
+        | Method::TaskList
+        | Method::TaskGet
+        | Method::TaskNote
+        // Read state on the runner (ov-113): a phone opens a ticket, and
+        // the Unread section is built from what comes back.
+        | Method::WorkspaceMarkRead
+        | Method::WorkspaceStartOrchestrator
+        | Method::TerminalWatching
+        | Method::UsageTask => Some(method.name()),
+        Method::AdapterList => Some("adapters"),
+        Method::ThemeList => Some("themes"),
+        Method::RepositoryList => Some("repositories"),
+        Method::NeedsYouList => Some("needs_you"),
+        Method::WorktreeList | Method::TerminalList => Some("fleet"),
+        // `host` is `host.health` with this client's build beside it.
+        Method::HostGet => None,
+        // The Mac app owns the local daemon's lifecycle, through the CLI.
+        Method::DaemonShutdown => None,
+        // Discovery and a node key are the Mac's and the ceremony's: paths
+        // sit behind `host_admin`, and the tunnel is joined by the CLI.
+        Method::WorktreeDiscover | Method::ClientSetNodeKey => None,
+        // The title bar's message to a terminal orchestrator (ov-214): a phone
+        // has no title bar. Ask the Orchestrator's paste (ov-184,
+        // `terminal.draft_prompt`) is routed above, for the phones' task screen
+        // (ov-241).
+        Method::TerminalTell => None,
+        // Their own C entry points, `farcooler_client_paste_file` and
+        // `farcooler_client_stream_start`, because neither is one reply.
+        Method::TerminalPasteFile | Method::TerminalAttach => None,
+        // The Files tab is the Mac's first (ov-189); the phones follow.
+        Method::WorktreeListDir | Method::WorktreeReadFile => None,
+        // Tiling is tmux's, and a phone shows one pane at a time.
+        Method::LayoutList
+        | Method::LayoutSplit
+        | Method::LayoutMove
+        | Method::LayoutResize
+        | Method::LayoutBreak
+        | Method::LayoutRename
+        | Method::LayoutViewport
+        | Method::LayoutPreset
+        | Method::LayoutCycle
+        | Method::LayoutFocus
+        | Method::LayoutZoom
+        | Method::LayoutSwap
+        | Method::LayoutGroupSelect => None,
+        // The orchestrator owns the task list (ov-184): a phone never
+        // creates, edits, moves or blocks a task. `PHONES_NEVER_WRITE_A_TASK`.
+        Method::TaskCreate
+        | Method::TaskUpdate
+        | Method::TaskSetStatus
+        | Method::TaskBlock
+        | Method::TaskMove => None,
+        // The workspaces' writes and the stack's, and two board reads: the
+        // Mac and the CLI make them, and no phone screen offers them yet.
+        // `workspace.list` is read inside `worktree.create`.
+        Method::StackSetParent
+        | Method::TaskGetByKey
+        | Method::TaskSearch
+        | Method::WorkspaceList
+        | Method::WorkspaceCreate
+        | Method::WorkspaceRename
+        | Method::WorkspaceSetPrefix
+        | Method::WorkspaceSetSettings
+        | Method::WorkspaceDelete
+        | Method::WorktreeAssign
+        | Method::TerminalSetRole
+        // Naming a terminal (ov-234): the phones show the name and do not set it.
+        | Method::TerminalRename => None,
+        // The CLI reads it today; the Summary page (ov-188 phase 3) will
+        // route it here.
+        Method::ReportGet => None,
+        // Spend (ov-194): the CLI's `farcooler report` reads the whole
+        // runner's through `Session`. A task's own is the task screen's
+        // Usage section (ov-195), routed above.
+        Method::UsageReport => None,
+        // When a task starts and who works it (ov-212, ov-213): the CLI
+        // writes them, from the orchestrator's session. The phones only read
+        // the board (ov-184), and the board's rows carry both.
+        Method::TaskSetWait | Method::TaskSetLine | Method::TaskWorker => None,
+    }
+}

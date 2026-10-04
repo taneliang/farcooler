@@ -43,6 +43,7 @@ use serde_json::{Value, json};
 // boundaries, and their reasoning is written once, in `farcooler-ffi-guard`.
 use farcooler_ffi_guard::{guarded, locked};
 
+use farcooler_protocol::method::Method;
 use crate::session::{Session, SessionError, uuid_of};
 use crate::ssh::{Destination, HostKeyPolicy, Reach};
 
@@ -2297,7 +2298,14 @@ async fn dispatch(
 
         // Refused rather than defaulted, so a typo in a client is a visible
         // error instead of a call that silently does nothing.
-        other => Err(SessionError::Protocol(format!("unknown method: {other}"))),
+        other => Err(SessionError::Protocol(match Method::parse(other) {
+            // A method this runner serves and an app is meant to reach, whose
+            // arm is missing: this build's bug, not an unknown name.
+            Some(method) if route::route(method) == Some(other) => {
+                format!("method routed but not handled: {other}")
+            }
+            _ => format!("unknown method: {other}"),
+        })),
     }
 }
 
@@ -3222,6 +3230,7 @@ mod tests {
 /// The agent screen's controls against a real daemon, as a phone sends them.
 #[cfg(test)]
 mod phone_path_tests;
+mod route;
 #[cfg(test)]
 mod board_reads_phone_tests;
 mod board_reads_args;
