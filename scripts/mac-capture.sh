@@ -2,7 +2,7 @@
 # Capture the real Mac window, offscreen, against a seeded scratch daemon (ov-278).
 #
 #   scripts/mac-capture.sh <out-dir> [stage]       every seeded place, light and dark
-#   scripts/mac-capture.sh stop                    stop the scratch daemon
+#   scripts/mac-capture.sh stop                    stop the scratch daemon and its tmux
 #
 # What it does, in order:
 #
@@ -40,7 +40,12 @@ bin="${FARCOOLER_BIN:-$root/target/debug/farcooler}"
 fc() { FARCOOLER_HOME="$home" "$bin" "$@"; }
 
 if [ "${1:-}" = "stop" ]; then
-    [ -x "$bin" ] && fc daemon stop >/dev/null 2>&1 || true
+    [ -x "$bin" ] || exit 0
+    # The daemon, then its tmux server, which `daemon stop` leaves running:
+    # `status` names its socket in its recovery line.
+    socket=$(fc status 2>/dev/null | sed -n -E 's/.*tmux -L (farcooler-[0-9a-f]+).*/\1/p' | head -1)
+    fc daemon stop >/dev/null 2>&1 || true
+    [ -n "$socket" ] && tmux -L "$socket" kill-server 2>/dev/null || true
     exit 0
 fi
 
