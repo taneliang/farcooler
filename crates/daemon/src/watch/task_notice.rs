@@ -9,7 +9,7 @@
 //! design; this is its runner half.
 //!
 //! **Intake.** The board's writes (`task_ops`) call `task_event`, and an
-//! agent working on a task (`task_link::task_of`) calls `agent_event` from
+//! agent working on a task (`task_link::notice_task`) calls `agent_event` from
 //! its transition in place of its own alert. Each marks the task pending.
 //!
 //! **The window.** Per task: open on the first event, closed 3 s after the

@@ -298,9 +298,13 @@ async fn a_task_filed_by_the_manager_is_new() {
 
 #[tokio::test]
 async fn an_agent_on_a_task_is_told_about_through_the_task() {
-    let (_dir, svc, workspace, checkout, pane) = a_runner().await;
+    let (_dir, svc, workspace, checkout, _) = a_runner().await;
     let watcher = Watcher::new(svc.clone());
-    // The pane's lane is this task's, and it is the only open one there.
+    // The pane's lane is this task's, and it is the only open one there. The
+    // lane is not the main checkout, whose hand-opened agents are nobody's.
+    let repo = svc.store.get_worktree(checkout).unwrap().repository_id;
+    let checkout = svc.store.create_worktree(repo, "lane", "/tmp/fc-t/ov-112-lane", false).unwrap().id;
+    let pane = svc.store.create_terminal_for_test(checkout, workspace);
     let task = svc.store.create_task(workspace, "Wake the agent", Actor::User).unwrap();
     let update = TaskUpdate {
         title: task.title.clone(),
@@ -333,6 +337,60 @@ async fn an_agent_on_a_task_is_told_about_through_the_task() {
     assert_eq!(notice.subtitle, "claude needs you · Create haiku.txt?");
     assert_eq!(notice.task.as_deref(), Some(task.key.as_str()));
     assert!(notice.options.is_empty(), "never an agent's ask's options");
+}
+
+/// What `announce_transition` taps for one blocked agent, minus the counts.
+async fn heard_from_a_blocked(watcher: &Watcher, pane: Uuid) -> Vec<Tapped> {
+    let mut taps = watcher.tap_notices();
+    tokio::time::pause();
+    let asking = Quoted { worktree: "main", question: Some("Create haiku.txt?"), said: None };
+    watcher.announce_transition(pane, AgentActivity::Blocked, "claude", asking, false, None);
+    let mut heard = Vec::new();
+    while let Ok(Some(tap)) = tokio::time::timeout(AT_MOST * 3, taps.recv()).await {
+        if tap.kind != Some("count") {
+            heard.push(tap);
+        }
+    }
+    heard
+}
+
+#[tokio::test]
+async fn an_agent_on_a_closed_task_notifies_as_itself() {
+    let (_dir, svc, workspace, checkout, _) = a_runner().await;
+    let watcher = Watcher::new(svc.clone());
+    let repo = svc.store.get_worktree(checkout).unwrap().repository_id;
+    let lane = svc.store.create_worktree(repo, "lane", "/tmp/fc-t/ov-112-lane", false).unwrap().id;
+    let task = svc.store.create_task(workspace, "Over", Actor::User).unwrap();
+    let made = svc
+        .store
+        .create_terminal_for_task(lane, "agent", "claude", farcooler_protocol::v1::TerminalIntent::Running, 80, 24, Some(task.id))
+        .unwrap();
+    let pane = svc.store.set_terminal_workspace(made.id, workspace).unwrap().id;
+    svc.store.set_task_status(task.id, TaskStatus::Done, Actor::User).unwrap();
+    let heard = heard_from_a_blocked(&watcher, pane).await;
+    assert_eq!(heard.len(), 1, "{heard:#?}");
+    assert_eq!(heard[0].kind, None);
+    assert!(!heard[0].quiet, "its own banner alerts: no task notice speaks for it");
+}
+
+#[tokio::test]
+async fn a_hand_opened_agent_in_the_main_checkout_notifies_as_itself() {
+    let (_dir, svc, workspace, checkout, pane) = a_runner().await;
+    let watcher = Watcher::new(svc.clone());
+    // The checkout's one open task is somebody else's dispatch.
+    let task = svc.store.create_task(workspace, "Dispatched here", Actor::User).unwrap();
+    let update = TaskUpdate {
+        title: task.title.clone(),
+        intent: String::new(),
+        acceptance: Vec::new(),
+        constraints: Vec::new(),
+        labels: Vec::new(),
+        worktree_id: Some(checkout),
+    };
+    svc.store.update_task(task.id, task.resource_version, &update).unwrap();
+    let heard = heard_from_a_blocked(&watcher, pane).await;
+    assert_eq!(heard.len(), 1, "{heard:#?}");
+    assert!(!heard[0].quiet, "it alerts");
 }
 
 #[tokio::test]

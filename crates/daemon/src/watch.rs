@@ -2839,7 +2839,7 @@ impl Watcher {
 
     /// An agent's blocked or done transition, worth telling the owner about.
     ///
-    /// An agent working on a task (`task_link::task_of`) is told about through
+    /// An agent working on a task (`task_link::notice_task`) is told about through
     /// its task (ov-94): its own notice still goes, for the live card, but with
     /// `alert: false`, and its news joins the task's notice window, worded by
     /// task. An agent with no task, and an orchestrator, notify as they
@@ -2858,7 +2858,7 @@ impl Watcher {
             .store
             .get_terminal(terminal)
             .ok()
-            .and_then(|row| crate::task_link::task_of(&self.service.store, &row));
+            .and_then(|row| crate::task_link::notice_task(&self.service.store, &row));
         let Some(task) = task else {
             return self.push_if_paired(terminal, activity, label, quoted, turn_failed, started_at);
         };
