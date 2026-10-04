@@ -860,8 +860,14 @@ struct TaskBoardView: View {
                         keyed: hasKeyboard)
                     .id(NavigatorItem.orchestrator)
                     .padding(.horizontal, NavigatorGrid.edge)
+                    // The orchestrator's row stays put over panes that scroll,
+                    // and this line is the edge they scroll up to, as the
+                    // rules between the panes are. The owner asked for these
+                    // lines to be spaced, not removed (ov-243, 3 Oct: "the
+                    // orchestrator box, the divider, section headers"), and
+                    // for content to meet them (ov-258, 4 Oct).
                     if ruleUnderOrchestrator {
-                        Divider().probed("navigator-divider")  // style-exempt: the owner's rule under the orchestrator (ov-258)
+                        Divider().probed("navigator-divider")  // style-exempt: the edge the panes scroll to, as NavigatorSplit's rules (ov-243, ov-258)
                             .padding(.vertical, NavigatorRhythm.rule)
                     }
                 }
