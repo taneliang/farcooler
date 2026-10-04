@@ -174,13 +174,32 @@ extension ContentView {
 
     /// The detail with no workspace to show: the fleet's own state first,
     /// before it has anything in it (`FleetPlaceholder`), then "choose one".
-    var placeholder: some View {
+    /// While a restore waits for its runner, read again every second, so
+    /// "Connecting…" turns to unreachable at `FleetPlaceholder.connectingLimit`.
+    @ViewBuilder var placeholder: some View {
+        if let runner = restoringRunner, let since = restoring?.since {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                placeholder(restoringOn: runner, waited: context.date.timeIntervalSince(since))
+            }
+        } else {
+            placeholder(restoringOn: nil, waited: 0)
+        }
+    }
+
+    /// What a runner a restore waits for has said is wrong with it: this
+    /// Mac's daemon's error, or a runner's refusal.
+    func trouble(on runner: String) -> String? {
+        let client = store.clients[runner]
+        return (runner.isEmpty ? client?.fleetError : nil) ?? client?.state.refusal
+    }
+
+    private func placeholder(restoringOn runner: String?, waited: TimeInterval) -> some View {
         let local = store.clients[""]
         return FleetPlaceholder(
             phase: FleetPlaceholder.phase(
                 hasWorktrees: !store.fleet.worktrees.isEmpty, localLoaded: local?.hasLoaded == true,
                 localError: local?.fleetError, hasRepositories: !store.repositories.isEmpty,
-                restoringOn: restoringRunner),
+                restoringOn: runner, trouble: runner.flatMap(trouble(on:)), waited: waited),
             onShowNeedsYou: { selection = .needsYou },
             onOpenMain: FleetPlaceholder.mainToOpen(in: store.repositories, fleet: store.fleet).map { target in
                 { selection = .workspace(host: target.host, workspace: target.workspace.id, focus: nil) }
@@ -188,6 +207,9 @@ extension ContentView {
             onNewWorkspace: workspaceRepositories.isEmpty ? nil : { newWorkspaceName = NewWorkspaceName(name: "") },
             onAddRepository: { showAddRepository = true },
             onNewWorktree: { newWorktreeIntent = NewWorktreeIntent() },
-            onTryAgain: { Task { await local?.refresh() } })
+            // The runner a restore waits for, dialed again; else this Mac's read.
+            onTryAgain: {
+                if let runner, !runner.isEmpty { store.reconnect(runner) } else { Task { await local?.refresh() } }
+            })
     }
 }

@@ -27,7 +27,17 @@ struct FleetPlaceholder: View {
         /// The window is going back to where it was, on a runner that
         /// hasn't connected yet (ov-279): the runner, `""` for this Mac.
         case connecting(String)
+        /// The same, on a runner that said why it can't be reached, or that
+        /// has taken longer than a connection is allowed (`connectingLimit`):
+        /// the runner, and its own words when it has any. The window still
+        /// goes back to its place when the runner comes (review H2).
+        case unreachable(String, reason: String?)
     }
+
+    /// How long "Connecting…" is said before a runner that hasn't answered
+    /// reads as unreachable: ssh's own `ConnectTimeout`, which the CLI sets
+    /// to ten seconds (`crates/cli/src/remote.rs`).
+    nonisolated static let connectingLimit: TimeInterval = 10
 
     /// The phase for the fleet as it is.
     ///
@@ -38,12 +48,17 @@ struct FleetPlaceholder: View {
     /// past all of this, whichever runner it came from.
     ///
     /// A window going back to a place on a runner still connecting says so,
-    /// whatever else the fleet holds: that place is the one it opens.
+    /// whatever else the fleet holds: that place is the one it opens. Until
+    /// the runner says what's wrong (`trouble`), or has been waited for past
+    /// `connectingLimit`: then it's unreachable, with Try Again.
     nonisolated static func phase(
         hasWorktrees: Bool, localLoaded: Bool, localError: String?, hasRepositories: Bool,
-        restoringOn runner: String? = nil
+        restoringOn runner: String? = nil, trouble: String? = nil, waited: TimeInterval = 0
     ) -> Phase {
-        if let runner { return .connecting(runner) }
+        if let runner {
+            if trouble != nil || waited >= connectingLimit { return .unreachable(runner, reason: trouble) }
+            return .connecting(runner)
+        }
         if hasWorktrees { return .chooseWorkspace }
         if localLoaded { return hasRepositories ? .noWorktrees : .noRepositories }
         if let localError { return .failed(localError) }
@@ -93,12 +108,18 @@ struct FleetPlaceholder: View {
         return (only.host, main)
     }
 
-    /// The connecting state's title: "Connecting to studio…".
+    /// The connecting state's title: "Connecting to studio…", by the
+    /// runner's name, not its ssh target.
     nonisolated static func connectingTitle(_ runner: String) -> String {
-        "Connecting to \(runner.isEmpty ? "this Mac’s runner" : runner)…"
+        "Connecting to \(ReadOnlyFolders.runnerName(runner))…"
     }
 
-    /// Under it: what happens next, so waiting reads as waiting.
+    /// The unreachable state's title: "Can’t Reach studio".
+    nonisolated static func unreachableTitle(_ runner: String) -> String {
+        "Can’t Reach \(ReadOnlyFolders.runnerName(runner))"
+    }
+
+    /// Under either: what happens next, so waiting reads as waiting.
     static let connectingCopy = "This window goes back to where you left it once the runner answers."
 
     let phase: Phase
@@ -160,7 +181,24 @@ struct FleetPlaceholder: View {
                 Text(Self.connectingCopy)
             } actions: {
                 if let onShowNeedsYou {
-                    Button("Show Needs You", action: onShowNeedsYou)
+                    // Instead: it gives the restore up (`WindowRestore`).
+                    Button("Show Needs You Instead", action: onShowNeedsYou)
+                }
+            }
+        case .unreachable(let runner, let reason):
+            ContentUnavailableView {
+                Label(Self.unreachableTitle(runner), systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(Self.connectingCopy)
+            } actions: {
+                // The runner's own words in a box, never the app's voice.
+                if let reason {
+                    DetailBox(text: reason)
+                        .frame(maxWidth: 420)
+                }
+                Button("Try Again", action: onTryAgain)
+                if let onShowNeedsYou {
+                    Button("Show Needs You Instead", action: onShowNeedsYou)
                 }
             }
         case .chooseWorkspace:
