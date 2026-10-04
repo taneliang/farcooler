@@ -200,7 +200,7 @@ struct AskOrchestratorTests {
                 paste: { spy.pasted.append($0); return ok }, copy: { spy.copied.append($0) },
                 handoff: ComposerHandoff())
         }
-        for text in spy.pasted + spy.copied { #expect(!text.contains(where: \.isNewline)) }
+        for text in spy.pasted + spy.copied { #expect(!text.contains { $0.isNewline }) }
         for text in spy.pasted + spy.copied { #expect(!text.hasSuffix("\n") && !text.hasSuffix("\r"), "\(text.debugDescription)") }
         #expect(!spy.pasted.isEmpty && !spy.copied.isEmpty)
     }
