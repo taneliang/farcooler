@@ -127,7 +127,7 @@ struct StartTaskTests {
     }
 
     /// A client wired to `runner`, connected, with the runner's build read.
-    private func client(_ runner: Runner, notifications: NotificationCenter = NotificationCenter())
+    func client(_ runner: Runner, notifications: NotificationCenter = NotificationCenter())
         async -> DaemonClient
     {
         let client = DaemonClient(target: "", notifications: notifications)
@@ -532,7 +532,7 @@ struct StartTaskTests {
 
     // MARK: - The "watching" heartbeat
 
-    private static func present(
+    static func present(
         app: Bool = true, awake: Bool = true, unlocked: Bool = true, idle: TimeInterval = 1
     ) -> Presence {
         Presence(
@@ -557,7 +557,7 @@ struct StartTaskTests {
     /// that task first suspends, so this one, enqueued on the same actor
     /// after them, lands after theirs. `agent-prompt`, so no filter below
     /// (`sent`, `watchingCalls`, `seenCalls`) ever counts it.
-    private func afterTheSentinel(_ client: DaemonClient, _ runner: Runner) async {
+    func afterTheSentinel(_ client: DaemonClient, _ runner: Runner) async {
         let sentinel = ["terminal", "agent-prompt", "sentinel", "--", ""]
         Task { _ = await client.agentPrompt(terminal: "sentinel", text: "") }
         for _ in 0..<500 where !runner.calls.contains(sentinel) {
@@ -684,7 +684,7 @@ struct StartTaskTests {
     // MARK: - Seen
 
     /// A runner whose one agent, `t-new`, has finished and not been seen.
-    private func aFinishedAgent(watching: Bool = true) -> Runner {
+    func aFinishedAgent(watching: Bool = true) -> Runner {
         let runner = Runner(capabilities: ["workspaces", "terminals"] + (watching ? ["watching"] : []))
         runner.worktreeMade = true
         runner.terminalMade = true

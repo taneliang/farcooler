@@ -2670,7 +2670,12 @@ final class DaemonClient: ObservableObject {
     /// (`WATCHED_TTL_MS` in `crates/daemon/src/watch.rs`). Two consecutive
     /// failures are therefore survivable without a pane somebody is plainly
     /// watching starting to buzz them.
-    private static let watchingFloor: TimeInterval = 3
+    static let watchingFloor: TimeInterval = 3
+
+    /// The wait between renewals, and the clock the floor is read on.
+    /// Replaced in tests, which hold both still and step them by hand.
+    var watchingPause: @MainActor () async -> Void = { try? await Task.sleep(for: .seconds(DaemonClient.watchingFloor)) }
+    var watchingNow: () -> Date = { Date() }
 
     /// Tell this runner which panes are in front of the person right now, so it
     /// does not push a notification about an agent they are already reading.
@@ -2708,12 +2713,14 @@ final class DaemonClient: ObservableObject {
     ///
     /// **Every main window, not the caller's alone.** The runner keeps one slot
     /// for every local client (`watched` in `crates/daemon/src/watch.rs`, keyed
-    /// `"-"`), and each window has clients of its own, so a second window's
-    /// call replaced the first's and a pane only the first showed lost its
-    /// claim. What the other windows show (`Notifier.watching`, per window) is
-    /// added here, limited to the panes this runner has. Only the resignation
-    /// path leaves them out (`includingOtherWindows: false`): the claim goes
-    /// because the person did, and that is true of every window.
+    /// `"-"`), and every window shares this one client (ov-133), so each call
+    /// claims what every window shows (`Notifier.watching`, per window),
+    /// limited to the panes this runner has, and the renewal runs while any
+    /// window shows one: a covered window saying it shows nothing used to
+    /// cancel the renewal a window still watching had armed, and the claim
+    /// lapsed ten seconds later. Only the resignation path leaves the other
+    /// windows out (`includingOtherWindows: false`): the claim goes because
+    /// the person did, and that is true of every window.
     func reportWatching(_ terminals: [String], includingOtherWindows: Bool = true) {
         // Never an ssh attempt for a heartbeat to a runner that is not up: the
         // runner ages every claim out on its own (`WATCHED_TTL_MS`), so
@@ -2756,9 +2763,14 @@ final class DaemonClient: ObservableObject {
         // selection change, and nothing else would ask again. On a runner
         // without `watching` too, for the `done` above; it spawns nothing
         // there, only asks `Presence` again.
-        if !terminals.isEmpty {
+        //
+        // Armed for what every window shows, and renewed by asking every
+        // window again (`Notifier.watching` holds each window's own panes),
+        // so it lasts while any window watches, whichever called last.
+        if !everyWindow.isEmpty {
+            let pause = watchingPause
             watchingTask = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(Self.watchingFloor))
+                await pause()
                 guard !Task.isCancelled else { return }
                 self?.reportWatching(terminals)
             }
@@ -2778,13 +2790,13 @@ final class DaemonClient: ObservableObject {
         // while nobody is there.
         if claim.isEmpty && watching.isEmpty { return }
 
-        if changed || Date().timeIntervalSince(watchingSentAt) >= Self.watchingFloor {
+        if changed || watchingNow().timeIntervalSince(watchingSentAt) >= Self.watchingFloor {
             // Stamped before the call and stamped even when it fails, on the
             // same terms as `changesInboxReadAt`: a runner that refuses this in
             // a millisecond must not thereby be asked far more often than one
             // that answers it. The floor is a floor on ATTEMPTS.
             watching = claim
-            watchingSentAt = Date()
+            watchingSentAt = watchingNow()
             // `runRaw`, and its message dropped: a heartbeat that failed is
             // nobody's news, least of all the news of the action it happened
             // to start inside.
