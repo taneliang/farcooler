@@ -112,7 +112,11 @@ struct WorkspaceBoardList: View {
                 // orchestrator to tell, the way to start one: the orchestrator
                 // owns the task list (ov-184), so there's no Add Task here.
                 ContentUnavailableView {
+                    // The identifier is the title's: on the container, the
+                    // outer "board" replaced it (integ-9, from the element
+                    // tree), as "not-installed" moved onto its title.
                     Label(FirstRunCopy.Phone.boardTitle, systemImage: "checklist")
+                        .accessibilityIdentifier("board-empty")
                 } description: {
                     VStack(spacing: 16) {
                         TaskSkeleton().frame(maxWidth: 240)
@@ -131,8 +135,6 @@ struct WorkspaceBoardList: View {
                             .accessibilityIdentifier("board-show-orchestrator")
                     }
                 }
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("board-empty")
             } else if let board {
                 list(board)
             } else if unread {
