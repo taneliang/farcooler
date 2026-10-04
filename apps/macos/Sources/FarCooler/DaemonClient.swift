@@ -549,6 +549,12 @@ final class DaemonClient: ObservableObject {
                     self.readsChanged(reads)
                 }
             },
+            onPlan: { [weak self] workspace in
+                Task { @MainActor in
+                    guard let self, self.streamGeneration == generation else { return }
+                    self.planNews[workspace, default: 0] += 1
+                }
+            },
             onEnd: { [weak self] in
                 Task { @MainActor in
                     // Stale: either this stream was deliberately stopped, or
@@ -1094,6 +1100,8 @@ final class DaemonClient: ObservableObject {
     /// drifted from it when an implicit board started re-reading on news that
     /// names a workspace. `boardGeneration(for:)` asks `touches` itself.
     @Published private(set) var boardNews: [BoardNews: Int] = [:]
+    /// How many times each board's plan moved, by workspace id (ov-273).
+    @Published var planNews: [String: Int] = [:]
 
     /// A notice's say about boards, without its actor.
     struct BoardNews: Hashable {

@@ -74,6 +74,8 @@ extension ContentView {
         /// A finished status's History page (ov-103): every task in Done or
         /// Canceled, grouped by when it landed, searchable.
         case history(TaskStatus)
+        /// A theme's or lane's page, from the Plan view (ov-273).
+        case plan(PlanPage)
     }
 }
 

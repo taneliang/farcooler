@@ -99,7 +99,8 @@ extension ContentView {
         // A workspace with nothing opened has nothing to heal either: a
         // runner that loses it draws the column's sentence until you choose.
         // A task is its own view's to say it's gone.
-        case .workspace(_, _, nil), .workspace(_, _, .task), .workspace(_, _, .history): return selection
+        case .workspace(_, _, nil), .workspace(_, _, .task), .workspace(_, _, .history), .workspace(_, _, .plan):
+            return selection
         case .workspace(let h, _, .worktree(let w, let t)): (host, worktreeID, terminalID) = (h, w, t)
         case .looseWorktree(let h, let w, let t): (host, worktreeID, terminalID) = (h, w, t)
         }

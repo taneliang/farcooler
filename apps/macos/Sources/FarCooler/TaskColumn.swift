@@ -505,7 +505,8 @@ enum WorkspaceNavigation {
     static func crumbs(
         _ selection: Selection?, trail: Selection?, workspace: String,
         task: (String) -> String, worktree: (String) -> String,
-        projectTerminal: (_ worktree: String, _ terminal: String) -> String? = { _, _ in nil }
+        projectTerminal: (_ worktree: String, _ terminal: String) -> String? = { _, _ in nil },
+        plan: (PlanPage) -> String = { $0.word }
     ) -> [Crumb] {
         guard case .workspace(let host, let id, let focus?)? = selection else { return [] }
         let top = Crumb(title: workspace, target: .workspace(host: host, workspace: id, focus: nil))
@@ -514,6 +515,8 @@ enum WorkspaceNavigation {
             return [top, Crumb(title: task(t), target: nil)]
         case .history(let status):
             return [top, Crumb(title: BoardHistory.title(status), target: nil)]
+        case .plan(let page):
+            return [top, Crumb(title: plan(page), target: nil)]
         case .worktree(let wt, let terminal):
             if let terminal, let name = projectTerminal(wt, terminal) {
                 return [top, Crumb(title: name, target: nil)]

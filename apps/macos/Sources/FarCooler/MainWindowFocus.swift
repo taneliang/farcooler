@@ -67,6 +67,18 @@ struct MainWindowFocus: Equatable {
     /// The Layout menu's worktree, or nil when none is on screen.
     var layout: LayoutMenuFocus?
 
+    /// View ▸ Show Plan, or Show Tasks while the plan is shown (ov-273).
+    /// `plan` is the board's `\.boardPlan`: nil where it offers none.
+    static func planTitle(_ plan: Bool?) -> String {
+        plan == true ? "Show Tasks" : "Show Plan"
+    }
+
+    /// Show Plan acts on a navigator in the key main window whose runner
+    /// keeps a plan.
+    static func togglesPlan(_ focus: MainWindowFocus?, plan: Bool?) -> Bool {
+        marksRead(focus) && plan != nil
+    }
+
     /// What ⌘F says it does: find in the file clicked into, the
     /// navigator's filter in a workspace (or a loose worktree beside one),
     /// else Go to Anything's find.
@@ -168,4 +180,7 @@ struct MainWindowFocus: Equatable {
 
 extension FocusedValues {
     @Entry var mainWindow: MainWindowFocus?
+    /// The navigator's board shows its plan, from its Tasks | Plan control;
+    /// nil where it offers none (ov-273).
+    @Entry var boardPlan: Bool?
 }

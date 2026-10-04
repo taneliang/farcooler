@@ -182,6 +182,18 @@ struct PlanModelTests {
         #expect(plan.taskLine("t9") == nil)
     }
 
+    @Test("A live lane waits on the owner when one of its cards needs a decision; a landed one never does")
+    func waitsOnOwner() throws {
+        let plan = try Self.plan(
+            themes: [],
+            lanes: [
+                Self.lane("asks", "review", cards: ["t1", "t2"]), Self.lane("quiet", "review", cards: ["t3"]),
+                Self.lane("done", "landed", cards: ["t1"]),
+            ])
+        let statuses: [String: TaskStatus] = ["t1": .needsDecision, "t2": .inReview, "t3": .inProgress]
+        #expect(plan.lanes.map { plan.waitsOnOwner($0, statuses: statuses) } == [true, false, false])
+    }
+
     // MARK: Words
 
     @Test("A lane's status says its round, its place, its commit and its train")

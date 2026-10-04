@@ -89,6 +89,10 @@ enum MacDestination {
                     runner: runner, place: .worktree(id, workspace: workspace), pane: terminal ?? pane)
             case .history(let status):
                 return Destination(runner: runner, place: .history(workspace: workspace, status: status.rawValue))
+            case .plan:
+                // The plan layer is an experiment the shared destinations
+                // don't name (ov-273): a page is kept as its workspace.
+                return Destination(runner: runner, place: .workspace(workspace))
             }
         case .looseWorktree(let host, let worktree, let terminal):
             return Destination(

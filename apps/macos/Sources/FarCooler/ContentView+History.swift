@@ -30,7 +30,8 @@ extension ContentView {
                     .map { "\($0.key) \($0.title)" }
             },
             worktree: { host, id in worktree(host: host, id: id)?.task },
-            remembered: { jumpBar.restoredTitles[$0] })
+            remembered: { jumpBar.restoredTitles[$0] },
+            plan: { host, workspace, page in boardStores["\(host)/\(workspace)"]?.plan.title(page) })
     }
 
     /// A row of the list chosen: there in one move, the stops between kept

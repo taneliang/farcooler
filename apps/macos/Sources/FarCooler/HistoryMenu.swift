@@ -38,6 +38,8 @@ enum HistoryMenu {
         /// What a place was called when it was last seen, for one the runner
         /// hasn't answered about yet (a relaunch's history).
         var remembered: (Selection) -> String? = { _ in nil }
+        /// A theme's or lane's name (ov-273).
+        var plan: (_ host: String, _ workspace: String, _ page: PlanPage) -> String? = { _, _, _ in nil }
     }
 
     /// `rows`, named and drawn: the symbol of its kind, its last crumb as the
@@ -83,6 +85,8 @@ enum HistoryMenu {
         case .workspace(let host, let id, .history(let status)?):
             let title = "\(status.title) History"
             return (title, title, "clock.arrow.circlepath", names.workspace(host, id), host)
+        case .workspace(let host, let id, .plan(let page)?):
+            return (names.plan(host, id, page), page.word, page.symbol, names.workspace(host, id), host)
         case .looseWorktree(let host, let worktree, _):
             return (names.worktree(host, worktree), "Worktree", "arrow.triangle.branch", nil, host)
         }

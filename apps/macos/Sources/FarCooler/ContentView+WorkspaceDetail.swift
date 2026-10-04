@@ -96,6 +96,9 @@ extension ContentView {
             leaf = worktree(host: host, id: id)?.windowTitle
         case .history(let status)?:
             leaf = BoardHistory.title(status)
+        case .plan(let page)?:
+            leaf = workspace.flatMap { w in store.clients[host].map { boardStore(for: w, client: $0, host: host) } }?
+                .plan.title(page)
         case nil:
             break
         }
@@ -261,6 +264,10 @@ extension ContentView {
             worktree: { id in worktree(host: host, id: id)?.task ?? "Worktree" },
             projectTerminal: { id, terminal in
                 ProjectTerminals.name(of: terminal, in: worktree(host: host, id: id), fleet: store.fleet)
+            },
+            plan: { page in
+                workspace.flatMap { w in store.clients[host].map { boardStore(for: w, client: $0, host: host) } }?
+                    .plan.title(page) ?? page.word
             })
     }
 
@@ -302,6 +309,13 @@ extension ContentView {
             } else {
                 ContentUnavailableView("Board Not Found", systemImage: "checklist")
                     .background(WorkspaceStyle.paper)
+            }
+        case .workspace(let host, let id, .plan(let page)?):
+            if let client = store.clients[host], let workspace = board(host: host, id: id) {
+                let board = boardStore(for: workspace, client: client, host: host)
+                PlanPageView(plan: board.plan, page: page, context: planContext(board, host: host, workspace: id))
+            } else {
+                ContentUnavailableView("Board Not Found", systemImage: "map")
             }
         case .workspace(let host, _, .worktree(let wt, _)?), .looseWorktree(let host, let wt, _):
             if !settled {
@@ -510,6 +524,7 @@ extension ContentView {
             sentence: TaskColumnModel.sentence(agent) ?? "", row: row, ask: ask)
         return VStack(spacing: 0) {
             TaskViewHeader(row: row, ask: ask, agent: chosen)
+            PlanTaskLineView(plan: board.plan, task: row.id) { openPlan($0, host: host, workspace: board.workspace.id) }
             TaskTabBar(
                 tab: tab, onChoose: { choose($0, for: row.id) },
                 worktree: lane.map { WorkspaceScreen.ownTerminals(of: $0, fleet: store.fleet) },

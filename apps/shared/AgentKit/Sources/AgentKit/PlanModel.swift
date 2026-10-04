@@ -318,6 +318,13 @@ extension PlanModel {
         return PlanTaskLine(lane: lane, theme: theme)
     }
 
+    /// Whether a live lane is waiting on the owner: one of its cards needs
+    /// a decision, by the board's own statuses. With staleness, the only
+    /// thing that draws a lane in color.
+    public func waitsOnOwner(_ lane: PlanLane, statuses: [String: TaskStatus]) -> Bool {
+        lane.state.isLive && lane.cards.contains { statuses[$0.task] == .needsDecision }
+    }
+
     /// A card's row, from the plan's own read: for a card the board hasn't.
     public func card(_ task: String) -> PlanCard? { cards.first { $0.task == task } }
 }

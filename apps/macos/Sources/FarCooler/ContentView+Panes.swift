@@ -72,7 +72,9 @@ extension ContentView {
                 onHistory: { status in openHistory(status, host: host, workspace: workspace.id) },
                 filterRequest: boardFilterRequest,
                 ask: askOrchestrator(host: host, workspace: workspace),
-                split: $navigatorSplit
+                split: $navigatorSplit,
+                planPage: planPage(host: host, workspace: workspace.id),
+                onPlan: { page in openPlan(page, host: host, workspace: workspace.id) }
             )
         } else {
             // Said, rather than the generic "Select a worktree": this
