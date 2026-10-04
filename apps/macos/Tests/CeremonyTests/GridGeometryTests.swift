@@ -146,7 +146,13 @@ struct GridGeometryTests {
         // The row alone has no margin, so the glyph column's center is half
         // a cell in; in the board it's `glyphCenter` (`checkTheLines`).
         #expect(abs(dot.midX - NavigatorGrid.mark / 2) <= 0.5, "dot \(dot) isn't centered in the glyph column")
-        #expect(abs(dot.midY - title.midY) <= 0.5, "dot \(dot) vs title \(title): y centers \(dot.midY), \(title.midY)")
+        // Against the title the tolerance is a whole point: at 1x (CI's
+        // headless runner) the text's line box and the dot each snap to whole
+        // points, so a dot centered on the first line reads up to 1.0 off
+        // (11 vs 12 on CI). The dot-to-icon check above pins the placement at
+        // 0.5; this one catches a dot that left the first line, which a top
+        // or bottom alignment does by 4 points or more.
+        #expect(abs(dot.midY - title.midY) <= 1.0, "dot \(dot) vs title \(title): y centers \(dot.midY), \(title.midY)")
         // The needs-you and unread dots take the icon's place too (ov-260 review).
         for state in [OrchestratorRow.State.needsYou, .unread] {
             let news = await row(state, status: nil).first { $0.row == "orchestratorDot" }
