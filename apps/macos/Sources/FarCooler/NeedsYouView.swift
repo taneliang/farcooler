@@ -150,7 +150,9 @@ struct NeedsYouView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(WorkspaceStyle.canvas)
+        // The page's ground is the window's frosted plane, with the items on it
+        // as opaque cards (ov-225).
+        .background { WindowPlane().ignoresSafeArea() }
         .navigationTitle("Needs You")
         .navigationSubtitle(items.isEmpty ? "" : (items.count == 1 ? "1 item" : "\(items.count) items"))
     }
@@ -241,9 +243,10 @@ struct NeedsYouItemRow: View {
                     .foregroundStyle(.red)
             }
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 10).fill(WorkspaceStyle.document))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.08)))
+        .padding(Spacing.inset)
+        // A card: `Radius.medium` paper, with no stroke. The card against the
+        // plane is its edge; Increase Contrast draws a separator back.
+        .surface(.content, in: .card, fill: WorkspaceStyle.document)
         .contentShape(Rectangle())
         .onTapGesture(perform: onOpen)
         .accessibilityElement(children: .contain)

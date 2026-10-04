@@ -120,7 +120,7 @@ struct NoteHits: Equatable {
 }
 
 /// A row of area chips, wrapping onto as many lines as it takes.
-private struct AreaChips: View {
+struct AreaChips: View {
     let areas: [String]
     @Binding var chosen: String?
 
@@ -131,10 +131,12 @@ private struct AreaChips: View {
                 Button { chosen = on ? nil : area } label: {
                     Text(area)
                         .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: on ? .semibold : .regular))
-                        .foregroundStyle(on ? Color.white : Color.primary)
+                        .foregroundStyle(.primary)
                         .padding(.horizontal, 8)  // grid-exempt: a chip's own inset
                         .padding(.vertical, 3)
-                        .background(Capsule().fill(on ? Color.accentColor : Color.primary.opacity(0.07)))
+                        // A pill that states a filter: the selection's fill when
+                        // it's on, the inset's when it isn't, ink the same both ways.
+                        .background(on ? Fill.selection(active: true) : Fill.inset(), in: Capsule())
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
