@@ -23,4 +23,8 @@ log="$(mktemp -t farcooler-test-vt)"
 trap 'rm -f "$log"' EXIT
 ./build-vt.sh >"$log" 2>&1 || { cat "$log" >&2; echo "test.sh: the Rust cores did not build" >&2; exit 1; }
 
-exec swift test "$@"
+# Under the tmux leak check (ov-207): the real-CLI tests start scratch
+# daemons, each with a tmux server that `daemon stop` leaves running, and a
+# test that forgets to end one fails the run here rather than leaving a
+# server and a shell behind (`ScratchDaemon.stop`).
+exec ../../scripts/tmux-leak-check.py -- swift test "$@"

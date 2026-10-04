@@ -65,18 +65,7 @@ struct PaneHeaderProgramTests {
             _ = await ProcessRunner.run("/usr/bin/git", ["-C", demo] + args, deadline: 30)
         }
         _ = await farcooler(["--json", "daemon", "ensure"], home: home)
-        // The scratch tmux server too, which `daemon stop` leaves running:
-        // `status` names its socket in its recovery line.
-        func tearDown() async {
-            let status = String(decoding: await farcooler(["status"], home: home).out, as: UTF8.self)
-            _ = await farcooler(["daemon", "stop"], home: home)
-            if let socket = status.firstMatch(of: /tmux -L (farcooler-[0-9a-f]+)/)?.1,
-                let tmux = ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"]
-                    .first(where: { FileManager.default.isExecutableFile(atPath: $0) })
-            {
-                _ = await ProcessRunner.run(tmux, ["-L", String(socket), "kill-server"], deadline: 10)
-            }
-        }
+        func tearDown() async { await ScratchDaemon.stop(cli: Self.cli!, farcoolerHome: home + "/h") }
         do {
             _ = await farcooler(["root", "add", home + "/repos"], home: home)
             _ = await farcooler(["repo", "register", demo], home: home)

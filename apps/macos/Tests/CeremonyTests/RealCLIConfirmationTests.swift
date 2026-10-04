@@ -53,11 +53,12 @@ struct RealCLIConfirmationTests {
         do {
             try await scenario(home: home)
         } catch {
-            _ = await farcooler(["daemon", "stop"], home: home)
+            await ScratchDaemon.stop(cli: Self.cli!, farcoolerHome: home + "/h")
             try? FileManager.default.removeItem(atPath: home)
             throw error
         }
-        _ = await farcooler(["daemon", "stop"], home: home)
+        // Its tmux server too, which `daemon stop` leaves running.
+        await ScratchDaemon.stop(cli: Self.cli!, farcoolerHome: home + "/h")
         try? FileManager.default.removeItem(atPath: home)
     }
 
