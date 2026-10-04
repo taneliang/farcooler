@@ -721,6 +721,20 @@ final class DaemonClient: ObservableObject {
             updated.turnFailed = event.turnFailed
             // Which task its banner folds into, as of this very event (ov-112).
             updated.noticeTaskId = event.noticeTaskId
+            // The rest of what the event carries. `rank`, `paneMode` and
+            // `taskId` are what a derived Needs You item is built from
+            // (`olderPanes`), so stale ones put the wrong agent first.
+            updated.said = event.said
+            updated.paneMode = event.paneMode
+            updated.rank = event.rank
+            updated.taskId = event.taskId
+            updated.ports = event.ports
+            updated.agentSessionId = event.agentSessionId
+            updated.agentMode = event.agentMode
+            updated.availableAgentModes = event.availableAgentModes
+            updated.agentFailure = event.agentFailure
+            updated.workspace = event.workspace
+            updated.role = event.role
 
             if updated != fleet.worktrees[w].terminals[t] { fleet.worktrees[w].terminals[t] = updated }
 

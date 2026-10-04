@@ -81,6 +81,20 @@ struct TerminalEvent: Sendable, Decodable {
     // since the last full read would otherwise fold a banner into a thread
     // that is not coming. See `DaemonClient.apply(_:)`.
     var noticeTaskId: String?
+    // Pushed on every terminal event and applied by none until now (ov-156's
+    // review): `EventResyncTests` lists every `Terminal` property against this
+    // struct, so a field the wire carries and this app drops fails by name.
+    var said: String?
+    var paneMode: String?
+    var rank: UInt32?
+    var taskId: String?
+    var ports: [Int]?
+    var agentSessionId: String?
+    var agentMode: String?
+    var availableAgentModes: [String]?
+    var agentFailure: String?
+    var workspace: String?
+    var role: String?
 }
 
 /// A worktree's tiling, pushed whole.

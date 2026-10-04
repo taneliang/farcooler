@@ -83,7 +83,10 @@ struct EventResyncTests {
             state: "running", activity: "working", chatCapable: true, exitCode: 3, exitSignal: 9,
             activitySince: 1234, turnStartedAt: 5678, blockedQuestion: "Allow touch x?",
             feed: ["a line"], line: "3/7 · Testing", subagents: ["Explore"], turnFailed: true,
-            noticeTaskId: "task-1")
+            noticeTaskId: "task-1", said: "Added the retry.", paneMode: "agent", rank: 7,
+            taskId: "task-9", ports: [3000, 8080], agentSessionId: "sess-1", agentMode: "plan",
+            availableAgentModes: ["plan", "edit"], agentFailure: "adapter_failed", workspace: "ws-1",
+            role: "orchestrator")
         client.apply(event)
 
         let row = try #require(client.fleet.worktrees.first?.terminals.first)
@@ -99,6 +102,15 @@ struct EventResyncTests {
             #expect(
                 rowFields[label] == "\(child.value)",
                 "TerminalEvent.\(label) was not applied: the row has \(rowFields[label] ?? "nothing")")
+        }
+        // The other direction: every property of the row is either carried by
+        // the event or named here as not pushed. A field added to `Terminal` and
+        // to the wire but not to `TerminalEvent` fails here, which is how
+        // `said`, `paneMode`, `rank`, `taskId` and `ports` went unapplied.
+        let eventLabels = Set(Mirror(reflecting: event).children.compactMap(\.label))
+        let notPushed: Set<String> = ["epoch"]
+        for label in rowFields.keys where !eventLabels.contains(label) {
+            #expect(notPushed.contains(label), "Terminal.\(label) is not on TerminalEvent, so a live event can't apply it")
         }
         // The fixture sets every property: a field added to the event and not
         // to this fixture would be compared as nil against nil.
