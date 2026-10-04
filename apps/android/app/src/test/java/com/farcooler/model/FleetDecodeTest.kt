@@ -50,6 +50,7 @@ class FleetDecodeTest {
               "open_tasks": [
                 {"id": "0198f2c0-0000-7000-8000-00000000a001", "key": "bil-9", "title": "Invoice PDF export", "status": "in_progress"}
               ],
+              "lfs_pointers": 3,
               "terminals": [
                 {
                   "id": "aab3238922bcc25a6f606eb525ffdc56",
@@ -174,6 +175,10 @@ class FleetDecodeTest {
             listOf(TaskRef("0198f2c0-0000-7000-8000-00000000a001", "bil-9", "Invoice PDF export", "in_progress")),
             w.openTasks,
         )
+        // Snake_case, from `with_workspaces` and the CLI's row: how many large
+        // files weren't downloaded (ov-199). Three, so a decode that does
+        // nothing cannot pass.
+        assertEquals(3, w.lfsPointers)
     }
 
     /**

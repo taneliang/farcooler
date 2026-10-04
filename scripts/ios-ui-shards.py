@@ -49,6 +49,7 @@ SHARDS = {
         "AgentDraftTests",  # -agent-layout-harness
         "ChangesPullRequestTests",  # -changes-layout-harness
         "ChangesPatchNoticeTests",  # -changes-layout-harness
+        "ChangesLfsNoticeTests",  # -changes-layout-harness -lfs-pointers (ov-199)
         "TerminalTaskKeyTests",  # -phone-harness -phone-terminal-key (ov-215)
         "AgentRetrySendTests",  # -agent-layout-harness
         "AgentStoppedTests",  # -agent-layout-harness -stopped

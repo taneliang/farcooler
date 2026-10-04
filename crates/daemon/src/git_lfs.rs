@@ -143,7 +143,10 @@ fn hydrate_limit() -> std::time::Duration {
 
 /// Replace the LFS pointers in the freshly filled `worktree` with their
 /// content, from the local store, within [`HYDRATE_LIMIT`]. Best effort:
-/// nothing here fails the worktree.
+/// nothing here fails the worktree. Answers the paths that are still pointer
+/// files, which is what the worktree says it didn't download (ov-199): every
+/// `filter=lfs` path after a hydration that failed or ran out, and after one
+/// that finished, the ones the store had no object for ([`pointers`]).
 ///
 /// git rewrites only what it sees as changed, and a pointer the fill just
 /// wrote matches the index. So the `filter=lfs` entries are taken out of the
@@ -161,22 +164,28 @@ fn hydrate_limit() -> std::time::Duration {
 /// and the fill run again, which restores the index from `HEAD` and puts every
 /// file back to its pointer. An object the store doesn't have stays a
 /// pointer.
-pub async fn hydrate(worktree: &Path) {
-    if helper().is_none() {
-        return;
-    }
+pub async fn hydrate(worktree: &Path) -> Vec<String> {
     let listed = crate::git::git_bytes(worktree, &["ls-files", "-z", "--", LFS_PATHS]).await;
-    if !matches!(&listed, Ok(l) if l.ok && !l.stdout.is_empty()) {
-        return;
+    let listed: Vec<String> = match &listed {
+        Ok(l) if l.ok => paths_of(&l.stdout),
+        _ => return Vec::new(),
+    };
+    if listed.is_empty() {
+        return listed;
+    }
+    // No helper beside the daemon: LFS is off, and every one of them stays a
+    // pointer, which is what the worktree should say.
+    if helper().is_none() {
+        return listed;
     }
     let unlisted = crate::git::git(worktree, &["rm", "-r", "-q", "--cached", "--", LFS_PATHS]).await;
     if !matches!(&unlisted, Ok(u) if u.ok) {
         tracing::warn!("Git LFS files couldn't be marked for hydration; they stay pointers");
-        return;
+        return listed;
     }
     let limit = hydrate_limit();
     match crate::git::git_with(worktree, &["checkout", "-q", "HEAD", "--", LFS_PATHS], &[], limit).await {
-        Ok(out) if out.ok => return,
+        Ok(out) if out.ok => return pointers(worktree, &listed).await,
         Ok(out) => tracing::warn!(stderr = %out.stderr, "Git LFS files couldn't be hydrated; they stay pointers"),
         Err(_) => tracing::warn!(?limit, "Git LFS files took too long to hydrate; they stay pointers"),
     }
@@ -194,6 +203,191 @@ pub async fn hydrate(worktree: &Path) {
     if !matches!(crate::git::git_with(worktree, FILL, &off(), crate::git::GIT_TIMEOUT).await, Ok(f) if f.ok) {
         tracing::warn!(worktree = %worktree.display(), "a cut-short LFS hydration couldn't be undone");
     }
+    listed
+}
+
+/// The NUL-separated paths `git ... -z` printed.
+fn paths_of(stdout: &[u8]) -> Vec<String> {
+    stdout
+        .split(|b| *b == 0)
+        .filter(|p| !p.is_empty())
+        .map(|p| String::from_utf8_lossy(p).into_owned())
+        .collect()
+}
+
+/// The first line of every LFS pointer, in the spelling git-lfs writes and
+/// the older one it reads.
+const POINTER_PREFIXES: [&[u8]; 2] =
+    [b"version https://git-lfs.github.com/spec/v1", b"version https://hawser.github.com/spec/v1"];
+
+/// A pointer file is a few lines; git-lfs's own limit on reading one is 1,024
+/// bytes.
+const POINTER_MAX: u64 = 1024;
+
+/// Which of `paths` (relative to `worktree`) are LFS pointer files now.
+///
+/// From the files themselves, not the store: it is ground truth whether the
+/// cause was a hydration that ran out, an object the store lacks, or a store
+/// the helper's hash check rejected, it needs no git, and it notices an agent
+/// that ran `git lfs pull` itself. A path that is gone, a directory, a
+/// symlink, or anything beyond [`POINTER_MAX`] bytes is not one. Every
+/// directory on the way is opened with `O_NOFOLLOW`
+/// (`beneath::open_dir_beneath`), and so is the file, so a link an agent
+/// swapped in is refused rather than read through.
+pub async fn pointers(worktree: &Path, paths: &[String]) -> Vec<String> {
+    let (worktree, paths) = (worktree.to_path_buf(), paths.to_vec());
+    tokio::task::spawn_blocking(move || {
+        paths.into_iter().filter(|path| is_pointer(&worktree, path)).collect()
+    })
+    .await
+    .unwrap_or_default()
+}
+
+fn is_pointer(worktree: &Path, relative: &str) -> bool {
+    use std::io::Read;
+    use rustix::fs::{FileType, Mode, OFlags};
+    let relative = Path::new(relative);
+    let Ok((dirs, name)) = crate::beneath::split(relative) else { return false };
+    let Ok(dir) = crate::beneath::open_dir_beneath(worktree, dirs, false) else { return false };
+    let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
+    let Ok(fd) = rustix::fs::openat(&dir, name, flags, Mode::empty()) else { return false };
+    let Ok(stat) = rustix::fs::fstat(&fd) else { return false };
+    if FileType::from_raw_mode(stat.st_mode) != FileType::RegularFile || stat.st_size as u64 > POINTER_MAX {
+        return false;
+    }
+    let mut head = Vec::new();
+    if std::fs::File::from(fd).take(POINTER_MAX).read_to_end(&mut head).is_err() {
+        return false;
+    }
+    POINTER_PREFIXES.iter().any(|p| head.starts_with(p))
+}
+
+/// Try again to replace `recorded` pointers with their content, on a worktree
+/// an agent may be working in. Answers the paths still pointer files.
+///
+/// **Not [`hydrate`].** Its failure path (`index.lock` removed, then `reset
+/// --hard`) would wipe an agent's work, and its `rm --cached` window lets an
+/// agent's `git commit` record the large files as deleted. This writes
+/// through a throwaway index instead: `read-tree HEAD` makes one with no stat
+/// data, so every entry reads as changed, and `checkout-index -f` writes the
+/// files through the filter without touching the worktree's real index, so an
+/// agent's git sees no gap.
+///
+/// What it does then to the real index is one short `update-index
+/// --cacheinfo` for the paths it wrote ([`refresh`]). The real index still
+/// holds the pointer's size for them, and git calls a file whose size differs
+/// from its entry's modified without reading it, so Changes would list every
+/// downloaded file as edited until something rewrote the entry. `--cacheinfo`
+/// writes entries with no stat data, which git compares by content, through
+/// the filter, where they match.
+///
+/// Only paths that are pointers now and whose index entry is still HEAD's are
+/// rewritten: a path the agent edited, staged or removed is theirs. A
+/// failed or timed-out write is undone the same way with LFS off, which
+/// writes the pointer back over a half-written file; these paths held only
+/// pointers, so none of the agent's content is at stake. The caller holds the
+/// repository's lock.
+pub async fn rehydrate(worktree: &Path, recorded: &[String]) -> Vec<String> {
+    let still = pointers(worktree, recorded).await;
+    if still.is_empty() || helper().is_none() {
+        return still;
+    }
+    let changed = crate::git::git_bytes(worktree, &["diff-index", "--cached", "--name-only", "-z", "HEAD"]).await;
+    let Ok(changed) = changed else { return still };
+    if !changed.ok {
+        return still;
+    }
+    let changed: std::collections::HashSet<String> = paths_of(&changed.stdout).into_iter().collect();
+    let untouched: Vec<&str> = still.iter().map(String::as_str).filter(|p| !changed.contains(*p)).collect();
+    if untouched.is_empty() {
+        return still;
+    }
+    let dir = match crate::git::git(worktree, &["rev-parse", "--absolute-git-dir"]).await {
+        Ok(dir) if dir.ok => PathBuf::from(dir.stdout.trim_end()),
+        _ => return still,
+    };
+    let index = dir.join(format!("fc-lfs-{}.index", std::process::id()));
+    let deadline = tokio::time::Instant::now() + hydrate_limit();
+    let wrote = rewrite(worktree, &index, &untouched, &[], deadline).await.is_ok();
+    if !wrote {
+        tracing::warn!("Git LFS files couldn't be downloaded; they stay pointers");
+        // With LFS off, whatever the cut-short write left becomes the pointer
+        // again.
+        let undo = tokio::time::Instant::now() + crate::git::GIT_TIMEOUT;
+        if rewrite(worktree, &index, &untouched, &off(), undo).await.is_err() {
+            tracing::warn!(worktree = %worktree.display(), "a cut-short LFS retry couldn't be undone");
+        }
+    }
+    if wrote {
+        refresh(worktree, &index, &untouched).await;
+    }
+    let _ = std::fs::remove_file(&index);
+    pointers(worktree, recorded).await
+}
+
+/// Tell the worktree's real index about files [`rewrite`] wrote, for the
+/// paths whose entry is still HEAD's: asked again here, since the download
+/// took as long as it took and the agent may have staged one meanwhile.
+async fn refresh(worktree: &Path, index: &Path, paths: &[&str]) {
+    let none: &[crate::git_guard::Pin] = &[];
+    let limit = crate::git::GIT_TIMEOUT;
+    for batch in paths.chunks(BATCH) {
+        let mut args = vec!["diff-index", "--cached", "--name-only", "-z", "HEAD", "--"];
+        args.extend_from_slice(batch);
+        let Ok(changed) = crate::git::git_bytes(worktree, &args).await else { return };
+        let changed: std::collections::HashSet<String> = paths_of(&changed.stdout).into_iter().collect();
+        let mut args = vec!["ls-files", "-s", "-z", "--"];
+        args.extend_from_slice(batch);
+        let Ok(listed) = crate::git::git_with_index(worktree, &args, none, limit, index).await else { return };
+        // "<mode> <oid> <stage>\t<path>", NUL-separated.
+        let entries: Vec<String> = listed
+            .stdout
+            .split('\0')
+            .filter_map(|line| {
+                let (info, path) = line.split_once('\t')?;
+                let mut parts = info.split(' ');
+                let (mode, oid) = (parts.next()?, parts.next()?);
+                (!changed.contains(path)).then(|| format!("{mode},{oid},{path}"))
+            })
+            .collect();
+        if entries.is_empty() {
+            continue;
+        }
+        let mut args = vec!["update-index".to_string()];
+        args.extend(entries.iter().flat_map(|e| ["--cacheinfo".to_string(), e.clone()]));
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        if !matches!(crate::git::git(worktree, &args).await, Ok(u) if u.ok) {
+            tracing::warn!("couldn't tell the index about downloaded Git LFS files; Changes may list them as edited");
+        }
+    }
+}
+
+/// How many paths one `checkout-index` is given: an argument list has a limit.
+const BATCH: usize = 200;
+
+/// `read-tree HEAD` into `index`, then `checkout-index -f` of `paths` against
+/// it, with `pins` after the usual ones, all within `deadline`.
+async fn rewrite(
+    worktree: &Path,
+    index: &Path,
+    paths: &[&str],
+    pins: &[crate::git_guard::Pin],
+    deadline: tokio::time::Instant,
+) -> Result<(), ()> {
+    let left = || deadline.saturating_duration_since(tokio::time::Instant::now());
+    let read = crate::git::git_with_index(worktree, &["read-tree", "HEAD"], &[], left(), index).await;
+    if !matches!(read, Ok(r) if r.ok) {
+        return Err(());
+    }
+    for batch in paths.chunks(BATCH) {
+        let mut args = vec!["checkout-index", "-f", "-q", "--"];
+        args.extend_from_slice(batch);
+        let wrote = crate::git::git_with_index(worktree, &args, pins, left(), index).await;
+        if !matches!(wrote, Ok(w) if w.ok) {
+            return Err(());
+        }
+    }
+    Ok(())
 }
 
 /// `base` (the `PATH` git is otherwise handed) with the helper's directory
@@ -212,6 +406,10 @@ fn path_for(helper: Option<&Helper>, base: Option<OsString>) -> Option<OsString>
     }
     Some(out)
 }
+
+#[cfg(test)]
+#[path = "git_lfs_pointer_tests.rs"]
+mod pointer_tests;
 
 #[cfg(test)]
 mod tests {

@@ -41,6 +41,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.core.TerminalPalette
 import com.farcooler.model.FleetLayout
 import com.farcooler.model.InboxRow
+import com.farcooler.model.LfsNotice
 import com.farcooler.model.ShellClose
 import com.farcooler.model.Terminal
 import com.farcooler.model.Worktree
@@ -626,5 +627,7 @@ private fun ChangesTab(
         onOpenDrawer = onOpenDrawer,
         onBack = onBack,
         onOpenFiles = onOpenFiles,
+        lfs = LfsNotice.make(worktree?.lfsPointers, mayAct = connection.daemon.value?.grantedScope != "read"),
+        onRetryLfs = { worktree?.let { connection.hydrateLfs(it.id) } },
     )
 }

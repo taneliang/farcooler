@@ -26,6 +26,7 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         | Method::RepositoryRootRemove
         | Method::WorktreeCreate
         | Method::WorktreeHide
+        | Method::WorktreeHydrateLfs
         | Method::WorktreeUnhide
         | Method::WorktreeRemove
         | Method::BranchList

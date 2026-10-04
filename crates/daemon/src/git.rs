@@ -78,7 +78,7 @@ pub async fn git(cwd: &Path, args: &[&str]) -> Result<GitOutput> {
 /// mid-scroll leaves a `git diff` running on the runner for as long as it likes,
 /// once per abandoned request.
 pub async fn git_bytes(cwd: &Path, args: &[&str]) -> Result<GitBytes> {
-    run_bounded(&*launch()?, GIT_TIMEOUT, cwd, args, &[]).await
+    run_bounded(&*launch()?, GIT_TIMEOUT, cwd, args, &[], None).await
 }
 
 /// `git_bytes`, sharing one `deadline` with every other git of the same act.
@@ -94,7 +94,7 @@ pub async fn git_bytes_by(deadline: tokio::time::Instant, cwd: &Path, args: &[&s
         tracing::warn!(?args, "no time left for git in this act's budget");
         return Err(DomainError::OperationFailed);
     }
-    run_bounded(&*launch()?, left, cwd, args, &[]).await
+    run_bounded(&*launch()?, left, cwd, args, &[], None).await
 }
 
 /// `git`, with `extra` pinned after every other pin (so it wins) and its own
@@ -106,7 +106,22 @@ pub async fn git_with(
     extra: &[crate::git_guard::Pin],
     timeout: Duration,
 ) -> Result<GitOutput> {
-    let raw = run_bounded(&*launch()?, timeout, cwd, args, extra).await?;
+    let raw = run_bounded(&*launch()?, timeout, cwd, args, extra, None).await?;
+    Ok(GitOutput { ok: raw.ok, stdout: String::from_utf8_lossy(&raw.stdout).into_owned(), stderr: raw.stderr })
+}
+
+/// `git_with`, against the index file `index` instead of the worktree's own
+/// (`GIT_INDEX_FILE`, set after the guard has stripped the inherited one): a
+/// throwaway index lets a checkout write files without touching the real
+/// index or its lock (`crate::git_lfs::rehydrate`).
+pub async fn git_with_index(
+    cwd: &Path,
+    args: &[&str],
+    extra: &[crate::git_guard::Pin],
+    timeout: Duration,
+    index: &Path,
+) -> Result<GitOutput> {
+    let raw = run_bounded(&*launch()?, timeout, cwd, args, extra, Some(index)).await?;
     Ok(GitOutput { ok: raw.ok, stdout: String::from_utf8_lossy(&raw.stdout).into_owned(), stderr: raw.stderr })
 }
 
@@ -186,14 +201,15 @@ async fn run_bounded(
     cwd: &Path,
     args: &[&str],
     extra: &[crate::git_guard::Pin],
+    index: Option<&Path>,
 ) -> Result<GitBytes> {
     let deadline = tokio::time::Instant::now() + timeout;
     let out = if unguarded() {
-        spawn_bounded(launch, deadline, cwd, args, None).await?
+        spawn_bounded(launch, deadline, cwd, args, None, index).await?
     } else {
         let mut pins = pins_by(launch, deadline, cwd).await?;
         pins.extend_from_slice(extra);
-        spawn_bounded(launch, deadline, cwd, &crate::git_guard::args(args), Some(&pins)).await?
+        spawn_bounded(launch, deadline, cwd, &crate::git_guard::args(args), Some(&pins), index).await?
     };
     Ok(GitBytes { ok: out.code == Some(0), stdout: out.stdout, stderr: out.stderr })
 }
@@ -213,6 +229,7 @@ async fn spawn_bounded(
     cwd: &Path,
     args: &[&str],
     pins: Option<&[crate::git_guard::Pin]>,
+    index: Option<&Path>,
 ) -> Result<Spawned> {
     let mut cmd = launch.command()?;
     if let Some(pins) = pins {
@@ -221,6 +238,9 @@ async fn spawn_bounded(
         if let Some(path) = crate::git_lfs::path(crate::git_guard::child_path()) {
             cmd.env("PATH", path);
         }
+    }
+    if let Some(index) = index {
+        cmd.env("GIT_INDEX_FILE", index);
     }
     let child = Command::from(cmd)
         .current_dir(cwd)
@@ -266,7 +286,7 @@ async fn pins_by(
     cwd: &Path,
 ) -> Result<Vec<crate::git_guard::Pin>> {
     let mut pins = crate::git_guard::fixed();
-    let listing = spawn_bounded(launch, deadline, cwd, crate::git_guard::LISTING, Some(&pins)).await?;
+    let listing = spawn_bounded(launch, deadline, cwd, crate::git_guard::LISTING, Some(&pins), None).await?;
     // 1 is "no key matched", which is the answer for most repositories.
     match listing.code {
         Some(0) => pins.extend(crate::git_guard::pins_from(&listing.stdout)),
@@ -351,6 +371,8 @@ pub struct CreatedWorktree {
     /// A new branch cut from the base, as opposed to a remote branch that
     /// already had the name and was checked out with its commits.
     pub forked: bool,
+    /// The Git LFS paths still pointer files after hydration (ov-199).
+    pub lfs_pointers: Vec<String>,
 }
 
 /// The worktree transaction.
@@ -448,6 +470,7 @@ pub async fn create_worktree_with(
         Some(start) => add_worktree(repo, &["--track", "-b", branch, &dest, start], destination, Some(branch)).await?,
         None => add_worktree(repo, &["-b", branch, &dest, &commit], destination, Some(branch)).await?,
     };
+    let (r, lfs_pointers) = r;
 
     if !r.ok {
         tracing::warn!(stderr = %r.stderr, "worktree add failed");
@@ -455,7 +478,7 @@ pub async fn create_worktree_with(
         // worktree together, so a failure leaves neither.
         return Err(DomainError::OperationFailed);
     }
-    Ok(CreatedWorktree { commit, forked: tracking.is_none() })
+    Ok(CreatedWorktree { commit, forked: tracking.is_none(), lfs_pointers })
 }
 
 /// `git worktree add <args>`, as two gits rather than one.
@@ -486,24 +509,24 @@ async fn add_worktree(
     args: &[&str],
     destination: &Path,
     made_branch: Option<&str>,
-) -> Result<GitOutput> {
+) -> Result<(GitOutput, Vec<String>)> {
     let mut add = vec!["worktree", "add", "--no-checkout"];
     add.extend_from_slice(args);
     let made = git(repo, &add).await?;
     if !made.ok {
-        return Ok(made);
+        return Ok((made, Vec::new()));
     }
     let filled = git_with(destination, crate::git_lfs::FILL, &crate::git_lfs::off(), GIT_TIMEOUT).await;
     if matches!(&filled, Ok(f) if f.ok) {
-        crate::git_lfs::hydrate(destination).await;
-        return filled;
+        let pointers = crate::git_lfs::hydrate(destination).await;
+        return filled.map(|f| (f, pointers));
     }
     let dest = destination.to_string_lossy();
     let _ = git(repo, &["worktree", "remove", "--force", &dest]).await;
     if let Some(branch) = made_branch {
         let _ = git(repo, &["branch", "-D", branch]).await;
     }
-    filled
+    filled.map(|f| (f, Vec::new()))
 }
 
 /// A branch you could resume work on.
@@ -613,13 +636,13 @@ pub async fn create_worktree_from_branch(
     repo: &Path,
     branch: &str,
     destination: &Path,
-) -> Result<()> {
+) -> Result<Vec<String>> {
     if destination.exists() {
         return Err(DomainError::WorktreeExists);
     }
     let dest = destination.to_string_lossy().to_string();
 
-    let r = if branch_exists(repo, branch).await? {
+    let (r, lfs_pointers) = if branch_exists(repo, branch).await? {
         add_worktree(repo, &[&dest, branch], destination, None).await?
     } else {
         // Find which remote has it. Guessing `origin` is wrong often enough to
@@ -646,7 +669,7 @@ pub async fn create_worktree_from_branch(
         tracing::warn!(stderr = %r.stderr, "worktree add from branch failed");
         return Err(DomainError::OperationFailed);
     }
-    Ok(())
+    Ok(lfs_pointers)
 }
 
 /// Roll back a worktree created moments ago, only when it is safe.

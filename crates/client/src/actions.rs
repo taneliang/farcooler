@@ -72,6 +72,22 @@ where
     call(client, "worktree.hide", worktree, None).await.map(|_| ())
 }
 
+/// Try again to download the large files a worktree still holds as pointers
+/// (`worktree.hydrate_lfs`, ov-199). Answers the worktree with its fresh count.
+pub async fn hydrate_lfs<R, W>(
+    client: &Client<R, W>,
+    worktree: Uuid,
+) -> Result<Option<farcooler_protocol::v1::Worktree>, ClientError>
+where
+    R: AsyncRead + Unpin + Send,
+    W: AsyncWrite + Unpin + Send,
+{
+    Ok(match call(client, "worktree.hydrate_lfs", worktree, None).await? {
+        Some(result::Value::Worktree(w)) => Some(w),
+        _ => None,
+    })
+}
+
 pub async fn unhide_worktree<R, W>(
     client: &Client<R, W>,
     worktree: Uuid,

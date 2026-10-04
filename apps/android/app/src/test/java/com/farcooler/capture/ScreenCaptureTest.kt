@@ -5,6 +5,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.ui.Modifier
 import com.farcooler.model.HarnessAvailability
+import com.farcooler.model.LfsNotice
 import com.farcooler.model.RunnerCount
 import com.farcooler.model.RunnerLink
 import com.farcooler.model.idleWithoutOrchestrator
@@ -20,6 +21,7 @@ import com.farcooler.model.WorkspaceSummary
 import com.farcooler.ui.BoardBlank
 import com.farcooler.ui.BoardList
 import com.farcooler.ui.BoardListEntry
+import com.farcooler.ui.LfsNoticeCard
 import com.farcooler.ui.NoRepositories
 import com.farcooler.ui.OrchestratorEmpty
 import com.farcooler.ui.OrchestratorSeat
@@ -123,6 +125,16 @@ class ScreenCaptureTest {
                 }
             }
         }
+    }
+
+    /** ov-199: the worktree's Changes says large files weren't downloaded, with Try again. */
+    @Test fun changesLfsNotice() = Capture.both("changes-lfs-notice") {
+        LfsNoticeCard(LfsNotice(pointers = 2, canRetry = true), onRetry = {})
+    }
+
+    /** ov-199: a read grant sees the sentence and no button. */
+    @Test fun changesLfsNoticeReadGrant() = Capture.both("changes-lfs-notice-read-grant") {
+        LfsNoticeCard(LfsNotice(pointers = 2, canRetry = false), onRetry = {})
     }
 
     private val workspace = WorkspaceSummary(id = "w1", name = "overnight", repository = "r1")

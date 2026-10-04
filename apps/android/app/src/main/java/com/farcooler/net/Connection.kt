@@ -1791,6 +1791,12 @@ class Connection(
         refresh()
     }
 
+    /** Ask the runner to try again to download a worktree's large files (ov-199). */
+    suspend fun hydrateLfs(worktree: String) {
+        actions.hydrateLfs(worktree)
+        refresh()
+    }
+
     /**
      * What asking to remove a worktree came back with.
      *

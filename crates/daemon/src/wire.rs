@@ -260,6 +260,7 @@ pub fn worktree(view: &WorktreeView, scope: Scope) -> wire::Worktree {
         claim_source: ws.claim_source.map(|source| source.as_str().to_string()),
         foreign_writer_workspace_ids: foreign_writers(view).into_iter().map(id_bytes).collect(),
         open_tasks: view.open_tasks.iter().map(task_ref).collect(),
+        lfs_pointers: view.lfs_pointers,
     }
 }
 

@@ -118,6 +118,9 @@ SOURCES = [
     # and its dialog.
     "TerminalSessionTaskKeys.swift",
     "HeldLinkDialog.swift",
+    # A worktree says when large files weren't downloaded, with Try Again
+    # (ov-199).
+    "ChangesLfsNotice.swift",
     # The same stack over a canned runner, for the UI suite. DEBUG only.
     "PhoneHarness.swift",
     "ShellHarness.swift",
@@ -579,6 +582,8 @@ AGENTKIT_SOURCES = [
     "TaskKeyLinks.swift",
     # Which cell of a terminal's output a task key is in (ov-215).
     "TerminalTaskKeys.swift",
+    # What a worktree says about large files that weren't downloaded (ov-199).
+    "LfsNotice.swift",
 ]
 # The widget extension's own sources, in `apps/ios/FarCoolerActivity/`.
 #
@@ -756,6 +761,9 @@ UI_TEST_SOURCES = [
     "ComposerKeyboardTests.swift",
     "ChangesPullRequestTests.swift",
     "ChangesPatchNoticeTests.swift",
+    # A worktree says when large files weren't downloaded, with Try Again
+    # (ov-199). Stands on `-changes-layout-harness -lfs-pointers`.
+    "ChangesLfsNoticeTests.swift",
     # A task key in terminal output opens its task with a long press (ov-215).
     # Needs no runner: `-phone-harness -phone-terminal-key`.
     "TerminalTaskKeyTests.swift",

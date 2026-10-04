@@ -110,6 +110,12 @@ data class Worktree(
      * old to fill it, which reads as "no task" — all such a runner can say.
      */
     @SerialName("open_tasks") val openTasks: List<TaskRef> = emptyList(),
+    /**
+     * How many of its large files are still pointers (ov-199): what Changes'
+     * "Some large files weren't downloaded." counts. Null or 0 from a runner
+     * that predates the count; neither shows a notice ([LfsNotice.make]).
+     */
+    @SerialName("lfs_pointers") val lfsPointers: Int? = null,
 ) {
     /**
      * Which of several identically-labelled terminals each one is, keyed by

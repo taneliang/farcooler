@@ -65,6 +65,10 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     // Older builds never read them, so a rollback past the experiment keeps a
     // working database.
     (crate::plan::migration_0023_plan_layer, Older::Welcome),
+    // One new table (ov-199) only lfs_pointers.rs touches, whose rows go with
+    // their worktree by cascade, whichever build deletes it. An older build
+    // never reads or writes which large files weren't downloaded.
+    (crate::lfs_pointers::migration_0023_lfs_pointers, Older::Welcome),
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -940,6 +944,7 @@ mod tests {
             "meta",
             "board_read_floors",
             "task_reads",
+            "worktree_lfs_pointers",
         ]
         {
             assert!(names.iter().any(|n| n == expected), "missing table {expected}");

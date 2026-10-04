@@ -137,6 +137,8 @@ struct WorktreeCallsTests {
         }
         await record("hide", ["worktree", "hide", "w1", "--json"]) { await $0.hideWorktree("w1") }
         await record("unhide", ["worktree", "unhide", "w1", "--json"]) { await $0.unhideWorktree("w1") }
+        // Try Again on a worktree's large files (ov-199).
+        await record("hydrateLfs", ["worktree", "hydrate-lfs", "w1", "--json"]) { _ = await $0.hydrateLfs("w1") }
         await record("remove", ["worktree", "remove", "w1", "--json"]) {
             _ = await $0.removeWorktree("w1", confirm: "")
         }

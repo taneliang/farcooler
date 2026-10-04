@@ -42,4 +42,5 @@ public enum Capability: String, CaseIterable, Sendable {
     case readOnlyFolders = "read_only_folders"
     case agentQueue = "agent_queue"
     case boardPlan = "board_plan"
+    case lfsPointers = "lfs_pointers"
 }

@@ -85,6 +85,7 @@ struct ChangesPane: View {
                     problem
                 }
                 guessedBase
+                ChangesLfsNotice(client: changes.client, worktree: changes.worktree.id)
                 if geo.size.width >= Self.wideEnough {
                     HStack(spacing: 0) {
                         fileColumn.frame(width: fileColumnWidth(for: geo.size.width))

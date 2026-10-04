@@ -46,6 +46,17 @@ class HostActions(private val core: TerminalTransport, val notices: ActionNotice
         notices.run(context) { core.call(method, Connection.args("worktree" to worktreeId)) }
     }
 
+    /**
+     * Ask the runner to try again to download a worktree's large files
+     * (ov-199). What it found comes back through the fleet's next count; a
+     * runner that couldn't be asked says so, as every call here does.
+     */
+    suspend fun hydrateLfs(worktreeId: String) {
+        notices.run("Couldn’t ask the runner to try again.") {
+            core.call("worktree.hydrate_lfs", Connection.args("worktree" to worktreeId))
+        }
+    }
+
     suspend fun reorder(ordered: List<String>) {
         val payload = JsonObject(
             mapOf("worktrees" to JsonArray(ordered.map { JsonPrimitive(it) }))

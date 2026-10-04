@@ -110,6 +110,8 @@ struct ChangesView: View {
     @State private var showingIndex = false
     @State private var showingComments = false
     @State private var composing: ComposeRequest?
+    /// Large files that weren't downloaded, with Try Again (ov-199).
+    var lfs: ChangesLfs?
 
     /// A composer that has been asked for, and what it is about.
     ///
@@ -139,6 +141,7 @@ struct ChangesView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         summary
                             .id(Self.topAnchor)
+                        if let lfs { ChangesLfsNotice(notice: lfs.notice, retry: lfs.retry) }
 
                         if let saved = store.resume {
                             resumeCard(saved)
@@ -2793,7 +2796,7 @@ struct ChangesLayoutHarness: View {
         Self.standIn(store)
         return NavigationStack {
             ChangesView(
-                store: store, worktreeName: "add-retries", pullRequest: Self.pullRequest)
+                store: store, worktreeName: "add-retries", pullRequest: Self.pullRequest, lfs: .harness)
                 .navigationTitle("add-retries")
                 .navigationBarTitleDisplayMode(.inline)
         }

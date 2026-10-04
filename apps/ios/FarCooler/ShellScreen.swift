@@ -597,7 +597,8 @@ struct ShellPaneRealView: View {
                     store: connection.changesStores.store(for: ref.worktree),
                     worktreeName: worktree?.task ?? "Worktree",
                     agents: worktree?.reviewAgentTargets() ?? [],
-                    pullRequest: pullRequest)
+                    pullRequest: pullRequest,
+                    lfs: ChangesView.lfs(worktree, connection))
             }
         }
     }

@@ -363,6 +363,8 @@ fn scope_of(method: Method) -> Scope {
         // hiding one. It writes no git data and reveals no path, so it sits
         // where hide and unhide sit rather than behind `host_admin`.
         | Method::WorktreeReorder
+        // Writes the worktree's own large files and reveals no path.
+        | Method::WorktreeHydrateLfs
         | Method::TerminalCreate
         | Method::TerminalResize
         | Method::TerminalStop
@@ -1355,6 +1357,18 @@ impl Rpc {
                 Ok(result::Value::Worktree(wire::worktree(&view, scope)))
             }
 
+            // Try again to download the large files a worktree still holds as
+            // pointers (ov-199). `control`, like the reorder below it: it
+            // writes files only into the worktree's own, and reveals no path.
+            "worktree.hydrate_lfs" => {
+                let ws = svc.hydrate_lfs(Self::target(&req)?).await?;
+                // The count moved without git's help, so the reconciler's gate
+                // never sees it; announce so every device's notice follows.
+                self.watcher.announce_fleet_changed();
+                let view = svc.worktree_view(&ws).await?;
+                Ok(result::Value::Worktree(wire::worktree(&view, scope)))
+            }
+
             "worktree.reorder" => {
                 let Some(request::Payload::WorktreeReorder(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
@@ -1883,7 +1897,15 @@ impl Rpc {
                 let Some(request::Payload::ChangeSetRequest(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
-                Ok(result::Value::ChangeSet(crate::review_ops::change_set(svc, &p).await?))
+                let set = crate::review_ops::change_set(svc, &p).await?;
+                // The notice for large files that weren't downloaded lives on
+                // Changes, so its count is made fresh here (ov-199).
+                if let Some(id) = wire::parse_id(&p.worktree_id) {
+                    if svc.recheck_lfs_pointers(id).await {
+                        self.watcher.announce_fleet_changed();
+                    }
+                }
+                Ok(result::Value::ChangeSet(set))
             }
 
             "changes.commit_files" => {

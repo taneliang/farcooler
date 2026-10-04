@@ -204,6 +204,11 @@ struct Worktree: Decodable, Identifiable, Hashable {
     /// function (`open_tasks_json`). Nil from a client core too old to send
     /// it; `[]` from a runner too old to fill it. Both read as "no task".
     var openTasks: [NeedsYouTask]?
+    /// How many of its large files are still pointers (ov-199): what the
+    /// Changes screen's "Some large files weren't downloaded." counts. Nil from
+    /// a client core too old to send it, and 0 from a runner that has none or
+    /// predates the count; neither shows a notice (`LfsNotice.make`).
+    var lfsPointers: Int?
 
     /// Every key but the three workspace ones and `open_tasks` is the
     /// property's own name; see `isMainCheckout` for why that matters. Those
@@ -217,6 +222,7 @@ struct Worktree: Decodable, Identifiable, Hashable {
         case claimSource = "claim_source"
         case foreignWriters = "foreign_writers"
         case openTasks = "open_tasks"
+        case lfsPointers = "lfs_pointers"
     }
 
     /// The decided answer, for the two screens that draw it.

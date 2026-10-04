@@ -521,6 +521,13 @@ pub mod capability {
     /// runner needs an update to keep a plan. Needs `workstreams`, since a board
     /// here is a workspace's.
     pub const BOARD_PLAN: &str = "board_plan";
+    /// A worktree says when large files weren't downloaded (ov-199):
+    /// `Worktree.lfs_pointers`, and `worktree.hydrate_lfs` to try again.
+    ///
+    /// Its own capability for `WORKTREE_ORDER`'s reason: the field is dropped
+    /// by an older daemon without a word, and the method refused as an unknown
+    /// one. A client that reads it absent shows no notice and no button.
+    pub const LFS_POINTERS: &str = "lfs_pointers";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -534,7 +541,7 @@ pub mod capability {
             NEEDS_YOU, WAKE_ON_ANSWER, STREAM_SIZE_MARKERS, TASK_NOTICES, REPORT, AGENT_USAGE,
             AGENTS_FOUND,
             TASK_WAITS, TASK_WORKERS, NOTICE_TASK, BOARD_READS, WORKTREE_FILES, TERMINAL_NAMES, TERMINAL_PORTS,
-            READ_ONLY_FOLDERS, AGENT_QUEUE, BOARD_PLAN,
+            READ_ONLY_FOLDERS, AGENT_QUEUE, BOARD_PLAN, LFS_POINTERS,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
@@ -678,6 +685,7 @@ pub mod method {
         ClientRevoke = "client.revoke" => ENROLLMENT,
         ClientSetNodeKey = "client.set_node_key" => TUNNEL,
         WorktreeReorder = "worktree.reorder" => WORKTREE_ORDER,
+        WorktreeHydrateLfs = "worktree.hydrate_lfs" => LFS_POINTERS,
         TaskList = "task.list" => TASKS,
         TaskGet = "task.get" => TASKS,
         TaskGetByKey = "task.get_by_key" => TASKS,
@@ -882,6 +890,8 @@ mod tests {
             ("Worktree", "foreign_writer_workspace_ids", 13, ""),
             // Added by the needs-you rollup, on a fresh tag.
             ("Worktree", "open_tasks", 14, ".farcooler.v1.TaskRef"),
+            // Added by ov-199, on a fresh tag.
+            ("Worktree", "lfs_pointers", 15, ""),
             ("WorktreeList", "items", 1, WT),
             ("WorktreeReorder", "worktree_ids", 1, ""),
             ("WorktreeCreate", "task_name", 1, ""),
@@ -1063,6 +1073,7 @@ mod tests {
             ("Event", "needs_you_changed", 24),
             ("Result", "needs_you_list", 45),
             ("Worktree", "open_tasks", 14),
+            ("Worktree", "lfs_pointers", 15),
         ] {
             assert_eq!(number(m, f), n, "{m}.{f} moved off tag {n}");
         }

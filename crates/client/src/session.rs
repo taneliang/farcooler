@@ -1173,6 +1173,11 @@ impl Session {
         Ok(crate::actions::hide_worktree(&self.client, worktree).await?)
     }
 
+    /// Try again to download a worktree's large files (ov-199).
+    pub async fn hydrate_lfs(&self, worktree: Uuid) -> Result<(), SessionError> {
+        Ok(crate::actions::hydrate_lfs(&self.client, worktree).await.map(|_| ())?)
+    }
+
     pub async fn unhide_worktree(&self, worktree: Uuid) -> Result<(), SessionError> {
         Ok(crate::actions::unhide_worktree(&self.client, worktree).await?)
     }
@@ -2557,6 +2562,8 @@ fn with_workspaces(
     // in `fleet` so the test below can see it; `worktree list --json` carries
     // the same key from the same function.
     row["open_tasks"] = crate::needs_you_json::open_tasks_json(&w.open_tasks);
+    // How many large files weren't downloaded (ov-199); 0 from an older runner.
+    row["lfs_pointers"] = json!(w.lfs_pointers);
     let mine = terminals.iter().filter(|t| t.worktree_id == w.id);
     if let Some(rows) = row["terminals"].as_array_mut() {
         for (out, t) in rows.iter_mut().zip(mine) {
@@ -2687,6 +2694,7 @@ mod tests {
             workspace_id: Some(b(main)),
             claim_source: Some("hook".into()),
             foreign_writer_workspace_ids: vec![b(billing)],
+            lfs_pointers: 4,
             open_tasks: vec![farcooler_protocol::v1::TaskRef {
                 id: b(other),
                 key: "bil-9".into(),
@@ -2719,6 +2727,7 @@ mod tests {
         assert_eq!(row["workspace"], main.to_string(), "{row}");
         assert_eq!(row["claim_source"], "hook");
         assert_eq!(row["foreign_writers"], serde_json::json!(["Billing"]));
+        assert_eq!(row["lfs_pointers"], 4, "how many large files weren't downloaded (ov-199)");
         assert_eq!(
             row["open_tasks"],
             serde_json::json!([{

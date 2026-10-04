@@ -90,6 +90,7 @@ import com.farcooler.model.ChangedFile
 import com.farcooler.model.ChangedFileStatus
 import com.farcooler.model.ChangesRow
 import com.farcooler.model.ChangesState
+import com.farcooler.model.LfsNotice
 import com.farcooler.model.DiffComputation
 import com.farcooler.model.DiffLayout
 import com.farcooler.model.DiffScope
@@ -256,6 +257,9 @@ fun ChangesPane(
     onBack: (() -> Unit)? = null,
     /** Opens the worktree's Files (ov-259), or null where they aren't offered. */
     onOpenFiles: (() -> Unit)? = null,
+    /** Large files that weren't downloaded, and a way to try again (ov-199). */
+    lfs: LfsNotice? = null,
+    onRetryLfs: suspend () -> Unit = {},
 ) {
     val state by store.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
@@ -384,6 +388,8 @@ fun ChangesPane(
                                 store = store,
                                 worktree = worktree,
                                 onOpenSheet = { sheet = it },
+                                lfs = lfs,
+                                onRetryLfs = onRetryLfs,
                             )
                             is ChangesRow.GeneratedHeading -> GeneratedHeading(row)
                             is ChangesRow.File -> FileCard(
@@ -1094,9 +1100,12 @@ private fun SummaryBlock(
     store: ChangesStore,
     worktree: Worktree?,
     onOpenSheet: (ReviewSheet) -> Unit,
+    lfs: LfsNotice?,
+    onRetryLfs: suspend () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (lfs != null) LfsNoticeCard(lfs, onRetryLfs)
         Card {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(

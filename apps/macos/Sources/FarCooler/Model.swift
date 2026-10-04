@@ -137,6 +137,10 @@ struct Worktree: Decodable, Identifiable, Hashable {
     /// task of its own. Nil from a CLI older than the key; `[]` from a runner
     /// too old to fill it.
     var openTasks: [NeedsYouTask]?
+    /// How many of its large files are still pointers (ov-199). Nil from a CLI
+    /// older than the key, and 0 from a runner with none; neither shows the
+    /// notice (`LfsNotice.make`).
+    var lfsPointers: Int?
 
     enum CodingKeys: String, CodingKey {
         case id, short, task, branch, repository, host, ordinal, state, terminals
@@ -145,6 +149,7 @@ struct Worktree: Decodable, Identifiable, Hashable {
         case repositoryID = "repository_id"
         case workspace
         case openTasks = "open_tasks"
+        case lfsPointers = "lfs_pointers"
     }
 
     /// This worktree as its sidebar row draws it: without the terminals

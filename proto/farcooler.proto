@@ -1038,6 +1038,12 @@ message Worktree {
   // the CLI's worktree JSON already has `task`, the worktree's own name.
   // Empty from a runner without the `needs_you` capability.
   repeated TaskRef open_tasks = 14;
+  // How many of this worktree's Git LFS files are still pointer files: an
+  // object missing from the runner's LFS store, or a hydrate that ran out of
+  // time, leaves the pointer. A count, not the paths; they stay on the runner.
+  // 0 from a runner without the `lfs_pointers` capability, which says nothing
+  // about its files, so a client shows no notice.
+  uint32 lfs_pointers = 15;
 }
 
 message WorktreeList { repeated Worktree items = 1; }

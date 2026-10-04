@@ -2166,6 +2166,9 @@ pub struct WorktreeView {
     /// The tasks whose lane this is, neither Done nor Cancelled, in the order
     /// they were filed. `Worktree.open_tasks`.
     pub open_tasks: Vec<models::Task>,
+    /// How many large files are still pointers (`crate::lfs_ops`).
+    /// `Worktree.lfs_pointers`.
+    pub lfs_pointers: u32,
 }
 
 #[derive(Debug)]
@@ -2822,6 +2825,7 @@ impl Service {
         let created =
             git::create_worktree_with(&repo_path, branch, base_revision, &dest, fork_only).await?;
         let base_commit = created.commit;
+        let lfs_pointers = created.lfs_pointers;
         // Claim it before anyone can adopt it. Another install sharing this
         // host sees the same worktree in `git worktree list` and would
         // otherwise take it for its own fleet.
@@ -2839,6 +2843,7 @@ impl Service {
                 // the worktree again, and there is no reason to have written
                 // into a directory that is about to go.
                 install_project_hooks(&dest, &hook_ingress::HookIngress::socket_path(&self.root)).await;
+                let ws = self.record_lfs_pointers(ws, &lfs_pointers);
                 self.claim_new(ws, workspace)
             }
             Err(e) => {
@@ -2924,7 +2929,7 @@ impl Service {
         let repo_path = self.repository_worktree(&repo);
         let dest = self.worktree_dest(&repo, name)?;
 
-        git::create_worktree_from_branch(&repo_path, branch, &dest).await?;
+        let lfs_pointers = git::create_worktree_from_branch(&repo_path, branch, &dest).await?;
         git::mark_owner(&dest, &self.install_id).await;
 
         match self.store.create_worktree(repository_id, branch, &dest.to_string_lossy(), false) {
@@ -2934,6 +2939,7 @@ impl Service {
                 // the same panes, and a pane that reports nothing is exactly
                 // as broken here as it is in `create_worktree`.
                 install_project_hooks(&dest, &hook_ingress::HookIngress::socket_path(&self.root)).await;
+                let worktree = self.record_lfs_pointers(worktree, &lfs_pointers);
                 self.claim_new(worktree, workspace)
             }
             Err(e) => {
@@ -5232,7 +5238,8 @@ impl Service {
 
         let observed_writers = self.observed_writers(ws);
         let open_tasks = self.store.open_tasks_in_worktree(ws.id)?;
-        Ok(WorktreeView { worktree: ws.clone(), state, terminals: views, observed_writers, open_tasks })
+        let lfs_pointers = self.store.lfs_pointer_count(ws.id)?;
+        Ok(WorktreeView { worktree: ws.clone(), state, terminals: views, observed_writers, open_tasks, lfs_pointers })
     }
 
     /// The workspaces of live, non-orchestrator terminals `claims` saw working

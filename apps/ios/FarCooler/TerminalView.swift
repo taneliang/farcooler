@@ -939,7 +939,8 @@ struct TerminalView: View {
                 ChangesView(
                     store: connection.changesStores.store(for: worktree.id),
                     worktreeName: worktree.task,
-                    agents: worktree.reviewAgentTargets())
+                    agents: worktree.reviewAgentTargets(),
+                    lfs: ChangesView.lfs(worktree, connection))
                     .id(worktree.id)
             } else {
                 GeometryReader { geo in

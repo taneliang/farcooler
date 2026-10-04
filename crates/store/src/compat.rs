@@ -182,7 +182,7 @@ mod tests {
     ///
     /// Each was checked for what an older build's code would meet: a column
     /// it never names with a default or allowing NULL, an index, or a table it
-    /// never touches whose rows cascade with their task. Nothing here adds a
+    /// never touches whose rows cascade with their task (0023's, with their worktree). Nothing here adds a
     /// trigger or a constraint an old write could trip, drops anything, or
     /// rewrites data. Changing a marking is a decision about every runner's
     /// downgrade, so it has to change this list too.

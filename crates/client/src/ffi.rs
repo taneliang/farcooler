@@ -1855,15 +1855,15 @@ async fn dispatch(
             Ok(json!({ "id": uuid_of(&worktree.id).to_string() }))
         }
 
-        "worktree.hide" => {
-            session.hide_worktree(id("worktree")?).await?;
+        "worktree.hide" | "worktree.unhide" | "worktree.hydrate_lfs" => {
+            let worktree = id("worktree")?;
+            match method {
+                "worktree.hide" => session.hide_worktree(worktree).await?,
+                "worktree.unhide" => session.unhide_worktree(worktree).await?,
+                _ => session.hydrate_lfs(worktree).await?,
+            }
             Ok(json!({}))
         }
-        "worktree.unhide" => {
-            session.unhide_worktree(id("worktree")?).await?;
-            Ok(json!({}))
-        }
-
         // The whole visible order, not "move this one to index N". The client
         // sends the sequence of cards it is drawing; the runner permutes them
         // among the ranks they already hold and leaves everything the client

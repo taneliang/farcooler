@@ -46,6 +46,7 @@ mod task_usage;
 mod confirmation;
 mod tasks;
 mod workspaces;
+mod worktree_lfs;
 use terminal_requests::terminal_create_request;
 pub(crate) use daemon_link::{Link, connect_to, expect_value, req, req_for, with};
 use farcooler_client::actions::RemoveRootOutcome;
@@ -687,6 +688,8 @@ enum WorktreeCmd {
     Hide { worktree: String },
     /// Bring a hidden worktree back.
     Unhide { worktree: String },
+    /// Try again to download the large files this worktree holds as pointers.
+    HydrateLfs { worktree: String },
     /// Give a worktree to a workspace, whoever owned it before.
     ///
     /// The strongest claim there is: a worktree a workspace's agents were
@@ -2419,6 +2422,8 @@ async fn worktree(runner: Option<&str>, cmd: WorktreeCmd, json: bool) -> Fallibl
             println!("hidden {}  (git data untouched)", short_bytes(&ws.id));
         }
 
+        WorktreeCmd::HydrateLfs { worktree } => worktree_lfs::hydrate(&mut link, &worktree, json).await?,
+
         WorktreeCmd::Unhide { worktree } => {
             let all = list_worktrees(&mut link).await?;
             let ws = resolve(&all, &worktree, |w| &w.id, "worktree")?;
@@ -3516,6 +3521,8 @@ fn worktree_list_row(
         // status}`, from the same builder as the phones' fleet. `[]` from a
         // runner too old to fill it.
         "open_tasks": farcooler_client::needs_you_json::open_tasks_json(&w.open_tasks),
+        // How many large files weren't downloaded; 0 from an older runner.
+        "lfs_pointers": w.lfs_pointers,
     })
 }
 
@@ -4058,6 +4065,9 @@ pub(crate) fn resolve<'a, T>(
 }
 
 #[cfg(test)]
+mod worktree_json_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -4454,97 +4464,6 @@ mod tests {
         let mut keys: Vec<_> = v.as_object().unwrap().keys().cloned().collect();
         keys.sort();
         assert_eq!(keys, ["branch_prefix", "live_panes", "runtime_healthy", "worktrees"]);
-    }
-
-    /// The workstreams ride beside the worktrees, as `workspace list
-    /// --json`'s objects, so the Mac reads the whole fleet in one call — and
-    /// an empty list is still a list, where a runner without workspaces
-    /// sends no key at all.
-    #[test]
-    fn the_envelope_carries_the_workspaces_beside_the_worktrees() {
-        let billing = farcooler_protocol::v1::Workspace {
-            id: bytes::Bytes::copy_from_slice(&[1; 16]),
-            repository_id: bytes::Bytes::copy_from_slice(&[2; 16]),
-            name: "Billing".into(),
-            task_prefix: "bil".into(),
-            ..Default::default()
-        };
-        let v = worktree_list_envelope(true, 0, String::new(), vec![], Some(vec![workspace_json(&billing)]));
-        assert_eq!(v["workspaces"], serde_json::json!([workspace_json(&billing)]), "{v}");
-        assert_eq!(v["workspaces"][0]["task_prefix"], "bil");
-        assert_eq!(v["workspaces"][0]["repository"], uuid_of(&[2; 16]).to_string());
-        assert_eq!(v["worktrees"], serde_json::json!([]));
-        let none = worktree_list_envelope(true, 0, String::new(), vec![], Some(vec![]));
-        assert_eq!(none["workspaces"], serde_json::json!([]));
-    }
-
-    /// A worktree row names its repository by id as well as by name, which
-    /// is how the Mac places a worktree nobody has claimed; and its owner,
-    /// how it was claimed, and who else is writing in it, by name. Each of
-    /// its panes says its workspace and its role.
-    #[test]
-    fn a_worktree_row_names_its_repository_its_workspace_and_its_panes_roles() {
-        use farcooler_protocol::v1 as pb;
-        let id = |n: u8| bytes::Bytes::copy_from_slice(&[n; 16]);
-        let repositories = [pb::Repository { id: id(2), display_name: "api".into(), ..Default::default() }];
-        let workspaces = [
-            pb::Workspace { id: id(3), repository_id: id(2), name: "Main".into(), ..Default::default() },
-            pb::Workspace { id: id(4), repository_id: id(2), name: "Billing".into(), ..Default::default() },
-        ];
-        let w = Worktree {
-            id: id(1),
-            repository_id: id(2),
-            workspace_id: Some(id(3)),
-            claim_source: Some("hook".into()),
-            foreign_writer_workspace_ids: vec![id(4)],
-            open_tasks: vec![pb::TaskRef {
-                id: id(8),
-                key: "bil-9".into(),
-                title: "Invoice PDF export".into(),
-                status: pb::TaskStatus::InProgress as i32,
-            }],
-            ..Default::default()
-        };
-        let pane = |n: u8, role: pb::TerminalRole, workspace: Option<bytes::Bytes>| Terminal {
-            id: id(n),
-            worktree_id: id(1),
-            role: role as i32,
-            workspace_id: workspace,
-            ..Default::default()
-        };
-        let terminals = [
-            pane(5, pb::TerminalRole::Orchestrator, Some(id(3))),
-            pane(6, pb::TerminalRole::Agent, Some(id(4))),
-            Terminal { worktree_id: id(9), ..pane(7, pb::TerminalRole::Shell, None) },
-        ];
-        let row = worktree_list_row(&w, None, &repositories, &terminals, &workspaces);
-        assert_eq!(row["repository"], "api", "the name the rows have always carried");
-        assert_eq!(row["repository_id"], uuid_of(&id(2)).to_string());
-        assert_eq!(row["workspace"], uuid_of(&id(3)).to_string());
-        assert_eq!(row["claim_source"], "hook");
-        assert_eq!(row["foreign_writers"], serde_json::json!(["Billing"]));
-        assert_eq!(
-            row["open_tasks"],
-            serde_json::json!([{
-                "id": uuid_of(&id(8)).to_string(),
-                "key": "bil-9",
-                "title": "Invoice PDF export",
-                "status": "in_progress",
-            }])
-        );
-        let panes = row["terminals"].as_array().expect("terminals");
-        assert_eq!(panes.len(), 2, "only this worktree's panes");
-        assert_eq!((&panes[0]["role"], &panes[0]["workspace"]), (&serde_json::json!("orchestrator"), &serde_json::json!(uuid_of(&id(3)).to_string())));
-        assert_eq!((&panes[1]["role"], &panes[1]["workspace"]), (&serde_json::json!("agent"), &serde_json::json!(uuid_of(&id(4)).to_string())));
-
-        let unclaimed =
-            Worktree { workspace_id: None, claim_source: None, foreign_writer_workspace_ids: vec![], open_tasks: vec![], ..w };
-        let row = worktree_list_row(&unclaimed, None, &repositories, &[], &workspaces);
-        assert_eq!(row["workspace"], serde_json::json!(null));
-        assert_eq!(row["claim_source"], serde_json::json!(null));
-        assert_eq!(row["foreign_writers"], serde_json::json!([]));
-        assert_eq!(row["open_tasks"], serde_json::json!([]), "an empty list, not a missing key");
-        assert_eq!(row["repository_id"], uuid_of(&id(2)).to_string(), "unclaimed still says where it is");
     }
 
     /// The plain listing says who owns a worktree and which signal claimed
