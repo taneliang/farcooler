@@ -428,55 +428,20 @@ final class Connection: ObservableObject {
         guard !listeningForNews else { return }
         listeningForNews = true
         await core.startEvents { [weak self] notice in
-            // The notice is read for one thing only: which BOARD to read
-            // again, if it names one. Every notice still means "re-read it"
-            // and none carries a delta — see `FleetEvent` in
-            // `crates/client/src/session.rs` — so the fleet is re-read from
-            // one place for all of them, and an app that applied deltas would
-            // have to be right about reconciliation creating and deleting
-            // rows in the same pass, and about the CLI and an agent editing
-            // the same state from outside it.
-            //
-            // A board is the exception because it is not in the fleet. A
-            // `task` notice names its board — the workspace the task is on,
-            // and on a move the one it left — so that a `task.list` per board
-            // it moved is what it costs, and `resync` — the queue overflowed,
-            // or the runner dropped events it owed this link
-            // (`events_missed`) — is every board. Which boards a
-            // notice moves is `RunnerBoards.touched`'s to say.
             let event = notice["event"] as? String
-            let moved = BoardNotice(notice: notice)
             // Another device read something: this board's whole read state,
             // which the fleet needn't be read again for (ov-113).
             if event == "reads" {
                 Task { @MainActor in self?.hearReads(notice) }
                 return
             }
-            //
             // The fleet first, and never behind a board: `fleetNewsArrived`
             // only arms a refresh, and the board read after it runs on its
-            // own. A `resync` is the queue having overflowed, which is when
-            // the fleet is most behind — it must not wait out a `task.list`
-            // per repository before it is even asked for.
+            // own (`hearNews`).
             Task { @MainActor in
                 guard let self else { return }
                 self.fleetNewsArrived()
-                switch event {
-                case "task":
-                    guard let moved else { break }
-                    let touched = RunnerBoards.touched(by: moved, among: self.boardList)
-                    for board in touched { await self.readBoard(board) }
-                    await self.rereadPlans(for: touched)
-                case "resync":
-                    await self.loadNeedsYou()
-                    await self.loadBoards()
-                    await self.rereadPlans(for: self.boardList)
-                case "plan": await self.hearPlan(notice)
-                // The rollup moved: an ask held or settled, a decision asked
-                // or answered, a review in or out. See `loadNeedsYou`.
-                case "needs_you": await self.loadNeedsYou()
-                default: break
-                }
+                await self.hearNews(notice)
             }
         }
     }

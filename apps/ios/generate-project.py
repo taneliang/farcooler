@@ -84,6 +84,7 @@ SOURCES = [
     "PlanBoardSections.swift",
     "PlanPageScreens.swift",
     "ConnectionPlan.swift",
+    "ConnectionNews.swift",
     "PhonePlanHarness.swift",
     "EmptyState.swift",
     # The drawings behind first run and the empty states: task skeleton,

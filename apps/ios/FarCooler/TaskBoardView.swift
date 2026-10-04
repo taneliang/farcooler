@@ -226,9 +226,14 @@ struct WorkspaceBoardList: View {
             }
             // What's new to this person comes first, as the Mac's does
             // (ov-113): it's what they opened the board to see.
-            BoardUnreadSection(
-                board: board, reads: reads, readNotes: readNotes, readsAreShared: readsAreShared,
-                onOpen: onOpen, onMarkAllRead: onMarkAllRead)
+            // Plan stands in for the whole task list, Unread with it, as on
+            // the Mac: the plan is the first thing seen. One tap on Tasks
+            // brings it back.
+            if !showsPlan {
+                BoardUnreadSection(
+                    board: board, reads: reads, readNotes: readNotes, readsAreShared: readsAreShared,
+                    onOpen: onOpen, onMarkAllRead: onMarkAllRead)
+            }
             // The one count worth putting above a board, in the Mac's words
             // (`TaskBoardModel.waitingSentence`), and nothing at zero: a
             // badge reading zero teaches people to ignore it. One line

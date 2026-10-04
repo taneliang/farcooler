@@ -73,7 +73,7 @@ final class PlanUITests: XCTestCase {
         let control = app.segmentedControls["plan-switch"]
         XCTAssertTrue(control.waitForExistence(timeout: 10), "no control on a runner with a plan")
         XCTAssertTrue(element(app, "board-section-needs_decision").waitForExistence(timeout: 10), "no tasks by default")
-        XCTAssertTrue(element(app, "board-unread").exists, "no Unread strip")
+        XCTAssertTrue(element(app, "board-unread").exists, "no Unread strip in Tasks")
         XCTAssertFalse(element(app, "plan-next-up").exists, "the plan is up by default")
 
         control.buttons["Plan"].tap()
@@ -84,13 +84,67 @@ final class PlanUITests: XCTestCase {
             app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'board-section-'")).count, 0,
             "the task list stayed under the plan")
         for _ in 0..<12 { app.swipeDown() }
-        XCTAssertTrue(element(app, "board-unread").exists, "the Unread strip went with the tasks")
+        XCTAssertFalse(element(app, "board-unread").exists, "Unread is above the plan, which is the first thing to see")
         XCTAssertTrue(control.exists, "the control went")
         keep(app, "plan-overview")
 
         control.buttons["Tasks"].tap()
         XCTAssertTrue(element(app, "board-section-needs_decision").waitForExistence(timeout: 10), "tasks didn't return")
+        XCTAssertTrue(element(app, "board-unread").waitForExistence(timeout: 10), "Unread didn't come back with the tasks")
         XCTAssertFalse(element(app, "plan-next-up").exists)
+    }
+
+    /// A runner notice, as the harness takes one: a Darwin notification.
+    private static func notify(_ which: String) {
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName("com.farcooler.harness.\(which)" as CFString), nil, nil, true)
+    }
+
+    private func sent(_ app: XCUIApplication) -> [String] {
+        (element(app, "harness-sent").value as? String).map { $0.split(separator: "\n").map(String.init) } ?? []
+    }
+
+    /// A `plan` notice reaches the connection and the plan on screen is read again.
+    func testAPlanNoticeReadsThePlanAgain() {
+        let app = openBoard()
+        showPlan(app)
+        XCTAssertTrue(element(app, "plan-lane-plan-phones").waitForExistence(timeout: 10))
+        Self.notify("plan-news")
+        XCTAssertTrue(element(app, "plan-lane-plan-phones-v2").waitForExistence(timeout: 15), "the notice didn't re-read the plan")
+    }
+
+    /// A task notice moves counts the plan derives: it reads the plan again too.
+    func testATaskNoticeReadsThePlanAgain() {
+        let app = openBoard()
+        showPlan(app)
+        XCTAssertTrue(element(app, "plan-lane-plan-phones").waitForExistence(timeout: 10))
+        Self.notify("task-news")
+        XCTAssertTrue(element(app, "plan-lane-plan-phones-v2").waitForExistence(timeout: 15), "the task notice didn't re-read the plan")
+    }
+
+    /// A notice reads the record of the page on screen, not every page opened since.
+    func testANoticeReadsOnlyThePageOnScreen() {
+        let app = openBoard()
+        showPlan(app)
+        let lane = element(app, "plan-lane-plan-phones")
+        XCTAssertTrue(lane.waitForExistence(timeout: 10))
+        lane.tap()
+        XCTAssertTrue(element(app, "plan-lane-page").waitForExistence(timeout: 10))
+        element(app, "plan-lane-theme").tap()
+        XCTAssertTrue(element(app, "plan-theme-page").waitForExistence(timeout: 10))
+        let gets = sent(app).filter { $0 == "plan.get" }.count
+        let records = sent(app).filter { $0.hasPrefix("plan.events") }.count
+        XCTAssertEqual(records, 2, "one record per page opened: \(sent(app))")
+        Self.notify("plan-news")
+        let deadline = Date().addingTimeInterval(15)
+        while sent(app).filter({ $0.hasPrefix("plan.events") }).count == records, Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        }
+        RunLoop.current.run(until: Date().addingTimeInterval(2))
+        let after = sent(app)
+        XCTAssertGreaterThan(after.filter { $0 == "plan.get" }.count, gets, "the plan wasn't read again")
+        XCTAssertEqual(after.filter { $0.hasPrefix("plan.events") }.count, records + 1, "more than the open page was read: \(after)")
     }
 
     func testEachLaneNamesItsThemeAndEachThemeReadsOnItsOwn() {

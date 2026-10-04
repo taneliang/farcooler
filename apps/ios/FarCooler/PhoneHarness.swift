@@ -175,6 +175,17 @@ struct PhoneHarness: View {
             .onReceive(NotificationCenter.default.publisher(for: HarnessTaps.decision)) { _ in
                 pendingDestination = Self.task("bil-7")
             }
+            // The plan layer's news (ov-274), delivered where the client core's would be.
+            .onReceive(NotificationCenter.default.publisher(for: HarnessTaps.planNews)) { _ in
+                Task { await runner.deliver(["event": "plan", "workspace": HarnessRunner.billing]) }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: HarnessTaps.taskNews)) { _ in
+                Task {
+                    await runner.deliver([
+                        "event": "task", "repository": HarnessRunner.repository, "workspace": HarnessRunner.billing,
+                    ])
+                }
+            }
             .overlay(alignment: .topTrailing) {
                 if ready {
                     Rectangle()
@@ -229,10 +240,12 @@ extension PhoneHarness {
 enum HarnessTaps {
     static let agent = Notification.Name("com.farcooler.harness.agent")
     static let decision = Notification.Name("com.farcooler.harness.decision")
+    static let planNews = Notification.Name("com.farcooler.harness.plan-news")
+    static let taskNews = Notification.Name("com.farcooler.harness.task-news")
 
     /// Listen, once per process.
     static let listening: Void = {
-        for name in [agent, decision] {
+        for name in [agent, decision, planNews, taskNews] {
             CFNotificationCenterAddObserver(
                 CFNotificationCenterGetDarwinNotifyCenter(), nil,
                 { _, _, name, _, _ in
@@ -304,6 +317,13 @@ final class HarnessRunner {
         waiting =
             CommandLine.arguments.contains("-phone-empty-inbox")
             ? [] : ["ask:hook-ask-1", "decision:\(Self.decisionTask)"]
+    }
+
+    /// A runner notice, as the client core would queue it: the plan it
+    /// answers with changes first, as the runner's would have.
+    func deliver(_ notice: [String: Any]) async {
+        HarnessPlan.version += 1
+        await connection.hearNews(notice)
     }
 
     func stand() async {
@@ -570,6 +590,8 @@ final class HarnessRunner {
             guard let plan = HarnessPlan(),
                 let data = try await plan.answer(method, args, boards: [Self.main, Self.billing])
             else { throw ClientCore.CoreError.rejected("not in the harness", word: "unimplemented") }
+            sent.append(
+                method == "plan.get" ? "plan.get" : "plan.events \((args["theme"] as? String) ?? (args["lane"] as? String) ?? "")")
             return data
         default:
             throw ClientCore.CoreError.rejected("not in the harness", word: "unimplemented")

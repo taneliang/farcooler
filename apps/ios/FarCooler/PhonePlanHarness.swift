@@ -14,6 +14,11 @@ import Foundation
 //                         and `plan.events` from the file
 //   -phone-plan-fails     it advertises `board_plan` and refuses `plan.get`
 //   -phone-plan-hangs     it advertises `board_plan` and never answers `plan.get`
+//   a Darwin notification `com.farcooler.harness.plan-news` (or `.task-news`) delivers
+//                         a `plan` (or `task`) notice for Billing's board, as the client core
+//                         queues one, and the plan the runner answers with from then on is
+//                         a new one: its first Next Up lane is called "<name>-v2". Each
+//                         `plan.get` and `plan.events` is in the harness's `sent`.
 //   -phone-plan-timeout N the phone gives up on a read after N seconds, not 15
 //   -phone-plan-outcomes  the first three themes carry an outcome of one line, of two and of
 //                         far too many, and no Next or Needs You line, so a test measures
@@ -23,6 +28,9 @@ import Foundation
 // `board_plan`, so the board has no control.
 
 struct HarnessPlan {
+    /// How many notices have moved the plan: the lane the answer renames.
+    static var version = 0
+
     static var advertised: Bool {
         let arguments = CommandLine.arguments
         return arguments.contains("-phone-plan") || arguments.contains("-phone-plan-fails")
@@ -38,6 +46,17 @@ struct HarnessPlan {
             let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
         capture = object
+    }
+
+    /// After a notice, the first queued lane is "<name>-v2".
+    private static func versioned(_ plan: Any) -> Any {
+        guard version > 0, var plan = plan as? [String: Any], var lanes = plan["lanes"] as? [[String: Any]],
+            let first = (plan["order"] as? [String])?.first,
+            let at = lanes.firstIndex(where: { $0["id"] as? String == first })
+        else { return plan }
+        lanes[at]["name"] = "\((lanes[at]["name"] as? String) ?? "")-v\(version + 1)"
+        plan["lanes"] = lanes
+        return plan
     }
 
     /// `-phone-plan-outcomes`: three themes alike but for the length of their
@@ -74,7 +93,7 @@ struct HarnessPlan {
             }
             guard let board = args["workspace"] as? String, boards.contains(board), let plan = capture["plan"]
             else { throw ClientCore.CoreError.rejected("bad workspace", word: "invalid-argument") }
-            return try JSONSerialization.data(withJSONObject: Self.measuring(plan))
+            return try JSONSerialization.data(withJSONObject: Self.versioned(Self.measuring(plan)))
         case "plan.events":
             let subject = (args["theme"] as? String) ?? (args["lane"] as? String)
             guard let subject, let records = capture["records"] as? [String: Any], let record = records[subject]

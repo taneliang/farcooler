@@ -24,6 +24,12 @@ struct PlanPageScreen: View {
     var body: some View {
         Group {
             switch reads.state(place.workspace) {
+            case .none where summary == nil:
+                // The workspace left while the page was open.
+                ContentUnavailableView {
+                    Label(PlanWords.couldntRead, systemImage: "exclamationmark.triangle")
+                }
+                .accessibilityIdentifier("plan-unavailable")
             case .none, .loading:
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             case .needsUpdate:
@@ -44,6 +50,8 @@ struct PlanPageScreen: View {
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .task(id: page) { await load() }
+        .onAppear { reads.openPage = page }
+        .onDisappear { if reads.openPage == page { reads.openPage = nil } }
     }
 
     private var title: String {

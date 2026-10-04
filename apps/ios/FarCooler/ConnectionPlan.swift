@@ -26,6 +26,10 @@ final class PlanReads: ObservableObject {
     private var reading: Set<String> = []
     private var movedAgain: Set<String> = []
 
+    /// The theme's or lane's page on screen, if one is: the only record a
+    /// plan notice reads again.
+    var openPage: PhonePlanPage?
+
     func state(_ workspace: String) -> PlanReadState? { states[workspace] }
 
     fileprivate func set(_ state: PlanReadState, for workspace: String) {
@@ -82,7 +86,9 @@ extension Connection {
         if plans.state(key)?.plan == nil { plans.set(.loading, for: key) }
         repeat {
             guard let board = summary.boardWorkspace else {
-                plans.set(.needsUpdate, for: key)
+                // An implicit board, on a runner without workspaces, has no
+                // plan to ask for. Not an old runner, so not "needs an update".
+                plans.set(.unavailable, for: key)
                 return
             }
             let state = await PlanReadState.read(
@@ -121,7 +127,7 @@ extension Connection {
         guard let news = PlanNews(notice: notice) else { return }
         for board in boardList where plans.state(board.id) != nil && news.touches(board.id) {
             await readPlan(board)
-            for page in plans.records.keys { await readPlanRecord(page) }
+            if let page = plans.openPage { await readPlanRecord(page) }
         }
     }
 
