@@ -17,7 +17,10 @@ extension ContentView {
             world: { MacDestination.world(of: store) },
             read: { await DestinationReads.read($1, from: store.clients[$0], fleet: store.fleet) },
             land: { land($0, arrival: .restore) })
-        if restoring?.id == open.id { restoring = nil }
+        if restoring?.id == open.id {
+            restoring = nil
+            restoreFocus()
+        }
     }
 
     /// Open a resolved destination here: a relaunch sets the selection and leaves

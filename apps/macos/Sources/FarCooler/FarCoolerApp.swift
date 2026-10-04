@@ -37,6 +37,11 @@ struct FarCoolerApp: App {
                     )
                 }
         }
+        // The app restores its own windows, each where it was
+        // (`WindowSessions`), whatever "Close windows when quitting an
+        // application" says; the system restoring them too would open each
+        // twice.
+        .restorationBehavior(.disabled)
         .windowStyle(.titleBar)
         // The system's regular unified toolbar (ov-214): a 52 pt bar with
         // 36 pt controls, as Xcode and Finder have it. The window's root

@@ -339,7 +339,7 @@ struct NavigatorSplitTests {
     final class Kept { var value = "" }
 
     /// What the window does with the heights: keeps them in state it
-    /// observes (`@SceneStorage` in `ContentView`), so a change draws again.
+    /// observes (`@State` in `ContentView`, kept in the window's record), so a change draws again.
     /// `sink` sees each value kept.
     struct Keeping<V: View>: View {
         @State var kept: String

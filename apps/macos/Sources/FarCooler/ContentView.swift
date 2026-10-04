@@ -163,7 +163,12 @@ struct ContentView: View {
     /// this Mac (ov-92).
     @AppStorage("workspace.navigatorWidth") private var navigatorWidth = Double(WorkspaceColumns.navigatorDefault)
     /// The navigator's pane heights a drag chose, this window's (ov-244).
-    @SceneStorage("navigator.split") private var navigatorSplit = ""
+    /// Kept in this window's record, not `@SceneStorage`: that comes back only
+    /// when the system restores windows, which it doesn't by default (ov-248).
+    @State var navigatorSplit = ""
+    /// This window's record as it was taken, which `sessionState` keeps current.
+    @State var kept: WindowSession?
+    @Environment(\.openWindow) var openWindow
     /// Asks the navigator for the keyboard: bumped by ⌥⌘2, and by a click
     /// on a row, so ↑ and ↓ walk it from there.
     @State var boardFocusRequest = 0
@@ -283,6 +288,7 @@ struct ContentView: View {
         // `PrefixHintOverlay` uses for its chip.
         .animation(.snappy(duration: 0.22), value: outcomes.shown)
         .task {
+            adoptSession()
             DestinationOpener.shared.register(window: windowID)
             Notifier.shared.requestAuthorization()
             PushRegistration.shared.label = { Host.current().localizedName ?? "Mac" }
@@ -320,6 +326,7 @@ struct ContentView: View {
             // what the remaining windows still show.
             Notifier.shared.closeWindow(windowID)
             DestinationOpener.shared.unregister(window: windowID)
+            closeSession()
             for client in store.clients.values {
                 client.stopEvents()
                 client.reportWatching([])
@@ -432,7 +439,12 @@ struct ContentView: View {
         .onChange(of: taskTabs) { _, _ in markVisibleSeen() }
         .onChange(of: store.needsYouSettled) { _, _ in settleLaunch() }
         .onChange(of: keptPlace) { _, now in
-            if let now { lastDestination = now }
+            if let now, windowBox.window?.isKeyWindow != false { lastDestination = now }
+        }
+        .onChange(of: sessionState) { _, record in if let record { WindowSessions.shared.update(record) } }
+        // Where a new window starts, and the fallback: the key window's.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+            if let now = keptPlace, (note.object as? NSWindow) === windowBox.window { lastDestination = now }
         }
         // Coming back to the app is reading whatever it comes back to. The
         // notification did its job while you were away; leaving the row lit
@@ -2628,12 +2640,15 @@ struct ContentView: View {
     private func settleLaunch() {
         SelectionMemory.migrate(
             .standard, fleet: store.fleet, ready: { host in store.clients[host]?.hasLoaded ?? true })
-        guard !launched else { return }
+        // Not before the window has taken its record (`adoptSession`).
+        guard !launched, self.kept != nil else { return }
         guard selection == nil else {
             launched = true
             return
         }
-        if let kept = SelectionMemory.kept(destination: lastDestination, legacy: lastSelection) {
+        if let kept = SelectionMemory.kept(
+            destination: self.kept?.place?.encoded ?? lastDestination, legacy: lastSelection)
+        {
             launched = true
             restoring = DestinationOpen(destination: kept, arrival: .restore, since: Date())
             return

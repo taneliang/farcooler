@@ -33,6 +33,21 @@ struct NavigationHistory: Equatable {
     /// new step.
     private var stepping: Selection?
 
+    init() {}
+
+    /// A history kept across a relaunch: `back` oldest first, `forward` with
+    /// the next stop last, each cut to `limit` and with adjacent repeats made
+    /// one.
+    init(back: [Stop], forward: [Stop]) {
+        func settled(_ stops: [Stop]) -> [Stop] {
+            var out: [Stop] = []
+            for stop in stops where out.last != stop { out.append(stop) }
+            return Array(out.suffix(Self.limit))
+        }
+        self.back = settled(back)
+        self.forward = settled(forward)
+    }
+
     var canGoBack: Bool { !back.isEmpty }
     var canGoForward: Bool { !forward.isEmpty }
 

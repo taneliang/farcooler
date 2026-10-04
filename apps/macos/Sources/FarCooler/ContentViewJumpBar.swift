@@ -7,6 +7,9 @@ import SwiftUI
 struct JumpBarWindow: Equatable {
     /// Where the window has been, for ⌃⌘← and ⌃⌘→.
     var history = NavigationHistory()
+    /// What the places in `history` were called when the window was last
+    /// open, for naming them before their runners have answered (ov-248).
+    var restoredTitles: [ContentView.Selection: String] = [:]
     /// Bumped by ⌘L: the jump bar takes the keyboard.
     var request = 0
     /// The jump bar has the keyboard: its Esc is its own, not Back.

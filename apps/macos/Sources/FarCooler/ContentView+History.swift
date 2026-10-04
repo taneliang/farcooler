@@ -11,20 +11,26 @@ extension ContentView {
     var historyRows: [PlaceRow] {
         HistoryMenu.rows(
             jumpBar.history.rows(current: selection, trail: openedFrom(selection), resolves: resolves),
-            names: HistoryMenu.Names(
-                workspace: { host, id in
-                    board(host: host, id: id).map { w in
-                        w.isImplicit
-                            ? store.clients[host]?.repositories.first { $0.id == (w.repository ?? w.id) }?.displayName ?? w.name
-                            : w.name
-                    }
-                },
-                task: { host, workspace, id in
-                    boardStores["\(host)/\(workspace)"]?.board.columns.flatMap(\.rows).first { $0.id == id }
-                        .map { "\($0.key) \($0.title)" }
-                },
-                worktree: { host, id in worktree(host: host, id: id)?.task }),
-            showHosts: showHosts)
+            names: historyNames, showHosts: showHosts)
+    }
+
+    /// What the window calls its places: from what it has read, else from
+    /// what its record remembers.
+    var historyNames: HistoryMenu.Names {
+        HistoryMenu.Names(
+            workspace: { host, id in
+                board(host: host, id: id).map { w in
+                    w.isImplicit
+                        ? store.clients[host]?.repositories.first { $0.id == (w.repository ?? w.id) }?.displayName ?? w.name
+                        : w.name
+                }
+            },
+            task: { host, workspace, id in
+                boardStores["\(host)/\(workspace)"]?.board.columns.flatMap(\.rows).first { $0.id == id }
+                    .map { "\($0.key) \($0.title)" }
+            },
+            worktree: { host, id in worktree(host: host, id: id)?.task },
+            remembered: { jumpBar.restoredTitles[$0] })
     }
 
     /// A row of the list chosen: there in one move, the stops between kept

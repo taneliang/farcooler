@@ -479,6 +479,17 @@ final class PushDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated { Notifier.shared.becomeDelegate() }
     }
 
+    /// Quitting keeps every window's record: windows closing under it aren't
+    /// the person closing them one by one (`WindowSessions.closed`).
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        MainActor.assumeIsolated { WindowSessions.shared.quitting = true }
+        return .terminateNow
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        MainActor.assumeIsolated { WindowSessions.shared.flush() }
+    }
+
     func application(
         _ application: NSApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
