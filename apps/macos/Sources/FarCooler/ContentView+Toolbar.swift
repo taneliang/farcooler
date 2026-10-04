@@ -339,6 +339,10 @@ extension ContentView {
             selected: Self.openedWhole(selection).map(\.worktree)
                 ?? (terminals.selected == nil ? WorkspaceScreen.namedTerminal(selection).map(\.worktree) : nil),
             onOpen: { worktree in glance(at: worktree) },
+            worktreeTerminals: Dictionary(
+                uniqueKeysWithValues: loose.shown.map { ($0.id, BoardWorktrees.terminals(of: $0, in: store.fleet)) }),
+            selectedTerminal: terminals.selected == nil ? WorkspaceScreen.namedTerminal(selection).map(\.terminal) : nil,
+            onOpenTerminal: { worktree, terminal in glance(at: worktree, terminal: terminal.id) },
             onNew: usable ? repository.map { repo in { newWorktree(host: host, project: repo.displayName) } } : nil,
             onUnhide: usable ? { ws in Task { await act(.unhide, on: ws) { c in await c.unhideWorktree(ws.short) } } } : nil,
             menu: { worktreeMenu(for: $0) },
@@ -407,15 +411,15 @@ extension ContentView {
         }
     }
 
-    /// A loose worktree in the navigator chosen, by a click or ↑ or ↓: it
-    /// opens in the main area, and the navigator keeps the keyboard, as a
-    /// task's row does.
-    private func glance(at worktree: Worktree) {
+    /// A loose worktree in the navigator chosen, by a click or ↑ or ↓, or a
+    /// terminal under it (ov-267): it opens in the main area, and the
+    /// navigator keeps the keyboard, as a task's row does.
+    private func glance(at worktree: Worktree, terminal: String? = nil) {
         trail = nil
         let step = WorkspaceNavigation.boardStep(.choose(glance: true), from: boardState)
         if step.keyboard == .board { boardKeyboardPending = true }
         focusColumn = step.focus
-        open(worktree, terminal: nil)
+        open(worktree, terminal: terminal)
         key(step.keyboard)
     }
 
@@ -462,6 +466,39 @@ extension ContentView {
             title: segment.title, isHere: segment.isHere, tasks: segment.tasks, loose: segment.loose,
             worktree: named?.task, actions: named.map { worktreeMenu(for: $0).filter { $0 != .open } } ?? [],
             perform: { item in if let named { perform(item, on: named) } }, opens: segment.opens, help: help,
-            children: named.map { JumpMenus.terminals(of: $0, selection: selection, fleet: store.fleet) } ?? [])
+            children: named.map { JumpMenus.terminals(of: $0, selection: selection, fleet: store.fleet) } ?? [],
+            // The selection, not `place`, which the detail is handed
+            // without its pane.
+            target: named.flatMap { Self.backToWorktree($0, from: current, in: store.fleet) },
+            terminal: named.flatMap { worktree in
+                TerminalCrumb.of(
+                    Self.openTerminal(in: worktree, place: current, keyPane: keyPane), in: worktree, selection: selection,
+                    fleet: store.fleet)
+            })
+    }
+
+    /// The terminal open in `worktree` at `place` (ov-267): the one the
+    /// place names, else the one the keyboard is in there.
+    static func openTerminal(in worktree: Worktree, place: Selection, keyPane: PaneRef?) -> String? {
+        switch place {
+        case .workspace(_, _, .worktree(worktree.id, let terminal?)?), .looseWorktree(_, worktree.id, let terminal?):
+            return terminal
+        case .workspace(_, _, .worktree(worktree.id, nil)?), .looseWorktree(_, worktree.id, nil):
+            return keyPane.flatMap { $0.worktree == worktree.id ? $0.terminal : nil }
+        default:
+            return nil
+        }
+    }
+
+    /// Where the worktree segment's label goes from `place` (ov-267): the
+    /// worktree whole, from one of its terminals; nil when it's already
+    /// open whole.
+    static func backToWorktree(_ worktree: Worktree, from place: Selection, in fleet: Fleet) -> JumpTarget? {
+        switch place {
+        case .workspace(_, _, .worktree(worktree.id, _?)?), .looseWorktree(_, worktree.id, _?):
+            return .go(opening(worktree, terminal: nil, in: fleet))
+        default:
+            return nil
+        }
     }
 }

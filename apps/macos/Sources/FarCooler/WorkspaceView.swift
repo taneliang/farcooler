@@ -436,10 +436,14 @@ struct DrillBreadcrumb: View {
     struct Piece: Equatable {
         enum Kind: Equatable {
             case separator
-            /// A crumb, by its index in `crumbs`.
+            /// A crumb, by its index in `crumbs`, and its ⌄ where it has a
+            /// menu (ov-267).
             case crumb(Int)
+            case crumbCaret(Int)
             /// The worktree menu's icon, its title and its ⌄.
             case menuIcon, menuTitle, menuChevron
+            /// The terminal open in the worktree, and its ⌄ (ov-267).
+            case terminalTitle, terminalChevron
         }
 
         var kind: Kind
@@ -447,25 +451,35 @@ struct DrillBreadcrumb: View {
     }
 
     /// Everything the bar draws, in order, each in its one style: what
-    /// `ColumnHeaderTests` reads, and all the view draws from.
-    static func pieces(_ crumbs: [WorkspaceNavigation.Crumb], worktrees: WorktreeCrumb?) -> [Piece] {
+    /// `ColumnHeaderTests` reads, and all the view draws from. The first
+    /// `menus` crumbs have a menu, and a ⌄ to open it.
+    static func pieces(_ crumbs: [WorkspaceNavigation.Crumb], worktrees: WorktreeCrumb?, menus: Int = 0) -> [Piece] {
         var out: [Piece] = []
         for (index, crumb) in crumbs.enumerated() {
             if index > 0 { out.append(Piece(kind: .separator, style: JumpBar.chevron)) }
             out.append(Piece(kind: .crumb(index), style: JumpBar.style(crumb.target == nil ? .current : .ancestor)))
+            if index < menus { out.append(Piece(kind: .crumbCaret(index), style: JumpBar.chevron)) }
         }
         if let worktrees {
+            let terminalHere = worktrees.terminal != nil
             if !crumbs.isEmpty { out.append(Piece(kind: .separator, style: JumpBar.chevron)) }
-            out.append(Piece(kind: .menuIcon, style: JumpBar.icon(.menu, isHere: worktrees.isHere)))
-            out.append(Piece(kind: .menuTitle, style: JumpBar.style(.menu, isHere: worktrees.isHere)))
+            out.append(Piece(kind: .menuIcon, style: JumpBar.icon(.menu, isHere: worktrees.isHere && !terminalHere)))
+            out.append(Piece(kind: .menuTitle, style: JumpBar.style(.menu, isHere: worktrees.isHere && !terminalHere)))
             // A way into a task's one worktree is no menu, and has no ⌄.
             if worktrees.opens == nil { out.append(Piece(kind: .menuChevron, style: JumpBar.chevron)) }
+            if terminalHere {
+                out.append(Piece(kind: .separator, style: JumpBar.chevron))
+                out.append(Piece(kind: .terminalTitle, style: JumpBar.style(.current)))
+                out.append(Piece(kind: .terminalChevron, style: JumpBar.chevron))
+            }
         }
         return out
     }
 
     /// How many segments the keyboard moves through.
-    var segmentCount: Int { crumbs.count + (worktrees == nil ? 0 : 1) }
+    var segmentCount: Int {
+        crumbs.count + (worktrees == nil ? 0 : 1) + (worktrees?.terminal == nil ? 0 : 1)
+    }
 
     /// The segments' menus, built now and kept until the bar lets go.
     private func materialize() -> [JumpMenu] {
@@ -483,11 +497,12 @@ struct DrillBreadcrumb: View {
     static func segmentMenus(crumbs: Int, menus: [JumpMenu], worktrees: WorktreeCrumb?) -> [JumpMenu] {
         var out = (0..<crumbs).map { menus.indices.contains($0) ? menus[$0] : JumpMenu([]) }
         if let worktrees { out.append(worktrees.jumpMenu) }
+        if let terminal = worktrees?.terminal { out.append(terminal.jumpMenu) }
         return out
     }
 
     var body: some View {
-        let pieces = Self.pieces(crumbs, worktrees: worktrees)
+        let pieces = Self.pieces(crumbs, worktrees: worktrees, menus: menus.count)
         let segments = built ?? []
         HStack(spacing: JumpBar.spacing) {
             // The segments on one baseline; the bar centered in the header.
@@ -500,18 +515,29 @@ struct DrillBreadcrumb: View {
                         .foregroundStyle(piece.style.color)
                         .accessibilityHidden(true)
                 case .crumb(let index):
-                    crumb(crumbs[index], index: index, style: piece.style, segments: segments)
+                    crumb(crumbs[index], index: index, style: piece.style)
+                case .crumbCaret(let index):
+                    caret(piece.kind, segment: index, style: piece.style, segments: segments)
                 case .menuIcon:
-                    if let worktrees {
-                        if let item = worktrees.opens {
-                            worktreeButton(item, worktrees: worktrees, pieces: pieces)
-                        } else {
-                            worktreeMenu(worktrees, pieces: pieces, segments: segments)
-                        }
-                    }
-                case .menuTitle, .menuChevron:
-                    // Drawn inside the menu's label, with its icon.
+                    if let worktrees { worktreeLabel(worktrees, pieces: pieces) }
+                case .menuTitle:
+                    // Drawn inside the label, with its icon.
                     EmptyView()
+                case .menuChevron:
+                    caret(piece.kind, segment: crumbs.count, style: piece.style, segments: segments)
+                case .terminalTitle:
+                    if let terminal = worktrees?.terminal {
+                        HStack(alignment: .firstTextBaseline, spacing: 3) {
+                            Image(systemName: "terminal").font(piece.style.font)
+                            Text(terminal.title).font(piece.style.font).lineLimit(1)
+                        }
+                        .foregroundStyle(piece.style.color)
+                        .background(ring(crumbs.count + 1))
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("breadcrumb-terminal")
+                    }
+                case .terminalChevron:
+                    caret(piece.kind, segment: crumbs.count + 1, style: piece.style, segments: segments)
                 }
             }
             }
@@ -630,76 +656,58 @@ struct DrillBreadcrumb: View {
             .opacity(keys.segment == index && !keys.open ? 1 : 0)
     }
 
-    /// A crumb: a menu of its siblings when it has one, else a way back
-    /// while it has a target, else where you are. Ancestors keep their
-    /// width; the current one, a task's long title, gives way, cut in its
-    /// middle.
+    /// Carry out a piece's click (`click`).
+    private func perform(_ click: Click) {
+        switch click {
+        case .go(let target): dispatch(target)
+        case .menu(let index): open(segment: index)
+        case .none: break
+        }
+    }
+
+    /// A crumb's label: a way to the level it names, the level you're at
+    /// plain. Ancestors keep their width; the current one, a task's long
+    /// title, gives way, cut in its middle.
     @ViewBuilder
-    private func crumb(
-        _ crumb: WorkspaceNavigation.Crumb, index: Int, style: JumpBar.Style, segments: [JumpMenu]
-    ) -> some View {
+    private func crumb(_ crumb: WorkspaceNavigation.Crumb, index: Int, style: JumpBar.Style) -> some View {
         let text = Text(crumb.title).font(style.font).foregroundStyle(style.color).lineLimit(1)
-        if index < menus.count {
-            Button { open(segment: index) } label: {
-                text.truncationMode(.middle)
+        if crumb.target != nil {
+            JumpLabelButton(name: Self.labelName(crumb.title)) {
+                perform(Self.click(.crumb(index), crumbs: crumbs, worktrees: worktrees))
+            } label: {
+                text
             }
-            .buttonStyle(.plain)
-            .background(ring(index))
-            .layoutPriority(crumb.target == nil ? -1 : 0)
-            .help(crumb.target == nil ? "Go to another place in this workspace" : "Go to \(crumb.title) or beside it")
-            .popover(isPresented: presented(index), arrowEdge: .bottom) { menu(index, segments: segments) }
-            .accessibilityHint("Opens a menu of the places beside it")
-            .accessibilityIdentifier("jump-segment-\(index)")
-        } else if let target = crumb.target {
-            Button { onGo(target) } label: { text }
-            .buttonStyle(.plain)
             .fixedSize()
-            .help("Go to \(crumb.title)")
+            .background(ring(index))
+            .identified("jump-label-\(index)")
         } else {
             text
                 .truncationMode(.middle)
                 .layoutPriority(-1)
+                .background(ring(index))
+                .accessibilityIdentifier("jump-segment-\(index)")
         }
     }
 
-    /// The worktree segment: a menu whose label is drawn here, in the bar's
-    /// type, not the pop-up button's own, which set "Worktrees" a size
-    /// larger than its neighbors (owner, 2 Oct).
-    private func worktreeMenu(_ worktrees: WorktreeCrumb, pieces: [Piece], segments: [JumpMenu]) -> some View {
-        let index = crumbs.count
-        return Button { open(segment: index) } label: {
-            worktreeLabel(worktrees, pieces: pieces)
+    /// A segment's ⌄: its menu, in a popover hung from it.
+    private func caret(_ kind: Piece.Kind, segment index: Int, style: JumpBar.Style, segments: [JumpMenu]) -> some View {
+        JumpCaretButton(name: Self.caretName(index, crumbs: crumbs.count), style: style) {
+            perform(Self.click(kind, crumbs: crumbs, worktrees: worktrees))
         }
-        .buttonStyle(.plain)
-        .background(ring(index))
-        .fixedSize()
-        .help(worktrees.help)
         .popover(isPresented: presented(index), arrowEdge: .bottom) { menu(index, segments: segments) }
-        .accessibilityHint("Opens a menu of the places beside it")
-        .accessibilityIdentifier("breadcrumb-worktrees")
+        .identified("jump-caret-\(index)")
     }
 
-    /// The segment beside a task with one worktree: its name, which opens
-    /// it, as the task's Open Worktree does.
-    private func worktreeButton(_ item: WorkspaceWorktrees.MenuItem, worktrees: WorktreeCrumb, pieces: [Piece]) -> some View {
-        Button { open(item) } label: {
-            worktreeLabel(worktrees, pieces: pieces)
-        }
-        .buttonStyle(.plain)
-        .background(ring(crumbs.count))
-        .fixedSize()
-        .help(worktrees.help)
-        .accessibilityIdentifier("breadcrumb-worktrees")
-    }
-
-    /// The segment's label, for the menu and the button alike: the glyph,
-    /// the title and, when `pieces` has one (a menu), the ⌄, each in its
-    /// piece's style.
+    /// The worktree segment's label, the glyph and the title: a way to the
+    /// worktree it names (back to it from one of its terminals), into a
+    /// task's one worktree, or, for "Worktrees" beside a task with several,
+    /// its menu. Drawn in the bar's type, not a pop-up button's, which set
+    /// "Worktrees" a size larger than its neighbors (owner, 2 Oct).
+    @ViewBuilder
     private func worktreeLabel(_ worktrees: WorktreeCrumb, pieces: [Piece]) -> some View {
         let icon = pieces.first { $0.kind == .menuIcon }?.style ?? JumpBar.icon(.menu)
         let title = pieces.first { $0.kind == .menuTitle }?.style ?? JumpBar.style(.menu)
-        let chevron = pieces.first { $0.kind == .menuChevron }?.style
-        return HStack(alignment: .firstTextBaseline, spacing: 3) {
+        let label = HStack(alignment: .firstTextBaseline, spacing: 3) {
             Image(systemName: WorktreeSection.glyph)
                 .font(icon.font)
                 .foregroundStyle(icon.color)
@@ -707,13 +715,24 @@ struct DrillBreadcrumb: View {
                 .font(title.font)
                 .foregroundStyle(title.color)
                 .lineLimit(1)
-            if let chevron {
-                Image(systemName: JumpBar.menuGlyph)
-                    .font(chevron.font)
-                    .foregroundStyle(chevron.color)
-            }
         }
-        .contentShape(Rectangle())
+        let click = Self.click(.menuIcon, crumbs: crumbs, worktrees: worktrees)
+        if click == .none {
+            label
+                .fixedSize()
+                .background(ring(crumbs.count))
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("breadcrumb-worktrees")
+        } else {
+            JumpLabelButton(name: worktrees.opens != nil || worktrees.target != nil ? Self.labelName(worktrees.title) : worktrees.help) {
+                perform(click)
+            } label: {
+                label
+            }
+            .fixedSize()
+            .background(ring(crumbs.count))
+            .identified("breadcrumb-worktrees")
+        }
     }
 
     private func open(_ item: WorkspaceWorktrees.MenuItem) {
@@ -743,6 +762,12 @@ struct WorktreeCrumb {
     /// The worktree it stands for, opened whole: its terminals, lost ones
     /// apart, for its menu's children (ov-192).
     var children: [JumpSection] = []
+    /// Where a click on its label goes: back to the worktree it names from
+    /// one of its terminals (ov-267). Nil where it's the level you're at,
+    /// or names no one worktree.
+    var target: JumpTarget? = nil
+    /// The terminal open in it, its last segment (ov-267).
+    var terminal: TerminalCrumb? = nil
 
     /// Its menu (ov-192): its siblings, then its children, then the
     /// worktree's own items. Beside a task with one worktree, that one.

@@ -311,11 +311,16 @@ enum PaletteIndex {
             id: "terminal:\(terminal.id)",
             action: .openTerminal(worktree: worktree.id, terminal: terminal.id),
             title: terminal.label,
-            detail: [worktree.task, worktree.repository ?? ""]
-                .filter { !$0.isEmpty }
-                .joined(separator: " · "),
+            detail: path(to: worktree),
             terminal: terminal,
             kind: "terminal")
+    }
+
+    /// Where a terminal lives, as the jump bar reads it down to it
+    /// (ov-267): "overnight › invoice pdf", its repository then its
+    /// worktree, the terminal itself being the row's title.
+    static func path(to worktree: Worktree) -> String {
+        [worktree.repository ?? "", worktree.task].filter { !$0.isEmpty }.joined(separator: " › ")
     }
 
     /// What a terminal found only by its worktree's name gives up to the

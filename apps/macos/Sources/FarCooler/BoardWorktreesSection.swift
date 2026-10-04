@@ -15,6 +15,13 @@ struct BoardWorktrees {
     /// The worktree open whole beside the board, drawn selected.
     var selected: String?
     var onOpen: (Worktree) -> Void = { _ in }
+    /// Each shown worktree's own terminals, by worktree id, listed under its
+    /// row (ov-267): where a terminal opened in it lives.
+    var worktreeTerminals: [String: [Terminal]] = [:]
+    /// The terminal open in the main area, by id, drawn selected under its
+    /// worktree in place of the worktree's row.
+    var selectedTerminal: String?
+    var onOpenTerminal: (Worktree, Terminal) -> Void = { _, _ in }
     /// New Worktree…, the section's trailing row. Nil where the runner
     /// can't take one.
     var onNew: (() -> Void)?
@@ -32,6 +39,18 @@ struct BoardWorktrees {
     var unclaimed: Set<String> = []
 
     static var none: BoardWorktrees { BoardWorktrees() }
+
+    /// The terminals listed under `worktree`'s row: its own, not an
+    /// orchestrator seated in it, which only its conversation shows.
+    static func terminals(of worktree: Worktree, in fleet: Fleet) -> [Terminal] {
+        WorkspaceScreen.ownTerminals(of: worktree, fleet: fleet).terminals.filter { !$0.isOrchestrator }
+    }
+
+    /// Whether `worktree`'s own row is drawn selected: open whole, not one
+    /// of its terminals listed under it.
+    func rowSelected(_ worktree: Worktree) -> Bool {
+        worktree.id == selected && !(worktreeTerminals[worktree.id] ?? []).contains { $0.id == selectedTerminal }
+    }
 
     /// Which of `worktrees` no workspace on their runner owns
     /// (`WorkspaceSelection.owner`). Never the main checkout, which is the
@@ -83,11 +102,16 @@ struct BoardWorktreesSection: View {
         VStack(alignment: .leading, spacing: NavigatorRhythm.row) {
             ForEach(Self.rows(worktrees)) { worktree in
                 BoardWorktreeRow(
-                    worktree: worktree, selected: worktree.id == worktrees.selected, keyed: keyed,
+                    worktree: worktree, selected: worktrees.rowSelected(worktree), keyed: keyed,
                     caption: BoardWorktrees.caption(worktree, unclaimed: worktrees.unclaimed.contains(worktree.id)),
                     onOpen: { worktrees.onOpen(worktree) },
                     menu: worktrees.menu(worktree), perform: { worktrees.perform($0, worktree) })
                 .id(NavigatorItem.worktree(worktree.id))
+                ForEach(worktrees.worktreeTerminals[worktree.id] ?? []) { terminal in
+                    BoardWorktreeTerminalRow(
+                        terminal: terminal, selected: terminal.id == worktrees.selectedTerminal, keyed: keyed,
+                        onOpen: { worktrees.onOpenTerminal(worktree, terminal) })
+                }
             }
             if !worktrees.hidden.isEmpty {
                 hiddenGroup
@@ -200,6 +224,39 @@ private struct BoardWorktreeRow: View {
             }
         }
         .navigatorRow(selected: selected, keyed: keyed, leading: 0, box: "boardWorktree")
+    }
+}
+
+/// One of a loose worktree's terminals, under its row (ov-267): its glyph
+/// and name at the worktree's text column, and its status.
+private struct BoardWorktreeTerminalRow: View {
+    let terminal: Terminal
+    let selected: Bool
+    let keyed: Bool
+    let onOpen: () -> Void
+
+    var body: some View {
+        Button(action: onOpen) {
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                Image(systemName: "terminal")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .glyphColumn()
+                Text(terminal.label)
+                    .font(.system(size: WorkspaceStyle.PaneText.body))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: SidebarGrid.gap)
+                StatusGlyph(status: terminal.status)
+                    .help(terminal.status.label)
+            }
+            .navigatorRow(selected: selected, keyed: keyed)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(terminal.label)
+        .accessibilityValue(terminal.status.label)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .identified("board-worktree-terminal-\(terminal.id)")
     }
 }
 

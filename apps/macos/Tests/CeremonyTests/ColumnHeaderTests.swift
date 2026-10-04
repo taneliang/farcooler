@@ -53,7 +53,7 @@ struct ColumnHeaderTests {
             #expect(!pieces.isEmpty)
             for piece in pieces {
                 switch piece.kind {
-                case .separator, .menuChevron:
+                case .separator, .menuChevron, .crumbCaret, .terminalChevron:
                     // One chevron, one size and weight, tertiary.
                     #expect(piece.style == JumpBar.chevron, "\(piece.kind)")
                 case .crumb(let index):
@@ -63,6 +63,8 @@ struct ColumnHeaderTests {
                     } else {
                         #expect(piece.style.tone == .secondary && piece.style.weight == .regular)
                     }
+                case .terminalTitle:
+                    #expect(piece.style == JumpBar.style(.current))
                 case .menuIcon, .menuTitle:
                     #expect(piece.style.size == ColumnHeader.textSize, "\(piece.kind)")
                     #expect(piece.style.tone == (worktrees?.isHere == true ? .primary : .secondary))
