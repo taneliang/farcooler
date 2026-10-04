@@ -98,9 +98,10 @@ public struct Destination: Hashable, Sendable {
         case terminal(String)
     }
 
-    /// A task's tabs, as the Mac's `TaskTab` names them.
+    /// A task's tabs, as the Mac's `TaskTab` names them. Files is the
+    /// Mac's (ov-189); a phone, which has no such tab, reads it as none.
     public enum Tab: String, CaseIterable, Hashable, Sendable {
-        case overview, agent, changes
+        case overview, agent, changes, files
     }
 
     /// A phone workspace screen's segments, as `WorkspaceSegment` names them.
