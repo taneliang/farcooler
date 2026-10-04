@@ -668,6 +668,9 @@ jobs:
       # Check every signing path, not only the local bundle assembled above.
       - run: ./scripts/macos-entitlements-test.sh "apps/macos/build/$APP_NAME.app"
 
+      # `apps/macos/test.sh` builds the Rust cores before the Mac tests (ov-134).
+      - run: ./scripts/macos-test-wrapper-test.sh
+
       - name: Test AgentKit
         run: swift test --package-path apps/shared/AgentKit
 
@@ -693,7 +696,7 @@ jobs:
       # nothing else. RenderBenchTests asserts nothing and stays silent unless
       # `FARCOOLER_RENDER_BENCH` is set, so this is not the slow benchmark.
       - name: Test the Mac app
-        run: swift test --package-path apps/macos
+        run: ./apps/macos/test.sh
 
   ios:
     name: iOS

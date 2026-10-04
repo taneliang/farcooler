@@ -149,7 +149,7 @@ how to build on the runner itself instead.
 | Rust | `cargo test --workspace --no-fail-fast` (CI wraps it in `./scripts/tmux-leak-check.py --`, which fails a test that leaves a tmux server running) |
 | Rust lints | `cargo clippy --workspace --all-targets -- -D warnings` |
 | AgentKit | `swift test --package-path apps/shared/AgentKit` |
-| Mac app | `swift test --package-path apps/macos` |
+| Mac app | `apps/macos/test.sh` (builds the Rust cores the app links, then runs `swift test`; takes `swift test`'s arguments) |
 | iOS UI tests | `./scripts/ios-ui-tests.sh` |
 | Android | `cd apps/android && ./gradlew testInstrumentedUnitTest` |
 | Relay | `cd services/relay && npm ci && npm test` |
