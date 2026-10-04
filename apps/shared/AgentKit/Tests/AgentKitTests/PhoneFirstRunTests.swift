@@ -43,6 +43,19 @@ private func section(_ repository: String, _ rows: [PhoneWorkspaceRow]) -> Phone
     #expect(PhoneFirstRun.noOrchestratorLine(sections: [section("a", [row("main", orchestrator: nil)])], working: 2) == nil)
 }
 
+@Test func aQuickExit127NamesTheAgentThatWasAskedFor() {
+    func missing(_ code: Int?, _ after: TimeInterval?, _ asked: AgentHarness? = .codex, _ preset: String = "claude") -> AgentHarness? {
+        OrchestratorExit.missingAgent(exitCode: code, endedAfter: after, asked: asked, preset: preset)
+    }
+    #expect(missing(127, 6) == .codex)
+    #expect(missing(127, 6, nil) == .claude)
+    #expect(missing(127, nil) == nil)
+    #expect(missing(127, 60) == nil)
+    #expect(missing(1, 6) == nil)
+    #expect(missing(nil, 6) == nil)
+    #expect(missing(127, 6, nil, "shell") == nil)
+}
+
 @Test func aDaemonBuildReadsWhichHarnessesTheRunnerFound() {
     let said = DaemonBuild(version: "1", matches: true, platform: "linux", agentsFound: ["codex"])
     #expect(said.availability.installed == [.codex])

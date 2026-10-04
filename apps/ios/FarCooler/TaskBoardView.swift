@@ -131,6 +131,7 @@ struct WorkspaceBoardList: View {
                             .accessibilityIdentifier("board-show-orchestrator")
                     }
                 }
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("board-empty")
             } else if let board {
                 list(board)

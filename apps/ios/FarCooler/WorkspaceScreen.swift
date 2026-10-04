@@ -363,10 +363,9 @@ struct OrchestratorSegment: View {
     /// The agent a quick exit 127 says isn't installed, when this phone can
     /// say which: the one it asked for, else the pane's own preset.
     private func missingAgent(_ terminal: Terminal) -> AgentHarness? {
-        guard let endedAfter,
-            OrchestratorExit.classify(exitCode: terminal.exitCode, ranFor: endedAfter) == .notInstalled
-        else { return nil }
-        return askedHarness ?? AgentHarness(rawValue: terminal.preset)
+        OrchestratorExit.missingAgent(
+            exitCode: terminal.exitCode, endedAfter: endedAfter, asked: askedHarness,
+            preset: terminal.preset)
     }
 
     @ViewBuilder
@@ -381,6 +380,7 @@ struct OrchestratorSegment: View {
     private func notInstalled(_ harness: AgentHarness, _ terminal: Terminal) -> some View {
         ContentUnavailableView {
             Label(FirstRunCopy.Conversation.notInstalledTitle(harness), systemImage: "exclamationmark.triangle")
+                .accessibilityIdentifier("orchestrator-not-installed")
         } description: {
             Text(FirstRunCopy.Phone.notInstalledBody(harness, on: connection.hostLabel))
         } actions: {
@@ -394,7 +394,6 @@ struct OrchestratorSegment: View {
                 .accessibilityIdentifier("orchestrator-try-again")
             }
         }
-        .accessibilityIdentifier("orchestrator-not-installed")
     }
 
     private func stopped(_ terminal: Terminal) -> some View {

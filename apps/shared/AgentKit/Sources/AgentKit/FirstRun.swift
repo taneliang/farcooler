@@ -103,6 +103,21 @@ public enum OrchestratorExit: Equatable, Sendable {
     }
 }
 
+extension OrchestratorExit {
+    /// The agent a quick exit 127 says isn't installed, or nil when the pane's
+    /// end isn't that. `endedAfter` is nil until the app has seen the pane end
+    /// after asking for it; the harness is the one asked for, else the pane's
+    /// own preset.
+    public static func missingAgent(
+        exitCode: Int?, endedAfter: TimeInterval?, asked: AgentHarness?, preset: String
+    ) -> AgentHarness? {
+        guard let endedAfter, classify(exitCode: exitCode, ranFor: endedAfter) == .notInstalled else {
+            return nil
+        }
+        return asked ?? AgentHarness.allCases.first { $0.rawValue == preset }
+    }
+}
+
 /// What the Mac's local runner has said about itself so far.
 public enum LocalRunnerState: Equatable, Sendable {
     /// `daemon ensure` hasn't answered yet.

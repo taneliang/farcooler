@@ -176,6 +176,7 @@ struct NeedsYouScreen: View {
                     .font(.footnote.weight(.semibold))
                     .accessibilityIdentifier("needs-you-sign-in")
                 }
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("needs-you-push")
             }
         }
