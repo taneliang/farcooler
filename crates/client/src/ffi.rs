@@ -2893,12 +2893,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let socket = dir.path().join("runner.sock");
         let created = a_runner_with_main(&socket, repository, main).await;
-        let mut session = Session::connect_local(&socket).await.expect("connect");
+        let session = Session::connect_local(&socket).await.expect("connect");
         let mut args = args;
         args["repository"] = json!(repository.to_string());
         args["task"] = json!("phone task");
         args["branch"] = json!("feat/phone");
-        dispatch(&mut session, "worktree.create", &args).await.expect("created");
+        dispatch(&session, "worktree.create", &args).await.expect("created");
         let sent = locked(&created).clone();
         assert_eq!(sent.len(), 1, "one create reached the runner");
         sent[0].workspace_id.as_deref().map(crate::session::uuid_of)

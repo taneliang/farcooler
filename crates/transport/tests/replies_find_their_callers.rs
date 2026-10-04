@@ -20,6 +20,9 @@ use farcooler_transport::{
 
 type Duplex = tokio::io::DuplexStream;
 type TestClient = Client<tokio::io::ReadHalf<Duplex>, tokio::io::WriteHalf<Duplex>>;
+type Reads = FrameReader<tokio::io::ReadHalf<Duplex>>;
+type Writes = FrameWriter<tokio::io::WriteHalf<Duplex>>;
+type Script = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
 
 /// Answers every call at once with its own method name, except `slow`, which
 /// waits until the test releases it.
@@ -93,7 +96,7 @@ async fn connected() -> (TestClient, Arc<tokio::sync::Semaphore>) {
 /// hello, then hands every request to `script` along with the writer.
 async fn scripted<F, Fut>(script: F) -> TestClient
 where
-    F: FnOnce(FrameReader<tokio::io::ReadHalf<Duplex>>, FrameWriter<tokio::io::WriteHalf<Duplex>>) -> Fut
+    F: FnOnce(Reads, Writes) -> Fut
         + Send
         + 'static,
     Fut: std::future::Future<Output = ()> + Send,
@@ -121,7 +124,7 @@ fn envelope(body: wire_envelope::Body) -> WireEnvelope {
     WireEnvelope { protocol_version: PROTOCOL_VERSION, message_id: farcooler_protocol::ids::new_id(), body: Some(body) }
 }
 
-async fn next_request(reader: &mut FrameReader<tokio::io::ReadHalf<Duplex>>) -> Option<Request> {
+async fn next_request(reader: &mut Reads) -> Option<Request> {
     match reader.read_frame().await.ok()??.body {
         Some(wire_envelope::Body::Request(req)) => Some(req),
         _ => None,
@@ -236,10 +239,10 @@ async fn a_disconnect_fails_every_waiting_call_at_once() {
 }
 
 /// What a scripted runner saw, in the order it arrived.
-fn recording() -> (Arc<Mutex<Vec<String>>>, impl FnOnce(FrameReader<tokio::io::ReadHalf<Duplex>>, FrameWriter<tokio::io::WriteHalf<Duplex>>) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>) {
+fn recording() -> (Arc<Mutex<Vec<String>>>, impl FnOnce(Reads, Writes) -> Script) {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let kept = seen.clone();
-    let script = move |mut reader: FrameReader<_>, mut writer: FrameWriter<_>| -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
+    let script = move |mut reader: Reads, mut writer: Writes| -> Script {
         Box::pin(async move {
             while let Some(req) = next_request(&mut reader).await {
                 kept.lock().unwrap().push(req.method.clone());

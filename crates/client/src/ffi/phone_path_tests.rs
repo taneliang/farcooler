@@ -170,10 +170,10 @@ fn the_agent_screen_controls(pane: uuid::Uuid) -> Vec<(&'static str, Value, Valu
 async fn a_control_scoped_phone_s_queue_and_pickers_reach_the_agent() {
     let runner = a_runner(Scope::Control).await;
     let mut shim = Shim::dial(&runner).await;
-    let mut session = Session::connect_local(&runner.socket).await.expect("connect");
+    let session = Session::connect_local(&runner.socket).await.expect("connect");
 
     for (method, args, heard) in the_agent_screen_controls(runner.pane) {
-        if let Err(e) = dispatch(&mut session, method, &args).await {
+        if let Err(e) = dispatch(&session, method, &args).await {
             panic!("{method} from a control-scoped phone was refused: {e:?}");
         }
         assert_eq!(shim.next(5_000).await, Some(heard), "{method} did not reach the agent");
@@ -188,10 +188,10 @@ async fn a_control_scoped_phone_s_queue_and_pickers_reach_the_agent() {
 async fn a_read_scoped_phone_is_refused_the_queue_and_pickers_and_the_agent_hears_nothing() {
     let runner = a_runner(Scope::Read).await;
     let mut shim = Shim::dial(&runner).await;
-    let mut session = Session::connect_local(&runner.socket).await.expect("connect");
+    let session = Session::connect_local(&runner.socket).await.expect("connect");
 
     for (method, args, _) in the_agent_screen_controls(runner.pane) {
-        match dispatch(&mut session, method, &args).await {
+        match dispatch(&session, method, &args).await {
             Err(SessionError::Refused { code, .. }) => assert_eq!(
                 code,
                 ErrorCode::ScopeDenied as i32,
@@ -599,15 +599,15 @@ async fn a_phone_answer_reaches_the_runner_and_no_other_note_does() {
     let dir = tempfile::tempdir().unwrap();
     let socket = dir.path().join("r.sock");
     a_runner_that_refuses_everything(&socket).await;
-    let mut session = Session::connect_local(&socket).await.expect("connect");
+    let session = Session::connect_local(&socket).await.expect("connect");
     let task = uuid::Uuid::now_v7().to_string();
 
-    let answer = dispatch(&mut session, "task.note", &json!({ "task": task, "kind": "answer", "body": "Postgres" }))
+    let answer = dispatch(&session, "task.note", &json!({ "task": task, "kind": "answer", "body": "Postgres" }))
         .await;
     assert!(matches!(answer, Err(SessionError::Refused { .. })), "the answer never reached the runner: {answer:?}");
 
     for kind in ["comment", "progress", "finding", "question", "decision", "status_change", "created"] {
-        let note = dispatch(&mut session, "task.note", &json!({ "task": task, "kind": kind, "body": "x" })).await;
+        let note = dispatch(&session, "task.note", &json!({ "task": task, "kind": kind, "body": "x" })).await;
         assert!(matches!(note, Err(SessionError::Protocol(_))), "a {kind} note went out: {note:?}");
     }
 }
