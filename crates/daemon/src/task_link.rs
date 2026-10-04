@@ -25,12 +25,6 @@ use farcooler_store::Store;
 use farcooler_store::models::{Task, TaskStatus, Terminal, TerminalRole};
 use uuid::Uuid;
 
-/// The task `terminal` was opened for, by its row alone: its `task_id`,
-/// unless it is an orchestrator.
-pub(crate) fn bound_task(terminal: &Terminal) -> Option<Uuid> {
-    terminal.task_id.filter(|_| terminal.role != TerminalRole::Orchestrator)
-}
-
 /// The task `terminal` is working on, read from the store: its own, else the
 /// one open task whose lane it is in, else none. See this module's docs.
 pub(crate) fn task_of(store: &Store, terminal: &Terminal) -> Option<Task> {
@@ -108,7 +102,6 @@ mod tests {
         let mut row = svc.store.get_terminal(pane).unwrap();
         row.task_id = Some(task.id);
         assert_eq!(task_of(&svc.store, &row).map(|t| t.id), Some(task.id));
-        assert_eq!(bound_task(&row), Some(task.id));
     }
 
     #[tokio::test]
@@ -120,7 +113,6 @@ mod tests {
         row.task_id = Some(task.id);
         row.role = TerminalRole::Orchestrator;
         assert!(task_of(&svc.store, &row).is_none());
-        assert!(bound_task(&row).is_none());
     }
 
     #[tokio::test]

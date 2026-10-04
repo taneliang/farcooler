@@ -70,6 +70,10 @@ pub struct Inputs {
     /// Every task in Needs Decision or In Review, and every task a live
     /// terminal was opened for.
     pub tasks: Vec<models::Task>,
+    /// The task each live agent works for, by `task_link::task_of`: its own,
+    /// else its lane's one open task. Every value is in `tasks`. Computed in
+    /// `gather` so `assemble` stays a pure function of its inputs (ov-112).
+    pub task_of: HashMap<Uuid, Uuid>,
     /// The QUESTION and ANSWER notes of each task in Needs Decision, in the
     /// order they were appended.
     pub notes: HashMap<Uuid, Vec<models::TaskNote>>,
@@ -110,11 +114,12 @@ pub async fn gather(
         }
         inputs.workspaces.insert(workspace.id, workspace.name);
     }
-    for id in inputs.terminals.iter().filter(|t| !crate::wire::has_ended(t)).filter_map(|t| t.task_id) {
-        if !tasks.contains_key(&id)
-            && let Ok(task) = svc.store.get_task(id)
-        {
-            tasks.insert(id, task);
+    // The runner's one rule for which task an agent works for, so an agent is
+    // filed under the same task its notices fold into (ov-112).
+    for t in inputs.terminals.iter().filter(|t| !crate::wire::has_ended(t)) {
+        if let Some(task) = crate::task_link::task_of(&svc.store, t) {
+            inputs.task_of.insert(t.id, task.id);
+            tasks.entry(task.id).or_insert(task);
         }
     }
     for task in tasks.values().filter(|t| t.status == TaskStatus::NeedsDecision) {
@@ -333,9 +338,9 @@ pub fn assemble(inputs: &Inputs, now: SystemTime) -> Vec<pb::NeedsYouItem> {
 
     let mut signals: Vec<Signal> = Vec::new();
     for t in inputs.terminals.iter().filter(|t| !crate::wire::has_ended(t)) {
-        // An orchestrator is never a task's agent, so its signals are about
-        // its own terminal whatever its row says.
-        let subject = match crate::task_link::bound_task(t).filter(|id| tasks.contains_key(id)) {
+        // An orchestrator is never a task's agent, so `task_of` has none for
+        // it and its signals are about its own terminal.
+        let subject = match inputs.task_of.get(&t.id).filter(|id| tasks.contains_key(id)).copied() {
             Some(task) => Subject::Task(task),
             None => Subject::Terminal(t.id),
         };
@@ -555,8 +560,16 @@ mod tests {
                 split_of: None,
                 split_of_orchestrator: None,
             });
+            if let Some(task) = task.filter(|_| role != TerminalRole::Orchestrator) {
+                self.inputs.task_of.insert(id, task);
+            }
             self.observe(id, AgentActivity::Working, 0);
             id
+        }
+
+        /// What `gather` computes for a live non-orchestrator agent: its task.
+        fn works_for(&mut self, terminal: Uuid, task: Uuid) {
+            self.inputs.task_of.insert(terminal, task);
         }
 
         fn agent(&mut self, task: Option<Uuid>) -> Uuid {
@@ -649,6 +662,51 @@ mod tests {
         assert_eq!(items[0].also, vec![NeedsYouKind::Decision as i32]);
         assert_eq!(items[0].task.as_ref().map(|t| t.key.as_str()), Some("bil-1"));
         assert_eq!(items[0].terminal.as_ref().map(|t| t.id.clone()), Some(id_bytes(pane)));
+    }
+
+    #[test]
+    fn a_hand_opened_agent_in_a_single_task_lane_is_filed_under_the_task() {
+        let mut fleet = Fleet::new();
+        let task = fleet.task(TaskStatus::NeedsDecision, 5 * MINUTE);
+        fleet.note(task, NoteKind::Question, "Which PDF library?", serde_json::json!({}), 5 * MINUTE);
+        // No `task_id` on the row: the runner's rule says the lane's one task.
+        let pane = fleet.agent(None);
+        fleet.works_for(pane, task);
+        fleet.observe(pane, AgentActivity::Blocked, MINUTE);
+        let items = fleet.items();
+        assert_eq!(items.len(), 1, "{items:#?}");
+        assert_eq!(items[0].kind(), NeedsYouKind::Blocked);
+        assert_eq!(items[0].also, vec![NeedsYouKind::Decision as i32]);
+        assert_eq!(items[0].task.as_ref().map(|t| t.key.as_str()), Some("bil-1"));
+        assert_eq!(items[0].terminal.as_ref().map(|t| t.id.clone()), Some(id_bytes(pane)));
+    }
+
+    /// `gather` asks the runner's one rule (`task_link::task_of`), so a lane's
+    /// hand-opened agent is the task's and one in the main checkout is nobody's.
+    #[tokio::test]
+    async fn gather_files_a_lanes_hand_opened_agent_by_the_runners_rule() {
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let main = svc.store.ensure_main_workspace(repo).unwrap();
+        let rows = svc.store.list_worktrees_for_repository(repo).unwrap();
+        let checkout = rows.iter().find(|w| w.is_main_checkout).unwrap().id;
+        let lane = svc.store.create_worktree(repo, "lane", "/tmp/fc-t/ov-112-lane", false).unwrap().id;
+        let task = svc.store.create_task(main.id, "On the lane", Actor::User).unwrap();
+        let update = farcooler_store::models::TaskUpdate {
+            title: task.title.clone(),
+            intent: String::new(),
+            acceptance: Vec::new(),
+            constraints: Vec::new(),
+            labels: Vec::new(),
+            worktree_id: Some(lane),
+        };
+        let task = svc.store.update_task(task.id, task.resource_version, &update).unwrap();
+        let in_lane = svc.store.create_terminal_for_test(lane, main.id);
+        let in_checkout = svc.store.create_terminal_for_test(checkout, main.id);
+        let watcher = crate::watch::Watcher::new(svc.clone());
+        let inputs = gather(&svc, &watcher).await.unwrap();
+        assert_eq!(inputs.task_of.get(&in_lane), Some(&task.id));
+        assert!(!inputs.task_of.contains_key(&in_checkout));
+        assert!(inputs.tasks.iter().any(|t| t.id == task.id), "its task is among the inputs");
     }
 
     #[test]
