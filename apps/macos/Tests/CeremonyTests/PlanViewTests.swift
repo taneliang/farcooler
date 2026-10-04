@@ -237,7 +237,7 @@ struct PlanViewTests {
         #expect(!PlanStore(client: client, workspace: a, host: "other", defaults: defaults).shown)
     }
 
-    @Test("A plan line from the runner re-reads that board's plan, and no other's")
+    @Test("A plan line from the runner re-reads that board's plan, and no other's, through the client's own stream")
     func planEventRereads() async throws {
         let calls = Calls()
         let store = try await Self.store(plan: true, defaults: Self.defaults(), calls: calls)
@@ -246,15 +246,33 @@ struct PlanViewTests {
         #expect(reads() == 1)
         await store.plan.reloadIfMoved()
         #expect(reads() == 1, "nothing moved")
-        let heard = { (line: String) in
-            EventStream.dispatch(Data(line.utf8), decoder: JSONDecoder(), onPlan: { store.client.planNews[$0, default: 0] += 1 })
+
+        // The client's real `events` stream, from a stand-in CLI that says
+        // another board's plan moved, then this one's, then waits.
+        let client = store.client
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ov273-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cli = directory.appendingPathComponent("farcooler")
+        let lines = [
+            #"{"kind":"plan","workspace":"someone-else","actor":"manager"}"#,
+            #"{"kind":"plan","workspace":"\#(store.workspace.id)","actor":"manager"}"#,
+        ]
+        try "#!/bin/sh\nprintf '%s\\n' '\(lines.joined(separator: "' '"))'\nexec sleep 30\n"
+            .write(to: cli, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: cli.path)
+        client.binaryForTesting = cli.path
+        let before = store.plan.generation
+        client.startEvents()
+        defer { client.stopEvents() }
+        for _ in 0..<250 where client.planNews[store.workspace.id] == nil {
+            try await Task.sleep(for: .milliseconds(20))
         }
-        heard(#"{"kind":"plan","workspace":"someone-else","actor":"manager"}"#)
+        #expect(client.planNews["someone-else"] == 1, "heard: \(client.planNews)")
+        #expect(client.planNews[store.workspace.id] == 1, "heard: \(client.planNews)")
+        #expect(store.plan.generation == before + 1, "only this board's line moves its plan")
         await store.plan.reloadIfMoved()
-        #expect(reads() == 1, "another board's plan moved")
-        heard(#"{"kind":"plan","workspace":"\#(store.workspace.id)","actor":"manager"}"#)
-        await store.plan.reloadIfMoved()
-        #expect(reads() == 2)
+        #expect(reads() == 2, "this board's plan moved, once")
     }
 
     @Test("A task's page names its lane and theme only while the plan is shown")

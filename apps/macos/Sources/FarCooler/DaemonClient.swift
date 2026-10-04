@@ -419,7 +419,11 @@ final class DaemonClient: ObservableObject {
         target.isEmpty ? [] : ["--host", target]
     }
 
-    private var binary: String? { CLI.binary }
+    private var binary: String? { binaryForTesting ?? CLI.binary }
+
+    /// A stand-in for the CLI, for a test that drives the real event stream
+    /// (`startEvents`) with lines it chose.
+    var binaryForTesting: String?
 
     private var environment: [String: String] { CLI.environment }
 
