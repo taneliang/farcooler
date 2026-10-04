@@ -390,6 +390,8 @@ AGENTKIT_SOURCES = [
     # What's been read on a board (ov-104), which Done's rule keeps, and the
     # History page's grouping, search and area chips (ov-103).
     "BoardReads.swift",
+    # Sending marks to the runner and folding its answers in (ov-113).
+    "BoardReadsSync.swift",
     "BoardHistory.swift",
     "TaskQuestion.swift",
     # In this list AND in `WATCH_AGENTKIT_SOURCES` below: the phone and the
