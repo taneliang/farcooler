@@ -833,6 +833,15 @@ final class DaemonClient: ObservableObject {
             // assignment, and a full read lands after every fleet event, so an
             // unchanged read used to republish the whole window four times
             // (ov-229).
+            // A pane that is no longer there takes its banners with it, whoever
+            // closed it: this Mac, another device, an agent (ov-163). Before the
+            // assignment, which is when the old list is still to hand.
+            let before = Set(fleet.worktrees.flatMap { $0.terminals.map(\.id) })
+            let after = Set(read.worktrees.flatMap { $0.terminals.map(\.id) })
+            for id in PaneBanner.closed(before: before, after: after) {
+                Notifier.shared.forget(id)
+                VisitLog.shared.forget(id)
+            }
             if read != fleet { fleet = read }
             if !hasLoaded { hasLoaded = true }
             // Diff status for the whole sidebar, in one more call. Cheap by

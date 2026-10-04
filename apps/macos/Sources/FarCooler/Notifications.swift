@@ -394,14 +394,16 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         content.body = words.body
         if activity == .blocked { content.interruptionLevel = .timeSensitive }
         content.sound = .default
-        // Keyed by terminal so a later state replaces the earlier notification
-        // for the same one instead of stacking up.
+        // One banner per pane: the identifier below is the pane's, so a later
+        // state replaces the earlier notification for it, which an identifier
+        // that carried the activity never did (`PaneBanner`). The thread is the
+        // same id, for the foreground check and a click.
         content.threadIdentifier = terminal.id
         content.userInfo = Destination(
             runner: .init(host: host, id: runnerId?.lowercased()), place: .terminal(terminal.id)
         ).userInfo
         return UNNotificationRequest(
-            identifier: "\(terminal.id)-\(activity.rawValue)", content: content, trigger: nil)
+            identifier: PaneBanner.identifier(forPane: terminal.id), content: content, trigger: nil)
     }
 
     /// Announce a command that ran and came back badly, if that hasn't
@@ -453,7 +455,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         content.userInfo = Destination(
             runner: .init(host: host, id: runnerId?.lowercased()), place: .terminal(terminal.id)
         ).userInfo
-        return UNNotificationRequest(identifier: "\(terminal.id)-failedRun", content: content, trigger: nil)
+        return UNNotificationRequest(
+            identifier: PaneBanner.identifier(forPane: terminal.id), content: content, trigger: nil)
     }
 
     /// Forget a terminal that no longer exists, so a reused id cannot inherit
@@ -462,9 +465,14 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         announced.removeValue(forKey: terminalID)
         lastReport.removeValue(forKey: terminalID)
         announcedFailure.remove(terminalID)
-        guard Self.canNotify else { return }
-        UNUserNotificationCenter.current()
-            .removeDeliveredNotifications(withIdentifiers: [terminalID])
+        removeDelivered(PaneBanner.removing(pane: terminalID))
+    }
+
+    /// Where `forget` takes banners down. The notification center unless a test
+    /// stands in for it; a build with no bundle has no center to ask.
+    var removeDelivered: ([String]) -> Void = { identifiers in
+        guard Notifier.canNotify else { return }
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: identifiers)
     }
 }
 
