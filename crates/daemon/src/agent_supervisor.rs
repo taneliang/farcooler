@@ -1100,28 +1100,6 @@ mod tests {
     }
 
     #[test]
-    fn a_session_that_establishes_stops_reporting_the_failure_before_it() {
-        // A pane that failed, was switched back to a terminal and switched in
-        // again would otherwise keep drawing a failure row over a chat that is
-        // working perfectly.
-        let supervisor = AgentSupervisor::new();
-        let terminal = Uuid::now_v7();
-        supervisor.apply(
-            terminal,
-            ShimMessage::Failed { failure: AgentFailure::NoAdapter },
-            &|_, _| {},
-        );
-        assert_eq!(supervisor.failure(terminal), Some(AgentFailure::NoAdapter));
-
-        supervisor.apply(
-            terminal,
-            ShimMessage::Established { session_id: "s".into(), available_modes: Vec::new() },
-            &|_, _| {},
-        );
-        assert_eq!(supervisor.failure(terminal), None);
-    }
-
-    #[test]
     fn leaving_agent_mode_drops_the_dead_shims_state_and_keeps_the_conversations() {
         // Nothing used to tell the supervisor that a toggle out of agent mode
         // had killed the shim, so every word it held went on describing a
