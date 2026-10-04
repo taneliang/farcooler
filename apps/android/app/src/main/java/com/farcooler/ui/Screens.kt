@@ -27,7 +27,6 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -384,7 +383,7 @@ fun SettingsScreen(
                 // where a grant can be changed later. It has to be here, or that
                 // sentence sends someone looking for a screen that does not
                 // exist.
-                HorizontalDivider()
+                Separator()
                 SectionTitle("Devices")
                 Button(onClick = { model.navigate(Route.AddDevice) }) { Text("Add a device") }
                 Text(
@@ -409,7 +408,7 @@ fun SettingsScreen(
                 pushError?.let { Warning(it) }
             }
 
-            HorizontalDivider()
+            Separator()
             // The task classes (ov-94), each under its own key, all under the
             // master switch below, and sent to the relay when they change.
             SectionTitle("Tasks")
@@ -429,7 +428,7 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            HorizontalDivider()
+            Separator()
             SectionTitle("Agents without a task")
             SettingRow("When an agent needs you", onAttention) {
                 model.settings.setNotifyOnAttention(it)
@@ -456,7 +455,7 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            HorizontalDivider()
+            Separator()
             SectionTitle("Runners")
             SettingRow("Connect every runner at once", allRunners) {
                 model.settings.setAllRunnersAtOnce(it)
@@ -504,7 +503,7 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            HorizontalDivider()
+            Separator()
             SectionTitle("Theme")
             Text(
                 "Sets the terminal’s colors and the app’s.",
@@ -533,7 +532,7 @@ fun SettingsScreen(
                 }
             }
 
-            HorizontalDivider()
+            Separator()
             SectionTitle("Terminal font")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 for (choice in TerminalFontChoice.entries) {
@@ -573,7 +572,7 @@ fun SettingsScreen(
                     .padding(12.dp),
             )
 
-            HorizontalDivider()
+            Separator()
             SectionTitle("Version")
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -612,7 +611,7 @@ fun SettingsScreen(
             // ships with stops answering, which is the only day anybody should
             // open it. The Apple apps put it in the same place, for the same
             // reason (`RendezvousSection.swift`).
-            HorizontalDivider()
+            Separator()
             RendezvousSection(model.settings)
 
             Spacer(Modifier.height(24.dp))
@@ -902,7 +901,7 @@ fun DevicesScreen(model: AppModel, onBack: () -> Unit) {
                 )
             }
 
-            HorizontalDivider()
+            Separator()
             SectionTitle("Runners")
             for (runner in current.runners) {
                 RegistrationRow(runner) {

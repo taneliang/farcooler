@@ -17,7 +17,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -114,7 +113,7 @@ fun ThemeEditorScreen(theme: Theme, onCancel: () -> Unit, onSave: (Theme) -> Uni
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
 
-                HorizontalDivider()
+                Separator()
                 SectionTitle("Ground")
                 ColorRow("Background", draft.background, expanded == GROUND_BACKGROUND, {
                     expanded = if (expanded == GROUND_BACKGROUND) null else GROUND_BACKGROUND
@@ -126,7 +125,7 @@ fun ThemeEditorScreen(theme: Theme, onCancel: () -> Unit, onSave: (Theme) -> Uni
                     expanded = if (expanded == GROUND_CURSOR) null else GROUND_CURSOR
                 }) { draft = draft.copy(cursor = it) }
 
-                HorizontalDivider()
+                Separator()
                 SectionTitle("Normal")
                 for (index in 0..7) {
                     ansiRow(index, ANSI_NAMES[index], draft, expanded, { expanded = it }) {
@@ -134,7 +133,7 @@ fun ThemeEditorScreen(theme: Theme, onCancel: () -> Unit, onSave: (Theme) -> Uni
                     }
                 }
 
-                HorizontalDivider()
+                Separator()
                 SectionTitle("Bright")
                 for (index in 8..15) {
                     ansiRow(
@@ -401,7 +400,7 @@ fun AdapterEditorScreen(
                 )
             }
 
-            HorizontalDivider()
+            Separator()
             SectionTitle("Launch")
             OutlinedTextField(
                 value = program,
@@ -419,7 +418,7 @@ fun AdapterEditorScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            HorizontalDivider()
+            Separator()
             SectionTitle("Detection")
             Multiline("Process names", commandsText) { commandsText = it }
             Multiline("Identity", identityText) { identityText = it }
@@ -433,7 +432,7 @@ fun AdapterEditorScreen(
                 color = MaterialTheme.colorScheme.error,
             )
 
-            HorizontalDivider()
+            Separator()
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),

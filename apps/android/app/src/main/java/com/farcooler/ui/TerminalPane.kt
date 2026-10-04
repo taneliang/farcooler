@@ -1,5 +1,6 @@
 package com.farcooler.ui
 
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.indication
@@ -16,7 +17,6 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -683,12 +683,12 @@ private fun TaskChip(task: TaskRef, onOpen: (() -> Unit)?) {
         contentAlignment = Alignment.Center,
     ) {
         Surface(
-            shape = RoundedCornerShape(50),
+            shape = CircleShape,
             color = Color.White.copy(alpha = 0.12f),
             contentColor = Color.White,
             modifier = Modifier
                 .widthIn(max = 220.dp)
-                .clip(RoundedCornerShape(50))
+                .clip(CircleShape)
                 .indication(presses, ripple()),
         ) {
             Row(Modifier.padding(horizontal = 8.dp, vertical = 2.dp)) {

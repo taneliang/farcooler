@@ -30,7 +30,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -484,7 +483,7 @@ internal fun CommitHistorySheet(
                         CurrentMark()
                     }
                 }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Separator()
             }
 
             if (state.changeSet.commits.isEmpty()) {
@@ -673,7 +672,7 @@ internal fun CommentComposerSheet(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Separator()
 
         // `weight(1f, fill = false)` so this takes what the field and the buttons
         // above it left rather than asking for the whole sheet: a quote is the
@@ -813,7 +812,7 @@ internal fun CommentOutboxSheet(
         }
 
         if (state.pending.isNotEmpty()) {
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Separator()
             SendControls(
                 state = state,
                 agents = agents,

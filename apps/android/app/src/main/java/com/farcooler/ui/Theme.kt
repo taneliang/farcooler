@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -116,6 +117,17 @@ object Radius {
 
     /** A free-floating surface: the composer, an approval over the transcript, a bar. */
     val large = 16.dp
+}
+
+/**
+ * The one rule a list or a sheet draws between two rows: one density-independent
+ * pixel of the scheme's `outlineVariant`, which is what Material's own divider
+ * already was, so naming it moves no pixel (ov-276). Where a rule is allowed is
+ * decided here and not in a screen; prefer space between groups.
+ */
+@Composable
+fun Separator(modifier: Modifier = Modifier) {
+    HorizontalDivider(modifier, color = MaterialTheme.colorScheme.outlineVariant)
 }
 
 /**

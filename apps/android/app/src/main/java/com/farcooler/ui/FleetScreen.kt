@@ -38,7 +38,6 @@ import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -151,7 +150,7 @@ fun FleetDrawer(
                 )
                 folderItems(folders, namesRunners = connections.size > 1, onOpenFolder = onOpenFolder)
             }
-            HorizontalDivider()
+            Separator()
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -637,7 +636,7 @@ internal fun RunnerStatusRow(
 
             Connection.Phase.Connected -> Unit
         }
-        HorizontalDivider(Modifier.padding(top = 8.dp))
+        Separator(Modifier.padding(top = 8.dp))
     }
 }
 
@@ -937,7 +936,7 @@ private fun WorktreeHeader(
                 // never have succeeded. See `07e75e8`, which is that story on
                 // iOS, and `RemoveWorktreeCeremony`.
                 if (!entry.worktree.isMainCheckout) {
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Separator()
                     DropdownMenuItem(
                         text = {
                             Text(

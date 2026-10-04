@@ -21,7 +21,6 @@ import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -282,7 +281,7 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
                 }) { Text("Save") }
             }
 
-            HorizontalDivider()
+            Separator()
             SectionTitle("Themes on this runner")
             Text(
                 "Only themes this runner defines are listed. Shipped themes have nothing to " +
@@ -327,7 +326,7 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
                 editingTheme = Themes.current.copy(name = name)
             }) { Text("Duplicate the current theme") }
 
-            HorizontalDivider()
+            Separator()
             SectionTitle("Agents")
             Text(
                 "An adapter lets Far Cooler show an agent as a chat instead of its terminal.",
@@ -396,7 +395,7 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
             }) { Text("Add an agent") }
 
             failure?.let {
-                HorizontalDivider()
+                Separator()
                 Text(
                     it,
                     style = MaterialTheme.typography.bodySmall,
@@ -458,7 +457,7 @@ private fun RepositoriesSection(repositories: List<Repository>) {
                 }
             }
         }
-        HorizontalDivider(Modifier.padding(top = 6.dp))
+        Separator(Modifier.padding(top = 6.dp))
     }
 }
 
@@ -541,7 +540,7 @@ private fun WatchedFoldersSection(
             )
         }
         OutlinedButton(onClick = onAdd) { Text("Add a repository") }
-        HorizontalDivider(Modifier.padding(top = 6.dp))
+        Separator(Modifier.padding(top = 6.dp))
     }
 }
 
@@ -694,7 +693,7 @@ private fun HealthSection(health: HostHealth) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        HorizontalDivider(Modifier.padding(top = 6.dp))
+        Separator(Modifier.padding(top = 6.dp))
     }
 }
 

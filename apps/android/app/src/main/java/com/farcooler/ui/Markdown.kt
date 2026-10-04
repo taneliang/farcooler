@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -80,7 +79,7 @@ fun MarkdownText(
                     Body(block.text, secondary = true)
                 }
 
-                Markdown.Block.Rule -> HorizontalDivider()
+                Markdown.Block.Rule -> Separator()
 
                 is Markdown.Block.Table -> MarkdownTable(block)
             }
@@ -225,7 +224,7 @@ private fun MarkdownTable(table: Markdown.Block.Table) {
                     )
                 }
             }
-            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+            Separator(Modifier.padding(vertical = 4.dp))
             for (row in table.rows) {
                 Row(Modifier.padding(vertical = 1.dp)) {
                     for ((column, width) in widths.withIndex()) {

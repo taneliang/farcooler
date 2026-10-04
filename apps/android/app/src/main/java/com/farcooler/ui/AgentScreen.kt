@@ -1,5 +1,6 @@
 package com.farcooler.ui
 
+import androidx.compose.foundation.shape.CircleShape
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -42,7 +43,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -1199,7 +1199,7 @@ private fun AgentComposer(
                                     },
                                 )
                             }
-                            HorizontalDivider()
+                            Separator()
                         }
                         // An older daemon that only reports modes still gets a
                         // picker.
@@ -1359,7 +1359,7 @@ private fun SelectorChip(option: ConfigOption, onSetConfig: (String, String) -> 
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier
                 .minimumInteractiveComponentSize()
-                .clip(RoundedCornerShape(50))
+                .clip(CircleShape)
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                 .clickable { open = true }
                 .padding(horizontal = 9.dp, vertical = 3.dp),
@@ -1416,7 +1416,7 @@ private fun SuggestionList(items: List<AgentChoice>, onChoose: (String) -> Unit)
                         )
                     }
                 }
-                HorizontalDivider()
+                Separator()
             }
         }
     }

@@ -28,7 +28,6 @@ import androidx.compose.material.icons.outlined.PanTool
 import androidx.compose.material.icons.outlined.Circle
 import androidx.compose.material.icons.outlined.DonutLarge
 import androidx.compose.material3.Button
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -244,7 +243,7 @@ private fun ToolRowView(
         }
 
         if (showingDetail) {
-            HorizontalDivider()
+            Separator()
             Column(Modifier.padding(9.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 tool.content?.takeIf { it.isNotEmpty() }?.let { DetailBox(it) }
                 tool.diff?.let { DiffView(it) }
@@ -256,7 +255,7 @@ private fun ToolRowView(
         // waiting, and repeating it in words inside the row it is drawn on is
         // the same fact twice.
         if (pending != null && onAnswer != null) {
-            HorizontalDivider()
+            Separator()
             ApprovalControls(pending, onAnswer, Modifier.padding(9.dp))
         }
     }
@@ -342,7 +341,7 @@ private fun SubagentBlockView(
         }
 
         if (showing && block.children.isNotEmpty()) {
-            HorizontalDivider()
+            Separator()
             Column(
                 Modifier.padding(9.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),

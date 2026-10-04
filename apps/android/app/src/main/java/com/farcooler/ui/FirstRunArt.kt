@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.PhoneAndroid
@@ -50,8 +49,8 @@ fun TaskSkeleton(modifier: Modifier = Modifier) {
                 Box(Modifier.padding(top = 2.dp).size(10.dp).border(1.5.dp, fill, CircleShape))
                 Spacer(Modifier.width(16.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Box(Modifier.fillMaxWidth(w).height(8.dp).background(fill, RoundedCornerShape(4.dp)))
-                    Box(Modifier.fillMaxWidth(w * 0.45f).height(6.dp).background(fill, RoundedCornerShape(3.dp)))
+                    Box(Modifier.fillMaxWidth(w).height(8.dp).background(fill, CircleShape))
+                    Box(Modifier.fillMaxWidth(w * 0.45f).height(6.dp).background(fill, CircleShape))
                 }
             }
         }

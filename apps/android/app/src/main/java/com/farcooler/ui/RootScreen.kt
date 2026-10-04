@@ -444,7 +444,7 @@ private fun DismissibleOverlay(
                 val direction = if (edge == BackEventCompat.EDGE_LEFT) 1f else -1f
                 translationX = direction * fraction * size.width * 0.06f
                 transformOrigin = TransformOrigin(if (direction > 0f) 1f else 0f, 0.5f)
-                shape = RoundedCornerShape((28f * fraction).dp)
+                shape = RoundedCornerShape((28f * fraction).dp) // style-exempt: predictive back morphs the screen to the platform's own 28 dp corner
                 clip = true
             }
     ) {

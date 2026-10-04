@@ -20,7 +20,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -218,7 +217,7 @@ fun StackSheet(
                     )
                 }
                 for ((index, link) in current.links.withIndex()) {
-                    if (index > 0) HorizontalDivider()
+                    if (index > 0) Separator()
                     StackLinkRows(link)
                 }
             }

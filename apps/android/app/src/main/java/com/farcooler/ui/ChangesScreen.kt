@@ -46,7 +46,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -536,7 +535,7 @@ private fun PinnedFileName(
                 FileHeading(file, expanded == file.path, onClick)
             }
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Separator()
     }
 }
 
@@ -1750,7 +1749,7 @@ private fun ReviewBar(
     val waiting = queue.pending.size
 
     Column(Modifier.fillMaxWidth()) {
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Separator()
         if (waiting > 0) {
             Row(
                 Modifier
@@ -1786,7 +1785,7 @@ private fun ReviewBar(
                     modifier = Modifier.padding(start = 4.dp).size(16.dp),
                 )
             }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Separator()
         }
         Row(
             Modifier.fillMaxWidth().padding(start = 6.dp, end = 6.dp),
@@ -1911,7 +1910,7 @@ private fun ReviewMenu(
                 modifier = Modifier.testTag("pane-files"),
             )
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Separator()
         DropdownMenuItem(
             text = { Text("Mark as reviewed") },
             leadingIcon = { Icon(Icons.Outlined.CheckCircleOutline, contentDescription = null) },
