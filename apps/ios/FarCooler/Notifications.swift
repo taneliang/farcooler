@@ -162,13 +162,15 @@ final class Notifier {
             return
         }
         content.sound = .default
-        // Keyed by terminal so a later state replaces the earlier notification
-        // for the same one rather than stacking up.
+        // One banner per pane: the identifier is the pane's, so a later state
+        // replaces the earlier notification for it, which an identifier that
+        // carried the activity never did (`PaneBanner`). The thread is the same
+        // id, for the foreground check and a tap.
         content.threadIdentifier = terminal.id
 
         UNUserNotificationCenter.current().add(
             UNNotificationRequest(
-                identifier: "\(terminal.id)-\(activity.rawValue)",
+                identifier: PaneBanner.identifier(forPane: terminal.id),
                 content: content,
                 trigger: nil))
     }
@@ -178,7 +180,7 @@ final class Notifier {
     func forget(_ terminalID: String) {
         announced.removeValue(forKey: terminalID)
         UNUserNotificationCenter.current()
-            .removeDeliveredNotifications(withIdentifiers: [terminalID])
+            .removeDeliveredNotifications(withIdentifiers: PaneBanner.removing(pane: terminalID))
     }
 }
 

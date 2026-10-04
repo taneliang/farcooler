@@ -62,6 +62,9 @@ final class Connection: ObservableObject {
 
     @Published private(set) var phase: Phase = .connecting
     @Published private(set) var fleet: Fleet = .empty
+    /// The panes the last read showed, so a pane that has gone has its banners
+    /// taken down (`PaneBanner.closed`).
+    private var bannerPanes: Set<String> = []
 
     /// Whether `fleet` is an answer or merely the absence of one.
     ///
@@ -1042,6 +1045,16 @@ final class Connection: ObservableObject {
             for report in fleet.agentReports(runner: daemon, registered: PushRegistration.shared.registered) {
                 Notifier.shared.report(report)
             }
+
+            // And take down the banners of a pane that is gone: closed here,
+            // closed on a Mac, removed by an agent. Nothing else would, and a
+            // banner for a pane that no longer exists opens onto nothing
+            // (ov-153).
+            let panes = Set(fleet.worktrees.flatMap { $0.terminals.map(\.id) })
+            for id in PaneBanner.closed(before: bannerPanes, after: panes) {
+                Notifier.shared.forget(id)
+            }
+            bannerPanes = panes
 
             // And write down what each blocked agent is asking, for the lock
             // screen card. See `readAsks`.

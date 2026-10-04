@@ -286,6 +286,9 @@ AGENTKIT_SOURCES = [
     # — seven surfaces draw one, which is why the table is not in any of them.
     # See `RunnerRefusalTests`.
     "RunnerRefusal.swift",
+    # How a pane's banners are filed, so the next one replaces the last and a
+    # closed pane's goes (ov-153). See `PaneBannerTests`.
+    "PaneBanner.swift",
     # Whether a runner can edit, remove or steer a queued message, and the
     # sentence a refusal of one gets. See `QueueControlsTests`.
     "QueueControls.swift",
