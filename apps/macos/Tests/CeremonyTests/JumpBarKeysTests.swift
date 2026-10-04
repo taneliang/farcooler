@@ -126,6 +126,9 @@ struct JumpBarKeysTests {
     func keyMapping() {
         #expect(JumpBarKeys.key(.leftArrow, characters: "", modifiers: [.command, .control]) == nil)
         #expect(JumpBarKeys.key("l", characters: "l", modifiers: .command) == nil)
+        // ⌃ alone, on a key that would otherwise be the bar's: the character
+        // rule below does not catch an arrow.
+        #expect(JumpBarKeys.key(.leftArrow, characters: "", modifiers: .control) == nil)
         #expect(JumpBarKeys.key("a", characters: "\u{1}", modifiers: .control) == nil)
         #expect(JumpBarKeys.key(.leftArrow, characters: "", modifiers: []) == .left)
         #expect(JumpBarKeys.key(.downArrow, characters: "", modifiers: .option) == .down)
