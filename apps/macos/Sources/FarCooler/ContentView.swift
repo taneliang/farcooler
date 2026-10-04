@@ -1443,14 +1443,16 @@ struct ContentView: View {
     }
 
     /// Back and Forward in the title bar (slice 3), gated as the menu items
-    /// are. Forward has nowhere to go until ov-192's history lands; then
-    /// `canGoForward` is `jumpBar.history.canGoForward` and `forward` its
-    /// step, and Back's `canGoBack` adds `jumpBar.history.canGoBack`.
+    /// are (`focus.goesBack`, `focus.goesForward`): each steps through the
+    /// jump bar's history (ov-192) as ⌃⌘← and ⌃⌘→ do, and Back with no
+    /// history goes up a level.
     private var backForward: BackForwardControl {
         let scene = selection.flatMap(workspaceScene)
         return BackForwardControl(
-            canGoBack: Self.goesBack(focus: focusColumn, from: selection, trail: trail, board: scene?.board),
-            canGoForward: false, back: { goBack() }, forward: {})
+            canGoBack: jumpBar.history.canGoBack
+                || Self.goesBack(focus: focusColumn, from: selection, trail: trail, board: scene?.board),
+            canGoForward: jumpBar.history.canGoForward,
+            back: { step(back: true) }, forward: { step(back: false) })
     }
 
     /// What a switcher item does, by the routes the rest of the window uses.
