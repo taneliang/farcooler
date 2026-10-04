@@ -186,12 +186,4 @@ enum FilesLogic {
     static func widest(_ lines: [String]) -> Int {
         lines.reduce(0) { max($0, $1.count) }
     }
-
-    /// A `/`-query from the ⌘P field: the path fragment after the slash, or
-    /// nil when the query isn't one.
-    static func fileQuery(_ typed: String) -> String? {
-        let trimmed = typed.trimmingCharacters(in: .whitespaces)
-        guard trimmed.hasPrefix("/") else { return nil }
-        return String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces)
-    }
 }

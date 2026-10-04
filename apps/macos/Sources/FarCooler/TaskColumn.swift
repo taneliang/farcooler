@@ -3,10 +3,10 @@ import SwiftUI
 
 // A task, opened beside the navigator (spec §4.4, ov-98): a compact header
 // that stays put (key, title, the agent's state, its status), and
-// under it three full-height tabs, Overview (the task itself, whole), Agent
-// (its terminal) and Changes (its diff). A task need not have a worktree or
-// a terminal at all; then Agent and Changes say so and offer Ask the
-// Orchestrator.
+// under it four full-height tabs, Overview (the task itself, whole), Agent
+// (its terminal), Changes (its diff) and Files (its worktree's files,
+// ov-189). A task need not have a worktree or a terminal at all; then
+// Agent, Changes and Files say so and offer Ask the Orchestrator.
 //
 // The rules it draws by are values here, `TaskColumnModel` and
 // `TaskTabMemory`, so `TaskColumnTests` and `TaskTabsTests` pin them.
@@ -110,9 +110,10 @@ enum TaskColumnModel {
     }
 }
 
-/// A task's tabs (ov-98): the task itself, its agent's terminal, its diff.
+/// A task's tabs (ov-98): the task itself, its agent's terminal, its diff,
+/// and its worktree's files (ov-189).
 enum TaskTab: String, CaseIterable, Identifiable {
-    case overview, agent, changes
+    case overview, agent, changes, files
 
     var id: Self { self }
 
@@ -121,6 +122,7 @@ enum TaskTab: String, CaseIterable, Identifiable {
         case .overview: "Overview"
         case .agent: "Agent"
         case .changes: "Changes"
+        case .files: "Files"
         }
     }
 }
@@ -306,7 +308,7 @@ struct TaskTabBar: View {
             .labelsHidden()
             .controlSize(.small)
             .fixedSize()
-            .help("Overview, Agent and Changes (⌃⌘[ and ⌃⌘])")
+            .help("Overview, Agent, Changes, and Files (⌃⌘[ and ⌃⌘])")
             .accessibilityIdentifier("task-tabs")
             Spacer(minLength: ColumnGrid.rhythm)
             if let worktree {
@@ -374,20 +376,23 @@ struct TaskStartPanel: View {
     }
 }
 
-/// The three tabs, full height, one in front.
+/// The four tabs, full height, one in front.
 ///
 /// Overview and Agent are made once and kept: the one not shown is faded
 /// out, takes no click, no keyboard (`outOfSight`) and nothing VoiceOver
 /// reaches, so the terminal is never rebuilt and never re-wraps as the tabs
-/// switch (`TaskTabsTests`). Changes is made the first time it's shown and
-/// kept from then on, so a task never looked at for its diff never reads one.
-struct TaskTabs<Overview: View, Agent: View, Changes: View>: View {
+/// switch (`TaskTabsTests`). Changes and Files are each made the first time
+/// they're shown and kept from then on, so a task never looked at for its
+/// diff never reads one, and one never browsed reads no directory.
+struct TaskTabs<Overview: View, Agent: View, Changes: View, Files: View>: View {
     let tab: TaskTab
     @ViewBuilder let overview: () -> Overview
     @ViewBuilder let agent: () -> Agent
     @ViewBuilder let changes: () -> Changes
+    @ViewBuilder let files: () -> Files
 
     @State private var changesShown = false
+    @State private var filesShown = false
     /// The pane's own: a task leaving the main area is out of sight whole.
     @Environment(\.outOfSight) private var paneOutOfSight
 
@@ -398,10 +403,14 @@ struct TaskTabs<Overview: View, Agent: View, Changes: View>: View {
             if changesShown || tab == .changes {
                 changes().modifier(TabLayer(shown: tab == .changes, paneOutOfSight: paneOutOfSight))
             }
+            if filesShown || tab == .files {
+                files().modifier(TabLayer(shown: tab == .files, paneOutOfSight: paneOutOfSight))
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onChange(of: tab, initial: true) { _, tab in
             if tab == .changes { changesShown = true }
+            if tab == .files { filesShown = true }
         }
     }
 

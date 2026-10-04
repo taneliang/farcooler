@@ -446,11 +446,9 @@ private struct ToolRowView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             if let location = tool.locations.first {
-                Text(location)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                // A link into the worktree's Files when the path is in it
+                // (ov-189).
+                ToolLocationLabel(location: location)
             }
             Spacer(minLength: 4)
         }

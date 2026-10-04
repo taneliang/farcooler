@@ -59,6 +59,8 @@ enum AppCommand: String {
     /// A task's next or previous tab, Overview, Agent and Changes (ov-98).
     case nextTaskTab
     case previousTaskTab
+    /// Go to a line of the file open in Files (ov-189).
+    case goToLine
 
     static let notification = Notification.Name("farcooler.command")
 
@@ -495,6 +497,10 @@ struct FarCoolerCommands: Commands {
                 Button(MainWindowFocus.findTitle(mainWindow)) { AppCommand.search.post() }
                     .keyboardShortcut("f", modifiers: .command)
                     .disabled(!MainWindowFocus.isKey(mainWindow))
+                // ⌘L, Xcode's, for the file open in Files (ov-189).
+                Button("Go to Line…") { AppCommand.goToLine.post() }
+                    .keyboardShortcut("l", modifiers: .command)
+                    .disabled(mainWindow?.findsInFile != true)
             }
 
             CommandGroup(replacing: .help) {

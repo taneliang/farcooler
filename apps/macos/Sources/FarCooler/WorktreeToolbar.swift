@@ -1,13 +1,13 @@
 import SwiftUI
 
-/// The toolbar's actions on the worktree on screen (ov-214): Open in Editor
-/// and Show Changes, in one group, so the toolbar draws them in one capsule
-/// rather than two. They act on the same thing, and the HIG asks for at
-/// most three groups ("Minimize the number of groups").
+/// The toolbar's actions on the worktree on screen (ov-214): Open in Editor,
+/// Show Changes and Show Files (ov-189), in one group, so the toolbar draws
+/// them in one capsule rather than several. They act on the same thing, and
+/// the HIG asks for at most three groups ("Minimize the number of groups").
 ///
 /// Each is still drawn only where it can act: the editor with a worktree on
 /// screen, Changes where `WorkspaceScreen.changesTarget` names one and its
-/// runner can read changes.
+/// runner can read changes, Files there too where its runner can read files.
 struct WorktreeToolbar: ToolbarContent {
     /// Show Changes, where offered: the worktree it splits, and whether its
     /// Changes pane is open.
@@ -16,10 +16,19 @@ struct WorktreeToolbar: ToolbarContent {
         var open: Bool
     }
 
+    /// Show Files (ov-189), where offered: the worktree whose files the
+    /// inspector shows, and whether it's showing them.
+    struct Files {
+        var worktree: Worktree
+        var open: Bool
+    }
+
     let editor: Worktree?
     let onEditorError: (String) -> Void
     let changes: Changes?
     let onChanges: (Worktree) -> Void
+    var files: Files? = nil
+    var onFiles: (Worktree) -> Void = { _ in }
 
     var body: some ToolbarContent {
         // Automatic, not primary: with the title gone from the toolbar, only
@@ -41,6 +50,16 @@ struct WorktreeToolbar: ToolbarContent {
                 // splits a pane, closing kills one.
                 .symbolVariant(changes.open ? .fill : .none)
                 .help(changes.open ? "Close the changes pane" : "Show what this worktree changed, in a pane")
+            }
+            // Its files, read-only, in the inspector (ov-189).
+            if let files {
+                Button {
+                    onFiles(files.worktree)
+                } label: {
+                    Label("Files", systemImage: "doc.text")
+                }
+                .symbolVariant(files.open ? .fill : .none)
+                .help(files.open ? "Hide this worktree’s files" : "Show this worktree’s files")
             }
         }
     }

@@ -32,20 +32,23 @@ struct TaskTabsTests {
     @Test("⌃⌘] and ⌃⌘[ walk the tabs, wrapping, from the one shown")
     func theShortcutsWalkTheTabs() {
         var memory = TaskTabMemory()
-        #expect(TaskTab.allCases == [.overview, .agent, .changes])
+        #expect(TaskTab.allCases == [.overview, .agent, .changes, .files])
         memory.step("t-1", by: 1, agentWorking: false)
         #expect(memory.tab(for: "t-1", agentWorking: false) == .agent)
         memory.step("t-1", by: 1, agentWorking: false)
         #expect(memory.tab(for: "t-1", agentWorking: false) == .changes)
         memory.step("t-1", by: 1, agentWorking: false)
+        #expect(memory.tab(for: "t-1", agentWorking: false) == .files)
+        memory.step("t-1", by: 1, agentWorking: false)
         #expect(memory.tab(for: "t-1", agentWorking: false) == .overview, "doesn't wrap forward")
         memory.step("t-1", by: -1, agentWorking: false)
-        #expect(memory.tab(for: "t-1", agentWorking: false) == .changes, "doesn't wrap back")
+        #expect(memory.tab(for: "t-1", agentWorking: false) == .files, "doesn't wrap back")
         // From the default: a task an agent is working opens on Agent, so
         // ⌃⌘[ goes to Overview.
         memory.step("t-2", by: -1, agentWorking: true)
         #expect(memory.tab(for: "t-2", agentWorking: true) == .overview)
         #expect(TaskTab.overview.title == "Overview" && TaskTab.agent.title == "Agent" && TaskTab.changes.title == "Changes")
+        #expect(TaskTab.files.title == "Files")
     }
 
     /// The task's terminal counts as on screen, for seen marks, the
@@ -110,6 +113,8 @@ struct TaskTabsTests {
                     Terminal(probe: probe)
                 } changes: {
                     Text("Changes")
+                } files: {
+                    Text("Files")
                 }
                 .frame(width: 400, height: 300)
             }
@@ -131,7 +136,7 @@ struct TaskTabsTests {
         await settle()
         let first = probe.made.first
         #expect(probe.outOfSight.last == false)
-        for tab in [TaskTab.changes, .overview, .agent, .overview, .changes, .agent] {
+        for tab in [TaskTab.changes, .overview, .agent, .files, .overview, .changes, .agent] {
             shown.tab = tab
             await settle()
             #expect(probe.outOfSight.last == (tab != .agent), "\(tab): out of sight \(String(describing: probe.outOfSight.last))")
@@ -175,6 +180,8 @@ struct TaskTabsTests {
                 Probe(seen: seen)
             } changes: {
                 Text("Changes")
+            } files: {
+                Text("Files")
             }
             .environment(\.outOfSight, leaving)
             .frame(width: 300, height: 200)

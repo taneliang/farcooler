@@ -179,6 +179,15 @@ struct ContentView: View {
     /// The task whose changes the keyboard is in: the Diff menu's
     /// shortcuts are for the diff you clicked into.
     @State var changesFocus: String?
+    /// Each worktree's Files (ov-189), kept like `changesStores`, by runner
+    /// connection and worktree.
+    @State var filesModels: [String: FilesModel] = [:]
+    /// The worktree whose Files the inspector shows, beside a worktree opened
+    /// whole or a workspace's main checkout; nil while it's closed.
+    @State var filesInspector: Worktree?
+    /// The worktree whose Files was clicked into last: what ⌘F and ⇧⌘L act on
+    /// while that Files is on screen.
+    @State var filesFocus: String?
     /// The key monitor that turns Esc into Back. See `EscapeBack`.
     @State private var escapeMonitor: Any?
     /// The mouse's side buttons and the swipe between pages, as Back and
@@ -252,7 +261,8 @@ struct ContentView: View {
         .toolbar {
             WorktreeToolbar(
                 editor: detailWorktree, onEditorError: { editorError = $0 },
-                changes: changesToolbarState, onChanges: { ws in toggleChangesPane(in: ws) })
+                changes: changesToolbarState, onChanges: { ws in toggleChangesPane(in: ws) },
+                files: filesToolbarState, onFiles: { ws in toggleFilesInspector(for: ws) })
         }
         .titleBarStatus(statusSource, room: room, actions: statusActions, width: $windowWidth)
         // The title would repeat the switcher or the breadcrumb
@@ -1060,6 +1070,97 @@ struct ContentView: View {
         return made
     }
 
+    /// `ws`'s Files, made the first time it's asked for and kept, as
+    /// `changesStore(for:client:)` keeps a diff (ov-189).
+    private func filesModel(for ws: Worktree, client: DaemonClient) -> FilesModel {
+        let key = Self.filesKey(ws, client)
+        if let existing = filesModels[key] { return existing }
+        let made = FilesModel(worktree: ws, client: client)
+        // Outside the view update, for `changesStore`'s reason.
+        DispatchQueue.main.async { if filesModels[key] == nil { filesModels[key] = made } }
+        return made
+    }
+
+    /// A worktree's Files by the connection it reads through, so a runner
+    /// reconnected reads through its new one.
+    private static func filesKey(_ ws: Worktree, _ client: DaemonClient) -> String {
+        "\(ObjectIdentifier(client).hashValue)/\(ws.id)"
+    }
+
+    /// Open or close the Files inspector for `ws`: the toolbar's button.
+    private func toggleFilesInspector(for ws: Worktree) {
+        if filesInspector?.id == ws.id {
+            filesInspector = nil
+        } else {
+            filesInspector = ws
+            filesFocus = ws.id
+        }
+    }
+
+    /// What the Files inspector draws: the worktree's Files, or why not.
+    @ViewBuilder
+    private var filesInspectorContent: some View {
+        if let ws = filesInspector, let client = store.client(for: ws) {
+            FilesPane(
+                model: filesModel(for: ws, client: client), onFocus: { filesFocus = ws.id },
+                onClose: { filesInspector = nil })
+        } else {
+            PaneNotice(title: "No Worktree", detail: "This worktree isn’t on a connected runner.")
+        }
+    }
+
+    /// The task open, and the worktree its Files tab reads, if it has one.
+    private var openTaskLane: (task: String, worktree: String?)? {
+        guard case .workspace(let host, let workspace, .task(let id)?)? = selection else { return nil }
+        let chosen = WorkspaceScreen.agent(of: id, host: host, in: store.fleet, chosen: chosenAgents[id])
+        let row = boardStores["\(host)/\(workspace)"]?.board.rows.first { $0.id == id }
+        return (id, row.flatMap { TaskColumnModel.worktree(of: $0, agent: chosen) } ?? chosen?.worktree.id)
+    }
+
+    /// Show `path` in `ws`'s Files at 1-based `line` (ov-189): on the open
+    /// task's Files tab when the task works in `ws`, else in the inspector.
+    /// From an agent's tool call, a diff's file heading, and ⌘P's `/`.
+    private func showInFiles(_ path: String, line: Int?, in ws: Worktree) {
+        guard let client = store.client(for: ws) else { return }
+        let key = Self.filesKey(ws, client)
+        let model = filesModels[key] ?? FilesModel(worktree: ws, client: client)
+        filesModels[key] = model
+        if let lane = openTaskLane, lane.worktree == ws.id {
+            choose(.files, for: lane.task)
+        } else {
+            filesInspector = ws
+        }
+        filesFocus = ws.id
+        Task { await model.open(path, line: line) }
+    }
+
+    /// What ⌘P's `/` searches: the open task's worktree, else the one on
+    /// screen, else the one the Files inspector shows (ov-189).
+    private var paletteFiles: PaletteFiles? {
+        var lane: Worktree?
+        if let open = openTaskLane, let id = open.worktree, let host = selection?.host {
+            lane = worktree(host: host, id: id)
+        }
+        guard let ws = lane ?? currentWorktree ?? filesInspector,
+            let client = store.client(for: ws), client.showsFiles != false
+        else { return nil }
+        return PaletteFiles(worktree: ws) { query in await client.searchFiles(in: ws, query: query) }
+    }
+
+    /// The Files on screen that was clicked into last: what ⌘F and ⇧⌘L act
+    /// on. Nil when that Files isn't on screen, or nothing's open in it.
+    private var focusedFiles: FilesModel? {
+        guard let focus = filesFocus else { return nil }
+        let shown: String?
+        if let lane = openTaskLane, taskTab(for: selection) == .files {
+            shown = lane.worktree
+        } else {
+            shown = filesInspector?.id
+        }
+        guard shown == focus else { return nil }
+        return filesModels.values.first { $0.worktree.id == focus && !$0.lines.isEmpty }
+    }
+
     /// Every layout the detail draws for `selection`: `WorkspaceScreen`'s,
     /// and of a workspace's, only the columns its width draws.
     func shownLayouts(for selection: Selection?) -> [ShownLayout] {
@@ -1141,6 +1242,22 @@ struct ContentView: View {
         detail
             .task(id: noticeOpener.pending?.id) { await openNoticedTask() }
             .task(id: restoring?.id) { await restoreWhereYouWere() }
+            // Files beside a worktree opened whole (ov-189). A task has its
+            // own Files tab instead.
+            .inspector(
+                isPresented: Binding(get: { filesInspector != nil }, set: { if !$0 { filesInspector = nil } })
+            ) {
+                filesInspectorContent
+                    .inspectorColumnWidth(min: 420, ideal: 760, max: 1400)
+            }
+            .environment(\.openInFiles, OpenInFiles { ws, path, line in showInFiles(path, line: line, in: ws) })
+            // Going somewhere else closes it: Files is beside the worktree
+            // on screen, never a leftover from the last one.
+            .onChange(of: selection) { _, now in
+                guard let shown = filesInspector else { return }
+                let target = WorkspaceScreen.changesTarget(now, in: store.fleet, repositories: repositoryIDs(now?.host ?? ""))
+                if target?.id != shown.id { filesInspector = nil }
+            }
     }
 
     @ViewBuilder
@@ -1273,6 +1390,17 @@ struct ContentView: View {
         return WorktreeToolbar.Changes(worktree: ws, open: changesPane(in: ws) != nil)
     }
 
+    /// Show Files in the toolbar (ov-189): for the worktree Changes would
+    /// split, on a runner that can read files, lit while the inspector shows it.
+    private var filesToolbarState: WorktreeToolbar.Files? {
+        guard
+            let ws = WorkspaceScreen.changesTarget(
+                selection, in: store.fleet, repositories: repositoryIDs(selection?.host ?? "")),
+            store.client(for: ws)?.showsFiles != false
+        else { return nil }
+        return WorktreeToolbar.Files(worktree: ws, open: filesInspector?.id == ws.id)
+    }
+
     /// The title bar's status area for the workspace on screen (ov-214):
     /// its orchestrator as the navigator's row says it, and its board. Nil
     /// with no workspace on screen.
@@ -1324,6 +1452,7 @@ struct ContentView: View {
                         offersNewWorkspace: !workspaceRepositories.isEmpty)
             },
             run: { perform($0) },
+            files: paletteFiles,
             send: { text in
                 guard let seat, let client = store.client(for: seat.worktree) else {
                     return .refused(TitleConsoleRecipient.noOrchestrator)
@@ -2198,6 +2327,17 @@ struct ContentView: View {
                 } else {
                     start
                 }
+            } files: {
+                // Its worktree's files, read-only (ov-189).
+                if let lane, client.showsFiles != false {
+                    if settled {
+                        FilesPane(model: filesModel(for: lane, client: client), onFocus: { filesFocus = lane.id })
+                    }
+                } else if lane != nil {
+                    TaskStartPanel(sentence: "Update Far Cooler on this runner to see its files here.")
+                } else {
+                    start
+                }
             }
         }
         // The card's record and question, read for the task on screen once
@@ -2304,6 +2444,8 @@ struct ContentView: View {
             onAction: { action in Task { await run(action, on: term, in: ws) } },
             hasKeyboard: keyboard && WorkspaceScreen.bareTakesKeyboard(shown)
         )
+        // A path its agent's tool call names opens in this worktree's Files.
+        .environment(\.filesWorktree, ws)
     }
 
     /// A workspace's navigator, or a sentence saying where its board went.
@@ -2425,6 +2567,7 @@ struct ContentView: View {
             hasKeyboard: KeptOrchestrator.takesKeyboard(
                 shown, onScreen: keyboard, key: selectedPane, onBoard: keyboardOnBoard)
         )
+        .environment(\.filesWorktree, ws)
     }
 
     /// The detail with no workspace to show: the fleet's own state first,
@@ -2648,6 +2791,7 @@ struct ContentView: View {
             hasNavigator: scene?.board != nil)
         focus.sidebarShown = !navigatorHidden
         focus.hasWorktree = currentWorktree != nil
+        focus.findsInFile = focusedFiles != nil
         focus.terminals = terminals.count
         focus.stepsTerminals = terminals.count > 1 || (terminals.count == 1 && terminals.first != selectedPane)
         focus.hasAttention =
@@ -2792,6 +2936,7 @@ struct ContentView: View {
         case .focusConversation, .focusBoard, .focusTask:
             focusWorkspaceColumn(command)
         case .switchWorkspace: switcherRequest += 1
+        case .goToLine: focusedFiles?.goingToLine = true
         case .nextTaskTab: stepTaskTab(by: 1)
         case .previousTaskTab: stepTaskTab(by: -1)
         case .nextWorktree: stepWorktree(by: 1)
@@ -2816,8 +2961,11 @@ struct ContentView: View {
         // which finds the same workspaces, tasks and agents the old
         // sidebar's search did (ov-178).
         case .search:
+            // A file on screen, clicked into: find in it (ov-189).
+            if let files = focusedFiles {
+                files.finding = true
             // A loose worktree draws its board's navigator too.
-            if selection.flatMap(workspaceScene)?.board != nil {
+            } else if selection.flatMap(workspaceScene)?.board != nil {
                 navigatorHidden = false
                 boardFilterRequest += 1
             } else {
@@ -2905,6 +3053,10 @@ struct ContentView: View {
                 let target = ws.terminals.first(where: { $0.id == terminal })
             else { return }
             Task { await togglePaneMode(target, in: ws) }
+
+        case .openFile(let worktree, let path):
+            guard let ws = store.fleet.worktrees.first(where: { $0.id == worktree }) else { return }
+            showInFiles(path, line: nil, in: ws)
         }
     }
 

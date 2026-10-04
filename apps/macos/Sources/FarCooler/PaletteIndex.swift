@@ -27,6 +27,23 @@ enum PaletteAction: Hashable {
     /// places the plan names for this toggle — the other is `⌃B a` — because
     /// the pane itself grew no button for it.
     case togglePaneMode(worktree: String, terminal: String)
+    /// A file, by its path in a worktree: ⌘P's `/` (ov-189).
+    case openFile(worktree: String, path: String)
+}
+
+/// The worktree ⌘P's `/` searches, and how (ov-189). A function rather than
+/// a client, for `CommandPalette.screen`'s reason: the palette can look, and
+/// report what was chosen, and nothing else.
+struct PaletteFiles {
+    let worktree: Worktree
+    let search: @MainActor (String) async -> [String]
+
+    /// One file found, as a row.
+    func entry(_ path: String) -> PaletteEntry {
+        PaletteEntry(
+            id: "file:\(path)", action: .openFile(worktree: worktree.id, path: path),
+            title: (path as NSString).lastPathComponent, detail: path, symbol: "doc", kind: "File")
+    }
 }
 
 /// One row, already resolved into the handful of things a row can draw.

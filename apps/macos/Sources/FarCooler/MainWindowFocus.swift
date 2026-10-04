@@ -19,6 +19,9 @@ struct MainWindowFocus: Equatable {
     /// A workspace's navigator is on screen: ⌘F filters its tasks, and Board
     /// ▸ Mark All as Read reads its Unread (ov-104).
     var hasNavigator = false
+    /// A file is open in the Files on screen, and was clicked into: ⌘F
+    /// finds in it and ⌘L goes to a line of it (ov-189).
+    var findsInFile = false
 
     // What the rest of the menu bar can act on, so an item that can't is
     // dimmed rather than left to do nothing (ov-211). HIG, The menu bar: "If a
@@ -58,10 +61,12 @@ struct MainWindowFocus: Equatable {
     /// The Layout menu's worktree, or nil when none is on screen.
     var layout: LayoutMenuFocus?
 
-    /// What ⌘F says it does: the navigator's filter in a workspace (or a
-    /// loose worktree beside one), else Go to Anything's find.
+    /// What ⌘F says it does: find in the file clicked into, the
+    /// navigator's filter in a workspace (or a loose worktree beside one),
+    /// else Go to Anything's find.
     static func findTitle(_ focus: MainWindowFocus?) -> String {
-        focus?.hasNavigator == true ? "Filter Tasks" : "Find Workspace, Task, or Agent…"
+        if focus?.findsInFile == true { return "Find in File…" }
+        return focus?.hasNavigator == true ? "Filter Tasks" : "Find Workspace, Task, or Agent…"
     }
 
     /// Board ▸ Mark All as Read acts only on a navigator in the key main

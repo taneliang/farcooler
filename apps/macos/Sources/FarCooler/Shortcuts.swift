@@ -141,10 +141,11 @@ enum Shortcut {
         (
             "App",
             [
-                Item(keys: "⌘P", action: "Go to a workspace, task, or terminal, or start a worktree"),
+                Item(keys: "⌘P", action: "Go to a workspace, task, terminal, or file, or start a worktree"),
                 Item(keys: "⌘K", action: "Ask the orchestrator, or see what’s happening"),
                 Item(keys: "⌘B", action: "Show or hide the sidebar"),
-                Item(keys: "⌘F", action: "Filter the navigator’s tasks, or with no navigator, find a workspace, task, or agent"),
+                Item(keys: "⌘F", action: "Find in the file open in Files, filter the navigator’s tasks, or find a workspace, task, or agent"),
+                Item(keys: "⌘L", action: "Go to a line of the file open in Files"),
                 Item(keys: "⌘,", action: "Settings"),
                 Item(keys: "⌘/", action: "Keyboard shortcuts"),
                 Item(keys: "⌘R", action: "Reload the fleet"),

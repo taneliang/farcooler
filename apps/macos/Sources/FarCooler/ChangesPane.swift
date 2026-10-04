@@ -71,6 +71,8 @@ struct ChangesPane: View {
 
     /// Kept mounted out of sight, behind a task's other tabs.
     @Environment(\.outOfSight) private var outOfSight
+    /// Where a file's heading opens the file whole (ov-189).
+    @Environment(\.openInFiles) private var openInFiles
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var codeFont: Font { Font(preferences.terminalFont() as CTFont) }
@@ -1657,6 +1659,21 @@ struct ChangesPane: View {
                     .fixedSize()
             }
             Spacer(minLength: 0)
+            // The whole file, as it is now, in Files: not for one the change
+            // deleted, which has nothing left to read.
+            if let openInFiles, f.status != .deleted {
+                Button {
+                    openInFiles.open(changes.worktree, f.path, nil)
+                } label: {
+                    Image(systemName: "doc.text")
+                        .font(.system(size: 9.5, weight: .medium))
+                        .frame(width: 16, height: 18)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Show this file in Files")
+            }
             // Always drawn, unlike the line and hunk anchors, which appear on
             // hover. One per file is not chrome — and if every way into this
             // feature were revealed by hovering, the feature would be invisible

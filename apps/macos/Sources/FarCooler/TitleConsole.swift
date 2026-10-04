@@ -13,7 +13,8 @@ import SwiftUI
 //          empty box, bracketed paste known), which types nothing when any
 //          check fails. Empty, the panel under it shows the activity.
 //   find   `/` at the start, or ⌘P, which opens it with `/` already typed:
-//          Go to Anything, the palette's results, in place.
+//          Go to Anything, the palette's results, in place, then the files
+//          of the worktree on screen whose paths match (ov-189).
 //   Esc    back to the activity line, even while a send is out. A message
 //          being written is kept, for its own workspace: each workspace has
 //          its own, so a message is never sent to another's orchestrator.
@@ -80,6 +81,11 @@ struct TitleConsole: Equatable {
     private(set) var workspace = ""
     /// Every other workspace's message being written, by workspace.
     private(set) var drafts: [String: String] = [:]
+    /// What the runner found in the files of the worktree on screen (ov-189),
+    /// and the query it found them for: listed only while that's still the
+    /// query, so a slow answer never lists files for what was typed before.
+    private(set) var fileHits: [String] = []
+    private(set) var fileHitsQuery: String?
 
     var mode: Mode {
         guard isOpen else { return .rest }
@@ -99,7 +105,7 @@ struct TitleConsole: Equatable {
     static let sendFailed = "Couldn’t send that to the orchestrator. Your message is still here."
     static let timedOut =
         "The runner didn’t answer in 20 seconds. Your message is still here; check the orchestrator before sending it again."
-    static let findPlaceholder = "Find a workspace, task, or terminal"
+    static let findPlaceholder = "Find a workspace, task, terminal, or file"
 
     /// "Ask Billing’s orchestrator, or type / to find".
     static func askPlaceholder(recipient: String?) -> String {
@@ -159,6 +165,19 @@ struct TitleConsole: Equatable {
         sending = false
         notice = nil
         resetHighlight()
+    }
+
+    /// The files found for `query`, kept only if it's still what's searched.
+    mutating func found(files: [String], for query: String) {
+        guard mode == .find, query == self.query else { return }
+        fileHits = files
+        fileHitsQuery = query
+    }
+
+    /// The files found for what's searched now: none while that search is
+    /// still out, or with nothing typed.
+    var foundFiles: [String] {
+        mode == .find && !query.isEmpty && fileHitsQuery == query ? fileHits : []
     }
 
     /// What was typed. Typing never sends.
@@ -337,6 +356,9 @@ struct TitleConsoleActions {
     /// Find results for a query; the recent terminals for an empty one.
     var find: (String) -> [PaletteEntry] = { _ in [] }
     var run: (PaletteAction) -> Void = { _ in }
+    /// The files find searches (ov-189): the worktree on screen's, or nil
+    /// with none, or on a runner too old to show files.
+    var files: PaletteFiles? = nil
     /// Send to the orchestrator, and how it came out.
     var send: (String) async -> TitleConsole.Outcome = { _ in .sent }
     /// Why nothing can be sent now, or nil.
@@ -348,7 +370,9 @@ struct TitleConsoleActions {
     var current: String? = nil
 
     func entries(_ console: TitleConsole) -> [PaletteEntry] {
-        console.mode == .find ? find(console.query) : []
+        guard console.mode == .find else { return [] }
+        let files = files.map { f in console.foundFiles.map(f.entry) } ?? []
+        return find(console.query) + files
     }
 
     /// Where the highlight starts in `entries`: on the second when the
@@ -487,6 +511,16 @@ struct TitleConsolePanel: View {
         .onHover { inside in model.pointerInPanel = inside }
         .onDisappear { model.pointerInPanel = false }
         .onChange(of: console.text) { _, _ in sendLit = false }
+        // A file search on the runner, a beat after the last keystroke: each
+        // keystroke cancels the one before (ov-189).
+        .task(id: console.mode == .find ? console.query : nil) {
+            guard console.mode == .find, !console.query.isEmpty, let files = actions.files else { return }
+            let query = console.query
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+            let found = await files.search(query)
+            if !Task.isCancelled { model.console.found(files: found, for: query) }
+        }
     }
 
     private func sendRow(_ console: TitleConsole) -> some View {
