@@ -23,7 +23,6 @@
 
 use farcooler_store::Store;
 use farcooler_store::models::{Task, TaskStatus, Terminal, TerminalRole};
-use uuid::Uuid;
 
 /// The task `terminal` is working on, read from the store: its own, else the
 /// one open task whose lane it is in, else none. See this module's docs.
@@ -73,6 +72,7 @@ pub(crate) fn stamp_notice_task(store: &Store, terminal: &Terminal, message: &mu
 mod tests {
     use super::*;
     use farcooler_store::models::Actor;
+    use uuid::Uuid;
 
     /// A runner with a Main workspace and its checkout, and one task.
     async fn a_runner() -> (crate::test_support::ScratchDir, std::sync::Arc<crate::service::Service>, Uuid, Uuid) {
