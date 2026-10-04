@@ -284,8 +284,8 @@ struct WorktreeCallsTests {
         let reader = client(current)
         await reader.refreshNeedsYou()
         #expect(current.calls.contains(["needs-you", "--json"]), "\(current.calls)")
-        #expect(reader.needsYouItems.map(\.itemID) == ["decision:t-9"])
-        #expect(reader.needsYouItems.first?.task?.key == "bil-9")
+        #expect(reader.needsYouList?.map(\.itemID) == ["decision:t-9"])
+        #expect(reader.needsYouList?.first?.task?.key == "bil-9")
         #expect(!reader.needsYouFromOlderRunner)
 
         let older = Recorder()
@@ -353,11 +353,11 @@ struct WorktreeCallsTests {
         recorder.capabilities = ["workspaces", "terminals", "needs_you"]
         let reader = client(recorder)
         await reader.refreshNeedsYou()
-        #expect(reader.needsYouItems.map(\.itemID) == ["decision:t-9"])
+        #expect(reader.needsYouList?.map(\.itemID) == ["decision:t-9"])
         recorder.capabilities = nil
         await reader.refresh()
         #expect(reader.daemonBuild == nil, "the reconnection didn't clear the build")
-        #expect(reader.needsYouItems.map(\.itemID) == ["decision:t-9"])
+        #expect(reader.needsYouList?.map(\.itemID) == ["decision:t-9"])
         #expect(!reader.needsYouFromOlderRunner)
         reader.stopEvents()
     }

@@ -2171,7 +2171,7 @@ extension Fleet {
 }
 
 /// What Needs You says under "Nothing needs you" when it can't be sure.
-enum PhoneInbox {
+public enum PhoneInbox {
     /// Every item Needs You shows, across runners: each runner's own list
     /// where it has one, and for a runner whose list isn't read yet (still
     /// coming, or the read failed), the blocked agents its fleet shows, as
@@ -2183,7 +2183,7 @@ enum PhoneInbox {
     /// counting that runner's blocked agents.
     ///
     /// `unread` is by runner id, each runner's panes (`Fleet.olderPanes`).
-    static func shown(
+    public static func shown(
         lists: [String: [NeedsYouItem]], unread: [String: [NeedsYou.OlderPane]]
     ) -> [NeedsYouItem] {
         var all = lists
@@ -2196,7 +2196,7 @@ enum PhoneInbox {
     /// Nil when every runner answered. Otherwise names the ones that didn't,
     /// since their items aren't in the list: "Nothing needs you" about a
     /// runner nobody could ask would be a claim nobody made.
-    static func caveat(unanswered: [String]) -> String? {
+    public static func caveat(unanswered: [String]) -> String? {
         switch unanswered.count {
         case 0: return nil
         case 1: return "\(unanswered[0]) isn’t answering, so this may not be everything."

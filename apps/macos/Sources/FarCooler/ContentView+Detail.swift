@@ -386,6 +386,7 @@ extension ContentView {
             NeedsYouView(
                 items: store.needsYou,
                 olderRunners: store.hosts.filter { store.clients[$0]?.needsYouFromOlderRunner == true },
+                unanswered: store.needsYouUnanswered,
                 canAct: { item in
                     store.refusal(for: item.runner) == nil
                         && TaskBoardWrites.offered(by: store.clients[item.runner]?.daemonBuild)

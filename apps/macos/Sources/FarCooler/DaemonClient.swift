@@ -1319,12 +1319,21 @@ final class DaemonClient: ObservableObject {
     /// is still unknown: that's not yet a thing to tell anybody.
     var needsYouFromOlderRunner: Bool { daemonBuild != nil && !servesNeedsYou }
 
-    /// Everything on this runner a person has to act on: its own list when it
-    /// computes one, and otherwise its blocked agents, derived from the fleet
-    /// it already sends (spec §2.6). Hidden worktrees' panes are included:
-    /// their items still count.
-    var needsYouItems: [NeedsYouItem] {
-        servesNeedsYou ? needsYouRead : NeedsYou.derived(fromTerminals: Self.olderPanes(in: fleet.worktrees))
+    /// This runner's own list, once it has been read; nil before that, on a
+    /// runner without `needs_you`, and while every read has failed. The window
+    /// then derives the runner's blocked agents from its fleet (spec §2.6,
+    /// `PhoneInbox.shown`): an unread list is not an empty one, and "Nothing
+    /// Needs You" about a runner nobody could ask is a claim nobody made.
+    var needsYouList: [NeedsYouItem]? {
+        servesNeedsYou && needsYouLoaded ? needsYouRead : nil
+    }
+
+    /// Whether this runner has failed to say what needs a person: not
+    /// connected, or serving a list it has not yet managed to read. What the
+    /// caveat under Needs You names. A runner too old to serve a list is
+    /// answering; its derived items are all it has.
+    var needsYouUnanswered: Bool {
+        (state != .connected && state != .connecting) || (servesNeedsYou && !needsYouLoaded)
     }
 
     /// What `needs-you` is asked with.

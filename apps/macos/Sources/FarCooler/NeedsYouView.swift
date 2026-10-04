@@ -100,6 +100,9 @@ struct NeedsYouView: View {
     /// Runners too old to send decisions and asks, by name: each gets its
     /// line (`NeedsYou.olderRunnerNote`).
     let olderRunners: [String]
+    /// Runners that haven't said what needs a person, by name: under the list
+    /// (or under "Nothing Needs You") the page says it may not be everything.
+    var unanswered: [String] = []
     let canAct: (NeedsYouItem) -> Bool
     var onOpen: (NeedsYouItem) -> Void
     var onAnswerAsk: (NeedsYouItem, String) async -> DaemonClient.AskRefusal?
@@ -132,8 +135,11 @@ struct NeedsYouView: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            if !olderRunners.isEmpty {
+            if !olderRunners.isEmpty || !unanswered.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
+                    if let caveat = PhoneInbox.caveat(unanswered: unanswered) {
+                        Text(caveat)
+                    }
                     ForEach(olderRunners, id: \.self) { runner in
                         Text(NeedsYou.olderRunnerNote(runner: runner.isEmpty ? "this Mac" : runner))
                     }

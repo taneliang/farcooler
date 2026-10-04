@@ -300,12 +300,34 @@ final class FleetStore: ObservableObject {
             objectWillChange.send()
         }
         if reading != merged.reading { reading = merged.reading }
-        let items = NeedsYou.merge(
-            Dictionary(clients.map { ($0.key, $0.value.needsYouItems) }, uniquingKeysWith: { a, _ in a }))
+        let items = Self.shownNeedsYou(clients)
         if items != needsYou { needsYou = items }
+        let unanswered = hosts.filter { clients[$0]?.needsYouUnanswered == true }
+            .map { $0.isEmpty ? "this Mac" : $0 }
+        if unanswered != needsYouUnanswered { needsYouUnanswered = unanswered }
         let settled = Self.settled(clients.values.map { ($0.state, $0.needsYouKnown) })
         if settled != needsYouSettled { needsYouSettled = settled }
     }
+
+    /// What Needs You shows: each runner's own list where it has been read, and
+    /// for every other runner the blocked agents its fleet shows
+    /// (`PhoneInbox.shown`, the rule the phones and the glances use).
+    static func shownNeedsYou(_ clients: [String: DaemonClient]) -> [NeedsYouItem] {
+        var lists: [String: [NeedsYouItem]] = [:]
+        var unread: [String: [NeedsYou.OlderPane]] = [:]
+        for (host, client) in clients {
+            if let list = client.needsYouList {
+                lists[host] = list
+            } else {
+                unread[host] = DaemonClient.olderPanes(in: client.fleet.worktrees)
+            }
+        }
+        return PhoneInbox.shown(lists: lists, unread: unread)
+    }
+
+    /// The runners that haven't said what needs a person, by name, for the
+    /// caveat under the list (`PhoneInbox.caveat`).
+    @Published private(set) var needsYouUnanswered: [String] = []
 
     /// Whether every runner has said what's waiting, as far as it can: none
     /// still making its first connection, and every one that's connected
