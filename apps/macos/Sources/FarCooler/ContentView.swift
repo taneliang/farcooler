@@ -1262,10 +1262,19 @@ struct ContentView: View {
         let host = scene.host
         let orchestrator = scene.hasConversation ? navigatorOrchestrator(host: host, workspace: summary) : nil
         let decisions = WorkspaceCounts.decisions(for: summary, host: host, in: store.needsYou)
+        let read = scene.board == nil ? nil : boardStore(for: summary, client: client, host: host)
+        let tasks = Set(read?.board.rows.map(\.id) ?? [])
+        // The workspace's panes: its own, and any working one of its tasks.
+        let panes = store.fleet.worktrees.filter { ($0.host ?? "") == host }.flatMap { worktree in
+            worktree.terminals
+                .filter { $0.workspace == summary.id || $0.taskId.map(tasks.contains) == true }
+                .map { BoardPane(terminal: $0, worktree: worktree) }
+        }
         return TitleStatusSource(
             orchestrator: orchestrator?.state, status: orchestrator?.status, nowDoing: orchestrator?.nowDoing,
-            board: scene.board == nil ? nil : boardStore(for: summary, client: client, host: host),
-            waiting: { column in client.boardWaiting(columnCount: column, decisions: decisions) })
+            board: read,
+            waiting: { column in client.boardWaiting(columnCount: column, decisions: decisions) },
+            seat: WorkspaceScreen.orchestrator(of: summary, host: host, in: store.fleet)?.terminal, panes: panes)
     }
 
     /// What the status area sizes itself around (`TitleStatusRoom`).
@@ -1295,7 +1304,30 @@ struct ContentView: View {
                     open(next.item)
                 }
             },
-            openTask: { row in chooseTask(row.id, host: host, workspace: board, glance: false) })
+            openTask: { row in chooseTask(row.id, host: host, workspace: board, glance: false) },
+            openLine: { line in openActivityLine(line, host: host, workspace: summary) },
+            readSpend: {
+                guard let client = store.clients[host] else { return .couldntRead }
+                let read = await client.spendToday(repository: summary.repository ?? summary.id)
+                return ActivitySpend.read(data: read.data, message: read.message)
+            })
+    }
+
+    /// A row of the activity panel or the failed menu, opened: its pane, or
+    /// its task on this workspace's board.
+    private func openActivityLine(_ line: ActivityLine, host: String, workspace: WorkspaceSummary) {
+        switch line.kind {
+        case .agent(let terminal, let worktreeID):
+            if let ws = worktree(host: host, id: worktreeID), let term = ws.terminals.first(where: { $0.id == terminal }) {
+                go(to: BoardPane(terminal: term, worktree: ws))
+            }
+        case .subagent(let key), .queued(let key):
+            guard let client = store.clients[host] else { return }
+            let board = boardStore(for: workspace, client: client, host: host).board
+            if let row = board.rows.first(where: { $0.key == key }) {
+                chooseTask(row.id, host: host, workspace: workspace.id, glance: false)
+            }
+        }
     }
 
     /// The orchestrator's menu, for the status area: what its column's

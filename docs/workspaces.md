@@ -89,9 +89,14 @@ as in any menu. Below the workspaces:
 open. It says what the orchestrator is doing ("Working — Running the Mac tests
 for ov-91"), then how many of this workspace's tasks need you, are running and
 are in review. Click the orchestrator to go to it from anywhere in the
-workspace; its ⌄ is the orchestrator's menu, below. Click the need-you count to
-open the next thing in this workspace waiting on you, and running or in review
-for a menu of those tasks. A narrower window says less: the counts become a
+workspace; its ⌄ is the orchestrator's menu, below, with **Show Activity**
+first. Click what it's doing for the activity panel: what the orchestrator last
+said, every agent at work and what it's doing (the subagents the orchestrator
+recorded too), what's queued and why ("2nd in line for a build, after
+ov-177", "Blocked by ov-191"), anything that failed, and what agents spent
+today in this repository. Click the need-you count to open the next thing in
+this workspace waiting on you; running (with how many are queued), in review
+and, when any agent failed, failed each open a menu of those tasks or agents. A narrower window says less: the counts become a
 glyph and a number, then only the state's word, then only the orchestrator's
 mark and the need-you count.
 

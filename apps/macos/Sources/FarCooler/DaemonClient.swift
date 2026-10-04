@@ -1215,6 +1215,13 @@ final class DaemonClient: ObservableObject {
         await runRaw(["task", "usage", key, "--repo", repository, "--json"], background: true)
     }
 
+    /// What agents spent today in `repository` (ov-195's report, for the
+    /// title bar's activity panel): `farcooler report --since today --json`,
+    /// whose `spend.total` `ActivitySpend.read` decodes.
+    func spendToday(repository: String) async -> (data: Data?, message: String?) {
+        await runRaw(["report", "--since", "today", "--repo", repository, "--json"], background: true)
+    }
+
     /// Every note in the repository's record carrying `query`, each with its
     /// task's key: the History page's note search (ov-103).
     func taskSearch(query: String, repository: String) async -> (data: Data?, message: String?) {

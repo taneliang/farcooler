@@ -32,6 +32,9 @@ import SwiftUI
 @MainActor
 final class TaskBoardStore: ObservableObject {
     @Published private(set) var board: TaskBoardModel = .empty
+    /// Each open task's start and workers by key (`TaskStarts`); empty from
+    /// a runner older than ov-212.
+    @Published private(set) var starts: [String: TaskStart] = [:]
     @Published private(set) var detail: TaskDetailModel = .empty
     /// The card `detail` and `question` were read for, once they've been
     /// read: nil from `open` until the read lands. They are single slots,
@@ -297,6 +300,10 @@ final class TaskBoardStore: ObservableObject {
         }
         trouble = nil
         board = read
+        // When each task starts and who works it (ov-212, ov-213), from the
+        // same read: the title bar's queue and its activity panel.
+        let reading = TaskStarts.decode(data)
+        if reading != starts { starts = reading }
         hasRead = true
         // Keep the open card pointing at the row that is on the board now,
         // rather than at the copy this store read a minute ago — the whole

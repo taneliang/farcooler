@@ -38,6 +38,11 @@ enum TitleStatus {
         /// Its tasks in progress and in review, in board order.
         var running: [TaskRow]
         var inReview: [TaskRow]
+        /// Tasks queued to start, with a wait or a blocker (ov-212).
+        var queued: Int = 0
+        /// Agents whose run or turn failed, or that were lost: shown only
+        /// above zero, in the failure color.
+        var failed: [ActivityLine] = []
     }
 
     /// How much the area can afford to say, narrowest first.
@@ -57,7 +62,7 @@ enum TitleStatus {
             case .ring: 64
             case .short: 184
             case .medium: 380
-            case .wide: 600
+            case .wide: 680
             }
         }
 
@@ -128,14 +133,27 @@ enum TitleStatus {
         return (column(.inProgress), column(.inReview))
     }
 
-    /// The area's model: `source`'s orchestrator, and `board` as read now.
+    /// The area's model: `source`'s orchestrator and panes, and `board` and
+    /// its tasks' `starts` as read now.
     @MainActor
-    static func model(_ source: TitleStatusSource, board: TaskBoardModel) -> Model {
+    static func model(_ source: TitleStatusSource, board: TaskBoardModel, starts: [String: TaskStart] = [:]) -> Model {
         let counts = counts(board)
         return Model(
             orchestrator: source.orchestrator, status: source.status, nowDoing: source.nowDoing,
-            needYou: source.waiting(board.waitingOnYou), running: counts.running, inReview: counts.inReview)
+            needYou: source.waiting(board.waitingOnYou), running: counts.running, inReview: counts.inReview,
+            queued: TitleActivity.queuedCount(starts), failed: activity(source, board: board, starts: starts).failed)
     }
+
+    /// The activity panel's content for `source`, over `board` and `starts`.
+    @MainActor
+    static func activity(_ source: TitleStatusSource, board: TaskBoardModel, starts: [String: TaskStart]) -> TitleActivity {
+        TitleActivity.make(
+            orchestrator: source.orchestrator, seat: source.seat, panes: source.panes, board: board, starts: starts)
+    }
+
+    static func failedWords(_ count: Int) -> String? { count > 0 ? "\(number(count)) failed" : nil }
+    static func failedLabel(_ count: Int) -> String { count == 1 ? "1 agent failed" : "\(count) agents failed" }
+    static func queuedWords(_ count: Int) -> String? { count > 0 ? "\(number(count)) queued" : nil }
 
     /// A count as the area draws it: "99+" past 99.
     static func number(_ count: Int) -> String { count > 99 ? "99+" : "\(count)" }
@@ -188,6 +206,10 @@ struct TitleStatusSource {
     /// The waiting count shown, from the board's Needs Decision count
     /// (`DaemonClient.boardWaiting`, which prefers the runner's list).
     var waiting: (Int) -> Int = { $0 }
+    /// The orchestrator's own terminal, for what it last said.
+    var seat: Terminal? = nil
+    /// The workspace's other panes, for the agents at work and failed.
+    var panes: [BoardPane] = []
 }
 
 /// What the status area's parts do. `ContentView` routes each to what the
@@ -201,6 +223,11 @@ struct TitleStatusActions {
     var nextNeedingYou: () -> Void = {}
     /// Open a task from the running or in-review menu.
     var openTask: (TaskRow) -> Void = { _ in }
+    /// Open a row of the activity panel or the failed menu: its pane, or
+    /// its task.
+    var openLine: (ActivityLine) -> Void = { _ in }
+    /// Today's spend, read when the activity panel opens.
+    var readSpend: () async -> ActivitySpend = { .nothing }
 }
 
 /// The status area drawn: `form` decides what's said, `model` what it says.
@@ -208,18 +235,27 @@ struct TitleStatusView: View {
     let model: TitleStatus.Model
     let form: TitleStatus.Form
     let actions: TitleStatusActions
+    /// What the activity panel shows (slice 2).
+    var activity = TitleActivity(orchestrator: nil, working: [], queued: [], failed: [])
 
     @Environment(\.colorScheme) private var scheme
+    @State private var showingActivity = false
 
     var body: some View {
         HStack(spacing: form >= .medium ? 14 : 8) {
             if model.orchestrator != nil { orchestrator }
+            if form >= .medium { activityButton }
             Spacer(minLength: 0)
             needYou
+            if form >= .short { failed }
             if form >= .medium {
                 taskMenu(
-                    model.running, symbol: "circle.dotted", words: TitleStatus.runningWords(model.running.count),
-                    label: TitleStatus.runningLabel(model.running.count), id: "title-status-running")
+                    model.running, symbol: "circle.dotted",
+                    words: [TitleStatus.runningWords(model.running.count), TitleStatus.queuedWords(model.queued)]
+                        .compactMap { $0 }.joined(separator: " · "),
+                    label: [TitleStatus.runningLabel(model.running.count), TitleStatus.queuedWords(model.queued)]
+                        .compactMap { $0 }.joined(separator: ", "),
+                    id: "title-status-running", extra: activity.queued)
                 taskMenu(
                     model.inReview, symbol: "eye", words: TitleStatus.inReviewWords(model.inReview.count),
                     label: TitleStatus.inReviewLabel(model.inReview.count), id: "title-status-in-review")
@@ -229,11 +265,15 @@ struct TitleStatusView: View {
         // At least the compact bar's 24 pt control height, to hit.
         .frame(width: form.width, height: 24)
         .background(TitleStatusAnchor.Mark())
+        .popover(isPresented: $showingActivity, arrowEdge: .bottom) {
+            TitleActivityPopover(activity: activity, actions: actions) { showingActivity = false }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Status")
     }
 
-    /// The orchestrator: a click shows it, its ⌄ holds its menu.
+    /// The orchestrator: a click shows it, its ⌄ holds its menu, with Show
+    /// Activity first, so the panel is reachable at every width.
     @ViewBuilder
     private var orchestrator: some View {
         let label = HStack(spacing: 6) {
@@ -243,33 +283,45 @@ struct TitleStatusView: View {
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .fixedSize()
-                if form >= .medium, let doing = model.nowDoing {
-                    Text("— \(doing)")
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
             }
         }
-        Group {
+        Menu {
+            Button("Show Activity") { showingActivity = true }
             if let menu = actions.orchestratorMenu {
-                Menu {
-                    menu
-                } label: {
-                    label
-                } primaryAction: {
-                    actions.goToOrchestrator()
-                }
-                .menuStyle(.borderlessButton)
-            } else {
-                Button(action: actions.goToOrchestrator) { label }
-                    .buttonStyle(.borderless)
+                Divider()  // style-exempt: menu
+                menu
             }
+        } label: {
+            label
+        } primaryAction: {
+            actions.goToOrchestrator()
         }
-        .help(TitleStatus.orchestratorLine(model) ?? "Orchestrator")
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Show the orchestrator")
         .accessibilityLabel(TitleStatus.orchestratorLabel(model) ?? "Orchestrator")
         .accessibilityIdentifier("title-status-orchestrator")
-        .layoutPriority(1)
+    }
+
+    /// What it's doing, or "Activity" with nothing to say: a click opens
+    /// the activity panel.
+    private var activityButton: some View {
+        Button {
+            showingActivity.toggle()
+        } label: {
+            Text(model.nowDoing.map { "— \($0)" } ?? "Activity")
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .layoutPriority(-1)
+        .help(model.nowDoing ?? "Show what’s happening in this workspace")
+        .accessibilityLabel("Activity")
+        .accessibilityValue(model.nowDoing ?? "")
+        .accessibilityIdentifier("title-status-activity")
     }
 
     /// This workspace's need-you count, in the attention color, with words
@@ -297,19 +349,58 @@ struct TitleStatusView: View {
         }
     }
 
-    /// Running or in review: a count, and a menu of those tasks; a pick
-    /// opens it. Nothing at zero.
+    /// Failed or lost agents, only above zero, in the failure color with
+    /// its glyph: a menu of them, each opening its pane.
     @ViewBuilder
-    private func taskMenu(_ rows: [TaskRow], symbol: String, words: String?, label: String, id: String) -> some View {
-        if !rows.isEmpty {
+    private var failed: some View {
+        let lines = model.failed
+        if !lines.isEmpty {
+            Menu {
+                ForEach(lines) { line in
+                    Button([line.title, line.detail].compactMap { $0 }.joined(separator: " — ")) { actions.openLine(line) }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "xmark.octagon")
+                    Text(form == .wide ? TitleStatus.failedWords(lines.count) ?? "" : TitleStatus.number(lines.count))
+                        .monospacedDigit()
+                }
+                .foregroundStyle(Tint.failure)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help(TitleStatus.failedLabel(lines.count))
+            .accessibilityLabel(TitleStatus.failedLabel(lines.count))
+            .accessibilityIdentifier("title-status-failed")
+        }
+    }
+
+    /// Running or in review: a count, and a menu of those tasks; a pick
+    /// opens it. `extra` lists queued tasks after the running ones. Nothing
+    /// with neither.
+    @ViewBuilder
+    private func taskMenu(
+        _ rows: [TaskRow], symbol: String, words: String?, label: String, id: String, extra: [ActivityLine] = []
+    ) -> some View {
+        if !rows.isEmpty || !extra.isEmpty {
             Menu {
                 ForEach(rows) { row in
                     Button("\(row.key) \(row.title)") { actions.openTask(row) }
                 }
+                if !extra.isEmpty {
+                    Section("Queued") {
+                        ForEach(extra) { line in
+                            Button([line.title, line.detail].compactMap { $0 }.joined(separator: " — ")) {
+                                actions.openLine(line)
+                            }
+                        }
+                    }
+                }
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: symbol)
-                    if form == .wide, let words {
+                    if form == .wide, let words, !words.isEmpty {
                         Text(words)
                     } else {
                         Text(TitleStatus.number(rows.count)).monospacedDigit()
@@ -324,6 +415,29 @@ struct TitleStatusView: View {
             .accessibilityLabel(label)
             .accessibilityIdentifier(id)
         }
+    }
+}
+
+/// The activity panel in its popover, reading today's spend as it opens.
+struct TitleActivityPopover: View {
+    let activity: TitleActivity
+    let actions: TitleStatusActions
+    let close: () -> Void
+
+    @State private var spend: ActivitySpend = .reading
+
+    var body: some View {
+        TitleActivityPanel(
+            activity: activity, spend: spend,
+            onOpen: { line in
+                close()
+                actions.openLine(line)
+            },
+            onOrchestrator: {
+                close()
+                actions.goToOrchestrator()
+            })
+        .task { spend = await actions.readSpend() }
     }
 }
 
@@ -397,7 +511,9 @@ private struct TitleStatusBoard: View {
         if let store = source.board {
             Observed(store: store, source: source, form: form, actions: actions)
         } else {
-            TitleStatusView(model: TitleStatus.model(source, board: .empty), form: form, actions: actions)
+            TitleStatusView(
+                model: TitleStatus.model(source, board: .empty), form: form, actions: actions,
+                activity: TitleStatus.activity(source, board: .empty, starts: [:]))
         }
     }
 
@@ -408,7 +524,9 @@ private struct TitleStatusBoard: View {
         let actions: TitleStatusActions
 
         var body: some View {
-            TitleStatusView(model: TitleStatus.model(source, board: store.board), form: form, actions: actions)
+            TitleStatusView(
+                model: TitleStatus.model(source, board: store.board, starts: store.starts), form: form,
+                actions: actions, activity: TitleStatus.activity(source, board: store.board, starts: store.starts))
         }
     }
 }
