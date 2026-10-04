@@ -288,7 +288,11 @@ extension ContentView {
                 shown: drawableLayouts(for: place).last { $0.column != .conversation }, keyboard: current,
                 settled: settled
             )
-            .background(WorkspaceStyle.document)
+            // The task is one card on the plane (ov-223): its header, tabs and
+            // body together, in the paper's color, inset by the window's gutter.
+            .clipShape(.card)
+            .surface(.content, in: .card, fill: WorkspaceStyle.document)
+            .padding(Gutter.window)
         case .workspace(let host, let id, .history(let status)?):
             if let client = store.clients[host], let workspace = board(host: host, id: id) {
                 BoardHistoryView(

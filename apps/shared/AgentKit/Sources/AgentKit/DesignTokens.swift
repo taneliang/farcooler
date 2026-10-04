@@ -156,6 +156,24 @@ extension Surface {
     public var drawsAnything: Bool { self != .window }
 }
 
+/// One family of floating surfaces: every member is `.surface(.floating, in:)`,
+/// and the group lets neighboring glass blend and morph as one piece instead of
+/// sampling each other. The only way a view draws glass inside glass. Members
+/// share a corner radius, concentric with the card they rest in.
+public struct FloatingGroup<Content: View>: View {
+    private let spacing: CGFloat
+    private let content: Content
+
+    public init(spacing: CGFloat = Spacing.group, @ViewBuilder content: () -> Content) {
+        self.spacing = spacing
+        self.content = content()
+    }
+
+    public var body: some View {
+        GlassEffectContainer(spacing: spacing) { content }
+    }
+}
+
 private struct SurfaceModifier<S: Shape>: ViewModifier {
     let level: Surface
     let shape: S

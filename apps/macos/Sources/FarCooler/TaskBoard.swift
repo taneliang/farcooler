@@ -1427,7 +1427,6 @@ struct TaskCard: View {
             if let usage {
                 TaskUsageView(state: usage, onRetry: onRetryUsage)
             }
-            Divider()
             record
         }
         .frame(maxWidth: TaskTypography.measure, alignment: .leading)
@@ -1596,6 +1595,8 @@ struct TaskCard: View {
 /// A question waiting on the person reading, and the ways to answer it:
 /// `TaskCard.offer`'s, drawn and nothing decided here.
 private struct QuestionAnswers: View {
+    @Environment(\.colorScheme) private var scheme
+
     let offer: TaskCard.Offer
     let onAnswer: (String) async -> Bool
     let draft: TaskCard.Draft
@@ -1648,7 +1649,8 @@ private struct QuestionAnswers: View {
         }
         .padding(1.5 * ColumnGrid.rhythm)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.07)))
+        // Amber, as every "needs you" is; the accent is for the answering buttons.
+        .background(Tint.attentionFill(scheme), in: .card)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("task-card-question")
         // The field comes back open, with what was in it, whenever this view
@@ -1743,7 +1745,7 @@ private struct TaskNoteView: View {
         .padding(.leading, pairedWithQuestion ? 2 * ColumnGrid.rhythm : 0)
         .overlay(alignment: .leading) {
             if pairedWithQuestion {
-                Capsule().fill(Color.secondary.opacity(0.5)).frame(width: 2)
+                Capsule().fill(.tertiary).frame(width: 2)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1765,9 +1767,7 @@ private struct TaskNoteView: View {
         }
         .padding(1.5 * ColumnGrid.rhythm)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.primary.opacity(0.05)))
+        .surface(.inset, in: .card)
     }
 
     /// "Status Change: Backlog → In Progress · 4m ago", or the bare

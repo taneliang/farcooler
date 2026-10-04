@@ -244,8 +244,9 @@ private struct MessageRow: View {
                         // `quaternary` rather than a hand-mixed opacity: it is the
                         // fill AppKit uses for exactly this — a grouped surface
                         // that must stay legible in both appearances without
-                        // anyone picking two numbers and hoping.
-                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 14))
+                        // anyone picking two numbers and hoping. A message is
+                        // a card, so `Radius.medium`.
+                        .background(.quaternary, in: .card)
 
                     if let onEdit {
                         Button("Edit", action: onEdit)
@@ -366,7 +367,6 @@ private struct ToolRowView: View {
                     accessory: { EmptyView() }
                 ) {
                     VStack(alignment: .leading, spacing: 0) {
-                        Divider()
                         VStack(alignment: .leading, spacing: 8) {
                             if let content = tool.content, !content.isEmpty {
                                 // No fill of its own: it is already inside one.
@@ -388,26 +388,17 @@ private struct ToolRowView: View {
 
             // The question, on the thing being asked about.
             if let pending, let onAnswer {
-                Divider()
                 ApprovalControls(options: pending.options, onChoose: onAnswer)
                     .padding(9)
             }
         }
-        .background(.quinary, in: RoundedRectangle(cornerRadius: 7))
-        .overlay {
-            // Outlined only while it is waiting on you. A tool call that needs
-            // nothing should not shout, and one that does should be findable
-            // without reading the transcript.
-            if pending != nil {
-                // §01's one saturated hue, from the one place it is written
-                // down. A tool call that has stopped and is waiting for a
-                // person to answer is the definition of `needsYou`, so this
-                // outline and the sidebar's amber ring are the same color by
-                // construction rather than by two hands typing `.orange`.
-                RoundedRectangle(cornerRadius: 7)
-                    .strokeBorder(GlancePalette.amber(scheme).opacity(0.45))
-            }
-        }
+        .surface(.inset, in: .card)
+        // Amber only while it is waiting on you, as a fill laid over the
+        // block's own: a tool call that needs nothing should not shout, and
+        // one that does should be findable without reading the transcript. The
+        // fill is the one `Tint` writes down for "needs you", the same amber as
+        // the sidebar's ring, and there is no outline.
+        .background(pending != nil ? Tint.attentionFill(scheme) : Color.clear, in: .card)
         // Driven by the model rather than a timer, exactly as the thought row
         // is: the fold follows the turn moving on, on the shared spring.
         .animation(BoardMotion.list(reduceMotion: reduceMotion), value: pending != nil)
@@ -493,6 +484,7 @@ private struct SubagentBlockView: View {
     /// `nil` means nobody has said, so the automatic rule applies.
     @State private var toggled: Bool?
     @State private var showingAll = false
+    @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// How many children a running block shows. Enough to see what it is
@@ -537,7 +529,6 @@ private struct SubagentBlockView: View {
         ) {
             if !block.children.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
-                    Divider()
                     VStack(alignment: .leading, spacing: 8) {
                         // Above the rows it hides, because that is where they are:
                         // these are the OLDEST children, and an affordance for them
@@ -568,11 +559,8 @@ private struct SubagentBlockView: View {
                 }
             }
         }
-        .background(
-            running || pending != nil
-                ? AnyShapeStyle(.quinary)
-                : AnyShapeStyle(Color.primary.opacity(0.035)),
-            in: RoundedRectangle(cornerRadius: 7))
+        .surface(.inset, in: .card)
+        .background(pending != nil ? Tint.attentionFill(scheme) : Color.clear, in: .card)
         // Driven by the model rather than by the toggle alone: children arrive
         // while the block is open, and an unanimated insert makes the
         // transcript below it jump. The fold follows the block finishing.
@@ -642,6 +630,8 @@ private struct SubagentBlockView: View {
 private struct GapRow: View {
     let reason: GapReason
 
+    @Environment(\.colorScheme) private var scheme
+
     var body: some View {
         // The sentence, then — where there is one — the adapter's account of
         // the refusal beneath it. `reason.sentence` and `reason.detail` are
@@ -674,9 +664,7 @@ private struct GapRow: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            reason.isInformational ? Color.secondary.opacity(0.08) : Color.orange.opacity(0.10),
-            in: RoundedRectangle(cornerRadius: 6))
+        .background(reason.isInformational ? Fill.inset() : Tint.attentionFill(scheme), in: .control)
     }
 }
 
@@ -813,19 +801,10 @@ struct QueuedRow: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            // Opaque for the same reason the plan panel is: it floats over the
-            // transcript, and a half-transparent bubble with conversation
-            // showing through it is not a bubble.
-            .background {
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(.regularMaterial)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 14)
-                            .strokeBorder(
-                                .tertiary,
-                                style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                    }
-            }
+            // Glass, a member of the family the plan and the composer are in:
+            // it floats over the transcript. "Queued" under the text says it
+            // hasn't gone anywhere yet, which the dashed outline used to.
+            .surface(.floating, in: .chatFamily)
         }
     }
 

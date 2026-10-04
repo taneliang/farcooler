@@ -80,7 +80,6 @@ struct AgentComposer: View {
         VStack(alignment: .leading, spacing: 10) {
             if pickerOpen {
                 picker
-                Divider()
             }
             if !attachments.isEmpty { attachmentStrip }
 
@@ -242,7 +241,8 @@ struct AgentComposer: View {
         }
         .overlay {
             if isTargetedForDrop {
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle.chatFamily
+                    // style-exempt: a drop target's state
                     .strokeBorder(Color.accentColor, lineWidth: 2)
                     .padding(3)
                     .allowsHitTesting(false)
@@ -287,16 +287,14 @@ struct AgentComposer: View {
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(
-                    index == highlight ? Color.primary.opacity(0.08) : .clear,
-                    in: RoundedRectangle(cornerRadius: 5))
+                .background(index == highlight ? Fill.selection(active: true) : Color.clear, in: .control)
                 .contentShape(Rectangle())
                 .onTapGesture { accept(item.name) }
             }
         }
         .padding(6)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.08)))
+        // An inset group inside the glass composer: a fill is its edge.
+        .surface(.inset, in: .control)
         .padding(.horizontal, 10)
         .padding(.top, 8)
     }
@@ -417,7 +415,7 @@ struct AgentComposer: View {
                             .resizable()
                             .scaledToFill()
                             .frame(width: 40, height: 40)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .clipShape(.control)
                             .clipped()
                         Button {
                             attachments.removeAll { $0.id == attachment.id }
@@ -425,6 +423,7 @@ struct AgentComposer: View {
                             Image(systemName: "xmark.circle.fill")
                                 .font(.system(size: 12))
                                 .symbolRenderingMode(.palette)
+                                // style-exempt: a white mark on a black disc, over whatever photo it is on
                                 .foregroundStyle(.white, .black.opacity(0.6))
                         }
                         .buttonStyle(.plain)
@@ -1191,16 +1190,14 @@ extension String {
 
 
 /// The composer's surface: Liquid Glass, because that is what a control resting
-/// ON scrolling content is on this platform.
+/// ON scrolling content is on this platform, in the chat family's one radius.
 ///
 /// No fallback. macOS 26 is this app's floor, so the material-and-hairline
 /// approximation that used to sit behind an availability check was a second
 /// implementation nobody ran — the kind that rots quietly and then misleads the
 /// next person who reads it as documentation of what the app does.
 struct GlassCard: ViewModifier {
-    var cornerRadius: CGFloat = 20
-
     func body(content: Content) -> some View {
-        content.glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+        content.surface(.floating, in: .chatFamily)
     }
 }

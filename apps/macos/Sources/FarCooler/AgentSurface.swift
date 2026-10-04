@@ -132,8 +132,8 @@ struct AgentSurface: View {
             // itself and pegged a core. Available now that the floor is macOS 26.
             .scrollEdgeEffectStyle(.soft, for: .bottom)
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                GlassEffectContainer(spacing: 8) {
-                    VStack(spacing: 8) {
+                FloatingGroup(spacing: Spacing.group) {
+                    VStack(spacing: Spacing.group) {
                         // The plan and the queue are ATTACHED to the composer, not
                         // scattered around the pane.
                         //
@@ -324,7 +324,7 @@ struct AgentSurface: View {
 
             // The end of the content, and what following the tail targets.
             Color.clear
-                .frame(height: 1)
+                .frame(height: 1)  // style-exempt: the scroll anchor at the end, which draws nothing
                 .id(Self.endOfTranscript)
         }
         // What the scroll view holds still.
@@ -518,7 +518,7 @@ struct AgentSurface: View {
 /// Pinned above the transcript rather than placed in it. The list is current
 /// state, not something that was said at a moment — inline it would scroll away
 /// exactly when the work it describes is still going on.
-private struct PlanPanel: View {
+struct PlanPanel: View {
     let entries: [PlanEntry]
 
     @State private var expanded = true
@@ -570,16 +570,11 @@ private struct PlanPanel: View {
             .padding(.horizontal, 12)
             .padding(.bottom, 8)
         }
-        // OPAQUE, because it floats over a scrolling transcript.
-        //
-        // `.quinary` is a translucent fill, which was fine when this was a
-        // header with nothing behind it. Over the conversation it let the text
-        // through, and expanding the list turned both into one unreadable
-        // overlap. A material is the platform's answer to "something legible
-        // resting on content that moves under it".
+        // Glass, a member of the family the composer is in: it floats over a
+        // scrolling transcript, and glass is the platform's answer to
+        // "something legible resting on content that moves under it".
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
+        .surface(.floating, in: .chatFamily)
     }
 
 
@@ -593,7 +588,7 @@ private struct PlanPanel: View {
 /// A permission request, as an inline card rather than a sheet — the agent is
 /// paused waiting on it, so it belongs in the flow of the conversation it
 /// interrupted, not in a window layered on top of it.
-private struct ApprovalCard: View {
+struct ApprovalCard: View {
     /// §01's amber is a different color in each appearance — "Not a filter
     /// flip" — so this card resolves it rather than holding a constant.
     @Environment(\.colorScheme) private var scheme
@@ -616,12 +611,9 @@ private struct ApprovalCard: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            GlancePalette.amber(scheme).opacity(0.08), in: RoundedRectangle(cornerRadius: 8)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(GlancePalette.amber(scheme).opacity(0.3)))
+        // The amber fill is the whole card: the glyph carries the state, with no
+        // outline.
+        .background(Tint.attentionFill(scheme), in: .card)
     }
 }
 
@@ -638,7 +630,7 @@ private struct ApprovalCard: View {
 /// **Every word here belongs to this app.** The runner sends
 /// `not-authenticated`; the sentence is `AgentFailure`'s. A raw error string
 /// from a Rust process must never reach this view.
-private struct AgentFailureRow: View {
+struct AgentFailureRow: View {
     @Environment(\.colorScheme) private var scheme
 
     let failure: AgentFailure
@@ -667,12 +659,9 @@ private struct AgentFailureRow: View {
         }
         .padding(12)
         .frame(maxWidth: 420, alignment: .leading)
-        .background(
-            GlancePalette.amber(scheme).opacity(0.08), in: RoundedRectangle(cornerRadius: 8)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(GlancePalette.amber(scheme).opacity(0.3)))
+        // The amber fill is the whole card: the glyph carries the state, with no
+        // outline.
+        .background(Tint.attentionFill(scheme), in: .card)
         .padding(16)
     }
 }
