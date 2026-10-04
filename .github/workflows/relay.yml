@@ -116,7 +116,7 @@ jobs:
           ref: ${{ inputs.ref || github.ref }}
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: services/relay/package-lock.json
       - run: npm ci

@@ -579,7 +579,7 @@ jobs:
         if: vars.SPARKLE_PUBLISH == 'true' && env.HAS_SIGN_IDENTITY == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .nvmrc
 
       - name: Fetch Sparkle's signing tool
         if: vars.SPARKLE_PUBLISH == 'true' && env.HAS_SIGN_IDENTITY == 'true'
