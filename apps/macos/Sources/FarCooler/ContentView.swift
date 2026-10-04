@@ -11,7 +11,7 @@ struct ContentView: View {
     @ObservedObject private var themes = Themes.shared
     /// A click on a notification, waiting to be opened (ov-106, ov-183).
     @ObservedObject var noticeOpener = DestinationOpener.shared
-    @Environment(\.openSettings) private var openSettings
+    @Environment(\.openSettings) var openSettings
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.windowVisible) private var windowVisible
@@ -34,7 +34,7 @@ struct ContentView: View {
     /// on, and clicking `+` on the second repository re-opened the first.
     /// `sheet(item:)` presents a new value as a new presentation, so each `+`
     /// gets a view that has never chosen anything.
-    private struct NewWorktreeIntent: Identifiable {
+    struct NewWorktreeIntent: Identifiable {
         /// The project the control named, by display name, which is what the
         /// sheet matches on. Empty
         /// when the control named no project at all.
@@ -49,7 +49,7 @@ struct ContentView: View {
         var id: String { "\(host)\u{1}\(project)" }
     }
 
-    @State private var newWorktreeIntent: NewWorktreeIntent?
+    @State var newWorktreeIntent: NewWorktreeIntent?
     /// Each worktree's change state, kept across selection changes: a review is
     /// a session, not a mode. Coming back to a worktree should still be showing
     /// the file you were reading.
@@ -67,15 +67,15 @@ struct ContentView: View {
     /// Keyed by both because an id is minted per daemon: two runners can
     /// hand back rows that collide on id alone. Same lifetime rule as
     /// `changesStores` — see `boardStore(for:client:host:)`.
-    @State private var boardStores: [String: TaskBoardStore] = [:]
-    @State private var showAddRepository = false
+    @State var boardStores: [String: TaskBoardStore] = [:]
+    @State var showAddRepository = false
     @State private var showAdd = false
-    @State private var showShortcuts = false
-    @State private var showQuickCreate = false
+    @State var showShortcuts = false
+    @State var showQuickCreate = false
     /// The ⌘N panel's start in flight, kept here so it survives the panel
     /// closing and reopening.
     @StateObject private var taskSubmission = TaskSubmission()
-    @AppStorage("tasks.lastProject") private var lastProject = ""
+    @AppStorage("tasks.lastProject") var lastProject = ""
     /// Where the window was when the app last closed, as a `Destination`'s
     /// encoding: the workspace and what's open in it, a task's tab and agent,
     /// the pane the keyboard was in (ov-182). Recorded as it changes rather
@@ -100,24 +100,24 @@ struct ContentView: View {
     @State private var removeWorktree: Worktree?
     @State private var removeRepository: RepositoryToRemove?
     @State private var showResumeBranch = false
-    @State private var showPalette = false
+    @State var showPalette = false
     /// Quick-create's draft, reachable from here so that what was typed into
     /// the palette arrives in the panel that acts on it. See `perform`.
-    @AppStorage("tasks.draft") private var taskDraft = ""
+    @AppStorage("tasks.draft") var taskDraft = ""
     /// One divider resize at a time. See `resizeDivider`.
-    @State private var resizingDivider = false
+    @State var resizingDivider = false
     /// Set when `setPaneMode` comes back `confirmationRequired` — a turn is in
     /// flight and switching would cancel it. Drives a sheet the same way
     /// `removeWorktree` does, rather than a banner: this refusal has an
     /// answer ("cancel it anyway?") a banner cannot offer.
-    @State private var pendingPaneModeSwitch: PaneModeConfirmation?
+    @State var pendingPaneModeSwitch: PaneModeConfirmation?
     /// What an editor said when it would not start.
     ///
     /// Its own state rather than routed through `errorBanner`, which is
     /// rendered only by `fleetPlaceholder`'s error branch and by the general
     /// banner below — the opposite of when this control exists. See
     /// `ErrorBanner`, which shows it.
-    @State private var editorError: String?
+    @State var editorError: String?
     /// Each action's result, shown by the banners over the detail pane.
     ///
     /// Filed by `act(_:on:target:subject:default:_:)` under the action and
@@ -129,13 +129,13 @@ struct ContentView: View {
     @StateObject var outcomes = ActionOutcomes()
     /// A sentence the app wrote that isn't one action's result: the one
     /// notice slot, cleared on navigation. See `ActionOutcomes.notice`.
-    private var errorBanner: String? {
+    var errorBanner: String? {
         get { outcomes.notice }
         nonmutating set { outcomes.notice = newValue }
     }
     /// Workspaces whose orchestrator this app has asked to start and the
     /// runner hasn't answered, by `orchestratorKey`.
-    @State private var startingOrchestrators = OrchestratorStarts()
+    @State var startingOrchestrators = OrchestratorStarts()
     /// A Replace Orchestrator waiting on its confirmation.
     @State private var orchestratorReplacement: OrchestratorReplacement?
     /// Use as Orchestrator on a workspace that has one, until confirmed.
@@ -154,13 +154,13 @@ struct ContentView: View {
     @State var taskTabs = TaskTabMemory()
     /// The Needs You item ⌃⌘N last opened, by its key: where the next
     /// press goes on from, while the window is still showing it.
-    @State private var lastAttention: String?
+    @State var lastAttention: String?
     /// The navigator's width, as its trailing edge was last dropped, on
     /// this Mac (ov-92).
     @AppStorage("workspace.navigatorWidth") private var navigatorWidth = Double(WorkspaceColumns.navigatorDefault)
     /// Asks the navigator for the keyboard: bumped by ⌥⌘2, and by a click
     /// on a row, so ↑ and ↓ walk it from there.
-    @State private var boardFocusRequest = 0
+    @State var boardFocusRequest = 0
     /// Focus (⌃⌘↩): a task or worktree opened, alone, without the
     /// navigator.
     @State var focusColumn = false
@@ -176,20 +176,20 @@ struct ContentView: View {
     @State var jumpBar = JumpBarWindow()
     /// The task whose changes the keyboard is in: the Diff menu's
     /// shortcuts are for the diff you clicked into.
-    @State private var changesFocus: String?
+    @State var changesFocus: String?
     /// The key monitor that turns Esc into Back. See `EscapeBack`.
     @State private var escapeMonitor: Any?
     /// ⌥⌘2 gave the board the keyboard: no terminal takes typed keys until
     /// a pane is clicked or chosen again.
-    @State private var keyboardOnBoard = false
+    @State var keyboardOnBoard = false
     /// ⌥⌘2 from a task, going up to the board: the selection's change
     /// leaves the keyboard on the board this once.
-    @State private var boardKeyboardPending = false
+    @State var boardKeyboardPending = false
     /// This window, for the Esc monitor, which hears every window's keys.
     @State var windowBox = WindowBox()
     /// New Workspace…, with the name typed into the palette, while its
     /// sheet is up.
-    @State private var newWorkspaceName: NewWorkspaceName?
+    @State var newWorkspaceName: NewWorkspaceName?
     struct NewWorkspaceName: Identifiable {
         let name: String
         var id: String { name }
@@ -197,12 +197,12 @@ struct ContentView: View {
     /// Whether this window's navigator is put away (⌘B, ov-178): as the
     /// last window left it, and out the first time. See
     /// `NavigatorVisibility`.
-    @State private var navigatorHidden = NavigatorVisibility.hiddenAtLaunch()
+    @State var navigatorHidden = NavigatorVisibility.hiddenAtLaunch()
     /// Bumped by ⌘0 (Switch Workspace…): the title bar's switcher opens.
     @State private var switcherRequest = 0
     /// When each workspace's orchestrator start began, by `host|workspace`:
     /// this app's, or one first seen starting. See `ConversationColumn.slowStart`.
-    @State private var orchestratorStartedAt: [String: Date] = [:]
+    @State var orchestratorStartedAt: [String: Date] = [:]
 
     /// What confirming a pane-mode switch would do, and to which pane.
     struct PaneModeConfirmation: Identifiable {
@@ -805,13 +805,13 @@ struct ContentView: View {
 
     /// Repositories New Workspace… can make one in: on runners with
     /// workspaces.
-    private var workspaceRepositories: [(host: String, repository: Repository)] {
+    var workspaceRepositories: [(host: String, repository: Repository)] {
         store.repositories.filter { store.fleet.runnerWorkspaces[$0.host] != nil }
     }
 
     /// Every workspace, for the palette, in the switcher's order
     /// (`WorkspaceDirectory`).
-    private var paletteWorkspaces: [PaletteWorkspace] {
+    var paletteWorkspaces: [PaletteWorkspace] {
         WorkspaceDirectory.groups(in: store.fleet).flatMap { group in
             group.workspaces.map { workspace in
                 PaletteWorkspace(
@@ -823,7 +823,7 @@ struct ContentView: View {
     }
 
     /// Every task on a board this window has read, for the palette.
-    private var paletteTasks: [PaletteTask] {
+    var paletteTasks: [PaletteTask] {
         boardStores.values.flatMap { board -> [PaletteTask] in
             let host = board.client.target
             let name = board.title
@@ -838,7 +838,7 @@ struct ContentView: View {
     /// A repository the switcher's Remove Repository… named, on its way to
     /// `RemoveRepositorySheet`.
     /// `.sheet(item:)` needs `Identifiable`; a bare tuple is not one.
-    private struct RepositoryToRemove: Identifiable {
+    struct RepositoryToRemove: Identifiable {
         let host: String
         let repository: Repository
         var id: String { "\(host)\u{1}\(repository.id)" }
@@ -858,7 +858,7 @@ struct ContentView: View {
     /// Gated on `offersUpdate` rather than on "not current": a runner whose
     /// version could not be read is not a runner to offer an update for, and a
     /// runner nobody can reach is not one either. See `DaemonSkew`.
-    private func daemonUpdate(for host: String) -> DaemonUpdateTarget? {
+    func daemonUpdate(for host: String) -> DaemonUpdateTarget? {
         // Never for a runner ahead of this Mac (ov-143): updating it would
         // install this Mac's older build over it. The runner item says so
         // instead (`RunnerStatusItem`, `aheadHosts`).
@@ -871,7 +871,7 @@ struct ContentView: View {
     /// The repository a project header stands for: by its uuid, which a
     /// worktree row carries as `repository_id`, and by its display name only
     /// from a CLI too old to send that — two repositories can share a name.
-    private func repository(host: String, id: String?, project: String) -> Repository? {
+    func repository(host: String, id: String?, project: String) -> Repository? {
         let here = store.repositories.filter { $0.host == host }.map(\.repository)
         if let id { return here.first { $0.id == id } }
         return here.first { $0.displayName == project }
@@ -882,7 +882,7 @@ struct ContentView: View {
     /// The sheet already has a repository picker; this just answers it in
     /// advance, because someone clicking `+` on a project header has already
     /// said which one.
-    private func newWorktree(host: String, project: String) {
+    func newWorktree(host: String, project: String) {
         newWorktreeIntent = NewWorktreeIntent(project: project, host: host)
     }
 
@@ -918,13 +918,13 @@ struct ContentView: View {
 
     /// A plain, non-optional entry point into `newMainTerminal(host:repositoryID:project:)`,
     /// for the switcher's New Terminal in Checkout.
-    private func startMainTerminal(host: String, repositoryID: String?, project: String) {
+    func startMainTerminal(host: String, repositoryID: String?, project: String) {
         Task { await newMainTerminal(host: host, repositoryID: repositoryID, project: project) }
     }
 
     /// Move a worktree to another workspace (`farcooler worktree assign`):
     /// Move to Workspace ▸.
-    private func move(_ worktree: Worktree, to workspace: WorkspaceSummary) {
+    func move(_ worktree: Worktree, to workspace: WorkspaceSummary) {
         Task {
             // Refused first, as every write here is; see `act`. Filed as
             // the move's own result, which a selection change leaves alone.
@@ -944,7 +944,7 @@ struct ContentView: View {
     /// Start `workspace`'s orchestrator, or replace the one running. The row
     /// says "Starting Orchestrator…" until the runner answers; a refusal is
     /// the banner, in `orchestratorRefusal`'s words.
-    private func startOrchestrator(
+    func startOrchestrator(
         _ workspace: WorkspaceSummary, host: String, harness: OrchestratorHarness, replace: Bool
     ) {
         if let why = store.refusalSentence(for: host) {
@@ -964,7 +964,7 @@ struct ContentView: View {
 
     /// Every pane on one runner, for the board to find the ones working a
     /// task — or none while that runner is refused. See `BoardAgents.on`.
-    private func boardAgents(host: String, client: DaemonClient) -> BoardAgents {
+    func boardAgents(host: String, client: DaemonClient) -> BoardAgents {
         BoardAgents.on(
             store.fleet.worktrees.filter { ($0.host ?? "") == host },
             state: client.state, build: client.daemonBuild)
@@ -973,7 +973,7 @@ struct ContentView: View {
     /// Why a selected board can't be drawn, said only as far as this app
     /// knows it: "gone" only from a runner that is answering and has listed
     /// its projects without it.
-    private func missingBoardSentence(host: String) -> String {
+    func missingBoardSentence(host: String) -> String {
         guard let client = store.clients[host] else {
             return "The runner this board was on isn’t in Far Cooler anymore."
         }
@@ -986,7 +986,7 @@ struct ContentView: View {
     /// Go to a pane a card offered, as the fleet has it now. See
     /// `BoardPane.landing`: its worktree when the pane has gone, and the
     /// board with a sentence when the worktree has too.
-    private func go(to pane: BoardPane) {
+    func go(to pane: BoardPane) {
         guard let landed = BoardPane.landing(for: pane, in: store.fleet) else {
             errorBanner = "That agent has closed, and its worktree is gone."
             return
@@ -1234,7 +1234,7 @@ struct ContentView: View {
 
     /// Every layout the detail draws for `selection`: `WorkspaceScreen`'s,
     /// and of a workspace's, only the columns its width draws.
-    private func shownLayouts(for selection: Selection?) -> [ShownLayout] {
+    func shownLayouts(for selection: Selection?) -> [ShownLayout] {
         let all = drawableLayouts(for: selection)
         guard let selection, let scene = workspaceScene(selection) else { return all }
         let arrangement = detailWidth.map { _ in
@@ -1281,7 +1281,7 @@ struct ContentView: View {
     }
 
     /// What the detail draws now.
-    private var shown: [ShownLayout] { shownLayouts(for: selection) }
+    var shown: [ShownLayout] { shownLayouts(for: selection) }
 
     /// Every layout `selection` could draw, on screen or not: the
     /// conversation's included while it's kept hidden behind a task, so it's
@@ -1373,7 +1373,7 @@ struct ContentView: View {
         var key: String { "\(host)|\(board ?? "")" }
     }
 
-    private func workspaceScene(_ selection: Selection) -> WorkspaceScene? {
+    func workspaceScene(_ selection: Selection) -> WorkspaceScene? {
         Self.workspaceScene(
             selection, in: store.fleet, repositories: store.clients[selection.host ?? ""]?.repositories.map(\.id) ?? [])
     }
@@ -1533,7 +1533,7 @@ struct ContentView: View {
     }
 
     /// What a switcher item does, by the routes the rest of the window uses.
-    private func perform(_ command: SwitcherCommand) {
+    func perform(_ command: SwitcherCommand) {
         switch command {
         case .go(let target): selection = target
         case .needsYou: selection = .needsYou
@@ -1567,7 +1567,7 @@ struct ContentView: View {
             adoptable: listed.terminals.filter { offer($0) == .use })
     }
 
-    private func perform(_ item: WorktreeMenu.Item, on ws: Worktree) {
+    func perform(_ item: WorktreeMenu.Item, on ws: Worktree) {
         let host = ws.host ?? ""
         let listed = worktree(host: host, id: ws.id) ?? ws
         switch item {
@@ -1599,7 +1599,7 @@ struct ContentView: View {
 
     /// What a line of the runner item's menu does. The update opens its
     /// card from the item itself (`RunnerStatusMenu`).
-    private func perform(_ entry: RunnerStatusItem.Entry) {
+    func perform(_ entry: RunnerStatusItem.Entry) {
         switch entry {
         case .reconnect(let host): store.reconnect(host)
         case .reconnectAll: for trouble in runnerTroubles { store.reconnect(trouble.host) }
@@ -1613,7 +1613,7 @@ struct ContentView: View {
     /// The workspace's worktrees in the board list's order, for the scene
     /// the selection draws: what ⌃⌘↑ and ⌃⌘↓ walk and the breadcrumb's
     /// menu lists.
-    private func worktreeEntries(_ scene: WorkspaceScene) -> [WorkspaceWorktrees.Entry] {
+    func worktreeEntries(_ scene: WorkspaceScene) -> [WorkspaceWorktrees.Entry] {
         guard let summary = scene.summary, let client = store.clients[scene.host] else { return [] }
         let board = boardStore(for: summary, client: client, host: scene.host).board
         return WorkspaceWorktrees.entries(in: summary, host: scene.host, board: board, fleet: store.fleet)
@@ -1683,7 +1683,7 @@ struct ContentView: View {
 
     /// ↑ or ↓ in the navigator onto `item`: it's selected, and the
     /// navigator keeps the keyboard, to go on (ov-92).
-    private func step(to item: NavigatorItem, host: String, workspace: WorkspaceSummary) {
+    func step(to item: NavigatorItem, host: String, workspace: WorkspaceSummary) {
         switch item {
         case .orchestrator:
             selectOrchestrator(keyboard: .board)
@@ -2099,7 +2099,7 @@ struct ContentView: View {
     /// The orchestrator selected (⌥⌘1, its row, ↑ or ↓ onto it): whatever
     /// was open goes, and `keyboard` says where the keyboard goes, into the
     /// orchestrator or staying on the navigator.
-    private func selectOrchestrator(keyboard: WorkspaceNavigation.KeyTarget) {
+    func selectOrchestrator(keyboard: WorkspaceNavigation.KeyTarget) {
         guard let current = selection, let scene = workspaceScene(current) else { return }
         trail = nil
         focusColumn = false
@@ -2112,7 +2112,7 @@ struct ContentView: View {
 
     /// The keyboard to what the main area shows: what's opened, else the
     /// orchestrator.
-    private func keyMain() {
+    func keyMain() {
         let layouts = shownLayouts(for: selection)
         if let pane = (layouts.last(where: { $0.column != .conversation }) ?? layouts.first)
             .flatMap(WorkspaceScreen.columnPane)
@@ -2127,7 +2127,7 @@ struct ContentView: View {
 
     /// The keyboard to the task's or worktree's terminal, if it has one on
     /// screen, else to the view itself, so Esc and the arrows reach it.
-    private func keyOpened() {
+    func keyOpened() {
         if let pane = shownLayouts(for: selection).last(where: { $0.column != .conversation })
             .flatMap(WorkspaceScreen.columnPane)
         {
@@ -2323,7 +2323,7 @@ struct ContentView: View {
 
     /// Open `worktree`, or `terminal` in it, as its navigator row and its card
     /// do. See `navigate(to:key:)`.
-    private func open(_ worktree: Worktree, terminal: String?) {
+    func open(_ worktree: Worktree, terminal: String?) {
         navigate(to: Self.opening(worktree, terminal: terminal, in: store.fleet))
     }
 
@@ -2532,7 +2532,7 @@ struct ContentView: View {
     /// guaranteed to be present, the one everything else is optional next to.
     /// Falls back to any repository so the picker still has something to
     /// preselect the very first time, before this Mac has one of its own.
-    private var defaultProjectID: String? {
+    var defaultProjectID: String? {
         store.repositories.first { $0.host.isEmpty }?.repository.id
             ?? store.repositories.first?.repository.id
     }
@@ -2602,7 +2602,7 @@ struct ContentView: View {
     /// what ⌘] and ⌘[, ⌥⌘↓ and ⌥⌘↑ and ⌃⌘1… step through (spec §4.9).
     /// Nothing lists every terminal, so stepping through all of them would
     /// walk a list nobody can see.
-    private var allTerminals: [PaneRef] { Self.stepOrder(shown) }
+    var allTerminals: [PaneRef] { Self.stepOrder(shown) }
 
     /// `allTerminals` for what's shown: column by column, each layout's
     /// panes in tmux's order.
@@ -2614,9 +2614,9 @@ struct ContentView: View {
 
     /// The pane the keyboard acts on, with its worktree and terminal. See
     /// `WorkspaceScreen.keyPane`.
-    private var selectedPane: PaneRef? { WorkspaceScreen.keyPane(keyPane, in: shown, selection: selection) }
+    var selectedPane: PaneRef? { WorkspaceScreen.keyPane(keyPane, in: shown, selection: selection) }
 
-    private var selectedTerminal: (worktree: Worktree, terminal: Terminal)? {
+    var selectedTerminal: (worktree: Worktree, terminal: Terminal)? {
         guard let pane = selectedPane, let worktree = worktree(host: pane.host, id: pane.worktree),
             let terminal = worktree.terminals.first(where: { $0.id == pane.terminal })
         else { return nil }
@@ -2631,7 +2631,7 @@ struct ContentView: View {
     /// not through the window tmux calls active, which in the main checkout
     /// can be an orchestrator's. With two columns showing one worktree's
     /// layouts, the one holding the key pane.
-    private func onScreen(in ws: Worktree) -> (group: PaneGroup, groups: [PaneGroup])? {
+    func onScreen(in ws: Worktree) -> (group: PaneGroup, groups: [PaneGroup])? {
         let mine = shown.filter { $0.host == (ws.host ?? "") && $0.worktree.id == ws.id }
         let pick = selectedPane.flatMap { key in mine.first { $0.contains(key) } } ?? mine.last
         return pick.map { ($0.group, $0.groups) }
@@ -2734,11 +2734,11 @@ struct ContentView: View {
     // MARK: - Tiling
 
     /// The worktree a tiling keystroke acts on.
-    private var tileTarget: Worktree? { currentWorktree }
+    var tileTarget: Worktree? { currentWorktree }
 
     /// What the menu bar can act on in this window: each item dimmed when
     /// what it reads here has nothing to act on (ov-211).
-    private var menuFocus: MainWindowFocus {
+    var menuFocus: MainWindowFocus {
         let scene = selection.flatMap(workspaceScene)
         let terminals = allTerminals
         var focus = MainWindowFocus(
@@ -2806,7 +2806,7 @@ struct ContentView: View {
     /// This file no longer contributes geometry. Directional focus used to be
     /// worked out here from a recomputed arrangement; it is now read off the
     /// rectangles tmux reported, which is the only copy.
-    private func tile(_ command: TileCommand) async {
+    func tile(_ command: TileCommand) async {
         guard let worktree = tileTarget else { return }
         let screen = onScreen(in: worktree)
         let group = screen?.group
@@ -2983,7 +2983,7 @@ struct ContentView: View {
     /// One call, and the daemon is the one deciding whether that is even
     /// possible — a client guessing "this preset can't be an agent" would be
     /// exactly the kind of state the design says clients never derive.
-    private func togglePaneMode(_ terminal: Terminal, in worktree: Worktree) async {
+    func togglePaneMode(_ terminal: Terminal, in worktree: Worktree) async {
         let target = terminal.isAgentPane ? "terminal" : "agent"
         let result = await act(
             .switchMode, on: worktree, target: terminal.id, subject: Self.quoted(terminal),
@@ -3048,7 +3048,7 @@ struct ContentView: View {
     /// — losing most of them over a fast drag, so the divider followed the pointer
     /// at a fraction of its speed.
     @discardableResult
-    private func resizeDivider(
+    func resizeDivider(
         _ terminal: String, side: TileDirection, cells: Int, in worktree: Worktree
     ) -> Bool {
         guard cells != 0, !resizingDivider else { return false }
@@ -3068,7 +3068,7 @@ struct ContentView: View {
     }
 
     /// Works across layouts too: the pane leaves whichever one it was in.
-    private func placePane(
+    func placePane(
         _ dragged: String, onto target: String, side: TileDirection, in worktree: Worktree
     ) {
         let shorts = [dragged, target].compactMap { id in
@@ -3096,7 +3096,7 @@ struct ContentView: View {
     /// "the thing I am looking at" and "the thing the layout says is focused" cannot
     /// disagree. `preferring` is for the cases where the command was about a
     /// specific terminal and that terminal should win.
-    private func reveal(
+    func reveal(
         _ groups: [PaneGroup], in worktree: Worktree, preferring: String? = nil
     ) {
         let host = worktree.host ?? ""
@@ -3129,7 +3129,7 @@ struct ContentView: View {
     /// in the conversation or a task's column, the selection stays and only
     /// the key pane moves. A pane on no column of this view goes to where it
     /// lives, as `land(on:)` does.
-    private func focus(_ pane: PaneRef) {
+    func focus(_ pane: PaneRef) {
         changesFocus = nil
         keyboardOnBoard = false
         let inConversation = shown.contains { $0.column == .conversation && $0.contains(pane) }
@@ -3145,7 +3145,7 @@ struct ContentView: View {
     /// ⌥⌘1, ⌥⌘2, ⌥⌘3 (ov-92): the orchestrator selected and given the
     /// keyboard; the navigator given the keyboard; the main area, whatever
     /// it shows, given the keyboard.
-    private func focusWorkspaceColumn(_ command: AppCommand) {
+    func focusWorkspaceColumn(_ command: AppCommand) {
         // A loose worktree beside its repository's navigator takes them too.
         guard let current = selection, workspaceScene(current) != nil else { return }
         switch command {
@@ -3177,7 +3177,7 @@ struct ContentView: View {
 
     /// What "ov-190" in the selection's text links to: a task on its
     /// runner's boards read so far, opened as the palette opens one.
-    private var taskKeyLinker: TaskKeyLinker {
+    var taskKeyLinker: TaskKeyLinker {
         guard let host = selection?.host else { return .none }
         return .mac(
             host: host, workspaces: store.fleet.runnerWorkspaces[host] ?? [], stores: boardStores.values,
@@ -3186,7 +3186,7 @@ struct ContentView: View {
 
     /// A finished status's History page, in the main area (ov-103). The
     /// navigator keeps the keyboard, as it does for a task glanced at.
-    private func openHistory(_ status: TaskStatus, host: String, workspace: String) {
+    func openHistory(_ status: TaskStatus, host: String, workspace: String) {
         let next = Selection.workspace(host: host, workspace: workspace, focus: .history(status))
         guard next != selection else { return }
         trail = nil
@@ -3197,7 +3197,7 @@ struct ContentView: View {
     /// A row in the navigator chosen: a click opens its task, or, on the
     /// task already open, goes back to the orchestrator; ↑ and ↓ (`glance`)
     /// only open. Either way the navigator keeps the keyboard, to go on.
-    private func chooseTask(_ id: String, host: String, workspace: String, glance: Bool) {
+    func chooseTask(_ id: String, host: String, workspace: String, glance: Bool) {
         let next = WorkspaceNavigation.choosing(task: id, host: host, workspace: workspace, from: selection, toggles: !glance)
         guard next != selection else { return }
         trail = nil
@@ -3210,7 +3210,7 @@ struct ContentView: View {
 
     /// What `WorkspaceNavigation.boardStep` reads: what's open, Focus, and
     /// where the keyboard is.
-    private var boardState: WorkspaceNavigation.BoardState {
+    var boardState: WorkspaceNavigation.BoardState {
         let scene = selection.flatMap(workspaceScene)
         return WorkspaceNavigation.BoardState(
             opened: scene?.opened != nil, focus: focusColumn, onBoard: keyboardOnBoard,
@@ -3220,7 +3220,7 @@ struct ContentView: View {
     /// ⌘B, View ▸ Toggle Sidebar and the title bar's button: the navigator
     /// put away or brought back (ov-178). Put away with the keyboard in
     /// it, the keyboard goes to what the main area shows.
-    private func toggleNavigator() {
+    func toggleNavigator() {
         navigatorHidden = NavigatorVisibility.toggled(
             navigatorHidden, hasNavigator: selection.flatMap(workspaceScene)?.board != nil)
         guard navigatorHidden, keyboardOnBoard else { return }
@@ -3229,13 +3229,13 @@ struct ContentView: View {
     }
 
     /// Does what a `BoardStep` says.
-    private func apply(_ step: WorkspaceNavigation.BoardStep) {
+    func apply(_ step: WorkspaceNavigation.BoardStep) {
         focusColumn = step.focus
         key(step.keyboard)
     }
 
     /// The keyboard to `target`.
-    private func key(_ target: WorkspaceNavigation.KeyTarget) {
+    func key(_ target: WorkspaceNavigation.KeyTarget) {
         switch target {
         case .board:
             // Never onto a navigator put away with ⌘B: what the main area
@@ -3269,7 +3269,7 @@ struct ContentView: View {
     }
 
     /// Open a Needs You item where spec §2.5 says it lands.
-    private func open(_ item: NeedsYouItem) {
+    func open(_ item: NeedsYouItem) {
         lastAttention = item.key
         guard let landed = NeedsYouNavigation.landing(for: item, in: store.fleet) else {
             errorBanner = "That’s no longer on its runner."
@@ -3280,7 +3280,7 @@ struct ContentView: View {
 
     /// Go to `pane` wherever it lives: its workspace, its task, or its
     /// worktree (`WorkspaceSelection.landing`).
-    private func land(on pane: PaneRef) {
+    func land(on pane: PaneRef) {
         guard let landed = WorkspaceSelection.landing(on: pane, in: store.fleet) else { return }
         navigate(to: landed, key: pane)
     }
@@ -3302,7 +3302,7 @@ struct ContentView: View {
     /// where you left it. Selection and screen agree, which they did not before;
     /// the runner and the app disagree about which layout is at the front, which
     /// nothing on screen claims either way.
-    private func followLayoutFocus() {
+    func followLayoutFocus() {
         guard let pane = selectedPane,
             let worktree = worktree(host: pane.host, id: pane.worktree),
             let group = store.client(for: worktree)?.activeGroup(pane.worktree),
@@ -3313,7 +3313,7 @@ struct ContentView: View {
         focus(PaneRef(host: pane.host, worktree: pane.worktree, terminal: focused))
     }
 
-    private func run(_ command: AppCommand) {
+    func run(_ command: AppCommand) {
         switch command {
         case .newTerminal:
             // Creates immediately. There is no agent to choose: a terminal is a
@@ -3478,7 +3478,7 @@ struct ContentView: View {
     /// the whole design of `PaletteAction`: the palette knows what you picked
     /// and nothing about what picking it means, so opening a terminal from the
     /// panel and clicking it in the window cannot drift apart.
-    private func perform(_ action: PaletteAction) {
+    func perform(_ action: PaletteAction) {
         showPalette = false
         switch action {
         case .openTerminal(let worktree, let terminal):
@@ -3539,7 +3539,7 @@ struct ContentView: View {
     /// The control gets its probe when it draws; a shortcut can be the first
     /// thing pressed after launch, and without this it would report "no editors
     /// found" on a Mac with four of them installed.
-    private func openInPreferredEditor(_ chosen: Worktree? = nil) {
+    func openInPreferredEditor(_ chosen: Worktree? = nil) {
         guard let worktree = chosen ?? detailWorktree else {
             errorBanner = "Open a worktree first — there is nothing to hand to an editor."
             return
@@ -3577,7 +3577,7 @@ struct ContentView: View {
     /// whose `repositories` has not been re-read since a reconnect, and a
     /// lookup that finds nothing has to be answered with a refusal, not a
     /// fallback to this Mac.
-    private func startTask(_ request: TaskRequest) async -> TaskSubmission.Outcome {
+    func startTask(_ request: TaskRequest) async -> TaskSubmission.Outcome {
         let host = request.host
         if let client = store.clients[host], client.state == .notInstalled {
             return .failed("Far Cooler isn’t installed on this runner, so the agent wasn’t started.")
@@ -3634,7 +3634,7 @@ struct ContentView: View {
     /// sheet's own picker selection rather than a `project`-keyed lookup
     /// repeated here — see `startTask`'s own doc comment for why that lookup
     /// belongs where the selection was made, not downstream of it.
-    private func resume(branch: String, host: String, project: String, agent: String) {
+    func resume(branch: String, host: String, project: String, agent: String) {
         Task {
             let key = ActionKey(verb: .resumeBranch, host: host, target: "\(project) \(branch)")
             let subject = "“\(branch)”"
@@ -3651,7 +3651,7 @@ struct ContentView: View {
     }
 
     /// Select a freshly created worktree, preferring its terminal.
-    private func reveal(_ worktree: String?) {
+    func reveal(_ worktree: String?) {
         guard let worktree else { return }
         let found = store.fleet.worktrees.first { $0.id == worktree }
         let host = found?.host ?? ""
@@ -3676,7 +3676,7 @@ struct ContentView: View {
     /// Selecting it afterwards matters: you made a terminal because you want to
     /// type in it, and leaving the selection where it was means a second click
     /// to get to the thing you just asked for.
-    private func newTerminal(in worktree: Worktree) {
+    func newTerminal(in worktree: Worktree) {
         Task { await openTerminalInNewLayout(worktree) }
     }
 
@@ -3692,7 +3692,7 @@ struct ContentView: View {
     ///
     /// tmux's `c` opens a window with a shell in it. So does this.
     @discardableResult
-    private func openTerminalInNewLayout(_ worktree: Worktree) async -> Terminal? {
+    func openTerminalInNewLayout(_ worktree: Worktree) async -> Terminal? {
         guard
             let created = await act(
                 .newTerminal, on: worktree, default: nil as Terminal?,
@@ -3713,7 +3713,7 @@ struct ContentView: View {
     /// in `workspace`, else the workspace on screen. Never a split of the
     /// orchestrator's window, which would make a checkout terminal only the
     /// column could draw (ov-78).
-    private func openShell(besideOrchestratorIn checkout: Worktree, workspace: String? = nil) async {
+    func openShell(besideOrchestratorIn checkout: Worktree, workspace: String? = nil) async {
         let host = checkout.host ?? ""
         let id: String
         if let workspace {
@@ -3747,7 +3747,7 @@ struct ContentView: View {
     /// control lying about what it points at. Kept as a separate property so
     /// each name still reads as what it answers: this one, what the detail
     /// pane draws; `currentWorktree`, what a keystroke acts on.
-    private var detailWorktree: Worktree? {
+    var detailWorktree: Worktree? {
         currentWorktree
     }
 
@@ -3763,7 +3763,7 @@ struct ContentView: View {
     /// one failure this feature must never produce, so with no selection
     /// there is now no target, and `tileTarget`'s and `.newTerminal`'s own
     /// `guard`/`if let` already do nothing rather than guess.
-    private var currentWorktree: Worktree? {
+    var currentWorktree: Worktree? {
         // The key pane's, which is on screen by construction. A board alone
         // is a workspace's, not a worktree's: a keystroke that acts on "the
         // current worktree" has nothing to act on there.
@@ -3772,7 +3772,7 @@ struct ContentView: View {
         return nil
     }
 
-    private func step(by offset: Int) {
+    func step(by offset: Int) {
         let ordered = allTerminals
         guard !ordered.isEmpty else { return }
         let current = ordered.firstIndex { $0 == selectedPane } ?? 0
@@ -3792,7 +3792,7 @@ struct ContentView: View {
     /// closing one here with ⌘W included. See `healed(_:in:was:)`, which is the
     /// rule itself. `previous` is the fleet before the change, which is the only
     /// place a removed worktree's repository can still be read.
-    private func healSelection(previous: [Worktree] = []) {
+    func healSelection(previous: [Worktree] = []) {
         let next = Self.healed(
             selection, in: store.fleet.worktrees, was: previous, workspaces: store.fleet.runnerWorkspaces)
         if next != selection { selection = next }
@@ -3887,14 +3887,14 @@ struct ContentView: View {
         return next.map { opening($0, terminal: nil, in: fleet) }
     }
 
-    private func selectTerminal(at index: Int) {
+    func selectTerminal(at index: Int) {
         let ordered = allTerminals
         guard index >= 0, index < ordered.count else { return }
         step(to: ordered[index])
     }
 
     /// Put the keyboard in a pane on screen, and tmux's focus with it.
-    private func step(to pane: PaneRef) {
+    func step(to pane: PaneRef) {
         focus(pane)
         guard let worktree = worktree(host: pane.host, id: pane.worktree),
             let rect = store.client(for: worktree)?.group(holding: pane.terminal, in: pane.worktree)?.pane(pane.terminal)
