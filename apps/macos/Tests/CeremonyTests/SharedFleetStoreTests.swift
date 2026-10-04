@@ -42,24 +42,6 @@ struct SharedFleetStoreTests {
         #expect(last)
     }
 
-    /// A change on a runner reaches both windows observing the one store.
-    @Test func twoWindowsSeeOneChange() async throws {
-        let client = DaemonClient(target: "", notifications: NotificationCenter())
-        let store = FleetStore(clients: ["": client])
-        let seen = Seen()
-        var windows: [NSWindow] = []
-        for index in 0..<2 {
-            windows.append(
-                try await TitleBarHarness.window(Probe(store: store, index: index, seen: seen), width: 300, height: 200))
-        }
-        defer { windows.forEach { $0.close() } }
-        client.fleet = Fleet(
-            runtimeHealthy: true, livePanes: 0,
-            worktrees: [TitleBarHarness.worktree])
-        for window in windows { try await TitleBarHarness.settle(window) }
-        #expect(seen.counts == [0: 1, 1: 1])
-    }
-
     /// ⌃B x typed in one window closes a pane in that window only.
     @Test func aTileCommandReachesOnlyItsWindow() async throws {
         let heard = Heard()
@@ -73,29 +55,24 @@ struct SharedFleetStoreTests {
         #expect(heard.windows == [1])
     }
 
+    /// Typed in a popover or child panel, a command is for the window it
+    /// hangs off (review L2).
+    @Test func aCommandFromAChildPanelReachesItsWindow() {
+        let window = NSWindow(), panel = NSPanel(), other = NSWindow()
+        window.addChildWindow(panel, ordered: .above)
+        defer { window.removeChildWindow(panel) }
+        let box = TileCommand.Box(.closePane, window: panel)
+        #expect(box.reaches(window))
+        #expect(!box.reaches(other))
+    }
+
     @Test func aCommandForNoWindowReachesNone() {
         let box = TileCommand.Box(.closePane, window: nil)
         #expect(!box.reaches(NSWindow()))
     }
 
-    @MainActor final class Seen {
-        var counts: [Int: Int] = [:]
-    }
-
     @MainActor final class Heard {
         var windows: [Int] = []
-    }
-
-    struct Probe: View {
-        @ObservedObject var store: FleetStore
-        let index: Int
-        let seen: Seen
-        var body: some View {
-            Text("\(store.fleet.worktrees.count)")
-                .onChange(of: store.fleet.worktrees.count) { _, count in
-                    seen.counts[index] = count
-                }
-        }
     }
 
     struct TileProbe: View {

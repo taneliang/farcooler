@@ -63,11 +63,12 @@ enum TileCommand: Equatable {
             self.window = window
         }
 
-        /// Whether `window` is the one it's for, or the one under the sheet
-        /// it was typed in. A command for no window reaches none.
+        /// Whether `window` is the one it's for, or the one under the sheet,
+        /// popover or child panel it was typed in. A command for no window
+        /// reaches none.
         func reaches(_ window: NSWindow?) -> Bool {
             guard let target = self.window, let window else { return false }
-            return target === window || target.sheetParent === window
+            return target === window || target.sheetParent === window || target.parent === window
         }
     }
 }
