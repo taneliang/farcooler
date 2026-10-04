@@ -96,8 +96,17 @@ pub fn gh_launch() -> Option<Arc<Launch>> {
         );
     }
     let path = crate::git_guard::child_path().unwrap_or_else(|| "/usr/bin:/bin".into());
-    let (path_git, path_ssh) =
-        (crate::git_sandbox::on_path("git", &path), crate::git_sandbox::on_path("ssh", &path));
+    let (launch, watched) = build_gh_launch(program, &git, &path);
+    *cache = Some((launch.clone(), git, crate::git_sandbox::Resolved::of(&watched)));
+    Some(launch)
+}
+
+/// gh's launch for `program` as found, given git's and the `PATH` gh is
+/// handed, and the paths whose resolution a later call must recheck: gh, and
+/// the git and ssh `path` finds. Split from `gh_launch` so a test can give it
+/// a world of its own, which the process-wide caches there never let it.
+fn build_gh_launch(program: PathBuf, git: &Launch, path: &std::ffi::OsStr) -> (Arc<Launch>, Vec<PathBuf>) {
+    let (path_git, path_ssh) = (crate::git_sandbox::on_path("git", path), crate::git_sandbox::on_path("ssh", path));
     let mut programs: Vec<PathBuf> = vec![program.clone()];
     programs.extend(path_git.clone());
     programs.extend(git.sandbox.as_ref().map(|s| s.allowed().to_vec()).unwrap_or_else(|| vec![git.program.clone()]));
@@ -107,7 +116,8 @@ pub fn gh_launch() -> Option<Arc<Launch>> {
     }
     let sandbox = crate::git_sandbox::Sandbox::new(&program, crate::git_sandbox::allowlist(&programs));
     let watched: Vec<PathBuf> = [Some(program.clone()), path_git, path_ssh].into_iter().flatten().collect();
-    let launch = Arc::new(Launch { program, sandbox });
-    *cache = Some((launch.clone(), git, crate::git_sandbox::Resolved::of(&watched)));
-    Some(launch)
+    (Arc::new(Launch { program, sandbox }), watched)
 }
+
+#[cfg(test)]
+mod tests;
