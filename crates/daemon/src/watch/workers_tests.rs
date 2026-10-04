@@ -95,6 +95,23 @@ impl Runner {
     }
 }
 
+/// An ISO time for unix milliseconds, as a transcript writes it.
+fn stamp(ms: i64) -> String {
+    let secs = ms / 1000;
+    let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+    // Civil-from-days (Howard Hinnant), enough for a test's timestamp.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.000Z", rem / 3600, rem % 3600 / 60, rem % 60)
+}
+
 fn note(n: usize) -> &'static str {
     NOTIFICATIONS.lines().nth(n).unwrap()
 }
@@ -180,21 +197,6 @@ async fn new_transcript_lines_after_the_stop_reopen_it_and_old_ones_do_not() {
     assert_eq!(state(&r.workers(&r.tasks[0])[0]), pb::TaskWorkerState::Finished);
     // A line stamped after the stop.
     let later = farcooler_store::testing::now_millis() + 3_600_000;
-    let stamp = |ms: i64| {
-        let secs = ms / 1000;
-        let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
-        // Civil-from-days (Howard Hinnant), enough for a test's timestamp.
-        let z = days + 719_468;
-        let era = z.div_euclid(146_097);
-        let doe = z.rem_euclid(146_097);
-        let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-        let mp = (5 * doy + 2) / 153;
-        let d = doy - (153 * mp + 2) / 5 + 1;
-        let m = if mp < 10 { mp + 3 } else { mp - 9 };
-        let y = yoe + era * 400 + i64::from(m <= 2);
-        format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.000Z", rem / 3600, rem % 3600 / 60, rem % 60)
-    };
     let fresh = TRANSCRIPT.lines().nth(1).unwrap().replace("2026-09-06T07:35:35.395Z", &stamp(later));
     assert!(fresh.contains(&stamp(later)), "the fixture line carries the stamp it's replaced at");
     r.transcript(&agent(1), &[fresh]);
@@ -285,4 +287,41 @@ async fn a_session_it_cannot_find_is_unobserved() {
     r.svc.store.record_worker(r.tasks[0].id, &record, Actor::Manager).unwrap();
     r.pass().await;
     assert_eq!(state(&r.workers(&r.tasks[0])[0]), pb::TaskWorkerState::Unobserved);
+}
+
+/// `--stale-for` lists the cards that have gone quiet, and a card whose
+/// subagent was seen working inside the window hasn't: the card says
+/// nothing of work a subagent does. One whose subagent went quiet has.
+#[tokio::test]
+async fn a_task_whose_subagent_is_working_is_not_stale() {
+    let mut r = runner(2).await;
+    r.session(&[]);
+    r.record(&r.tasks[0], &agent(1));
+    r.record(&r.tasks[1], &agent(2));
+    let now = farcooler_store::testing::now_millis();
+    let line = |at: i64| {
+        TRANSCRIPT
+            .lines()
+            .nth(1)
+            .unwrap()
+            .replace("2026-09-06T07:35:35.395Z", &stamp(at))
+    };
+    r.pass().await;
+    // The first writes a line a minute from now (the window is milliseconds
+    // long, and the cards below have sat in progress for longer than that),
+    // the second one an hour ago.
+    r.transcript(&agent(1), &[line(now + 60_000)]);
+    r.transcript(&agent(2), &[line(now - 3_600_000)]);
+    r.pass().await;
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    let req = pb::TaskListRequest {
+        repository_id: crate::wire::id_bytes(r.tasks[0].repository_id),
+        stale_after_millis: Some(100),
+        ..Default::default()
+    };
+    let keys: Vec<String> = crate::task_ops::list(&r.svc, &req).unwrap().items.into_iter().map(|t| t.key).collect();
+    assert_eq!(keys, [r.tasks[1].key.clone()]);
+    for task in &r.tasks {
+        assert!(r.workers(task).iter().all(|w| state(w) == pb::TaskWorkerState::Running), "both subagents run");
+    }
 }

@@ -310,11 +310,27 @@ pub fn list(svc: &Service, req: &pb::TaskListRequest) -> Result<pb::TaskList> {
         Some(workspace) => TaskScope::Workspace(named_workspace(svc, workspace, &req.repository_id)?.id),
         None => TaskScope::Repository(required_id(&req.repository_id)?),
     };
-    let tasks = match req.stale_after_millis.filter(|ms| *ms > 0) {
+    let stale = req.stale_after_millis.filter(|ms| *ms > 0);
+    let tasks = match stale {
         Some(millis) => svc.store.list_tasks_stale_for(scope, std::time::Duration::from_millis(millis))?,
         None => svc.store.list_tasks(scope, status_from_wire(req.status))?,
     };
-    Ok(pb::TaskList { items: crate::task_starts::pb_tasks(svc, &tasks)? })
+    let mut items = crate::task_starts::pb_tasks(svc, &tasks)?;
+    // A task whose subagent was seen working inside the window hasn't gone
+    // quiet, however long its card has sat (ov-213): the card says nothing
+    // of work a subagent does, and its transcript does.
+    if let Some(window) = stale {
+        let now = crate::review::now_millis();
+        items.retain(|task| !task.workers.iter().any(|w| worked_within(w, now, window)));
+    }
+    Ok(pb::TaskList { items })
+}
+
+/// Whether a subagent is running and wrote a line within `window` of `now`.
+fn worked_within(worker: &pb::TaskWorker, now: i64, window: u64) -> bool {
+    worker.state == pb::TaskWorkerState::Running as i32
+        && worker.last_activity_at > 0
+        && now.saturating_sub(worker.last_activity_at) < window.min(i64::MAX as u64) as i64
 }
 
 /// `task.get`: one task, its record and what it waits on, in a single read.
