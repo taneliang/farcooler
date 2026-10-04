@@ -3,7 +3,7 @@
 # home holding its charter, a canned board, an empty call log, and (unless
 # --baseline) the rendered skill.
 #
-#   new-scratch-repo.sh <S1..S11> <dir> [--baseline]
+#   new-scratch-repo.sh <S1..S11|S13> <dir> [--baseline]
 #
 # <dir> must not exist. Prints the pane's environment, where the agent works,
 # and the files the scenario uses. See scenarios.md for what each scenario
@@ -62,7 +62,7 @@ write_charter() {
 }
 
 case $scenario in
-  S1|S2|S3|S4|S5|S6|S10|S11) write_charter ;;
+  S1|S2|S3|S4|S5|S6|S10|S11|S13) write_charter ;;
   S7|S8) ;;
   S9) write_charter "skip:Lanes" "skip:Autonomy" ;;
   *) echo "unknown scenario $scenario" >&2; exit 1 ;;
@@ -121,6 +121,11 @@ EOF
     cat > "$dir/board/worktrees.json" <<EOF
 {"worktrees":[{"id":"00000000-0000-0000-0000-000000000001","short":"00000001","task":"main","branch":"main","repository":"scratch","worktree":"$repo","state":"ready","is_main_checkout":true,"workspace":"$main_ws","terminals":[]},{"id":"00000000-0000-0000-0000-000000000003","short":"00000003","task":"billing-webhooks","branch":"billing-webhooks","repository":"scratch","worktree":"$dir/billing-webhooks","state":"ready","is_main_checkout":false,"workspace":"$main_ws","terminals":[{"short":"0000000b","title":"claude","preset":"claude","state":"running","activity":"working","role":"agent"}]}]}
 EOF
+    ;;
+  S13)
+    # Four tasks the owner will order, hold and park, and fc-2, which a
+    # subagent the manager started in its own session is already working.
+    printf 'KEY   STATUS       AGE  TITLE\nfc-2  todo         1d   Tests: cover subtraction\nfc-4  todo         2d   Docs: update the README\nfc-5  todo         1d   Daemon: fix the failing add test\nfc-6  todo         3d   Docs: write the release notes\nfc-7  todo         9d   Site: redo the landing page\n' > "$dir/board/list.txt"
     ;;
   *) printf 'no tasks\n' > "$dir/board/list.txt" ;;
 esac

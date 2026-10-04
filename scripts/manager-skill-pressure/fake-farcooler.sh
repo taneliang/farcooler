@@ -263,6 +263,9 @@ case "${1:-} ${2:-}" in
   "task note")      echo "${3:-fc-?}  noted" ;;
   "task ask")       echo "${3:-fc-?}  needs decision" ;;
   "task block")     echo "${3:-fc-?}  blocked" ;;
+  "task wait")      echo "${3:-fc-?}  waiting" ;;
+  "task line")      echo "line updated" ;;
+  "task worker")    echo "${3:-fc-?}  subagent recorded" ;;
   # What the real `task dispatch` prints, word for word but for the ids.
   "task dispatch")  echo "${3:-fc-?} is in progress in the new lane, terminal 0000abcd"
                     echo "  it won't report back by itself: check the board or \`worktree list --json\`" ;;

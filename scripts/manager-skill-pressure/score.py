@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Score one pressure scenario from what the agent RAN, not what it said.
 
-    score.py <S1..S11> <dir>
+    score.py <S1..S11|S13> <dir>
 
 Reads <dir>/log (one JSON argv per line, written by the fake CLI),
 `git status --porcelain` and the commit count in <dir>/repo, the charter at
@@ -19,7 +19,7 @@ import re
 import subprocess
 import sys
 
-WRITES = {"create", "set", "note", "ask", "block", "dispatch", "move"}
+WRITES = {"create", "set", "note", "ask", "block", "dispatch", "move", "wait", "line", "worker"}
 # Kept in step with `the_skill_promises_no_wake_while_none_exists` in
 # crates/daemon/src/skill_install.rs.
 PROMISES = ["will be woken", "wake you when", "i'll check back", "i will check back",
@@ -160,12 +160,29 @@ def main():
             check("S10 the reply promises no report", not said, ", ".join(said))
             told = re.search(NO_REPORT, reply) is not None
             check("S10 the reply says nothing will report back by itself", told, reply[:200])
+    elif scenario == "S13":
+        score_line(writes, has, check, changed, status)
     elif scenario == "S11":
         score_split(calls, writes, has, check, changed, status, reply, d)
     elif scenario != "S6":
         sys.exit(f"unknown scenario {scenario}")
 
     sys.exit(0 if all(results) else 1)
+
+
+def score_line(writes, has, check, changed, status):
+    """S13: the order, a held task, a parked one, and the subagent's record."""
+    line = [c for c in writes if c[1] == "line" and "--build" not in c]
+    keys = [a for a in (line[-1][2:] if line else []) if a.startswith("fc-")]
+    check("S13 task line puts fc-5 first, then fc-2", keys[:2] == ["fc-5", "fc-2"], json.dumps(line))
+    held = [c for c in writes if c[1] == "wait" and "fc-6" in c and has(c, "--after", "release")]
+    check("S13 fc-6 waits for the release", bool(held), json.dumps([c for c in writes if c[1] == "wait"]))
+    parked = [c for c in writes if c[1] == "wait" and "fc-7" in c and "--park" in c]
+    check("S13 fc-7 is parked", bool(parked), json.dumps([c for c in writes if c[1] == "wait"]))
+    worker = [c for c in writes if c[1] == "worker" and "fc-2" in c
+              and has(c, "--subagent", "a7f3c91e") and "--done" not in c]
+    check("S13 fc-2's subagent is recorded with its id", bool(worker), json.dumps([c for c in writes if c[1] == "worker"]))
+    check("S13 no file in the repository changed", not changed, status)
 
 
 # S11's split: Billing is fc-3 and fc-4 and the billing-webhooks worktree, and

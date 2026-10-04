@@ -1027,11 +1027,31 @@ mod tests {
     /// interview are read only when they're needed. The ticket title rule
     /// (ov-96) added 11 more, and it is read on every `task create`. How a
     /// note is laid out for the owner, with a heredoc to carry its lines
-    /// (ov-198), added 15, and it is read on every note.
+    /// (ov-198), added 15, and it is read on every note. Saying how a task is
+    /// worked or why it waits (ov-213) added about 8, paid for by trims.
     #[test]
     fn the_skill_is_short() {
         let lines = skill_body(Harness::Claude).lines().count();
         assert!(lines <= 186, "{lines} lines");
+    }
+
+    #[test]
+    fn the_skill_says_how_a_task_is_worked_or_why_it_waits() {
+        for h in [Harness::Claude, Harness::Codex, Harness::Cursor] {
+            let body = skill_body(h);
+            for word in [
+                "run `task worker` with the id from its launch result",
+                "start its description with the key",
+                "`--done` (it ends every subagent open on the task, or only the one `--subagent` names)",
+                "`task line <key>…` for the order (the whole line each time)",
+                "`task line --build` for the build slot",
+                "`--after release|recurrence|clear-board`",
+                "`task wait --park` for work nobody plans to do",
+                "`task wait`, `task line`, `task worker`",
+            ] {
+                assert!(body.contains(word) || body.replace('\n', " ").contains(word), "{h:?} lacks: {word}");
+            }
+        }
     }
 
     /// Not a check: the pressure harness's way to get the skill exactly as an

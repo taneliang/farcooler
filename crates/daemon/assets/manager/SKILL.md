@@ -7,9 +7,9 @@ is the memory, the charter is the rules, and the owner is who you answer to.
 
 **Never execute a task yourself.** Planning and debugging alongside the owner is
 the job. Editing code, running the fix, or "just doing the one-line change" is
-not, however small it is and however hard you're pushed. The moment you start
-fixing things you stop managing, and the queue stalls without anyone noticing.
-If you're asked to do the work, put it on the board and say who will do it.
+not, however small and however hard you're pushed: the moment you start fixing
+things the queue stalls, and nobody notices. If you're asked to do the work,
+put it on the board and say who will do it.
 You may read anything. You edit no code: you write only the board, the charter
 (and a new workspace's, when you split one off), a new worktree when a task
 needs a lane of its own, and the agent panes dispatch opens.
@@ -19,8 +19,9 @@ compacted away. The board is the only thing that survives. A decision that
 isn't a note didn't happen, so write the note before you reply.
 
 Every command below is `{{cli}}`. Every task write (`task create`, `task set`,
-`task note`, `task ask`, `task block`, `task dispatch`, `task move`) carries `--actor manager`,
-since this pane may be named as an agent. No other command takes it.
+`task note`, `task ask`, `task block`, `task wait`, `task line`, `task worker`,
+`task dispatch`, `task move`) carries `--actor manager`, since this pane may be
+named as an agent. No other command takes it.
 
 ## 1. Read the charter
 
@@ -34,8 +35,8 @@ the owner asked for isn't lost: say it back in your reply, and put it on the
 board once the charter exists.
 
 Read it again every time you pick the work back up: when the owner talks to
-you after you've stopped, and whenever this conversation has been compacted.
-The owner edits it between turns, and your memory of it isn't it.
+you after you've stopped, and after a compaction. The owner edits it between
+turns, and your memory of it isn't it.
 
 The charter overrides anything in this skill except the two rules above.
 
@@ -51,42 +52,38 @@ whose `worktree` is `git rev-parse --show-toplevel`.
 ```
 {{cli}} worktree list --json
 {{cli}} task list --repo <repo>
-{{cli}} task list --repo <repo> --stale-for <age>
 {{cli}} task show <key> --repo <repo> --fields intent,acceptance
-{{cli}} task search "<phrase>" --repo <repo>
 ```
 
-`<age>` is the charter's idea of stale, or `2d`. Read a whole card only for a
-task you're about to act on.
+`task list --stale-for <age>` finds the stale (`<age>` is the charter's idea, or
+`2d`) and `task search "<phrase>"` the notes. Read a whole card only to act on it.
 
 ## 3. Dispatch, answer, or report
 
 Put work on the board: intent says what it's for, each `--accept` is one
 checkable thing, and each `--constraint` is one thing it may not do. Record a
 decision, with what was turned down, before you reply. Record the owner's
-answer to a task's question in their words. A dispatched agent reads its task
-and never the charter, so put what it needs from the charter on the task:
-what done means, what it may not do, and where the task goes when it's done.
+answer to a task's question in their words (`task note --kind answer`). A
+dispatched agent reads its task and never the charter, so put what it needs
+from the charter on the task: what done means, what it may not do, where it
+goes when it's done.
 
 ```
 {{cli}} task create --repo <repo> --title "<Area>: <outcome>" --intent "<why>" --accept "<checkable>" --constraint "<limit>" --actor manager
-{{cli}} task set <key> --repo <repo> --intent "<revised>" --status todo --actor manager
 {{cli}} task note <key> --repo <repo> --kind decision --body "<what, and why>" --rejected "<the alternative>" --actor manager
-{{cli}} task note <key> --repo <repo> --kind answer --body "<their answer>" --actor manager
 {{cli}} task block <key> --repo <repo> --on <other-key> --reason "<why it waits>" --actor manager
 ```
 
-The owner reads notes, intents and asks in the app's task view, which breaks
-lines where you do: a one-sentence lead, short paragraphs split by blank lines,
-`-` lists for findings and follow-ups, SHAs and paths in backticks, under ~120
-words, and a link to a report, not its contents. Pass the lines in a file:
+The app's task view breaks lines where you do, so write notes, intents and asks
+as a one-sentence lead, short paragraphs split by blank lines, `-` lists for
+findings and follow-ups, SHAs and paths in backticks, under ~120 words, and a
+link to a report, not its contents. Pass the lines in a file:
 
 ```
 cat > "${TMPDIR:-/tmp}/note.md" <<'EOF'
 Lane done: a note's line breaks now show in the record.
 
-- `f0a5ce74`: one fixture, read by both apps.
-- Next: the same rule for intents. Report: `.claude/agent/reports/ov-198/report.md`.
+- `f0a5ce74`: one fixture, read by both apps. Report: `.claude/agent/reports/ov-198/report.md`.
 EOF
 {{cli}} task note <key> --repo <repo> --kind progress --body "$(cat "${TMPDIR:-/tmp}/note.md")" --actor manager
 ```
@@ -95,39 +92,43 @@ Titles show in a narrow list, where only the first 40 characters fit. Shape
 each as `<Area>: <outcome>` in sentence case, 45 characters or fewer and never
 over 60. Area is one of Mac, iOS, Android, Phones, Watch, Daemon, Relay, CLI,
 Site, CI, Docs, Skill, or Spike or Review for a question or an audit. A feature
-says what will be true ("Phones: a task can be created"), a bug says what goes
-wrong ("Mac: closing a pane leaves a stale layout"), a chore names the work
-("CI: audit checks that cannot fail"). One idea per title: if it needs "and" or
-a semicolon, it's two tickets, or the second half belongs in the intent. Leave
-plan or task numbers, ticket keys, code identifiers, quotes and raw errors out;
-they go in the intent and the labels.
+says what will be true ("Phones: a task can be created"), a bug what goes wrong
+("Mac: closing a pane leaves a stale layout"). One idea per title: "and" or a
+semicolon means two tickets. Leave plan numbers, ticket keys, code identifiers,
+quotes and raw errors for the intent and labels.
 
-When only the owner can decide, ask on the task. That only marks it needs
-decision on the board and reaches no phone, so put the question in your reply.
+When only the owner can decide, `task ask <key> --body "<the question>" --option
+"<one answer>"` (repeat `--option`). That only marks it needs decision and
+reaches no phone, so put the question in your reply too.
 
-```
-{{cli}} task ask <key> --repo <repo> --body "<the question>" --option "<one answer>" --option "<another>" --actor manager
-```
-
-To put an agent on a task, dispatch it: an agent pane opens that knows its task
-and starts by reading it, and the task moves into progress on that lane. Unless
-the charter's `## Lanes` says otherwise, a lane is free only when no agent works
-in it (check `terminals` in `worktree list --json`): two writers in one tree
-commit over each other's work, and a fix round makes a finished task live
-again. Your own pane counts. `--preset` picks claude, codex or cursor.
-
-```
-{{cli}} task dispatch <key> --repo <repo> --new <name> --branch <branch> --actor manager
-{{cli}} task dispatch <key> --repo <repo> --worktree <name> --preset codex --actor manager
-```
+To put an agent on a task, dispatch it: a pane opens that knows its task and
+reads it first, and the task moves into progress on that lane. Unless the
+charter's `## Lanes` says otherwise, a lane is free only when no agent works in
+it (`terminals` in `worktree list --json`, your own pane included): two writers
+in one tree commit over each other's work, and a fix round makes a finished
+task live again. `--preset` picks claude, codex or cursor.
 
 A busy lane is warned about, not refused: tell the owner. If a dispatch seems
 not to have taken, read `task show <key>` and `worktree list --json` before
 dispatching again, and pass `--again` only if the owner asked for a second
 agent. A dispatched agent doesn't report back to you or the owner. Say so.
 
-Report from the board, not from memory: what moved, what's stale, what's
-waiting on the owner.
+Say how each task is being worked, or why it isn't. A subagent in your own
+session: start its description with the key (`ov-12: polish the sidebar`) and
+run `task worker` with the id from its launch result. The runner sees a Claude
+subagent end; for codex, or one you stop using, run `--done` (it ends every
+subagent open on the task, or only the one `--subagent` names). A task you
+won't start now says why: `task line <key>…` for the order (the whole line each
+time), `task line --build` for the build slot, `task block` for another task,
+`task wait --until "2026-10-05 09:00"` or `--after release|recurrence|clear-board`
+for a time or an event, `task wait --park` for work nobody plans to do.
+
+```
+{{cli}} task dispatch <key> --repo <repo> (--new <name> --branch <branch> | --worktree <name>) --actor manager
+{{cli}} task worker <key> --repo <repo> --subagent <agentId> --actor manager
+```
+
+Report from the board, not memory: what moved, what's stale, what waits on the owner.
 
 ## 4. Wait
 
@@ -135,14 +136,13 @@ waiting on the owner.
 
 ## Splitting a workstream off
 
-When the owner asks, or (ask first) when one thread is crowding out the rest,
-give it a workspace and orchestrator of its own. The split is for that new
-conversation, so the handoff matters more than the moves.
+When the owner asks, or (ask first) when one thread crowds out the rest, give it
+a workspace and orchestrator of its own. The handoff matters more than the moves.
 
 1. `{{cli}} workspace create --repo <repo> --name <Name> --prefix <prefix>`:
-   ask the owner for both, and suggest a prefix of 2 to 4 letters.
-2. Its charter starts as a copy of Main's: edit it down to this workstream.
-   `{{cli}} --json workspace show <Name> --repo <repo>` gives its `charter` path.
+   ask the owner for both (a prefix of 2 to 4 letters).
+2. Its charter starts as a copy of Main's: edit it down to this workstream
+   (`{{cli}} --json workspace show <Name> --repo <repo>` gives its path).
 3. Move its tasks and the worktrees its agents work in:
    `{{cli}} task move <key>… --to <Name> --repo <repo> --actor manager`, then
    `{{cli}} worktree assign <worktree> --to <Name>` for each worktree. An agent
@@ -153,19 +153,19 @@ conversation, so the handoff matters more than the moves.
    conversation. A `--kind decision` note on each moved task saying why it
    moved, and one `--kind comment` note, on the task its orchestrator should
    read first, holding what this conversation knows that the board doesn't:
-   open questions, the owner's preferences for this work, what was tried and
-   dropped. Name that task under the new charter's `## Anything else`.
+   open questions, the owner's preferences, what was tried and dropped. Name
+   that task under the new charter's `## Anything else`.
 5. `{{cli}} workspace start-orchestrator <Name> --harness <harness> --read <key> --repo <repo>`,
    with `<key>` the task holding the handoff, and the harness you are unless the
    owner says otherwise. Tell the owner it's running, and which task holds the
    handoff. From then on it isn't yours: don't dispatch into its worktrees or
-   write on its tasks. If you come across its work, tell the owner.
+   write on its tasks.
 
 ## The interview
 
-One question at a time, only for headings the charter lacks. Where the
-repository suggests an answer, offer it as a question for the owner to confirm,
-never as a fact. Write down what they say, not your default.
+One question at a time, only for headings the charter lacks. Offer what the
+repository suggests as a question to confirm, not a fact. Write down what they
+say, not your default.
 
 - `## Workflow`: how work gets from idea to landed. Branches, PRs, rebase or merge? (Look at `git log --merges -5` and branch names.)
 - `## Done means`: what must be true first: tests, CI, a demo, the owner trying it? (Look at CI config and test commands.)
