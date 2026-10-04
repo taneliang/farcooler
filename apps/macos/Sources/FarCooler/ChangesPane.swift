@@ -105,6 +105,12 @@ struct ChangesPane: View {
         }
         .background(WorkspaceStyle.document)
         .task(id: changes.worktree.id) { await changes.loadIfNeeded() }
+        // Where a relaunch left the review (`ChangesStore.applyKeptPosition`).
+        .onChange(of: changes.restoreTarget, initial: true) { _, path in
+            guard let path, let file = changes.files.first(where: { $0.path == path }) else { return }
+            changes.restoreTarget = nil
+            jump(to: file)
+        }
         // Cancelled with the view, which is what keeps this honest: the poll
         // exists only while somebody is reading the diff. Kept behind a
         // task's other tabs (`outOfSight`, ov-98), nobody is: it stops, and

@@ -822,9 +822,12 @@ final class ChangesStore: ObservableObject {
     var scrollPosition = ScrollPosition(idType: String.self)
 
     /// The file the jump bar last went to. Highlights it; hides nothing.
-    @Published var selectedFile: String?
+    @Published var selectedFile: String? {
+        didSet { remember() }
+    }
     @Published var scope: DiffScope = .branch {
         didSet {
+            defer { remember() }
             // Leaving the commit view forgets WHICH commit, because every way
             // out of it means the same thing: the reader is done with that
             // commit. Without this, clicking `Branch` in the header control —
@@ -842,7 +845,18 @@ final class ChangesStore: ObservableObject {
 
     /// Which commit is on screen, when the scope is `.commit`. Nil otherwise,
     /// and kept nil by `scope`'s own `didSet` rather than by every caller.
-    @Published private(set) var selectedCommit: String?
+    @Published private(set) var selectedCommit: String? {
+        didSet { remember() }
+    }
+
+    /// A file to bring to the top once the pane is drawn: the one a relaunch
+    /// left it at. The pane takes it, and clears it.
+    @Published var restoreTarget: String?
+    private let defaults: UserDefaults
+    /// The kept position has been put back, or there was none: only now is
+    /// what the store holds the reader's own, and written down.
+    private var positionApplied = false
+    private var lastKept: ReviewPlace?
 
     /// What that commit touched, from `changes files` — a separate call,
     /// because the change set deliberately carries no per-commit file lists.
@@ -879,9 +893,10 @@ final class ChangesStore: ObservableObject {
     /// `ReviewCommentQueue`.
     let comments: ReviewCommentQueue
 
-    init(client: DaemonClient, worktree: Worktree) {
+    init(client: DaemonClient, worktree: Worktree, defaults: UserDefaults = .standard) {
         self.client = client
         self.worktree = worktree
+        self.defaults = defaults
         // Keyed by worktree, which is what is being reviewed — so two changes
         // panes in one layout share a queue rather than writing two, and so a
         // runner that drops and comes back finds the notes still there. That
@@ -1103,6 +1118,42 @@ final class ChangesStore: ObservableObject {
         }
         let live = Set(files.map(\.path))
         collapsedFiles = collapsedFiles.intersection(live)
+        if !positionApplied, error == nil { await applyKeptPosition() }
+    }
+
+    /// Write down where the review is, when it's changed and it's the
+    /// reader's own (`positionApplied`).
+    private func remember() {
+        guard positionApplied else { return }
+        let place = ReviewPlace(
+            scope: ReviewPlace.scope(scope, commit: selectedCommit), file: selectedFile, topFile: nil, savedAt: 0)
+        guard place != lastKept else { return }
+        lastKept = place
+        var stamped = place
+        stamped.savedAt = Date().timeIntervalSince1970
+        ReviewMemory.write(stamped, host: worktree.host ?? "", worktree: worktree.id, in: defaults)
+    }
+
+    /// The first time the change set is read: put the kept comparison and file
+    /// back, quietly. A commit that's gone is the whole branch again; a file
+    /// that's gone leaves the top of it. Nothing is said either way.
+    func applyKeptPosition() async {
+        positionApplied = true
+        guard let kept = ReviewMemory.read(host: worktree.host ?? "", worktree: worktree.id, in: defaults),
+            selectedFile == nil, scope == .branch
+        else { return }
+        let landing = ReviewMemory.landing(kept, in: changeSet)
+        if let sha = landing.commit {
+            await select(commit: sha)
+        } else if landing.scope != scope {
+            scope = landing.scope
+        }
+        if let file = landing.file, files.contains(where: { $0.path == file }) {
+            selectedFile = file
+            restoreTarget = file
+        }
+        lastKept = nil
+        remember()
     }
 
     /// Throw away every diff read so far, and say so.
