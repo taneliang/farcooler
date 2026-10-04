@@ -2792,14 +2792,18 @@ async fn pane_with_scrollback(
     // — which is how `an_unchanged_screen_still_carries_the_history_that_was_asked_for`
     // failed its own precondition rather than its assertion.
     //
-    // Two identical revisions in a row is the pane at rest, and waiting for
-    // that beats sleeping for a number: what is being waited on is somebody's
-    // login shell finishing whatever their rc files do.
-    let settled = tokio::time::timeout(std::time::Duration::from_secs(15), async {
+    // Several identical revisions in a row is the pane at rest, and waiting
+    // for that beats sleeping for a number: what is being waited on is
+    // somebody's login shell finishing whatever their rc files do. Two reads
+    // were not enough under load, where a starved shell can sit silent for
+    // longer than one poll and then draw its prompt.
+    let settled = tokio::time::timeout(std::time::Duration::from_secs(30), async {
         let mut previous = 0u64;
+        let mut steady = 0u32;
         loop {
             let now = screen_of(client, &terminal.id, 0).await.revision;
-            if now != 0 && now == previous {
+            steady = if now != 0 && now == previous { steady + 1 } else { 0 };
+            if steady >= 5 {
                 return true;
             }
             previous = now;
@@ -2871,18 +2875,33 @@ async fn an_unchanged_screen_still_carries_the_history_that_was_asked_for() {
     let mut client = connect(&h).await;
     let (_repo_dir, terminal) = pane_with_scrollback(&mut client).await;
 
-    let first = screen_of(&mut client, &terminal, 0).await;
-
-    let mut req = request("terminal.screen");
-    req.target_resource_id = Some(terminal.clone());
-    req.payload = Some(request::Payload::TerminalScreenRequest(
-        farcooler_protocol::v1::TerminalScreenRequest {
-            known_revision: first.revision,
-            history_lines: 400,
-        },
-    ));
-    let result = client.call(req).await.expect("terminal.screen");
-    let Some(result::Value::TerminalScreen(again)) = result.value else { panic!("wrong result") };
+    // Ask until the pane holds still across the pair of calls: under load a
+    // late repaint can land between them, and that call answers with a fresh
+    // screen instead of the branch under test. Only that is retried; the
+    // assertions below run on the first pair that exercised the branch.
+    let again = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        loop {
+            let first = screen_of(&mut client, &terminal, 0).await;
+            let mut req = request("terminal.screen");
+            req.target_resource_id = Some(terminal.clone());
+            req.payload = Some(request::Payload::TerminalScreenRequest(
+                farcooler_protocol::v1::TerminalScreenRequest {
+                    known_revision: first.revision,
+                    history_lines: 400,
+                },
+            ));
+            let result = client.call(req).await.expect("terminal.screen");
+            let Some(result::Value::TerminalScreen(again)) = result.value else {
+                panic!("wrong result")
+            };
+            if again.unchanged {
+                return again;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("the pane never held still long enough to exercise the unchanged branch");
 
     // The screen did not move — nothing was typed into the pane between the two
     // calls — so this is the branch under test rather than a fresh screen.
