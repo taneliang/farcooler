@@ -1153,6 +1153,10 @@ class Connection(
             // from a runner too old to say, which offers every harness.
             agentsFound = (body["agentsFound"] as? kotlinx.serialization.json.JsonArray)
                 ?.mapNotNull { it.jsonPrimitive.contentOrNull },
+            // The runner's extra read-only folders, by name (ov-259). Null from a
+            // runner too old to have them.
+            readOnlyFolders = (body["readOnlyFolders"] as? kotlinx.serialization.json.JsonArray)
+                ?.mapNotNull { it.jsonPrimitive.contentOrNull },
         )
         // A read that set out on the previous link answers into nothing.
         if (!daemonBuild.land(link, build)) return

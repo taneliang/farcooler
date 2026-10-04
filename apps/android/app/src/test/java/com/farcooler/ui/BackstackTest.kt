@@ -62,6 +62,8 @@ class BackstackTest {
             Route.AddDevice,
             Route.Devices,
             Route.BoardHistory("h", "w", "done"),
+            Route.Files("h", worktreeId = "w", path = "src/lib", expecting = "either"),
+            Route.Files("h", folder = "logs"),
         )) {
             assertEquals(listOf(route), Backstack.decodeStack(Backstack.encodeStack(listOf(route))))
         }

@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.outlined.ContentPaste
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.MoreVert
@@ -62,6 +63,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.core.TerminalPalette
@@ -141,6 +143,8 @@ fun TerminalPane(
     onOpenDrawer: () -> Unit,
     /** Back to what pushed this worktree, drawn as an arrow in place of the menu; see [WorktreeTopBar]. */
     onBack: (() -> Unit)? = null,
+    /** Opens the worktree's Files (ov-259), or null where they aren't offered. */
+    onOpenFiles: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboard.current
@@ -322,6 +326,17 @@ fun TerminalPane(
                     Icon(Icons.Outlined.MoreVert, contentDescription = "More")
                 }
                 DropdownMenu(showMenu, onDismissRequest = { showMenu = false }) {
+                    if (onOpenFiles != null) {
+                        DropdownMenuItem(
+                            text = { Text("Files") },
+                            leadingIcon = { Icon(Icons.Outlined.Folder, null) },
+                            onClick = {
+                                showMenu = false
+                                onOpenFiles()
+                            },
+                            modifier = Modifier.testTag("pane-files"),
+                        )
+                    }
                     if (terminal?.isAgentPane != true) {
                         DropdownMenuItem(
                             text = { Text("Paste") },

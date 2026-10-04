@@ -107,6 +107,7 @@ fun NeedsYouScreen(model: AppModel, onOpenDrawer: () -> Unit) {
     val rows = NeedsYou.rows(runners.map { it.second })
     val merged = rows.map { it.entry }
     val namesRunners = connections.size > 1
+    val folders = rememberSharedFolders(connections)
     val older = NeedsYou.olderRunners(runners.map { it.second })
     val sections = runners.flatMap { (connection, runner) ->
         NeedsYou.workspaces(runner, merged).map { connection to it }
@@ -261,6 +262,11 @@ fun NeedsYouScreen(model: AppModel, onOpenDrawer: () -> Unit) {
                     onOpenWorktrees = { host, repository, hidden ->
                         model.navigate(Route.Worktrees(host, repository, hidden))
                     },
+                )
+                folderItems(
+                    runners = folders,
+                    namesRunners = namesRunners,
+                    onOpenFolder = { host, name -> model.navigate(Route.Files(host, folder = name)) },
                 )
             }
         }

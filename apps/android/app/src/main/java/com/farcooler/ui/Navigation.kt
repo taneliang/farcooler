@@ -213,6 +213,23 @@ sealed interface Route {
     ) : Route
 
     /**
+     * One screen of the read-only Files browser (ov-259): a directory or a file,
+     * in a worktree or in one of the runner's extra read-only folders. A folder
+     * pushes the next directory and a file pushes its own, so Back walks up the
+     * way you came down. Exactly one of [worktreeId] and [folder] is set;
+     * [expecting] is `directory`, `file` or `either` (a link's destination).
+     */
+    @Serializable
+    @SerialName("files")
+    data class Files(
+        val hostId: String,
+        val worktreeId: String? = null,
+        val folder: String? = null,
+        val path: String = "",
+        val expecting: String = "directory",
+    ) : Route
+
+    /**
      * Whether this route is drawn OVER the worktree rather than instead of it.
      *
      * Every pushed screen is. The worktree underneath stays composed, which is
@@ -225,7 +242,7 @@ sealed interface Route {
     val isOverlay: Boolean
         get() = when (this) {
             is Settings, is RunnerSettings, is Authorize, is Join, is AddDevice, is Devices,
-            is Worktrees, is BoardTask, is BoardHistory -> true
+            is Worktrees, is BoardTask, is BoardHistory, is Files -> true
             is Board -> true
             // The three GROUND routes. A terminal is one of them and not an
             // overlay, even though it is now pushed onto the front door rather

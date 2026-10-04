@@ -150,6 +150,12 @@ fun WorktreeScreen(
     val connections by model.fleet.active.collectAsStateWithLifecycle()
     val runnerFleet by connection.fleet.collectAsStateWithLifecycle()
     val runnerLink by connection.link.collectAsStateWithLifecycle()
+    // Files (ov-259): offered where the runner serves them and this grant may
+    // read them, and not before the runner has said what it can do.
+    val build by connection.daemon.collectAsStateWithLifecycle()
+    val openFiles: (() -> Unit)? = if (build?.offersFiles == true) {
+        { model.navigate(Route.Files(route.hostId, worktreeId = route.worktreeId)) }
+    } else null
     // An orchestrator's tab is called after its workspace — "Billing
     // Orchestrator" — since the main checkout it runs in may be another
     // workspace's. See [FleetLayout.orchestratorTitles].
@@ -386,6 +392,7 @@ fun WorktreeScreen(
                                     },
                                     onOpenDrawer = onOpenDrawer,
                                     onBack = onBack,
+                                    onOpenFiles = openFiles,
                                 )
 
                                 is Pane.Changes -> ChangesTab(
@@ -403,6 +410,7 @@ fun WorktreeScreen(
                                     visible = showing && onScreen,
                                     onOpenDrawer = onOpenDrawer,
                                     onBack = onBack,
+                                    onOpenFiles = openFiles,
                                 )
                             }
                         }
@@ -587,6 +595,8 @@ private fun ChangesTab(
     onOpenDrawer: () -> Unit,
     /** Back to what pushed this worktree, drawn as an arrow in place of the menu; see [WorktreeTopBar]. */
     onBack: (() -> Unit)? = null,
+    /** Opens the worktree's Files, or null where they aren't offered. */
+    onOpenFiles: (() -> Unit)? = null,
 ) {
     val fontChoice by model.settings.font.collectAsStateWithLifecycle()
     val fontSize by model.settings.fontSize.collectAsStateWithLifecycle()
@@ -615,5 +625,6 @@ private fun ChangesTab(
         },
         onOpenDrawer = onOpenDrawer,
         onBack = onBack,
+        onOpenFiles = onOpenFiles,
     )
 }

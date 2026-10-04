@@ -963,7 +963,26 @@ data class DaemonBuild(
      * harness (ov-205).
      */
     val agentsFound: List<String>? = null,
+    /**
+     * The names of the runner's extra read-only folders (`Host.read_only_folders`,
+     * ov-232), or null when it didn't say: a runner too old to have them. Names
+     * only: a phone never learns the path (ov-259).
+     */
+    val readOnlyFolders: List<String>? = null,
 ) {
+    /**
+     * Whether a phone offers Files for this runner's worktrees: the runner serves
+     * them (`worktree_files`) and this connection may read them. The runner
+     * refuses a read grant, so the door isn't offered rather than shown to fail.
+     * Hidden, not dimmed: there is nothing to do about it from here. Matches
+     * iOS's `DaemonBuild.offersFiles`.
+     */
+    val offersFiles: Boolean get() = can(Capability.WORKTREE_FILES) && grantedScope != "read"
+
+    /** The runner's extra read-only folders, by name, when there are any to offer. */
+    val sharedFolders: List<String>
+        get() = if (offersFiles && can(Capability.READ_ONLY_FOLDERS)) readOnlyFolders.orEmpty() else emptyList()
+
     /** Which orchestrator harnesses this runner can start. */
     val availability: HarnessAvailability get() = HarnessAvailability(agentsFound)
 

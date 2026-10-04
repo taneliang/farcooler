@@ -33,6 +33,7 @@ import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.CheckCircleOutline
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.FormatListNumbered
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
@@ -80,6 +81,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -253,6 +255,8 @@ fun ChangesPane(
     onOpenDrawer: () -> Unit,
     /** Back to what pushed this worktree, drawn as an arrow in place of the menu; see [WorktreeTopBar]. */
     onBack: (() -> Unit)? = null,
+    /** Opens the worktree's Files (ov-259), or null where they aren't offered. */
+    onOpenFiles: (() -> Unit)? = null,
 ) {
     val state by store.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
@@ -342,6 +346,7 @@ fun ChangesPane(
                 onOpenSheet = { sheet = it },
                 onMarkRead = { scope.launch { store.markRead() } },
                 onRecompute = { scope.launch { store.load(fresh = true) } },
+                onOpenFiles = onOpenFiles,
             )
         }
 
@@ -1871,6 +1876,7 @@ private fun ReviewMenu(
     onOpenSheet: (ReviewSheet) -> Unit,
     onMarkRead: () -> Unit,
     onRecompute: () -> Unit,
+    onOpenFiles: (() -> Unit)? = null,
 ) {
     var open by remember { mutableStateOf(false) }
     IconButton(onClick = { open = true }) {
@@ -1894,6 +1900,17 @@ private fun ReviewMenu(
                 onOpenSheet(ReviewSheet.Base)
             },
         )
+        if (onOpenFiles != null) {
+            DropdownMenuItem(
+                text = { Text("Files") },
+                leadingIcon = { Icon(Icons.Outlined.Folder, contentDescription = null) },
+                onClick = {
+                    open = false
+                    onOpenFiles()
+                },
+                modifier = Modifier.testTag("pane-files"),
+            )
+        }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         DropdownMenuItem(
             text = { Text("Mark as reviewed") },

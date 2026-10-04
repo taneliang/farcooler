@@ -112,11 +112,13 @@ fun FleetDrawer(
     onNeedsYou: () -> Unit,
     onOpenWorkspace: (WorkspaceRow) -> Unit,
     onOpenWorktrees: (hostId: String, repository: String, hidden: Boolean) -> Unit,
+    onOpenFolder: (hostId: String, name: String) -> Unit,
     onSettings: () -> Unit,
     onAuthorize: () -> Unit,
 ) {
     val connections by model.fleet.active.collectAsStateWithLifecycle()
     val runners = rememberNeedsYouRunners(connections)
+    val folders = rememberSharedFolders(connections)
     val rows = NeedsYou.rows(runners.map { it.second })
     val merged = rows.map { it.entry }
     val sections = runners.flatMap { (connection, runner) ->
@@ -147,6 +149,7 @@ fun FleetDrawer(
                     onOpenWorkspace = onOpenWorkspace,
                     onOpenWorktrees = onOpenWorktrees,
                 )
+                folderItems(folders, namesRunners = connections.size > 1, onOpenFolder = onOpenFolder)
             }
             HorizontalDivider()
             Row(

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Icon
@@ -114,6 +115,48 @@ fun LazyListScope.workspaceItems(
                         .testTag("hidden-${section.key}"),
                 )
             }
+        }
+    }
+}
+
+/** Each connected runner's shared folders as its build says them, collected once. */
+@Composable
+fun rememberSharedFolders(connections: List<Connection>): List<Pair<Connection, List<String>>> =
+    connections.map { connection ->
+        key(connection.host.id) {
+            val build by connection.daemon.collectAsStateWithLifecycle()
+            connection to build?.sharedFolders.orEmpty()
+        }
+    }
+
+/**
+ * Each runner's extra read-only folders, by name (ov-232, ov-259): the logs and
+ * notes its owner chose to share, never addable from here. A heading and a row
+ * each, from a runner that has any and that this grant may read; nothing from
+ * a runner without. Drawn on Needs You and in the drawer beside the workspaces.
+ */
+fun LazyListScope.folderItems(
+    runners: List<Pair<Connection, List<String>>>,
+    namesRunners: Boolean,
+    onOpenFolder: (hostId: String, name: String) -> Unit,
+) {
+    for ((connection, names) in runners) {
+        if (names.isEmpty()) continue
+        item(key = "folders/${connection.host.id}") {
+            RepositoryHeading(
+                "Folders", if (namesRunners) connection.host.displayLabel else null)
+        }
+        items(names, key = { "folder/${connection.host.id}/$it" }) { name ->
+            ListItem(
+                headlineContent = { Text(name) },
+                leadingContent = {
+                    Icon(Icons.Outlined.Folder, null, Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                },
+                modifier = Modifier
+                    .clickable { onOpenFolder(connection.host.id, name) }
+                    .testTag("folder-row-$name"),
+            )
         }
     }
 }

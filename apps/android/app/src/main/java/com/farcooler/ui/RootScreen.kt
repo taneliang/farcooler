@@ -158,6 +158,10 @@ fun RootScreen(model: AppModel) {
                             scope.launch { drawer.close() }
                             model.navigate(Route.Worktrees(host, repository, hidden))
                         },
+                        onOpenFolder = { host, name ->
+                            scope.launch { drawer.close() }
+                            model.navigate(Route.Files(host, folder = name))
+                        },
                         onSettings = {
                             scope.launch { drawer.close() }
                             model.navigate(Route.Settings)
@@ -350,6 +354,20 @@ private fun OverlayScreen(model: AppModel, route: Route, connections: List<Conne
                     workspaceId = route.workspaceId,
                     status = status,
                     onOpenTask = { model.navigate(Route.BoardTask(route.hostId, route.workspaceId, it)) },
+                    onBack = { model.back() },
+                )
+            }
+        }
+
+        is Route.Files -> {
+            val live = connections.firstOrNull { it.host.id == route.hostId }
+            if (live == null) {
+                model.back()
+            } else {
+                FilesScreen(
+                    connection = live,
+                    route = route,
+                    onOpen = { model.navigate(it) },
                     onBack = { model.back() },
                 )
             }
