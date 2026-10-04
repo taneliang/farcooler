@@ -72,6 +72,8 @@ farcooler-fence.workspace = true
 tempfile = "3"
 # `NeedsYouItem.since`, built by hand for the shared needs-you fixture.
 prost-types.workspace = true
+# The plan fixture's wire bytes, encoded and decoded as the runner's are (ov-274).
+prost.workspace = true
 # The tests drive the real daemon binary, not a stub — this is a dev-dependency
 # only, so it does not put the daemon back on any shipping build's graph.
 farcooler-daemon.workspace = true

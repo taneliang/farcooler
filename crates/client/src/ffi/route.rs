@@ -82,7 +82,10 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // (ov-259).
         | Method::WorktreeListDir
         | Method::WorktreeReadFile
-        | Method::UsageTask => Some(method.name()),
+        | Method::UsageTask
+        // The plan layer's two reads (ov-274), behind `board_plan`.
+        | Method::PlanGet
+        | Method::PlanEvents => Some(method.name()),
         Method::AdapterList => Some("adapters"),
         Method::ThemeList => Some("themes"),
         Method::RepositoryList => Some("repositories"),
@@ -140,13 +143,10 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         | Method::TerminalSetRole
         // Naming a terminal (ov-234): the phones show the name and do not set it.
         | Method::TerminalRename => None,
-        // The plan layer (ov-268) is experimental and has no phone screen yet:
-        // the CLI writes it and the Mac's Plan view reads it. The phones' Plan
-        // view (P5) routes `plan.get` and `plan.events`; neither will ever
-        // route a write, since the orchestrator is the layer's one writer.
-        Method::PlanGet
-        | Method::PlanSet
-        | Method::PlanEvents
+        // The plan layer's writes (ov-268): the CLI makes them, the
+        // orchestrator being the layer's one writer. A phone reads `plan.get`
+        // and `plan.events`, routed above, and never routes a write.
+        Method::PlanSet
         | Method::BoardThemeCreate
         | Method::BoardThemeUpdate
         | Method::BoardThemeCards

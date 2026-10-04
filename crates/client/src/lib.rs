@@ -15,6 +15,7 @@ pub mod changes_json;
 pub mod ffi;
 pub mod files_json;
 pub mod needs_you_json;
+pub mod plan_json;
 pub mod session;
 pub mod ssh;
 pub mod task_starts_json;

@@ -189,6 +189,7 @@ fn event_line(what: &crate::session::FleetEvent) -> String {
         FleetEvent::Fleet => json!({ "event": "fleet" }),
         FleetEvent::Resync => json!({ "event": "resync" }),
         FleetEvent::NeedsYou => json!({ "event": "needs_you" }),
+        FleetEvent::Plan { workspace } => json!({ "event": "plan", "workspace": workspace.to_string() }),
         FleetEvent::ChangeSet { worktree } => {
             json!({ "event": "change_set", "worktree": worktree.to_string() })
         }
@@ -1992,6 +1993,25 @@ async fn dispatch(
             Ok(crate::usage_json::task_spend_json(&usage))
         }
 
+        // The plan layer, read-only (ov-274): `{workspace}` answers as
+        // `plan_json` shapes it, `{theme}` or `{lane}` a record. Refused on a
+        // runner without `board_plan`, so a phone's Plan view says the runner
+        // can't answer rather than waiting.
+        "plan.get" => {
+            let plan = session.plan(id("workspace")?).await?;
+            Ok(crate::plan_json::plan_json(&plan))
+        }
+        "plan.events" => {
+            use farcooler_protocol::v1::plan_events_request::Subject;
+            let subject = match (optional_id(args, "theme", method)?, optional_id(args, "lane", method)?) {
+                (Some(theme), None) => Subject::ThemeId(bytes::Bytes::copy_from_slice(theme.as_bytes())),
+                (None, Some(lane)) => Subject::LaneId(bytes::Bytes::copy_from_slice(lane.as_bytes())),
+                _ => return Err(SessionError::Protocol("plan.events takes a theme or a lane".into())),
+            };
+            let list = session.plan_events(subject).await?;
+            Ok(crate::plan_json::events_json(&list))
+        }
+
         // The only board write a phone makes: answering a decision, as
         // `{task, kind: "answer", body}`, which takes the decision off Needs
         // You and wakes the agent waiting on it. Always as `user`; see
@@ -3234,6 +3254,8 @@ mod route;
 mod board_reads_phone_tests;
 #[cfg(test)]
 mod files_phone_tests;
+#[cfg(test)]
+mod plan_phone_tests;
 mod board_reads_args;
 mod files_args;
 use board_reads_args::mark_read_of;

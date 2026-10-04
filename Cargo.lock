@@ -966,6 +966,7 @@ dependencies = [
  "farcooler-tailcat",
  "farcooler-tmux",
  "farcooler-transport",
+ "prost",
  "prost-types",
  "rand",
  "russh",

@@ -309,6 +309,10 @@ pub enum FleetEvent {
     /// Not a re-read notice, and not coalesced into one by the FFI's queue
     /// except against an identical line.
     Reads { workspace: Uuid, floor_ms: i64, opened: Vec<(Uuid, i64)> },
+    /// A board's plan moved (ov-274): a theme, a lane or the queued order was
+    /// written. A client showing that board's Plan re-reads `plan.get`. The
+    /// board only, so two writes to one board are one notice.
+    Plan { workspace: Uuid },
 }
 
 impl FleetEvent {
@@ -337,10 +341,10 @@ impl FleetEvent {
             // A task notice (ov-94): the phones hear it as a push from the
             // relay, which their notification code draws; nothing to re-read.
             Payload::Notice(_) => None,
-            // The plan layer (ov-268) is the Mac's and the CLI's for now: no
-            // phone screen reads it, so there is nothing to re-read. The
-            // phones' Plan view (P5) turns this into news.
-            Payload::PlanChanged(_) => None,
+            // The plan layer (ov-268): the phones' Plan view re-reads that
+            // board's plan (ov-274). The actor isn't carried: the plan has one
+            // writer, the orchestrator, and a phone never writes it.
+            Payload::PlanChanged(p) => Some(FleetEvent::Plan { workspace: uuid_of(&p.workspace_id) }),
             // Reserved arms no daemon emits yet. Named one by one rather than
             // swept up by `_` so that the day a NEW variant is added to this
             // oneof, this match stops compiling (E0004) and somebody decides
@@ -1843,6 +1847,38 @@ impl Session {
         }
     }
 
+    /// One board's plan: its themes, lanes and the queued order (`plan.get`,
+    /// ov-274). EXPERIMENTAL. Refused without a round trip on a runner that
+    /// doesn't advertise `board_plan`, so a phone never waits on a runner that
+    /// can't answer.
+    pub async fn plan(&self, workspace: Uuid) -> Result<farcooler_protocol::v1::Plan, SessionError> {
+        require(self.capabilities(), farcooler_protocol::capability::BOARD_PLAN, "plan.get")?;
+        let payload = request::Payload::PlanGet(farcooler_protocol::v1::PlanGetRequest {
+            workspace_id: bytes::Bytes::copy_from_slice(workspace.as_bytes()),
+            include_closed: false,
+        });
+        match self.value("plan.get", None, Some(payload)).await? {
+            result::Value::Plan(plan) => Ok(plan),
+            other => Err(wrong("plan", &other)),
+        }
+    }
+
+    /// One theme's or lane's record, oldest first (`plan.events`, ov-274).
+    pub async fn plan_events(
+        &self,
+        subject: farcooler_protocol::v1::plan_events_request::Subject,
+    ) -> Result<farcooler_protocol::v1::PlanEventList, SessionError> {
+        require(self.capabilities(), farcooler_protocol::capability::BOARD_PLAN, "plan.events")?;
+        let payload = request::Payload::PlanEvents(farcooler_protocol::v1::PlanEventsRequest {
+            subject: Some(subject),
+            since_ms: 0,
+        });
+        match self.value("plan.events", None, Some(payload)).await? {
+            result::Value::PlanEventList(list) => Ok(list),
+            other => Err(wrong("plan_event_list", &other)),
+        }
+    }
+
     /// Mark a worktree as read, which is what clears its inbox badge.
     pub async fn changes_mark_read(&self, worktree: Uuid) -> Result<(), SessionError> {
         let payload =
@@ -2632,6 +2668,19 @@ fn fleet_trace_anchor(list: &farcooler_protocol::v1::TerminalList) -> Option<i64
 
 #[cfg(test)]
 mod tests {
+    /// A plan written on a board is news of that board (ov-274): not nothing,
+    /// which is what it was while no phone read the plan, and not `Fleet`.
+    #[test]
+    fn a_plan_event_is_news_of_its_board() {
+        use farcooler_protocol::v1::event::Payload;
+        let board = uuid::Uuid::from_u128(9);
+        let news = super::FleetEvent::of(Payload::PlanChanged(farcooler_protocol::v1::PlanChanged {
+            workspace_id: bytes::Bytes::copy_from_slice(board.as_bytes()),
+            actor: "manager".into(),
+        }));
+        assert_eq!(news, Some(super::FleetEvent::Plan { workspace: board }));
+    }
+
     /// **A connection that fell behind is a resync** (ov-20 R-M9): the daemon
     /// dropped events addressed to it, and the one answer to "you missed some"
     /// is to re-read everything, which is what the phones already do on the
