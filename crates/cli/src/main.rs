@@ -1557,12 +1557,17 @@ async fn root(runner: Option<&str>, cmd: RootCmd, json: bool) -> Fallible {
                 // a wrong --confirm would think it had removed a root it still
                 // has.
                 //
-                // The same string `worktree remove` returns further down, and the same
-                // reason: it is the substring the daemon's own error carried, and
-                // `DaemonClient.swift` on macOS still sniffs stderr for
-                // "confirmation" to tell a name mismatch from a real failure.
+                // The same error `worktree remove` returns further down: the
+                // daemon's own `ConfirmationRequired`, so `--json` prints
+                // `code: confirmation-required` and the Mac tells a name
+                // mismatch from a real failure by that word.
                 RemoveRootOutcome::NameDidNotMatch => {
-                    return Err("exact typed confirmation required".into());
+                    return Err(Box::new(farcooler_transport::ClientError::Daemon {
+                        code: farcooler_protocol::v1::ErrorCode::ConfirmationRequired as i32,
+                        retryable: false,
+                        message: "exact typed confirmation required".into(),
+                        what: String::new(),
+                    }));
                 }
             }
         }
@@ -2440,11 +2445,16 @@ async fn worktree(runner: Option<&str>, cmd: WorktreeCmd, json: bool) -> Fallibl
                 RemoveWorktreeOutcome::Removed => {
                     println!("removed worktree for {} (branch kept)", short_bytes(&ws.id));
                 }
-                // Same substring the CLI's own prior direct call produced in
-                // its error text — DaemonClient.swift on macOS still sniffs
-                // for "confirmation" in whatever this prints to stderr.
+                // The daemon's own `ConfirmationRequired`, with its word on
+                // stderr under `--json` (`error_code_lines`), which is what the
+                // Mac reads to ask for the name.
                 RemoveWorktreeOutcome::ConfirmationRequired => {
-                    return Err("exact typed confirmation required".into());
+                    return Err(Box::new(farcooler_transport::ClientError::Daemon {
+                        code: farcooler_protocol::v1::ErrorCode::ConfirmationRequired as i32,
+                        retryable: false,
+                        message: "exact typed confirmation required".into(),
+                        what: String::new(),
+                    }));
                 }
             }
         }
