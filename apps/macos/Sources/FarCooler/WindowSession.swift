@@ -157,7 +157,12 @@ final class WindowSessions {
     /// of a launch takes the newest and says how many windows more to open;
     /// one opened later (the Dock after the last was closed) takes the one
     /// that was kept. With none to take, it's new.
-    func adopt() -> Adoption {
+    func adopt(holding held: UUID? = nil) -> Adoption {
+        // A window that already holds a record keeps it: claiming again would
+        // strand the first until a relaunch opened it as a window of its own.
+        if let held, claimed.contains(held) {
+            return Adoption(session: sessions.first { $0.id == held } ?? WindowSession(id: held), open: 0)
+        }
         let unclaimed = sessions.filter { !claimed.contains($0.id) }.sorted { $0.savedAt > $1.savedAt }
         let first = !restoredAtLaunch
         restoredAtLaunch = true
@@ -169,6 +174,9 @@ final class WindowSessions {
     /// `session` as it is now. Written once per run-loop turn, however many
     /// changes land in it.
     func update(_ session: WindowSession) {
+        // Only a record a live window holds: a write landing after its window
+        // closed must not bring back what closing forgot.
+        guard claimed.contains(session.id) else { return }
         var stamped = session
         stamped.savedAt = Date()
         if let at = sessions.firstIndex(where: { $0.id == session.id }) {

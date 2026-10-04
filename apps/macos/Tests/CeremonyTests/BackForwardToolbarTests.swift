@@ -79,13 +79,16 @@ struct BackForwardToolbarTests {
     }
 
     @Test("A history of one place has nothing to list")
-    func nothingToList() async throws {
+    func noHistoryIsSaid() async throws {
         let window = try await Harness.window(
             Harness.Root(
                 words: Harness.Words(), backForward: true, history: [Self.rows[1]], content: Color.clear),
             width: 1200)
         defer { window.close() }
-        #expect(Self.longPressMenus(in: window).allSatisfy { $0.items.isEmpty })
+        for menu in Self.longPressMenus(in: window) {
+            #expect(menu.items.map(\.title) == ["No History"])
+            #expect(menu.items.allSatisfy { !$0.isEnabled })
+        }
     }
 
     @Test("In a real window, Back and Forward sit after the switcher and push nothing into the overflow menu", arguments: cases)

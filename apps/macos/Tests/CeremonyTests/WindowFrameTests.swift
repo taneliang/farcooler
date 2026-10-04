@@ -59,26 +59,29 @@ struct WindowFrameTests {
     @Test("Only SwiftUI's frames for the window's root view are stale")
     func staleKeys() {
         let keys = [
-            "NSWindow Frame SwiftUI.ModifiedContent<ContentView, X>-1-AppWindow-1",
+            "NSWindow Frame SwiftUI.ModifiedContent<Far_Cooler.ContentView, X>-1-AppWindow-1",
+            "NSWindow Frame SwiftUI.ModifiedContent<OtherContentView, X>",
             "NSWindow Frame SwiftUI.ModifiedContent<AboutView, X>",
             "NSWindow Frame com.apple.something", "nav.destination.v1",
         ]
         #expect(WindowFrame.staleKeys(in: keys) == [keys[0]])
+        #expect(!WindowFrame.staleKeys(in: keys).contains(keys[1]), "only the fully qualified root view")
     }
 
-    @Test("Removing them is done once, and takes nothing else")
+    @Test("Removing them takes only those, and does it again for a key a later build leaves")
     func removal() {
         let suite = "farcooler.test.frames"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
-        defaults.set("1 2 3 4", forKey: "NSWindow Frame SwiftUI.ModifiedContent<ContentView, A>")
+        let stale = "NSWindow Frame SwiftUI.ModifiedContent<Far_Cooler.ContentView, A>"
+        defaults.set("1 2 3 4", forKey: stale)
         defaults.set("keep", forKey: "nav.destination.v1")
         WindowFrame.removeStale(from: defaults)
-        #expect(defaults.string(forKey: "NSWindow Frame SwiftUI.ModifiedContent<ContentView, A>") == nil)
+        #expect(defaults.string(forKey: stale) == nil)
         #expect(defaults.string(forKey: "nav.destination.v1") == "keep")
-        // A later build's key isn't removed behind its back.
-        defaults.set("1 2 3 4", forKey: "NSWindow Frame SwiftUI.ModifiedContent<ContentView, B>")
+        let later = "NSWindow Frame SwiftUI.ModifiedContent<Far_Cooler.ContentView, B>"
+        defaults.set("1 2 3 4", forKey: later)
         WindowFrame.removeStale(from: defaults)
-        #expect(defaults.string(forKey: "NSWindow Frame SwiftUI.ModifiedContent<ContentView, B>") != nil)
+        #expect(defaults.string(forKey: later) == nil)
     }
 }

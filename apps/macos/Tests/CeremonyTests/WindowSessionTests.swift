@@ -143,7 +143,7 @@ struct WindowSessionTests {
     @Test("A change is written; a repeat of it is not")
     func updates() {
         let (sessions, defaults) = Self.store()
-        var record = WindowSession(id: UUID())
+        var record = sessions.adopt().session
         record.place = Self.task("t1")
         sessions.update(record)
         sessions.flush()
@@ -155,6 +155,35 @@ struct WindowSessionTests {
         record.layout.split = "0.5,0.5"
         sessions.update(record)
         #expect(sessions.sessions[0].layout.split == "0.5,0.5")
+    }
+
+    @Test("A window that already holds a record claims nothing more")
+    func claimsOnce() {
+        let (_, defaults) = Self.store()
+        let a = Self.session("t1", at: 1), b = Self.session("t2", at: 2)
+        defaults.set(WindowSession.encode([a, b]), forKey: WindowSessions.key)
+        let sessions = WindowSessions(defaults: defaults)
+        let first = sessions.adopt()
+        #expect(sessions.adopt(holding: first.session.id) == .init(session: first.session, open: 0))
+        // The other record is still there for the window that is to take it.
+        #expect(sessions.adopt().session.id == a.id)
+    }
+
+    @Test("A write for a window that closed is ignored, and the next launch opens no ghost")
+    func lateWrite() {
+        let (_, defaults) = Self.store()
+        let a = Self.session("t1", at: 1), b = Self.session("t2", at: 2)
+        defaults.set(WindowSession.encode([a, b]), forKey: WindowSessions.key)
+        let sessions = WindowSessions(defaults: defaults)
+        _ = sessions.adopt()
+        _ = sessions.adopt()
+        sessions.closed(a.id)
+        sessions.update(a)
+        sessions.update(WindowSession(id: UUID()))
+        sessions.flush()
+        let next = WindowSessions(defaults: defaults)
+        #expect(next.sessions.map(\.id) == [b.id])
+        #expect(next.adopt().open == 0)
     }
 
     // MARK: - History, kept

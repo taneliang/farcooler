@@ -49,15 +49,22 @@ struct BackForwardControl: View {
     /// hold.
     private func button(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
         Menu {
-            if rows.count > 1 { HistoryMenuItems(rows: rows, go: go) }
+            historyItems
         } label: {
             Label(title, systemImage: symbol)
         } primaryAction: {
             action()
         }
         .menuIndicator(.hidden)
-        .contextMenu {
-            if rows.count > 1 { HistoryMenuItems(rows: rows, go: go) }
+        .contextMenu { historyItems }
+    }
+
+    /// The history, or, with nowhere but here, a dimmed word saying so.
+    @ViewBuilder private var historyItems: some View {
+        if rows.count > 1 {
+            HistoryMenuItems(rows: rows, go: go)
+        } else {
+            Button("No History") {}.disabled(true)
         }
     }
 

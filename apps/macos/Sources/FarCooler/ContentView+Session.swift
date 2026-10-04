@@ -10,16 +10,23 @@ extension ContentView {
     /// windows the launch had more of. The place itself is put back by
     /// `restoreWhereYouWere`, as the runners come up.
     func adoptSession() {
-        let adoption = WindowSessions.shared.adopt()
+        guard kept == nil else { return }
+        let adoption = WindowSessions.shared.adopt(holding: kept?.id)
         let record = adoption.session
         windowID = record.id
         kept = record
-        guard record.savedAt > Date(timeIntervalSince1970: 0) else { return }
-        jumpBar.history = Self.history(of: record)
-        jumpBar.restoredTitles = Self.titles(of: record)
-        navigatorHidden = record.layout.navigatorHidden
-        navigatorSplit = record.layout.split
+        if record.savedAt > Date(timeIntervalSince1970: 0) {
+            jumpBar.history = Self.history(of: record)
+            jumpBar.restoredTitles = Self.titles(of: record)
+            navigatorHidden = record.layout.navigatorHidden
+            navigatorSplit = record.layout.split
+        }
         for _ in 0..<adoption.open { openWindow(id: FarCoolerApp.mainWindowID) }
+        if adoption.open > 0 {
+            // The windows opened after this one are in front of it, and it
+            // holds the one that was last in use.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { windowBox.window?.makeKeyAndOrderFront(nil) }
+        }
         WindowFrame.removeStale()
         if let window = windowBox.window {
             WindowFrame.apply(record, to: window)
@@ -45,6 +52,27 @@ extension ContentView {
     func keepFrame(_ note: Notification) {
         guard let window = windowBox.window, note.object as? NSWindow === window, kept != nil else { return }
         captureFrame(of: window)
+    }
+
+    /// What `sessionState` is made from, cheap to compare: the record is built
+    /// only when one of these changes, not on every redraw.
+    struct SessionInputs: Equatable {
+        var selection: Selection?
+        var tabs: TaskTabMemory
+        var agents: [String: String]
+        var keyPane: PaneRef?
+        var history: NavigationHistory
+        var focus: Bool
+        var hidden: Bool
+        var split: String
+        var kept: WindowSession?
+        var restoring: Bool
+    }
+
+    var sessionInputs: SessionInputs {
+        SessionInputs(
+            selection: selection, tabs: taskTabs, agents: chosenAgents, keyPane: keyPane, history: jumpBar.history,
+            focus: focusColumn, hidden: navigatorHidden, split: navigatorSplit, kept: kept, restoring: restoring != nil)
     }
 
     /// The window as its record says it is now, or nil while it has nowhere to
@@ -81,7 +109,7 @@ extension ContentView {
             MacDestination.destination(stop.place).map {
                 WindowSession.Entry(
                     place: $0, trail: stop.trail.flatMap { MacDestination.destination($0) },
-                    title: HistoryMenu.title(of: stop.place, names: names))
+                    title: HistoryMenu.title(of: stop.place, names: names).map(HistoryMenu.shortened))
             }
         }
     }

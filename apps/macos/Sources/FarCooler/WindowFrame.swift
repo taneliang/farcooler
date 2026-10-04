@@ -60,14 +60,13 @@ enum WindowFrame {
     /// type name, which changes with every modifier added to the window's
     /// root: one stale key for each, the first window's frame lost to each.
     static func staleKeys(in keys: [String]) -> [String] {
-        keys.filter { $0.hasPrefix("NSWindow Frame SwiftUI.") && $0.contains("ContentView") }
+        keys.filter { $0.hasPrefix("NSWindow Frame SwiftUI.")
+                && ($0.contains("Far_Cooler.ContentView") || $0.contains("FarCooler.ContentView")) }
     }
 
-    /// Remove them, once: a record keeps each window's frame now.
+    /// Remove them, whenever there are any: a record keeps each window's frame
+    /// now, and the next change to the root's modifiers makes another.
     static func removeStale(from defaults: UserDefaults = .standard) {
-        let done = "window.frames.cleaned.v1"
-        guard !defaults.bool(forKey: done) else { return }
         for key in staleKeys(in: Array(defaults.dictionaryRepresentation().keys)) { defaults.removeObject(forKey: key) }
-        defaults.set(true, forKey: done)
     }
 }
