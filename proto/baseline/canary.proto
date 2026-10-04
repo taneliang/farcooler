@@ -1,4 +1,4 @@
-// Shipped by Canary at 2d3c6df9807712cfc6397e3c7d98b5b023a9a104. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 4d797b12e9552967c83659829dc2dc5860c4dac4. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -1280,6 +1280,15 @@ message Terminal {
   // whenever `split_of` is, for a split recorded before this existed, and
   // from an older runner: not known. Set once, at creation.
   optional bool split_of_orchestrator = 42;
+  // The board task this terminal's own notifications fold into: the runner's
+  // `task_link::notice_task`, decided here so no client keeps a copy of the
+  // rule (ov-112). Absent for a terminal that notifies as itself: an
+  // orchestrator, a pane with no task, a lane with no task or two, the main
+  // checkout's hand-opened agents, and a closed task's. Also absent from a
+  // runner without the `notice_task` capability, which a client tells apart by
+  // the capability, never by the field. Computed when the message is built, so
+  // a terminal event carries the answer as of that event.
+  optional bytes notice_task_id = 43;
 }
 
 // What a terminal is for. At most one live orchestrator per workspace.
