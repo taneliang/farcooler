@@ -362,6 +362,10 @@ pub struct Following {
     /// server, so this gains one small entry per pane ever followed, and
     /// a kept entry is never found again for a different pane.
     turns: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// A test's hold on the next `follow` between its pid read and its
+    /// subscription: told when it gets there, waits to be let go.
+    #[cfg(test)]
+    hold: Mutex<Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>>,
 }
 
 impl Following {
@@ -370,6 +374,13 @@ impl Following {
     #[cfg(test)]
     pub(crate) fn assume_tmux_cannot_report(&self) {
         self.tmux_reports.store(2, Ordering::SeqCst);
+    }
+
+    /// Hold the next `follow` once it has read the pane's pid: `reached` is
+    /// notified there, and it goes on when `go` is.
+    #[cfg(test)]
+    pub(crate) fn hold_next_follow(&self, reached: Arc<tokio::sync::Notify>, go: Arc<tokio::sync::Notify>) {
+        *self.hold.lock().unwrap_or_else(|e| e.into_inner()) = Some((reached, go));
     }
 
     /// Whether tmux has been found to report the mode itself.
@@ -423,6 +434,13 @@ impl Following {
         // The pid first: a respawn between this and the subscription leaves
         // a record about the program before it, which is dropped below.
         let Ok(pid) = runtime.tmux.pane_pid(&pane).await else { return self.failed(&pane) };
+        #[cfg(test)]
+        let hold = self.hold.lock().unwrap_or_else(|e| e.into_inner()).take();
+        #[cfg(test)]
+        if let Some((reached, go)) = hold {
+            reached.notify_one();
+            go.notified().await;
+        }
         let record = Record::new(pid);
         {
             let mut records = self.records.lock().unwrap_or_else(|e| e.into_inner());

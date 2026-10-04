@@ -1297,6 +1297,9 @@ mod worker_tests;
 #[path = "lane_tests.rs"]
 mod lane_tests;
 
+#[path = "follow_race_tests.rs"]
+mod follow_race_tests;
+
 // ---- Ask the Orchestrator (ov-184): a draft is pasted and never sent ----
 
 /// Nothing reached the pane: no paste and no Enter.

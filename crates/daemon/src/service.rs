@@ -5126,6 +5126,13 @@ impl Service {
         self.paste_modes.assume_tmux_cannot_report();
     }
 
+    /// Hold the next follow between its pid read and its subscription
+    /// (`paste_mode::Following::hold_next_follow`).
+    #[cfg(test)]
+    pub(crate) fn hold_next_paste_mode_follow(&self, reached: Arc<tokio::sync::Notify>, go: Arc<tokio::sync::Notify>) {
+        self.paste_modes.hold_next_follow(reached, go);
+    }
+
     /// Whether a live record follows the program now in `id`'s pane.
     #[cfg(test)]
     pub(crate) async fn paste_mode_followed(&self, id: Uuid) -> bool {
