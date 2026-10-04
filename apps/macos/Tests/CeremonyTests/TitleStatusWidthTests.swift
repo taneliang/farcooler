@@ -32,7 +32,7 @@ struct TitleStatusWidthTests {
         (1790, .wide), (1200, .wide), (900, .medium), (700, .short), (600, .ring),
     ]
 
-    @Test("The status area is whole, in its form, and leaves every other item in place", arguments: widths)
+    @Test("The status area is whole, in its form, and leaves every other item in place", .disabled("ov-235: text widths differ on CI's macOS runner"), arguments: widths)
     func fitsAtEveryWidth(width: CGFloat, form: TitleStatus.Form) async throws {
         // Everything at the widest, for the count of items a window shows
         // when nothing has gone to the overflow menu.
@@ -84,7 +84,7 @@ struct TitleStatusWidthTests {
 
     /// The form follows the window: made wide, then narrowed on screen, the
     /// item is measured again at the new form's width, and the tray stays.
-    @Test("Narrowing the window on screen measures the status area again")
+    @Test("Narrowing the window on screen measures the status area again", .disabled("ov-235: text widths differ on CI's macOS runner"))
     func narrowingOnScreen() async throws {
         let window = try await Harness.window(Self.root(Harness.Words()), width: 1790)
         defer { window.close() }
