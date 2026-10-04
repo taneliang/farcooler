@@ -123,14 +123,15 @@ enum TitleStatus {
     /// count, the space before them, then Open in Editor and Changes, and
     /// the runner trouble's words while there's any. Measured as `leading`
     /// is, in the regular toolbar: the tray 36 pt and its count, the editor 80,
-    /// Changes 36, Show Files 36, and 8 between items.
+    /// Changes 36, and 8 between items; Show Files 37, in Changes' capsule
+    /// with no gap of its own.
     static func trailing(editor: Bool, changes: Bool, files: Bool = false, trouble: String?, needsYou: Int = 0) -> CGFloat {
         var width: CGFloat = 10 + 36 + 12
         if let count = NeedsYouToolbar.countText(count: needsYou) { width += 4 + textWidth(count) }
         if editor { width += 80 + 8 }
         if changes { width += 36 + 8 }
-        // Show Files (ov-189): an icon button in the same capsule, as Changes is.
-        if files { width += 36 + 8 }
+        // Show Files (ov-189): an icon button in Changes' capsule, so no gap.
+        if files { width += 37 }
         if let trouble { width += 34 + textWidth(trouble) + 8 }
         return width
     }
