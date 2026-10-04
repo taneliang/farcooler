@@ -63,12 +63,12 @@ async fn place_ids<L: DispatchLink>(link: &mut L, place: Place) -> Result<(bytes
 
 /// `worktree.list_dir`'s request for `place`.
 pub(crate) fn dir_request(worktree_id: bytes::Bytes, folder: String, path: String) -> pb::WorktreeDirRequest {
-    pb::WorktreeDirRequest { worktree_id, folder, path, ..Default::default() }
+    pb::WorktreeDirRequest { worktree_id, folder, path }
 }
 
 /// `worktree.read_file`'s request for `place`.
 pub(crate) fn file_request(worktree_id: bytes::Bytes, folder: String, path: String) -> pb::WorktreeFileRequest {
-    pb::WorktreeFileRequest { worktree_id, folder, path, ..Default::default() }
+    pb::WorktreeFileRequest { worktree_id, folder, path }
 }
 
 pub async fn files(runner: Option<&str>, cmd: FilesCmd, json: bool) -> Fallible {
