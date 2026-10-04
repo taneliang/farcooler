@@ -23,8 +23,24 @@ check() {
 }
 
 scratch="$(mktemp -d)"
-trap 'rm -rf "$scratch"' EXIT
+# Git's background auto-gc or maintenance, started by a commit or push, can
+# write into .git/objects/pack while rm -rf empties it ("Directory not empty").
+# Turn both off for every git here, the script under test included.
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+export GIT_CONFIG_COUNT=2
+export GIT_CONFIG_KEY_0=gc.auto GIT_CONFIG_VALUE_0=0
+export GIT_CONFIG_KEY_1=maintenance.auto GIT_CONFIG_VALUE_1=false
+
+# Cleanup never decides a case's exit code: retry briefly, then give up quietly.
+rmtree() {
+  local i
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    rm -rf "$@" 2>/dev/null && return 0
+    sleep 0.2
+  done
+  return 0
+}
+trap 'rmtree "$scratch"' EXIT
 git_q() { git -c user.name=t -c user.email=t@t -c init.defaultBranch=main "$@"; }
 
 git_q init --quiet --bare "$scratch/origin.git"
@@ -50,7 +66,7 @@ land() {
 
 # The job: a fresh full clone of main, then the script.
 record() {
-  rm -rf "$scratch/ci"
+  rmtree "$scratch/ci"
   git clone --quiet "$scratch/origin.git" "$scratch/ci" 2>/dev/null
   (cd "$scratch/ci" && "$SCRIPT" "$1")
 }
@@ -89,7 +105,7 @@ check "and warns that it did not advance" warned "$got"
 # A push that loses a race retries from the new main. The job's clone is taken,
 # then a human push lands before the script runs; its fetch sees the new main.
 e="$(land epsilon 5)"
-rm -rf "$scratch/ci"
+rmtree "$scratch/ci"
 git clone --quiet "$scratch/origin.git" "$scratch/ci" 2>/dev/null
 land epsilon 6 >/dev/null
 (cd "$scratch/ci" && "$SCRIPT" "$e") >/dev/null
@@ -144,7 +160,7 @@ fi
 exec "$real_git" "\$@"
 SHIM
 chmod +x "$scratch/shim/git"
-rm -rf "$scratch/ci"
+rmtree "$scratch/ci"
 git clone --quiet "$scratch/origin.git" "$scratch/ci" 2>/dev/null
 (cd "$scratch/ci" && PATH="$scratch/shim:$PATH" "$SCRIPT" "$i") >/dev/null 2>&1 || true
 check "the race was staged" yes "$([ -e "$scratch/raced" ] && echo yes || echo no)"
