@@ -671,6 +671,11 @@ final class RunnerStore: ObservableObject {
         if edited.reach != previous.reach {
             edited.fingerprint = nil
         }
+        // The id it said belongs to the box it was; a runner re-pointed or
+        // run as another user is not it (ov-231).
+        if RunnerIds.survivesEdit(reachChanged: edited.reach != previous.reach, userChanged: edited.user != previous.user) == false {
+            RunnerIds().forget(edited.id.uuidString)
+        }
         hosts[index] = edited
         // Kept in step deliberately: `selected` is a copy, and `RootView` keys
         // the whole screen on it, so this is what makes an edit reconnect

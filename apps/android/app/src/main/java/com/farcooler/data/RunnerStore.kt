@@ -322,6 +322,9 @@ class RunnerStore(context: Context) {
         val edited =
             if (host.reach != previous.reach) host.copy(fingerprint = null) else host
         _hosts.value = current.toMutableList().also { it[index] = edited }
+        if (!RunnerIds.survivesEdit(host.reach != previous.reach, host.user != previous.user)) {
+            preferences.edit().putString(KEY_RUNNER_IDS, RunnerIds.encode(RunnerIds.forget(runnerIds(), host.id))).apply()
+        }
         save()
     }
 

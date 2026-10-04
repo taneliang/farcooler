@@ -211,6 +211,9 @@ final class Connection: ObservableObject {
     /// something to reconnect TO. Before this, the host appeared only as an
     /// argument to `start` and was gone the moment it returned.
     private var host: Runner?
+    /// Set by `retire()`: a build read after a removal or an edit says nothing
+    /// about the runner the entry is now (ov-231), so it is not remembered.
+    private var retired = false
 
     /// The runner this connection is for, as it reads on screen.
     ///
@@ -775,6 +778,7 @@ final class Connection: ObservableObject {
     /// registers the runner it was meant to forget — with no later `retire`
     /// able to reach either entry.
     func retire() {
+        retired = true
         // Same bump as `abandon`: anything still awaiting the core for this
         // connection stops being able to write a phase on the way out.
         attempt += 1
@@ -926,7 +930,7 @@ final class Connection: ObservableObject {
         lastDaemon = build
         // Kept for the next launch, when a push names this runner before it
         // is connected (ov-231).
-        if let host { RunnerIds().remember(build.runnerId, for: host.id.uuidString) }
+        if let host, !retired { RunnerIds().remember(build.runnerId, for: host.id.uuidString) }
         // Boards this link never read — `loadBoards` refused them while the
         // build was missing. Not the ordinary link-up, whose own sweep comes
         // after this. Detached, so the poll that installed the build does not

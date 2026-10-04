@@ -33,7 +33,7 @@ struct PhoneDestinationIdleRunnerTests {
     @Test("A push for a runner never connected here is not matched, and nothing is dialed")
     func unknownRunnerStaysAbsent() throws {
         let sources = Self.sources(known: [:])
-        #expect(try Self.resolve(sources) != .connect(host: "host-b"))
+        #expect(try Self.resolve(sources) == .stay(.runnerUnavailable))
         #expect(sources.first { $0.host == "host-b" }?.idle == true)
     }
 
@@ -42,6 +42,23 @@ struct PhoneDestinationIdleRunnerTests {
         let live = PhoneDestinationTests.ready(host: "host-b", runnerId: "runner-b")
         let sources = Self.sources(known: ["host-b": "stale"], connected: [PhoneDestinationTests.ready(), live])
         #expect(sources.first { $0.host == "host-b" }?.runnerId == "runner-b")
+    }
+
+    @Test("A runner that's connecting is matched by its remembered id, and waited for")
+    func connectingRunnerMatchesRememberedId() throws {
+        let dialing = PhoneDestination.Source(host: "host-b", runnerId: nil, ready: false, idle: false, fleet: nil)
+        let sources = Self.sources(known: ["host-b": "runner-b"], connected: [PhoneDestinationTests.ready(), dialing])
+        #expect(sources.first { $0.host == "host-b" }?.runnerId == "runner-b")
+        #expect(try Self.resolve(sources) == .wait)
+    }
+
+    @Test("An edit that re-points a runner or changes its user forgets its id")
+    func editForgetsId() throws {
+        #expect(RunnerIds.survivesEdit(reachChanged: false, userChanged: false))
+        #expect(!RunnerIds.survivesEdit(reachChanged: true, userChanged: false))
+        #expect(!RunnerIds.survivesEdit(reachChanged: false, userChanged: true))
+        // Forgotten, a push for the old runner no longer finds the edited one.
+        #expect(try Self.resolve(Self.sources(known: [:])) == .stay(.runnerUnavailable))
     }
 
     @Test("Runner ids are remembered, overwritten and forgotten")

@@ -3,9 +3,9 @@ package com.farcooler.ui
 import com.farcooler.data.RunnerIds
 import com.farcooler.model.Destination
 import com.farcooler.model.DestinationPayloads
+import com.farcooler.model.DestinationResolver
 import com.farcooler.model.DestinationResolver.Arrival
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -21,6 +21,8 @@ class IdleRunnerPushTest {
         DestinationWorld.sources(
             paired = listOf("h1", "h2"), connected = connected, known = known, everyRunner = false, selected = "h1",
         )
+
+    private val stayed = DestinationDriver.Step.Stay(DestinationResolver.Note.RUNNER_UNAVAILABLE, Arrival.NOTIFICATION)
 
     private fun step(sources: List<DestinationWorld.Source>): DestinationDriver.Step {
         val driver = DestinationDriver { 0L }
@@ -40,7 +42,7 @@ class IdleRunnerPushTest {
     @Test
     fun aPushNamingARunnerNeverConnectedDialsNothing() {
         val sources = sources(known = emptyMap())
-        assertNotEquals(DestinationDriver.Step.Connect("h2"), step(sources))
+        assertEquals(stayed, step(sources))
         assertTrue(sources.first { it.hostId == "h2" }.idle)
     }
 
@@ -48,6 +50,23 @@ class IdleRunnerPushTest {
     fun aLiveIdBeatsARememberedOne() {
         val live = connected() + ("h2" to DestinationWorld.Source("h2", "runner-b", ready = true, idle = false, fleet = null))
         assertEquals("runner-b", sources(known = mapOf("h2" to "stale"), connected = live).first { it.hostId == "h2" }.runnerId)
+    }
+
+    @Test
+    fun aConnectingRunnerMatchesByItsRememberedIdAndIsWaitedFor() {
+        val dialing = connected() + ("h2" to DestinationWorld.Source("h2", null, ready = false, idle = false, fleet = null))
+        val sources = sources(known = mapOf("h2" to "runner-b"), connected = dialing)
+        assertEquals("runner-b", sources.first { it.hostId == "h2" }.runnerId)
+        assertEquals(DestinationDriver.Step.Wait, step(sources))
+    }
+
+    @Test
+    fun anEditThatRepointsARunnerOrChangesItsUserForgetsItsId() {
+        assertTrue(RunnerIds.survivesEdit(reachChanged = false, userChanged = false))
+        assertTrue(!RunnerIds.survivesEdit(reachChanged = true, userChanged = false))
+        assertTrue(!RunnerIds.survivesEdit(reachChanged = false, userChanged = true))
+        // Forgotten, a push for the old runner no longer finds the edited one.
+        assertEquals(stayed, step(sources(known = emptyMap())))
     }
 
     @Test

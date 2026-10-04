@@ -31,6 +31,13 @@ public struct RunnerIds {
         defaults.set(ids, forKey: key)
     }
 
+    /// Whether a runner's remembered id outlives an edit: not when the edit
+    /// re-points it or changes its user, which makes it another runner, so a
+    /// push for the old one must not dial it.
+    public static func survivesEdit(reachChanged: Bool, userChanged: Bool) -> Bool {
+        !reachChanged && !userChanged
+    }
+
     /// Forget a removed runner's id.
     public func forget(_ host: String) {
         var ids = all

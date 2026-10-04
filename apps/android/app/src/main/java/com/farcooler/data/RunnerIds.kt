@@ -27,5 +27,8 @@ object RunnerIds {
     fun remember(ids: Map<String, String>, host: String, runnerId: String?): Map<String, String> =
         if (runnerId.isNullOrEmpty()) ids else ids + (host to runnerId)
 
+    /** Whether an id outlives an edit: not when it re-points the runner or changes its user, which makes it another runner. */
+    fun survivesEdit(reachChanged: Boolean, userChanged: Boolean): Boolean = !reachChanged && !userChanged
+
     fun forget(ids: Map<String, String>, host: String): Map<String, String> = ids - host
 }
