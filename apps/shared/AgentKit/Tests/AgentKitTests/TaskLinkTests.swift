@@ -13,6 +13,7 @@ private struct Pane: TaskLinkPane, TaskBoardPane {
     var runsAgent: Bool = true
     var isOrchestrator: Bool = false
     var workspace: String? = nil
+    var noticeTaskID: String? = nil
 }
 
 private struct Lane: TaskLinkWorktree {
@@ -160,9 +161,44 @@ func aBannerIsLeftToTheTaskOnlyWhereTheNoticeArrives() {
     let agent = Pane(boardTaskID: bil7)
     let loose = Pane(boardTaskID: nil)
     let lane = Lane(openTaskIDs: [bil7, bil9])
-    #expect(TaskLink.leavesBannerToTask(agent, in: lane, noticeReachesHere: true))
-    #expect(!TaskLink.leavesBannerToTask(agent, in: lane, noticeReachesHere: false), "its own banner is all there is")
-    #expect(!TaskLink.leavesBannerToTask(loose, in: lane, noticeReachesHere: true))
+    // An older runner (no `notice_task`): the mirror above decides.
+    #expect(TaskLink.leavesBannerToTask(agent, in: lane, noticeReachesHere: true, runnerAnswers: false))
+    #expect(
+        !TaskLink.leavesBannerToTask(agent, in: lane, noticeReachesHere: false, runnerAnswers: false),
+        "its own banner is all there is")
+    #expect(!TaskLink.leavesBannerToTask(loose, in: lane, noticeReachesHere: true, runnerAnswers: false))
+}
+
+// The runner's own answer (`Terminal.notice_task_id`, ov-112): once a runner
+// sends `notice_task`, the field decides and the mirror above is not asked.
+
+@Test("A runner that answers decides by the field alone")
+func aRunnerThatAnswersDecidesByTheFieldAlone() {
+    let lane = Lane(openTaskIDs: [bil9])
+    // The field names a task: fold, though the mirror would not (a pane that
+    // names a workspace, in a lane whose task it was not opened for).
+    let told = Pane(boardTaskID: nil, workspace: "ws-a", noticeTaskID: bil9)
+    #expect(TaskLink.noticeTask(of: told, in: lane) == nil, "the mirror says no")
+    #expect(TaskLink.leavesBannerToTask(told, in: lane, noticeReachesHere: true, runnerAnswers: true))
+    // No field: the runner said it notifies as itself, though the mirror would
+    // fold a pane in a single-task lane outside the main checkout.
+    let own = Pane(boardTaskID: nil, noticeTaskID: nil)
+    #expect(TaskLink.noticeTask(of: own, in: lane) == bil9, "the mirror says yes")
+    #expect(!TaskLink.leavesBannerToTask(own, in: lane, noticeReachesHere: true, runnerAnswers: true))
+    // An empty id is no id.
+    let empty = Pane(boardTaskID: bil7, noticeTaskID: "")
+    #expect(!TaskLink.leavesBannerToTask(empty, in: Lane(openTaskIDs: [bil7]), noticeReachesHere: true, runnerAnswers: true))
+    // The field is read only where the notice arrives at all.
+    #expect(!TaskLink.leavesBannerToTask(told, in: lane, noticeReachesHere: false, runnerAnswers: true))
+}
+
+@Test("A runner that doesn't answer is not read through the field")
+func aRunnerThatDoesntAnswerIsNotReadThroughTheField() {
+    // Absent means "notifies as itself" from a runner that answers and "too
+    // old to say" from one that doesn't; only the capability tells them apart.
+    let lane = Lane(openTaskIDs: [bil9])
+    let stray = Pane(boardTaskID: nil, workspace: "ws-a", noticeTaskID: bil9)
+    #expect(!TaskLink.leavesBannerToTask(stray, in: lane, noticeReachesHere: true, runnerAnswers: false))
 }
 
 @Test("A phone hears a task notice only from a paired runner that sends them, once registered")
@@ -188,7 +224,7 @@ func thePhonesFleetLeavesAHandOpenedAgentInTheMainCheckoutToItself() throws {
     pane.taskId = nil
     #expect(TaskLink.noticeTask(of: pane, in: worktree) == nil)
     pane.taskId = "0198f2c0-0000-7000-8000-00000000a002"
-    #expect(TaskLink.leavesBannerToTask(pane, in: worktree, noticeReachesHere: true))
+    #expect(TaskLink.leavesBannerToTask(pane, in: worktree, noticeReachesHere: true, runnerAnswers: false))
 }
 
 /// The iPhone's call site: the reports its `Connection` hands `Notifier`,
@@ -208,5 +244,26 @@ func theIPhonesFleetReportsLeaveATaskBoundAgentToItsTask() throws {
     }
     #expect(try #require(report(paired)).leftToTask)
     #expect(try #require(report(nil)).leftToTask == false, "no runner build, no push to leave it to")
+}
+
+/// A runner that sends `notice_task` is believed over this app's mirror: the
+/// same pane, in a main checkout the mirror refuses, folds when the runner
+/// names its task, and does not when the runner names none.
+@Test("The iPhone's fleet reports follow the runner's notice task when it sends one")
+func theIPhonesFleetReportsFollowTheRunnersNoticeTask() throws {
+    var fleet = try FleetDecodeTests.decodeFleet()
+    fleet.worktrees[0].terminals[0].role = "agent"
+    fleet.worktrees[0].terminals[0].taskId = nil
+    let id = fleet.worktrees[0].terminals[0].id
+    let answers = DaemonBuild(
+        version: "v", matches: true, platform: "linux",
+        capabilities: ["tasks", "task_notices", "notice_task"], pushPaired: true)
+    func report(_ noticeTask: String?) throws -> Bool {
+        fleet.worktrees[0].terminals[0].noticeTaskId = noticeTask
+        return try #require(fleet.agentReports(runner: answers, registered: true).first { $0.terminal.id == id })
+            .leftToTask
+    }
+    #expect(try report("0198f2c0-0000-7000-8000-00000000a002"))
+    #expect(try report(nil) == false)
 }
 

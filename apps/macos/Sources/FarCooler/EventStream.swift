@@ -74,6 +74,12 @@ struct TerminalEvent: Sendable, Decodable {
     // until something else happened in that pane, which for a dead agent is
     // indefinitely.
     var turnFailed: Bool?
+    // The task this pane's own notifications fold into, as the runner decided
+    // it when it built THIS event (ov-112). Applied from the push because the
+    // answer belongs to the moment of the change: a Done task or a moved lane
+    // since the last full read would otherwise fold a banner into a thread
+    // that is not coming. See `DaemonClient.apply(_:)`.
+    var noticeTaskId: String?
 }
 
 /// A worktree's tiling, pushed whole.

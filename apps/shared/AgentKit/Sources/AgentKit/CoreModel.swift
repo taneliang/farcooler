@@ -435,6 +435,12 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// runner that does not advertise `terminal_task`; see
     /// `TaskAgentLink.speaksOfAgents` for what a board says then.
     var taskId: String?
+    /// The task this pane's own notifications fold into, as the runner decided
+    /// it (`notice_task`), or nil when it notifies as itself. Sent as
+    /// `noticeTaskId` by `Session::fleet`; nil too from a runner without
+    /// `notice_task`, which `TaskLink.leavesBannerToTask` tells apart by the
+    /// capability, never by this.
+    var noticeTaskId: String?
     /// Whose work this pane is doing, as a workspace id: not always the owner
     /// of the worktree it runs in, since an orchestrator may run in a
     /// checkout another workspace owns. Nil in an unclaimed worktree and from
@@ -1224,7 +1230,9 @@ extension Fleet {
 
 /// The phone's terminal and worktree, as `TaskLink` asks about them. The
 /// pane's `boardTaskID` is `TaskBoardPane`'s, above.
-extension Terminal: TaskLinkPane {}
+extension Terminal: TaskLinkPane {
+    var noticeTaskID: String? { noticeTaskId }
+}
 
 extension Worktree: TaskLinkWorktree {
     var openTaskIDs: [String] { (openTasks ?? []).map(\.id) }

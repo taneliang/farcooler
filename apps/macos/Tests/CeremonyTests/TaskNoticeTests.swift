@@ -93,18 +93,34 @@ struct TaskNoticeTests {
         orchestrator.role = "orchestrator"
         let loose = pane("l1")
         let bare = try lane(openTasks: 0), own = try lane(openTasks: 1)
-        #expect(Notifier.foldsIntoTask(agent, in: own, runnerSendsNotices: true))
-        #expect(!Notifier.foldsIntoTask(agent, in: own, runnerSendsNotices: false), "an older runner sends none")
-        #expect(!Notifier.foldsIntoTask(agent, in: bare, runnerSendsNotices: true), "a task this Mac doesn't know")
-        #expect(!Notifier.foldsIntoTask(orchestrator, in: own, runnerSendsNotices: true))
-        #expect(!Notifier.foldsIntoTask(loose, in: bare, runnerSendsNotices: true))
-        // Opened by hand in a lane with one open task: the runner folds it,
-        // so its banner is the task's too (ov-107). Not in the main checkout.
+        // A runner older than `notice_task` sends no answer, so this Mac's
+        // mirror (`TaskLink.noticeTask`) stands in.
+        let sends = DaemonBuild(version: "v", matches: true, platform: "linux", capabilities: ["tasks", "task_notices"])
+        let older = DaemonBuild(version: "v", matches: true, platform: "linux", capabilities: ["tasks"])
+        #expect(Notifier.foldsIntoTask(agent, in: own, runner: sends))
+        #expect(!Notifier.foldsIntoTask(agent, in: own, runner: older), "an older runner sends none")
+        #expect(!Notifier.foldsIntoTask(agent, in: own, runner: nil))
+        #expect(!Notifier.foldsIntoTask(agent, in: bare, runner: sends), "a task this Mac doesn't know")
+        #expect(!Notifier.foldsIntoTask(orchestrator, in: own, runner: sends))
+        #expect(!Notifier.foldsIntoTask(loose, in: bare, runner: sends))
+        // Opened by hand in a lane with one open task: an older runner folds
+        // it, so its banner is the task's too (ov-107). Not in the main checkout.
         let one = try lane(openTasks: 1), two = try lane(openTasks: 2)
         let checkout = try lane(openTasks: 1, checkout: true)
-        #expect(Notifier.foldsIntoTask(loose, in: one, runnerSendsNotices: true))
-        #expect(!Notifier.foldsIntoTask(loose, in: two, runnerSendsNotices: true))
-        #expect(!Notifier.foldsIntoTask(loose, in: checkout, runnerSendsNotices: true))
+        #expect(Notifier.foldsIntoTask(loose, in: one, runner: sends))
+        #expect(!Notifier.foldsIntoTask(loose, in: two, runner: sends))
+        #expect(!Notifier.foldsIntoTask(loose, in: checkout, runner: sends))
+        // A runner that sends `notice_task` decides by `noticeTaskId` alone
+        // (ov-112): the same panes, the opposite answers where the mirror
+        // differs from the runner.
+        let answers = DaemonBuild(
+            version: "v", matches: true, platform: "linux",
+            capabilities: ["tasks", "task_notices", "notice_task"])
+        #expect(!Notifier.foldsIntoTask(loose, in: one, runner: answers), "it said it notifies as itself")
+        var told = loose
+        told.noticeTaskId = "t-0"
+        #expect(Notifier.foldsIntoTask(told, in: checkout, runner: answers), "it named the task")
+        #expect(!Notifier.foldsIntoTask(told, in: checkout, runner: sends), "a runner that doesn't answer sent no field")
     }
 
     /// The notifier's own entry point, as `DaemonClient` calls it: a blocked
@@ -150,5 +166,39 @@ struct TaskNoticeTests {
         #expect(Notifier.shared.lastReport["ov107-c1"] == .leftToTask)
         Notifier.shared.forget("ov107-c1")
     }
-}
 
+    /// The same call site from a runner that sends `notice_task`: the event
+    /// carries the runner's answer, and the Mac believes it over its mirror.
+    /// The pane is in a lane with one open task, which the mirror would fold,
+    /// so only the event's field can tell the two events apart.
+    @Test("DaemonClient.apply folds by the event's noticeTaskId when the runner answers")
+    @MainActor
+    func applyFoldsByTheEventsNoticeTask() throws {
+        let fleetJSON = #"""
+            {"runtime_healthy":true,"live_panes":2,"worktrees":[{"id":"w-112","short":"w","task":"lane",
+              "branch":"b","worktree":"/tmp/w","state":"active","open_tasks":[{"id":"t-9","key":"ov-9",
+              "title":"T","status":"in_progress"}],
+              "terminals":[
+                {"id":"ov112-c1","short":"c1","title":"claude","preset":"claude","state":"running","epoch":0},
+                {"id":"ov112-c2","short":"c2","title":"claude","preset":"claude","state":"running","epoch":0}]}]}
+            """#
+        func event(_ id: String, noticeTask: String?) throws -> TerminalEvent {
+            let field = noticeTask.map { #","noticeTaskId":"\#($0)""# } ?? ""
+            return try JSONDecoder().decode(TerminalEvent.self, from: Data(#"""
+                {"kind":"terminal","id":"\#(id)","short":"c","worktree":"w-112","title":"claude",
+                 "preset":"claude","state":"running","activity":"blocked"\#(field)}
+                """#.utf8))
+        }
+        let client = DaemonClient(target: "", notifications: NotificationCenter())
+        client.fleet = try JSONDecoder().decode(Fleet.self, from: Data(fleetJSON.utf8))
+        client.daemonBuild = DaemonBuild(
+            version: "v", matches: true, platform: "linux",
+            capabilities: ["tasks", "task_notices", "notice_task"])
+        client.apply(try event("ov112-c1", noticeTask: "t-9"))
+        #expect(Notifier.shared.lastReport["ov112-c1"] == .leftToTask)
+        client.apply(try event("ov112-c2", noticeTask: nil))
+        #expect(Notifier.shared.lastReport["ov112-c2"] == .ownBanner, "the runner named no task")
+        Notifier.shared.forget("ov112-c1")
+        Notifier.shared.forget("ov112-c2")
+    }
+}

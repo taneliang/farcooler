@@ -209,8 +209,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// so an agent opened by hand in a task's lane folds as the runner folds
     /// it (ov-107). An orchestrator is never a task's agent, and an agent with
     /// no task notifies as it always has.
-    static func foldsIntoTask(_ terminal: Terminal, in worktree: Worktree, runnerSendsNotices: Bool) -> Bool {
-        TaskLink.leavesBannerToTask(terminal, in: worktree, noticeReachesHere: runnerSendsNotices)
+    static func foldsIntoTask(_ terminal: Terminal, in worktree: Worktree, runner: DaemonBuild?) -> Bool {
+        TaskLink.leavesBannerToTask(
+            terminal, in: worktree, noticeReachesHere: runner?.can("task_notices") == true,
+            runnerAnswers: runner?.can("notice_task") == true)
     }
 
     /// The notification for `notice`, posted from the runner `target` names.
@@ -344,7 +346,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         let activity = terminal.agent
         defer { announced[terminal.id] = activity }
 
-        if Self.foldsIntoTask(terminal, in: worktree, runnerSendsNotices: runner?.can("task_notices") == true) {
+        if Self.foldsIntoTask(terminal, in: worktree, runner: runner) {
             lastReport[terminal.id] = .leftToTask
             return .leftToTask
         }

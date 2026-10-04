@@ -705,6 +705,8 @@ final class DaemonClient: ObservableObject {
             // something else happened in that pane, which for a dead agent is
             // never.
             updated.turnFailed = event.turnFailed
+            // Which task its banner folds into, as of this very event (ov-112).
+            updated.noticeTaskId = event.noticeTaskId
 
             if updated != fleet.worktrees[w].terminals[t] { fleet.worktrees[w].terminals[t] = updated }
 

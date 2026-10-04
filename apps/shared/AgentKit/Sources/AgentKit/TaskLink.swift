@@ -29,6 +29,11 @@ public protocol TaskLinkPane {
     /// Whose work this pane does, as a workspace id, or nil when the runner
     /// didn't say. `Terminal.workspace_id`; read by `noticeTask` only.
     var workspace: String? { get }
+    /// The task this pane's own notifications fold into, as the runner decided
+    /// it (`notice_task`): `Terminal.notice_task_id`. Nil when the pane
+    /// notifies as itself, and from a runner without `notice_task`, which
+    /// `leavesBannerToTask` tells apart by the capability, never by this.
+    var noticeTaskID: String? { get }
 }
 
 /// A worktree, as `TaskLink` asks about it.
@@ -71,14 +76,17 @@ public enum TaskLink {
 //
 // A different question from `TaskLink.task`, which names a header. This one
 // decides whether an agent's "finished" or "needs you" banner is left to its
-// task's notice, the one the runner composes (`task_link::task_of` in
-// `crates/daemon/src/task_link.rs`), so it has to give the runner's answer.
-// The Mac and the iPhone ask it here; Android's `TaskLink.noticeTaskId` states
-// the same cases.
+// task's notice, the one the runner composes. The runner decides, and sends
+// its answer as `Terminal.notice_task_id` (`task_link::notice_task` in
+// `crates/daemon/src/task_link.rs`, ov-112). `noticeTask` below is the mirror
+// this app keeps only for a runner too old to send it; Android's
+// `TaskLink.noticeTaskId` states the same cases.
 
 extension TaskLink {
     /// The id of the task `pane`'s own notifications fold into, or nil when
     /// it notifies as itself.
+    ///
+    /// The fallback for a runner without `notice_task`, which sends no answer.
     ///
     /// Where this client can't see what the runner sees, it doesn't fold:
     /// an agent left with its own banner beside the task's is a duplicate,
@@ -97,9 +105,8 @@ extension TaskLink {
     /// - Never by lane in the repository's main checkout. Ad hoc agents run
     ///   there, and one task dispatched to it (`task dispatch --worktree`)
     ///   would take in every one of them, and turn their turn ends into that
-    ///   task's Done, which is off by default. The runner's `task_of` still
-    ///   folds there (ov-107 report): until it doesn't, an agent there gets
-    ///   both banners, never neither.
+    ///   task's Done, which is off by default. A runner older than ov-112 still
+    ///   folds there: an agent there gets both banners, never neither.
     public static func noticeTask(of pane: some TaskLinkPane, in worktree: some TaskLinkWorktree) -> String? {
         guard !pane.isOrchestrator else { return nil }
         let open = worktree.openTaskIDs
@@ -111,14 +118,21 @@ extension TaskLink {
     /// Whether `pane`'s own banner is left to its task's notice.
     ///
     /// `noticeReachesHere` says whether that notice reaches this device at
-    /// all. On the Mac it's the runner advertising `task_notices`: the Mac
+    /// all. `runnerAnswers` says whether the runner decides which task that is
+    /// (`notice_task`): then `Terminal.notice_task_id` is the whole answer, and
+    /// absent means it notifies as itself. A runner that doesn't answer sends
+    /// no field, so the mirror above stands in. It folds no more than any
+    /// runner of that age does, so the worst case is a duplicate banner.
+    /// On the Mac `noticeReachesHere` is the runner advertising `task_notices`: the Mac
     /// posts the runner's notice itself. On a phone, which hears notices only
     /// as pushes, it's `taskNoticeReachesPhone`. Without it the agent's own
     /// banner is the only word there is, so it posts as it always has.
     public static func leavesBannerToTask(
-        _ pane: some TaskLinkPane, in worktree: some TaskLinkWorktree, noticeReachesHere: Bool
+        _ pane: some TaskLinkPane, in worktree: some TaskLinkWorktree, noticeReachesHere: Bool, runnerAnswers: Bool
     ) -> Bool {
-        noticeReachesHere && noticeTask(of: pane, in: worktree) != nil
+        guard noticeReachesHere else { return false }
+        guard runnerAnswers else { return noticeTask(of: pane, in: worktree) != nil }
+        return !(pane.noticeTaskID?.isEmpty ?? true)
     }
 
     /// Whether a task notice from the runner `build` describes reaches this
@@ -149,11 +163,13 @@ extension Fleet {
     /// tested: the phone has no unit test target of its own.
     func agentReports(runner build: DaemonBuild?, registered: Bool) -> [AgentReport] {
         let reaches = TaskLink.taskNoticeReachesPhone(build, registered: registered)
+        let answers = build?.can("notice_task") == true
         return worktrees.flatMap { worktree in
             worktree.terminals.map { terminal in
                 AgentReport(
                     terminal: terminal, worktree: worktree.task,
-                    leftToTask: TaskLink.leavesBannerToTask(terminal, in: worktree, noticeReachesHere: reaches))
+                    leftToTask: TaskLink.leavesBannerToTask(
+                        terminal, in: worktree, noticeReachesHere: reaches, runnerAnswers: answers))
             }
         }
     }

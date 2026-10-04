@@ -425,6 +425,11 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// board on such a runner offers no link rather than guessing one — see
     /// `TaskRow.agentPresence` in AgentKit.
     var taskId: String?
+    /// The task this pane's own notifications fold into, as the runner decided
+    /// it (`notice_task`), or nil when it notifies as itself. Nil too from a
+    /// runner without `notice_task`; ask the capability, not this, to tell
+    /// the two apart (`TaskLink.leavesBannerToTask`).
+    var noticeTaskId: String?
     /// The workspace this terminal works for, or nil. Absent from a runner
     /// without `workstreams`.
     var workspace: String?
@@ -949,7 +954,9 @@ extension Worktree {
 
 /// A pane as `TaskLink` asks about it: its own task, and whether it leads a
 /// workspace. Both are already here; this only says so.
-extension Terminal: TaskLinkPane {}
+extension Terminal: TaskLinkPane {
+    var noticeTaskID: String? { noticeTaskId }
+}
 
 /// A worktree as `TaskLink` asks about it.
 extension Worktree: TaskLinkWorktree {
