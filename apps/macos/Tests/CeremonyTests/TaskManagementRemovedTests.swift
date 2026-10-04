@@ -19,7 +19,7 @@ struct TaskManagementRemovedTests {
     /// The task commands that write the list, as the CLI spells them in an
     /// argv (`"task", "create"`) and as the daemon names them on the wire
     /// (`"task.create"`).
-    private static let writes = "create|set|update|move|block|set_status"
+    private static let writes = "create|set|update|move|block|set_status|dispatch|ask|starts"
 
     /// Each task write a source in `texts` names, as "text in file".
     static func taskWrites(in texts: [(String, String)]) -> [String] {
@@ -59,11 +59,17 @@ struct TaskManagementRemovedTests {
             ("A.swift", "run([\"task\", \"create\", \"--title\", t])"),
             ("B.swift", "run([\"task\",\n \"set\", key])"),
             ("C.swift", "let m = \"task.set_status\""),
+            ("E.swift", "run([\"task\", \"dispatch\", key])"),
+            ("F.swift", "run([\"task\", \"ask\", key])"),
+            ("G.swift", "let m = \"task.starts\""),
             ("D.swift", "run([\"task\", \"note\", key, \"--kind\", \"answer\"])"),
         ]
         #expect(
             Self.taskWrites(in: texts)
-                == ["\"task\", \"create\" in A.swift", "\"task\",\n \"set\" in B.swift", "\"task.set_status\" in C.swift"])
+                == [
+                    "\"task\", \"create\" in A.swift", "\"task\",\n \"set\" in B.swift", "\"task.set_status\" in C.swift",
+                    "\"task\", \"dispatch\" in E.swift", "\"task\", \"ask\" in F.swift", "\"task.starts\" in G.swift",
+                ])
     }
 }
 
@@ -197,5 +203,24 @@ struct AskOrchestratorTests {
         for text in spy.pasted + spy.copied { #expect(!text.contains(where: \.isNewline)) }
         for text in spy.pasted + spy.copied { #expect(!text.hasSuffix("\n") && !text.hasSuffix("\r"), "\(text.debugDescription)") }
         #expect(!spy.pasted.isEmpty && !spy.copied.isEmpty)
+    }
+
+    @Test("A hostile title reaches the composer, the daemon and the clipboard as plain words")
+    func aHostileTitleIsMadeSafe() async {
+        var row = Self.row
+        row.title = "Fix\u{1B}[201~\u{15}\u{3}\u{4} it\u{1B}]0;pwn\u{7}\r\nrm -rf /\u{202E}\u{1B}x  now\u{7F}"
+        let expected = "About bil-9 (“Fix it rm -rf / now”): "
+        #expect(AskOrchestrator.draft(for: row) == expected)
+        let spy = Spy()
+        let handoff = ComposerHandoff()
+        _ = await AskOrchestrator.deliver(
+            row, to: Self.pane("orch"), paste: { _ in true }, copy: { spy.copied.append($0) }, handoff: handoff)
+        #expect(handoff.waiting["orch"] == expected)
+        _ = await AskOrchestrator.deliver(
+            row, to: Self.pane("t", chat: false), paste: { _ in false }, copy: { spy.copied.append($0) }, handoff: handoff)
+        #expect(spy.copied == [expected.trimmingCharacters(in: .whitespaces)])
+        for text in [expected] + spy.copied {
+            #expect(!text.unicodeScalars.contains { $0.value < 0x20 || $0.value == 0x7F }, "\(text.debugDescription)")
+        }
     }
 }

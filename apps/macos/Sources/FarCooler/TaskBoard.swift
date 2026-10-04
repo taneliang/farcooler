@@ -428,8 +428,8 @@ final class TaskBoardStore: ObservableObject {
     /// or `local` for this Mac.
     var hostKey: String { client.target.isEmpty ? "local" : client.target }
 
-    /// Whether this board offers its one write: a question's Answer buttons. `TaskBoardWrites.offered`'s rule over this runner's
-    /// build.
+    /// Whether this board offers its one write: a question's Answer buttons.
+    /// `TaskBoardWrites.offered`'s rule over this runner's build.
     var offersWrites: Bool { TaskBoardWrites.offered(by: client.daemonBuild) }
 
     /// Whether `id`'s card offers its question's answers: only from a read

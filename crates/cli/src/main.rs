@@ -30,8 +30,8 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 mod changes;
-mod draft_prompt;
 mod clients;
+mod draft_prompt;
 mod report;
 mod task_usage;
 mod tasks;

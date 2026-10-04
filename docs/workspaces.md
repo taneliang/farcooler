@@ -194,7 +194,10 @@ when several agents are on the task. A task with nothing started says so on its 
 tabs, puts a line naming the task in the orchestrator's message box and takes
 you there, so you can say what you want done. It's dimmed, with "Start an
 orchestrator to ask about this task," when the workspace has none running
-(Main never does). It never starts one.
+(Main never does). It never starts one. If the orchestrator is a
+terminal, Far Cooler pastes the line for you only when its agent is idle with an
+empty box; otherwise it copies the line, takes you to the pane and says so, and
+you paste it yourself.
 
 - **Open Worktree** shows the worktree itself, full size, with all its terminals
   and layouts. The breadcrumb leads back to the task.

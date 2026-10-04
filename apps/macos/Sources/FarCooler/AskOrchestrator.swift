@@ -19,10 +19,53 @@ enum AskOrchestrator {
     /// orchestrator reads the task itself (`farcooler task show`). Ends where
     /// the person goes on typing.
     static func draft(for row: TaskRow) -> String {
-        // One line: a title with a line break would be a second line in the
-        // composer, or an Enter in a terminal.
-        let title = row.title.split(whereSeparator: \.isNewline).joined(separator: " ")
-        return "About \(row.key) (“\(title)”): "
+        "About \(oneLine(row.key)) (“\(oneLine(row.title))”): "
+    }
+
+    /// `raw` as one line that does nothing when it reaches a composer or a
+    /// terminal, the way the daemon's `one_line` makes one (here by removing
+    /// rather than spelling out): escape sequences (a CSI such as `ESC[201~`,
+    /// which would close a bracketed paste, an OSC, or ESC and the character
+    /// after it), every other control character (^C, ^D, ^U, DEL, C1), line
+    /// breaks and tabs as spaces, and invisible format characters (bidi
+    /// overrides, zero-width marks). Runs of space become one. The one place
+    /// a task's words are made safe, for the composer, the daemon and the
+    /// clipboard alike.
+    static func oneLine(_ raw: String) -> String {
+        var out = String.UnicodeScalarView()
+        var scalars = raw.unicodeScalars[...]
+        while let c = scalars.popFirst() {
+            switch c.value {
+            case 0x1B:
+                guard let kind = scalars.popFirst() else { break }
+                if kind == "[" {
+                    // CSI: parameters, then one final byte, 0x40 to 0x7E.
+                    while let next = scalars.popFirst(), !(0x40...0x7E).contains(next.value) {}
+                } else if kind == "]" {
+                    // OSC: up to BEL, or ESC and a backslash.
+                    while let next = scalars.popFirst() {
+                        if next.value == 0x07 { break }
+                        if next.value == 0x1B { _ = scalars.popFirst(); break }
+                    }
+                }
+            case 0x09, 0x0A, 0x0D, 0x0B, 0x0C, 0x85, 0x2028, 0x2029:
+                out.append(" ")
+            case 0x00...0x1F, 0x7F...0x9F, 0xAD, 0x200B...0x200F, 0x202A...0x202E, 0x2060...0x2064, 0x2066...0x2069,
+                0xFEFF:
+                break
+            default:
+                out.append(c)
+            }
+        }
+        return String(out).split(separator: " ").joined(separator: " ")
+    }
+
+    /// Where a copy goes when the runner's client is gone: the general
+    /// pasteboard, so the notice that follows is true.
+    @MainActor
+    static func copyToPasteboard(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 
     /// Leave `row`'s draft in a chat orchestrator's composer. False when

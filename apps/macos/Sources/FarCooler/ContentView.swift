@@ -1875,12 +1875,7 @@ struct ContentView: View {
         host: String, workspace: WorkspaceSummary?, shown: ShownLayout?, onScreen: Bool = true
     ) -> some View {
         if let workspace {
-            // As the runner lists it now: the board's own copy is kept across an
-        // orchestrator starting or stopping.
-        let live = WorkspaceScreen.workspace(
-            workspace.id, host: host, in: store.fleet,
-            repositories: store.clients[host]?.repositories.map(\.id) ?? []) ?? workspace
-        let seat = WorkspaceScreen.orchestrator(of: live, host: host, in: store.fleet)
+            let seat = WorkspaceScreen.orchestrator(of: workspace, host: host, in: store.fleet)
             let key = "\(host)|\(workspace.id)"
             let canAct = store.refusal(for: host) == nil
             // No header row (ov-214): the orchestrator's state, its harness
@@ -2183,7 +2178,12 @@ struct ContentView: View {
     /// orchestrator (`AskOrchestrator.deliver`), and goes there; it starts
     /// nothing.
     private func askOrchestrator(host: String, workspace: WorkspaceSummary) -> AskOrchestrator.Action {
-        let seat = WorkspaceScreen.orchestrator(of: workspace, host: host, in: store.fleet)
+        // As the runner lists it now: the board's own copy is kept across an
+        // orchestrator starting or stopping.
+        let live = WorkspaceScreen.workspace(
+            workspace.id, host: host, in: store.fleet,
+            repositories: store.clients[host]?.repositories.map(\.id) ?? []) ?? workspace
+        let seat = WorkspaceScreen.orchestrator(of: live, host: host, in: store.fleet)
         return AskOrchestrator.Action(
             available: seat != nil,
             perform: { row in
@@ -2194,7 +2194,7 @@ struct ContentView: View {
                     let delivery = await AskOrchestrator.deliver(
                         row, to: seat,
                         paste: { text in await client?.draftPrompt(terminal: seat.terminal.short, text: text) ?? false },
-                        copy: { text in (client?.copyToClipboard ?? { _ in })(text) })
+                        copy: client?.copyToClipboard ?? AskOrchestrator.copyToPasteboard)
                     // A terminal pane has no composer to fill: the person
                     // pastes, so the pane takes the keyboard.
                     if delivery != .composer {
