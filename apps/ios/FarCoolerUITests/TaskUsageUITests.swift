@@ -41,8 +41,15 @@ final class TaskUsageUITests: XCTestCase {
         let rows = app.descendants(matching: .any)
         let claude = rows.matching(NSPredicate(format: "label CONTAINS '$2.87 partly not reported'")).firstMatch
         XCTAssertTrue(claude.waitForExistence(timeout: 5), "claude's row hides its caveat: \(app.debugDescription)")
+        // The breakdown opens below the fold since the task screen grew its
+        // Ask the Orchestrator section (ov-241): on an iPhone 17 claude's row
+        // ends at the bottom of the screen and codex's is a cell the list has
+        // not made yet. So scroll to it, as a reader would.
         let codex = rows.matching(NSPredicate(format: "label CONTAINS 'Cost not reported'")).firstMatch
-        XCTAssertTrue(codex.exists, "codex's row: \(app.debugDescription)")
+        for _ in 0..<4 where !(codex.exists && codex.isHittable) {
+            app.swipeUp()
+        }
+        XCTAssertTrue(codex.waitForExistence(timeout: 5), "codex's row: \(app.debugDescription)")
         keep(app, "usage-breakdown")
     }
 
