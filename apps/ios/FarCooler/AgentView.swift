@@ -31,6 +31,8 @@ struct AgentView: View {
     @Environment(\.phoneNavigator) private var navigator
     /// How tall the docked composer measured. Reported up out of `DockedBar`.
     @State private var barHeight: CGFloat = 0
+    /// A refused switch from the chat back to the terminal.
+    @State private var switchFailure: ActionFailure?
     // MARK: What a conversation's scrolling has to do
     //
     // Rebuilt from these, rather than grown one guard at a time. The behavior
@@ -1075,8 +1077,9 @@ struct AgentView: View {
             title: failure.title, message: failure.message)
         if let terminal = paneTerminal {
             Button(failure.action) {
-                Task { await connection.setPaneMode(terminal, to: "terminal") }
+                Task { switchFailure = await connection.setPaneMode(terminal, to: "terminal") }
             }
+            .actionFailureAlert($switchFailure)
             .buttonStyle(.bordered)
             .padding(.top, 18)
             .accessibilityIdentifier("agent-failure-action")

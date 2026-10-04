@@ -48,6 +48,7 @@ SHARDS = {
         "ChangesPullRequestTests",  # -changes-layout-harness
         "ChangesPatchNoticeTests",  # -changes-layout-harness
         "AgentRetrySendTests",  # -agent-layout-harness
+        "ActionFailureTests",  # -phone-harness and -agent-layout-harness
         "ComposerKeyboardTests",  # -agent-layout-harness
         "DynamicTypeTests",  # -agent-layout-harness
         "RunnerReachTests",  # seeded -hosts at an address that never answers

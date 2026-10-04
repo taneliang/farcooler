@@ -1008,13 +1008,17 @@ struct AddRepositorySheet: View {
 struct NewWorktreeView: View {
     let repositories: [Repository]
     let connection: Connection
-    let onCreate: (String, String, String, Bool) async -> Void
+    /// Nil when the runner made it; what went wrong when it didn't, which this
+    /// sheet shows and stays open for (ov-179).
+    let onCreate: (String, String, String, Bool) async -> ActionFailure?
 
     @Environment(\.dismiss) private var dismiss
     @State private var repository: String = ""
     @State private var name = ""
     @State private var branch = ""
     @State private var working = false
+    /// The runner's refusal of the last Create, shown in the form.
+    @State private var refused: ActionFailure?
     @State private var showAddRepository = false
     @State private var showBranchPicker = false
     /// Set when a branch was picked from the list rather than typed.
@@ -1053,9 +1057,9 @@ struct NewWorktreeView: View {
         return typed.isEmpty ? suggestedBranch : typed
     }
 
-    /// Both name rules are checked here, not just left to the runner, because
-    /// `createWorktree` swallows its error: a refused name would close this
-    /// sheet on a worktree that was never created and say nothing about why.
+    /// Both name rules are checked here as well as by the runner, so the common
+    /// refusals are explained before Create is pressed; a refusal that gets
+    /// through anyway keeps this sheet open and says so (`refused`).
     private var isValid: Bool {
         // Adoption has nothing to validate but the repository: the branch was
         // picked from a list the runner produced, and the name comes from it.
@@ -1122,6 +1126,14 @@ struct NewWorktreeView: View {
                     }
                 }
             }
+            .safeAreaInset(edge: .bottom) {
+                if let refused {
+                    refusal(refused.title + ". " + refused.sentence)
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.bar)
+                }
+            }
             .navigationTitle("New Worktree")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1131,14 +1143,22 @@ struct NewWorktreeView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(adopting == nil ? "Create" : "Resume") {
                         working = true
+                        refused = nil
                         Task {
+                            let outcome: ActionFailure?
                             if let adopting {
-                                await onCreate(repository, adopting.name, adopting.name, true)
+                                outcome = await onCreate(
+                                    repository, adopting.name, adopting.name, true)
                             } else {
-                                await onCreate(repository, trimmedName, effectiveBranch, false)
+                                outcome = await onCreate(
+                                    repository, trimmedName, effectiveBranch, false)
                             }
                             working = false
-                            dismiss()
+                            if let outcome {
+                                refused = outcome
+                            } else {
+                                dismiss()
+                            }
                         }
                     }
                     .disabled(!isValid || working)

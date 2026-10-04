@@ -4,13 +4,6 @@
 # A reason starting TODO(ov-N) is a known bug carded as ov-N, kept here so CI
 # passes today. Fix the call and delete its line; the scan fails on a stale one.
 
-apps/ios/FarCooler/AgentStream.swift :: editQueued :: _ = try? await core.call( "terminal.agent_edit_queued", ["terminal": terminal, "queuedId": id, "text": text]) :: TODO(ov-179): a refused queue edit, model, mode or cancel is silent on iOS
-apps/ios/FarCooler/AgentStream.swift :: steerQueued :: _ = try? await core.call( "terminal.agent_steer_queued", ["terminal": terminal, "queuedId": id]) :: TODO(ov-179): a refused queue edit, model, mode or cancel is silent on iOS
-apps/ios/FarCooler/AgentStream.swift :: cancelQueued :: _ = try? await core.call( "terminal.agent_cancel_queued", ["terminal": terminal, "queuedId": id]) :: TODO(ov-179): a refused queue edit, model, mode or cancel is silent on iOS
-apps/ios/FarCooler/AgentStream.swift :: setModel :: _ = try? await core.call( "terminal.agent_set_model", ["terminal": terminal, "model": model]) :: TODO(ov-179): a refused queue edit, model, mode or cancel is silent on iOS
-apps/ios/FarCooler/AgentStream.swift :: setConfig :: _ = try? await core.call( "terminal.agent_set_config", ["terminal": terminal, "configId": id, "value": value]) :: TODO(ov-179): a refused queue edit, model, mode or cancel is silent on iOS
-apps/ios/FarCooler/AgentStream.swift :: setMode :: _ = try? await core.call("terminal.agent_set_mode", ["terminal": terminal, "mode": mode]) :: TODO(ov-179): a refused queue edit, model, mode or cancel is silent on iOS
-apps/ios/FarCooler/AgentStream.swift :: cancel :: _ = try? await core.call("terminal.agent_cancel", ["terminal": terminal]) :: TODO(ov-179): a refused queue edit, model, mode or cancel is silent on iOS
 apps/ios/FarCooler/AgentView.swift :: scheduleMentionSearch :: try? await core.call( "worktree.file_search", ["worktree": worktreeID, "query": prefix, "limit": 20]) :: a failed @-mention search shows no suggestions; typing on is the retry
 apps/ios/FarCooler/Changes.swift :: markRead :: _ = try? await core.call("changes.mark_read", ["worktree": worktree]) :: read marks are bookkeeping; a failure leaves the dot, and the next open retries
 apps/ios/FarCooler/Connection.swift :: loadDaemonBuild :: try? await core.call("host") :: handshake cache; nil leaves capabilities unknown and the next connect asks again
@@ -20,33 +13,22 @@ apps/ios/FarCooler/Connection.swift :: loadRepositories :: try? await core.call(
 apps/ios/FarCooler/Connection.swift :: readBoard :: try? await rpc("task.list", args) :: poll read: keeps the last board, and the connection phase reports a dropped link
 apps/ios/FarCooler/Connection.swift :: loadInbox :: try? await core.call("changes.inbox") :: poll read: keeps the last inbox; the comment says one dropped packet mustn't blank the fleet
 apps/ios/FarCooler/Connection.swift :: loadNeedsYou :: try? await rpc("needs_you") :: poll read: keeps the last list; derived Needs You fills in
-apps/ios/FarCooler/Connection.swift :: taskRecord :: try? await rpc("task.get", ["task": task]) :: TODO(ov-179): a failed read leaves the task screen blank with no reason
 apps/ios/FarCooler/Connection.swift :: loadThemes :: try? await core.call("themes") :: poll read of runner themes; the built-ins stay
-apps/ios/FarCooler/Connection.swift :: close :: _ = try? await core.call("terminal.stop", ["terminal": terminal.id]) :: deliberate (doc comment): the refusal is a Rust enum name, the tab staying is the truth; still TODO(ov-179)
-apps/ios/FarCooler/Connection.swift :: close :: _ = try? await core.call("terminal.remove", ["terminal": terminal.id]) :: deliberate (doc comment): the refusal is a Rust enum name, the tab staying is the truth; still TODO(ov-179)
-apps/ios/FarCooler/Connection.swift :: hostThemes :: try? await core.call("themes") :: TODO(ov-179): Settings shows an empty theme list on a failed read
-apps/ios/FarCooler/Connection.swift :: branches :: try? await core.call("branch.list", ["repository": repository]) :: TODO(ov-179): the branch picker shows no branches on a failed read
-apps/ios/FarCooler/Connection.swift :: stack :: try? await core.call( "stack.get", ["repository": repository, "branch": branch]) :: TODO(ov-179): the Stack sheet draws an empty list on a failed read; ShellScreen's PR row keeps its last answer, which is fine
+apps/ios/FarCooler/Connection.swift :: close :: _ = try? await core.call("terminal.stop", ["terminal": terminal.id]) :: closing is the remove that follows, which is shown: a refused stop is followed by a remove that says why, or by a tab that is gone
 apps/ios/FarCooler/Connection.swift :: refreshPullRequests :: try? await core.call("pr.refresh", ["repository": repository]) :: the caller keeps the last answer (?? response); a PR refresh that fails changes nothing
-apps/ios/FarCooler/Connection.swift :: health :: try? await core.call("host.health") :: TODO(ov-179): Settings shows no health on a failed read
-apps/ios/FarCooler/Connection.swift :: repositoryRoots :: try? await core.call("repository_root.list") :: TODO(ov-179): Settings shows no roots on a failed read
+apps/ios/FarCooler/Connection.swift :: health :: try? await core.call("host.health") :: nil is the designed answer for a runner too old for host.health (RunnerSettingsModel.health), and the same screen's other reads report a dropped link
 apps/ios/FarCooler/Connection.swift :: setBranchPrefix :: try? await core.call( "settings.set_branch_prefix", ["prefix": prefix]) :: nil is shown: RunnerSettingsModel.setBranchPrefix sets failure
-apps/ios/FarCooler/Connection.swift :: upsertTheme :: try? await core.call("theme.upsert", theme.arguments) :: TODO(ov-179): RunnerSettings keeps the old list on nil and says nothing (setBranchPrefix two lines up shows the pattern)
-apps/ios/FarCooler/Connection.swift :: deleteTheme :: try? await core.call("theme.delete", ["name": name]) :: TODO(ov-179): RunnerSettings keeps the old list on nil and says nothing (setBranchPrefix two lines up shows the pattern)
-apps/ios/FarCooler/Connection.swift :: adapters :: try? await core.call("adapters") :: TODO(ov-179): Settings shows no agents on a failed read
-apps/ios/FarCooler/Connection.swift :: upsertAdapter :: try? await core.call("adapter.upsert", adapter.arguments) :: TODO(ov-179): RunnerSettings keeps the old list on nil and says nothing (setBranchPrefix two lines up shows the pattern)
-apps/ios/FarCooler/Connection.swift :: deleteAdapter :: try? await core.call("adapter.delete", ["preset": preset]) :: TODO(ov-179): RunnerSettings keeps the old list on nil and says nothing (setBranchPrefix two lines up shows the pattern)
+apps/ios/FarCooler/Connection.swift :: upsertTheme :: try? await core.call("theme.upsert", theme.arguments) :: nil is shown: RunnerSettingsModel.save(theme:) sets failure
+apps/ios/FarCooler/Connection.swift :: deleteTheme :: try? await core.call("theme.delete", ["name": name]) :: nil is shown: RunnerSettingsModel.delete(themeNamed:) sets failure
+apps/ios/FarCooler/Connection.swift :: upsertAdapter :: try? await core.call("adapter.upsert", adapter.arguments) :: nil is shown: RunnerSettingsModel.save(adapter:) sets failure
+apps/ios/FarCooler/Connection.swift :: deleteAdapter :: try? await core.call("adapter.delete", ["preset": preset]) :: nil is shown: RunnerSettingsModel.delete(adapterNamed:) sets failure
 apps/ios/FarCooler/Connection.swift :: testAdapter :: try? await core.call("adapter.test", adapter.arguments) :: nil becomes AdapterTestOutcome's failure arm, which the sheet shows
-apps/ios/FarCooler/Connection.swift :: createWorktree :: _ = try? await core.call("worktree.create", args) :: TODO(ov-179): From a Branch closes its sheet on a refused create and says nothing (FleetView.swift NewWorktreeView doc admits it)
 apps/ios/FarCooler/Connection.swift :: enroll :: try? await core.call( "client.enroll", [ "publicKey": publicKey, "label": label, "clientId": clientId, "scope": "control", "nodeKey": nodeKey, ]) :: nil becomes .couldNotWrite, which the enroll screen shows
-apps/ios/FarCooler/Connection.swift :: hideWorktree :: _ = try? await rpc("worktree.hide", ["worktree": worktree.id]) :: TODO(ov-179): a refused hide is silent, the row just doesn't move
-apps/ios/FarCooler/Connection.swift :: unhideWorktree :: _ = try? await rpc("worktree.unhide", ["worktree": worktree.id]) :: TODO(ov-179): a refused unhide is silent, the row just doesn't move
-apps/ios/FarCooler/Connection.swift :: setPaneMode :: _ = try? await core.call( "terminal.set_pane_mode", ["terminal": terminal.id, "paneMode": mode]) :: TODO(ov-179): a refusal (turn in flight) is silent where the Mac offers to force; ShellPaneBar.swift paneModeItem names the gap
 apps/ios/FarCooler/TerminalSession.swift :: resizePane :: _ = try? await core.call( "terminal.resize", ["terminal": terminalID, "columns": size.columns, "rows": size.rows]) :: a refused resize leaves the old geometry; the next layout pass resends
 apps/ios/FarCooler/TerminalSession.swift :: releasePane :: _ = try? await core.call( "terminal.resize", ["terminal": id, "columns": shape.columns, "rows": shape.rows]) :: best effort on leaving a pane; nobody is left to tell
 apps/ios/FarCooler/TerminalSession.swift :: checkGeometry :: try? await core.call( "terminal.screen", ["terminal": terminalID, "knownRevision": revision]) :: poll read; the next tick asks again
 apps/ios/FarCooler/TerminalSession.swift :: refreshHistory :: try? await core.call( "terminal.screen", TerminalScreenAsk.arguments(terminal: terminalID)) :: poll read; the next tick asks again
-apps/ios/FarCooler/TerminalSession.swift :: write :: _ = try? await core.call("terminal.write", ["terminal": terminalID, "hex": hex]) :: TODO(ov-179): a dropped keystroke is silent unless the link itself drops
+apps/ios/FarCooler/TerminalSession.swift :: write :: _ = try? await core.call("terminal.write", ["terminal": terminalID, "hex": hex]) :: a keystroke is fire-and-forget at typing rate, and a banner per key would flood; a dropped link shows as the pane's reconnecting state and a refusal means the pane is gone, which TerminalView draws as LostPane
 apps/shared/AgentKit/Sources/AgentKit/Account.swift :: signOut :: _ = try? await post("/v1/auth/logout", body) :: local sign-out proceeds regardless; the server token expires on its own (ov-121 is editing Account.swift)
 apps/android/app/src/main/java/com/farcooler/net/ChangesStore.kt :: markRead :: attempt { source.markRead(ref.worktreeId) } :: read marks are bookkeeping; a failure leaves the dot, and the next open retries
 apps/android/app/src/main/java/com/farcooler/net/ChangesStore.kt :: markRead :: attempt { source.refreshCounts() } :: read marks are bookkeeping; a failure leaves the dot, and the next open retries
@@ -71,3 +53,5 @@ apps/android/app/src/main/java/com/farcooler/notify/TaskNotices.kt :: post :: ru
 apps/android/app/src/main/java/com/farcooler/notify/TaskNotices.kt :: couldNotAnswer :: runCatching { NotificationManagerCompat.from(context).notify(tag, 0, card) } :: a notification the system won't post (permission revoked) has nobody else to tell
 apps/android/app/src/main/java/com/farcooler/ui/ChangesSheets.kt :: CommentComposerSheet :: runCatching { focus.requestFocus() } :: focus is a convenience; the field still takes a tap
 apps/android/app/src/main/java/com/farcooler/ui/TerminalPane.kt :: consumeModifiers :: runCatching { uri.openUri(link) } :: TODO(ov-180): Open does nothing when no app takes the link; say so
+
+apps/ios/FarCooler/ShellScreen.swift :: readPullRequest :: try? await connection.stack( repository: repository, branch: worktree.branch) :: poll-like read: the pull request row keeps its last answer, and a dropped link is not news about this pull request

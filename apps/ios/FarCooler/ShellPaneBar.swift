@@ -168,6 +168,8 @@ struct ShellPaneChromeModifier: ViewModifier {
     /// `RemoveWorktreeFlow`.
     @State private var removing: RemoveWorktreeRequest?
     @State private var newTerminalFailure: NewTerminalFailure?
+    /// A refused switch between the chat and the terminal.
+    @State private var paneModeFailure: ActionFailure?
 
     /// Which sentence a refused New Terminal shows.
     ///
@@ -281,6 +283,7 @@ struct ShellPaneChromeModifier: ViewModifier {
                     Text("It answered, and the answer was no. Nothing was created.")
                 }
             }
+            .actionFailureAlert($paneModeFailure)
             .onChange(of: isVisible) { _, visible in
                 if !visible { dismissEverything() }
             }
@@ -526,16 +529,13 @@ struct ShellPaneChromeModifier: ViewModifier {
     /// toggle however much its old icon looked like one, and it does not
     /// belong one stray tap from a thumb resting near the top of the screen.
     ///
-    /// **Known gap, and it is pre-existing:** `Connection.setPaneMode`
-    /// swallows the daemon's answer with `try?`, so a refusal ("a turn is in
-    /// flight") is silent here where the Mac shows it and offers to force. The
-    /// phone has needed that since the call was written; giving the call a
-    /// result type and a confirmation sheet is a change to `Connection` and to
-    /// the wire's error handling, not to a bar, so it is not folded in here.
+    /// A refusal ("a turn is in flight") is said in an alert now (ov-179).
+    /// The Mac also offers to force the switch; the phone only says it
+    /// wouldn't.
     private func paneModeItem(_ terminal: Terminal) -> some View {
         Button {
             Task {
-                await connection.setPaneMode(
+                paneModeFailure = await connection.setPaneMode(
                     terminal, to: terminal.isAgentPane ? "terminal" : "agent")
             }
         } label: {

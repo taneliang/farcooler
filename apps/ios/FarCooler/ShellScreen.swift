@@ -703,6 +703,8 @@ struct ShellScreen: View {
     /// is a surface that has since closed. What is being confirmed is a runner
     /// and a terminal, and neither of those is the menu.
     @State private var closing: CloseTerminalRequest?
+    /// A close the runner refused, said once the tab is seen to be still there.
+    @State private var closeFailure: ActionFailure?
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -811,12 +813,15 @@ struct ShellScreen: View {
         ) { request in
             Button(ShellClose.confirm, role: .destructive) {
                 closing = nil
-                Task { await request.connection.close(terminal: request.terminal) }
+                Task {
+                    closeFailure = await request.connection.close(terminal: request.terminal)
+                }
             }
             Button("Cancel", role: .cancel) { closing = nil }
         } message: { request in
             Text(request.question.message)
         }
+        .actionFailureAlert($closeFailure)
     }
 
     /// A column row, swiped and closed.
@@ -843,7 +848,7 @@ struct ShellScreen: View {
             let terminal = live(ref, on: connection)
         else { return }
         guard let question = ShellClose.question(about: terminal, at: Date()) else {
-            Task { await connection.close(terminal: terminal) }
+            Task { closeFailure = await connection.close(terminal: terminal) }
             return
         }
         closing = CloseTerminalRequest(
@@ -1225,7 +1230,7 @@ struct ShellScreen: View {
         }
         // A failed read leaves the last answer on screen rather than blanking
         // the row. The link dropping is not news about this pull request.
-        guard let reply = await connection.stack(
+        guard let reply = try? await connection.stack(
             repository: repository, branch: worktree.branch)
         else { return }
         let mine = reply.links.first { $0.branch == worktree.branch }

@@ -445,28 +445,53 @@ final class AgentStream: ObservableObject {
         ).sentence
     }
 
+    /// One of the pane's controls, with a refusal said beside the composer.
+    ///
+    /// These were `try?`: a queue edit, a model, a mode or a stop that the
+    /// runner refused looked exactly like one it took, because the control
+    /// moved on the tap and nothing came back (ov-179). They share the send
+    /// banner, which already sits on the thing a person looks at after
+    /// tapping one, and its Retry runs the same call again. `failed` is the
+    /// sentence for what didn't happen; a runner's own reason follows it.
+    private func perform(
+        _ method: String, _ arguments: [String: Any], failed: String
+    ) async {
+        var args = arguments
+        args["terminal"] = terminal
+        do {
+            _ = try await core.call(method, args)
+        } catch {
+            sendFailure = SendFailure(message: ClientCore.trouble(error, after: failed).sentence) {
+                [weak self] in
+                await self?.perform(method, arguments, failed: failed)
+            }
+        }
+    }
+
     /// Rewrite a message that has not gone out yet.
     func editQueued(_ id: String, _ text: String) async {
-        _ = try? await core.call(
-            "terminal.agent_edit_queued",
-            ["terminal": terminal, "queuedId": id, "text": text])
+        await perform(
+            "terminal.agent_edit_queued", ["queuedId": id, "text": text],
+            failed: "Couldn’t save that edit.")
     }
 
     /// Send a queued message into the turn already running.
     func steerQueued(_ id: String) async {
-        _ = try? await core.call(
-            "terminal.agent_steer_queued", ["terminal": terminal, "queuedId": id])
+        await perform(
+            "terminal.agent_steer_queued", ["queuedId": id],
+            failed: "Couldn’t send that into the running turn.")
     }
 
     /// Take back a message that has not gone out yet.
     func cancelQueued(_ id: String) async {
-        _ = try? await core.call(
-            "terminal.agent_cancel_queued", ["terminal": terminal, "queuedId": id])
+        await perform(
+            "terminal.agent_cancel_queued", ["queuedId": id],
+            failed: "Couldn’t take that message back.")
     }
 
     func setModel(_ model: String) async {
-        _ = try? await core.call(
-            "terminal.agent_set_model", ["terminal": terminal, "model": model])
+        await perform(
+            "terminal.agent_set_model", ["model": model], failed: "Couldn’t change the model.")
     }
 
     func setConfig(_ id: String, _ value: String) async {
@@ -477,8 +502,9 @@ final class AgentStream: ObservableObject {
         // as a control that does nothing. That was found and fixed on the Mac
         // and never ported; the phone has had the bug ever since.
         transcript.selectConfigOptionLocally(id: id, value: value)
-        _ = try? await core.call(
-            "terminal.agent_set_config", ["terminal": terminal, "configId": id, "value": value])
+        await perform(
+            "terminal.agent_set_config", ["configId": id, "value": value],
+            failed: "Couldn’t change that setting.")
     }
 
     func answer(_ requestID: String, _ optionID: String) async {
@@ -555,11 +581,12 @@ final class AgentStream: ObservableObject {
     private var recordedRequest: String?
 
     func setMode(_ mode: String) async {
-        _ = try? await core.call("terminal.agent_set_mode", ["terminal": terminal, "mode": mode])
+        await perform(
+            "terminal.agent_set_mode", ["mode": mode], failed: "Couldn’t change the mode.")
     }
 
     func cancel() async {
-        _ = try? await core.call("terminal.agent_cancel", ["terminal": terminal])
+        await perform("terminal.agent_cancel", [:], failed: "Couldn’t stop the agent.")
     }
 
     #if DEBUG

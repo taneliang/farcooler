@@ -131,6 +131,8 @@ SOURCES = [
     # the Mac now; it is `ReviewComments.swift` in `AGENTKIT_SOURCES` below.
     "ChangesReview.swift",
     "BranchAndStack.swift",
+    # What a screen says when something a person asked for was refused (ov-179).
+    "ActionFailure.swift",
 ]
 
 # The enrollment ceremony, in `Far Cooler/Ceremony/`.
@@ -674,6 +676,7 @@ UI_TEST_SOURCES = [
     "ChangesPullRequestTests.swift",
     "ChangesPatchNoticeTests.swift",
     "AgentRetrySendTests.swift",
+    "ActionFailureTests.swift",
     # A runner saved before `Runner.reach` existed still loads. Needs no runner
     # and no daemon: it seeds the old shape through the argument domain and
     # reads the screen the app puts up before any connection resolves, so it

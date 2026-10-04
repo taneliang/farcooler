@@ -1552,10 +1552,14 @@ final class Connection: ObservableObject {
     /// One task's record, as `task.get` answers it: the notes the task screen
     /// lists, and the question still waiting in them.
     func taskRecord(_ task: String) async -> (detail: TaskDetailModel, question: TaskQuestion?)? {
-        guard let data = try? await rpc("task.get", ["task": task]),
-            let detail = try? TaskDetailModel.decode(data)
-        else { return nil }
-        return (detail, TaskQuestion.open(in: data))
+        // Nil is a read that didn't come back, and `TaskScreen` says so rather
+        // than drawing a task with no record (ov-179).
+        do {
+            let data = try await rpc("task.get", ["task": task])
+            return (try TaskDetailModel.decode(data), TaskQuestion.open(in: data))
+        } catch {
+            return nil
+        }
     }
 
     /// What agents spent on a task (`usage.task`, ov-195): the spend, or
@@ -1711,10 +1715,26 @@ final class Connection: ObservableObject {
     /// a screen in this app. What a person sees instead is the tab still
     /// there — which is the truth, and which is the same thing they would see
     /// if the connection had dropped.
-    func close(terminal: Terminal) async {
+    ///
+    /// **Said, now (ov-179).** The sentence above is why the runner's raw word
+    /// never reaches a screen, and it's still true: what the caller gets back is
+    /// `ActionFailure`, whose sentence is the refusal table's. The stop's own
+    /// answer is dropped on purpose: closing is the remove that follows, so a
+    /// stop that was refused is either followed by a remove that says why or
+    /// by a tab that is gone.
+    @discardableResult
+    func close(terminal: Terminal) async -> ActionFailure? {
         _ = try? await core.call("terminal.stop", ["terminal": terminal.id])
-        _ = try? await core.call("terminal.remove", ["terminal": terminal.id])
+        var failure: ActionFailure?
+        do {
+            _ = try await core.call("terminal.remove", ["terminal": terminal.id])
+        } catch {
+            failure = ActionFailure(
+                error, title: "Couldn’t close the tab",
+                otherwise: "That runner wouldn’t close it, so the tab is still there.")
+        }
         await refresh()
+        return failure
     }
 
     // MARK: - Runner settings
@@ -1729,11 +1749,18 @@ final class Connection: ObservableObject {
     /// Not the merged list `Themes.shared.available` holds: that one includes
     /// this phone's built-ins, and a built-in shown in an editor as if the file
     /// defined it would offer a delete that does nothing.
-    func hostThemes() async -> [Theme] {
-        guard let data = try? await core.call("themes"),
-            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return [] }
-        return Self.themes(from: body)
+    ///
+    /// Nil when the read didn't come back, which the settings screen says; an
+    /// empty list is a runner whose file defines none.
+    func hostThemes() async -> [Theme]? {
+        do {
+            let data = try await core.call("themes")
+            guard let body = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return nil }
+            return Self.themes(from: body)
+        } catch {
+            return nil
+        }
     }
 
     /// The branches in a repository, newest first as the daemon orders them.
@@ -1742,18 +1769,26 @@ final class Connection: ObservableObject {
     /// a branch at least as often as it starts on one — pushed from another
     /// machine, handed over, or produced by a cloud agent — and before this the
     /// only way to pick one up here was to type its name exactly.
-    func branches(repository: String) async -> [Branch] {
-        guard let data = try? await core.call("branch.list", ["repository": repository])
-        else { return [] }
-        return (try? JSONDecoder().decode(BranchList.self, from: data))?.branches ?? []
+    ///
+    /// Nil when the read didn't come back, so the picker can say that rather
+    /// than claim the repository has no branches.
+    func branches(repository: String) async -> [Branch]? {
+        do {
+            let data = try await core.call("branch.list", ["repository": repository])
+            return try JSONDecoder().decode(BranchList.self, from: data).branches
+        } catch {
+            return nil
+        }
     }
 
     /// A branch's parent chain and the PR state along it.
-    func stack(repository: String, branch: String) async -> StackResponse? {
-        guard let data = try? await core.call(
+    ///
+    /// Throws what the runner said, so the sheet can tell a runner too old to
+    /// answer from one that failed to.
+    func stack(repository: String, branch: String) async throws -> StackResponse {
+        let data = try await core.call(
             "stack.get", ["repository": repository, "branch": branch])
-        else { return nil }
-        return try? JSONDecoder().decode(StackResponse.self, from: data)
+        return try JSONDecoder().decode(StackResponse.self, from: data)
     }
 
     /// Ask GitHub again rather than answering from what was last read.
@@ -1780,9 +1815,14 @@ final class Connection: ObservableObject {
     /// Two calls rather than one because they answer different questions — what
     /// you can start work in, and which directories the daemon is allowed to
     /// look in — and only the second is removable.
-    func repositoryRoots() async -> [RepositoryRoot] {
-        guard let data = try? await core.call("repository_root.list") else { return [] }
-        return (try? JSONDecoder().decode(RepositoryRootList.self, from: data))?.roots ?? []
+    /// Nil when the read didn't come back.
+    func repositoryRoots() async -> [RepositoryRoot]? {
+        do {
+            let data = try await core.call("repository_root.list")
+            return try JSONDecoder().decode(RepositoryRootList.self, from: data).roots
+        } catch {
+            return nil
+        }
     }
 
     /// What asking to stop watching a folder came back with.
@@ -1863,14 +1903,21 @@ final class Connection: ObservableObject {
     /// would go to choose it.
     func reloadThemes() async {
         guard let host else { return }
-        Themes.shared.merge(hostThemes: await hostThemes(), from: host.id)
+        // A read that didn't come back leaves the picker as it was.
+        guard let themes = await hostThemes() else { return }
+        Themes.shared.merge(hostThemes: themes, from: host.id)
     }
 
-    func adapters() async -> [AdapterInfo] {
-        guard let data = try? await core.call("adapters"),
-            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return [] }
-        return Self.adapters(from: body)
+    /// Nil when the read didn't come back.
+    func adapters() async -> [AdapterInfo]? {
+        do {
+            let data = try await core.call("adapters")
+            guard let body = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return nil }
+            return Self.adapters(from: body)
+        } catch {
+            return nil
+        }
     }
 
     func upsertAdapter(_ adapter: AdapterInfo) async -> [AdapterInfo]? {
@@ -1922,10 +1969,14 @@ final class Connection: ObservableObject {
     /// worktree is then named after that branch, so `name` is ignored — the
     /// daemon says so too, and this passes it anyway rather than pretending the
     /// two calls have different shapes.
+    ///
+    /// Returns what went wrong, for the sheet that asked: it used to close on a
+    /// refused create and say nothing (ov-179).
+    @discardableResult
     func createWorktree(
         repository: String, name: String, branch: String, adopt: Bool = false,
         workspace: String? = nil
-    ) async {
+    ) async -> ActionFailure? {
         // A shell, because a worktree with nothing running in it is a
         // directory. This is the manual form; the quick-task flow below
         // creates its own agent terminal and asks for none.
@@ -1935,8 +1986,16 @@ final class Connection: ObservableObject {
         ]
         // Claimed for the workspace whose screen it was made from (ruling 8).
         if let workspace { args["workspace"] = workspace }
-        _ = try? await core.call("worktree.create", args)
+        var failure: ActionFailure?
+        do {
+            _ = try await core.call("worktree.create", args)
+        } catch {
+            failure = ActionFailure(
+                error, title: "Couldn’t create the worktree",
+                otherwise: "That runner wouldn’t create it. Nothing was made.")
+        }
         await refresh()
+        return failure
     }
 
     // MARK: - Enrolling another device
@@ -2155,14 +2214,28 @@ final class Connection: ObservableObject {
     /// Fire-and-refresh: hiding is a view preference the runner stores, and
     /// the answer is the worktree moving into, or out of, its workspace's
     /// Hidden section. Nothing about where the worktree is changes.
-    func hideWorktree(_ worktree: Worktree) async {
-        _ = try? await rpc("worktree.hide", ["worktree": worktree.id])
-        await refresh()
+    @discardableResult
+    func hideWorktree(_ worktree: Worktree) async -> ActionFailure? {
+        await moveWorktree("worktree.hide", worktree, title: "Couldn’t hide the worktree")
     }
 
-    func unhideWorktree(_ worktree: Worktree) async {
-        _ = try? await rpc("worktree.unhide", ["worktree": worktree.id])
+    @discardableResult
+    func unhideWorktree(_ worktree: Worktree) async -> ActionFailure? {
+        await moveWorktree("worktree.unhide", worktree, title: "Couldn’t unhide the worktree")
+    }
+
+    private func moveWorktree(
+        _ method: String, _ worktree: Worktree, title: String
+    ) async -> ActionFailure? {
+        var failure: ActionFailure?
+        do {
+            _ = try await rpc(method, ["worktree": worktree.id])
+        } catch {
+            failure = ActionFailure(
+                error, title: title, otherwise: "That runner didn’t take it, so nothing moved.")
+        }
         await refresh()
+        return failure
     }
 
     /// What asking to remove a worktree came back with — mirrors macOS's
@@ -2233,10 +2306,22 @@ final class Connection: ObservableObject {
     /// and what comes back — a new epoch, a different pane mode, possibly a
     /// refusal because a turn was in flight — is its answer to give, not this
     /// client's to assume.
-    func setPaneMode(_ terminal: Terminal, to mode: String) async {
-        _ = try? await core.call(
-            "terminal.set_pane_mode", ["terminal": terminal.id, "paneMode": mode])
+    ///
+    /// Returns the refusal, for the screen that asked (ov-179). The Mac offers
+    /// to force a switch when a turn is in flight; the phone says it wouldn't.
+    @discardableResult
+    func setPaneMode(_ terminal: Terminal, to mode: String) async -> ActionFailure? {
+        var failure: ActionFailure?
+        do {
+            _ = try await core.call(
+                "terminal.set_pane_mode", ["terminal": terminal.id, "paneMode": mode])
+        } catch {
+            failure = ActionFailure(
+                error, title: "Couldn’t switch the pane",
+                otherwise: "That runner wouldn’t switch it just now. Try again in a moment.")
+        }
         await refresh()
+        return failure
     }
 
     func terminal(_ id: String, in worktree: String) -> Terminal? {

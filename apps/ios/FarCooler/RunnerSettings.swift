@@ -53,11 +53,20 @@ final class RunnerSettingsModel: ObservableObject {
         await connection.loadDaemonBuild()
         mayAdminister = connection.daemon?.mayAdministerRunner ?? true
         branchPrefix = connection.branchPrefix
-        themes = await connection.hostThemes()
-        adapters = await connection.adapters()
+        let readThemes = await connection.hostThemes()
+        let readAdapters = await connection.adapters()
         health = await connection.health()
         repositories = connection.repositories
-        roots = await connection.repositoryRoots()
+        let readRoots = await connection.repositoryRoots()
+        themes = readThemes ?? themes
+        adapters = readAdapters ?? adapters
+        roots = readRoots ?? roots
+        // A connection below the admin grant is refused these reads by design,
+        // and the screen already says why; saying "couldn't read" as well
+        // would blame a link that is fine (ov-179).
+        if mayAdminister, readThemes == nil || readAdapters == nil || readRoots == nil {
+            failure = "Couldn’t read all of this runner’s settings. Leave and reopen this screen to try again."
+        }
     }
 
     /// Stop watching a folder, with the name the person typed.
@@ -82,14 +91,22 @@ final class RunnerSettingsModel: ObservableObject {
 
     func setBranchPrefix(_ prefix: String) async {
         guard let stored = await connection.setBranchPrefix(prefix) else {
-            failure = "That runner didn’t accept the change."
+            failure = Self.notSaved
             return
         }
         branchPrefix = stored
     }
 
+    /// The sentence for a write whose answer was nil: the runner didn't take it,
+    /// and nothing on the screen changed.
+    private static let notSaved = "That runner didn’t accept the change."
+
     func save(theme: Theme) async {
-        themes = await connection.upsertTheme(theme) ?? themes
+        guard let saved = await connection.upsertTheme(theme) else {
+            failure = Self.notSaved
+            return
+        }
+        themes = saved
         // Every client's picker reads the merged list, so a saved theme has to
         // reach it — otherwise the thing you just made is missing from the one
         // place you would go to choose it.
@@ -97,16 +114,28 @@ final class RunnerSettingsModel: ObservableObject {
     }
 
     func delete(themeNamed name: String) async {
-        themes = await connection.deleteTheme(name) ?? themes
+        guard let left = await connection.deleteTheme(name) else {
+            failure = Self.notSaved
+            return
+        }
+        themes = left
         await connection.reloadThemes()
     }
 
     func save(adapter: AdapterInfo) async {
-        adapters = await connection.upsertAdapter(adapter) ?? adapters
+        guard let saved = await connection.upsertAdapter(adapter) else {
+            failure = Self.notSaved
+            return
+        }
+        adapters = saved
     }
 
     func delete(adapterNamed preset: String) async {
-        adapters = await connection.deleteAdapter(preset) ?? adapters
+        guard let left = await connection.deleteAdapter(preset) else {
+            failure = Self.notSaved
+            return
+        }
+        adapters = left
     }
 
     func test(adapter: AdapterInfo) async -> AdapterTestOutcome {

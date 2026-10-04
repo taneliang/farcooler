@@ -31,6 +31,8 @@ struct BranchPicker: View {
     /// more than it tells anyone. `@State` rather than a stored `let`, because a
     /// stored one is re-initialized every time the parent re-evaluates its body.
     @State private var now = Date()
+    /// The last read of the branch list didn't come back.
+    @State private var failed = false
 
     private var shown: [Branch] {
         let query = search.trimmingCharacters(in: .whitespaces).lowercased()
@@ -45,6 +47,14 @@ struct BranchPicker: View {
                     HStack(spacing: 10) {
                         ProgressView()
                         Text("Reading branches…").foregroundStyle(.secondary)
+                    }
+                } else if failed {
+                    // Not "no branches": the read didn't come back, which is a
+                    // different thing to be told (ov-179).
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Couldn’t read this repository’s branches.")
+                            .foregroundStyle(.secondary)
+                        Button("Try Again") { Task { await read() } }
                     }
                 } else if branches.isEmpty {
                     Text("This repository has no other branches.")
@@ -77,11 +87,16 @@ struct BranchPicker: View {
                     Button("Cancel") { dismiss() }
                 }
             }
-            .task {
-                branches = await connection.branches(repository: repository)
-                loading = false
-            }
+            .task { await read() }
         }
+    }
+
+    private func read() async {
+        loading = true
+        let read = await connection.branches(repository: repository)
+        branches = read ?? []
+        failed = read == nil
+        loading = false
     }
 
     private func row(_ branch: Branch) -> some View {
@@ -149,6 +164,8 @@ struct StackView: View {
     @State private var response: StackResponse?
     @State private var loading = true
     @State private var refreshing = false
+    /// Why the stack couldn't be read, when it couldn't.
+    @State private var failure: String?
 
     var body: some View {
         NavigationStack {
@@ -161,9 +178,10 @@ struct StackView: View {
                 } else if let response, response.links.isEmpty {
                     Text("This branch isn’t part of a stack.")
                         .foregroundStyle(.secondary)
-                } else if response == nil {
-                    Text("This runner’s Far Cooler is too old to answer.")
-                        .foregroundStyle(.secondary)
+                } else if let failure {
+                    // Said, where this used to call every failed read "too
+                    // old to answer" — including a dropped link (ov-179).
+                    Text(failure).foregroundStyle(.secondary)
                 }
 
                 if response?.cycleDetected == true {
@@ -228,7 +246,15 @@ struct StackView: View {
                 }
             }
             .task {
-                response = await connection.stack(repository: repository, branch: branch)
+                do {
+                    response = try await connection.stack(
+                        repository: repository, branch: branch)
+                } catch {
+                    failure = ClientCore.trouble(
+                        error,
+                        otherwise: "Couldn’t read this stack. If it keeps happening, this "
+                            + "runner’s Far Cooler may be too old to answer.").sentence
+                }
                 loading = false
             }
         }

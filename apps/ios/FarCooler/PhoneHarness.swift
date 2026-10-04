@@ -35,6 +35,8 @@ import SwiftUI
 //                            -phone-billing-led
 //   -phone-usage-old         the runner is older than spend: no agent_usage
 //   -phone-usage-fails       the runner doesn't answer usage.task
+//   -phone-task-fails        the runner refuses task.get, so a task has no record
+//   -phone-hide-fails        the runner refuses worktree.hide and worktree.unhide
 //
 // A Darwin notification from the test stands in for a notification tapped
 // while the app is open: `com.farcooler.harness.agent`, the blocked
@@ -347,6 +349,8 @@ final class HarnessRunner {
             return try json(["items": items()])
         case "task.list":
             return try json(["tasks": tasks(args["workspace"] as? String)])
+        case "task.get" where CommandLine.arguments.contains("-phone-task-fails"):
+            throw ClientCore.CoreError.rejected("unavailable", word: "unavailable")
         case "task.get":
             guard args["task"] as? String == Self.decisionTask else { return try json(["notes": []]) }
             return try json([
@@ -420,6 +424,9 @@ final class HarnessRunner {
             }
             return try json(["id": Self.billingOrchestrator])
         case "worktree.hide", "worktree.unhide":
+            if CommandLine.arguments.contains("-phone-hide-fails") {
+                throw ClientCore.CoreError.rejected("unavailable", word: "unavailable")
+            }
             guard args["worktree"] as? String == Self.webhooks else {
                 throw ClientCore.CoreError.rejected("bad worktree", word: "invalid-argument")
             }

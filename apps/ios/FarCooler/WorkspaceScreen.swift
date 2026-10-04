@@ -480,6 +480,8 @@ private struct WorkspaceWorktrees: View {
 
     @State private var composing = false
     @State private var fromBranch = false
+    /// A hide or unhide the runner refused.
+    @State private var moveFailure: ActionFailure?
 
     @Environment(\.phoneNavigator) private var navigator
 
@@ -508,6 +510,7 @@ private struct WorkspaceWorktrees: View {
             }
         }
         .listStyle(.insetGrouped)
+        .actionFailureAlert($moveFailure)
         .sheet(isPresented: $composing) {
             TaskComposerView(connection: connection, workspace: summary)
         }
@@ -518,7 +521,7 @@ private struct WorkspaceWorktrees: View {
                 },
                 connection: connection
             ) { repository, name, branch, adopt in
-                await connection.createWorktree(
+                return await connection.createWorktree(
                     repository: repository, name: name, branch: branch, adopt: adopt,
                     workspace: summary.boardWorkspace)
             }
@@ -535,11 +538,15 @@ private struct WorkspaceWorktrees: View {
         .swipeActions(edge: .trailing) {
             if connection.daemon?.mayAct ?? true {
                 if worktree.isHidden {
-                    Button("Unhide") { Task { await connection.unhideWorktree(worktree) } }
+                    Button("Unhide") {
+                        Task { moveFailure = await connection.unhideWorktree(worktree) }
+                    }
                         .tint(.blue)
                         .accessibilityIdentifier("unhide-\(worktree.task)")
                 } else {
-                    Button("Hide") { Task { await connection.hideWorktree(worktree) } }
+                    Button("Hide") {
+                        Task { moveFailure = await connection.hideWorktree(worktree) }
+                    }
                         .tint(.gray)
                         .accessibilityIdentifier("hide-\(worktree.task)")
                 }

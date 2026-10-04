@@ -15,6 +15,9 @@ struct TaskScreen: View {
     @State private var record: TaskDetailModel?
     /// The question still waiting, with its options, from the same read.
     @State private var question: TaskQuestion?
+    /// The last read of the record didn't come back, so the notes below may be
+    /// missing or old (ov-179).
+    @State private var recordUnread = false
     /// What its agents spent, read on arrival (ov-195).
     @State private var usage: TaskUsageState = .loading
     /// The answer on its way, by option.
@@ -66,7 +69,9 @@ struct TaskScreen: View {
         if let summary = connection.workspace(place.workspace) {
             await connection.readBoard(summary)
         }
-        if let read = await connection.taskRecord(task) {
+        let read = await connection.taskRecord(task)
+        recordUnread = read == nil
+        if let read {
             record = read.detail
             question = read.question
             // Opened and read: its finish no longer keeps it in Done's short
@@ -148,6 +153,14 @@ struct TaskScreen: View {
             TaskUsageSection(state: usage) {
                 usage = .loading
                 Task { await readUsage() }
+            }
+
+            if recordUnread {
+                Section {
+                    Text("Couldn’t read this task’s record. Pull down to try again.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             if let notes = record?.notes, !notes.isEmpty {
