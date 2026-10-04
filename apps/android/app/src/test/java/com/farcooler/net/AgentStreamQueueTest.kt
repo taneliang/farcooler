@@ -2,6 +2,7 @@ package com.farcooler.net
 
 import com.farcooler.core.ClientCore
 import com.farcooler.core.CoreException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -19,9 +20,11 @@ class AgentStreamQueueTest {
     private class Runner {
         val calls = mutableListOf<String>()
         var refuse: CoreException? = null
+        var gate: CompletableDeferred<Unit>? = null
 
         suspend fun call(method: String, args: JsonObject): JsonObject {
             calls += method
+            gate?.await()
             refuse?.let { throw it }
             return JsonObject(emptyMap())
         }
@@ -57,18 +60,42 @@ class AgentStreamQueueTest {
         )
     }
 
-    /** Mutation: `retryQueue` leaving the failure up. Red: the banner outlives the success. */
+    /**
+     * Only `retryQueue` takes the failure down while the retried call is out;
+     * the call's own success path hasn't run yet. Mutation: `retryQueue`
+     * leaving the failure up. Red: still set while the call is in flight.
+     */
     @Test
-    fun tryAgainRunsTheSameCallAndClearsOnSuccess() = runTest {
+    fun tryAgainTakesTheFailureDownAndRunsTheSameCall() = runTest {
         val runner = Runner().apply { refuse = CoreException("raw", word = "agent-stopped") }
         val stream = stream(runner)
         stream.cancelQueued("q1")
         advanceUntilIdle()
         runner.refuse = null
+        runner.gate = CompletableDeferred()
         stream.retryQueue()
         advanceUntilIdle()
         assertNull(stream.queueFailure.value)
+        runner.gate?.complete(Unit)
+        advanceUntilIdle()
         assertEquals(listOf("terminal.agent_cancel_queued", "terminal.agent_cancel_queued"), runner.calls)
+    }
+
+    /**
+     * Only the call's success path can clear it here: no retry is involved.
+     * Mutation: `queueCall` never clearing on success. Red: the old failure stays.
+     */
+    @Test
+    fun aLaterCallThatWorksClearsTheOldFailure() = runTest {
+        val runner = Runner().apply { refuse = CoreException("raw", word = "agent-stopped") }
+        val stream = stream(runner)
+        stream.cancelQueued("q1")
+        advanceUntilIdle()
+        assertNotNull(stream.queueFailure.value)
+        runner.refuse = null
+        stream.editQueued("q2", "x")
+        advanceUntilIdle()
+        assertNull(stream.queueFailure.value)
     }
 
     @Test

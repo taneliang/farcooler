@@ -50,4 +50,34 @@ class QueueControlsTest {
         assertTrue(said.contains("The agent stopped."))
         assertFalse(said.contains("raw"))
     }
+
+    /**
+     * The row's state: an older runner dims all three actions and says why.
+     * Mutation: `of` ignoring the gate. Red: enabled, no sentence.
+     */
+    @Test
+    fun anOlderRunnersRowIsDimmedAndSaysWhy() {
+        val row = QueueRowState.of(QueueControls.gate(runner("agent")), tappedEdit = false)
+        assertFalse(row.actionsEnabled)
+        assertEquals(QueueControls.OLDER_RUNNER_SENTENCE, row.sentence)
+    }
+
+    /** Mutation: `of` always dimmed. Red: no live actions with the capability. */
+    @Test
+    fun aCapableRunnersRowIsLiveAndSilent() {
+        val row = QueueRowState.of(QueueControls.gate(runner("agent_queue")), tappedEdit = false)
+        assertTrue(row.actionsEnabled)
+        assertEquals(null, row.sentence)
+    }
+
+    /**
+     * An edit open when the runner turns out to be gated closes rather than
+     * stranding a dimmed Save. Mutation: `editing = tappedEdit`. Red: still open.
+     */
+    @Test
+    fun anOpenEditClosesWhenTheRunnerIsGated() {
+        assertTrue(QueueRowState.of(QueueControls.Available, tappedEdit = true).editing)
+        val gated = QueueRowState.of(QueueControls.gate(runner("agent")), tappedEdit = true)
+        assertFalse(gated.editing)
+    }
 }

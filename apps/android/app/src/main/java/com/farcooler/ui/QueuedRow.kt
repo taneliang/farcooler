@@ -22,6 +22,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.unit.dp
 import com.farcooler.model.QueueControls
+import com.farcooler.model.QueueRowState
 import com.farcooler.model.QueuedPrompt
 
 /** A message written but not yet sent. */
@@ -33,8 +34,10 @@ internal fun QueuedRow(
     onSteer: () -> Unit,
     controls: QueueControls,
 ) {
-    val enabled = controls.isAvailable
-    var editing by remember { mutableStateOf(false) }
+    var tappedEdit by remember { mutableStateOf(false) }
+    val row = QueueRowState.of(controls, tappedEdit)
+    val editing = row.editing
+    val enabled = row.actionsEnabled
     var draft by remember(queued.id) { mutableStateOf(queued.text) }
 
     Column(
@@ -81,20 +84,20 @@ internal fun QueuedRow(
             Action("Send now", enabled, onSteer)
             Action(if (editing) "Save" else "Edit", enabled = enabled) {
                 if (editing) {
-                    editing = false
+                    tappedEdit = false
                     val trimmed = draft.trim()
                     if (trimmed.isNotEmpty() && trimmed != queued.text) onEdit(trimmed)
                 } else {
                     draft = queued.text
-                    editing = true
+                    tappedEdit = true
                 }
             }
             Action("Remove", enabled, onCancel)
         }
         // Dimmed and said, not hidden (ov-171): see [QueueControls].
-        (controls as? QueueControls.Unavailable)?.let {
+        row.sentence?.let {
             Text(
-                it.sentence,
+                it,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp),

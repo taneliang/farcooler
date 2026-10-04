@@ -43,3 +43,25 @@ sealed interface QueueControls {
             troubleAfter(word, message, action.failed).sentence
     }
 }
+
+/**
+ * What one queued row draws, decided where a test can reach it (ov-171).
+ *
+ * An edit that was open when the runner turned out to be gated is closed by
+ * this rather than stranded: [editing] is the tap AND the capability, the same
+ * reading iOS's `QueuedRow.isEditing` makes, so a dimmed Save is never the only
+ * thing left on screen.
+ */
+data class QueueRowState(
+    val actionsEnabled: Boolean,
+    val editing: Boolean,
+    val sentence: String?,
+) {
+    companion object {
+        fun of(controls: QueueControls, tappedEdit: Boolean) = QueueRowState(
+            actionsEnabled = controls.isAvailable,
+            editing = tappedEdit && controls.isAvailable,
+            sentence = (controls as? QueueControls.Unavailable)?.sentence,
+        )
+    }
+}
