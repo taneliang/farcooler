@@ -223,7 +223,9 @@ android {
     //         -Pfarcooler.captureJdk=/path/to/jdk-21 -Pfarcooler.captureDir=/path/to/out
     testOptions {
         unitTests {
-            isIncludeAndroidResources = true
+            // Only the captures need the merged resources and assets; every other
+            // unit-test run skips that merge (ov-245 review).
+            isIncludeAndroidResources = project.hasProperty("farcooler.captures")
             all { test ->
                 val capturing = project.hasProperty("farcooler.captures")
                 if (capturing) {
@@ -407,6 +409,8 @@ dependencies {
     testImplementation(libs.androidx.compose.ui.test.junit4)
     // The empty `ComponentActivity` the Compose test rule launches. In the build
     // type the unit tests compile against, so it never reaches a shipped APK.
+    // `instrumented` must never become a distributed build type: this adds an
+    // exported activity to it.
     "instrumentedImplementation"(libs.androidx.compose.ui.test.manifest)
     androidTestImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.ext.junit)
