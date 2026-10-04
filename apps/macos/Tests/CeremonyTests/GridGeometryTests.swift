@@ -184,7 +184,6 @@ struct GridGeometryTests {
 
     @Test(
         "Every board row's chevron and text is on the board column's grid",
-        .disabled("ov-235: glyph bounds differ on CI's macOS runner"),
         arguments: [(false, true), (true, false)])
     func theBoardIsOnTheGrid(collapsedSummary: Bool, orchestratorRunning: Bool) async {
         let store = await Self.store()
