@@ -4891,7 +4891,10 @@ impl Service {
                 if SKIP_DIRS.contains(&name.as_ref()) {
                     continue;
                 }
-                if path.is_dir() {
+                // The entry's own type, never what a link points at: a
+                // linked directory would walk outside the worktree, and one
+                // linked to an ancestor would walk forever (ov-189).
+                if entry.file_type().is_ok_and(|t| t.is_dir()) {
                     stack.push(path);
                     continue;
                 }
@@ -5732,6 +5735,25 @@ mod tests {
         .unwrap();
         let hits = service.search_worktree_files(ws.id, "brand", 10).await.unwrap();
         assert_eq!(hits, vec!["brand_new.rs".to_string()]);
+    }
+
+    /// A linked directory is never walked: not one leading outside the
+    /// worktree, and not one leading back up it, which walked until paths
+    /// grew too long to open (ov-189).
+    #[tokio::test]
+    async fn worktree_search_never_follows_a_linked_directory() {
+        let service = temp_service().await;
+        let ws = seed_worktree(&service).await;
+        let root = std::path::Path::new(&ws.worktree_path);
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret.txt"), "s").unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.join("escape")).unwrap();
+        std::os::unix::fs::symlink("..", root.join("up")).unwrap();
+        std::fs::write(root.join("mine.txt"), "m").unwrap();
+        let hits = service.search_worktree_files(ws.id, "", 500).await.unwrap();
+        assert!(!hits.iter().any(|p| p.contains("secret")), "{hits:?}");
+        assert!(hits.len() < 10, "walked through a link: {hits:?}");
+        assert!(hits.contains(&"mine.txt".to_string()), "{hits:?}");
     }
 
     #[tokio::test]
