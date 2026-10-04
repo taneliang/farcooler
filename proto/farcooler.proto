@@ -837,7 +837,9 @@ message Host {
 message ReadOnlyFolder {
   // What `WorktreeDirRequest.folder` and `WorktreeFileRequest.folder` name.
   string name = 1;
-  // Its path as the config file wrote it, to show.
+  // Its path as the config file wrote it, to show. Sent only to a client
+  // with control scope or more, the scope that can read the folder; empty
+  // for a read-scoped one.
   string path = 2;
 }
 

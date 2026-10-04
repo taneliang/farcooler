@@ -22,11 +22,14 @@
 //! so a link that already pointed at `~/.ssh` when the daemon started is
 //! caught there, and the log says when a path was resolved through a link.
 //!
-//! **The guard.** Whatever the config says, a folder is refused when it holds
-//! the runner user's home or the daemon's runtime directory (so `/`, `/Users`
-//! and `~` are never folders), or sits inside the runtime directory, `~/.ssh`
-//! or `~/.gnupg`. Each refusal is a warning in the daemon's log, and the
-//! daemon starts without that folder.
+//! **The guard** (`guard`). Whatever the config says, a folder is refused
+//! when it holds the runner user's home (so `/`, `/Users` and `~` are never
+//! folders), or holds or sits inside a protected directory: credentials,
+//! keychains, browser profiles, every channel's Far Cooler home, the config's
+//! directory, and `/proc` on Linux. Compared by `(st_dev, st_ino)` as well as
+//! by path, so an APFS firmlink or a bind mount can't name one under another
+//! path. With `$HOME` unset, every folder is refused. Each refusal is a
+//! warning in the daemon's log, and the daemon starts without that folder.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -49,13 +52,25 @@ impl Folder {
     }
 }
 
-/// The directories a folder may neither hold nor sit in.
+/// What a folder is checked against (`guard`).
 #[derive(Debug, Clone)]
 pub struct Guarded {
-    /// The runner user's home, `$HOME`.
-    pub home: Option<PathBuf>,
-    /// The daemon's runtime directory: its database, keys and sockets.
-    pub runtime: PathBuf,
+    /// The runner user's home: a folder may sit in it, never hold it.
+    home: PathBuf,
+    /// What a folder may neither hold nor sit in (`guard::protected`).
+    protected: Vec<PathBuf>,
+}
+
+impl Guarded {
+    /// The guard for a runner whose home is `home`, with `runtimes` (every
+    /// channel's Far Cooler home) and its `config_dir`. `None` without a
+    /// home: no folder is admitted when the home can't be named, since every
+    /// protected directory but the runtimes is found from it.
+    pub fn new(home: Option<PathBuf>, runtimes: &[PathBuf], config_dir: Option<&Path>) -> Option<Self> {
+        let home = home.filter(|h| h.is_absolute())?;
+        let protected = guard::protected(&home, runtimes, config_dir);
+        Some(Guarded { home, protected })
+    }
 }
 
 /// Why a configured folder was left out.
@@ -68,10 +83,13 @@ pub enum Refused {
     NotAbsolute,
     /// Nothing there when the daemon started, or not a directory.
     NotADirectory,
-    /// It holds the home or the runtime directory.
+    /// It holds the home or a protected directory (and isn't one).
     TooBroad,
-    /// It sits inside the runtime directory, `~/.ssh` or `~/.gnupg`.
+    /// It is a protected directory or sits inside one.
     Secret,
+    /// The runner's home is unknown (`$HOME` unset), so nothing can be
+    /// checked against it: every folder is refused.
+    NoHome,
 }
 
 fn good_name(name: &str) -> bool {
@@ -80,11 +98,6 @@ fn good_name(name: &str) -> bool {
         && !name.contains('/')
         && !name.chars().any(char::is_control)
         && !name.chars().all(|c| c == '.')
-}
-
-/// `path` resolved, or as given when it can't be (absent, unreadable).
-fn real_or_given(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// One configured folder, checked and resolved.
@@ -100,14 +113,12 @@ pub fn admit(name: &str, configured: &str, guarded: &Guarded) -> Result<Folder, 
     if !real.is_dir() || !real.components().all(|c| matches!(c, Component::RootDir | Component::Normal(_))) {
         return Err(Refused::NotADirectory);
     }
-    let runtime = real_or_given(&guarded.runtime);
-    let home = guarded.home.as_deref().map(real_or_given);
-    if runtime.starts_with(&real) || home.as_ref().is_some_and(|h| h.starts_with(&real)) {
-        return Err(Refused::TooBroad);
-    }
-    let secret = |dir: &Path| real.starts_with(dir);
-    if secret(&runtime) || home.as_ref().is_some_and(|h| secret(&h.join(".ssh")) || secret(&h.join(".gnupg"))) {
+    // Inside first, so a protected directory itself reads as a secret.
+    if guarded.protected.iter().any(|p| guard::inside(&real, p)) {
         return Err(Refused::Secret);
+    }
+    if guard::holds(&real, &guarded.home) || guarded.protected.iter().any(|p| guard::holds(&real, p)) {
+        return Err(Refused::TooBroad);
     }
     if real != path {
         tracing::info!(folder = %name, configured, real = %real.display(), "a read-only folder is resolved through a link, once, at startup");
@@ -116,11 +127,11 @@ pub fn admit(name: &str, configured: &str, guarded: &Guarded) -> Result<Folder, 
 }
 
 /// Every configured folder that passes `admit`, in name order. The rest are
-/// each a warning.
-pub fn resolve(configured: Vec<(String, String)>, guarded: &Guarded) -> Vec<Folder> {
+/// each a warning; without a guard (no home), all of them.
+pub fn resolve(configured: Vec<(String, String)>, guarded: Option<&Guarded>) -> Vec<Folder> {
     configured
         .into_iter()
-        .filter_map(|(name, path)| match admit(&name, &path, guarded) {
+        .filter_map(|(name, path)| match guarded.map_or(Err(Refused::NoHome), |g| admit(&name, &path, g)) {
             Ok(folder) => Some(folder),
             Err(why) => {
                 tracing::warn!(folder = %name, path, ?why, "leaving out a read-only folder");
@@ -130,11 +141,24 @@ pub fn resolve(configured: Vec<(String, String)>, guarded: &Guarded) -> Vec<Fold
         .collect()
 }
 
-/// The runner's folders, from its config file, guarded by its home and
-/// `runtime`.
+/// Every Far Cooler home on this machine: this daemon's `runtime`, and each
+/// channel's default, since `config.toml` is shared by all of them.
+pub fn runtimes(runtime: &Path) -> Vec<PathBuf> {
+    use farcooler_protocol::Channel;
+    let mut all = vec![runtime.to_path_buf()];
+    for channel in [Channel::Local, Channel::Canary, Channel::Preview, Channel::Stable] {
+        all.extend(crate::paths::default_runtime_dir_for(channel).ok());
+    }
+    all
+}
+
+/// The runner's folders, from its config file, guarded by its home, every
+/// channel's runtime directory and the config's own directory.
 pub fn load(runtime: &Path) -> Vec<Folder> {
-    let guarded = Guarded { home: std::env::var_os("HOME").map(PathBuf::from), runtime: runtime.to_path_buf() };
-    resolve(farcooler_core::config::load_read_only_folders(), &guarded)
+    let home = std::env::var_os("HOME").filter(|h| !h.is_empty()).map(PathBuf::from);
+    let config = farcooler_core::config::config_path();
+    let guarded = Guarded::new(home, &runtimes(runtime), config.as_deref().and_then(Path::parent));
+    resolve(farcooler_core::config::load_read_only_folders(), guarded.as_ref())
 }
 
 /// The folder a client named, by exact name and nothing else: a path, `..`
@@ -142,6 +166,8 @@ pub fn load(runtime: &Path) -> Vec<Folder> {
 pub fn find<'a>(folders: &'a [Folder], name: &str) -> Option<&'a Folder> {
     folders.iter().find(|f| f.name == name)
 }
+
+mod guard;
 
 #[cfg(test)]
 mod tests;

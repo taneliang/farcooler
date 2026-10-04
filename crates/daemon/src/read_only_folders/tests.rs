@@ -28,7 +28,7 @@ impl Scene {
         std::fs::write(top.join("home/.ssh/id_ed25519"), "PRIVATE KEY\n").unwrap();
         std::fs::write(top.join("logs/app/today.log"), "started\n").unwrap();
         std::fs::write(top.join("outside/secret"), "SECRET\n").unwrap();
-        let guarded = Guarded { home: Some(top.join("home")), runtime: top.join("runtime") };
+        let guarded = Guarded::new(Some(top.join("home")), &[top.join("runtime")], None).unwrap();
         Scene { _dir: dir, top, guarded }
     }
 
@@ -131,7 +131,7 @@ fn a_configured_link_into_a_secret_or_too_broad_a_folder_is_refused() {
     symlink(scene.top.join("home/.ssh"), &link).unwrap();
     assert_eq!(admit("keys", &link.to_string_lossy(), g), Err(Refused::Secret));
     assert_eq!(admit("keys", &scene.path("home/.ssh"), g), Err(Refused::Secret));
-    assert_eq!(admit("state", &scene.path("runtime"), g), Err(Refused::TooBroad));
+    assert_eq!(admit("state", &scene.path("runtime"), g), Err(Refused::Secret));
     std::fs::create_dir_all(scene.top.join("runtime/worktrees")).unwrap();
     assert_eq!(admit("state", &scene.path("runtime/worktrees"), g), Err(Refused::Secret));
     assert_eq!(admit("home", &scene.path("home"), g), Err(Refused::TooBroad));
@@ -143,7 +143,7 @@ fn a_configured_link_into_a_secret_or_too_broad_a_folder_is_refused() {
     // A home given through a link is guarded as the real directory.
     let home_link = scene.top.join("home-link");
     symlink(scene.top.join("home"), &home_link).unwrap();
-    let via = Guarded { home: Some(home_link), runtime: g.runtime.clone() };
+    let via = Guarded::new(Some(home_link), &[scene.top.join("runtime")], None).unwrap();
     assert_eq!(admit("keys", &scene.path("home/.ssh"), &via), Err(Refused::Secret));
 }
 
@@ -160,7 +160,7 @@ fn a_bad_name_or_path_is_left_out() {
     assert_eq!(admit("logs", &scene.path("outside/secret"), g), Err(Refused::NotADirectory));
     let kept = resolve(
         vec![("logs".into(), logs), ("keys".into(), scene.path("home/.ssh")), ("rel".into(), "logs".into())],
-        g,
+        Some(g),
     );
     assert_eq!(kept.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), vec!["logs"]);
 }
@@ -190,8 +190,14 @@ async fn the_methods_read_a_folder_by_name_and_nothing_else() {
     let both = pb::WorktreeDirRequest { worktree_id: vec![1u8; 16].into(), folder: "logs".into(), ..Default::default() };
     assert!(matches!(crate::worktree_files::list_dir(&svc, &both).await, Err(DomainError::InvalidArgument { what: "folder" })));
 
-    let host = crate::wire::host("t", svc.host_id, &svc.inventory_snapshot(), 0, None, false, None, Vec::new(), svc.read_only_folders());
-    assert_eq!(host.read_only_folders, vec![pb::ReadOnlyFolder { name: "logs".into(), path: scene.path("logs") }]);
+    let host = |scope| crate::wire::host("t", svc.host_id, &svc.inventory_snapshot(), 0, None, false, None, Vec::new(), svc.read_only_folders(), scope);
+    for scope in [pb::Scope::Control, pb::Scope::HostAdmin] {
+        assert_eq!(host(scope).read_only_folders, vec![pb::ReadOnlyFolder { name: "logs".into(), path: scene.path("logs") }]);
+    }
+    // A read-scoped client, which can't read the folder, learns only its name.
+    for scope in [pb::Scope::Read, pb::Scope::Unspecified] {
+        assert_eq!(host(scope).read_only_folders, vec![pb::ReadOnlyFolder { name: "logs".into(), path: String::new() }]);
+    }
 }
 
 /// A client can't add or change a folder: the list is set by `Service::open`
@@ -237,5 +243,87 @@ fn nothing_but_startup_sets_the_folders() {
     // And no method is about folders but the two reads that take one by name.
     for method in farcooler_protocol::method::Method::ALL {
         assert!(!method.name().contains("folder"), "{} would be a way to change the folders", method.name());
+    }
+}
+
+/// Each protected directory is refused both ways: a folder inside it, and a
+/// folder holding it, like `~/Library` around `~/Library/Keychains`. A folder
+/// beside them in the home, like `~/Library/Logs`, is still admitted.
+#[test]
+fn a_folder_in_or_around_a_protected_directory_is_refused() {
+    let scene = Scene::new();
+    for d in ["Library/Keychains", "Library/Logs", "Library/Application Support/Google/Chrome/Default", ".aws/sso", ".config/gh", ".config/other", "cfg"] {
+        std::fs::create_dir_all(scene.top.join("home").join(d)).unwrap();
+    }
+    let g = Guarded::new(Some(scene.top.join("home")), &[scene.top.join("runtime")], Some(&scene.top.join("home/cfg"))).unwrap();
+    for inside in ["home/Library/Keychains", "home/.aws/sso", "home/.config/gh", "home/Library/Application Support/Google/Chrome/Default", "home/cfg"] {
+        assert_eq!(admit("x", &scene.path(inside), &g), Err(Refused::Secret), "{inside}");
+    }
+    for around in ["home/Library", "home/.config", "home/Library/Application Support", "home/Library/Application Support/Google"] {
+        assert_eq!(admit("x", &scene.path(around), &g), Err(Refused::TooBroad), "{around}");
+    }
+    for fine in ["home/Library/Logs", "home/.config/other"] {
+        assert!(admit("x", &scene.path(fine), &g).is_ok(), "{fine}");
+    }
+}
+
+/// `config.toml` is shared by every channel, so each channel's Far Cooler
+/// home is guarded, not only this daemon's own.
+#[test]
+fn every_channels_runtime_directory_is_guarded() {
+    use farcooler_protocol::Channel;
+    let scene = Scene::new();
+    let all = runtimes(&scene.top.join("runtime"));
+    assert!(all.contains(&scene.top.join("runtime")));
+    for channel in [Channel::Local, Channel::Canary, Channel::Preview, Channel::Stable] {
+        let dir = crate::paths::default_runtime_dir_for(channel).unwrap();
+        assert!(all.contains(&dir), "{channel:?}'s {} isn't guarded", dir.display());
+    }
+    // And a guarded one is refused, here with a stand-in for another channel's.
+    std::fs::create_dir_all(scene.top.join("other-channel/worktrees")).unwrap();
+    let g = Guarded::new(Some(scene.top.join("home")), &[scene.top.join("runtime"), scene.top.join("other-channel")], None).unwrap();
+    assert_eq!(admit("x", &scene.path("other-channel/worktrees"), &g), Err(Refused::Secret));
+    assert_eq!(admit("x", &scene.path("other-channel"), &g), Err(Refused::Secret));
+    assert_eq!(admit("x", &scene.path(""), &g), Err(Refused::TooBroad));
+}
+
+/// With no home to check against, nothing is admitted.
+#[test]
+fn without_a_home_every_folder_is_refused() {
+    let scene = Scene::new();
+    assert!(Guarded::new(None, &[scene.top.join("runtime")], None).is_none());
+    assert!(Guarded::new(Some(PathBuf::from("relative/home")), &[], None).is_none());
+    assert!(resolve(vec![("logs".into(), scene.path("logs"))], None).is_empty());
+}
+
+/// `canonicalize` leaves an APFS firmlink as written:
+/// `/System/Volumes/Data/Users/<me>/.ssh` is `~/.ssh` by identity, under a
+/// path no string comparison matches. Against the real home, on a Mac that
+/// has the data volume.
+#[test]
+fn a_firmlink_path_to_a_protected_directory_is_refused() {
+    let data = Path::new("/System/Volumes/Data");
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from).filter(|h| h.starts_with("/Users")) else {
+        eprintln!("skipped: no home under /Users");
+        return;
+    };
+    let via_data = data.join(home.strip_prefix("/").unwrap());
+    if !via_data.is_dir() {
+        eprintln!("skipped: no APFS data volume at {}", data.display());
+        return;
+    }
+    let scene = Scene::new();
+    let g = Guarded::new(Some(home.clone()), &[scene.top.join("runtime")], None).unwrap();
+    assert_ne!(std::fs::canonicalize(&via_data).unwrap(), home, "canonicalize resolves the firmlink now; this test proves less");
+    for broad in [data.to_path_buf(), data.join("Users"), via_data.clone()] {
+        assert_eq!(admit("x", &broad.to_string_lossy(), &g), Err(Refused::TooBroad), "{}", broad.display());
+    }
+    for secret in [".ssh", "Library/Keychains"] {
+        let through = via_data.join(secret);
+        if through.is_dir() {
+            assert_eq!(admit("x", &through.to_string_lossy(), &g), Err(Refused::Secret), "{}", through.display());
+        } else {
+            eprintln!("skipped {secret}: not a directory here");
+        }
     }
 }
