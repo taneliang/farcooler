@@ -24,6 +24,9 @@ struct FleetPlaceholder: View {
         case noWorktrees
         /// The fleet has worktrees: a workspace to choose.
         case chooseWorkspace
+        /// The window is going back to where it was, on a runner that
+        /// hasn't connected yet (ov-279): the runner, `""` for this Mac.
+        case connecting(String)
     }
 
     /// The phase for the fleet as it is.
@@ -33,9 +36,14 @@ struct FleetPlaceholder: View {
     /// runner's trouble is the toolbar's runner item's to say, so it never
     /// blanks out a fleet this Mac can show. A fleet with any worktree is
     /// past all of this, whichever runner it came from.
+    ///
+    /// A window going back to a place on a runner still connecting says so,
+    /// whatever else the fleet holds: that place is the one it opens.
     nonisolated static func phase(
-        hasWorktrees: Bool, localLoaded: Bool, localError: String?, hasRepositories: Bool
+        hasWorktrees: Bool, localLoaded: Bool, localError: String?, hasRepositories: Bool,
+        restoringOn runner: String? = nil
     ) -> Phase {
+        if let runner { return .connecting(runner) }
         if hasWorktrees { return .chooseWorkspace }
         if localLoaded { return hasRepositories ? .noWorktrees : .noRepositories }
         if let localError { return .failed(localError) }
@@ -85,7 +93,18 @@ struct FleetPlaceholder: View {
         return (only.host, main)
     }
 
+    /// The connecting state's title: "Connecting to studio…".
+    nonisolated static func connectingTitle(_ runner: String) -> String {
+        "Connecting to \(runner.isEmpty ? "this Mac’s runner" : runner)…"
+    }
+
+    /// Under it: what happens next, so waiting reads as waiting.
+    static let connectingCopy = "This window goes back to where you left it once the runner answers."
+
     let phase: Phase
+    /// Show Needs You, from the connecting state: somewhere to work while
+    /// the runner comes. Moving gives up the restore (`WindowRestore`).
+    var onShowNeedsYou: (() -> Void)?
     /// Open Main, when the one repository has a Main workspace to open.
     var onOpenMain: (() -> Void)?
     /// New Workspace…, where a runner has workspaces to make one in.
@@ -129,6 +148,20 @@ struct FleetPlaceholder: View {
                 EmptyStateRows(copy: Self.noWorktreesCopy)
             } actions: {
                 Button("New Worktree…", action: onNewWorktree)
+            }
+        case .connecting(let runner):
+            ContentUnavailableView {
+                Label {
+                    Text(Self.connectingTitle(runner))
+                } icon: {
+                    ProgressView().controlSize(.small)
+                }
+            } description: {
+                Text(Self.connectingCopy)
+            } actions: {
+                if let onShowNeedsYou {
+                    Button("Show Needs You", action: onShowNeedsYou)
+                }
             }
         case .chooseWorkspace:
             ContentUnavailableView {

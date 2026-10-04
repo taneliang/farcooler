@@ -261,11 +261,15 @@ final class DestinationOpener: ObservableObject {
         pause: () async -> Void = { try? await Task.sleep(for: .milliseconds(250)) }
     ) async -> Outcome {
         var reads = DestinationReads()
+        // When the deadline's clock started: the open's own start, or for a
+        // restore whose runner is still coming, the moment it came (ov-279).
+        var since = open.since
         while !Task.isCancelled, isCurrent() {
             let held = reads.applied(to: world())
+            if Self.waitsForRunner(open, in: held) { since = now() }
             switch DestinationResolver.resolve(
                 open.destination, arrival: open.arrival, in: held,
-                elapsed: now().timeIntervalSince(open.since), deadline: open.deadline,
+                elapsed: now().timeIntervalSince(since), deadline: open.deadline,
                 interrupted: interrupted())
             {
             case .open(let destination, _):
@@ -290,6 +294,17 @@ final class DestinationOpener: ObservableObject {
             }
         }
         return .cancelled
+    }
+
+    /// Whether a relaunch is still waiting for its window's runner (ov-279):
+    /// the runner is configured here and hasn't connected. Its window keeps
+    /// the place it had, showing that it's connecting, however long the
+    /// runner takes, after sleep or over a slow tunnel; the ten seconds start
+    /// once it's up. A runner gone from the configuration has no seat, and
+    /// the restore falls back as before.
+    nonisolated static func waitsForRunner(_ open: DestinationOpen, in world: DestinationResolver.World) -> Bool {
+        guard open.arrival == .restore, let host = open.destination.runner.host else { return false }
+        return world.seats.contains { $0.host == host && !$0.ready }
     }
 
     /// A window's half of a click: wait until this window may open it (`claim`),

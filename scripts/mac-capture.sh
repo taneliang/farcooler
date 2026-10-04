@@ -27,6 +27,8 @@
 #                             <selection> is what `SelectionMemory.key` stores
 #   FARCOOLER_CAPTURE_WAIT    seconds a window settles before it's drawn (5)
 #   FARCOOLER_BIN             the CLI; unset, target/debug/farcooler and farcoolerd are built
+#   FARCOOLER_CAPTURE_APP_BIN the CLI the window runs, when it isn't FARCOOLER_BIN:
+#                             a wrapper that stalls draws a runner still connecting
 #   SWIFT_JOBS                swift test's -j (3)
 set -euo pipefail
 
@@ -110,7 +112,7 @@ cd "$root/apps/macos"
 # Built Rust cores first, as test.sh does: a stale library fails to link.
 ./build-vt.sh >/dev/null
 env -u FARCOOLER_WORKSPACE \
-    FARCOOLER_HOME="$home" FARCOOLER_BIN="$bin" \
+    FARCOOLER_HOME="$home" FARCOOLER_BIN="${FARCOOLER_CAPTURE_APP_BIN:-$bin}" \
     FARCOOLER_CAPTURE_OUT="$out" FARCOOLER_CAPTURE_STAGE="$stage" FARCOOLER_CAPTURE_SEED="$seed" \
     swift test -j "${SWIFT_JOBS:-3}" --filter RealWindowCaptures
 echo "mac-capture: wrote $(ls "$out" | grep -c "^$stage-") images to $out" >&2

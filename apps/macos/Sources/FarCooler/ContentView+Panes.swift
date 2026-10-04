@@ -164,6 +164,14 @@ extension ContentView {
         .environment(\.filesWorktree, ws)
     }
 
+    /// The runner this window's restore is waiting for, while it is
+    /// (`DestinationOpener.waitsForRunner`, ov-279).
+    var restoringRunner: String? {
+        guard let restoring, DestinationOpener.waitsForRunner(restoring, in: MacDestination.world(of: store))
+        else { return nil }
+        return restoring.destination.runner.host
+    }
+
     /// The detail with no workspace to show: the fleet's own state first,
     /// before it has anything in it (`FleetPlaceholder`), then "choose one".
     var placeholder: some View {
@@ -171,7 +179,9 @@ extension ContentView {
         return FleetPlaceholder(
             phase: FleetPlaceholder.phase(
                 hasWorktrees: !store.fleet.worktrees.isEmpty, localLoaded: local?.hasLoaded == true,
-                localError: local?.fleetError, hasRepositories: !store.repositories.isEmpty),
+                localError: local?.fleetError, hasRepositories: !store.repositories.isEmpty,
+                restoringOn: restoringRunner),
+            onShowNeedsYou: { selection = .needsYou },
             onOpenMain: FleetPlaceholder.mainToOpen(in: store.repositories, fleet: store.fleet).map { target in
                 { selection = .workspace(host: target.host, workspace: target.workspace.id, focus: nil) }
             },
