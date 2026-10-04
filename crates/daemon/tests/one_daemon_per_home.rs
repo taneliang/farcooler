@@ -31,12 +31,7 @@ fn daemon_binary() -> std::path::PathBuf {
 /// Kill the tmux server a daemon started, which killing the daemon does not do.
 fn reap_tmux(home: &std::path::Path) {
     let Ok(install) = std::fs::read_to_string(home.join("install-id")) else { return };
-    let Some(tmux) = farcooler_core::programs::find("tmux") else { return };
-    let _ = Command::new(tmux)
-        .args(["-L", &format!("farcooler-{}", install.trim()), "kill-server"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+    farcooler_tmux::reap_server(&format!("farcooler-{}", install.trim()));
 }
 
 #[test]

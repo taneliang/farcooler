@@ -709,11 +709,7 @@ mod tests {
 
     impl Drop for SlowTmux {
         fn drop(&mut self) {
-            let _ = std::process::Command::new(&self.real)
-                .args(["-L", self.server.socket(), "kill-server"])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
+            crate::reap_server(self.server.socket());
             let _ = std::fs::remove_file(&self.wrapper);
             let _ = std::fs::remove_file(self.fail_marker());
             let _ = std::fs::remove_file(&self.server.config_path);

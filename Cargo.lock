@@ -963,6 +963,7 @@ dependencies = [
  "farcooler-ffi-guard",
  "farcooler-protocol",
  "farcooler-tailcat",
+ "farcooler-tmux",
  "farcooler-transport",
  "prost-types",
  "rand",
@@ -1125,6 +1126,7 @@ version = "0.1.0"
 dependencies = [
  "farcooler-core",
  "farcooler-protocol",
+ "libc",
  "thiserror 2.0.19",
  "tokio",
  "tracing",

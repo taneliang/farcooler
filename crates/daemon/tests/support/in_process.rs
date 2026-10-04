@@ -28,11 +28,7 @@ pub struct Harness {
 /// does and for its reason.
 impl Drop for Harness {
     fn drop(&mut self) {
-        let _ = std::process::Command::new("tmux")
-            .args(["-L", &self.tmux_socket, "kill-server"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
+        farcooler_tmux::reap_server(&self.tmux_socket);
     }
 }
 

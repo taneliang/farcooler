@@ -36,11 +36,7 @@ struct Runner {
 /// harnesses do and for their reason: nothing else ever will.
 impl Drop for Runner {
     fn drop(&mut self) {
-        let _ = std::process::Command::new("tmux")
-            .args(["-L", self.service.tmux.socket(), "kill-server"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
+        farcooler_tmux::reap_server(self.service.tmux.socket());
     }
 }
 

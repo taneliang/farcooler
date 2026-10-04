@@ -75,3 +75,5 @@ prost-types.workspace = true
 # The tests drive the real daemon binary, not a stub — this is a dev-dependency
 # only, so it does not put the daemon back on any shipping build's graph.
 farcooler-daemon.workspace = true
+# Test teardown ends its tmux server by PID (ov-207).
+farcooler-tmux.workspace = true

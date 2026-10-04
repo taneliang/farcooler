@@ -46,12 +46,7 @@ impl Drop for ScratchDir {
         // it. Killing a server that never started fails harmlessly and costs a
         // couple of milliseconds; leaving one running costs the machine for as
         // long as it stays on.
-        let Some(tmux) = farcooler_core::programs::find("tmux") else { return };
-        let _ = std::process::Command::new(tmux)
-            .args(["-L", &self.socket, "kill-server"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
+        farcooler_tmux::reap_server(&self.socket);
     }
 }
 

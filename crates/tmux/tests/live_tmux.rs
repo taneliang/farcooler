@@ -49,12 +49,7 @@ impl Drop for Reaped {
         // in the middle of being torn down to poll it. A blocking `kill-server`
         // against a socket that is usually already gone costs a few
         // milliseconds and always happens.
-        let Some(tmux) = farcooler_core::programs::find("tmux") else { return };
-        let _ = std::process::Command::new(tmux)
-            .args(["-L", self.0.socket(), "kill-server"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
+        farcooler_tmux::reap_server(self.0.socket());
     }
 }
 

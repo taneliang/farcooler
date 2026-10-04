@@ -10,10 +10,12 @@
 pub mod control;
 pub mod inventory;
 pub mod layout;
+pub mod reap;
 pub mod server;
 pub mod windows;
 
 pub use control::{Notification, parse_line};
 pub use inventory::LiveInventory;
+pub use reap::reap_server;
 pub use server::{SESSION_NAME, TmuxServer};
 pub use windows::{ManagedWindow, UnfinishedOpen};

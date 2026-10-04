@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 farcooler-core.workspace = true
 farcooler-protocol.workspace = true
+libc.workspace = true
 tokio.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
