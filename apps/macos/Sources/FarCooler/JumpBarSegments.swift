@@ -79,10 +79,11 @@ extension DrillBreadcrumb {
     static func labelName(_ title: String) -> String { "Go to \(title)" }
 
     /// What VoiceOver calls segment `index`'s caret, in a bar of `crumbs`
-    /// crumbs: what its menu holds.
-    static func caretName(_ index: Int, crumbs: Int) -> String {
+    /// crumbs: what its menu holds. A middle crumb's names `title`, its
+    /// segment, so two carets in one bar don't read alike.
+    static func caretName(_ index: Int, crumbs: Int, title: String? = nil) -> String {
         if index == 0, crumbs > 0 { return "Show other workspaces" }
-        if index < crumbs { return "Show other places in this workspace" }
+        if index < crumbs { return title.map { "Show places beside \($0)" } ?? "Show other places in this workspace" }
         if index == crumbs { return "Show other worktrees" }
         return "Show other terminals"
     }
@@ -101,6 +102,7 @@ struct JumpLabelButton<Label: View>: View {
         Button(action: action) {
             label()
                 .padding(.horizontal, 3)
+                .frame(minHeight: JumpCaretButton.minHeight)
                 .background(RoundedRectangle.control.fill(hovering ? Fill.hover : Color.clear))
                 .contentShape(Rectangle())
         }
@@ -111,8 +113,8 @@ struct JumpLabelButton<Label: View>: View {
     }
 }
 
-/// A segment's caret: at least `minWidth` wide to hit, with its own hover
-/// highlight.
+/// A segment's caret: at least `minWidth` wide and `minHeight` tall to hit,
+/// with its own hover highlight. A label is as tall to hit.
 struct JumpCaretButton: View {
     let name: String
     let style: JumpBar.Style
@@ -121,6 +123,10 @@ struct JumpCaretButton: View {
     /// The narrowest a caret's hit area is (ov-267).
     static let minWidth: CGFloat = 20
 
+    /// The shortest a caret's or a label's hit area is (ov-267 review): a
+    /// label's own text is 13 to 15 pt, too small a target beside a caret.
+    static let minHeight: CGFloat = 28
+
     @State private var hovering = false
 
     var body: some View {
@@ -128,7 +134,7 @@ struct JumpCaretButton: View {
             Image(systemName: JumpBar.menuGlyph)
                 .font(style.font)
                 .foregroundStyle(style.color)
-                .frame(minWidth: Self.minWidth, minHeight: Self.minWidth)
+                .frame(minWidth: Self.minWidth, minHeight: Self.minHeight)
                 .background(RoundedRectangle.control.fill(hovering ? Fill.hover : Color.clear))
                 .contentShape(Rectangle())
         }

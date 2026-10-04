@@ -691,7 +691,7 @@ struct DrillBreadcrumb: View {
 
     /// A segment's ⌄: its menu, in a popover hung from it.
     private func caret(_ kind: Piece.Kind, segment index: Int, style: JumpBar.Style, segments: [JumpMenu]) -> some View {
-        JumpCaretButton(name: Self.caretName(index, crumbs: crumbs.count), style: style) {
+        JumpCaretButton(name: Self.caretName(index, crumbs: crumbs.count, title: crumbs.indices.contains(index) ? crumbs[index].title : nil), style: style) {
             perform(Self.click(kind, crumbs: crumbs, worktrees: worktrees))
         }
         .popover(isPresented: presented(index), arrowEdge: .bottom) { menu(index, segments: segments) }

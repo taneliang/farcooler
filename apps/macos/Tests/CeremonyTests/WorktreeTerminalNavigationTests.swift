@@ -188,11 +188,13 @@ struct WorktreeTerminalNavigationTests {
         #expect(DrillBreadcrumb.labelName("Main") == "Go to Main")
         #expect(DrillBreadcrumb.caretName(0, crumbs: 2) == "Show other workspaces")
         #expect(DrillBreadcrumb.caretName(1, crumbs: 2) == "Show other places in this workspace")
+        #expect(DrillBreadcrumb.caretName(1, crumbs: 3, title: "Billing") == "Show places beside Billing")
+        #expect(DrillBreadcrumb.caretName(2, crumbs: 3, title: "Task") != DrillBreadcrumb.caretName(1, crumbs: 3, title: "Billing"))
         #expect(DrillBreadcrumb.caretName(2, crumbs: 2) == "Show other worktrees")
         #expect(DrillBreadcrumb.caretName(3, crumbs: 2) == "Show other terminals")
     }
 
-    @Test("In a real bar, the labels go and the carets are their own controls, at least 20 pt wide")
+    @Test("In a real bar, the labels go and the carets are their own controls, at least 20 pt wide and 28 pt tall")
     func inARealBar() async throws {
         final class Heard { var jumps: [JumpTarget] = [] }
         let heard = Heard()
@@ -211,7 +213,9 @@ struct WorktreeTerminalNavigationTests {
         for index in 0...2 {
             let caret = try #require(seen.views["jump-caret-\(index)"], "no caret for segment \(index)")
             #expect(caret.width >= JumpCaretButton.minWidth, "segment \(index)'s caret is \(caret.width) wide")
+            #expect(caret.height >= JumpCaretButton.minHeight, "segment \(index)'s caret is \(caret.height) tall")
             let label = index == 0 ? seen.views["jump-label-0"] : index == 1 ? seen.views["breadcrumb-worktrees"] : nil
+            if let label { #expect(label.height >= JumpCaretButton.minHeight, "segment \(index)'s label is \(label.height) tall") }
             if let label { #expect(!label.intersects(caret), "segment \(index)'s caret overlaps its label") }
         }
         try await Self.click("jump-caret-1", in: window, seen)

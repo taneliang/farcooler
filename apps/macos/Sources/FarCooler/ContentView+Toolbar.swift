@@ -339,8 +339,10 @@ extension ContentView {
             selected: Self.openedWhole(selection).map(\.worktree)
                 ?? (terminals.selected == nil ? WorkspaceScreen.namedTerminal(selection).map(\.worktree) : nil),
             onOpen: { worktree in glance(at: worktree) },
+            // A worktree twice in the fleet keeps its first; never a trap (ov-267 L14).
             worktreeTerminals: Dictionary(
-                uniqueKeysWithValues: loose.shown.map { ($0.id, BoardWorktrees.terminals(of: $0, in: store.fleet)) }),
+                loose.shown.map { ($0.id, BoardWorktrees.terminals(of: $0, in: store.fleet)) },
+                uniquingKeysWith: { first, _ in first }),
             selectedTerminal: terminals.selected == nil ? WorkspaceScreen.namedTerminal(selection).map(\.terminal) : nil,
             onOpenTerminal: { worktree, terminal in glance(at: worktree, terminal: terminal.id) },
             onNew: usable ? repository.map { repo in { newWorktree(host: host, project: repo.displayName) } } : nil,
