@@ -1,38 +1,34 @@
 import SwiftUI
 
 /// Every column's header in a workspace (ov-92): the navigator's, the
-/// orchestrator's, and the jump bar over a task or a worktree. One height,
-/// one text size and one divider, so their bottom edges are one straight
-/// line across the window. The board's header was 40 pt beside the
-/// orchestrator's 30 before (owner, 2 Oct).
+/// orchestrator's, and the jump bar over a task or a worktree. One height
+/// and one text size, so their bottom edges are one straight line across
+/// the window. The board's header was 40 pt beside the orchestrator's 30
+/// before (owner, 2 Oct). No rule under it: a header is not one of the
+/// places a line is allowed (`Separator`), and the change of surface is its
+/// edge (ov-216 design, section 9; review 1004i M2).
 enum ColumnHeader {
-    /// The bar's height, its divider not counted: four rhythms, room for a
-    /// 24 pt control with 4 pt each side.
+    /// The bar's height: four rhythms, room for a 24 pt control with 4 pt
+    /// each side.
     static let height: CGFloat = 4 * ColumnGrid.rhythm
     /// The one text size in a header: its title, a jump bar's every segment.
     static let textSize: CGFloat = 12
-    /// A header's divider: the system's hairline.
-    static let divider: CGFloat = 1
-
     /// A header's text, at the one size.
     static func font(_ weight: Font.Weight = .regular) -> Font { .system(size: textSize, weight: weight) }
 
-    /// What the bar and its divider take together.
-    static var total: CGFloat { height + divider }
+    /// What the header takes: its bar, with no rule under it.
+    static var total: CGFloat { height }
 }
 
 extension View {
-    /// This view as a column header: `ColumnHeader.height` tall, on the
-    /// window's plane, over the one divider. Every header is drawn through this, so
-    /// none can come to differ (`ColumnHeaderTests`).
+    /// This view as a column header: `ColumnHeader.height` tall, with no
+    /// rule. Every header is drawn through this, so none can come to differ
+    /// (`ColumnHeaderTests`).
     func columnHeader() -> some View {
-        VStack(spacing: 0) {
-            self
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(height: ColumnHeader.height)
-                .clipped()
-            Divider()  // style-exempt: the one rule under the jump bar, between the controls and what they act on
-        }
+        self
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: ColumnHeader.height)
+            .clipped()
     }
 }
 

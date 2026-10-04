@@ -4,7 +4,8 @@ import Testing
 
 @testable import Far_Cooler
 
-/// Every column header in a workspace is one height over one divider, so
+/// Every column header in a workspace is one height, with no rule under it
+/// (review 1004i M2: a header isn't a place for a line), so
 /// their bottom edges are one line across the window (ov-92: the board's
 /// "Main" header stood taller than the orchestrator's), and the jump bar's
 /// segments are one size (owner, 2 Oct: "Main" small, the task large and
@@ -23,7 +24,7 @@ struct ColumnHeaderTests {
         title: "Main", target: .workspace(host: "", workspace: "ws", focus: nil))
     private static let menu = WorktreeCrumb(title: "Worktrees", isHere: false, tasks: [], loose: [])
 
-    @Test("Every column header is the shared height over the one divider", arguments: [280, 640, 1200] as [CGFloat])
+    @Test("Every column header is the shared height, and no rule adds to it", arguments: [280, 640, 1200] as [CGFloat])
     func everyHeaderIsOneHeight(width: CGFloat) {
         let headers: [(String, CGFloat)] = [
             ("jump bar", height(
