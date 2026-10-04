@@ -743,14 +743,9 @@ struct ContentView: View {
                 return result
             }
         }
-        .sheet(item: $renaming) { target in
-            RenameTerminalSheet(terminal: target.terminal) { typed in
-                await act(
-                    .rename, on: target.worktree, target: target.terminal.id,
-                    subject: Self.quoted(target.terminal)
-                ) { c in
-                    await c.rename(terminal: target.terminal.short, to: typed)
-                }
+        .renameTerminalSheet($renaming) { target, typed in
+            await act(.rename, on: target.worktree, target: target.terminal.id, subject: Self.quoted(target.terminal)) { c in
+                await c.rename(terminal: target.terminal.short, to: typed)
             }
         }
         .sheet(item: $removeRepository) { target in
@@ -1684,13 +1679,6 @@ struct ContentView: View {
             key: PaneRef(host: host, worktree: checkout.id, terminal: terminal.id))
     }
 
-    /// The ids of `workspace`'s repository's project terminals: what lights a
-    /// Terminals row rather than the checkout's.
-    private func projectTerminalIDs(host: String, workspace: WorkspaceSummary) -> Set<String> {
-        guard let checkout = ProjectTerminals.checkout(for: workspace, host: host, in: store.fleet) else { return [] }
-        return Set(ProjectTerminals.terminals(in: checkout, fleet: store.fleet).map(\.id))
-    }
-
     /// ↑ or ↓ in the navigator onto `item`: it's selected, and the
     /// navigator keeps the keyboard, to go on (ov-92).
     func step(to item: NavigatorItem, host: String, workspace: WorkspaceSummary) {
@@ -1704,8 +1692,7 @@ struct ContentView: View {
         case .worktree(let id):
             if let found = worktree(host: host, id: id) { glance(at: found) }
         case .terminal(let id):
-            // ↑ or ↓ onto a project terminal: shown, and the navigator keeps
-            // the keyboard to go on, as a worktree row does.
+            // ↑ or ↓ onto a project terminal: shown, the navigator keeping the keyboard.
             guard let checkout = ProjectTerminals.checkout(for: workspace, host: host, in: store.fleet),
                 let terminal = ProjectTerminals.terminals(in: checkout, fleet: store.fleet).first(where: { $0.id == id })
             else { return }
@@ -2490,7 +2477,7 @@ struct ContentView: View {
                 orchestrator: orchestrator,
                 current: Navigator.current(
                     selection, trail: trail, board: id,
-                    terminals: projectTerminalIDs(host: host, workspace: workspace)),
+                    terminals: ProjectTerminals.ids(for: workspace, host: host, in: store.fleet)),
                 onStep: { item in step(to: item, host: host, workspace: workspace) },
                 onHistory: { status in openHistory(status, host: host, workspace: workspace.id) },
                 filterRequest: boardFilterRequest,

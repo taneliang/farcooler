@@ -57,6 +57,13 @@ struct ProjectTerminals {
         }
     }
 
+    /// The ids of `workspace`'s repository's project terminals: what lights a
+    /// Terminals row rather than the checkout's (ov-234).
+    static func ids(for workspace: WorkspaceSummary, host: String, in fleet: Fleet) -> Set<String> {
+        guard let checkout = checkout(for: workspace, host: host, in: fleet) else { return [] }
+        return Set(terminals(in: checkout, fleet: fleet).map(\.id))
+    }
+
     /// The name of `terminal` when it's one of `worktree`'s project terminals
     /// (`terminals(in:fleet:)`) and `worktree` is a main checkout, else nil.
     /// What the breadcrumb says for one open (ov-234).

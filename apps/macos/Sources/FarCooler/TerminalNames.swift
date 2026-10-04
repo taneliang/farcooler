@@ -119,6 +119,19 @@ struct RenameTerminalSheet: View {
     }
 }
 
+extension View {
+    /// The Rename Terminal sheet while `renaming` holds a terminal; `rename`
+    /// runs what was typed.
+    func renameTerminalSheet(
+        _ renaming: Binding<RenamingTerminal?>,
+        rename: @escaping (RenamingTerminal, String) async -> Void
+    ) -> some View {
+        sheet(item: renaming) { target in
+            RenameTerminalSheet(terminal: target.terminal) { typed in await rename(target, typed) }
+        }
+    }
+}
+
 /// A task's terminals, under its tab bar and over whichever tab is shown, so
 /// a dev server stays in view while you read the diff (ov-234). Drawn only
 /// while the worktree has one; each row has its name, its port with Open in
