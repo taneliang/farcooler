@@ -8740,6 +8740,52 @@ mod needs_you_push_tests {
         );
     }
 
+    /// What the relay actually receives, not what the tap saw: the count
+    /// notice's body carries `reviews` under the key the relay reads (ov-181).
+    #[tokio::test]
+    async fn the_count_notice_on_the_wire_carries_the_review_count() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let (_dir, svc, _, pane) = a_runner().await;
+        let checkout = svc.store.get_terminal(pane).unwrap().worktree_id;
+        let ws = svc.store.get_worktree(checkout).unwrap();
+        svc.review_cache.set_counts_for_tests(
+            ws.id,
+            std::path::Path::new(&ws.worktree_path),
+            crate::review::Counts::Known(1, 4, 0),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        crate::push::Pairing { relay: format!("http://{}", listener.local_addr().unwrap()), token: "t".into() }
+            .save_in(svc.root_dir())
+            .expect("pair");
+        let relay = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut seen = Vec::new();
+            let mut buf = [0u8; 4096];
+            loop {
+                let n = socket.read(&mut buf).await.unwrap();
+                seen.extend_from_slice(&buf[..n]);
+                let text = String::from_utf8_lossy(&seen).to_string();
+                if let Some(end) = text.find("\r\n\r\n") {
+                    let length = text[..end]
+                        .lines()
+                        .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap()))
+                        .unwrap_or(0);
+                    if seen.len() >= end + 4 + length {
+                        socket.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{}").await.unwrap();
+                        return serde_json::from_slice::<serde_json::Value>(&seen[end + 4..end + 4 + length]).unwrap();
+                    }
+                }
+                assert!(n != 0, "the relay's socket closed before a whole request");
+            }
+        });
+        let watcher = Watcher::new(svc.clone());
+        watcher.schedule_count_notice();
+        let body = tokio::time::timeout(std::time::Duration::from_secs(30), relay).await.expect("a notice").unwrap();
+        assert_eq!(body["kind"], "count", "{body}");
+        assert_eq!(body["reviews"], serde_json::json!(1), "{body}");
+        assert!(body.get("needsYou").is_some(), "{body}");
+    }
+
     /// The relay refreshes the card on every count notice, so a burst of
     /// changes is one notice, trailing, and a count it already has is none.
     #[tokio::test]
