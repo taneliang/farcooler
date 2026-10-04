@@ -27,9 +27,10 @@ extension BoardSummary {
     }
 
     /// What Mark All as Read says it will do. On a runner that keeps the
-    /// state it clears every device, and the person is told so.
+    /// state, and a phone that may write it, it clears every device, and the
+    /// person is told so; otherwise it's this device only, and that is said.
     public static func markAllReadMessage(tasks: Int, everywhere: Bool) -> String {
         let what = tasks == 1 ? "1 task will be marked as read" : "\(tasks) tasks will be marked as read"
-        return everywhere ? "\(what) on all your devices." : "\(what)."
+        return everywhere ? "\(what) on all your devices." : "\(what) on this device only."
     }
 }

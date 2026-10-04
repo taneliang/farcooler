@@ -80,6 +80,16 @@ public protocol BoardReadStore {
     /// they survive a relaunch.
     func loadPending(host: String, workspace: String) -> ReadsRaise
     func savePending(_ pending: ReadsRaise, host: String, workspace: String)
+    /// Whether the floor was set on purpose on this device (a Mark All as Read
+    /// that was kept), as a phone counts it; false for one an older build or a
+    /// first look left. The Mac doesn't ask, and a store that can't say answers yes.
+    func floorWasSet(host: String, workspace: String) -> Bool
+    func markFloorSet(host: String, workspace: String)
+}
+
+extension BoardReadStore {
+    public func floorWasSet(host: String, workspace: String) -> Bool { true }
+    public func markFloorSet(host: String, workspace: String) {}
 }
 
 /// The read state in this device's defaults, under
@@ -154,6 +164,14 @@ public struct DefaultsBoardReads: BoardReadStore {
         let key = "board.read.\(host).\(workspace).pending"
         defaults.set(pending.floor?.timeIntervalSince1970, forKey: key + ".floor")
         defaults.set(pending.opened.mapValues(\.timeIntervalSince1970), forKey: key + ".opened")
+    }
+
+    public func floorWasSet(host: String, workspace: String) -> Bool {
+        defaults.bool(forKey: "board.read.\(host).\(workspace).floor.set")
+    }
+
+    public func markFloorSet(host: String, workspace: String) {
+        defaults.set(true, forKey: "board.read.\(host).\(workspace).floor.set")
     }
 
     public func markUploaded(host: String, workspace: String) {

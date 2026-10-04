@@ -13,6 +13,12 @@ import Foundation
 ///   marks, and never a floor. A phone's floor is a first look nobody saw as
 ///   Unread, and sent, it would mark everything older than a day as read on
 ///   every device.
+/// - A phone's floor counts as its own only if somebody set it on this build
+///   (a Mark All as Read that this phone kept, `floorWasSet`). One saved before
+///   that, by an older build or a first look, is made up: never sent, and the
+///   runner's state replaces it.
+/// - A grant without Control can't write the runner's state (`mayWrite`): its
+///   marks are kept here, merged by max with the runner's, and never sent.
 /// - A runner that sends no state is an older build: marks go to the store,
 ///   times from this phone's clock, as they always did.
 @MainActor
@@ -29,7 +35,14 @@ public final class BoardReadsKeeper {
     private var runnerReads: BoardReads?
     /// Whether this phone's floor was somebody's doing (a Mark All as Read, or
     /// state from before floors were noted) and not the first look `load` made up.
-    private var keptARealFloor: Bool { (beforeLaunch?.floor ?? .distantPast) > .distantPast }
+    private var keptARealFloor: Bool {
+        (beforeLaunch?.floor ?? .distantPast) > .distantPast && store.floorWasSet(host: host, workspace: workspace)
+    }
+
+    /// Whether marking something read here reaches every device: the runner
+    /// keeps this board's state and this phone may write it.
+    public var readsAreShared: Bool { runnerKeepsReads && mayWrite() }
+    private let mayWrite: () -> Bool
     private var pending: ReadsRaise
     private let beforeLaunch: BoardReads?
     private let store: BoardReadStore
@@ -42,8 +55,10 @@ public final class BoardReadsKeeper {
     /// didn't give one.
     public init(
         store: BoardReadStore, host: String, workspace: String, now: Date = Date(),
+        mayWrite: @escaping () -> Bool = { true },
         send: @escaping (ReadsRaise) async -> Data?
     ) {
+        self.mayWrite = mayWrite
         self.store = store
         self.host = host
         self.workspace = workspace
@@ -83,7 +98,10 @@ public final class BoardReadsKeeper {
         if runnerKeepsReads {
             next.open(row, seenThrough: latest)
         } else {
-            next.open(row, latest: latest, now: now)
+            // On this phone's clock, and only ever raising.
+            var opened = reads
+            opened.open(row, latest: latest, now: now)
+            next = reads.merged(with: BoardReads(floor: .distantPast, opened: opened.opened.filter { $0.key == row.id }))
         }
         guard next != reads else { return }
         reads = next
@@ -96,8 +114,12 @@ public final class BoardReadsKeeper {
         if runnerKeepsReads {
             reads.markAllRead(rows: rows, seenThrough: latest)
         } else {
-            reads.markAllRead(rows: rows, now: now)
+            // On this phone's clock, and only ever raising.
+            var all = reads
+            all.markAllRead(rows: rows, now: now)
+            reads = reads.merged(with: BoardReads(floor: all.floor))
         }
+        if !readsAreShared { store.markFloorSet(host: host, workspace: workspace) }
         keep(ReadsRaise(floor: reads.floor))
     }
 
@@ -121,7 +143,7 @@ public final class BoardReadsKeeper {
     /// A change to `reads`: owed to a runner that keeps it, until it answers;
     /// saved here for one that can't.
     private func keep(_ change: ReadsRaise) {
-        if runnerKeepsReads {
+        if readsAreShared {
             pending = pending.merging(change)
             store.savePending(pending, host: host, workspace: workspace)
             queueFlush()
@@ -134,7 +156,7 @@ public final class BoardReadsKeeper {
     /// launch are owed to the runner, which merges by max. Nothing from a phone
     /// that kept none, and never a floor.
     private func seedFromThisPhone() {
-        guard !store.isUploaded(host: host, workspace: workspace) else { return }
+        guard mayWrite(), !store.isUploaded(host: host, workspace: workspace) else { return }
         if let kept = beforeLaunch, !kept.opened.isEmpty {
             pending = pending.merging(ReadsRaise(opened: kept.opened))
             store.savePending(pending, host: host, workspace: workspace)
@@ -154,7 +176,7 @@ public final class BoardReadsKeeper {
     }
 
     private func sendPending() async {
-        guard runnerKeepsReads, !pending.isEmpty else { return }
+        guard readsAreShared, !pending.isEmpty else { return }
         let sent = pending
         guard let data = await send(sent), let answer = WireBoardReads.decode(state: data) else { return }
         pending = pending.without(sent)

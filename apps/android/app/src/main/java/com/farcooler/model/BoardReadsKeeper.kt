@@ -23,6 +23,12 @@ import kotlinx.coroutines.sync.withLock
  *   marks, and never a floor.** A phone's floor is a first look nobody saw as
  *   Unread; sent, it would mark everything older than a day read on every
  *   device.
+ * - **A phone's floor counts as its own only if somebody set it on this build**
+ *   (a Mark All as Read that this phone kept, [BoardReadsStore.floorWasSet]). One
+ *   saved before that, by an older build or a first look, is made up: never sent,
+ *   and the runner's state replaces it.
+ * - **A grant without Control can't write the runner's state** ([mayWrite]): its
+ *   marks are kept here, merged by max with the runner's, and never sent.
  * - **A runner that sends no state is an older build**: marks go to the store,
  *   times from this phone's clock, as they always did.
  *
@@ -34,6 +40,8 @@ class BoardReadsKeeper(
     private val workspace: String,
     nowMs: Long,
     private val scope: CoroutineScope,
+    /** Whether this phone's grant lets it write the runner's read state (Control). */
+    private val mayWrite: () -> Boolean = { true },
     /** Tell the runner a raise: its answer, or null when it gave none. */
     private val send: suspend (ReadsRaise) -> String?,
 ) {
@@ -51,7 +59,11 @@ class BoardReadsKeeper(
     private var runnerReads: BoardReads? = null
 
     /** Whether this phone's floor was somebody's doing (a Mark All as Read) and not the first look `load` made up. */
-    private val keptARealFloor: Boolean get() = (beforeLaunch?.floorMs ?: Long.MIN_VALUE) > Long.MIN_VALUE
+    private val keptARealFloor: Boolean
+        get() = (beforeLaunch?.floorMs ?: Long.MIN_VALUE) > Long.MIN_VALUE && store.floorWasSet(host, workspace)
+
+    /** Whether marking something read here reaches every device: the runner keeps this board's state and this phone may write it. */
+    val readsAreShared: Boolean get() = runnerKeepsReads && mayWrite()
     private val sending = Mutex()
 
     /**
@@ -79,7 +91,7 @@ class BoardReadsKeeper(
     /** [row] was opened: everything on it so far is read, its notes through [latestMs]. */
     fun open(row: TaskRow, latestMs: Long? = null, nowMs: Long = System.currentTimeMillis()) {
         val now = _reads.value
-        val next = if (runnerKeepsReads) now.openSeenThrough(row, latestMs) else now.open(row, nowMs, latestMs)
+        val next = if (runnerKeepsReads) now.openSeenThrough(row, latestMs) else now.openSeenThrough(row, maxOf(nowMs, latestMs ?: Long.MIN_VALUE))
         if (next == now) return
         _reads.value = next
         keep(ReadsRaise(opened = next.opened[row.id]?.let { mapOf(row.id to it) } ?: emptyMap()))
@@ -90,6 +102,7 @@ class BoardReadsKeeper(
         val now = _reads.value
         _reads.value = if (runnerKeepsReads) now.markAllReadSeenThrough(rows, latestMs)
         else now.markAllReadOnDeviceClock(rows, nowMs)
+        if (!readsAreShared) store.markFloorSet(host, workspace)
         keep(ReadsRaise(floorMs = _reads.value.floorMs))
     }
 
@@ -112,7 +125,7 @@ class BoardReadsKeeper(
 
     /** A change to the state: owed to a runner that keeps it, until it answers; saved here for one that can't. */
     private fun keep(change: ReadsRaise) {
-        if (runnerKeepsReads) {
+        if (readsAreShared) {
             pending = pending.merging(change)
             store.savePending(pending, host, workspace)
             queueFlush()
@@ -127,7 +140,7 @@ class BoardReadsKeeper(
      * that kept none, and never a floor.
      */
     private fun seedFromThisPhone() {
-        if (store.isUploaded(host, workspace)) return
+        if (!mayWrite() || store.isUploaded(host, workspace)) return
         beforeLaunch?.takeIf { it.opened.isNotEmpty() }?.let {
             pending = pending.merging(ReadsRaise(opened = it.opened))
             store.savePending(pending, host, workspace)
@@ -138,7 +151,7 @@ class BoardReadsKeeper(
     private fun queueFlush(): Job = scope.launch { sending.withLock { sendPending() } }
 
     private suspend fun sendPending() {
-        if (!runnerKeepsReads || pending.isEmpty) return
+        if (!readsAreShared || pending.isEmpty) return
         val sent = pending
         val answer = send(sent)?.let(WireBoardReads::ofState) ?: return
         pending = pending.without(sent)

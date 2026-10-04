@@ -733,6 +733,13 @@ interface BoardReadsStore {
     /** Marks made and not yet acknowledged by the runner, kept so they survive a relaunch. */
     fun loadPending(host: String, workspace: String): ReadsRaise
     fun savePending(pending: ReadsRaise, host: String, workspace: String)
+
+    /**
+     * Whether the floor was set on purpose on this phone (a Mark All as Read that was kept), as a phone counts it:
+     * false for one a first look or an older build left. A store that can't say answers yes.
+     */
+    fun floorWasSet(host: String, workspace: String): Boolean = true
+    fun markFloorSet(host: String, workspace: String) {}
 }
 
 /** A store that lives as long as the process: what a test, or a connection built without a phone, keeps its marks in. */
@@ -740,6 +747,7 @@ class InMemoryBoardReads : BoardReadsStore {
     private val states = mutableMapOf<String, BoardReads>()
     private val invented = mutableSetOf<String>()
     private val uploaded = mutableSetOf<String>()
+    private val floorSet = mutableSetOf<String>()
     private val pending = mutableMapOf<String, ReadsRaise>()
 
     private fun key(host: String, workspace: String) = "$host/$workspace"
@@ -762,6 +770,8 @@ class InMemoryBoardReads : BoardReadsStore {
         return BoardReads(Long.MIN_VALUE, state.opened).takeIf { it.opened.isNotEmpty() }
     }
 
+    override fun floorWasSet(host: String, workspace: String) = key(host, workspace) in floorSet
+    override fun markFloorSet(host: String, workspace: String) { floorSet += key(host, workspace) }
     override fun isUploaded(host: String, workspace: String) = key(host, workspace) in uploaded
     override fun markUploaded(host: String, workspace: String) { uploaded += key(host, workspace) }
     override fun loadPending(host: String, workspace: String) = pending[key(host, workspace)] ?: ReadsRaise()

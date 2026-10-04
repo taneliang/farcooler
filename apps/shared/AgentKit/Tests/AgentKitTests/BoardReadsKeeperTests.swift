@@ -55,8 +55,19 @@ struct BoardReadsKeeperTests {
         DefaultsBoardReads(UserDefaults(suiteName: "ov113-phone-\(UUID().uuidString)")!)
     }
 
-    private func keeper(_ runner: Runner, _ store: DefaultsBoardReads, now: Date = Date()) -> BoardReadsKeeper {
-        BoardReadsKeeper(store: store, host: Self.host, workspace: Self.ws, now: now) { await runner.answer($0) }
+    private func keeper(
+        _ runner: Runner, _ store: DefaultsBoardReads, now: Date = Date(), mayWrite: @escaping () -> Bool = { true }
+    ) -> BoardReadsKeeper {
+        BoardReadsKeeper(store: store, host: Self.host, workspace: Self.ws, now: now, mayWrite: mayWrite) {
+            await runner.answer($0)
+        }
+    }
+
+    /// State as an older build left it: a floor and marks in the defaults, with none of the flags this build adds.
+    private func legacy(_ store: DefaultsBoardReads, floor: Int64, marks: [String: Int64] = [:]) {
+        store.defaults.set(Double(floor) / 1000, forKey: DefaultsBoardReads.floorKey(host: Self.host, workspace: Self.ws))
+        store.defaults.set(
+            marks.mapValues { Double($0) / 1000 }, forKey: DefaultsBoardReads.openedKey(host: Self.host, workspace: Self.ws))
     }
 
     private func ms(_ value: Int64) -> Date { Date(timeIntervalSince1970: Double(value) / 1000) }
@@ -184,9 +195,7 @@ struct BoardReadsKeeperTests {
         let store = defaults()
         // State this phone kept from before the runner kept any: a floor it
         // set itself, and one opened ticket.
-        store.save(
-            BoardReads(floor: ms(Self.moved - 90_000), opened: [Self.task: ms(Self.moved + 100)]), host: Self.host,
-            workspace: Self.ws)
+        legacy(store, floor: Self.moved - 90_000, marks: [Self.task: Self.moved + 100])
         let k = keeper(runner, store)
         k.adopt(board: runner.board())
         await k.flush()
@@ -204,15 +213,17 @@ struct BoardReadsKeeperTests {
     @Test func aFirstLookThePhoneMadeUpIsNeverUploaded() async {
         let runner = Runner()
         let store = defaults()
-        // Launch one makes up a first look and never hears from a runner that
-        // keeps state (offline, or an older build).
+        // Launch one makes up a first look and never hears from a runner that keeps state.
         _ = keeper(runner, store)
-        // Launch two does.
+        #expect(store.keptReads(host: Self.host, workspace: Self.ws) == nil, "nothing real is kept")
+        // Launch two does, and opens one ticket.
         let k = keeper(runner, store)
         k.adopt(board: runner.board())
+        k.open(row())
         await k.flush()
-        #expect(runner.sent.isEmpty, "nothing real was kept, so nothing goes up")
+        #expect(runner.sent.allSatisfy { $0.floor == nil }, "no floor, made up or not")
         #expect(runner.floor == 0)
+        #expect(runner.sent.flatMap { $0.opened.keys } == [Self.task], "only the mark this launch made")
     }
 
     @Test func aFirstLookThePhoneMadeUpDoesNotHideWhatTheRunnerShows() {
@@ -224,14 +235,67 @@ struct BoardReadsKeeperTests {
         #expect(k.reads.finishedUnread(row()), "the runner says it's unread")
     }
 
-    @Test func aFloorThePhoneKeptStillStandsOnARunnerThatKeepsState() {
+    @Test func aFloorSavedBeforeThisBuildIsMadeUpAndTheRunnersReplacesIt() async {
         let runner = Runner()
         let store = defaults()
-        store.save(BoardReads(floor: ms(Self.moved + 1000)), host: Self.host, workspace: Self.ws)
-        store.save(BoardReads(floor: ms(Self.moved + 2000)), host: Self.host, workspace: Self.ws)  // moved: somebody's doing
+        legacy(store, floor: Self.moved + 5000, marks: [Self.task: Self.moved + 9000])
+        let k = keeper(runner, store)
+        k.adopt(board: runner.board())  // the runner's floor is 0
+        await k.flush()
+        #expect(k.reads.floor == ms(0), "the old floor doesn't hide what the runner shows")
+        #expect(runner.floor == 0, "and was never sent")
+        #expect(runner.marks[Self.task] == Self.moved + 9000, "its marks were")
+    }
+
+    @Test func aFloorSetByMarkAllAsReadOnThisBuildStandsOnARunnerThatLaterKeepsState() async {
+        let runner = Runner()
+        let store = defaults()
+        let old = keeper(runner, store)
+        old.adopt(board: Data(#"{"tasks":[]}"#.utf8))  // an older runner
+        old.markAllRead(rows: [row()], now: ms(Self.moved + 7000))
         let k = keeper(runner, store)
         k.adopt(board: runner.board())
-        #expect(k.reads.floor == ms(Self.moved + 2000))
+        #expect(k.reads.floor == ms(Self.moved + 7000), "somebody set it")
+        await k.flush()
+        #expect(runner.floor == 0, "but a phone never sends a floor")
+    }
+
+    @Test func aReadGrantKeepsMarksHereAndSendsNothing() async {
+        let runner = Runner()
+        runner.floor = Self.moved - 1000
+        let store = defaults()
+        let k = keeper(runner, store, mayWrite: { false })
+        k.adopt(board: runner.board())
+        #expect(k.runnerKeepsReads)
+        #expect(!k.readsAreShared, "it says this device only")
+        k.open(row())
+        k.markAllRead(rows: [row("b", movedMs: Self.moved + 500)], latest: nil)
+        await k.flush()
+        #expect(runner.sent.isEmpty, "never sent, and never retried")
+        #expect(!k.reads.finishedUnread(row()))
+        #expect(k.reads.floor == ms(Self.moved + 500), "merged by max with the runner's")
+        #expect(!store.isUploaded(host: Self.host, workspace: Self.ws), "nothing was uploaded")
+        let again = keeper(runner, store, mayWrite: { false })
+        #expect(again.reads.floor == ms(Self.moved + 500), "kept across a relaunch")
+        let control = keeper(runner, defaults())
+        control.adopt(board: runner.board())
+        control.open(row())
+        await control.flush()
+        #expect(!runner.sent.isEmpty && control.readsAreShared, "a Control grant does send")
+    }
+
+    @Test func theDeviceClockNeverLowersAValueOnTheLocalPath() {
+        let runner = Runner()
+        let store = defaults()
+        store.save(BoardReads(floor: ms(Self.moved + 5000), opened: [Self.task: ms(Self.moved + 8000)]), host: Self.host, workspace: Self.ws)
+        let k = keeper(runner, store)
+        k.adopt(board: Data(#"{"tasks":[]}"#.utf8))
+        let behind = ms(Self.moved - 10_000)
+        k.open(row(), now: behind)
+        #expect(k.reads.opened[Self.task] == ms(Self.moved + 8000), "an open on a slow clock keeps the higher mark")
+        k.markAllRead(rows: [row()], now: behind)
+        #expect(k.reads.floor == ms(Self.moved + 5000), "Mark All as Read on a slow clock keeps the higher floor")
+        #expect(k.reads.opened[Self.task] == ms(Self.moved + 8000), "and the mark above it")
     }
 
     @Test func anOlderRunnerKeepsThePhonesOwnStateOnTheDeviceClock() async {
@@ -305,6 +369,6 @@ func markAllReadMessage() {
     let note = BoardSummary.Activity(taskID: "a", key: "k", title: "T", noteID: "n", kind: .finding, text: "x", at: at, more: 0)
     let both = BoardSummary(finished: [done], activity: [note])
     #expect(both.taskCount == 1)
-    #expect(BoardSummary.markAllReadMessage(tasks: 1, everywhere: false) == "1 task will be marked as read.")
+    #expect(BoardSummary.markAllReadMessage(tasks: 1, everywhere: false) == "1 task will be marked as read on this device only.")
     #expect(BoardSummary.markAllReadMessage(tasks: 68, everywhere: true) == "68 tasks will be marked as read on all your devices.")
 }

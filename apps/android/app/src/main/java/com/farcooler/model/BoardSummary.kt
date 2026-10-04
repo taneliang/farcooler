@@ -132,7 +132,7 @@ data class BoardSummary(
         /** What Mark All as Read says it will do. On a runner that keeps the state it clears every device. */
         fun markAllReadMessage(tasks: Int, everywhere: Boolean): String {
             val what = if (tasks == 1) "1 task will be marked as read" else "$tasks tasks will be marked as read"
-            return if (everywhere) "$what on all your devices." else "$what."
+            return if (everywhere) "$what on all your devices." else "$what on this device only."
         }
     }
 }

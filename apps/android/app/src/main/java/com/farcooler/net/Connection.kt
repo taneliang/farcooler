@@ -543,8 +543,10 @@ class Connection(
         store = boardReadsStore,
         host = host.id,
         scope = scope,
+        // `workspace.mark_read` needs Control: a Read grant keeps its marks here.
+        mayWrite = { daemonBuild.current.value?.let { it.can(Capability.BOARD_READS) && it.grantedScope != "read" } == true },
         markRead = { workspace, raise ->
-            if (daemonBuild.current.value?.can(Capability.BOARD_READS) != true) null
+            if (daemonBuild.current.value?.let { it.can(Capability.BOARD_READS) && it.grantedScope != "read" } != true) null
             else attempt { core.call("workspace.mark_read", raise.arguments(workspace)) }.getOrNull()?.toString()
         },
     )

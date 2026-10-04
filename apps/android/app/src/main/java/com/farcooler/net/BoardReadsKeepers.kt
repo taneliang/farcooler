@@ -27,6 +27,8 @@ class BoardReadsKeepers(
     private val scope: CoroutineScope,
     /** Tell the runner a raise on a board (`workspace.mark_read`): its answer, or null when it gave none. */
     private val markRead: suspend (workspace: String, raise: ReadsRaise) -> String?,
+    /** Whether this phone's grant lets it write the runner's read state (Control). */
+    private val mayWrite: () -> Boolean = { true },
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     private val keepers = mutableMapOf<String, BoardReadsKeeper>()
@@ -36,7 +38,7 @@ class BoardReadsKeepers(
     val reads: StateFlow<Map<String, BoardReads>> = _reads.asStateFlow()
 
     private fun keeper(workspace: String): BoardReadsKeeper = keepers.getOrPut(workspace) {
-        BoardReadsKeeper(store, host, workspace, clock(), scope) { raise -> markRead(workspace, raise) }.also { made ->
+        BoardReadsKeeper(store, host, workspace, clock(), scope, mayWrite) { raise -> markRead(workspace, raise) }.also { made ->
             _reads.value = _reads.value + (workspace to made.reads.value)
             scope.launch { made.reads.collect { _reads.value = _reads.value + (workspace to it) } }
         }
@@ -62,7 +64,7 @@ class BoardReadsKeepers(
         keeper(workspace).markAllRead(rows, latestMs, clock())
 
     /** Whether marking something read there reaches every device: the runner keeps this board's state. */
-    fun areShared(workspace: String): Boolean = keepers[workspace]?.runnerKeepsReads == true
+    fun areShared(workspace: String): Boolean = keepers[workspace]?.readsAreShared == true
 
     /** Send everything owed, and wait. For tests, and for a connection closing. */
     suspend fun flush() = keepers.values.forEach { it.flush() }

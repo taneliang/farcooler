@@ -55,8 +55,12 @@ class BoardReadsKeeperTest {
         fun board(): String = """{"tasks":[],"reads":${state()}}"""
     }
 
-    private fun TestScope.keeper(runner: Runner, store: BoardReadsStore, nowMs: Long = System.currentTimeMillis()) =
-        BoardReadsKeeper(store, host, ws, nowMs, backgroundScope) { runner.answer(it) }
+    private fun TestScope.keeper(
+        runner: Runner,
+        store: BoardReadsStore,
+        nowMs: Long = System.currentTimeMillis(),
+        mayWrite: () -> Boolean = { true },
+    ) = BoardReadsKeeper(store, host, ws, nowMs, backgroundScope, mayWrite) { runner.answer(it) }
 
     @Test
     fun theRunnersStateDecidesWhatIsRead() = runTest {
@@ -207,12 +211,15 @@ class BoardReadsKeeperTest {
         val store = InMemoryBoardReads()
         // Launch one makes up a first look and never hears from a runner that keeps state.
         keeper(runner, store)
-        // Launch two does.
+        assertNull("nothing real is kept", store.keptReads(host, ws))
+        // Launch two does, and opens one ticket.
         val k = keeper(runner, store)
         k.adopt(runner.board())
+        k.open(row())
         k.flush()
-        assertTrue("nothing real was kept, so nothing goes up", runner.sent.isEmpty())
+        assertTrue("no floor, made up or not", runner.sent.all { it.floorMs == null })
         assertEquals(0L, runner.floor)
+        assertEquals("only the mark this launch made", listOf(task), runner.sent.flatMap { it.opened.keys })
     }
 
     @Test
@@ -226,14 +233,68 @@ class BoardReadsKeeperTest {
     }
 
     @Test
-    fun aFloorThePhoneKeptStillStandsOnARunnerThatKeepsState() = runTest {
+    fun aFloorSavedBeforeThisBuildIsMadeUpAndTheRunnersReplacesIt() = runTest {
         val runner = Runner()
         val store = InMemoryBoardReads()
-        store.save(BoardReads(moved + 1000), host, ws)
-        store.save(BoardReads(moved + 2000), host, ws)  // moved: somebody's doing
+        store.save(BoardReads(moved + 5000, mapOf(task to moved + 9000)), host, ws)  // an older build's: no flag
+        val k = keeper(runner, store)
+        k.adopt(runner.board())  // the runner's floor is 0
+        k.flush()
+        assertEquals("the old floor doesn't hide what the runner shows", 0L, k.reads.value.floorMs)
+        assertEquals("and was never sent", 0L, runner.floor)
+        assertEquals("its marks were", moved + 9000, runner.marks[task])
+    }
+
+    @Test
+    fun aFloorSetByMarkAllAsReadOnThisBuildStandsOnARunnerThatLaterKeepsState() = runTest {
+        val runner = Runner()
+        val store = InMemoryBoardReads()
+        val old = keeper(runner, store)
+        old.adopt("""{"tasks":[]}""")  // an older runner
+        old.markAllRead(listOf(row()), nowMs = moved + 7000)
         val k = keeper(runner, store)
         k.adopt(runner.board())
-        assertEquals(moved + 2000, k.reads.value.floorMs)
+        assertEquals("somebody set it", moved + 7000, k.reads.value.floorMs)
+        k.flush()
+        assertEquals("but a phone never sends a floor", 0L, runner.floor)
+    }
+
+    @Test
+    fun aReadGrantKeepsMarksHereAndSendsNothing() = runTest {
+        val runner = Runner().apply { floor = moved - 1000 }
+        val store = InMemoryBoardReads()
+        val k = keeper(runner, store, mayWrite = { false })
+        k.adopt(runner.board())
+        assertTrue(k.runnerKeepsReads)
+        assertFalse("it says this device only", k.readsAreShared)
+        k.open(row())
+        k.markAllRead(listOf(row("b", moved + 500)), latestMs = null)
+        k.flush()
+        assertTrue("never sent, and never retried", runner.sent.isEmpty())
+        assertFalse(k.reads.value.finishedUnread(row()))
+        assertEquals("merged by max with the runner's", moved + 500, k.reads.value.floorMs)
+        assertFalse("nothing was uploaded", store.isUploaded(host, ws))
+        assertEquals("kept across a relaunch", moved + 500, keeper(runner, store, mayWrite = { false }).reads.value.floorMs)
+        val control = keeper(runner, InMemoryBoardReads())
+        control.adopt(runner.board())
+        control.open(row())
+        control.flush()
+        assertTrue("a Control grant does send", runner.sent.isNotEmpty() && control.readsAreShared)
+    }
+
+    @Test
+    fun theDeviceClockNeverLowersAValueOnTheLocalPath() = runTest {
+        val runner = Runner()
+        val store = InMemoryBoardReads()
+        store.save(BoardReads(moved + 5000, mapOf(task to moved + 8000)), host, ws)
+        val k = keeper(runner, store)
+        k.adopt("""{"tasks":[]}""")
+        val behind = moved - 10_000
+        k.open(row(), nowMs = behind)
+        assertEquals("an open on a slow clock keeps the higher mark", moved + 8000, k.reads.value.opened[task])
+        k.markAllRead(listOf(row()), nowMs = behind)
+        assertEquals("Mark All as Read on a slow clock keeps the higher floor", moved + 5000, k.reads.value.floorMs)
+        assertEquals("and the mark above it", moved + 8000, k.reads.value.opened[task])
     }
 
     @Test

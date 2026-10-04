@@ -11,7 +11,8 @@ extension Connection {
     func readsKeeper(for workspace: String) -> BoardReadsKeeper {
         if let keeper = readsKeepers[workspace] { return keeper }
         let keeper = BoardReadsKeeper(
-            store: DefaultsBoardReads(), host: hostId?.uuidString ?? "runner", workspace: workspace
+            store: DefaultsBoardReads(), host: hostId?.uuidString ?? "runner", workspace: workspace,
+            mayWrite: { [weak self] in self?.mayWriteReads ?? false }
         ) { [weak self] raise in await self?.sendReads(raise, workspace: workspace) }
         keeper.onChange = { [weak self] reads in self?.boardReads[workspace] = reads }
         readsKeepers[workspace] = keeper
@@ -39,7 +40,14 @@ extension Connection {
     /// Whether marking something read here reaches every device: the runner
     /// keeps this board's state.
     func readsAreShared(workspace: String) -> Bool {
-        readsKeepers[workspace]?.runnerKeepsReads ?? false
+        readsKeepers[workspace]?.readsAreShared ?? false
+    }
+
+    /// Whether this phone's grant lets it write the runner's read state:
+    /// `workspace.mark_read` needs Control, and a Read grant is refused.
+    var mayWriteReads: Bool {
+        guard let build = knownBuild else { return false }
+        return build.can(.boardReads) && build.grantedScope != "read"
     }
 
     /// Another device read something: the runner's `reads` event, for a board
@@ -56,7 +64,7 @@ extension Connection {
     /// when it gave none, which leaves the marks owed. Never sent to a runner
     /// without `board_reads`.
     private func sendReads(_ raise: ReadsRaise, workspace: String) async -> Data? {
-        guard knownBuild?.can(.boardReads) == true else { return nil }
+        guard mayWriteReads else { return nil }
         return try? await rpc("workspace.mark_read", raise.rpcArguments(workspace: workspace))
     }
 }

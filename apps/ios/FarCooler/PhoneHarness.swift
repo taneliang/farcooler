@@ -414,7 +414,8 @@ final class HarnessRunner {
                 }
                 readMarks[task] = max(readMarks[task] ?? 0, at)
             }
-            sent.append("workspace.mark_read floor=\(args["floor_ms"] as? Int64 ?? 0) marks=\(marks.count)")
+            let ids = marks.compactMap { $0["task_id"] as? String }.sorted().joined(separator: ",")
+            sent.append("workspace.mark_read floor=\(args["floor_ms"] as? Int64 ?? 0) tasks=\(ids)")
             return try json(readState())
         case "task.get" where CommandLine.arguments.contains("-phone-task-fails"):
             throw ClientCore.CoreError.rejected("unavailable", word: "unavailable")

@@ -132,7 +132,7 @@ class BoardSummaryTest {
     @Test
     fun groupsAreCutAtFiveAndMarkAllReadSaysWhetherItReachesEveryDevice() {
         assertEquals(5 to 2, BoardSummary.capped((1..7).toList()).let { it.first.size to it.second })
-        assertEquals("1 task will be marked as read.", BoardSummary.markAllReadMessage(1, false))
+        assertEquals("1 task will be marked as read on this device only.", BoardSummary.markAllReadMessage(1, false))
         assertEquals("68 tasks will be marked as read on all your devices.", BoardSummary.markAllReadMessage(68, true))
         assertEquals("You’re all caught up.", BoardSummary.NOTHING)
     }

@@ -47,6 +47,12 @@ class PrefsBoardReads(private val prefs: SharedPreferences) : BoardReadsStore {
         return BoardReads(Long.MIN_VALUE, state.opened).takeIf { it.opened.isNotEmpty() }
     }
 
+    override fun floorWasSet(host: String, workspace: String) = prefs.getBoolean(floorSetKey(host, workspace), false)
+
+    override fun markFloorSet(host: String, workspace: String) {
+        prefs.edit().putBoolean(floorSetKey(host, workspace), true).apply()
+    }
+
     override fun isUploaded(host: String, workspace: String) = prefs.getBoolean(syncedKey(host, workspace), false)
 
     override fun markUploaded(host: String, workspace: String) {
@@ -84,6 +90,7 @@ class PrefsBoardReads(private val prefs: SharedPreferences) : BoardReadsStore {
         fun floorKey(host: String, workspace: String) = "board.read.$host.$workspace.floor"
         fun openedKey(host: String, workspace: String) = "board.read.$host.$workspace.opened"
         private fun inventedKey(host: String, workspace: String) = "board.read.$host.$workspace.floor.invented"
+        private fun floorSetKey(host: String, workspace: String) = "board.read.$host.$workspace.floor.set"
         private fun syncedKey(host: String, workspace: String) = "board.read.$host.$workspace.synced"
         private fun pendingKey(host: String, workspace: String) = "board.read.$host.$workspace.pending"
     }
