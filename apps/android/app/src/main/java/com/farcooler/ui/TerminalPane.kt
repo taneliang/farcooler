@@ -402,6 +402,10 @@ fun TerminalPane(
             }
         }
 
+        // Typed input the runner didn't take, with Try again (ov-238).
+        val unsent by session.unsent.collectAsStateWithLifecycle()
+        unsent?.let { UnsentInputLine(it) { session.retryUnsent() } }
+
         // The keys a terminal needs and a phone's keyboard does not have.
         //
         // Only while the keyboard is up: they are meaningless without one, and a

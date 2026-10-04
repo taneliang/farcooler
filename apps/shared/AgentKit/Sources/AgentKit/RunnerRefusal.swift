@@ -156,6 +156,7 @@ public enum RunnerRefusal: String, CaseIterable, Sendable {
         message: String,
         otherwise generic: String
     ) -> ReviewTrouble {
+        if word == timedOutWord { return ReviewTrouble(sentence: timedOutSentence) }
         guard let refusal = known(word) else {
             return ReviewTrouble(sentence: generic, transcript: message)
         }
@@ -178,6 +179,9 @@ public enum RunnerRefusal: String, CaseIterable, Sendable {
         message: String,
         after context: String
     ) -> ReviewTrouble {
+        if word == timedOutWord {
+            return ReviewTrouble(sentence: context + " " + timedOutSentence)
+        }
         guard let refusal = known(word) else {
             return ReviewTrouble(sentence: context, transcript: message)
         }
@@ -197,9 +201,25 @@ public enum RunnerRefusal: String, CaseIterable, Sendable {
     /// it is ABSENT rather than null where no runner refused anything — a
     /// dropped link, or nothing ever connected. Android's
     /// `RunnerRefusal.wordInAnswerLine` reads the same key off the same line.
+    ///
+    /// A call that passed its deadline has no `code` — no runner refused
+    /// anything — and carries `timed_out: true` instead (ov-147). It is read
+    /// here as `timedOutWord`, so every screen that already turns a word into a
+    /// sentence words it plainly, with no raw error beneath (ov-238).
     public static func word(inAnswerLine line: [String: Any]) -> String? {
-        line["code"] as? String
+        if let code = line["code"] as? String { return code }
+        return line["timed_out"] as? Bool == true ? timedOutWord : nil
     }
+
+    /// The word a call that got no answer in time is read as. Not one of the
+    /// proto's `ErrorCode`s, and deliberately outside the enum above: nothing
+    /// on the runner produced it.
+    public static let timedOutWord = "call-timed-out"
+
+    /// What a screen says about a call the runner never answered in time. One
+    /// quiet sentence: it names no cause it doesn't know, and says what to do.
+    public static let timedOutSentence =
+        "The runner took too long to answer. Try again in a moment."
 
     /// Which case of its refusal the runner named, off the same line:
     /// `not_held` or `not_delivered` for a hook ask's answer. The daemon's

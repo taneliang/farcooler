@@ -1769,14 +1769,39 @@ final class TerminalSession: ObservableObject {
         for (index, scalar) in text.unicodeScalars.enumerated() {
             bytes += vt.encode(scalar: scalar, modifiers: index == 0 ? modifiers : [])
         }
-        await write(bytes)
+        await type(bytes)
     }
 
     func send(key: UInt32, modifiers: VTModifiers = []) async {
         guard let vt else { return }
         jumpToBottom(vt)
-        await write(vt.encode(key: key, modifiers: modifiers))
+        await type(vt.encode(key: key, modifiers: modifiers))
     }
+
+    /// Typed input the runner did not take, held until it is sent again.
+    ///
+    /// Nil when nothing is waiting. The terminal draws one quiet line while it
+    /// isn't, with Try Again (ov-238): a write used to be `try?`, so a keystroke
+    /// the runner never answered was gone and the screen looked as if it had
+    /// worked.
+    @Published private(set) var unsent: UnsentInput?
+
+    /// Typed bytes: whatever is already held goes first, so a retry and the next
+    /// keystroke arrive in the order they were typed. Taken out of `unsent`
+    /// before the call, so a second key typed while this one is in flight
+    /// doesn't send the same held bytes twice.
+    private func type(_ bytes: [UInt8]) async {
+        let held = unsent
+        let all = UnsentInput.bytesToSend(after: held, adding: bytes)
+        guard !all.isEmpty else { return }
+        unsent = nil
+        if let why = await write(all) {
+            unsent = (unsent ?? UnsentInput(bytes: [], why: why)).holding(all, why: why)
+        }
+    }
+
+    /// Try Again on the line above: send what is held.
+    func retryUnsent() async { await type([]) }
 
     /// Typing means "act on the live screen", so it always returns there
     /// first — the same rule the Mac's `keyDown` follows.
@@ -1957,10 +1982,22 @@ final class TerminalSession: ObservableObject {
         history = Self.decodedHistory(response)
     }
 
-    private func write(_ bytes: [UInt8]) async {
-        guard !bytes.isEmpty else { return }
+    /// Why the runner did not take these bytes, or nil when it did. Wheel
+    /// events ignore it: a scroll that didn't land is not typing.
+    @discardableResult
+    private func write(_ bytes: [UInt8]) async -> UnsentInput.Why? {
+        guard !bytes.isEmpty else { return nil }
         let hex = bytes.map { String(format: "%02x", $0) }.joined()
-        _ = try? await core.call("terminal.write", ["terminal": terminalID, "hex": hex])
+        var failure: UnsentInput.Why?
+        do {
+            _ = try await core.call("terminal.write", ["terminal": terminalID, "hex": hex])
+        } catch {
+            if error is CancellationError { return nil }
+            var lost = false
+            if let core = error as? ClientCore.CoreError, case .disconnected = core { lost = true }
+            failure = UnsentInput.why(
+                word: ClientCore.refusalWord(of: error), disconnected: lost)
+        }
         // Nothing to prompt when streaming: the echo is already on its way
         // back down the same channel, and asking for a screen would only race
         // it. Polling has no such luxury — the moment a key is sent is the
@@ -1968,6 +2005,7 @@ final class TerminalSession: ObservableObject {
         // interval rather than waiting out however long a quiet screen had
         // backed off to.
         if !streaming { wake() }
+        return failure
     }
 }
 

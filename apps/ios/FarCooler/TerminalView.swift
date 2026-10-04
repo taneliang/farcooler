@@ -964,10 +964,18 @@ struct TerminalView: View {
                 // beside it: taking rows from the grid would resize the pane in
                 // tmux and make claude redraw the very dialog being answered.
                 .overlay(alignment: .bottom) {
-                    TerminalPermissionBar(
-                        terminalID: terminal.id, core: connection.core,
-                        blocked: live.agent == .blocked, isVisible: isVisible)
-                        .id(terminal.id)
+                    VStack(spacing: 0) {
+                        TerminalPermissionBar(
+                            terminalID: terminal.id, core: connection.core,
+                            blocked: live.agent == .blocked, isVisible: isVisible)
+                            .id(terminal.id)
+                        // Typed input the runner didn't take (ov-238).
+                        if let unsent = session.unsent {
+                            UnsentInputLine(unsent: unsent) {
+                                Task { await session.retryUnsent() }
+                            }
+                        }
+                    }
                 }
                 // NO KEYBOARD INSET OF THIS VIEW'S OWN, AND THAT IS A CHANGE.
                 //

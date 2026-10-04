@@ -120,6 +120,7 @@ SOURCES = [
     # terminal. Reads the pane's ring through `AgentStream` and draws
     # `AgentView`'s `ApprovalCard`.
     "TerminalPermissionBar.swift",
+    "UnsentInputLine.swift",
     # The phone's half of the watch link. Not under `FarCoolerWatch/`: it runs
     # on the phone, holds the connection, and makes the core calls the watch
     # cannot.
@@ -165,6 +166,10 @@ CEREMONY_SOURCES = [
 # gives them a group of their own instead, the same way `fontsGroup` does for
 # `Fonts/`.
 AGENTKIT_SOURCES = [
+    # Typed input the runner did not take, held with the one line a terminal
+    # says about it. Here for `ShellNavigation.swift`'s reason: the iOS target
+    # has no unit tests. See `UnsentInputTests`.
+    "UnsentInput.swift",
     # The navigation shell's pure model: the flat sequence across the fleet,
     # the axis lock, the release decisions, precedence, search. In AgentKit
     # rather than beside its views because the iOS target has no unit tests —

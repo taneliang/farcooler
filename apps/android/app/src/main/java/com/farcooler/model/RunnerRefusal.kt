@@ -1,6 +1,7 @@
 package com.farcooler.model
 
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -129,6 +130,21 @@ enum class RunnerRefusal(val word: String, val sentence: String) {
          */
         fun wordInAnswerLine(line: JsonObject): String? =
             line["code"]?.jsonPrimitive?.contentOrNull
+                // A call that passed its deadline has no `code` and carries
+                // `timed_out: true` instead (ov-147); it reads as
+                // [TIMED_OUT_WORD] so every screen words it plainly (ov-238).
+                ?: if (line["timed_out"]?.jsonPrimitive?.booleanOrNull == true) TIMED_OUT_WORD else null
+
+        /**
+         * The word a call that got no answer in time is read as. Not one of the
+         * proto's `ErrorCode`s, and deliberately outside the enum: nothing on the
+         * runner produced it.
+         */
+        const val TIMED_OUT_WORD = "call-timed-out"
+
+        /** One quiet sentence for a call the runner never answered in time. */
+        const val TIMED_OUT_SENTENCE =
+            "The runner took too long to answer. Try again in a moment."
 
         /**
          * A word this build has a sentence for, or null for every other input —
@@ -162,6 +178,7 @@ enum class RunnerRefusal(val word: String, val sentence: String) {
  * keeping it would be noise rather than diagnosis.
  */
 fun troubleFor(word: String?, message: String?, generic: String): Trouble {
+    if (word == RunnerRefusal.TIMED_OUT_WORD) return Trouble(RunnerRefusal.TIMED_OUT_SENTENCE)
     val refusal = RunnerRefusal.of(word) ?: return Trouble(generic, message)
     return Trouble(refusal.sentence)
 }
@@ -176,6 +193,9 @@ fun troubleFor(word: String?, message: String?, generic: String): Trouble {
  * nothing here is quoted from the core.
  */
 fun troubleAfter(word: String?, message: String?, context: String): Trouble {
+    if (word == RunnerRefusal.TIMED_OUT_WORD) {
+        return Trouble(context + " " + RunnerRefusal.TIMED_OUT_SENTENCE)
+    }
     val refusal = RunnerRefusal.of(word) ?: return Trouble(context, message)
     return Trouble(context + " " + refusal.sentence)
 }
