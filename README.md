@@ -9,10 +9,9 @@ own git worktree. An orchestrator agent keeps the task board, dispatches the
 agents and asks you when it needs a decision, and everything waiting on you
 reaches your Mac, your iPhone, your Apple Watch or your Android phone.
 
-<!-- HERO SCREENSHOT: docs/images/hero.png is captured from a Debug build
-     against a scratch daemon and a demo repository, then committed in a
-     follow-up. Until the file exists, readers see the alt text below. -->
-![Far Cooler on the Mac: the navigator with a workspace's tasks and agents, and an agent's terminal beside its changes](docs/images/hero.png)
+<!-- HERO SCREENSHOT (ov-203): add docs/images/hero.png, captured from a Debug
+     build against a scratch daemon and a demo repository, then put this line here:
+     ![Far Cooler on the Mac: the navigator with a workspace's tasks and agents, and an agent's terminal beside its changes](docs/images/hero.png) -->
 
 > **Early software.** There's no stable release yet. The Mac app ships as a
 > canary build from every push to `main`, and it breaks sometimes.
