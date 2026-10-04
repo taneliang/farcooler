@@ -116,10 +116,9 @@ impl Store {
         }
 
         if let Some(raised) = delta.floor_ms {
-            if implicit && delta.seeds_floor {
-                floor = raised;
-                implicit = false;
-            } else if raised > floor {
+            // A seed replaces the first-look default outright, even with a
+            // lower floor; every other floor is a plain raise.
+            if (implicit && delta.seeds_floor) || raised > floor {
                 floor = raised;
                 implicit = false;
             }
