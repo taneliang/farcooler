@@ -130,7 +130,7 @@ struct AddDeviceView: View {
             } else {
                 CameraPreview(session: scanner.session)
                     .frame(height: 260)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .clipShape(.card)
             }
 
             HStack {

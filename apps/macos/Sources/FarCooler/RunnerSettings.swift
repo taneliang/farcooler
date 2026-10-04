@@ -1,3 +1,4 @@
+import AgentKit
 import SwiftUI
 
 /// One runner's `config.toml`, as a screen instead of an ssh session.
@@ -67,14 +68,12 @@ struct RunnerSettingsSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
             Form {
                 branchSection
                 themesSection
                 adaptersSection
             }
             .formStyle(.grouped)
-            Divider()
             footer
         }
         .frame(width: SettingsSheetSize.runner.width, height: SettingsSheetSize.runner.height)
@@ -211,7 +210,7 @@ struct RunnerSettingsSheet: View {
     ) -> some View {
         Menu {
             Button("Edit…", action: edit)
-            Divider()
+            Divider()  // style-exempt: menu
             Button(removeTitle, role: .destructive, action: remove)
         } label: {
             Image(systemName: "ellipsis.circle")
@@ -393,8 +392,7 @@ private struct ThemeSwatchRow: View {
                 Rectangle().fill(Color(nsColor: Theme.color(packed))).frame(width: 5, height: 18)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 3))
-        .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Color.primary.opacity(0.12)))
+        .clipShape(.control)
     }
 
     private var preview: [UInt32] {

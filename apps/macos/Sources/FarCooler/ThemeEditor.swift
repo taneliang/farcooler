@@ -28,7 +28,6 @@ struct ThemeEditor: View {
         VStack(spacing: 0) {
             ThemePreview(theme: draft)
                 .frame(height: 190)
-            Divider()
             Form {
                 Section {
                     TextField("Name", text: $draft.name)
@@ -58,7 +57,6 @@ struct ThemeEditor: View {
                 }
             }
             .formStyle(.grouped)
-            Divider()
             footer
         }
         // Shorter than the window it opens from. `RunnerSettings` is

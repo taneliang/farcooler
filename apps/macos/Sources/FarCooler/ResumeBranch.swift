@@ -1,3 +1,4 @@
+import AgentKit
 import SwiftUI
 
 struct BranchInfo: Decodable, Identifiable, Hashable {
@@ -141,11 +142,9 @@ struct ResumeBranch: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: Spacing.group) {
             header
-            Divider()
             body(for: visible)
-            Divider()
             footer
         }
         // 560, the width `QuickCreate` uses. These two are the same task —

@@ -86,7 +86,6 @@ struct AdapterEditor: View {
                 detectionSection
             }
             .formStyle(.grouped)
-            Divider()
             footer
         }
         .frame(width: SettingsSheetSize.editor.width, height: SettingsSheetSize.editor.height)
@@ -264,9 +263,8 @@ struct AdapterEditor: View {
             TextEditor(text: text)
                 .font(.subheadline.monospaced())
                 .frame(height: 54)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 5)
-                        .strokeBorder(Color.primary.opacity(0.12)))
+                .scrollContentBackground(.hidden)
+                .background(Fill.inset(), in: .control)
                 .overlay(alignment: .topLeading) {
                     if text.wrappedValue.isEmpty {
                         Text(prompt)

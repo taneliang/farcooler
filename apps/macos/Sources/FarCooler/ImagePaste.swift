@@ -1,3 +1,4 @@
+import AgentKit
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
@@ -354,7 +355,7 @@ private struct ImagePasteChip: View {
                         .resizable()
                         .aspectRatio(contentMode: .fill)
                         .frame(width: 24, height: 24)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .clipShape(.control)
                 }
 
                 if let failure = job.failure {

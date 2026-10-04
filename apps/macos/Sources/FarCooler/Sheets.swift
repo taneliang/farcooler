@@ -520,7 +520,7 @@ struct SheetFrame<Content: View>: View {
                 .padding(.top, 12)
             }
 
-            Divider().padding(.top, 20)
+            Spacer().frame(height: Spacing.section)
 
             HStack(spacing: 10) {
                 Spacer()
@@ -567,10 +567,7 @@ struct Callout: View {
         }
         .font(.callout)
         .padding(11)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(color.opacity(tone == .neutral ? 0.07 : 0.11))
-        )
+        .background(tone == .neutral ? Fill.inset() : color.opacity(0.10), in: .card)
     }
 }
 

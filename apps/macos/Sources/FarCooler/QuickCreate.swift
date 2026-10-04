@@ -1,3 +1,4 @@
+import AgentKit
 import SwiftUI
 
 /// Start a task by describing it.
@@ -187,8 +188,8 @@ struct QuickCreate: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Divider()
             footer
+                .padding(.top, Spacing.group)
         }
         .floatingPanel()
         .frame(width: 560)

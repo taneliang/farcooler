@@ -361,7 +361,7 @@ struct SettingsView: View {
                 // black says nothing about how it will look in the terminal.
                 .foregroundStyle(Color(nsColor: themes.current.foregroundColor))
                 .background(Color(nsColor: themes.current.backgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .clipShape(.control)
         }
         .formStyle(.grouped)
     }

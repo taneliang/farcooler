@@ -73,8 +73,6 @@ struct AddView: View {
                 }
             }
 
-            Divider()
-
             choice(
                 icon: "plus.rectangle.on.rectangle",
                 title: "Add Another Device",
