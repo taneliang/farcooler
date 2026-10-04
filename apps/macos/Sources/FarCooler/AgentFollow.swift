@@ -17,12 +17,12 @@ final class AgentFollow: @unchecked Sendable {
     private var stderr = Data()
 
     /// Start the process. `onLine` gets each JSON line; `onEnd` gets whether
-    /// any line ever arrived and what the process said on stderr, once, when
-    /// it exits — never after `stop()`.
+    /// any line ever arrived, everything the process said on stderr, and its
+    /// exit status, once, when it exits — never after `stop()`.
     func start(
         binary: String, arguments: [String], environment: [String: String],
         onLine: @escaping @Sendable (Data) -> Void,
-        onEnd: @escaping @Sendable (_ printed: Bool, _ stderr: String) -> Void
+        onEnd: @escaping @Sendable (_ printed: Bool, _ stderr: String, _ status: Int32) -> Void
     ) {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: binary)
@@ -47,11 +47,17 @@ final class AgentFollow: @unchecked Sendable {
             guard !chunk.isEmpty else { return }
             self?.appendError(chunk)
         }
-        p.terminationHandler = { [weak self] _ in
+        p.terminationHandler = { [weak self] process in
             handle.readabilityHandler = nil
             err.fileHandleForReading.readabilityHandler = nil
-            guard let self, let (printed, said) = self.finish() else { return }
-            onEnd(printed, said)
+            // What the handler hadn't read yet. The exit can be reported
+            // before the last of stderr is, and that last part is where a CLI
+            // too old for `--follow` says so.
+            let rest = err.fileHandleForReading.readDataToEndOfFile()
+            guard let self else { return }
+            if !rest.isEmpty { self.appendError(rest) }
+            guard let (printed, said) = self.finish() else { return }
+            onEnd(printed, said, process.terminationStatus)
         }
 
         lock.lock()
@@ -62,7 +68,7 @@ final class AgentFollow: @unchecked Sendable {
             try p.run()
         } catch {
             _ = finish()
-            onEnd(false, error.localizedDescription)
+            onEnd(false, error.localizedDescription, -1)
         }
     }
 

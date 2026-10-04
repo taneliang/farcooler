@@ -142,6 +142,13 @@ struct IdleCostTests {
         #expect(!link.isPaused, "a scroll didn't wake a resting pane")
     }
 
+    /// A changed row redraws with its neighbors, for a glyph taller than its row.
+    @Test func aChangedRowRedrawsWithTheRowsAroundIt() {
+        #expect(TerminalDamage.withNeighbors(IndexSet(integer: 5), rows: 10) == IndexSet(4...6))
+        #expect(TerminalDamage.withNeighbors(IndexSet([0, 9]), rows: 10) == IndexSet([0, 1, 8, 9]))
+        #expect(TerminalDamage.withNeighbors(IndexSet(), rows: 10).isEmpty)
+    }
+
     /// The rows a frame changed, from a real emulator.
     private static func damaged(after bytes: String, on core: VTCore, _ damage: inout TerminalDamage) -> IndexSet? {
         core.feed(Array(bytes.utf8))

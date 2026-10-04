@@ -114,7 +114,7 @@ mod tests {
     fn batch(epoch: u64, seqs: &[u64]) -> AgentEventBatch {
         AgentEventBatch {
             epoch,
-            events: seqs.iter().map(|&seq| AgentEventFrame { seq, payload_json: "{}".into(), ..Default::default() }).collect(),
+            events: seqs.iter().map(|&seq| AgentEventFrame { seq, payload_json: "{}".into() }).collect(),
             ..Default::default()
         }
     }

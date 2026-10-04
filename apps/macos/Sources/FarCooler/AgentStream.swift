@@ -152,10 +152,10 @@ final class AgentStream: ObservableObject {
                     }
                 }
             },
-            onEnd: { [weak self] printed, said in
+            onEnd: { [weak self] printed, said, status in
                 Task { @MainActor in
                     guard let self, self.follower === reader else { return }
-                    self.followEnded(printed: printed, said: said)
+                    self.followEnded(printed: printed, said: said, status: status)
                 }
             })
     }
@@ -164,9 +164,10 @@ final class AgentStream: ObservableObject {
     /// or the CLI doesn't know `--follow`. Counted like a failed poll, and
     /// tried again after a wait that grows, so a runner that's gone isn't
     /// asked five times a second.
-    private func followEnded(printed: Bool, said: String) {
+    private func followEnded(printed: Bool, said: String, status: Int32) {
         follower = nil
-        if !printed, said.contains("--follow") {
+        // Status 2 is clap's usage error: an unknown flag, whatever it said.
+        if !printed, said.contains("--follow") || status == 2 {
             followRefused = true
             startPolling()
             return

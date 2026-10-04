@@ -60,7 +60,8 @@ extension TerminalRenderView {
             needsDisplay = true
             return
         }
-        for row in changed { setNeedsDisplay(rowRect(row)) }
+        let rows = core.withSnapshot { $0.rows } ?? 0
+        for row in TerminalDamage.withNeighbors(changed, rows: rows) { setNeedsDisplay(rowRect(row)) }
     }
 }
 
@@ -75,6 +76,19 @@ struct TerminalDamage {
     private var rows = 0
     private var displayOffset = -1
     private var cursor: (row: Int, column: Int, visible: Bool) = (-1, -1, false)
+
+    /// The changed rows and the one above and below each, within `0..<rows`.
+    ///
+    /// A glyph can be taller than its row (an emoji drawn from a fallback
+    /// font), so a redraw clipped to the exact strip could cut its tail off,
+    /// or leave a fragment of the one it replaced in the next row.
+    static func withNeighbors(_ changed: IndexSet, rows: Int) -> IndexSet {
+        var padded = IndexSet()
+        for row in changed {
+            for neighbor in (row - 1)...(row + 1) where (0..<rows).contains(neighbor) { padded.insert(neighbor) }
+        }
+        return padded
+    }
 
     /// The rows that changed since the last call, or nil for "all of them".
     mutating func rows(changedIn snapshot: VTSnapshot) -> IndexSet? {

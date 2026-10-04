@@ -16,7 +16,7 @@ import Testing
 struct AgentFollowTests {
     /// A stand-in `farcooler` that appends its arguments to a log, one call
     /// per line, and answers like the real one.
-    private static func standIn(refusingFollow: Bool = false) throws -> (binary: String, log: URL) {
+    private static func standIn(refusingFollow: Bool = false, quietRefusal: Bool = false) throws -> (binary: String, log: URL) {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("agent-follow-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let log = dir.appendingPathComponent("calls.log")
@@ -25,7 +25,11 @@ struct AgentFollowTests {
             refusingFollow
             ? """
             case "$*" in *--follow*) echo "error: unexpected argument '--follow' found" >&2; exit 2;; esac
-            """ : ""
+            """
+            : quietRefusal
+                ? """
+                case "$*" in *--follow*) sleep 0.3; exit 2;; esac
+                """ : ""
         try """
             #!/bin/sh
             echo "$*" >> '\(log.path)'
@@ -65,6 +69,20 @@ struct AgentFollowTests {
         #expect(calls.dropFirst().count >= 2, "a CLI that refused --follow wasn't polled: \(calls)")
         #expect(calls.dropFirst().allSatisfy { !$0.contains("--follow") }, "\(calls)")
         #expect(stream.connectionError == nil, "a refused flag was shown as a broken chat")
+    }
+
+    /// A CLI that exits 2, clap's usage error, after a moment and with nothing
+    /// said is a refusal too, and is polled rather than retried.
+    @Test func aCLIThatExitsWithAUsageErrorIsPolled() async throws {
+        let (binary, log) = try Self.standIn(quietRefusal: true)
+        let stream = AgentStream(terminal: "t1")
+        stream.start(binary: binary, environment: [:])
+        defer { stream.stop() }
+        try await Task.sleep(for: .milliseconds(1500))
+
+        let calls = Self.calls(log)
+        #expect(calls.filter { $0.contains("--follow") }.count == 1, "the follow was retried: \(calls)")
+        #expect(calls.filter { !$0.contains("--follow") }.count >= 2, "it wasn't polled: \(calls)")
     }
 
     /// An answer with nothing in it is the healthy case, and changes nothing.
