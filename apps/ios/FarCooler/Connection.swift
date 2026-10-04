@@ -145,6 +145,11 @@ final class Connection: ObservableObject {
     // terminal's screen.
     let core = ClientCore()
 
+    /// Text a screen has left for a pane's composer, held until the composer
+    /// takes it (Ask the Orchestrator, ov-241). Per runner: a terminal id is
+    /// minted by a daemon, so two runners can hand out the same one.
+    let composerOffers = ComposerOffers()
+
     /// One review store per worktree, outliving the panes that show them. See
     /// `ChangesStores` for why they cannot live in the view.
     lazy var changesStores = ChangesStores(core: core)

@@ -55,6 +55,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
@@ -75,6 +76,7 @@ import com.farcooler.model.GlancePalette
 import com.farcooler.model.PhoneFirstRun
 import com.farcooler.model.Markdown
 import com.farcooler.model.RunnerBoards
+import com.farcooler.model.AskAboutTask
 import com.farcooler.model.TaskAcceptanceProgress
 import com.farcooler.model.TaskUsageState
 import com.farcooler.model.TaskAgentLink
@@ -709,6 +711,11 @@ fun TaskDetailScreen(
         }
         val agents = if (speaks) boardAgents(row, fleet.worktrees) else emptyList()
         val presence = row.agentPresence(agents.size, speaks)
+        // Ask the orchestrator (ov-241): on while the workspace has one running.
+        val seat = AskAboutTask.seat(workspaceId, fleet.worktrees, fleet.workspaces)
+        val clipboard = LocalClipboard.current
+        var askInFlight by remember { mutableStateOf(false) }
+        var askNotice by remember(taskId) { mutableStateOf<String?>(null) }
         // "ov-190" in its text opens that task (ov-196).
         val taskKeys = rememberTaskKeyLinker(connection, onNavigate)
         CompositionLocalProvider(LocalTaskKeyLinker provides taskKeys) {
@@ -755,6 +762,27 @@ fun TaskDetailScreen(
                                 AgentControl(row.key, agents, boardOrchestrator(row, fleet.worktrees), presence, jump)
                             },
                         )
+                    }
+                }
+                askOrchestratorItem(available = seat != null && !askInFlight, notice = askNotice) {
+                    val orchestrator = seat ?: return@askOrchestratorItem
+                    askInFlight = true
+                    askNotice = null
+                    scope.launch {
+                        val delivery = AskAboutTask.deliver(
+                            row.key, row.title, orchestrator.terminal.isAgentPane,
+                            offer = { connection.composerHandoff.offer(orchestrator.terminal.id, it) },
+                            paste = { connection.draftPrompt(orchestrator.terminal.id, it) },
+                            copy = { clipboard.writeText("Far Cooler", it) },
+                        )
+                        askInFlight = false
+                        if (delivery == AskAboutTask.Delivery.COPIED) {
+                            // Stays here: the reference is on the clipboard and the
+                            // notice says so, where a person pasting it can read it.
+                            askNotice = AskAboutTask.copiedNotice(row.key)
+                        } else {
+                            onJump(TerminalRef(connection.host.id, orchestrator.worktreeId, orchestrator.terminal.id))
+                        }
                     }
                 }
                 // Its worktree and changes, through the task's own worktree_id:

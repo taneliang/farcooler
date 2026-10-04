@@ -2031,6 +2031,15 @@ class Connection(
     }
 
     /**
+     * Ask the runner to paste [text] into a terminal orchestrator's box, pressing
+     * no Enter (Ask the orchestrator, ov-241). False when it declined or couldn't
+     * be reached, in which case nothing was typed.
+     */
+    suspend fun draftPrompt(terminal: String, text: String): Boolean =
+        attempt { core.call("terminal.draft_prompt", args("terminal" to terminal, "text" to text)) }
+            .isSuccess
+
+    /**
      * Every ref in a repository, for the sheet that pins a review's base.
      *
      * `branch.list` is one of the family the parity inventory found routed in

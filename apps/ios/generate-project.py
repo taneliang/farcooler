@@ -121,6 +121,8 @@ SOURCES = [
     # `AgentView`'s `ApprovalCard`.
     "TerminalPermissionBar.swift",
     "UnsentInputLine.swift",
+    # Ask the Orchestrator on a task's screen (ov-241).
+    "AskOrchestratorSection.swift",
     # The phone's half of the watch link. Not under `FarCoolerWatch/`: it runs
     # on the phone, holds the connection, and makes the core calls the watch
     # cannot.
@@ -170,6 +172,9 @@ AGENTKIT_SOURCES = [
     # says about it. Here for `ShellNavigation.swift`'s reason: the iOS target
     # has no unit tests. See `UnsentInputTests`.
     "UnsentInput.swift",
+    # Ask the Orchestrator's draft, how it is delivered, and the offers a
+    # composer takes (ov-241). Here for the same reason. See `AskAboutTaskTests`.
+    "AskAboutTask.swift",
     # The navigation shell's pure model: the flat sequence across the fleet,
     # the axis lock, the release decisions, precedence, search. In AgentKit
     # rather than beside its views because the iOS target has no unit tests —

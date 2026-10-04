@@ -2224,6 +2224,13 @@ async fn dispatch(
             Ok(json!({}))
         }
 
+        // Ask the Orchestrator's paste into a terminal orchestrator's box
+        // (ov-241): never Enter, and refused unless the pane is provably idle.
+        "terminal.draft_prompt" => {
+            session.draft_prompt(id("terminal")?, &text("text")).await?;
+            Ok(json!({}))
+        }
+
         "terminal.agent_answer" => {
             session
                 .agent_answer(id("terminal")?, &text("requestId"), &text("optionId"))

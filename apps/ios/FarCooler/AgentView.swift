@@ -672,6 +672,7 @@ struct AgentView: View {
                     availableCommands: transcript.availableCommands,
                     worktreeID: worktreeID,
                     paneID: terminalID,
+                    offers: connection.composerOffers,
                     core: connection.core,
                     onSend: { text, images in
                         Task { await stream.send(text, images: images) }
@@ -2352,6 +2353,8 @@ private struct AgentComposer: View {
     /// The terminal's id, which is the same key `PaneDraftStore` is keyed by
     /// and the same one `AgentStream` subscribes with. See `PaneDraft`.
     let paneID: String
+    /// Text another screen left for this pane's composer (ov-241).
+    @ObservedObject var offers: ComposerOffers
     let core: ClientCore
     let onSend: (String, [(mime: String, data: Data)]) -> Void
     let onSetMode: (String) -> Void
@@ -2600,6 +2603,15 @@ private struct AgentComposer: View {
         // encode of a small dictionary, not a disk write per character.
         .onChange(of: text) { _, latest in
             PaneDraftStore.record(latest, forPane: paneID)
+        }
+        // Ask the Orchestrator's draft (ov-241): appended behind whatever is
+        // being typed, never over it, taken once, with the caret at the end.
+        // `.task(id:)` so one that arrived before this composer existed is
+        // taken on arrival, and one that arrives while it's up is taken now.
+        .task(id: offers.waiting[paneID]) {
+            guard let offered = offers.take(for: paneID) else { return }
+            text = ComposerOffers.joined(field: text, offered: offered)
+            cursor = text.count
         }
     }
 

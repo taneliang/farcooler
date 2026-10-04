@@ -117,6 +117,8 @@ struct TaskScreen: View {
 
             places(row)
 
+            AskOrchestratorSection(connection: connection, place: place, row: row)
+
             if !row.intent.isEmpty {
                 // Markdown, as the Mac draws it (ov-98): the same
                 // `TaskProse` blocks, with the document's spacing.

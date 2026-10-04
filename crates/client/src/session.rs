@@ -25,6 +25,7 @@ use crate::changes_json::{stack_json, change_set_json, file_change_json, file_di
 use crate::ssh;
 
 mod board_reads;
+mod draft_prompt;
 mod notice_task;
 mod results;
 pub use board_reads::{MarkRead, reads_json};
