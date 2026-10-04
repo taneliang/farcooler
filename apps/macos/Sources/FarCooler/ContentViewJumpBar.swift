@@ -48,7 +48,9 @@ extension ContentView {
 
     /// Whether `place` is still somewhere to go, for a step through history.
     func resolves(_ place: Selection) -> Bool {
-        NavigationHistory.resolves(place, in: store.fleet) { store.clients[$0]?.repositories.map(\.id) ?? [] }
+        NavigationHistory.resolves(
+            place, in: store.fleet, repositories: { store.clients[$0]?.repositories.map(\.id) ?? [] },
+            board: { boardStores["\($0)/\($1)"]?.board })
     }
 
     /// ⌃⌘← (`back`) and ⌃⌘→: where you were, or where Back left. Back in

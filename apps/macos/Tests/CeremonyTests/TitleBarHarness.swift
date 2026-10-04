@@ -34,6 +34,9 @@ enum TitleBarHarness {
         var trayCount = 11
         /// Whether the window offers Back and Forward (slice 3).
         var backForward = false
+        /// The history Back and Forward's long press lists (ov-248).
+        var history: [PlaceRow] = []
+        var go: (NavigationHistory.Spot) -> Void = { _ in }
         /// Whether Show Files is beside Changes (ov-189).
         var files = false
         /// The title bar's field (slice 4), where a test opens it.
@@ -76,7 +79,8 @@ enum TitleBarHarness {
                             perform: { _ in }),
                         navigator: NavigatorToggle(hidden: false, available: true, toggle: {}),
                         backForward: room.layout(window: width).backForward
-                            ? BackForwardControl(canGoBack: true, canGoForward: false, back: {}, forward: {}) : nil)
+                            ? BackForwardControl(
+                                canGoBack: true, canGoForward: false, rows: history, back: {}, forward: {}, go: go) : nil)
                 }
                 .mainWindowChrome()
         }
@@ -143,6 +147,19 @@ enum TitleBarHarness {
     static func backForward(in window: NSWindow) -> CGRect? {
         guard let anchor = first(BackForwardControl.Anchor.View.self, in: window.contentView?.superview) else { return nil }
         return anchor.convert(anchor.bounds, to: nil)
+    }
+
+    /// The control's host item's subtree, as a class-name outline, for a
+    /// probe of what a toolbar item is made of.
+    static func outline(of view: NSView?, depth: Int = 0) -> String {
+        guard let view else { return "" }
+        let line = String(repeating: "  ", count: depth) + String(describing: type(of: view)) + " \(view.frame.integral)"
+        return ([line] + view.subviews.map { outline(of: $0, depth: depth + 1) }).joined(separator: "\n")
+    }
+
+    /// The toolbar item holding Back and Forward.
+    static func backForwardItem(in window: NSWindow) -> NSView? {
+        first(BackForwardControl.Anchor.View.self, in: window.contentView?.superview).flatMap(hostingItem(of:))
     }
 
     /// The switcher's frame in the window: its menu anchor's.

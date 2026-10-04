@@ -6,14 +6,22 @@ import SwiftUI
 /// steps ⌃⌘← and ⌃⌘→ take. Each is dimmed with nowhere to go, as its menu
 /// item is (`MainWindowFocus`).
 ///
+/// A click steps; a press and hold, or a right-click, lists the places this
+/// window has been, one list on both buttons with the one it's at checked, as
+/// Firefox's session history is (ov-248). Choosing one goes there in one move.
+///
 /// Drawn only where the status area keeps room for its medium form
 /// (`TitleStatusRoom.layout`); narrower, the keys and the Workspace menu
 /// still go back and forward.
 struct BackForwardControl: View {
     let canGoBack: Bool
     let canGoForward: Bool
+    /// The window's history, for each button's long press.
+    var rows: [PlaceRow] = []
     let back: () -> Void
     let forward: () -> Void
+    /// A row of the list chosen.
+    var go: (NavigationHistory.Spot) -> Void = { _ in }
 
     static let backHelp = "Go back (⌃⌘←)"
     static let forwardHelp = "Go forward (⌃⌘→)"
@@ -24,17 +32,33 @@ struct BackForwardControl: View {
         // is split into two items and laid out at the trailing end (integ-8;
         // the lane's probe). One item keeps its place after the switcher.
         HStack(spacing: 0) {
-            Button(action: back) { Label("Back", systemImage: "chevron.left") }
+            button("Back", symbol: "chevron.left", action: back)
                 .disabled(!canGoBack)
                 .help(Self.backHelp)
                 .accessibilityIdentifier("toolbar-back")
-            Button(action: forward) { Label("Forward", systemImage: "chevron.right") }
+            button("Forward", symbol: "chevron.right", action: forward)
                 .disabled(!canGoForward)
                 .help(Self.forwardHelp)
                 .accessibilityIdentifier("toolbar-forward")
         }
         .labelStyle(.iconOnly)
         .background(Anchor.Mark())
+    }
+
+    /// A button that steps on a click and opens the history on a press and
+    /// hold.
+    private func button(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Menu {
+            if rows.count > 1 { HistoryMenuItems(rows: rows, go: go) }
+        } label: {
+            Label(title, systemImage: symbol)
+        } primaryAction: {
+            action()
+        }
+        .menuIndicator(.hidden)
+        .contextMenu {
+            if rows.count > 1 { HistoryMenuItems(rows: rows, go: go) }
+        }
     }
 
     /// The view behind the control, for `TitleBarHarness` to find.

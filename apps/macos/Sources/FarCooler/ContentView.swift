@@ -377,6 +377,7 @@ struct ContentView: View {
         .onCommand { command in if isKeyWindow { run(command) } }
         .onTileCommand { command in Task { await tile(command) } }
         .onSelectIndex { index in if isKeyWindow { selectTerminal(at: index) } }
+        .onGoToHistory { spot in if isKeyWindow { go(to: spot) } }
         .onSelectWorkspace { number in
             guard isKeyWindow else { return }
             if let target = WorkspaceNumbers.target(number, in: WorkspaceNumbers.groups(in: store.fleet)) {
@@ -1047,7 +1048,7 @@ struct ContentView: View {
     /// The board a `.board` selection names, as its runner lists it now: a
     /// workspace it lists, or on a runner without workspaces the repository
     /// whose id it is. Nil once it is gone.
-    private func board(host: String, id: String) -> WorkspaceSummary? {
+    func board(host: String, id: String) -> WorkspaceSummary? {
         guard let client = store.clients[host] else { return nil }
         if let listed = client.fleet.workspaces {
             return listed.first { $0.id == id }
@@ -1520,7 +1521,7 @@ struct ContentView: View {
             canGoBack: jumpBar.history.canGoBack
                 || Self.goesBack(focus: focusColumn, from: selection, trail: trail, board: scene?.board),
             canGoForward: jumpBar.history.canGoForward,
-            back: { step(back: true) }, forward: { step(back: false) })
+            rows: historyRows, back: { step(back: true) }, forward: { step(back: false) }, go: go(to:))
     }
 
     /// What a switcher item does, by the routes the rest of the window uses.
@@ -2802,6 +2803,7 @@ struct ContentView: View {
             NeedsYouNavigation.step(lastOpened: lastAttention, items: store.needsYou, fleet: store.fleet, showing: selection) != nil
         focus.goesBack = jumpBar.history.canGoBack || Self.goesBack(focus: focusColumn, from: selection, trail: trail, board: scene?.board)
         focus.goesForward = jumpBar.history.canGoForward
+        focus.history = historyRows
         focus.hasJumpBar = scene?.opened != nil || selection?.focus != nil
         focus.focuses = scene?.opened != nil || selection?.focus != nil
         focus.focused = focusColumn

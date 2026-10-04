@@ -81,6 +81,13 @@ enum AppCommand: String {
     }
 
     static let selectWorkspaceNotification = Notification.Name("farcooler.selectWorkspace")
+
+    /// Go to a row of Workspace ▸ History (ov-248).
+    static func goToHistory(_ spot: NavigationHistory.Spot) {
+        NotificationCenter.default.post(name: goToHistoryNotification, object: spot)
+    }
+
+    static let goToHistoryNotification = Notification.Name("farcooler.goToHistory")
 }
 
 /// The menu bar.
@@ -192,6 +199,14 @@ struct FarCoolerCommands: Commands {
             Button("Forward") { AppCommand.forward.post() }
                 .keyboardShortcut(.rightArrow, modifiers: [.command, .control])
                 .disabled(!MainWindowFocus.goes(\.goesForward, mainWindow))
+            // The same list a long press on Back or Forward opens, for the
+            // keyboard and the menu bar's search (ov-248).
+            Menu("History") {
+                if let mainWindow, MainWindowFocus.goes(\.goesHistory, mainWindow) {
+                    HistoryMenuItems(rows: mainWindow.history, go: AppCommand.goToHistory)
+                }
+            }
+            .disabled(!MainWindowFocus.goes(\.goesHistory, mainWindow))
             // ⌘L, a browser's "focus the location bar": nothing here or in
             // the system's menus holds it, and ⌘ never reaches a terminal.
             Button("Go to Jump Bar") { AppCommand.jumpBar.post() }
@@ -528,6 +543,13 @@ extension View {
         onReceive(NotificationCenter.default.publisher(for: AppCommand.selectWorkspaceNotification)) { note in
             guard let number = note.object as? Int else { return }
             perform(number)
+        }
+    }
+
+    func onGoToHistory(_ perform: @escaping (NavigationHistory.Spot) -> Void) -> some View {
+        onReceive(NotificationCenter.default.publisher(for: AppCommand.goToHistoryNotification)) { note in
+            guard let spot = note.object as? NavigationHistory.Spot else { return }
+            perform(spot)
         }
     }
 

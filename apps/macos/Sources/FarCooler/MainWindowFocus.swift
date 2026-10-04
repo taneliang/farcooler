@@ -44,6 +44,11 @@ struct MainWindowFocus: Equatable {
     var goesBack = false
     /// Back has left somewhere to go Forward to (ov-192).
     var goesForward = false
+    /// The places Back and Forward go through, for Workspace ▸ History
+    /// (ov-248).
+    var history: [PlaceRow] = []
+    /// There is a place besides this one to go to.
+    var goesHistory: Bool { history.count > 1 }
     /// The jump bar is drawn, over a task or a worktree, for ⌘L (ov-192).
     var hasJumpBar = false
     /// Focus (⌃⌘↩) has something to put at full size, and whether it has.

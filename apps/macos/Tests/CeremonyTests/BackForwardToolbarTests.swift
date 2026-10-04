@@ -30,8 +30,62 @@ struct BackForwardToolbarTests {
         #expect(!without.layout(window: width).backForward, "a window without them never draws them")
     }
 
-    private static func root(backForward: Bool) -> Harness.Root<Color> {
-        Harness.Root(words: Harness.Words(), backForward: backForward, content: Color.clear)
+    /// Two places back, the one it's at, one forward.
+    static let rows: [PlaceRow] = [
+        PlaceRow(spot: .forward(0), title: "bil-9 Invoice PDF", subtitle: "Billing", symbol: "checklist"),
+        PlaceRow(spot: .current, title: "Billing", subtitle: nil, symbol: "square.stack.3d.up"),
+        PlaceRow(spot: .back(0), title: "Needs You", subtitle: nil, symbol: "tray"),
+        PlaceRow(spot: .back(1), title: "invoice-pdf", subtitle: "Billing", symbol: "arrow.triangle.branch"),
+    ]
+
+    private static func root(backForward: Bool, go: @escaping (NavigationHistory.Spot) -> Void = { _ in })
+        -> Harness.Root<Color>
+    {
+        Harness.Root(words: Harness.Words(), backForward: backForward, history: rows, go: go, content: Color.clear)
+    }
+
+    /// The menu each button opens on a long press, as AppKit holds it:
+    /// filled when the button asks, as it does when the press comes.
+    private static func longPressMenus(in window: NSWindow) -> [NSMenu] {
+        var menus: [NSMenu] = []
+        func walk(_ view: NSView) {
+            if let control = view as? NSSegmentedControl, let menu = control.menu(forSegment: 0) {
+                menu.delegate?.menuNeedsUpdate?(menu)
+                menus.append(menu)
+            }
+            view.subviews.forEach(walk)
+        }
+        Harness.backForwardItem(in: window).map(walk)
+        return menus
+    }
+
+    @Test("A long press on Back or Forward lists the window's history, the place it's at checked, and choosing a row goes there")
+    func longPress() async throws {
+        var chosen: [NavigationHistory.Spot] = []
+        let window = try await Harness.window(Self.root(backForward: true, go: { chosen.append($0) }), width: 1200)
+        defer { window.close() }
+        let menus = Self.longPressMenus(in: window)
+        #expect(menus.count == 2, "one for Back and one for Forward")
+        for menu in menus {
+            #expect(menu.items.map(\.title) == Self.rows.map(\.line))
+            #expect(menu.items.map { $0.state == .on } == [false, true, false, false], "only where it's at is checked")
+            #expect(menu.items.allSatisfy { $0.image != nil }, "each with its kind's symbol")
+        }
+        // Back's menu is the one that's enabled here (Forward has nowhere to go).
+        let menu = try #require(menus.first)
+        menu.performActionForItem(at: menu.items.count - 1)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(chosen == [.back(1)])
+    }
+
+    @Test("A history of one place has nothing to list")
+    func nothingToList() async throws {
+        let window = try await Harness.window(
+            Harness.Root(
+                words: Harness.Words(), backForward: true, history: [Self.rows[1]], content: Color.clear),
+            width: 1200)
+        defer { window.close() }
+        #expect(Self.longPressMenus(in: window).allSatisfy { $0.items.isEmpty })
     }
 
     @Test("In a real window, Back and Forward sit after the switcher and push nothing into the overflow menu", arguments: cases)

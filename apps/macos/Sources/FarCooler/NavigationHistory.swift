@@ -1,3 +1,4 @@
+import AgentKit
 import Foundation
 
 /// Back and forward through where the window has been (ov-192): ⌃⌘← and
@@ -126,6 +127,16 @@ extension NavigationHistory {
         return rows + side(back) { .back($0) }
     }
 
+    /// A row of the list chosen, whichever side it's on. Nil for the place
+    /// the window is at, and for one that isn't there.
+    mutating func go(to spot: Spot, from current: Selection?, trail: Selection?) -> Stop? {
+        switch spot {
+        case .back(let distance): go(toBack: distance, from: current, trail: trail)
+        case .forward(let distance): go(toForward: distance, from: current, trail: trail)
+        case .current: nil
+        }
+    }
+
     /// A row of Back's side chosen: the stop `distance` away (0 the nearest)
     /// in one move. The stops passed over, and `current`, go onto Forward in
     /// the order they'd be walked back through, as Safari does. Nil, and
@@ -153,9 +164,14 @@ extension NavigationHistory {
     }
 
     /// Whether `place` is still somewhere to go in `fleet`: its workspace
-    /// listed, its worktree there. A task's own presence is the board's,
-    /// which the window checks when it opens one.
-    static func resolves(_ place: Selection, in fleet: Fleet, repositories: (String) -> [String]) -> Bool {
+    /// listed, its worktree there, its task on its board once that has been
+    /// read (`board` gives a workspace's, by runner and id, or nil when the
+    /// window hasn't one; a board with no rows isn't read yet, and says
+    /// nothing is gone).
+    static func resolves(
+        _ place: Selection, in fleet: Fleet, repositories: (String) -> [String],
+        board: (_ host: String, _ workspace: String) -> TaskBoardModel? = { _, _ in nil }
+    ) -> Bool {
         switch place {
         case .needsYou:
             return true
@@ -167,6 +183,9 @@ extension NavigationHistory {
             }
             if case .worktree(let worktree, _)? = focus {
                 return WorkspaceSelection.worktree(host: host, id: worktree, in: fleet) != nil
+            }
+            if case .task(let task)? = focus, let rows = board(host, id)?.columns.flatMap(\.rows), !rows.isEmpty {
+                return rows.contains { $0.id == task }
             }
             return true
         }

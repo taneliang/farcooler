@@ -7,13 +7,13 @@ import Testing
 /// The history a long press on Back or Forward lists (ov-248): the whole
 /// session in one list, Firefox's way, and a row chosen in one move.
 struct NavigationHistoryMenuTests {
-    private typealias Selection = ContentView.Selection
-    private typealias Stop = NavigationHistory.Stop
+    fileprivate typealias Selection = ContentView.Selection
+    fileprivate typealias Stop = NavigationHistory.Stop
 
-    private static func task(_ id: String) -> Selection { .workspace(host: "", workspace: "billing", focus: .task(id)) }
+    fileprivate static func task(_ id: String) -> Selection { .workspace(host: "", workspace: "billing", focus: .task(id)) }
     private static func always(_: Selection) -> Bool { true }
 
-    private static func walked(_ path: [Selection]) -> NavigationHistory {
+    fileprivate static func walked(_ path: [Selection]) -> NavigationHistory {
         var history = NavigationHistory()
         for (old, new) in zip(path, path.dropFirst()) { history.record(from: old, to: new) }
         return history
@@ -87,5 +87,46 @@ struct NavigationHistoryMenuTests {
         let rows = history.rows(current: Self.task("b"), trail: Self.task("y"), resolves: Self.always)
         #expect(rows.first?.stop == Stop(Self.task("b"), trail: Self.task("y")))
         #expect(rows.last?.stop == Stop(Self.task("a"), trail: Self.task("z")))
+    }
+}
+
+extension NavigationHistoryMenuTests {
+    @Test("A row on either side is a jump to it; the place it's at is none")
+    func jumpBySpot() {
+        var history = Self.walked(["a", "b", "c", "d"].map(Self.task))
+        #expect(history.go(to: .current, from: Self.task("d"), trail: nil) == nil)
+        #expect(history.go(to: .back(1), from: Self.task("d"), trail: nil) == Stop(Self.task("b")))
+        history.record(from: Self.task("d"), to: Self.task("b"))
+        #expect(history.go(to: .forward(1), from: Self.task("b"), trail: nil) == Stop(Self.task("d")))
+    }
+
+    @Test("A task its board has read and lacks is passed over; one on a board not read yet isn't")
+    func goneTaskResolves() {
+        var fleet = Fleet(runtimeHealthy: true, livePanes: 0, worktrees: [], branchPrefix: nil)
+        fleet.runnerWorkspaces[""] = [
+            WorkspaceSummary(id: "billing", name: "Billing", taskPrefix: "bil", isMain: false, ordinal: 1, repository: "r")
+        ]
+        let row = TaskRow(id: "here", key: "bil-1", title: "Kept", status: .todo, statusSince: Date(timeIntervalSince1970: 0))
+        let read = TaskBoardModel(columns: [TaskBoardColumn(status: .todo, rows: [row])])
+        let none: (String) -> [String] = { _ in [] }
+        func resolves(_ id: String, _ board: TaskBoardModel?) -> Bool {
+            NavigationHistory.resolves(Self.task(id), in: fleet, repositories: none, board: { _, _ in board })
+        }
+        #expect(resolves("here", read))
+        #expect(!resolves("gone", read))
+        #expect(resolves("gone", .empty), "a board with no rows isn't read yet")
+        #expect(resolves("gone", nil), "no board in the window says nothing")
+    }
+
+    @Test("Workspace ▸ History is there for a window with somewhere to go, and not over an overlay")
+    func menuBarItem() {
+        let rows = [
+            PlaceRow(spot: .current, title: "A", subtitle: nil, symbol: "tray"),
+            PlaceRow(spot: .back(0), title: "B", subtitle: nil, symbol: "tray"),
+        ]
+        #expect(MainWindowFocus.goes(\.goesHistory, MainWindowFocus(overlayOpen: false, history: rows)))
+        #expect(!MainWindowFocus.goes(\.goesHistory, MainWindowFocus(overlayOpen: false, history: [rows[0]])))
+        #expect(!MainWindowFocus.goes(\.goesHistory, MainWindowFocus(overlayOpen: true, history: rows)))
+        #expect(!MainWindowFocus.goes(\.goesHistory, nil))
     }
 }
