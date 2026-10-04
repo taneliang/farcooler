@@ -310,7 +310,7 @@ private fun Mono(text: String) {
         fontFamily = FontFamily.Monospace,
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(Radius.medium))
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .padding(12.dp),
     )
@@ -568,7 +568,7 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall.copy(fontSize = fontSize.sp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(Radius.medium))
                     .background(androidx.compose.ui.graphics.Color(com.farcooler.core.TerminalPalette.BACKGROUND))
                     .padding(12.dp),
             )

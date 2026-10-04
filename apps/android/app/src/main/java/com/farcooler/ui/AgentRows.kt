@@ -112,7 +112,7 @@ private fun MessageRow(role: Role, text: String, isLive: Boolean) {
                 text,
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(RoundedCornerShape(Radius.medium))
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                     .padding(horizontal = 12.dp, vertical = 8.dp),
             )
@@ -195,14 +195,14 @@ private fun ToolRowView(
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(Radius.medium))
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .then(
                 if (pending != null) {
                     Modifier.border(
                         1.dp,
                         MaterialTheme.colorScheme.tertiary.copy(alpha = 0.55f),
-                        RoundedCornerShape(8.dp),
+                        RoundedCornerShape(Radius.medium),
                     )
                 } else {
                     Modifier
@@ -298,7 +298,7 @@ private fun SubagentBlockView(
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(Radius.medium))
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
     ) {
         Row(
@@ -404,7 +404,7 @@ private fun GapRow(reason: GapReason) {
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(Radius.medium))
             .background(tint.copy(alpha = 0.12f))
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -525,7 +525,7 @@ fun ApprovalCard(pending: PendingPermission, onChoose: (String) -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(Radius.medium))
             .background(MaterialTheme.colorScheme.tertiaryContainer)
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -560,7 +560,7 @@ fun PlanPanel(entries: List<PlanEntry>) {
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(Radius.large))
             // OPAQUE, because it floats over a scrolling transcript. A tinted
             // overlay let the conversation through, and expanding the list
             // turned both into one unreadable overlap.
@@ -694,7 +694,7 @@ fun DiffView(diff: Diff) {
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(6.dp))
+                    .clip(RoundedCornerShape(Radius.small))
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                     .horizontalScroll(rememberScrollState())
                     .padding(vertical = 4.dp)

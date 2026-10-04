@@ -139,7 +139,7 @@ fun DetailBox(text: String, maxLines: Int = 24, modifier: Modifier = Modifier) {
             Modifier
                 .fillMaxWidth()
                 .heightIn(max = 180.dp)
-                .clip(RoundedCornerShape(6.dp))
+                .clip(RoundedCornerShape(Radius.small))
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                 .verticalScroll(rememberScrollState())
                 .horizontalScroll(rememberScrollState())
@@ -176,7 +176,7 @@ private fun CodeBlock(text: String) {
     Box(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(Radius.small))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .horizontalScroll(rememberScrollState())
             .padding(horizontal = 10.dp, vertical = 8.dp)
@@ -209,7 +209,7 @@ private fun MarkdownTable(table: Markdown.Block.Table) {
     Box(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(Radius.small))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .horizontalScroll(rememberScrollState())
             .padding(8.dp)

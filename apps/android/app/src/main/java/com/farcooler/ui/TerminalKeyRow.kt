@@ -104,7 +104,7 @@ private fun RowScope.Key(
         Modifier
             .weight(1f)
             .height(42.dp)
-            .clip(RoundedCornerShape(7.dp))
+            .clip(RoundedCornerShape(Radius.small))
             .background(
                 if (filled) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.surfaceVariant

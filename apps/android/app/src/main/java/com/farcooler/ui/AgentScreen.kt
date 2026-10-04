@@ -405,7 +405,7 @@ private fun SendFailureRow(message: String, onRetry: () -> Unit, onDismiss: () -
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(Radius.medium))
             .background(MaterialTheme.colorScheme.errorContainer)
             .padding(start = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -441,7 +441,7 @@ private fun StoppedRow(line: String, onRestart: (() -> Unit)?) {
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(Radius.medium))
             .background(MaterialTheme.colorScheme.errorContainer)
             .padding(start = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1015,7 +1015,7 @@ private fun AgentComposer(
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(Radius.large))
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -1048,7 +1048,7 @@ private fun AgentComposer(
                 attachments.forEachIndexed { index, attachment ->
                     Row(
                         Modifier
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(Radius.small))
                             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                             .padding(horizontal = 8.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1076,7 +1076,7 @@ private fun AgentComposer(
                 if (photos.preparing > 0) {
                     Row(
                         Modifier
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(Radius.small))
                             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                             .padding(horizontal = 8.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1385,7 +1385,7 @@ private fun SuggestionList(items: List<AgentChoice>, onChoose: (String) -> Unit)
         Modifier
             .fillMaxWidth()
             .heightIn(max = 200.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(Radius.medium))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest),
     ) {
         LazyColumn {

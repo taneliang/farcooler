@@ -359,7 +359,7 @@ private fun FingerprintRow(fingerprint: String, publicKey: String) {
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(Radius.medium))
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .clickable { expanded = !expanded }
             .padding(12.dp),

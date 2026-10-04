@@ -21,6 +21,7 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
+import com.farcooler.ui.Radius
 
 /**
  * A QR code, drawn large enough to scan off a screen.
@@ -80,7 +81,7 @@ fun CodeImage(payload: String, modifier: Modifier = Modifier) {
         modifier
             .fillMaxWidth()
             .aspectRatio(1f)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(Radius.medium))
             .background(Color.White)
             .padding(16.dp),
     ) {

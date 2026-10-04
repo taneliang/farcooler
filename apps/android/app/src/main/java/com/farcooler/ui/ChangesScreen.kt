@@ -525,7 +525,7 @@ private fun PinnedFileName(
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(RoundedCornerShape(Radius.medium))
                     .background(cardColor())
             ) {
                 FileHeading(file, expanded == file.path, onClick)
@@ -571,7 +571,7 @@ private fun FileCard(
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(Radius.medium))
             .background(cardColor())
     ) {
         FileHeading(file, expanded, onClick = { store.toggle(file.path) })
@@ -1947,7 +1947,7 @@ private fun Card(modifier: Modifier = Modifier, content: @Composable ColumnScope
     Column(
         modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(Radius.medium))
             .background(cardColor())
             .padding(12.dp),
         content = content,

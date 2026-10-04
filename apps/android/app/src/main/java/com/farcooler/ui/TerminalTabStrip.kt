@@ -214,7 +214,7 @@ fun TerminalTabStrip(
             // ONE surface holding them, not one per chip. A chip apiece on its
             // own background reads as a browser tab strip pasted under a
             // terminal; a single bar is one sibling of the screen above it.
-            .clip(RoundedCornerShape(18.dp))
+            .clip(RoundedCornerShape(Radius.large))
             .background(MaterialTheme.colorScheme.surfaceContainerHigh),
         contentPadding = PaddingValues(horizontal = 6.dp, vertical = 5.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),

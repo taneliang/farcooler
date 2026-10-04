@@ -99,6 +99,26 @@ fun FarCoolerTheme(content: @Composable () -> Unit) {
 }
 
 /**
+ * The three corner steps, in the same points as the iOS and Mac `Radius`
+ * (DesignTokens.swift in AgentKit), so a card is the same shape on every
+ * screen the owner holds (ov-227). Steps, not numbers: a fourth value is a
+ * design change made here, never in a view.
+ *
+ * A shape nested `padding` inside a parent's corner takes `parent - padding`,
+ * never below [small], so it stays concentric with the parent.
+ */
+object Radius {
+    /** Something the hand acts on inside a list or bar: a key, a chip, a code span. */
+    val small = 6.dp
+
+    /** A card: a message, a tool block, a note, a preview. */
+    val medium = 10.dp
+
+    /** A free-floating surface: the composer, an approval over the transcript, a bar. */
+    val large = 16.dp
+}
+
+/**
  * The terminal's typeface.
  *
  * Not a free-form picker: the terminal draws a fixed grid of one glyph per
