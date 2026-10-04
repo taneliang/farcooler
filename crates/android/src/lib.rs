@@ -917,6 +917,42 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeTakeClipboard(
     })
 }
 
+/// The whitespace-delimited word under a cell as "<utf16 offset>\n<word>", or
+/// null for a blank cell. The app's own link rule, such as a task key, reads it.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeWordAt(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    row: jint,
+    column: jint,
+) -> jstring {
+    guarded(std::ptr::null_mut(), || {
+        if row < 0 || column < 0 {
+            return std::ptr::null_mut();
+        }
+        let h = handle_of(handle);
+        let (row, column) = (clamp_u16(row), clamp_u16(column));
+        let mut offset = 0u32;
+        let needed =
+            unsafe { vt::farcooler_vt_word_at(h, row, column, &mut offset, std::ptr::null_mut(), 0) };
+        if needed == 0 {
+            return std::ptr::null_mut();
+        }
+        let mut buffer = vec![0u8; needed];
+        let written = unsafe {
+            vt::farcooler_vt_word_at(h, row, column, &mut offset, buffer.as_mut_ptr(), buffer.len())
+        };
+        if written != needed {
+            return std::ptr::null_mut();
+        }
+        match std::str::from_utf8(&buffer) {
+            Ok(text) => jstring_of(&mut env, &format!("{offset}\n{text}")),
+            Err(_) => std::ptr::null_mut(),
+        }
+    })
+}
+
 /// The URL under a cell, or null.
 ///
 /// The core decides what counts as a URL and which schemes may be opened.

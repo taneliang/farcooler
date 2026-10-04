@@ -1714,6 +1714,9 @@ final class TerminalSession: ObservableObject {
         vt?.url(atRow: row, column: column)
     }
 
+    /// The word under a cell and where the cell sits in it (ov-215).
+    func word(atRow row: Int, column: Int) -> (word: String, offset: Int)? { vt?.word(atRow: row, column: column) }
+
     /// "resource not found" is the host's answer for a terminal that is not
     /// currently a live pane — restarted, stopped, never started. Everything
     /// else is a real failure, and the two must read differently: one is

@@ -6,7 +6,7 @@ import Testing
 
 /// `test/fixtures/task-key-links.json`, which Android's `TaskKeyLinksTest`
 /// reads too: text, and the task keys in it that become links.
-private struct TaskKeyLinksFixture: Decodable {
+struct TaskKeyLinksFixture: Decodable {
     struct Link: Decodable, Equatable {
         var start: Int
         var key: String

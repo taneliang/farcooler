@@ -257,6 +257,19 @@ size_t farcooler_vt_url_at(void *handle, uint16_t row, uint16_t column,
                            FarCoolerVtUrlSpan *span, uint8_t *out,
                            size_t capacity);
 
+/*
+ * The whitespace-delimited word under a cell, or 0 if the cell is blank.
+ *
+ * For a link rule the core cannot know, such as a task key: the client reads
+ * the word and decides. `offset_utf16` is where the asked cell's character
+ * sits in the word, in UTF-16 units, and is filled on sizing calls too.
+ * Soft-wrapped rows are followed. Same sizing contract as farcooler_vt_url_at:
+ * nothing is written when the word exceeds `capacity`.
+ */
+size_t farcooler_vt_word_at(void *handle, uint16_t row, uint16_t column,
+                            uint32_t *offset_utf16, uint8_t *out,
+                            size_t capacity);
+
 /* MARK: - Input */
 
 /*

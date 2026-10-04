@@ -257,6 +257,12 @@ internal object NativeVt {
      */
     external fun nativeUrlAt(handle: Long, row: Int, column: Int): String?
 
+    /**
+     * The whitespace-delimited word under a cell as "<UTF-16 offset>\n<word>",
+     * or null on a blank cell. The app's own link rule, a task key, reads it.
+     */
+    external fun nativeWordAt(handle: Long, row: Int, column: Int): String?
+
     external fun nativeAltScreen(handle: Long): Boolean
 
     external fun nativeEncodeKey(handle: Long, key: Int, modifiers: Int): ByteArray?

@@ -227,6 +227,26 @@ final class VTCore {
         return (String(decoding: buffer, as: UTF8.self), span)
     }
 
+    /// The whitespace-delimited word under a cell and where the cell sits in
+    /// it, in UTF-16 units, or nil on a blank (ov-215).
+    ///
+    /// Which words are task keys is not the core's to know: the app has read
+    /// the boards, so the core answers with the word and `TaskKeyLinks` decides.
+    func word(atRow row: Int, column: Int) -> (word: String, offset: Int)? {
+        guard let handle, row >= 0, column >= 0 else { return nil }
+        var offset: UInt32 = 0
+        let needed = farcooler_vt_word_at(
+            handle, UInt16(clamping: row), UInt16(clamping: column), &offset, nil, 0)
+        guard needed > 0 else { return nil }
+        var buffer = [UInt8](repeating: 0, count: needed)
+        let written = buffer.withUnsafeMutableBufferPointer {
+            farcooler_vt_word_at(
+                handle, UInt16(clamping: row), UInt16(clamping: column), &offset, $0.baseAddress, $0.count)
+        }
+        guard written == needed else { return nil }
+        return (String(decoding: buffer, as: UTF8.self), Int(offset))
+    }
+
     var title: String? {
         guard let handle, let ptr = farcooler_vt_title(handle) else { return nil }
         return String(cString: ptr)

@@ -1049,8 +1049,17 @@ class TerminalSession(
      *
      * Asked of the emulator rather than of the host: it holds the same bytes,
      * and a round trip to answer a long press would arrive after the gesture.
+     * Private: the long press asks [linkAt], so no caller can read a URL and
+     * skip the task keys (ov-215).
      */
-    fun urlAt(row: Int, column: Int): String? = vt?.urlAt(row, column)
+    private fun urlAt(row: Int, column: Int): String? = vt?.urlAt(row, column)
+
+    /**
+     * What a long press on a cell holds: the URL there, else a task key's link
+     * ([index]'s runner), else null (ov-215).
+     */
+    fun linkAt(row: Int, column: Int, index: com.farcooler.model.TaskKeyIndex): String? =
+        com.farcooler.model.TerminalLinks.resolve({ urlAt(row, column) }, { vt?.wordAt(row, column) }, index)
 
     /**
      * "resource not found" is the host's answer for a terminal that is not

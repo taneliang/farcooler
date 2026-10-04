@@ -59,7 +59,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboard
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -148,6 +147,8 @@ fun TerminalPane(
 ) {
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboard.current
+    // The task keys a long press on output can land on (ov-215).
+    val taskKeys = rememberTaskKeyLinker(connection, model::navigate)
 
     // The URL a long press landed on, which is also what shows the sheet: a
     // dialog that can be presented with nothing to present is one that
@@ -397,7 +398,7 @@ fun TerminalPane(
                         // So the new behavior only appears where there is
                         // something to act on, and the old one is untouched
                         // everywhere else.
-                        val link = session.urlAt(row, column)
+                        val link = session.linkAt(row, column, taskKeys.index)
                         if (link != null) {
                             heldLink = link
                             linkFailure = null
@@ -452,30 +453,19 @@ fun TerminalPane(
     // "Open Link" without saying which link asks you to trust output an agent
     // produced without showing you what you are trusting.
     heldLink?.let { link ->
-        val uri = LocalUriHandler.current
-        AlertDialog(
-            onDismissRequest = { heldLink = null },
-            title = { Text("Link") },
-            text = {
-                Column {
-                    Text(link)
-                    linkFailure?.let {
-                        Text(it, color = MaterialTheme.colorScheme.error)
-                    }
-                }
+        HeldLinkDialog(
+            link = link,
+            linker = taskKeys,
+            failure = linkFailure,
+            onOpen = { failure ->
+                linkFailure = failure
+                if (failure == null) heldLink = null
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    linkFailure = LinkOpen.open(link, uri::openUri)
-                    if (linkFailure == null) heldLink = null
-                }) { Text("Open") }
+            onCopy = { text ->
+                heldLink = null
+                scope.launch { clipboard.writeText("Far Cooler link", text) }
             },
-            dismissButton = {
-                TextButton(onClick = {
-                    heldLink = null
-                    scope.launch { clipboard.writeText("Far Cooler link", link) }
-                }) { Text("Copy") }
-            },
+            onDismiss = { heldLink = null },
         )
     }
 }

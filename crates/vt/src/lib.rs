@@ -16,6 +16,7 @@ pub mod ffi;
 pub mod grid;
 pub mod input;
 pub mod url;
+pub mod word;
 
 use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::term::test::TermSize;

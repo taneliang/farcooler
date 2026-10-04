@@ -49,6 +49,8 @@ import SwiftUI
 //   -phone-no-kept-focus     with -phone-reopen-worktree, nothing was chosen in it: the rule decides
 //   -phone-files-old         the runner is older than Files: no worktree_files, no read_only_folders
 //   -phone-board-first       Billing opens on its Board segment, for a capture that sends no input
+//   -phone-terminal-key      the shell terminal (d003) opens with a line naming bil-9, a task on
+//                            Billing's board, for a long press to land on (ov-215)
 //   -phone-board-reads       the runner keeps read state (`board_reads`): Billing's floor is
 //                            25 hours back, so bil-5 (done a day ago) and bil-7 (moved
 //                            ten minutes ago) are unread, and `workspace.mark_read` raises it
@@ -301,6 +303,13 @@ final class HarnessRunner {
             guard let self else { throw ClientCore.CoreError.notStarted }
             return try await self.answer(method, args)
         }
+        // Calls made on the core itself, as a terminal pane's screen reads are.
+        nonisolated(unsafe) let calls = connection.standInCalls
+        await connection.core.standIn { method, args in
+            guard let calls else { throw ClientCore.CoreError.notStarted }
+            return try await calls(method, args)
+        }
+        connection.standIn(host: Self.host)
         connection.standIn(
             on: fleet(),
             repositories: CommandLine.arguments.contains("-phone-no-repositories")
@@ -527,6 +536,15 @@ final class HarnessRunner {
             return try json([:])
         case "worktree.list_dir", "worktree.read_file":
             return try files(method, args)
+        case "terminal.screen" where Self.showsTerminalKey && args["terminal"] as? String == Self.shell:
+            // One screen, the way the runner answers a capture: base64 of the
+            // bytes that draw it. A key in a sentence, and a version beside it
+            // that must stay plain.
+            let text = "bil-9 is done; build finished (v1.2, bil-1.2)\r\n$ "
+            return try json([
+                "contents": Data(text.utf8).base64EncodedString(), "columns": 52, "rows": 12,
+                "cursorColumn": 2, "cursorRow": 1, "revision": 1, "unchanged": false,
+            ])
         case "worktree.hide", "worktree.unhide":
             if CommandLine.arguments.contains("-phone-hide-fails") {
                 throw ClientCore.CoreError.rejected("unavailable", word: "unavailable")
@@ -586,6 +604,9 @@ final class HarnessRunner {
         default: throw ClientCore.CoreError.rejected("not found", word: "not-found")
         }
     }
+
+    /// `-phone-terminal-key`.
+    static var showsTerminalKey: Bool { CommandLine.arguments.contains("-phone-terminal-key") }
 
     /// `-phone-read-scope`.
     static var readOnly: Bool { CommandLine.arguments.contains("-phone-read-scope") }

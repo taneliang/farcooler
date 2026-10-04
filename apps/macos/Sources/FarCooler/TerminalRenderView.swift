@@ -1,3 +1,4 @@
+import AgentKit
 import AppKit
 import CFarCoolerVT
 import Combine
@@ -192,6 +193,10 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
 
     /// The link under the pointer while ⌘ is held, and where it sits.
     private var hoveredLink: (url: String, span: FarCoolerVtUrlSpan)?
+    /// What a task key in output links to, set by `TerminalCanvas` (ov-215).
+    var taskKeyLinker: TaskKeyLinker = .none
+    /// The URL under the pointer while ⌘ is held, for a test.
+    var hoveredLinkForTesting: String? { hoveredLink?.url }
     /// Recreated on every layout, so the area always covers the current bounds.
     private var linkTracking: NSTrackingArea?
     /// Whether this view is the one currently showing the pointing hand, so it
@@ -1206,7 +1211,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
             return
         }
         let point = cell(for: event)
-        setHoveredLink(core.url(atRow: point.row, column: point.column))
+        setHoveredLink(link(atRow: point.row, column: point.column))
     }
 
     private func setHoveredLink(_ link: (url: String, span: FarCoolerVtUrlSpan)?) {
@@ -1239,12 +1244,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         // whatever it read.
         if event.modifierFlags.contains(.command) {
             let target = cell(for: event)
-            if let link = core.url(atRow: target.row, column: target.column),
-                let url = URL(string: link.url)
-            {
-                NSWorkspace.shared.open(url)
-                return
-            }
+            if openLink(atRow: target.row, column: target.column) { return }
         }
 
         claimKeyboard()

@@ -2285,6 +2285,10 @@ final class Connection: ObservableObject {
         phase = .connected
     }
 
+    /// The runner this stand-in is on, so what reads `hostId` (a task key's
+    /// link) has one. `PhoneHarness` only.
+    func standIn(host runner: Runner) { host = runner }
+
     /// The same, with what `PhoneHarness` also has to claim: the runner's
     /// repositories and its build, which the workspace screens read.
     func standIn(on fleet: Fleet, repositories: [Repository], build: DaemonBuild) {

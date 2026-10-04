@@ -594,6 +594,38 @@ pub unsafe extern "C" fn farcooler_vt_url_at(
     })
 }
 
+/// The whitespace-delimited word under a cell, or 0 if the cell is blank.
+///
+/// For a client-side link rule the core cannot know, like a task key: the
+/// client reads the word, and `offset_utf16` says where the asked cell's
+/// character sits in it. Soft wraps are followed.
+///
+/// Returns the byte length the word needs and writes nothing when that exceeds
+/// `capacity`, the same contract as `farcooler_vt_url_at`. `offset_utf16` is
+/// filled whenever a word is found, sizing calls included.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn farcooler_vt_word_at(
+    handle: *mut c_void,
+    row: u16,
+    column: u16,
+    offset_utf16: *mut u32,
+    out: *mut u8,
+    capacity: usize,
+) -> usize {
+    guarded_handle(handle, 0, |h| {
+        let Some(found) = crate::word::word_at(&h.terminal, row, column) else { return 0 };
+        if !offset_utf16.is_null() {
+            unsafe { *offset_utf16 = found.offset };
+        }
+        let bytes = found.text.as_bytes();
+        if bytes.len() > capacity || out.is_null() {
+            return bytes.len();
+        }
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len()) };
+        bytes.len()
+    })
+}
+
 fn decode_key(key: u32) -> Option<crate::input::Key> {
     use crate::input::Key;
     Some(match key {
@@ -1111,6 +1143,35 @@ mod tests {
         assert_eq!((span.end_row, span.end_column), (0, 24));
 
         assert!(url(h, 0, 0).is_none(), "no URL under \"see\"");
+        unsafe { farcooler_vt_free(h) };
+    }
+
+    #[test]
+    fn a_word_crosses_the_boundary_with_its_offset() {
+        let h = farcooler_vt_new(60, 4);
+        feed(h, b"see (ov-190). now");
+        let mut offset = 99u32;
+        let needed =
+            unsafe { farcooler_vt_word_at(h, 0, 8, &mut offset, std::ptr::null_mut(), 0) };
+        assert_eq!(needed, "(ov-190).".len());
+        assert_eq!(offset, 4, "column 8 is the fifth character of the word");
+        let mut buf = vec![0u8; needed];
+        let n =
+            unsafe { farcooler_vt_word_at(h, 0, 8, &mut offset, buf.as_mut_ptr(), needed) };
+        assert_eq!((n, &buf[..]), (needed, &b"(ov-190)."[..]));
+        let mut one = [0u8; 1];
+        let short =
+            unsafe { farcooler_vt_word_at(h, 0, 8, &mut offset, one.as_mut_ptr(), 1) };
+        assert_eq!((short, one[0]), (needed, 0), "a short buffer writes nothing");
+        assert_eq!(
+            unsafe { farcooler_vt_word_at(h, 0, 0, &mut offset, std::ptr::null_mut(), 0) },
+            "see".len()
+        );
+        assert_eq!(
+            unsafe { farcooler_vt_word_at(h, 0, 3, &mut offset, std::ptr::null_mut(), 0) },
+            0,
+            "a space is no word"
+        );
         unsafe { farcooler_vt_free(h) };
     }
 

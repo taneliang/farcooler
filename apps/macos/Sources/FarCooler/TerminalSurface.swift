@@ -126,6 +126,7 @@ struct TerminalCanvas: NSViewRepresentable {
         view.takesKeyboard = !context.environment.outOfSight
         // Out of sight draws nothing, too (ov-229).
         view.isShown = !context.environment.outOfSight
+        view.taskKeyLinker = context.environment.taskKeyLinker
 
         // Only re-attach when the selected terminal actually changes, or when
         // the link underneath it has been replaced. Restarting on every

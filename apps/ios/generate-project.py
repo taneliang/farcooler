@@ -114,6 +114,10 @@ SOURCES = [
     "TaskUsageSection.swift",
     # Task keys in a runner's text as links, pushing the task (ov-196).
     "TaskKeyLinking.swift",
+    # Task keys in terminal output as links (ov-215): the long press's link
+    # and its dialog.
+    "TerminalSessionTaskKeys.swift",
+    "HeldLinkDialog.swift",
     # The same stack over a canned runner, for the UI suite. DEBUG only.
     "PhoneHarness.swift",
     "ShellHarness.swift",
@@ -573,6 +577,8 @@ AGENTKIT_SOURCES = [
     # Task keys in text as links (ov-196): which words are keys, the link's
     # URL, and the linker `MarkdownView.swift` reads from the environment.
     "TaskKeyLinks.swift",
+    # Which cell of a terminal's output a task key is in (ov-215).
+    "TerminalTaskKeys.swift",
 ]
 # The widget extension's own sources, in `apps/ios/FarCoolerActivity/`.
 #
@@ -750,6 +756,9 @@ UI_TEST_SOURCES = [
     "ComposerKeyboardTests.swift",
     "ChangesPullRequestTests.swift",
     "ChangesPatchNoticeTests.swift",
+    # A task key in terminal output opens its task with a long press (ov-215).
+    # Needs no runner: `-phone-harness -phone-terminal-key`.
+    "TerminalTaskKeyTests.swift",
     "AgentRetrySendTests.swift",
     # A chat whose agent died says so beside the composer, with Restart
     # (ov-174). Stands on `-agent-layout-harness -stopped`; needs no runner.

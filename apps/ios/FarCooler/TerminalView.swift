@@ -773,6 +773,9 @@ struct TerminalScrollReadout: Equatable {
 struct TerminalView: View {
     @ObservedObject var connection: Connection
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.phoneNavigator) private var navigator
+    /// What a task key in this pane's output links to (ov-215).
+    private var linker: TaskKeyLinker { connection.taskKeyLinker(navigator) }
 
     @StateObject private var session: TerminalSession
     /// The terminal this pane shows. Fixed for the pane's lifetime.
@@ -1032,20 +1035,7 @@ struct TerminalView: View {
         // Inside the stack rather than a second copy outside it, because
         // outside is where the one that loses already is.
         .background(TerminalPalette.background.ignoresSafeArea())
-        // The link a long press landed on. Titled with the URL itself, because
-        // "Open Link" without saying which link is a button that asks you to
-        // trust output an agent produced.
-        .confirmationDialog(
-            heldLink ?? "",
-            isPresented: Binding(get: { heldLink != nil }, set: { if !$0 { heldLink = nil } }),
-            titleVisibility: .visible
-        ) {
-            if let link = heldLink, let url = URL(string: link) {
-                Button("Open Link") { UIApplication.shared.open(url) }
-            }
-            Button("Copy Link") { UIPasteboard.general.string = heldLink }
-            Button("Cancel", role: .cancel) {}
-        }
+        .heldLinkDialog($heldLink, linker: linker)
         // What this pane costs while it is not on screen: nothing.
         //
         // The stream is a second ssh channel and the poll is traffic to the
@@ -1427,7 +1417,7 @@ struct TerminalView: View {
                     // inventing a second meaning here would be a gesture nobody
                     // asked for on a screen where every touch matters.
                     let target = cell(at: point, grid: grid, size: size)
-                    heldLink = session.url(atRow: target.row, column: target.column)
+                    heldLink = session.link(atRow: target.row, column: target.column, linker: linker)
                 },
                 accessory: AnyView(
                     TerminalKeyRow(

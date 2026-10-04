@@ -120,6 +120,20 @@ class VtCore(columns: Int, rows: Int) {
         else NativeVt.nativeUrlAt(handle, row, column)
 
     /**
+     * The whitespace-delimited word under a cell and where the cell sits in it,
+     * in UTF-16 units, or null on a blank. Soft wraps are followed. A link rule
+     * the core cannot know, such as a task key, reads it (ov-215).
+     */
+    fun wordAt(row: Int, column: Int): Pair<String, Int>? {
+        if (handle == 0L || row < 0 || column < 0) return null
+        val raw = NativeVt.nativeWordAt(handle, row, column) ?: return null
+        val cut = raw.indexOf('\n')
+        if (cut <= 0) return null
+        val offset = raw.substring(0, cut).toIntOrNull() ?: return null
+        return raw.substring(cut + 1) to offset
+    }
+
+    /**
      * Encode a keystroke for the program currently running.
      *
      * The core answers because the answer depends on modes it holds: an arrow

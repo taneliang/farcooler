@@ -158,12 +158,25 @@ actor ClientCore {
 
     /// Invoke a method.
     func call(_ method: String, _ args: [String: Any] = [:]) async throws -> Data {
-        try await submit { handle in
+        #if DEBUG
+        if let standInCalls { return try await standInCalls(method, args) }
+        #endif
+        return try await submit { handle in
             withJSON(args) { json in
                 method.withCString { farcooler_client_call(handle, $0, json) }
             }
         }
     }
+
+    #if DEBUG
+    /// A canned runner's answers for calls made on the core itself, such as a
+    /// terminal pane's screen reads (`PhoneHarness`). Nil in the app.
+    private var standInCalls: (@Sendable (String, [String: Any]) async throws -> Data)?
+
+    func standIn(_ calls: @escaping @Sendable (String, [String: Any]) async throws -> Data) {
+        standInCalls = calls
+    }
+    #endif
 
     /// Paste a file into a terminal, and hand back the path it landed at.
     ///

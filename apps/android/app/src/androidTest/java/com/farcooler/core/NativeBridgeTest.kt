@@ -51,6 +51,15 @@ class NativeBridgeTest {
     }
 
     @Test
+    fun theWordUnderACellComesBackWithItsOffset() {
+        val vt = VtCore(40, 4)
+        vt.feed("see (ov-190). now".toByteArray())
+        assertEquals("(ov-190)." to 4, vt.wordAt(0, 8))
+        assertNull(vt.wordAt(0, 3))
+        vt.free()
+    }
+
+    @Test
     fun aGridTooSmallToBeATerminalIsClampedRatherThanHonoured() {
         // The core floors a terminal at 20×5 (`crates/vt/src/lib.rs`, `clamp`),
         // and the header states it. Asserted here because the clamp has to
