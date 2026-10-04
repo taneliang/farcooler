@@ -4921,7 +4921,7 @@ mod tests {
             read_only_folders: vec![farcooler_protocol::v1::ReadOnlyFolder { name: "logs".into(), path: "/var/log".into() }],
             ..Default::default()
         };
-        let says = vec!["read_only_folders".to_string()];
+        let says = vec![farcooler_protocol::capability::READ_ONLY_FOLDERS.to_string()];
         assert_eq!(
             status_json(&host, &says, counts())["readOnlyFolders"],
             serde_json::json!([{"name": "logs", "path": "/var/log"}])

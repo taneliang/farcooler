@@ -35,7 +35,7 @@ struct FilesFolderTests {
             await client.refreshNeedsYou()
             return client.readOnlyFolders
         }
-        #expect(await names(["worktrees", "terminals", "read_only_folders"]) == ["logs"])
+        #expect(await names(["worktrees", "terminals", Capability.readOnlyFolders.rawValue]) == ["logs"])
         #expect(await names(["worktrees", "terminals"]).isEmpty)
     }
 
@@ -90,32 +90,40 @@ struct FilesFolderTests {
         let model = FilesModel(folder: "logs", client: client)
         await model.loadIfNeeded()
         await model.open("nginx/a.log", line: nil)
-        #expect(recorder.calls.contains(["files", "folder-ls", "logs", "", "--json"]), "\(recorder.calls)")
-        #expect(recorder.calls.contains(["files", "folder-cat", "logs", "nginx/a.log", "--json"]), "\(recorder.calls)")
+        #expect(recorder.calls.contains(["files", "folder-ls", "--json", "--", "logs", ""]), "\(recorder.calls)")
+        #expect(recorder.calls.contains(["files", "folder-cat", "--json", "--", "logs", "nginx/a.log"]), "\(recorder.calls)")
         #expect(recorder.calls.allSatisfy { $0.count < 2 || $0[1] != "ls" }, "a worktree's reads name an id")
     }
 
     // MARK: - Refusals
 
-    @Test("A folder the runner no longer shares reads as a sentence")
-    func aGoneFolderReadsPlainly() async {
-        let refused = "error: no such folder\ncode: not-found"
-        #expect(FileReadFailure.from(cli: refused, inFolder: true) == .folderGone)
-        #expect(FileReadFailure.from(cli: refused, inFolder: false) == .missingInFolder)
-        #expect(FileReadFailure.folderGone.sentence == "This runner doesn’t share this folder anymore.")
-        #expect(FileReadFailure.missingInFolder.sentence == "This isn’t in the folder anymore.")
-        // Anything the CLI says that isn't a known code stays the general sentence.
-        #expect(FileReadFailure.from(cli: "Error: Os { code: 2 }", inFolder: true) == .failed)
-
-        let model = model(root: .failure(.folderGone))
+    @Test("A folder the runner refuses reads as a sentence, through the CLI's own words")
+    func aRefusedFolderReadsPlainly() async {
+        let refused = "error: nothing by that name in this folder\ncode: not-found"
+        let client = DaemonClient(target: "", notifications: NotificationCenter())
+        client.commandRunnerForTesting = { _ in (nil, refused) }
+        let model = FilesModel(folder: "logs", client: client)
         await model.loadIfNeeded()
         #expect(model.folders[""] == .failed(.folderGone))
-        let file = self.model(["x": .failure(.missingInFolder)], root: .failure(.folderGone))
-        await file.open("x", line: nil)
-        #expect(file.opened?.content == .failed(.missingInFolder))
-        for why in [FileReadFailure.folderGone, .missingInFolder] {
-            #expect(!why.sentence.contains("Os {") && !why.sentence.contains("code"))
-        }
+        #expect(model.folderGone)
+        #expect(FileReadFailure.folderGone.sentence == "This runner doesn’t share this folder anymore.")
+        await model.open("x", line: nil)
+        #expect(model.opened?.content == .failed(.missingInFolder))
+        #expect(FileReadFailure.missingInFolder.sentence == "This isn’t in the folder anymore.")
+        // A message with no runner code stays the general sentence, never the raw text.
+        client.commandRunnerForTesting = { _ in (nil, "Error: Os { code: 2 }") }
+        let other = FilesModel(folder: "logs", client: client)
+        await other.loadIfNeeded()
+        #expect(other.folders[""] == .failed(.failed))
+        #expect(!FileReadFailure.failed.sentence.contains("Os"))
+        #expect(!other.folderGone)
+    }
+
+    @Test("A pane title names a remote runner, not its ssh target")
+    func theTitleNamesTheRunner() {
+        #expect(ReadOnlyFolders.title("logs", host: "") == "logs")
+        #expect(ReadOnlyFolders.title("logs", host: "deploy@box.local") == "logs · box.local")
+        #expect(ReadOnlyFolders.runnerName("") == "This Mac")
     }
 
     // MARK: - Where it opens

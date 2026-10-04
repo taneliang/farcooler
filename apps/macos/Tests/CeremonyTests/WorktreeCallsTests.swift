@@ -147,18 +147,22 @@ struct WorktreeCallsTests {
             _ = await $0.searchFiles(in: Self.worktree, query: "mai")
         }
         // The Files tab's two reads (ov-189), the root and a file.
-        await record("listFiles", ["files", "ls", "w1", "", "--json"]) {
+        await record("listFiles", ["files", "ls", "--json", "--", "w1", ""]) {
             _ = await $0.listFiles(in: Self.worktree, path: "")
         }
-        await record("readFile", ["files", "cat", "w1", "src/main.rs", "--json"]) {
+        await record("readFile", ["files", "cat", "--json", "--", "w1", "src/main.rs"]) {
             _ = await $0.readFile(in: Self.worktree, path: "src/main.rs")
         }
         // An extra read-only folder's two reads (ov-232): by name, never by id.
-        await record("listFiles in a folder", ["files", "folder-ls", "logs", "nginx", "--json"]) {
+        await record("listFiles in a folder", ["files", "folder-ls", "--json", "--", "logs", "nginx"]) {
             _ = await $0.listFiles(inFolder: "logs", path: "nginx")
         }
-        await record("readFile in a folder", ["files", "folder-cat", "logs", "nginx/a.log", "--json"]) {
+        await record("readFile in a folder", ["files", "folder-cat", "--json", "--", "logs", "nginx/a.log"]) {
             _ = await $0.readFile(inFolder: "logs", path: "nginx/a.log")
+        }
+        // A name shaped like a flag is still a name.
+        await record("readFile named like a flag", ["files", "folder-cat", "--json", "--", "logs", "--runner=x"]) {
+            _ = await $0.readFile(inFolder: "logs", path: "--runner=x")
         }
         await record("assign", ["worktree", "assign", "w1", "--to", Self.billing.id, "--json"]) {
             _ = await $0.assignWorktree(Self.worktree, to: Self.billing)
@@ -590,7 +594,10 @@ struct WorktreeCallsTests {
     private static func parse(_ line: [String], with cli: String) -> (Int32, String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: cli)
-        process.arguments = line + ["--help"]
+        // Before a `--`: after one `--help` would be one more name.
+        var arguments = line
+        arguments.insert("--help", at: line.firstIndex(of: "--") ?? line.endIndex)
+        process.arguments = arguments
         var environment = ProcessInfo.processInfo.environment
         environment["FARCOOLER_HOME"] = FileManager.default.temporaryDirectory
             .appendingPathComponent("fc-worktree-calls-\(UUID().uuidString)").path

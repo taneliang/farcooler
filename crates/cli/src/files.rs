@@ -83,8 +83,9 @@ async fn files_over<L: DispatchLink>(link: &mut L, cmd: FilesCmd, json: bool) ->
     if cmd.reads_folder() && !link.capabilities().iter().any(|c| c == capability::READ_ONLY_FOLDERS) {
         return Err(Refused::new("this runner needs an update to show its extra folders".into(), None).into());
     }
+    let folder = cmd.reads_folder();
     answer(link, cmd, json).await.map_err(|e| match e.downcast::<ClientError>() {
-        Ok(err) => Box::new(refusal(*err)) as Box<dyn std::error::Error>,
+        Ok(err) => Box::new(refusal(*err, folder)) as Box<dyn std::error::Error>,
         Err(other) => other,
     })
 }
@@ -147,19 +148,20 @@ async fn answer<L: DispatchLink>(link: &mut L, cmd: FilesCmd, json: bool) -> Fal
 }
 
 /// The runner's refusal in this CLI's words, keeping its code.
-fn refusal(err: ClientError) -> Refused {
+fn refusal(err: ClientError, folder: bool) -> Refused {
+    let place = if folder { "folder" } else { "worktree" };
     let (code, what) = match err {
         ClientError::Daemon { code, what, .. } => (code, what),
         other => return crate::tasks::refusal(other, ""),
     };
     let said = match (farcooler_core::error::word_for(code), what.as_str()) {
-        ("not-found", _) => "nothing by that name in this worktree, or a link on the way to it",
-        ("invalid-argument", "path") => "name a path inside the worktree, relative to its root, without `..`",
-        ("invalid-argument", "kind") => "that's a directory, or not a file that can be read",
-        ("scope-denied", _) => "this client isn't allowed to read files on this runner",
-        _ => "the runner couldn't read that",
+        ("not-found", _) => format!("nothing by that name in this {place}, or a link on the way to it"),
+        ("invalid-argument", "path") => format!("name a path inside the {place}, relative to its root, without `..`"),
+        ("invalid-argument", "kind") => "that's a directory, or not a file that can be read".into(),
+        ("scope-denied", _) => "this client isn't allowed to read files on this runner".into(),
+        _ => "the runner couldn't read that".into(),
     };
-    Refused::naming(said.into(), code, what)
+    Refused::naming(said, code, what)
 }
 
 #[cfg(test)]

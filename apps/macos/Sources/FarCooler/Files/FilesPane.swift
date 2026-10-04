@@ -218,7 +218,11 @@ struct FilesPane: View {
     private var document: some View {
         switch model.opened?.content {
         case nil:
-            PaneNotice(title: "No File Open", detail: "Choose a file to read it here.")
+            if model.folderGone {
+                PaneNotice(title: "Folder Unavailable", detail: FileReadFailure.folderGone.sentence)
+            } else {
+                PaneNotice(title: "No File Open", detail: "Choose a file to read it here.")
+            }
         case .loading?:
             // A read in flight isn't an answer (`ChangesPane.diffBody`).
             Color.clear
@@ -331,7 +335,8 @@ private struct FilesTree: View {
 
     @ViewBuilder
     private var tree: some View {
-        if case .failed(let why)? = model.folders[""] {
+        // A folder that's gone says so beside the file, not here too.
+        if case .failed(let why)? = model.folders[""], !model.folderGone {
             Text(why.sentence)
                 .font(.system(size: WorkspaceStyle.PaneText.body))
                 .foregroundStyle(.secondary)

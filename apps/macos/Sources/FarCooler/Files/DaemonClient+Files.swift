@@ -106,10 +106,14 @@ extension DaemonClient {
         daemonBuild.map { $0.can(.worktreeFiles) }
     }
 
+    /// Every read here puts `--` before the names it passes: a file in a
+    /// directory like /var/log is named by whoever writes there, and one
+    /// called `--runner=x` must be read as a name, never as a flag.
+
     /// One directory of `worktree`, `path` relative to its root ("" is the
     /// root). `files ls`.
     func listFiles(in worktree: Worktree, path: String) async -> Result<FileListing, FileReadFailure> {
-        let (data, message) = await runRaw(["files", "ls", worktree.short, path, "--json"], background: true)
+        let (data, message) = await runRaw(["files", "ls", "--json", "--", worktree.short, path], background: true)
         guard let data else { return .failure(.from(cli: message)) }
         guard let listing = try? JSONDecoder().decode(FileListing.self, from: data) else { return .failure(.failed) }
         return .success(listing)
@@ -117,7 +121,7 @@ extension DaemonClient {
 
     /// One file of `worktree`, whole, up to the runner's 512 KiB. `files cat`.
     func readFile(in worktree: Worktree, path: String) async -> Result<FileRead, FileReadFailure> {
-        let (data, message) = await runRaw(["files", "cat", worktree.short, path, "--json"], background: true)
+        let (data, message) = await runRaw(["files", "cat", "--json", "--", worktree.short, path], background: true)
         guard let data else { return .failure(.from(cli: message)) }
         guard let read = try? JSONDecoder().decode(FileRead.self, from: data) else { return .failure(.failed) }
         return .success(read)
@@ -128,7 +132,7 @@ extension DaemonClient {
     /// One directory of the extra read-only folder `name`, `path` relative to
     /// it ("" is its root). `files folder-ls`.
     func listFiles(inFolder name: String, path: String) async -> Result<FileListing, FileReadFailure> {
-        let (data, message) = await runRaw(["files", "folder-ls", name, path, "--json"], background: true)
+        let (data, message) = await runRaw(["files", "folder-ls", "--json", "--", name, path], background: true)
         guard let data else { return .failure(.from(cli: message, inFolder: path.isEmpty)) }
         guard let listing = try? JSONDecoder().decode(FileListing.self, from: data) else { return .failure(.failed) }
         return .success(listing)
@@ -136,7 +140,7 @@ extension DaemonClient {
 
     /// One file of the extra read-only folder `name`. `files folder-cat`.
     func readFile(inFolder name: String, path: String) async -> Result<FileRead, FileReadFailure> {
-        let (data, message) = await runRaw(["files", "folder-cat", name, path, "--json"], background: true)
+        let (data, message) = await runRaw(["files", "folder-cat", "--json", "--", name, path], background: true)
         guard let data else { return .failure(.from(cli: message, inFolder: false)) }
         guard let read = try? JSONDecoder().decode(FileRead.self, from: data) else { return .failure(.failed) }
         return .success(read)

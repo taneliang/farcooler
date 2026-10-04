@@ -228,7 +228,7 @@ enum WorkspaceSwitcherMenu {
             // Each runner's own, under its name once there's more than one.
             var lines: [SwitcherEntry] = []
             for group in folders {
-                if folders.count > 1 { lines.append(.header(RunnerStatusItem.name(group.host))) }
+                if folders.count > 1 { lines.append(.header(ReadOnlyFolders.runnerName(group.host))) }
                 lines += group.names.map {
                     .item(title: $0, symbol: "folder", command: .openFolder(host: group.host, name: $0))
                 }

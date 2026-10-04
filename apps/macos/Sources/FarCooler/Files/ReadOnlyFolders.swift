@@ -26,6 +26,12 @@ enum ReadOnlyFolders {
     /// What Files calls a folder: its name, and its runner when that
     /// disambiguates.
     static func title(_ name: String, host: String) -> String {
-        host.isEmpty ? name : "\(name) · \(host)"
+        host.isEmpty ? name : "\(name) · \(runnerName(host))"
+    }
+
+    /// A runner by name rather than by its ssh target: "This Mac", or the
+    /// host without its `user@`.
+    static func runnerName(_ host: String) -> String {
+        host.isEmpty ? "This Mac" : String(host.split(separator: "@", omittingEmptySubsequences: false).last ?? "")
     }
 }

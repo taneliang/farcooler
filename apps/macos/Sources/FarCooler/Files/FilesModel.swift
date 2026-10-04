@@ -109,6 +109,10 @@ final class FilesModel: ObservableObject {
     /// The longest line of the file on screen, in characters.
     @Published private(set) var widest = 0
 
+    /// Whether this is an extra folder its runner no longer shares: there is
+    /// nothing in it to choose.
+    var folderGone: Bool { worktree == nil && folders[""] == .failed(.folderGone) }
+
     /// The lines of the file on screen, or none.
     var lines: [String] {
         if case .text(let lines)? = opened?.content { return lines }
