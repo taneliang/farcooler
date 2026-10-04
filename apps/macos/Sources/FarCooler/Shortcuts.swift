@@ -164,8 +164,6 @@ struct ShortcutsSheet: View {
             .padding(.top, 20)
             .padding(.bottom, 14)
 
-            Divider()
-
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     ForEach(Shortcut.groups, id: \.0) { group in
@@ -192,7 +190,6 @@ struct ShortcutsSheet: View {
                 .padding(22)
             }
 
-            Divider()
             // Done at the bottom right with the footnote, where a Mac sheet
             // keeps its buttons, rather than in the title row.
             HStack {

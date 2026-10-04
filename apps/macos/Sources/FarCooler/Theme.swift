@@ -129,7 +129,7 @@ enum WorkspaceStyle {
     /// `paneChrome` as the dynamic `NSColor` it wraps, so it can be resolved under a chosen appearance.
     static var paneChromeNS: NSColor { blend(.controlBackgroundColor, withTheme: 0.14) }
 
-    static var hairline: Color { Color.primary.opacity(0.11) }
+    static var hairline: Color { Color(nsColor: .separatorColor) }
 
     /// Selection belongs to navigators, not to structural headings inside a
     /// document. Keeping this semantic stops a file heading, a selected file,
@@ -155,7 +155,7 @@ enum WorkspaceStyle {
     /// does natively and is the reason this is a state and not a flag the
     /// window sets.
     static func navigatorSelection(active: Bool) -> Color {
-        active ? Color.accentColor.opacity(0.13) : Color.primary.opacity(0.09)
+        Fill.selection(active: active)
     }
 
     /// A file boundary inside the diff. Deliberately neutral: it organizes the
@@ -170,11 +170,11 @@ enum WorkspaceStyle {
     /// the line numbers read as floating on the code's own ground and the
     /// column the tint exists to draw was not being drawn. 5% is still quiet
     /// over a thousand lines and is actually there.
-    static var diffGutter: Color { Color.primary.opacity(0.05) }
+    static var diffGutter: Color { Fill.inset() }
 
     /// Feedback for an inline disclosure, used only while the pointer is over
     /// it. The resting state stays almost invisible in a long diff.
-    static var disclosureHover: Color { Color.accentColor.opacity(0.08) }
+    static var disclosureHover: Color { Fill.hover }
 
     /// A DYNAMIC color: system `base` mixed `amount` of the way toward the
     /// theme's background, mixed again every time the color is resolved.
@@ -230,7 +230,7 @@ struct PaneHeaderBackground: View {
     var body: some View {
         ZStack {
             WorkspaceStyle.paneChrome
-            if focused { Color.accentColor.opacity(0.10) }
+            if focused { Fill.selection(active: true) }
         }
     }
 }
