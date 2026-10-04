@@ -622,4 +622,33 @@ final class AgentEndedSessionTests: XCTestCase {
                 "\(action) went missing from a queue that can still be acted on")
         }
     }
+
+    /// ov-171: a runner that doesn't advertise `agent_queue` can't change a
+    /// queued message, so the row says so and the three actions are dimmed,
+    /// not offered. Mutation: `QueuedRow` ignoring `controls`. Red: no sentence,
+    /// and the buttons are live.
+    func testAnOlderRunnerDimsTheQueueAndSaysWhy() {
+        let app = launch(["-phone-queue-old"])
+        let said = app.staticTexts["agent-queue-unavailable"]
+        XCTAssertTrue(said.waitForExistence(timeout: 30), "The older runner's queue said nothing")
+        XCTAssertEqual(
+            said.label,
+            "This runner can\u{2019}t change queued messages. Update it to edit or cancel them.")
+        for action in ["Send Now", "Edit", "Remove"] {
+            XCTAssertFalse(
+                app.buttons[action].isEnabled,
+                "\(action) was live on a runner that can't carry it out")
+        }
+    }
+
+    /// The other half: with the capability the actions are live and nothing
+    /// is said. Mutation: the gate always unavailable. Red: dimmed actions.
+    func testARunnerWithTheQueueCapabilityKeepsItsActionsLive() {
+        let app = launch([])
+        XCTAssertTrue(app.staticTexts["agent-queued-state"].waitForExistence(timeout: 30))
+        XCTAssertFalse(app.staticTexts["agent-queue-unavailable"].exists)
+        for action in ["Send Now", "Edit", "Remove"] {
+            XCTAssertTrue(app.buttons[action].isEnabled, "\(action) was dimmed with the capability")
+        }
+    }
 }

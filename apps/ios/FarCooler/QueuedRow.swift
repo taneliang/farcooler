@@ -1,7 +1,9 @@
 import SwiftUI
 
 // The queue's row, moved out of `AgentView.swift` (ov-171) to keep that file
-// inside its size ceiling. Nothing about it changed in the move.
+// inside its size ceiling. The move changed nothing; the same change then
+// added `controls`, which dims the three actions on a runner that can't
+// change a queued message and says why.
 
 /// A message written but not yet sent. See the Mac's `QueuedRow`.
 struct QueuedRow: View {
@@ -37,10 +39,10 @@ struct QueuedRow: View {
     let hasAgent: Bool
     /// Whether this runner can change a queued message at all (ov-171).
     ///
-    /// Hidden rather than grayed, for the reason `hasAgent` gives: three
-    /// unreadable words in a row say less than the one sentence that replaces
-    /// them. The sentence is what makes the same app showing different
-    /// controls on two runners read as a fact about the runner.
+    /// Dimmed with a reason, never hidden: `DaemonBuild.can` states the rule,
+    /// because the same app showing different controls on two runners with
+    /// nothing said about why reads as a bug. (`hasAgent` is the opposite
+    /// case and takes the actions away: there the pane itself is gone.)
     let controls: QueueControls
 
     @State private var editing = false
@@ -124,6 +126,15 @@ struct QueuedRow: View {
                     VStack(alignment: .leading, spacing: 0) { queuedActions(stacked: true) }
                 }
                 .buttonStyle(QueuedActionStyle())
+
+                if case let .unavailable(sentence) = controls {
+                    Text(sentence)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("agent-queue-unavailable")
+                }
             }
             .padding(.horizontal, PaneMetrics.edge)
             .padding(.vertical, PaneMetrics.card)
@@ -154,14 +165,9 @@ struct QueuedRow: View {
             .lineLimit(1)
             .fixedSize(horizontal: !stacked, vertical: true)
             .accessibilityIdentifier("agent-queued-state")
-        if case let .unavailable(sentence) = controls {
-            Text(sentence)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("agent-queue-unavailable")
-        } else if hasAgent {
+        if hasAgent {
             Button("Send Now", action: onSteer)
+                .disabled(!controls.isAvailable)
                 .buttonStyle(QueuedActionStyle(prominent: true))
                 .lineLimit(1)
                 .fixedSize(horizontal: !stacked, vertical: true)
@@ -173,9 +179,11 @@ struct QueuedRow: View {
                     editing = true
                 }
             }
+            .disabled(!controls.isAvailable)
             .lineLimit(1)
             .fixedSize(horizontal: !stacked, vertical: true)
             Button("Remove", action: onCancel)
+                .disabled(!controls.isAvailable)
                 .lineLimit(1)
                 .fixedSize(horizontal: !stacked, vertical: true)
         }
@@ -216,6 +224,7 @@ struct QueuedRow: View {
 struct QueuedActionStyle: ButtonStyle {
     /// Whether this is the one action on the card worth finding by color.
     var prominent = false
+    @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -224,7 +233,7 @@ struct QueuedActionStyle: ButtonStyle {
             // The press, said by the label rather than by a fill: there is no
             // fill here to press, and a word that does nothing under a thumb
             // is a word nobody is sure they hit.
-            .opacity(configuration.isPressed ? 0.55 : 1)
+            .opacity(configuration.isPressed ? 0.55 : (isEnabled ? 1 : 0.4))
             .frame(minHeight: PaneMetrics.target)
             .contentShape(.rect)
     }

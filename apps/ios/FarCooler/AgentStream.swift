@@ -468,6 +468,7 @@ final class AgentStream: ObservableObject {
     @discardableResult
     private func perform(
         _ method: String, _ arguments: [String: Any], failed: String,
+        queue: QueueControls.Action? = nil,
         retry: (@MainActor () async -> Void)? = nil
     ) async -> Bool {
         var args = arguments
@@ -478,10 +479,16 @@ final class AgentStream: ObservableObject {
             return true
         } catch {
             banners.controlFailed(
-                SendFailure(message: ClientCore.trouble(error, after: failed).sentence) {
+                SendFailure(
+                    message: queue.map {
+                        QueueControls.refusal(
+                            $0, word: ClientCore.refusalWord(of: error),
+                            message: error.localizedDescription)
+                    } ?? ClientCore.trouble(error, after: failed).sentence
+                ) {
                     [weak self] in
                     if let retry { await retry() } else {
-                        await self?.perform(method, arguments, failed: failed)
+                        await self?.perform(method, arguments, failed: failed, queue: queue)
                     }
                 }, key: method)
             return false
@@ -492,21 +499,24 @@ final class AgentStream: ObservableObject {
     func editQueued(_ id: String, _ text: String) async {
         await perform(
             "terminal.agent_edit_queued", ["queuedId": id, "text": text],
-            failed: QueueControls.Action.edit.failed)
+            failed: QueueControls.Action.edit.failed,
+            queue: .edit)
     }
 
     /// Send a queued message into the turn already running.
     func steerQueued(_ id: String) async {
         await perform(
             "terminal.agent_steer_queued", ["queuedId": id],
-            failed: QueueControls.Action.steer.failed)
+            failed: QueueControls.Action.steer.failed,
+            queue: .steer)
     }
 
     /// Take back a message that has not gone out yet.
     func cancelQueued(_ id: String) async {
         await perform(
             "terminal.agent_cancel_queued", ["queuedId": id],
-            failed: QueueControls.Action.cancel.failed)
+            failed: QueueControls.Action.cancel.failed,
+            queue: .cancel)
     }
 
     func setModel(_ model: String) async {

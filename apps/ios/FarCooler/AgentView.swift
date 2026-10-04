@@ -3335,8 +3335,18 @@ struct AgentLayoutHarness: View {
         if !CommandLine.arguments.contains("-keep-drafts") {
             PaneDraftStore.clear(pane: Self.agentPane.id)
         }
+        // A runner that says what it can do, because the queue's controls are
+        // gated on it (ov-171). `-phone-queue-old` is the same flag the phone
+        // harness takes for the same runner.
         connection.standIn(
-            on: Fleet(runtimeHealthy: true, livePanes: 2, worktrees: [Self.worktree]))
+            on: Fleet(runtimeHealthy: true, livePanes: 2, worktrees: [Self.worktree]),
+            repositories: [],
+            build: DaemonBuild(
+                version: "harness", matches: true, platform: "harness",
+                capabilities: Set(
+                    ["workspaces", "terminals", "agent"]
+                        + (CommandLine.arguments.contains("-phone-queue-old")
+                            ? [] : ["agent_queue"]))))
         // The store publishes off `Connection.objectWillChange`, which
         // `standIn` fires — but on the turn AFTER this one, so the merged fleet
         // this shell reads is empty for one body pass. Republishing here closes
