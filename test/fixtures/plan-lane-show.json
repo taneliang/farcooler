@@ -1,0 +1,72 @@
+{
+  "agents": [],
+  "branch": "",
+  "cards": [
+    {
+      "key": "ov-1",
+      "slice": "",
+      "task": "00000000-0000-0000-0000-000000001001"
+    }
+  ],
+  "events": [
+    {
+      "actor": "manager",
+      "at": 1799989200000,
+      "body": "Queued.",
+      "extra": {},
+      "kind": "state"
+    },
+    {
+      "actor": "manager",
+      "at": 1799989200001,
+      "body": "Ranked 1.",
+      "extra": {
+        "rank": 1
+      },
+      "kind": "plan"
+    },
+    {
+      "actor": "manager",
+      "at": 1799992800000,
+      "body": "Started building.",
+      "extra": {
+        "from": "queued",
+        "to": "building"
+      },
+      "kind": "state"
+    },
+    {
+      "actor": "manager",
+      "at": 1799996400000,
+      "body": "Moved to review.",
+      "extra": {
+        "from": "building",
+        "to": "review"
+      },
+      "kind": "state"
+    }
+  ],
+  "fix_rounds": 0,
+  "harness": "",
+  "id": "00000000-0000-0000-0000-000000002002",
+  "landed_sha": null,
+  "model": "",
+  "name": "mac-ux",
+  "plan_rank": null,
+  "reason": "",
+  "short": "00002002",
+  "spend": {
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0,
+    "cost_micros": null,
+    "input_tokens": 300000,
+    "output_tokens": 170000,
+    "runs": 2,
+    "unmeasured_agents": 0
+  },
+  "stale": false,
+  "state": "review",
+  "state_since": 1799999400000,
+  "train": "integ-9",
+  "worktree_path": ""
+}

@@ -91,6 +91,8 @@ struct Runner {
     capabilities: Vec<String>,
     sent: Vec<pb::Request>,
     refuse: Option<&'static str>,
+    /// What `plan.events` answers, for a theme or a lane alike.
+    events: Vec<pb::PlanEvent>,
 }
 
 fn runner() -> Runner {
@@ -98,6 +100,7 @@ fn runner() -> Runner {
         capabilities: ["workstreams", "tasks", capability::BOARD_PLAN].map(String::from).to_vec(),
         sent: vec![],
         refuse: None,
+        events: vec![],
     }
 }
 
@@ -125,7 +128,7 @@ impl DispatchLink for Runner {
             value: Some(match (method.as_str(), payload) {
                 ("plan.get", _) => result::Value::Plan(plan),
                 ("task.list", _) => result::Value::TaskList(pb::TaskList { items: items(), reads: None }),
-                ("plan.events", _) => result::Value::PlanEventList(pb::PlanEventList::default()),
+                ("plan.events", _) => result::Value::PlanEventList(pb::PlanEventList { events: self.events.clone() }),
                 ("plan.set", Some(request::Payload::PlanSet(p))) => result::Value::Plan(pb::Plan {
                     order: p.lane_ids,
                     ..plan
@@ -564,4 +567,58 @@ fn plan_json_is_the_shape_the_mac_reads() {
     }
     let fixture = std::fs::read_to_string(&path).expect("test/fixtures/plan.json is missing");
     assert_eq!(out, fixture, "plan --json no longer matches test/fixtures/plan.json, which the Mac decodes");
+}
+
+/// One event of a record, its extra as the store writes it.
+fn plan_event(at: i64, kind: &str, body: &str, extra: Value) -> pb::PlanEvent {
+    pb::PlanEvent {
+        id: id_bytes(Uuid::from_u128(0x4000 + at as u128 % 1000)),
+        at,
+        actor: "manager".into(),
+        kind: kind.into(),
+        body: body.into(),
+        extra_json: extra.to_string(),
+    }
+}
+
+/// **`plan theme show --json` and `plan lane show --json` are the records the
+/// Mac decodes** (ov-273, review 1004i P4): `test/fixtures/plan-theme-show.json`
+/// and `plan-lane-show.json` are this command's output, pretty-printed, and
+/// AgentKit's `PlanRecordFixtureTests` decode the same files. Each event's
+/// extra is the one `crates/store/src/plan.rs` writes for its kind. A key
+/// renamed here fails this test until the fixtures are rewritten
+/// (`FARCOOLER_WRITE_FIXTURES=1`), which then fails the Mac's.
+#[tokio::test]
+async fn plan_show_json_is_the_record_the_mac_reads() {
+    let theme_events = vec![
+        plan_event(NOW - 5 * HOUR, "state", "Created.", json!({})),
+        plan_event(NOW - 4 * HOUR, "story", "", json!({ "to": "Tokens are in review." })),
+        plan_event(NOW - 3 * HOUR, "cards", "Added ov-1.", json!({})),
+        plan_event(NOW - 3 * HOUR, "cards", "Added ov-2.", json!({})),
+        plan_event(NOW - HOUR, "story", "Tokens are in review.", json!({ "to": "Tokens are on main." })),
+        plan_event(NOW - HOUR + 1, "state", "Paused.", json!({ "from": "active" })),
+    ];
+    let lane_events = vec![
+        plan_event(NOW - 3 * HOUR, "state", "Queued.", json!({})),
+        plan_event(NOW - 3 * HOUR + 1, "plan", "Ranked 1.", json!({ "rank": 1 })),
+        plan_event(NOW - 2 * HOUR, "state", "Started building.", json!({ "from": "queued", "to": "building" })),
+        plan_event(NOW - HOUR, "state", "Moved to review.", json!({ "from": "building", "to": "review" })),
+    ];
+    for (args, events, file) in [
+        ("theme show Visual", theme_events, "plan-theme-show.json"),
+        ("lane show mac-ux", lane_events, "plan-lane-show.json"),
+    ] {
+        let mut link = runner();
+        link.events = events;
+        let out = run_on(&mut link, &the_board(), parsed(args), "manager", true, NOW).await.unwrap();
+        let value: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(value["events"].as_array().map(Vec::len), Some(link.events.len()), "{args}");
+        let out = serde_json::to_string_pretty(&value).unwrap() + "\n";
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test/fixtures").join(file);
+        if std::env::var_os("FARCOOLER_WRITE_FIXTURES").is_some() {
+            std::fs::write(&path, &out).unwrap();
+        }
+        let fixture = std::fs::read_to_string(&path).unwrap_or_else(|_| panic!("test/fixtures/{file} is missing"));
+        assert_eq!(out, fixture, "plan {args} --json no longer matches test/fixtures/{file}, which the Mac decodes");
+    }
 }
