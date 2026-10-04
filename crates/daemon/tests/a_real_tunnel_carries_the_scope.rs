@@ -545,6 +545,7 @@ fn scaffold(path: &Path, home: &Path, runtime: &Path, bin: &Path, devices: &[&De
             runtime.display(),
             path_for_forced_command(home, bin, &line)
         );
+        let prefix = prefix + &tmux_tmpdir_option();
         let scaffolded = file.replacen(&line, &format!("{prefix},{line}"), 1);
         assert_ne!(
             scaffolded, file,
@@ -715,4 +716,12 @@ fn free_port() -> u16 {
 
 fn mode_of(path: &Path) -> u32 {
     std::fs::metadata(path).expect("stat").permissions().mode() & 0o777
+}
+
+/// `TMUX_TMPDIR` for a forced command, as an `environment=` option, when this
+/// test run has a private one (`scripts/tmux-leak-check.py`): sshd hands the
+/// command none of our environment, so without it the command would look for
+/// tmux's sockets somewhere else (ov-207).
+fn tmux_tmpdir_option() -> String {
+    std::env::var("TMUX_TMPDIR").map(|d| format!(",environment=\"TMUX_TMPDIR={d}\"")).unwrap_or_default()
 }

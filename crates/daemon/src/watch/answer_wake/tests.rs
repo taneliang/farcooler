@@ -742,24 +742,39 @@ fn waiting_on_an_unproven_paste_names_tmux() {
 }
 
 /// The task's last word on an unproven paste says what to do, not only that
-/// it couldn't tell (ov-208): restart the agent in its pane.
+/// it couldn't tell (ov-208), without naming a cause it can't know and
+/// without internal words.
 #[test]
 fn an_undelivered_answer_says_to_restart_the_agent() {
     let why = Held::Unproven.why();
-    assert!(why.contains("started before Far Cooler followed this pane"), "{why}");
     assert!(why.contains("Restart the agent in its pane"), "{why}");
-    assert!(Held::Unproven.now().contains("restart it there"), "{}", Held::Unproven.now());
+    assert!(!why.contains("followed") && !why.contains("started before"), "{why}");
+    assert!(!Held::Unproven.now().contains("followed"), "{}", Held::Unproven.now());
+    assert!(Held::Unproven.now().contains("Restarting the agent in its pane"), "{}", Held::Unproven.now());
 }
 
 /// A shell adopted as the orchestrator is followed for bracketed paste, and
 /// once it is demoted it isn't: its pipe and reader would otherwise stay
 /// until the pane died (ov-208, ov-201 review note 3). Forced to the tmux
-/// 3.4 path so it runs on any tmux.
+/// 3.4 path, with the inventory read before following, so it runs the same
+/// on any tmux.
 #[tokio::test]
 async fn a_demoted_orchestrator_is_no_longer_followed() {
+    // Following pipes the pane through the daemon binary, which `--lib`
+    // doesn't build. A full run does, and CI's must not skip.
+    if crate::runtime::fanout_binary().is_none() {
+        assert!(std::env::var_os("CI").is_none(), "no farcoolerd beside the test binary");
+        eprintln!("SKIP a_demoted_orchestrator_is_no_longer_followed: no farcoolerd (`--lib` builds none)");
+        return;
+    }
     let b = board().await;
     b.svc.assume_tmux_cannot_report_paste_mode();
     let orchestrator = b.adopted_shell().await;
+    // Adoption follows at once, but from the inventory as it was: the new
+    // pane may not be in it yet. Read tmux, then follow, as the next sample
+    // does, so the test doesn't depend on that race.
+    b.svc.inventory.refresh().await;
+    b.svc.follow_paste_mode(orchestrator.id);
     assert!(b.followed(orchestrator.id).await, "an adopted orchestrator is followed");
     let demoted = b.svc.set_terminal_role(orchestrator.id, TerminalRole::Shell).await.expect("demoted");
     assert!(!b.svc.paste_mode_followed(demoted.id).await, "a demoted shell is still followed");

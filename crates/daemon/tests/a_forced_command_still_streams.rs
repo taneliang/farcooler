@@ -491,6 +491,7 @@ async fn start() -> Runner {
         runtime.display(),
         bin.display(),
     );
+    let scaffolding = scaffolding + &tmux_tmpdir_option();
     let written = std::fs::read_to_string(&authorized_keys).expect("read back the fence");
     let scaffolded: String = written
         .lines()
@@ -692,4 +693,12 @@ fn mode_of(path: &Path) -> u32 {
 fn free_port() -> u16 {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
     listener.local_addr().expect("addr").port()
+}
+
+/// `TMUX_TMPDIR` for a forced command, as an `environment=` option, when this
+/// test run has a private one (`scripts/tmux-leak-check.py`): sshd hands the
+/// command none of our environment, so without it the command would look for
+/// tmux's sockets somewhere else (ov-207).
+fn tmux_tmpdir_option() -> String {
+    std::env::var("TMUX_TMPDIR").map(|d| format!(",environment=\"TMUX_TMPDIR={d}\"")).unwrap_or_default()
 }

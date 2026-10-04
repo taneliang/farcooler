@@ -14,9 +14,10 @@
 //!   worktree's git dir must be `<common>/worktrees/<name>`, and its `gitdir`
 //!   file must point back at this worktree's `.git`. That file is git's, in
 //!   the common dir, so a `.git` rewritten to name another repository fails
-//!   the check. A submodule or `--separate-git-dir` checkout has a `.git`
-//!   file instead, which proves nothing (it is the agent's to rewrite), so
-//!   its git dir's own `core.worktree` must name this worktree (`points_back`).
+//!   the check. A submodule's checkout has a `.git` file instead, which
+//!   proves nothing (it is the agent's to rewrite), so its git dir's own
+//!   `core.worktree` must name this worktree (`points_back`). A
+//!   `--separate-git-dir` checkout records no such thing and is refused.
 //! - **Every directory is opened without following a link.** The common dir is
 //!   resolved once, then opened one component at a time from `/` with
 //!   `O_NOFOLLOW`, and `info` and `exclude` are opened from its descriptor. A
@@ -186,17 +187,15 @@ fn belongs_to(worktree: &Path, git_dir: &Path, common: &OwnedFd) -> std::io::Res
 }
 
 /// For a worktree whose `.git` is a file: refuse unless the git dir's own
-/// config makes this worktree its own.
+/// config says `core.worktree` is exactly this worktree.
 ///
 /// The `.git` file is the agent's to rewrite, so it proves nothing: git
 /// followed it to `git_dir`, and an agent could have named any repository's.
 /// The git dir's `config` is git's own and sits outside the worktree. A
-/// submodule's records `core.worktree`, which must name this directory. A
-/// `--separate-git-dir` checkout records nothing, so it is accepted only when
-/// its git dir is a non-bare repository that isn't some checkout's own `.git`
-/// directory: the two shapes an agent could borrow are a bare repository and
-/// a plain `.git`. The file, the config and every directory on the way are
-/// opened without following a link.
+/// submodule's records `core.worktree`. A `--separate-git-dir` store records
+/// nothing that ties it to its worktree, so it can't be told from another
+/// repository's store an agent borrowed, and is refused. The file, the
+/// config and every directory on the way are opened without following a link.
 fn points_back(tree: &OwnedFd, git_fd: &OwnedFd, git_dir: &Path) -> std::io::Result<()> {
     let flags = OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK;
     let dot_git = rustix::fs::openat(tree, ".git", flags, Mode::empty())?;
@@ -209,13 +208,8 @@ fn points_back(tree: &OwnedFd, git_fd: &OwnedFd, git_dir: &Path) -> std::io::Res
     }
     let mut bytes = Vec::new();
     std::fs::File::from(config).take(MAX_READ).read_to_end(&mut bytes)?;
-    let (worktree, bare) = core_settings(&String::from_utf8_lossy(&bytes))?;
-    let Some(named) = worktree else {
-        if bare || git_dir.file_name() == Some(OsStr::new(".git")) {
-            return Err(refused("the git dir records no worktree and isn't a separate git dir"));
-        }
-        return Ok(());
-    };
+    let named = core_worktree(&String::from_utf8_lossy(&bytes))?
+        .ok_or_else(|| refused("the git dir records no worktree, so this .git isn't proven its own"))?;
     // Relative to the git dir, as git reads it. Resolved only to compare
     // which directory it is, never to write there.
     let named = std::fs::canonicalize(git_dir.join(named))?;
@@ -223,15 +217,19 @@ fn points_back(tree: &OwnedFd, git_fd: &OwnedFd, git_dir: &Path) -> std::io::Res
     if same(&named, tree)? { Ok(()) } else { Err(refused("the git dir records another worktree")) }
 }
 
-/// `core.worktree` (unquoted) and `core.bare` from the text of a git config.
-/// Only a `[core]` section's own lines; git's escapes and includes are not
-/// read, so a value with a backslash or a quote is a refusal.
-fn core_settings(config: &str) -> std::io::Result<(Option<String>, bool)> {
-    let (mut in_core, mut worktree, mut bare) = (false, None, false);
+/// `core.worktree` (unquoted) from the text of a git config. Only a
+/// `[core]` section's own lines; git's escapes and includes are not read, so
+/// a value with a backslash or a quote, or an `include`, is a refusal.
+fn core_worktree(config: &str) -> std::io::Result<Option<String>> {
+    let (mut in_core, mut worktree) = (false, None);
     for line in config.lines() {
         let line = line.trim();
         if let Some(header) = line.strip_prefix('[') {
-            in_core = header.trim_end_matches(']').trim().eq_ignore_ascii_case("core");
+            let header = header.trim_end_matches(']').trim();
+            if header.to_ascii_lowercase().starts_with("include") {
+                return Err(refused("the git dir's config includes another file"));
+            }
+            in_core = header.eq_ignore_ascii_case("core");
         } else if in_core && let Some((key, value)) = line.split_once('=') {
             let (key, value) = (key.trim(), value.trim());
             let value = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')).unwrap_or(value);
@@ -240,12 +238,10 @@ fn core_settings(config: &str) -> std::io::Result<(Option<String>, bool)> {
             }
             if key.eq_ignore_ascii_case("worktree") {
                 worktree = Some(value.to_string());
-            } else if key.eq_ignore_ascii_case("bare") {
-                bare = value.eq_ignore_ascii_case("true");
             }
         }
     }
-    Ok((worktree, bare))
+    Ok(worktree)
 }
 
 /// Open an absolute, resolved directory one component at a time from `/`,

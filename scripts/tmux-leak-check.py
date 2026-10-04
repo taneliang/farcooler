@@ -4,45 +4,55 @@
 A test tmux server once outlived its run by 15.5 hours at 92% CPU. Teardown now
 ends its server by PID (`farcooler_tmux::reap_server`), but a test that never
 calls it, or a new harness that forgets, leaks all the same, and nothing in the
-test run would notice. This notices: it lists every named tmux server
-(`tmux -L <socket> ...`) before the command, runs the command, waits a few
-seconds, and fails on any server that wasn't there before and still is. Servers
-that were already running (the owner's live one) are never touched or counted.
-A leak is reported by PID and ended by exact PID, never by pattern.
+test run would notice. This notices.
+
+It gives the command a private `TMUX_TMPDIR` that it makes, so every tmux
+server the command starts keeps its socket there and nowhere else, then looks
+only in that directory afterwards. A socket with a live server behind it is a
+leak. It never looks at, or signals, any other tmux server: not the owner's,
+not another lane's, not one that was already running.
+
+  Outside CI it only reports a leak (exit 1) and names the PID.
+  With `CI` set it also ends the leaked servers, by exact PID.
 
   ./scripts/tmux-leak-check.py -- cargo test -p farcooler-tmux
   ./scripts/tmux-leak-check.py --self-test
 """
 
 import os
-import re
 import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 
 GRACE_SECONDS = 5
+# Every private dir `run` made, for the self-test to remove once it has ended
+# the servers it deliberately leaked.
+BASES = []
 
 
-def servers():
-    """pid -> command line of every `tmux -L <socket>` process running now."""
-    out = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True, check=True).stdout
-    found = {}
-    for line in out.splitlines():
-        pid, _, command = line.strip().partition(" ")
-        if re.search(r"(^|/)tmux\s+(-\S+\s+)*-L\s+\S+", command) and "new-session" in command:
-            found[int(pid)] = command
-    return found
+def server_pids(base):
+    """PIDs of the servers behind the sockets under `base/tmux-<uid>/`."""
+    sockets = os.path.join(base, f"tmux-{os.getuid()}")
+    pids = set()
+    if not os.path.isdir(sockets):
+        return pids
+    for name in os.listdir(sockets):
+        path = os.path.realpath(os.path.join(sockets, name))
+        out = subprocess.run(["lsof", "-t", "--", path], capture_output=True, text=True).stdout
+        pids.update(int(p) for p in out.split())
+    return pids
 
 
-def leaked(before, grace=GRACE_SECONDS):
-    """Servers started since `before` that are still running after `grace`."""
+def leaked(base, grace=GRACE_SECONDS):
+    """Servers still behind a socket under `base` after `grace` seconds."""
     deadline = time.time() + grace
     while True:
-        new = {p: c for p, c in servers().items() if p not in before}
-        if not new or time.time() >= deadline:
-            return new
+        pids = server_pids(base)
+        if not pids or time.time() >= deadline:
+            return pids
         time.sleep(0.25)
 
 
@@ -56,39 +66,75 @@ def end(pids):
         time.sleep(1)
 
 
-def run(argv):
-    before = servers()
-    status = subprocess.run(argv).returncode
-    new = leaked(before)
-    for pid, command in new.items():
-        print(f"tmux-leak-check: LEAKED server {pid}: {command[:160]}", file=sys.stderr)
-    end(list(new))
-    if new:
-        return 1
-    return status
+def run(argv, kill, grace=GRACE_SECONDS):
+    """Run `argv` with a private TMUX_TMPDIR; return (exit code, leaked PIDs)."""
+    # Short and directly under /tmp: a unix socket path is limited to about
+    # 100 bytes, and $TMPDIR on a Mac is already long.
+    base = tempfile.mkdtemp(prefix="fc-leak-", dir="/tmp")
+    BASES.append(base)
+    try:
+        status = subprocess.run(argv, env={**os.environ, "TMUX_TMPDIR": base}).returncode
+        pids = leaked(base, grace)
+        for pid in sorted(pids):
+            print(f"tmux-leak-check: LEAKED tmux server {pid} (socket under {base})", file=sys.stderr)
+        if kill:
+            end(pids)
+        return (1 if pids else status), pids
+    finally:
+        # Kept while a leaked server remains, so it can still be found.
+        if not server_pids(base):
+            shutil.rmtree(base, ignore_errors=True)
+
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
 
 
 def self_test():
     tmux = shutil.which("tmux")
-    if not tmux:
-        print("tmux-leak-check: SKIP self-test, no tmux")
+    if not tmux or not shutil.which("lsof"):
+        print("tmux-leak-check: SKIP self-test, no tmux or lsof")
         return 0
-    socket = f"leakcheck-{os.getpid()}"
-    before = servers()
-    # A command that leaks: starts a server and walks away.
-    leak = [tmux, "-L", socket, "-f", "/dev/null", "new-session", "-d", "-s", "x", "sleep 600"]
-    rc = run(leak)
-    if rc == 0:
-        print("tmux-leak-check: self-test FAILED, a leaked server was not caught", file=sys.stderr)
-        return 1
-    time.sleep(0.5)
-    if leaked(before, grace=0):
-        print("tmux-leak-check: self-test FAILED, the leaked server was not ended", file=sys.stderr)
-        return 1
-    # A command that cleans up after itself is not a leak.
-    clean = f"{tmux} -L {socket}b -f /dev/null new-session -d -s x 'sleep 600'; {tmux} -L {socket}b kill-server"
-    if run(["sh", "-c", clean]) != 0:
-        print("tmux-leak-check: self-test FAILED, a clean command was flagged", file=sys.stderr)
+    start = "{tmux} -L {name} -f /dev/null new-session -d -s x 'sleep 600'"
+    failures = []
+    pids = set()
+
+    # A bystander on its own TMUX_TMPDIR: never looked at or touched.
+    other = tempfile.mkdtemp(prefix="fc-other-", dir="/tmp")
+    env = {**os.environ, "TMUX_TMPDIR": other}
+    subprocess.run(["sh", "-c", start.format(tmux=tmux, name="bystander")], env=env, check=True)
+    bystanders = server_pids(other)
+    try:
+        # Outside CI: a leak is reported, the server is left running.
+        rc, pids = run(["sh", "-c", start.format(tmux=tmux, name=f"leak{os.getpid()}")], kill=False, grace=1)
+        if rc != 1 or len(pids) != 1:
+            failures.append(f"a leaked server was not caught (rc={rc}, pids={pids})")
+        if not all(alive(p) for p in pids):
+            failures.append("a leak was killed outside CI")
+        # In CI: a leak is reported and ended.
+        rc2, pids2 = run(["sh", "-c", start.format(tmux=tmux, name=f"leakci{os.getpid()}")], kill=True, grace=1)
+        if rc2 != 1 or len(pids2) != 1 or any(alive(p) for p in pids2):
+            failures.append(f"a leaked server was not ended in CI (rc={rc2}, pids={pids2})")
+        # A command that cleans up is not a leak.
+        clean = start.format(tmux=tmux, name=f"clean{os.getpid()}") + f"; {tmux} -L clean{os.getpid()} kill-server"
+        rc3, pids3 = run(["sh", "-c", clean], kill=False, grace=1)
+        if rc3 != 0 or pids3:
+            failures.append(f"a clean command was flagged (rc={rc3}, pids={pids3})")
+        if not all(alive(p) for p in bystanders):
+            failures.append("a server outside the private TMUX_TMPDIR was killed")
+    finally:
+        end([p for p in pids if alive(p)])
+        end(list(bystanders))
+        for base in BASES:
+            shutil.rmtree(base, ignore_errors=True)
+        shutil.rmtree(other, ignore_errors=True)
+    if failures:
+        for f in failures:
+            print(f"tmux-leak-check: self-test FAILED, {f}", file=sys.stderr)
         return 1
     print("tmux-leak-check: self-test ok")
     return 0
@@ -99,6 +145,6 @@ if __name__ == "__main__":
     if args == ["--self-test"]:
         sys.exit(self_test())
     if args[:1] == ["--"] and len(args) > 1:
-        sys.exit(run(args[1:]))
+        sys.exit(run(args[1:], kill=bool(os.environ.get("CI")))[0])
     print(__doc__)
     sys.exit(2)

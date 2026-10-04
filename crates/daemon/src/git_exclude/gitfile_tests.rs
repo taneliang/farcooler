@@ -29,19 +29,42 @@ async fn a_submodule_checkout_gets_its_exclude_line() {
     assert!(exclude(&module).await, "again");
 }
 
-/// `git init --separate-git-dir` leaves a `.git` file too.
-#[tokio::test]
-async fn a_separate_git_dir_checkout_gets_its_exclude_line() {
-    let dir = tempfile::tempdir().unwrap();
-    let tree = dir.path().join("tree");
-    let apart = dir.path().join("apart.git");
+/// A `git init --separate-git-dir` store: the checkout at `<base>/<name>`
+/// and its git dir at `<base>/<name>-store.git`.
+fn separate(base: &Path, name: &str) -> (PathBuf, PathBuf) {
+    let tree = base.join(name);
+    let store = base.join(format!("{name}-store.git"));
     std::fs::create_dir_all(&tree).unwrap();
-    git_in(&tree, &["init", "-q", "-b", "main", "--separate-git-dir", apart.to_str().unwrap()]);
+    git_in(&tree, &["init", "-q", "-b", "main", "--separate-git-dir", store.to_str().unwrap()]);
     git_in(&tree, &["commit", "-q", "--allow-empty", "-m", "first"]);
-    let tree = std::fs::canonicalize(&tree).unwrap();
+    (std::fs::canonicalize(&tree).unwrap(), store)
+}
+
+/// A `--separate-git-dir` checkout records nothing that ties its store to it,
+/// so it can't be told from a borrowed one and is refused: the skill is left
+/// out, and no exclude line is written.
+#[tokio::test]
+async fn a_separate_git_dir_checkout_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let (tree, store) = separate(dir.path(), "tree");
     assert!(tree.join(".git").is_file());
-    assert!(exclude(&tree).await, "refused a separate git dir");
-    assert_eq!(ours(&std::fs::read_to_string(apart.join("info/exclude")).unwrap()), 1);
+    assert!(!exclude(&tree).await);
+    assert_eq!(ours(&std::fs::read_to_string(store.join("info/exclude")).unwrap_or_default()), 0);
+}
+
+/// The attack: an agent's `.git` file names another repository's real
+/// separate git dir. Git accepts it (`rev-parse` names that store for both),
+/// and nothing in the store says the agent's tree is not its own.
+#[tokio::test]
+async fn a_dot_git_file_naming_another_separate_git_dir_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_victim, store) = separate(dir.path(), "victim");
+    let attacker = dir.path().join("attacker");
+    std::fs::create_dir_all(&attacker).unwrap();
+    std::fs::write(attacker.join(".git"), format!("gitdir: {}\n", store.display())).unwrap();
+    let attacker = std::fs::canonicalize(&attacker).unwrap();
+    assert!(!exclude(&attacker).await, "written through another repository's store");
+    assert_eq!(ours(&std::fs::read_to_string(store.join("info/exclude")).unwrap_or_default()), 0);
 }
 
 /// An agent rewrites its checkout's `.git` file to name another repository's
