@@ -181,13 +181,9 @@ final class Connection: ObservableObject {
     /// per-runner, and a memory that outlived the runner would name nothing on
     /// the next one.
     ///
-    /// It is kept across a launch (ov-233), in `UserDefaults` under a key per
-    /// runner (`FocusMemory`). It used to die with the process: the path and
-    /// this memory were written through to `@SceneStorage`, and both blobs went
-    /// with the navigation they belonged to — see `FleetView` — so a worktree
-    /// reopened on the rule's answer rather than on the tab you left it on.
-    /// Defaults don't go with the navigation, and the owner asked for the app
-    /// to go back to wherever he was.
+    /// Kept across a launch (ov-233), in `UserDefaults` per runner
+    /// (`FocusMemory`). The `@SceneStorage` copy went with the navigation it
+    /// belonged to, so a worktree reopened on the rule's answer.
     @Published private(set) var lastFocus: [String: PaneFocus] = [:]
 
     /// The fallback poll. See `startPolling` for what it is now a fallback TO.
@@ -341,8 +337,6 @@ final class Connection: ObservableObject {
         newsRefresh?.cancel()
         reconnectTask?.cancel()
         self.host = host
-        // The tab chosen in each worktree last run (ov-233). Read once, and
-        // never over what this run has chosen already.
         loadRememberedFocus(runner: host.id.uuidString)
         // The watch is no longer handed a connection here.
         //
@@ -2282,17 +2276,13 @@ final class Connection: ObservableObject {
         if let host { FocusMemory<PaneFocus>.save(lastFocus, runner: host.id.uuidString) }
     }
 
-    /// Read the choices kept for `runner` into `lastFocus`, when this run has
-    /// made none. The harness calls it too, so it opens through the code a
-    /// launch does.
+    /// The choices kept for `runner`, read at launch (the harness calls it too).
     func loadRememberedFocus(runner: String) {
         if lastFocus.isEmpty { lastFocus = FocusMemory<PaneFocus>.load(runner: runner) }
     }
 
-    /// Forget the choices made in worktrees a loaded fleet no longer has
-    /// (ov-233). Only from a fleet that has worktrees: an empty read is a
-    /// runner that hasn't answered, not one with nothing, and pruning on it
-    /// would forget every choice.
+    /// Forget choices in worktrees a loaded fleet no longer has. Not on an empty
+    /// one: that is a runner that hasn't answered, and would forget them all.
     private func pruneFocus(to fleet: Fleet) {
         guard !fleet.worktrees.isEmpty, let host else { return }
         let kept = FocusMemory<PaneFocus>.pruned(lastFocus, keeping: Set(fleet.worktrees.map(\.id)))
