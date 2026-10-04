@@ -86,6 +86,27 @@ impl StandIn {
         panic!("the stand-in never showed {mode}: {}", self.log());
     }
 
+    /// Wait, bounded, for the stand-in to log a paste: the bytes reach it a
+    /// moment after the daemon sends them, longer on a slow runner.
+    async fn pasted(&self) {
+        for _ in 0..250 {
+            if self.log().contains("PASTE ") {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    /// Wait, bounded, until the stand-in has logged `n` submissions.
+    async fn submits(&self, n: usize) {
+        for _ in 0..250 {
+            if self.submitted().len() >= n {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
     fn log(&self) -> String {
         std::fs::read_to_string(&self.log).unwrap_or_default()
     }
@@ -131,10 +152,28 @@ impl Board {
     /// pane afresh. Waits for the subscription where production makes one.
     async fn refollow(&self, terminal: Uuid) {
         self.svc.streamed_bracketed_paste(terminal).await;
-        self.watcher.sample().await;
         if self.follows(terminal) {
-            assert!(self.followed(terminal).await, "the sample never followed the pane");
+            assert!(self.sample_until_followed(terminal).await, "the sample never followed the pane");
+        } else {
+            self.watcher.sample().await;
         }
+    }
+
+    /// Sample, and sample again, until a live record follows `terminal`'s
+    /// pane. One sample is not enough on a slow runner: the subscription
+    /// can still be coming up, or a sample can land before the pane is
+    /// claimed. Bounded at about a minute; false if it never follows.
+    async fn sample_until_followed(&self, terminal: Uuid) -> bool {
+        for _ in 0..30 {
+            self.watcher.sample().await;
+            for _ in 0..100 {
+                if self.svc.paste_mode_followed(terminal).await {
+                    return true;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
+        false
     }
 
     /// Whether production follows `terminal`'s output for bracketed paste:
@@ -387,7 +426,9 @@ async fn an_answer_is_pasted_into_an_idle_claude_and_submitted() {
     b.doing(agent.id, AgentActivity::Idle).await;
     b.answer("Drill in");
     b.pump().await;
+    si.submits(1).await;
     assert_eq!(si.submitted(), [b.told("Drill in")], "{}", si.log());
+    si.pasted().await;
     assert!(si.log().contains("PASTE "), "a bracketed paste: {}", si.log());
     assert_eq!(b.progress(), ["Told Agent 2 about the decision"]);
     assert!(b.pending().is_empty());
@@ -402,6 +443,7 @@ async fn an_answer_is_pasted_into_an_idle_codex() {
     b.doing(agent.id, AgentActivity::Idle).await;
     b.answer("Drill in");
     b.pump().await;
+    si.submits(1).await;
     assert_eq!(si.submitted(), [b.told("Drill in")], "{}", si.log());
 }
 
@@ -418,6 +460,7 @@ async fn an_answer_waits_for_a_working_agent_to_go_idle() {
     b.untouched(&si);
     b.doing(agent.id, AgentActivity::Done).await;
     b.pump().await;
+    si.submits(1).await;
     assert_eq!(si.submitted().len(), 1, "{}", si.log());
 }
 
@@ -443,6 +486,7 @@ async fn nothing_is_typed_while_someone_is_typing() {
 
     b.watcher.report_watching("-", vec![]);
     b.pump().await;
+    si.submits(1).await;
     assert_eq!(si.submitted().len(), 1, "{}", si.log());
 }
 
@@ -540,6 +584,7 @@ async fn a_paste_the_box_doesnt_hold_exactly_is_not_sent() {
     b.doing(agent.id, AgentActivity::Idle).await;
     b.answer("Drill in");
     b.pump().await;
+    si.pasted().await;
     assert!(si.log().contains("PASTE "), "{}", si.log());
     assert!(!si.log().contains("ENTER"), "{}", si.log());
     assert_eq!(b.settled(), ["Paste left in the composer; not sent"]);
@@ -609,6 +654,7 @@ async fn an_answer_is_told_exactly_once_across_a_restart() {
         observe(&watcher, agent.id, AgentActivity::Idle).await;
         watcher.pump_wakes().await;
         watcher.pump_wakes().await;
+        si.submits(1).await;
         assert_eq!(si.submitted().len(), 1, "{}", si.log());
         // Said to be waiting once, before the restart; told once after.
         let said: Vec<String> =
@@ -631,6 +677,7 @@ async fn a_newer_answer_replaces_one_not_yet_told() {
     b.pump().await;
     b.doing(agent.id, AgentActivity::Idle).await;
     b.pump().await;
+    si.submits(1).await;
     assert_eq!(si.submitted(), [b.told("Actually, tabs")], "{}", si.log());
     assert_eq!(b.settled(), ["Not delivered: a newer answer replaced it.", "Told Agent 2 about the decision"]);
 }
@@ -651,6 +698,7 @@ async fn two_answers_for_one_terminal_go_one_at_a_time() {
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     b.pump().await;
     b.pump().await;
+    si.submits(1).await;
     assert_eq!(si.submitted(), [b.told("Drill in")], "{}", si.log());
     assert_eq!(b.pending().len(), 1);
 
@@ -658,6 +706,7 @@ async fn two_answers_for_one_terminal_go_one_at_a_time() {
     tokio::time::sleep(Duration::from_millis(2_100)).await;
     b.pump().await;
     let second = message(&other.key, "Tabs or spaces", "Tabs");
+    si.submits(2).await;
     assert_eq!(si.submitted(), [b.told("Drill in"), second], "{}", si.log());
 }
 
@@ -686,6 +735,7 @@ async fn a_node_claude_is_told() {
     b.doing(agent.id, AgentActivity::Idle).await;
     b.answer("Drill in");
     b.pump().await;
+    si.submits(1).await;
     assert_eq!(si.submitted(), [b.told("Drill in")], "{}", si.log());
 }
 
@@ -800,13 +850,13 @@ async fn a_record_from_before_a_respawn_is_never_used() {
     b.answer("Drill in");
     b.pump().await;
     b.untouched(&si);
-    b.watcher.sample().await;
-    assert!(b.followed(agent.id).await, "the sample follows the new agent");
+    assert!(b.sample_until_followed(agent.id).await, "the sample follows the new agent");
     si.show("working").await;
     si.show("idle").await;
     b.stream_says(agent.id, Some(true)).await;
     b.doing(agent.id, AgentActivity::Idle).await;
     b.pump().await;
+    si.submits(1).await;
     assert_eq!(si.submitted(), [b.told("Drill in")], "{}", si.log());
 }
 
@@ -830,13 +880,13 @@ async fn a_broken_stream_proves_nothing_until_it_is_followed_again() {
     b.answer("Drill in");
     b.pump().await;
     b.untouched(&si);
-    b.watcher.sample().await;
-    assert!(b.followed(agent.id).await, "the sample follows the pane again");
+    assert!(b.sample_until_followed(agent.id).await, "the sample follows the pane again");
     si.show("working").await;
     si.show("idle").await;
     b.stream_says(agent.id, Some(true)).await;
     b.doing(agent.id, AgentActivity::Idle).await;
     b.pump().await;
+    si.submits(1).await;
     assert_eq!(si.submitted(), [b.told("Drill in")], "{}", si.log());
 }
 
@@ -915,8 +965,7 @@ async fn a_pane_started_before_the_daemon_is_followed_on_a_sample() {
     b.run_unfollowed(&agent, "sleep 30").await;
     b.svc.streamed_bracketed_paste(agent.id).await;
     assert!(!b.svc.paste_mode_followed(agent.id).await);
-    b.watcher.sample().await;
-    assert!(b.followed(agent.id).await);
+    assert!(b.sample_until_followed(agent.id).await);
 }
 
 /// A tmux that reports bracketing itself gets no pipe and no fanout: after
@@ -984,6 +1033,7 @@ async fn typing_during_the_read_back_stops_the_enter() {
     b.answer("Drill in");
     b.pump().await;
     typist.await.unwrap();
+    si.pasted().await;
     assert!(si.log().contains("PASTE "), "{}", si.log());
     assert!(!si.log().contains("ENTER"), "{}", si.log());
     assert_eq!(b.settled(), ["Paste left in the composer; not sent"]);
@@ -1018,6 +1068,7 @@ async fn with_no_agent_the_orchestrator_is_told() {
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     b.answer("Drill in");
     b.pump().await;
+    si.submits(1).await;
     assert_eq!(si.submitted().len(), 1, "{}", si.log());
     assert_eq!(b.progress(), ["Told the orchestrator about the decision"]);
 }
@@ -1049,6 +1100,7 @@ async fn a_hand_started_orchestrator_is_told() {
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     b.answer("Drill in");
     b.pump().await;
+    si.submits(1).await;
     assert_eq!(si.submitted(), [b.told("Drill in")], "{}", si.log());
     assert_eq!(b.progress(), ["Told the orchestrator about the decision"]);
 }
@@ -1216,6 +1268,7 @@ async fn typing_marks_the_pane_and_telling_does_not() {
     b.doing(agent.id, AgentActivity::Idle).await;
     b.answer("Drill in");
     b.pump().await;
+    si.submits(1).await;
     assert_eq!(si.submitted().len(), 1, "{}", si.log());
     assert_eq!(last_input(b.svc.root_dir(), agent.id), None, "the runner marked its own telling");
 
@@ -1274,6 +1327,7 @@ async fn a_draft_is_pasted_into_an_idle_orchestrator_and_never_submitted() {
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     b.watcher.draft_into(orchestrator.id, "About ov-1 (“Fix”): ").await.expect("pasted");
+    si.pasted().await;
     assert!(si.log().contains("PASTE "), "a bracketed paste: {}", si.log());
     assert!(si.submitted().is_empty(), "Enter was pressed: {}", si.log());
 }
@@ -1343,7 +1397,9 @@ async fn a_message_is_typed_into_an_idle_orchestrator_and_submitted() {
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     b.watcher.tell_into(orchestrator.id, "-x land ov-214\nafter the rebase").await.expect("told");
+    si.pasted().await;
     assert!(si.log().contains("PASTE "), "a bracketed paste: {}", si.log());
+    si.submits(1).await;
     assert_eq!(si.submitted(), ["-x land ov-214 after the rebase"], "{}", si.log());
 }
 
