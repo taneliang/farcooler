@@ -177,7 +177,7 @@ struct FarCoolerCommands: Commands {
         }
 
         CommandGroup(after: .newItem) {
-            Divider()
+            Divider()  // style-exempt: menu
             // The keyboard half of the title bar's editor control, which until
             // now was the one thing in this app you could only reach with a
             // mouse. ⇧⌘E rather than a bare ⌘E: this opens another application
@@ -228,7 +228,7 @@ struct FarCoolerCommands: Commands {
             Toggle("Focus", isOn: Binding(get: { mainWindow?.focused == true }, set: { _ in AppCommand.focusColumn.post() }))
                 .keyboardShortcut(.return, modifiers: [.command, .control])
                 .disabled(!MainWindowFocus.goes(\.focuses, mainWindow))
-            Divider()
+            Divider()  // style-exempt: menu
             Button("Orchestrator") { AppCommand.focusConversation.post() }
                 .keyboardShortcut("1", modifiers: [.command, .option])
                 .disabled(!MainWindowFocus.goes(\.inWorkspace, mainWindow))
@@ -293,14 +293,14 @@ struct FarCoolerCommands: Commands {
             Button("Previous Terminal") { AppCommand.previousTerminal.post() }
                 .keyboardShortcut("[", modifiers: .command)
                 .disabled(!MainWindowFocus.goes(\.stepsTerminals, mainWindow))
-            Divider()
+            Divider()  // style-exempt: menu
             // The one shortcut that is not a convention from elsewhere, because
             // nothing else has this idea: go straight to whatever is waiting on
             // you. It is the reason to open the app at all.
             Button("Next Item That Needs You") { AppCommand.nextAttention.post() }
                 .keyboardShortcut("n", modifiers: [.command, .control])
                 .disabled(!MainWindowFocus.stepsToAttention(mainWindow))
-            Divider()
+            Divider()  // style-exempt: menu
             // ⌃⌘, since ⌘1 through ⌘9 went to the workspaces (ov-86).
             ForEach(1...9, id: \.self) { n in
                 Button("Terminal \(n)") { AppCommand.selectIndex(n - 1) }
@@ -326,7 +326,7 @@ struct FarCoolerCommands: Commands {
                 .disabled(!MainWindowFocus.lays(\.splits, mainWindow))
             Button("Move Pane Out") { TileCommand.breakPane.post() }
                 .disabled(!MainWindowFocus.lays(\.movesOut, mainWindow))
-            Divider()
+            Divider()  // style-exempt: menu
             // ⇧⌘↩ rather than ⇧⌘Z, which is Edit ▸ Redo on every Mac and was
             // bound here twice over: the menu bar showed ⇧⌘Z in two menus, and
             // which one a keypress reached depended on whether the field you
@@ -357,7 +357,7 @@ struct FarCoolerCommands: Commands {
                         .disabled(!MainWindowFocus.lays(\.arranges, mainWindow))
                 }
             }
-            Divider()
+            Divider()  // style-exempt: menu
             // The prefix-less ones, and the only tiling bindings that get a real
             // key equivalent here: they are used constantly, and a menu item is
             // how someone finds out they exist.
@@ -369,12 +369,12 @@ struct FarCoolerCommands: Commands {
                 .disabled(!MainWindowFocus.lays(\.above, mainWindow))
             Button("Pane Below") { TileCommand.focus(.bottom).post() }
                 .disabled(!MainWindowFocus.lays(\.below, mainWindow))
-            Divider()
+            Divider()  // style-exempt: menu
             Button("Next Pane") { TileCommand.focusNext.post() }
                 .disabled(!MainWindowFocus.lays(\.stepsPanes, mainWindow))
             Button("Previous Pane") { TileCommand.focusPrevious.post() }
                 .disabled(!MainWindowFocus.lays(\.stepsPanes, mainWindow))
-            Divider()
+            Divider()  // style-exempt: menu
             Button("New Layout") { TileCommand.newGroup.post() }
                 .disabled(!MainWindowFocus.lays(\.splits, mainWindow))
             // A layout IS a tab here — the pill bar across the top of a worktree
@@ -393,7 +393,7 @@ struct FarCoolerCommands: Commands {
             Button("Previous Layout") { TileCommand.previousGroup.post() }
                 .keyboardShortcut("[", modifiers: [.command, .shift])
                 .disabled(!MainWindowFocus.lays(\.stepsLayouts, mainWindow))
-            Divider()
+            Divider()  // style-exempt: menu
             // Not really a layout verb — nothing about the arrangement
             // changes — but it is scoped to the focused pane exactly the way
             // zoom and the splits are, and there is no chrome on the pane
@@ -431,14 +431,14 @@ struct FarCoolerCommands: Commands {
             Button("Previous Hunk") { AppCommand.diffPreviousHunk.post() }
                 .keyboardShortcut(.upArrow, modifiers: [.command, .option])
                 .disabled(!DiffMenuFocus.allows(\.previousHunk, diff, in: mainWindow))
-            Divider()
+            Divider()  // style-exempt: menu
             Button("Next File") { AppCommand.diffNextFile.post() }
                 .keyboardShortcut("]", modifiers: [.command, .option])
                 .disabled(!DiffMenuFocus.allows(\.nextFile, diff, in: mainWindow))
             Button("Previous File") { AppCommand.diffPreviousFile.post() }
                 .keyboardShortcut("[", modifiers: [.command, .option])
                 .disabled(!DiffMenuFocus.allows(\.previousFile, diff, in: mainWindow))
-            Divider()
+            Divider()  // style-exempt: menu
             // The way IN to reading a branch commit by commit, which is
             // otherwise a thing you can only discover by opening the history
             // and picking the oldest row.
@@ -450,7 +450,7 @@ struct FarCoolerCommands: Commands {
             Button("Previous Commit") { AppCommand.diffPreviousCommit.post() }
                 .keyboardShortcut("[", modifiers: [.command, .control, .option])
                 .disabled(!DiffMenuFocus.allows(\.previousCommit, diff, in: mainWindow))
-            Divider()
+            Divider()  // style-exempt: menu
             // Not a movement, which is why it is below the divider: it says
             // something about the worktree rather than about where you are in
             // it. The daemon keeps a per-worktree watermark and this is the

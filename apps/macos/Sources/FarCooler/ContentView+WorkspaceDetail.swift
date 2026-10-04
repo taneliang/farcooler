@@ -148,7 +148,6 @@ extension ContentView {
                         SharedWindowNotice(title: terminal.label, canAct: canAct) {
                             Task { await moveOutOfOrchestratorWindow(terminal, in: seat.worktree) }
                         }
-                        Divider()
                     }
                 }
                 // Ticks only while a start is being timed, in a window

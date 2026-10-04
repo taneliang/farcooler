@@ -954,7 +954,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
             // and "this terminal is just showing you something".
             context.setStrokeColor(Palette.cgColor(effectiveForeground(cell)).copy(alpha: 0.5)!)
             context.setLineWidth(1)
-            context.stroke(rect.insetBy(dx: 0.5, dy: 0.5))
+            context.stroke(rect.insetBy(dx: 0.5, dy: 0.5))  // style-exempt: the unfocused cursor's outline, in the terminal's own ink
             return
         }
 

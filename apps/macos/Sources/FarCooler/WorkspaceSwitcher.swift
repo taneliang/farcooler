@@ -252,7 +252,7 @@ struct RunnerStatusMenu: View {
             ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
                 switch entry {
                 case .separator:
-                    Divider()
+                    Divider()  // style-exempt: menu
                 case .note(let text):
                     Text(text)
                 case .update:

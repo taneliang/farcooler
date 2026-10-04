@@ -253,7 +253,6 @@ struct DaemonUpdateCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             ForEach(Array(targets.enumerated()), id: \.element.id) { index, target in
-                if index > 0 { Divider() }
                 runner(target)
             }
         }

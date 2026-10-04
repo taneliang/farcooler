@@ -47,7 +47,7 @@ struct EditorMenuItems: View {
         }
 
         if showsSettingsItem {
-            Divider()
+            Divider()  // style-exempt: menu
             Button(editors.available.isEmpty ? "Add an editor…" : "Editors…") {
                 EditorSettingsLink.open(openSettings)
             }

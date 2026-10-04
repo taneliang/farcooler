@@ -31,7 +31,7 @@ extension View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .frame(height: ColumnHeader.height)
                 .clipped()
-            Divider()
+            Divider()  // style-exempt: the one rule under the jump bar, between the controls and what they act on
         }
     }
 }

@@ -285,7 +285,7 @@ struct WorktreeMenuItems: View {
         }
         let last = items.filter { [.hide, .unhide, .remove, .dismiss].contains($0) }
         if !last.isEmpty {
-            Divider()
+            Divider()  // style-exempt: menu
             ForEach(last, id: \.self) { item in
                 Button(item.title, role: item == .remove ? .destructive : nil) { perform(item) }
             }

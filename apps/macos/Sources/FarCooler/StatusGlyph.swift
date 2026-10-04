@@ -162,7 +162,7 @@ struct StatusGlyph: View {
         case .lost, .failed:
             // Hollow: something is missing, and the shape says so before the
             // color does.
-            Circle().strokeBorder(status.tint(scheme), lineWidth: 1.5)
+            Circle().strokeBorder(status.tint(scheme), lineWidth: 1.5)  // style-exempt: the hollow ring is the glyph itself
         default:
             Circle().fill(status.tint(scheme))
         }
