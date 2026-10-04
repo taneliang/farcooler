@@ -266,7 +266,7 @@ struct ContentView: View {
                     toggle: { toggleNavigator() }),
                 backForward: layout.backForward ? backForward : nil)
         }
-        // The compact toolbar (ov-214), on whatever made the window.
+        // The regular toolbar (ov-214), on whatever made the window.
         .mainWindowChrome()
         .overlay(alignment: .top) {
             ActionBanners(outcomes: outcomes)

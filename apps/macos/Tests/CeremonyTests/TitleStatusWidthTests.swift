@@ -49,7 +49,11 @@ struct TitleStatusWidthTests {
         let switcher = try #require(Harness.switcher(in: window))
         #expect(status.frame.minX >= switcher.maxX, "at \(width) the status area overlaps the switcher")
         #expect(status.frame.maxX <= width, "at \(width) the status area runs off the window")
-        #expect(Harness.band(window) == 40, "the toolbar is \(Harness.band(window)) pt, not the compact 40")
+        let centre = status.frame.midY
+        let bar = window.frame.height - Harness.band(window) / 2
+        #expect(abs(status.frame.height - 36) < 0.5, "at \(width): the area is \(status.frame.height) pt tall, not 36")
+        #expect(abs(centre - bar) < 1, "at \(width): the area's middle is \(centre), the bar's is \(bar)")
+        #expect(Harness.band(window) == 52, "the toolbar is \(Harness.band(window)) pt, not the regular 52")
     }
 
     /// When the text grows: before the window shows (after the toolbar

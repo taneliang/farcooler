@@ -22,6 +22,9 @@ import SwiftUI
 
 /// The status area's values and rules.
 enum TitleStatus {
+    /// The area's height: the regular toolbar's control height (ov-214).
+    static let height: CGFloat = 36
+
     /// What the area says, built from what the navigator and the board
     /// already work out.
     struct Model: Equatable {
@@ -103,25 +106,26 @@ enum TitleStatus {
     /// holding the navigator's button and the switcher, whose label is
     /// `title · repository ⌄` at the toolbar's font.
     ///
-    /// Measured in a compact toolbar on macOS 27 (the lane's probe): the
-    /// traffic lights end at 92 pt, the navigator's button is 31 with 10 to
-    /// the switcher, and the switcher is its label and 35 more. Slightly
+    /// Measured in the regular toolbar on macOS 27 (the lane's probe): the
+    /// traffic lights end at 96 pt, the navigator's button is 39 and sits
+    /// against the switcher, which is its label and 33 to 42 more. Slightly
     /// over, never under: the room left over is what the area may take.
     static func leading(switcher title: String, repository: String) -> CGFloat {
         let label = repository.isEmpty ? title : "\(title) · \(repository)"
-        return 92 + 31 + 10 + textWidth(label) + 35 + 8
+        return 96 + 39 + textWidth(label) + 43 + 8
     }
 
     /// What the trailing items take: the window's edge, the tray and its
     /// count, the space before them, then Open in Editor and Changes, and
     /// the runner trouble's words while there's any. Measured as `leading`
-    /// is: the tray 32 pt and its count, the editor 69, Changes 32.
+    /// is, in the regular toolbar: the tray 36 pt and its count, the editor 80,
+    /// Changes 36, and 8 between items.
     static func trailing(editor: Bool, changes: Bool, trouble: String?, needsYou: Int = 0) -> CGFloat {
-        var width: CGFloat = 10 + 32 + 12
+        var width: CGFloat = 10 + 36 + 12
         if let count = NeedsYouToolbar.countText(count: needsYou) { width += 4 + textWidth(count) }
-        if editor { width += 69 + 5 }
-        if changes { width += 32 + 5 }
-        if let trouble { width += 30 + textWidth(trouble) + 5 }
+        if editor { width += 80 + 8 }
+        if changes { width += 36 + 8 }
+        if let trouble { width += 34 + textWidth(trouble) + 8 }
         return width
     }
 
@@ -279,8 +283,9 @@ struct TitleStatusView: View {
             }
         }
         .font(.system(size: NSFont.systemFontSize))
-        // At least the compact bar's 24 pt control height, to hit.
-        .frame(width: form.width, height: 24)
+        // The regular bar's 36 pt control height, to hit; the field inside
+        // is the 28 pt of Xcode's activity view.
+        .frame(width: form.width, height: TitleStatus.height)
         .background(TitleStatusAnchor.Mark())
         .popover(isPresented: $showingActivity, arrowEdge: .bottom) {
             TitleActivityPopover(activity: activity, actions: actions) { showingActivity = false }
@@ -669,12 +674,13 @@ extension View {
     }
 }
 
-/// The main window's chrome (ov-214): the system's compact toolbar, 40 pt
-/// with 24 pt controls where the unified one is 52 with 36. The scene asks
+/// The main window's chrome (ov-214): the system's regular unified toolbar,
+/// 52 pt with 36 pt controls, as Xcode and Finder have it (the compact one
+/// is 40 with 24, and glass that short looked wrong). The scene asks
 /// for it (`FarCoolerApp`), and the window's root sets it on its window as
 /// well, so a window made any other way, a test's included, is the same.
 enum MainWindowChrome {
-    static let toolbarStyle: NSWindow.ToolbarStyle = .unifiedCompact
+    static let toolbarStyle: NSWindow.ToolbarStyle = .unified
 
     struct Setter: NSViewRepresentable {
         final class Probe: NSView {

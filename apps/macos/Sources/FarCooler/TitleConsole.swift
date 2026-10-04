@@ -419,7 +419,7 @@ struct TitleConsoleField: View {
                 onSubmit: { actions.submit(model) },
                 onCancel: { model.console.close() },
                 onEndEditing: { model.fieldEndedEditing() })
-            .frame(height: 18)
+            .frame(height: 22)
             .accessibilityLabel(
                 console.mode == .find ? "Find" : TitleConsole.sendTitle(recipient: actions.recipient))
             .accessibilityIdentifier("title-console-field")
@@ -428,7 +428,7 @@ struct TitleConsoleField: View {
             }
         }
         .padding(.horizontal, Spacing.tight + 2)
-        .frame(height: 22)
+        .frame(height: 28)
         .surface(.inset, in: .control)
     }
 }

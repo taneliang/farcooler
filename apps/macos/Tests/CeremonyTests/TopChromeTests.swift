@@ -12,8 +12,8 @@ import Testing
 /// Before: a 52 pt unified toolbar and its hairline, the conversation's
 /// 32 pt header row and its divider, the canvas's 10 pt inset, then the lone
 /// pane's own 28 pt title row, 124 pt in all (the design's §1, measured from
-/// the owner's capture). After: the 40 pt compact toolbar, no header row,
-/// the inset, and no title row on a lone pane: 50 pt.
+/// the owner's capture). After: the 52 pt regular toolbar, no header row,
+/// the inset, and no title row on a lone pane: 62 pt.
 ///
 /// The window is the harness's, with the real title bar, and the main area
 /// is the real `TileView` the orchestrator's column draws, over a pane that
@@ -84,22 +84,22 @@ struct TopChromeTests {
         return (Harness.band(window), seen.views)
     }
 
-    @Test("A lone pane's content starts 50 pt below the window's top: the compact bar and the canvas inset")
+    @Test("A lone pane's content starts 62 pt below the window's top: the regular bar and the canvas inset")
     func lonePane() async throws {
         let (band, seen) = try await Self.measure(["orchestrator"])
-        #expect(band == 40, "the toolbar is \(band) pt, not the compact 40")
+        #expect(band == 52, "the toolbar is \(band) pt, not the regular 52")
         let body = try #require(seen["pane-body"]?.first, "no pane was drawn")
-        #expect(abs(body.minY - 50) < 0.5, "the pane's content starts \(body.minY) pt down, not 50")
+        #expect(abs(body.minY - 62) < 0.5, "the pane's content starts \(body.minY) pt down, not 62")
         #expect(seen["pane-header"] == nil, "a lone pane drew its title row")
     }
 
     @Test("Two panes each name themselves: the first's content is under its 28 pt title row")
     func twoPanes() async throws {
         let (band, seen) = try await Self.measure(["orchestrator", "shell"])
-        #expect(band == 40)
+        #expect(band == 52, "the toolbar is \(band) pt, not the regular 52")
         let headers = try #require(seen["pane-header"])
         #expect(headers.count == 2, "\(headers.count) title rows for two panes")
         let top = try #require(seen["pane-body"]?.map(\.minY).min())
-        #expect(abs(top - (50 + WorkspaceStyle.paneHeaderHeight)) < 0.5, "the first pane's content starts \(top) pt down")
+        #expect(abs(top - (62 + WorkspaceStyle.paneHeaderHeight)) < 0.5, "the first pane's content starts \(top) pt down")
     }
 }
