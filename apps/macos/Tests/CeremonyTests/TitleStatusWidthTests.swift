@@ -28,7 +28,7 @@ struct TitleStatusWidthTests {
     /// The window widths the owner uses and the window's minimum, with the
     /// form each affords beside "Main · overnight", Open in Editor, Changes
     /// and a tray reading 11.
-    static let widths: [(CGFloat, TitleStatus.Form)] = [
+    nonisolated static let widths: [(CGFloat, TitleStatus.Form)] = [
         (1790, .wide), (1200, .wide), (900, .medium), (700, .short), (600, .ring),
     ]
 

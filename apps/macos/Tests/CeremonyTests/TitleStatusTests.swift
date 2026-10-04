@@ -51,11 +51,12 @@ struct TitleStatusTests {
             orchestrator: state, status: nil, nowDoing: doing, needYou: needYou, running: [], inReview: [])
     }
 
+    // `.none` alone would be Optional.none, the no-column case; the state is spelled out.
     @Test("The orchestrator's line and label for each state")
     func orchestratorWords() {
         #expect(TitleStatus.orchestratorLine(Self.model(.working, doing: "Reading the diff")) == "Working — Reading the diff")
         #expect(TitleStatus.orchestratorLine(Self.model(.idle)) == "Idle")
-        #expect(TitleStatus.orchestratorLine(Self.model(.none)) == "No Orchestrator")
+        #expect(TitleStatus.orchestratorLine(Self.model(OrchestratorRow.State.none)) == "No Orchestrator")
         #expect(TitleStatus.orchestratorLine(Self.model(.needsYou, doing: "Ship it?")) == "Needs You — Ship it?")
         #expect(TitleStatus.orchestratorLine(Self.model(.unread)) == "Done")
         #expect(TitleStatus.orchestratorLine(Self.model(.starting)) == "Starting")
@@ -67,7 +68,7 @@ struct TitleStatusTests {
             TitleStatus.orchestratorLabel(Self.model(.working, doing: "Reading the diff"))
                 == "Orchestrator, Working, Reading the diff")
         #expect(TitleStatus.orchestratorLabel(Self.model(.idle)) == "Orchestrator, Idle")
-        #expect(TitleStatus.orchestratorLabel(Self.model(.none)) == "No Orchestrator")
+        #expect(TitleStatus.orchestratorLabel(Self.model(OrchestratorRow.State.none)) == "No Orchestrator")
         #expect(TitleStatus.orchestratorLabel(Self.model(nil)) == nil)
     }
 
