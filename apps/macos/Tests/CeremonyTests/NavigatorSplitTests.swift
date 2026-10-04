@@ -336,6 +336,63 @@ struct NavigatorSplitTests {
         }
     }
 
+    /// The dividers under the orchestrator and between the panes, top to
+    /// bottom.
+    private func dividers(_ drawn: Drawn) -> [CGRect] {
+        drawn.box.probes.filter { $0.0 == "navigator-divider" }.map(\.1).sorted { $0.minY < $1.minY }
+    }
+
+    /// ov-258, the owner, 4 October: "the sidebar horizontal dividers seem to
+    /// have margin around them ... the scroll content should probably bump up
+    /// against the lines." The scroll view of each pane over a rule ends where
+    /// the rule's line starts, so what scrolls runs up to it, and the room the
+    /// rhythm gives it is an inset at the foot of the content.
+    @Test("Each pane's scroll view meets the rule under it, with its rhythm as an inset inside")
+    func panesMeetTheirRules() async throws {
+        let drawn = Drawn(await Self.board(tasks: 120, terminals: 30), height: 800)
+        await drawn.settle()
+        let rules = dividers(drawn)
+        #expect(rules.count == 3, "\(rules.count) dividers: the orchestrator's and two rules")
+        guard rules.count == 3 else { return }
+        for (pane, rule) in [("tasks", rules[1]), ("terminals", rules[2])] {
+            let viewport = try #require(drawn.probe("navigator-pane-\(pane)"), "no \(pane) pane")
+            #expect(abs(viewport.maxY - rule.minY) <= 0.5, "\(pane) ends at \(viewport.maxY), its rule starts at \(rule.minY)")
+        }
+        #expect(NavigatorSplit.ruleSlot == WorkspaceColumns.divider, "a rule's slot is its line")
+        #expect(NavigatorSplit.paneInset == NavigatorRhythm.rule && NavigatorSplit.headerInset == NavigatorRhythm.rule)
+    }
+
+    /// At rest, the last row of a pane that shows all its rows is
+    /// `NavigatorRhythm.rule` (and its own air) from the rule: the inset,
+    /// inside the scroll view. Scrolled, a row runs under the line's edge.
+    @Test("A pane's last row rests a rhythm from its rule, and scrolled rows run up to it")
+    func theInsetIsInsideTheScroll() async throws {
+        let rest = Drawn(await Self.board(tasks: 3, terminals: 2), height: 800)
+        await rest.settle()
+        let rules = dividers(rest)
+        let new = try #require(rest.box.marks.first { $0.0.row == "projectTerminalNew" && $0.0.role == .text }?.1)
+        let pane = try #require(rest.probe("navigator-pane-terminals"))
+        let under = try #require(rules.last)
+        #expect(
+            abs((under.minY - new.maxY) - (NavigatorRhythm.rule + NavigatorRhythm.air)) <= 1,
+            "New Terminal ends \(under.minY - new.maxY) from its rule")
+        #expect(abs(pane.maxY - under.minY) <= 0.5, "the pane \(pane) and its rule \(under)")
+        // Scrolled: a pane whose rows are taller than it has one straddling
+        // its foot, cut by the scroll view's edge at the rule.
+        let long = Drawn(await Self.board(tasks: 120, terminals: 30), height: 800)
+        await long.settle()
+        let scrolls = long.scrollViews()
+        guard scrolls.count >= 2 else { Issue.record("\(scrolls.count) scroll views"); return }
+        let clip = scrolls[1].contentView
+        clip.scroll(to: NSPoint(x: 0, y: clip.bounds.origin.y + 100))
+        scrolls[1].reflectScrolledClipView(clip)
+        await long.settle()
+        let viewport = try #require(long.probe("navigator-pane-terminals"))
+        let rule = try #require(dividers(long).last)
+        let cut = long.boxes("projectTerminal").filter { $0.minY < viewport.maxY && $0.maxY > viewport.maxY }
+        #expect(!cut.isEmpty, "no row runs up to the rule at \(rule.minY)")
+    }
+
     final class Kept { var value = "" }
 
     /// What the window does with the heights: keeps them in state it

@@ -192,8 +192,33 @@ enum NavigatorSplit {
         return chosen
     }
 
-    /// A rule's slot: the line and `NavigatorRhythm.rule` over and under it.
-    static let ruleSlot: CGFloat = 2 * NavigatorRhythm.rule + WorkspaceColumns.divider
+    /// A rule's slot: the line, and nothing else (ov-258). The owner, 4
+    /// October: "the scroll content should probably bump up against the
+    /// lines". The pane over a rule clips right at it, so the rhythm's
+    /// `NavigatorRhythm.rule` over and under a line is not a margin the
+    /// panes leave, but an inset in what scrolls: `paneInset`.
+    static let ruleSlot: CGFloat = WorkspaceColumns.divider
+
+    /// The room a pane's rows keep from the rule under them: at the foot of
+    /// the scrolling content, so at rest the last row sits `rule` from the
+    /// line, and scrolled, rows run right up to it. A closed pane has no
+    /// scroll view, so its header keeps the room instead.
+    static let paneInset: CGFloat = NavigatorRhythm.rule
+    /// The room between a rule and the header of the pane under it: the
+    /// header is fixed, not scrolled, so it keeps this on its own top.
+    static let headerInset: CGFloat = NavigatorRhythm.rule
+
+    /// The room over the header of the pane at `index`: a rule's, but for
+    /// the first pane, which has none over it.
+    static func headerTop(_ index: Int) -> CGFloat { index > 0 ? headerInset : 0 }
+
+    /// The room under a pane's header, when the pane is closed and another
+    /// is under it: the rule's. An open pane keeps it in its content.
+    static func headerBottom(expanded: Bool, last: Bool) -> CGFloat { expanded || last ? 0 : paneInset }
+
+    /// The room at the foot of an open pane's content: none in the last,
+    /// which has no rule under it.
+    static func contentBottom(last: Bool) -> CGFloat { last ? 0 : paneInset }
 }
 
 /// One pane of the split, drawn: its header, and its rows.
@@ -243,11 +268,20 @@ struct NavigatorSplitView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(panes.enumerated()), id: \.element.id) { index, pane in
                         if index > 0 { rule(index, heights: heights, room: room) }
+                        let isLast = index == panes.count - 1
+                        // Fixed chrome, so the rule's room over it and, in a
+                        // closed pane, under it, are its own (ov-258).
                         pane.header
+                            .padding(.top, NavigatorSplit.headerTop(index))  // rhythm-exempt: NavigatorRhythm.rule, or none over the first
+                            .padding(.bottom, NavigatorSplit.headerBottom(expanded: pane.expanded, last: isLast))  // rhythm-exempt: NavigatorRhythm.rule in a closed pane over a rule
                             .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { headers[pane.id] = $0 }
                         if pane.expanded {
                             ScrollView {
+                                // The room under the last row is in the
+                                // content, so the scroll view itself meets
+                                // the rule with no gap.
                                 pane.content
+                                    .padding(.bottom, NavigatorSplit.contentBottom(last: isLast))  // rhythm-exempt: NavigatorRhythm.rule, or none in the last
                                     .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) {
                                         contents[pane.id] = $0
                                     }
@@ -351,7 +385,6 @@ struct NavigatorSplitRule: View {
 
     var body: some View {
         Divider().probed("navigator-divider")  // style-exempt: the rule between two navigator panes, dragged
-            .padding(.vertical, NavigatorRhythm.rule)
             .background(focused ? Fill.selection(active: true) : Color.clear)
             .contentShape(Rectangle())
             .pointerStyle(canMove ? .rowResize : nil)
