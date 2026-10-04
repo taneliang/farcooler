@@ -698,6 +698,10 @@ extension View {
 /// well, so a window made any other way, a test's included, is the same.
 enum MainWindowChrome {
     static let toolbarStyle: NSWindow.ToolbarStyle = .unified
+    /// The main window's narrowest: the regular bar holds every item at it,
+    /// the tray and Show Files included. They need 605 pt (integ-9,
+    /// measured); 600 sent the tray to the overflow menu. 640 leaves some room.
+    static let minimumWidth: CGFloat = 640
 
     struct Setter: NSViewRepresentable {
         final class Probe: NSView {

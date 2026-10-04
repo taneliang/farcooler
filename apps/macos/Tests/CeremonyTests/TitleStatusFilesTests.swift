@@ -13,10 +13,10 @@ import Testing
 struct TitleStatusFilesTests {
     typealias Harness = TitleBarHarness
 
-    nonisolated static let widths: [CGFloat] = [1790, 1200, 900, 700, 600]
-    /// The narrowest window that holds every item with Show Files in the
-    /// regular bar, as measured in integ-9 (`fitsWithFiles` at 600).
-    static let fitsEverything: CGFloat = 605
+    /// The owner's widths, and the window's minimum: at the minimum, every
+    /// item fits too. With the minimum back at 600, the tray overflows and
+    /// this goes red (integ-9).
+    nonisolated static let widths: [CGFloat] = [1790, 1200, 900, 700, MainWindowChrome.minimumWidth]
 
     private static func root(files: Bool) -> Harness.Root<Color> {
         Harness.Root(words: Harness.Words(), files: files, content: Color.clear)
@@ -36,18 +36,7 @@ struct TitleStatusFilesTests {
         ).form(window: width)
         let status = try #require(Harness.status(in: window), "no status area in the toolbar at \(width)")
         #expect(status.width == form.width, "at \(width): \(status.width) wide, not \(form)'s \(form.width)")
-        if width < Self.fitsEverything {
-            // Known (integ-9): at the regular bar's sizes, every item and its
-            // gap need 605 pt (measured), so at the window's 600 pt minimum the
-            // tray goes to the overflow menu whatever form the status area
-            // takes. Waits on a ruling: a wider minimum, or an item that
-            // gives way. Goes red here once it fits.
-            withKnownIssue("the tray overflows at the 600 pt minimum with Show Files") {
-                #expect(Harness.itemsShown(in: window) == everything, "at \(width) an item went to the overflow menu")
-            }
-        } else {
-            #expect(Harness.itemsShown(in: window) == everything, "at \(width) an item went to the overflow menu")
-        }
+        #expect(Harness.itemsShown(in: window) == everything, "at \(width) an item went to the overflow menu")
         let switcher = try #require(Harness.switcher(in: window))
         #expect(status.frame.minX >= switcher.maxX, "at \(width) the status area overlaps the switcher")
     }

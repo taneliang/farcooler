@@ -26,7 +26,7 @@ struct FarCoolerApp: App {
                 // a window sitting at its minimum had to grow to reveal one;
                 // the navigator gives its width out of the detail instead
                 // (`WorkspaceColumns`), and the old sidebar is gone (ov-178).
-                .frame(minWidth: 600, minHeight: 400)
+                .frame(minWidth: MainWindowChrome.minimumWidth, minHeight: 400)
                 .alert("Install command-line tools?", isPresented: $showsCLIToolsPrompt) {
                     Button("Install") { CommandLineTools().install() }
                     Button("Not Now", role: .cancel) {}
