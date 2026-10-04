@@ -72,7 +72,7 @@ struct NavigatorRhythmTests {
     /// A board read through a stubbed CLI: `done` tasks finished in the last
     /// hour, so Unread's Finished is long, `review` waiting, and a few of
     /// every other status.
-    static func store(done: Int, review: Int, others: Bool) async -> TaskBoardStore {
+    static func store(done: Int, review: Int, others: Bool, read: Bool = false) async -> TaskBoardStore {
         let client = DaemonClient(target: "", notifications: NotificationCenter())
         let now = Int64(Date().timeIntervalSince1970 * 1000) - 60_000
         var tasks: [(String, String)] = []
@@ -94,6 +94,7 @@ struct NavigatorRhythmTests {
         }
         let store = TaskBoardStore(client: client, workspace: .implicit(repository: "r"))
         await store.readIfNeverRead()
+        if read { for row in store.board.rows { store.markRead(row) } }
         return store
     }
 
@@ -251,7 +252,9 @@ struct NavigatorRhythmTests {
     @Test("Every gap in a long navigator is its level's", arguments: ["many", "empty"])
     func theRhythmHolds(_ board: String) async {
         let many = board == "many"
-        let store = await Self.store(done: many ? 32 : 0, review: many ? 4 : 0, others: many)
+        // "empty" is a board with one task, read: Unread says "Nothing new". A
+        // board with no task at all draws its own state (ov-205).
+        let store = await Self.store(done: many ? 32 : 1, review: many ? 4 : 0, others: many, read: !many)
         let found = await Self.lines(Self.board(store), height: many ? 1800 : 700)
         let kinds = Set(found.map(\.kind))
         // Every level is drawn, so every rule above was checked.
@@ -342,9 +345,9 @@ struct NavigatorRhythmTests {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let label = ProcessInfo.processInfo.environment["FARCOOLER_RHYTHM_LABEL"] ?? "capture"
         var text = ""
-        for (name, done, review, others) in [("many", 32, 4, true), ("empty", 0, 0, false)] {
+        for (name, done, review, others) in [("many", 32, 4, true), ("empty", 1, 0, false)] {
             for dark in [false, true] {
-                let store = await Self.store(done: done, review: review, others: others)
+                let store = await Self.store(done: done, review: review, others: others, read: name == "empty")
                 let found = await Self.lines(
                     Self.board(store), height: name == "many" ? 1800 : 700,
                     capture: directory.appendingPathComponent("\(label)-\(name)-\(dark ? "dark" : "light").png"),
