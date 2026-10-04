@@ -108,7 +108,7 @@ async fn a_theme_a_lane_and_the_plan_round_trip_and_announce() {
         actor: "manager".into(),
     });
     let result::Value::Plan(p) = call(&mut a, "plan.set", set).await.expect("plan.set") else { panic!("wrong result") };
-    assert_eq!(p.order, [queued.id.clone()]);
+    assert_eq!(p.order, std::slice::from_ref(&queued.id));
 
     let read = plan(&mut connect(&h).await, repo.workspace).await;
     assert_eq!(read.themes.len(), 1);

@@ -364,7 +364,7 @@ async fn send<L: DispatchLink>(
     let mut r = with(req_for(method, board.repository), payload);
     r.required_capabilities.push(capability::BOARD_PLAN.to_string());
     let answer = link.call(r).await.map_err(|e| refused_here(e, "The runner couldn't record that. Try again."))?;
-    Ok(expect_value(answer.value)?)
+    expect_value(answer.value)
 }
 
 async fn get_plan<L: DispatchLink>(link: &mut L, workspace: &bytes::Bytes, all: bool) -> Result<pb::Plan, Failed> {
@@ -931,7 +931,7 @@ fn spend_words(spend: &pb::LaneSpend) -> String {
 }
 
 fn done_of(view: &pb::BoardThemeView) -> String {
-    let c = view.counts.clone().unwrap_or_default();
+    let c = view.counts.unwrap_or_default();
     let total = c.backlog + c.todo + c.needs_decision + c.in_progress + c.in_review + c.done + c.cancelled;
     format!("{} of {} done", c.done, total)
 }
@@ -980,7 +980,7 @@ fn lane_status(l: &pb::Lane, now: i64) -> String {
         parts.push(format!("train {train}"));
     }
     parts.push(count(l.cards.len(), "card"));
-    let spend = l.spend.clone().unwrap_or_default();
+    let spend = l.spend.unwrap_or_default();
     if spend.runs > 0 {
         parts.push(spend_words(&spend));
     }
@@ -1007,7 +1007,7 @@ fn overview(plan: &pb::Plan, now: i64) -> String {
     }
     let keys = Keys::of_plan(plan);
     let mut out: Vec<String> = Vec::new();
-    let lane_of = |id: &bytes::Bytes| plan.lanes.iter().find(|l| &l.id == id);
+    let lane_of = |id: &bytes::Bytes| plan.lanes.iter().find(|l| l.id == *id);
 
     let next: Vec<&pb::Lane> = plan.order.iter().filter_map(lane_of).collect();
     if !next.is_empty() {
@@ -1124,7 +1124,7 @@ fn theme_text(
     out.push(String::new());
     out.push(format!("Cards · {}", done_of(view)));
     for id in &view.task_ids {
-        let card = plan.cards.iter().find(|c| &c.task_id == id);
+        let card = plan.cards.iter().find(|c| c.task_id == *id);
         match card {
             Some(c) => out.push(format!("  {}  {}  {}", c.key, c.title, status_word(c.status))),
             None => out.push(format!("  {}", keys.of(id))),
@@ -1154,7 +1154,7 @@ fn lane_text(l: &pb::Lane, keys: &Keys, events: &[pb::PlanEvent], now: i64) -> S
         let slice = if c.slice.is_empty() { "whole card".to_string() } else { c.slice.clone() };
         out.push(format!("  {}  {}", keys.of(&c.task_id), slice));
     }
-    out.push(format!("Spend  {}", spend_words(&l.spend.clone().unwrap_or_default())));
+    out.push(format!("Spend  {}", spend_words(&l.spend.unwrap_or_default())));
     if !l.agents.is_empty() {
         let agents: Vec<String> = l
             .agents
@@ -1166,7 +1166,7 @@ fn lane_text(l: &pb::Lane, keys: &Keys, events: &[pb::PlanEvent], now: i64) -> S
                     _ => "Builder",
                 };
                 let model = if a.model.is_empty() { String::new() } else { format!(" {}", a.model) };
-                let span = a.ended_at.map_or(now, |e| e) - a.started_at;
+                let span = a.ended_at.unwrap_or(now) - a.started_at;
                 format!("{role}{model}, {}", age(span))
             })
             .collect();
@@ -1190,7 +1190,7 @@ fn id_text(id: &[u8]) -> String {
 
 fn theme_json(view: &pb::BoardThemeView, keys: &Keys) -> Value {
     let t = view.theme.clone().unwrap_or_default();
-    let c = view.counts.clone().unwrap_or_default();
+    let c = view.counts.unwrap_or_default();
     json!({
         "id": id_text(&t.id),
         "short": short_bytes(&t.id),
@@ -1224,7 +1224,7 @@ fn lane_state_word(state: i32) -> &'static str {
 }
 
 fn lane_json(l: &pb::Lane, keys: &Keys) -> Value {
-    let spend = l.spend.clone().unwrap_or_default();
+    let spend = l.spend.unwrap_or_default();
     json!({
         "id": id_text(&l.id),
         "short": short_bytes(&l.id),
