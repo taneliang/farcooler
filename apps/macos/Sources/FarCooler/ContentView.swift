@@ -2176,6 +2176,7 @@ struct ContentView: View {
         row: TaskRow, board: TaskBoardStore, client: DaemonClient, host: String, shown: ShownLayout?,
         keyboard: Bool = true, settled: Bool = true
     ) -> some View {
+        let onRunner = boardAgents(host: host, client: client)
         let agents = WorkspaceScreen.agents(of: row.id, host: host, in: store.fleet)
         let chosen = WorkspaceScreen.agent(of: row.id, host: host, in: store.fleet, chosen: chosenAgents[row.id])
         let worktreeID = TaskColumnModel.worktree(of: row, agent: chosen)
@@ -2227,8 +2228,11 @@ struct ContentView: View {
                 onOpenWorktree: openWorktree)
             TaskTabs(tab: tab) {
                 ScrollView {
-                    TaskColumnCard(row: row, store: board)
-                        .padding(TaskTypography.inset)
+                    TaskColumnCard(
+                        row: row, store: board, orchestrator: onRunner.orchestrator(for: row),
+                        speaksOfAgents: onRunner.runnerRecordsTasks, onGoTo: { go(to: $0) }
+                    )
+                    .padding(TaskTypography.inset)
                 }
                 // The record runs past the window on a long task: bars that
                 // stay, and a soft edge that says there is more below.

@@ -633,6 +633,11 @@ struct BoardAgents {
         return panes.filter { working.contains($0.id) }
     }
 
+    /// The pane `row`'s subagents live in, or nil (`TaskWorkers.orchestrator`).
+    func orchestrator(for row: TaskRow) -> BoardPane? {
+        runnerRecordsTasks ? TaskWorkers.orchestrator(of: row, in: worktrees) : nil
+    }
+
     func presence(for row: TaskRow) -> TaskAgentPresence {
         row.agentPresence(livePanes: live(for: row).count, runnerRecordsTasks: runnerRecordsTasks)
     }
@@ -1322,6 +1327,10 @@ struct TaskListRow: View {
     let live: [BoardPane]
     let presence: TaskAgentPresence
     let onGoTo: (BoardPane) -> Void
+    /// The pane its subagents live in (ov-213), when it has some.
+    var orchestrator: BoardPane?
+    /// Whether the runner can be believed about its agents right now.
+    var speaksOfAgents = true
     /// Open beside the board (ov-85).
     var selected = false
     /// The list has the keyboard: selected reads in the accent.
@@ -1334,14 +1343,16 @@ struct TaskListRow: View {
 
     var body: some View {
         CompactTaskRow(key: row.key, title: row.title, emphasized: prominent, selected: selected, keyed: keyed) {
-            TaskRowMetaView(row: row, agent: TaskRowMeta.agent(live: live, presence: presence))
+            TaskRowMetaView(
+                row: row, agent: TaskRowMeta.agent(live: live, presence: presence),
+                speaksOfAgents: speaksOfAgents)
         }
         .contentShape(Rectangle())
         .onTapGesture { if let onChoose { onChoose() } else { store.choose(row) } }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
         .contextMenu {
-            TaskRowMenu(row: row, live: live, store: store, onGoTo: onGoTo)
+            TaskRowMenu(row: row, live: live, orchestrator: orchestrator, store: store, onGoTo: onGoTo)
             if let worktree, !worktreeMenu.isEmpty {
                 Divider()
                 Menu("Worktree \(worktree.task)") {
@@ -1358,6 +1369,7 @@ struct TaskListRow: View {
 private struct TaskRowMenu: View {
     let row: TaskRow
     let live: [BoardPane]
+    var orchestrator: BoardPane?
     @ObservedObject var store: TaskBoardStore
     let onGoTo: (BoardPane) -> Void
 
@@ -1365,7 +1377,11 @@ private struct TaskRowMenu: View {
         // Going somewhere writes nothing, so it is not a `BoardAction`:
         // that list is for writes, and `rewritesTheRecord` walks it.
         GoToAgentItems(live: live, onGoTo: onGoTo)
-        if !live.isEmpty { Divider() }
+        // Where its subagents live, when no pane of its own is on it.
+        if live.isEmpty, let orchestrator {
+            Button("Go to Orchestrator") { onGoTo(orchestrator) }
+        }
+        if !live.isEmpty || orchestrator != nil { Divider() }
         // Built from the model's list rather than written out here, which
         // is what makes `nothingTheBoardOffersRewritesTheRecord` a guard
         // over what actually ships. A new write goes in `TaskBoardModel`,
@@ -1492,6 +1508,11 @@ struct TaskCard: View {
     let canAnswer: Bool
     /// What its agents spent (ov-195). Nil draws no Usage section.
     var usage: TaskUsageState? = nil
+    /// The pane its subagents live in (ov-213), for the Subagents section.
+    var orchestrator: BoardPane?
+    var onGoTo: (BoardPane) -> Void = { _ in }
+    /// Whether the runner can be believed about its agents right now.
+    var speaksOfAgents = true
     /// Try Again, on a Usage section whose read failed.
     var onRetryUsage: () -> Void = {}
     /// Send an answer; true when it was written.
@@ -1519,6 +1540,9 @@ struct TaskCard: View {
             if let offer = Self.offer(row: row, question: question, canAnswer: canAnswer) {
                 QuestionAnswers(offer: offer, onAnswer: onAnswer, draft: draft)
                     .id(offer.question.id)
+            }
+            if speaksOfAgents, !row.workers.isEmpty {
+                TaskWorkersSection(row: row, orchestrator: orchestrator, onGoTo: onGoTo)
             }
             if let usage {
                 TaskUsageView(state: usage, onRetry: onRetryUsage)
@@ -1572,6 +1596,14 @@ struct TaskCard: View {
                             .font(TaskTypography.meta)
                             .foregroundStyle(.secondary)
                     }
+                }
+            }
+            BoardTick { now in
+                if let line = row.startLine(at: now, speaksOfAgents: speaksOfAgents) {
+                    Text(line)
+                        .font(TaskTypography.meta)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("task-start-line")
                 }
             }
             CardTimeLines(row: row, staleSize: TaskTypography.metaSize, timeSize: TaskTypography.metaSize)

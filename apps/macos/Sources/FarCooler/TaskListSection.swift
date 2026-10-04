@@ -67,7 +67,8 @@ struct TaskListSection: View {
                     TaskListRow(
                         row: row, prominent: leads, store: store,
                         live: agents.live(for: row), presence: agents.presence(for: row),
-                        onGoTo: onGoTo, selected: row.id == lit, keyed: keyed,
+                        onGoTo: onGoTo, orchestrator: agents.orchestrator(for: row),
+                        speaksOfAgents: agents.runnerRecordsTasks, selected: row.id == lit, keyed: keyed,
                         worktree: worktrees.byTask[row.id],
                         worktreeMenu: worktrees.byTask[row.id].map(worktrees.menu) ?? [],
                         performOnWorktree: { item in
