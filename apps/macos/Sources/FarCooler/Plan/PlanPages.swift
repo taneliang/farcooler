@@ -45,12 +45,24 @@ struct PlanPageView: View {
         .task(id: plan.generation) { await plan.reloadIfMoved() }
     }
 
+    /// The page with nothing to show: not found once the plan is read; until
+    /// then a spinner, and if the read failed (a runner that can't answer,
+    /// once the CLI's own timeout has passed), the unavailable state with
+    /// Try Again, never the spinner forever.
     private func missing(_ title: String) -> some View {
         Group {
             if plan.hasRead {
                 ContentUnavailableView(title, systemImage: "map")
+            } else if let trouble = plan.trouble, !plan.reading {
+                ContentUnavailableView {
+                    Label(trouble, systemImage: "map")
+                } actions: {
+                    Button("Try Again") { Task { await plan.reload() } }
+                }
+                .identified("plan-page-unavailable")
             } else {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .identified("plan-page-reading")
             }
         }
         .background(WorkspaceStyle.paper)
