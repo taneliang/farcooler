@@ -101,6 +101,14 @@ jobs:
         run: |
           ./scripts/file-size-budget.py --self-test
           ./scripts/file-size-budget.py
+      # The plan layer is removable (ov-268): the code that serves the board
+      # never names its tables or modules. Its rule against planted
+      # references first, then the tree. The drill that drops the tables from
+      # a populated database is `plan_tests.rs`, in the Rust job.
+      - name: Plan layer references
+        run: |
+          ./scripts/plan-layer-lint.py --self-test
+          ./scripts/plan-layer-lint.py
       # No new swallowed call to the host (ov-167): a `try?` on core.call or
       # runCLI, or an ignored runCatching/attempt or empty catch in the Android
       # app's Kotlin. Existing ones are listed, each with its reason,

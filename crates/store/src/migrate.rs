@@ -59,6 +59,12 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     // their workspace or task by cascade, whichever build deletes it. An older
     // build never reads or writes read state.
     (crate::board_reads::migration_0022_board_reads, Older::Welcome),
+    // Six new tables (ov-268) only plan.rs and plan_read.rs touch, whose rows
+    // go with their workspace, task or lane by cascade, or lose a worktree
+    // link (SET NULL). No column on a table old code writes, and no trigger.
+    // Older builds never read them, so a rollback past the experiment keeps a
+    // working database.
+    (crate::plan::migration_0023_plan_layer, Older::Welcome),
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;

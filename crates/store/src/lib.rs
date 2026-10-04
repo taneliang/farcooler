@@ -19,6 +19,8 @@ pub mod board_reads;
 mod compat;
 mod error;
 mod migrate;
+pub mod plan;
+pub mod plan_read;
 pub mod review;
 pub mod models;
 mod store;
