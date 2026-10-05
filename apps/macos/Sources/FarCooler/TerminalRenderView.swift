@@ -87,7 +87,12 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     /// sight (`outOfSight`), such as a pane another has been zoomed over.
     /// See `TerminalRenderView+Idle.swift` for what stops with it.
     var isShown = true {
-        didSet { if isShown != oldValue { updateDrawing() } }
+        didSet {
+            guard isShown != oldValue else { return }
+            updateDrawing()
+            // A card names a key the owner can no longer see (train 1004r, K1).
+            if !isShown { keyHover.exited() }
+        }
     }
     private(set) lazy var windowWatch = WindowVisibilityWatch { [weak self] _ in self?.updateDrawing() }
     /// Which rows the last frame drew, so the next draws only what moved.
@@ -1192,6 +1197,11 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
 
     override func mouseMoved(with event: NSEvent) {
         updateHoveredLink(for: event)
+        // A pane mounted out of sight (opacity 0 under an opened task, or a
+        // tile behind a zoomed one) still has its tracking area, which
+        // SwiftUI's opacity and hit-testing don't clip: no card from it
+        // (train 1004r, K1).
+        guard isShown else { return keyHover.exited() }
         keyHover.moved(self, event)
     }
 

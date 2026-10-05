@@ -93,6 +93,25 @@ struct TerminalKeyHoverTests {
         #expect(view.keyHover.shown == nil)
     }
 
+    @Test("A pane mounted out of sight shows no card, and one going out of sight closes its card (train 1004r, K1)")
+    func outOfSightShowsNothing() async throws {
+        // The orchestrator kept mounted at opacity 0 under an opened task:
+        // its tracking area still sees the pointer, so the gate is the view's.
+        let (view, window) = Self.pane("ov-190 x")
+        defer { window.close() }
+        view.isShown = false
+        try Self.move(view, row: 0, column: 2)
+        await Self.settle(view)
+        #expect(view.keyHover.shown == nil, "an invisible pane showed a card")
+        #expect(!view.keyHover.isWaiting)
+        view.isShown = true
+        try Self.move(view, row: 0, column: 2)
+        await Self.settle(view)
+        #expect(view.keyHover.shown?.key == "ov-190")
+        view.isShown = false
+        #expect(view.keyHover.shown == nil, "the card outlived its pane going out of sight")
+    }
+
     @Test("A key without a card, an unknown key and a key inside a URL show nothing")
     func nothingElse() async throws {
         let (view, window) = Self.pane("ov-7 ov-191 https://x.dev/ov-190")
