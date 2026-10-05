@@ -46,6 +46,11 @@ struct AppControlTests {
             }
         }
         guard connected == 0 else { return Data() }
+        // The app hangs up on another user without reading, so this write
+        // can meet a closed socket. Left at its default that raises SIGPIPE,
+        // which kills the whole test process rather than failing this test.
+        var on: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
         // Long: the answer is made on the main actor, which the rest of the
         // suite can hold for many seconds (it took 18 in one full run).
         var wait = timeval(tv_sec: 120, tv_usec: 0)
