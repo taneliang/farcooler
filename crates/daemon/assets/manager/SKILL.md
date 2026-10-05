@@ -106,16 +106,16 @@ won't start now says why: `task line <key>…` for the order (the whole line eac
 time), `task line --build` for the build slot, `task block` for another task,
 `task wait --until "2026-10-05 09:00"` or `--after release|recurrence|clear-board`
 for a time or an event, `task wait --park` for work nobody plans to do. Start
-the lane on the plan with the dispatch (`plan lane start`), and move it as
-each thing happens.
+the lane on the plan with the dispatch (`plan lane start`, next to it below; a
+dispatch isn't done without it), and move it as each thing happens.
 
 ```
 {{cli}} task create --repo <repo> --title "<Area>: <outcome>" --intent "<why>" --accept "<checkable>" --constraint "<limit>" --actor manager
 {{cli}} task note <key> --repo <repo> --kind decision --body "<what, and why>" --rejected "<the alternative>" --actor manager
 {{cli}} task dispatch <key> --repo <repo> --new <name> --branch <branch> --actor manager
 {{cli}} task dispatch <key> --repo <repo> --worktree <name> --preset codex --actor manager
-{{cli}} task worker <key> --repo <repo> --subagent <agentId> --actor manager
 {{cli}} plan lane start <name> --repo <repo> --card <key> --branch <branch> --model <model> --agent <id> --actor manager
+{{cli}} task worker <key> --repo <repo> --subagent <agentId> --actor manager
 {{cli}} plan lane set <name> --repo <repo> --state review --reason "<why it's there now>" --actor manager
 ```
 
@@ -135,7 +135,8 @@ in its environment (display scale, `CI=true`, shard timeouts), and a failure
 only CI caught earns a local gate. A red main comes first.
 
 - **Direct.** Rebase the train onto main (no merge commits unless the charter
-  wants them), check what's unpushed, push, and close cards on green CI.
+  wants them), check what's unpushed, push, start the watch (below), and close
+  cards on green CI.
 - **PR.** Never push main and never merge without the required approvals: no
   admin bypass, no dismissed reviews, no resolving another's thread, and never
   approve. One PR per card, under the owner's own `gh` login, so teammates
@@ -170,12 +171,17 @@ At each check-in, and when the owner returns, re-evaluate rather than replay:
 - the structure: do the themes still fit the work? Should a lane split, or a
   workstream move off?
 - initiative: in each theme, the gaps and next steps the owner would likely
-  want. File each as a card labeled `initiative`, with its evidence; never ask
-  first, even where you may only suggest. Build one only if `## Autonomy`
-  allows it and it's high-confidence and reversible, as a ruling. The owner's
-  requests come first, unless the idea unblocks one;
+  want. File each as a card labeled `initiative`, with its evidence, before you
+  report; never ask first, even where you may only suggest. Build one only if
+  `## Autonomy` allows it and it's high-confidence and reversible, as a ruling;
+  otherwise suggest it. The owner's requests come first, unless the idea
+  unblocks one;
 - what went wrong: one line in a lessons file, and a repeat becomes a brief
   rule or a gate. Name each permission prompt that blocked you or a lane.
+
+```
+{{cli}} task create --repo <repo> --title "<Area>: <outcome>" --intent "<the gap>" --accept "<checkable>" --label initiative --actor manager
+```
 
 Report from the board, not memory: what moved, what's stale, what waits on the owner.
 

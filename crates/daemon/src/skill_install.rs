@@ -1058,11 +1058,13 @@ mod tests {
     /// check-in with initiative. The owner asked for all of it in this skill,
     /// and only the landing and check-in steps are read every turn. The real
     /// haiku runs (ov-217) added 1 more: the exact commands a landing, a
-    /// ruling and a dispatch end with.
+    /// ruling and a dispatch end with, and a second round (a plan-lane line next
+    /// to the dispatch, the watch in the Direct step, a card recipe in the
+    /// check-in) added 6 more.
     #[test]
     fn the_skill_is_short() {
         let lines = skill_body(Harness::Claude).lines().count();
-        assert!(lines <= 233, "{lines} lines");
+        assert!(lines <= 240, "{lines} lines");
     }
 
     #[test]
