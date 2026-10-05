@@ -176,10 +176,10 @@ struct FarCoolerCommands: Commands {
             // and ⌥⌘→, which nothing else here holds (ov-334).
             Button("Collapse All") { AppCommand.collapseTree.post() }
                 .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
-                .disabled(!MainWindowFocus.goes(\.inWorkspace, mainWindow))
+                .disabled(!MainWindowFocus.goes(\.foldsTree, mainWindow))
             Button("Expand All") { AppCommand.expandTree.post() }
                 .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
-                .disabled(!MainWindowFocus.goes(\.inWorkspace, mainWindow))
+                .disabled(!MainWindowFocus.goes(\.foldsTree, mainWindow))
         }
 
         // File's close items, in place of SwiftUI's (ov-265). ⌘W closes the

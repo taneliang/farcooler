@@ -228,6 +228,8 @@ extension ContentView {
         focus.inWorkspace = scene != nil
         focus.boardView = showsBoardList
         focus.goesUp = treeParent != nil
+        focus.foldsTree = MainWindowFocus.treeOnScreen(
+            hasBoard: scene?.board != nil, boardView: showsBoardList, navigatorHidden: navigatorHidden, focused: focusColumn)
         if let scene, let board = scene.board {
             let entries = worktreeEntries(scene)
             let step = { (by: Int) in
@@ -333,8 +335,7 @@ extension ContentView {
             }
         case .focusConversation, .focusBoard, .focusTask:
             focusWorkspaceColumn(command)
-        case .collapseTree: treeFold.collapse()
-        case .expandTree: treeFold.expand()
+        case .collapseTree, .expandTree: treeFold.apply(command)
         case .switchWorkspace: switcherRequest += 1
         case .goToLine: focusedFiles?.goingToLine = true
         case .nextTaskTab: stepTaskTab(by: 1)

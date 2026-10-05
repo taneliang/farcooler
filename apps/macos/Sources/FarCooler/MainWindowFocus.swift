@@ -54,6 +54,14 @@ struct MainWindowFocus: Equatable {
     var boardView = false
     /// ⌘↑ has a node over the selection's to go to (ov-321).
     var goesUp = false
+    /// The one tree is on screen, for Collapse All and Expand All (ov-334):
+    /// a board with a navigator drawn, showing the tree and not the Board
+    /// view, and not in Focus.
+    var foldsTree = false
+
+    static func treeOnScreen(hasBoard: Bool, boardView: Bool, navigatorHidden: Bool, focused: Bool) -> Bool {
+        hasBoard && !boardView && !navigatorHidden && !focused
+    }
     /// The jump bar is drawn, over a task or a worktree, for ⌘L (ov-192).
     var hasJumpBar = false
     /// Focus (⌃⌘↩) has something to put at full size, and whether it has.

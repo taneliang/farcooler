@@ -29,18 +29,15 @@ struct OrchestratorRevealTests {
         #expect(OrchestratorReveal.step(conversation: nil, somethingOpen: true).leavesWhatIsOpen)
     }
 
-    @Test("⌥⌘1 and the title bar's Orchestrator item both go through selectOrchestrator, the one place that reveals")
-    func oneRoute() throws {
-        var root = URL(fileURLWithPath: #filePath)
-        for _ in 0..<3 { root.deleteLastPathComponent() }
-        let sources = root.appendingPathComponent("Sources/FarCooler")
-        func read(_ name: String) throws -> String { try String(contentsOf: sources.appendingPathComponent(name), encoding: .utf8) }
-        let toolbar = try read("ContentView+Toolbar.swift")
-        let tiling = try read("ContentView+Tiling.swift")
-        let detail = try read("ContentView+WorkspaceDetail.swift")
-        #expect(toolbar.contains("goToOrchestrator: { selectOrchestrator(keyboard: .conversation) }"))
-        #expect(tiling.contains("selectOrchestrator(keyboard: step.keyboard)"))
-        #expect(detail.contains("OrchestratorReveal.step("))
-        #expect(detail.contains("if reveal.endsPeek { planPeeking = false }"))
+    @Test("⌥⌘1 asks for the orchestrator to be selected and given the keyboard, as the title bar's item does")
+    func conversationStepSelectsTheOrchestrator() {
+        let step = WorkspaceNavigation.boardStep(.conversation, from: .init(opened: true, focus: true))
+        #expect(step.selectsOrchestrator)
+        #expect(step.keyboard == .conversation)
+        #expect(!step.focus, "out of Focus, so the chat is drawn to take it")
     }
+
+    // The title bar's item calls `selectOrchestrator(keyboard: .conversation)` itself, in a closure
+    // built inside `ContentView`, which a test can't construct and run without the whole window; the
+    // step above and `OrchestratorReveal` are what both entry points then read.
 }

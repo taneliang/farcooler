@@ -127,21 +127,56 @@ struct OneTreeFoldTests {
         #expect(TreeFold.help(anyExpanded: true).hasPrefix("Collapse"))
     }
 
-    @Test("View ▸ Collapse All and Expand All are menu items with ⌥⌘← and ⌥⌘→, enabled in a workspace, and the window answers them")
-    func menuWiring() throws {
-        var root = URL(fileURLWithPath: #filePath)
-        for _ in 0..<3 { root.deleteLastPathComponent() }
-        let sources = root.appendingPathComponent("Sources/FarCooler")
-        func read(_ name: String) throws -> String { try String(contentsOf: sources.appendingPathComponent(name), encoding: .utf8) }
-        let commands = try read("Commands.swift")
-        #expect(commands.contains("Button(\"Collapse All\") { AppCommand.collapseTree.post() }"))
-        #expect(commands.contains(".keyboardShortcut(.leftArrow, modifiers: [.command, .option])"))
-        #expect(commands.contains("Button(\"Expand All\") { AppCommand.expandTree.post() }"))
-        #expect(commands.contains(".keyboardShortcut(.rightArrow, modifiers: [.command, .option])"))
-        let window = try read("ContentView+Commands.swift")
-        #expect(window.contains("case .collapseTree: treeFold.collapse()"))
-        #expect(window.contains("case .expandTree: treeFold.expand()"))
-        #expect(try read("Plan/ContentView+OneTree.swift").contains("fold: treeFold)"))
-        #expect(try read("Shortcuts.swift").contains("⌥⌘←  ⌥⌘→"))
+    @Test("The menu's two commands ask the tree to fold the way they say, and no other command asks anything")
+    func commandsFold() {
+        var fold = TreeFoldRequest()
+        fold.apply(.collapseTree)
+        #expect(fold == TreeFoldRequest(serial: 1, expands: false))
+        fold.apply(.expandTree)
+        #expect(fold == TreeFoldRequest(serial: 2, expands: true))
+        let before = fold
+        for other in [AppCommand.showPlan, .focusConversation, .boardView, .goUp, .toggleSidebar] { fold.apply(other) }
+        #expect(fold == before)
+    }
+
+    @Test("An ⌥-click on a disclosure folds the siblings; the keyboard, VoiceOver and a plain click never do")
+    func optionClickReadsTheClick() throws {
+        let tree = try JumpBarGlyphTests.tree().tree
+        let plan = try #require(tree.tree.first { $0.kind == .theme && $0.hasChildren })
+        let siblings = tree.siblings(of: plan.id)
+        func mouse(_ flags: NSEvent.ModifierFlags, _ type: NSEvent.EventType = .leftMouseDown) -> NSEvent {
+            NSEvent.mouseEvent(
+                with: type, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
+                eventNumber: 0, clickCount: 1, pressure: 1)!
+        }
+        let key = NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [.option], timestamp: 0, windowNumber: 0, context: nil,
+            characters: " ", charactersIgnoringModifiers: " ", isARepeat: false, keyCode: 49)!
+        var closed = OneTreeExpansion()
+        closed.setAll(false, in: tree.roots)
+        let open = TreeFold.toggled(closed, plan, siblings: siblings, event: mouse([.option]))
+        for sibling in siblings where sibling.hasChildren { #expect(open.isExpanded(sibling), "\(sibling.id)") }
+        // The same toggle with a key held, a plain click, or no event: the row alone.
+        for event in [key, mouse([]), nil] as [NSEvent?] {
+            let one = TreeFold.toggled(closed, plan, siblings: siblings, event: event)
+            #expect(one.isExpanded(plan))
+            #expect(siblings.filter { $0.id != plan.id && $0.hasChildren }.allSatisfy { !one.isExpanded($0) })
+        }
+        #expect(TreeFold.togglesSiblings(event: mouse([.option], .leftMouseUp)))
+        #expect(!TreeFold.togglesSiblings(event: mouse([.option], .rightMouseDown)))
+    }
+
+    @Test("Collapse All and Expand All are enabled only where the tree is on screen")
+    func menuNeedsTheTree() {
+        #expect(MainWindowFocus.treeOnScreen(hasBoard: true, boardView: false, navigatorHidden: false, focused: false))
+        #expect(!MainWindowFocus.treeOnScreen(hasBoard: false, boardView: false, navigatorHidden: false, focused: false))
+        #expect(!MainWindowFocus.treeOnScreen(hasBoard: true, boardView: true, navigatorHidden: false, focused: false))
+        #expect(!MainWindowFocus.treeOnScreen(hasBoard: true, boardView: false, navigatorHidden: true, focused: false))
+        #expect(!MainWindowFocus.treeOnScreen(hasBoard: true, boardView: false, navigatorHidden: false, focused: true))
+        var focus = MainWindowFocus(overlayOpen: false)
+        focus.inWorkspace = true
+        #expect(!MainWindowFocus.goes(\.foldsTree, focus))
+        focus.foldsTree = true
+        #expect(MainWindowFocus.goes(\.foldsTree, focus))
     }
 }

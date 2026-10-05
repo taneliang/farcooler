@@ -1,4 +1,5 @@
 import AgentKit
+import AppKit
 import Foundation
 import Testing
 
@@ -25,7 +26,7 @@ struct JumpBarGlyphTests {
     /// worktree with an agent and a shell open, a task of every status, a loose
     /// worktree, the main checkout and a page. The filter is All, as the jump
     /// bar's tree is (`pathTree`).
-    private static func tree() throws -> (tree: OneTree, tasks: [OneTreeTask]) {
+    static func tree() throws -> (tree: OneTree, tasks: [OneTreeTask]) {
         struct Seeded: Decodable { var plan: PlanModel }
         let data = try Data(contentsOf: root.appendingPathComponent("test/fixtures/plan-seeded.json"))
         let decoder = JSONDecoder()
@@ -167,4 +168,41 @@ struct JumpBarGlyphTests {
         let menu = JumpMenus.workspaces(groups, current: nil, showsHosts: false, waiting: { _ in 0 })
         #expect(menu.items.allSatisfy { $0.glyph == nil })
     }
+
+    // MARK: The view draws the glyph, and VoiceOver doesn't read it
+
+    private static func bar(glyphs: Bool) async throws -> (NSWindow, WorktreeTerminalNavigationTests.Seen) {
+        typealias Nav = WorktreeTerminalNavigationTests
+        let go = Nav.workspaceCrumb.target
+        let crumbs = [
+            WorkspaceNavigation.Crumb(title: "Billing", target: go),
+            WorkspaceNavigation.Crumb(title: "Invoices", target: go, glyph: glyphs ? "map" : nil),
+            WorkspaceNavigation.Crumb(title: "Total each invoice", target: nil, glyph: glyphs ? "circle.lefthalf.filled" : nil),
+        ]
+        let bar = DrillBreadcrumb(crumbs: crumbs, worktrees: nil, onGo: { _ in }, onClose: nil)
+        return try await Nav.show(bar, size: CGSize(width: 700, height: 60))
+    }
+
+    @Test("Each segment draws its glyph before its text, and a segment with none draws none: the view, not the model")
+    func segmentsDrawTheirGlyph() async throws {
+        let (window, seen) = try await Self.bar(glyphs: true)
+        defer { window.close() }
+        let first = seen.views["jump-glyph-1"], second = seen.views["jump-glyph-2"]
+        let one = try #require(first, "no glyph drawn for Invoices: \(seen.views.keys.sorted())")
+        let two = try #require(second, "no glyph drawn for the current segment")
+        #expect(seen.views["jump-glyph-0"] == nil, "the workspace has no row in the sidebar, so no icon")
+        // Before the text, on its line, at the glyph column's width.
+        let text = try #require(seen.views["jump-label-1-baseline"] ?? seen.views["jump-label-1"])
+        #expect(one.maxX <= text.maxX && abs(one.width - JumpBar.glyphWidth) < 1)
+        #expect(abs(two.width - JumpBar.glyphWidth) < 1)
+        let (bare, none) = try await Self.bar(glyphs: false)
+        defer { bare.close() }
+        #expect(none.views["jump-glyph-1"] == nil)
+    }
+
+    // Whether the glyph is hidden from VoiceOver (`.accessibilityHidden(true)`) can't be read here: an
+    // offscreen window builds no accessibility tree (see `NavigatorSplitRule`'s probe), so the element
+    // list a test could walk is empty. The segment's name is `Self.labelName(title)` for a linked crumb
+    // and its title otherwise, and neither mentions the glyph; the modifier itself is on the one line
+    // that draws it in each view.
 }
