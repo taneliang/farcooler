@@ -247,7 +247,7 @@ struct LiveActivityContractTests {
 
     @Test("A running card's update and end carry the card the app decodes")
     func aRunningCardUpdatesAndEnds() throws {
-        #expect(try Contracts.names("live-activity/running") == ["end", "update"])
+        #expect(try Contracts.names("live-activity/running") == ["end", "plan", "update"])
 
         let update = try #require(try Contracts.object("live-activity/running/update.json")["aps"] as? [String: Any])
         #expect(update["event"] as? String == "update")

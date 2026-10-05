@@ -152,6 +152,7 @@
 		7FF594327BFE5E38B4E50359 /* SnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57DDC26E14F651988BDDC06B; };
 		5B31D535F77750B6878CDDA7 /* RunnerPulse.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA22CE0034F95DD6A5972F53; };
 		3DFC9E7DA76951E1AD7C84F7 /* PulseTurns.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFF64AB1F05A5182A641D4F8; };
+		6A3E1B3F39BF5992A86869E1 /* PlanGlance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C0033C77C175EFEB936297B; };
 		72C8B4DFB7B95847A02B9623 /* MarkdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB01EEA774815AC5A7038DAD; };
 		A10FDE4959955D12A8181EEC /* RenderMemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 947DAB47A9835294872990A6; };
 		CBDDC5EC069D53FC8EB3004A /* PushRegistration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BD8F54D5B935B33A810D490; };
@@ -220,6 +221,7 @@
 		AC28A1699AEA5DB0AEBFEA58 /* SnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57DDC26E14F651988BDDC06B; };
 		D7C00225628C5B12B4634C05 /* RunnerPulse.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA22CE0034F95DD6A5972F53; };
 		740AE424B29B5BCBB08D1DCC /* PulseTurns.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFF64AB1F05A5182A641D4F8; };
+		4BC16CCCE9115858A05989F9 /* PlanGlance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C0033C77C175EFEB936297B; };
 		E9D08E2F46EF5671ADD2D52A /* AnswerPermissionIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EDE8FA11AF7524B99256E67; };
 		69FE72D7B01058BAA2F58F33 /* GlancePermissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0CB7A2AC53457B8B195651C; };
 		357D5024EDA4520A93562188 /* GlancePalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = C121AB74CCAD5312B2AEAD9A; };
@@ -245,6 +247,7 @@
 		0D2B1F974A4250E999F6F707 /* SnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57DDC26E14F651988BDDC06B; };
 		A28EAC79C39A5E8896A52F41 /* RunnerPulse.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA22CE0034F95DD6A5972F53; };
 		23102B14A26B5D4480F77426 /* PulseTurns.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFF64AB1F05A5182A641D4F8; };
+		ED58DA596E975AF8A4693A67 /* PlanGlance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C0033C77C175EFEB936297B; };
 		DB6BF827A8BF54BEA2D7EF02 /* GlancePalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = C121AB74CCAD5312B2AEAD9A; };
 		D80DD4E44E7C545899B69B9E /* GlanceMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 446113E07EEE5744810DE44C; };
 		AB7045FA90AE5235A0BA6167 /* GlanceType.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEB390C8D61D59D88274911A; };
@@ -254,6 +257,7 @@
 		59D256C95C545020AA02BE79 /* SnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57DDC26E14F651988BDDC06B; };
 		01999A00AE7B5D2297B69681 /* RunnerPulse.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA22CE0034F95DD6A5972F53; };
 		46965003BCDA5F75B7D9D698 /* PulseTurns.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFF64AB1F05A5182A641D4F8; };
+		E3407426205B57E1A5F66F47 /* PlanGlance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C0033C77C175EFEB936297B; };
 		C26A6392BC0854D19F0D8573 /* GlancePalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = C121AB74CCAD5312B2AEAD9A; };
 		346CF7EABB275DC284626335 /* GlanceMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 446113E07EEE5744810DE44C; };
 		9781A8953E2A51C3B7C4417A /* GlanceType.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEB390C8D61D59D88274911A; };
@@ -442,6 +446,7 @@
 		57DDC26E14F651988BDDC06B /* SnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotStore.swift; sourceTree = "<group>"; };
 		DA22CE0034F95DD6A5972F53 /* RunnerPulse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerPulse.swift; sourceTree = "<group>"; };
 		BFF64AB1F05A5182A641D4F8 /* PulseTurns.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PulseTurns.swift; sourceTree = "<group>"; };
+		2C0033C77C175EFEB936297B /* PlanGlance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanGlance.swift; sourceTree = "<group>"; };
 		DB01EEA774815AC5A7038DAD /* MarkdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownView.swift; sourceTree = "<group>"; };
 		947DAB47A9835294872990A6 /* RenderMemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenderMemo.swift; sourceTree = "<group>"; };
 		1BD8F54D5B935B33A810D490 /* PushRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRegistration.swift; sourceTree = "<group>"; };
@@ -841,6 +846,7 @@
 				57DDC26E14F651988BDDC06B /* SnapshotStore.swift */,
 				DA22CE0034F95DD6A5972F53 /* RunnerPulse.swift */,
 				BFF64AB1F05A5182A641D4F8 /* PulseTurns.swift */,
+				2C0033C77C175EFEB936297B /* PlanGlance.swift */,
 				DB01EEA774815AC5A7038DAD /* MarkdownView.swift */,
 				947DAB47A9835294872990A6 /* RenderMemo.swift */,
 				1BD8F54D5B935B33A810D490 /* PushRegistration.swift */,
@@ -1319,6 +1325,7 @@
 				7FF594327BFE5E38B4E50359 /* SnapshotStore.swift in Sources */,
 				5B31D535F77750B6878CDDA7 /* RunnerPulse.swift in Sources */,
 				3DFC9E7DA76951E1AD7C84F7 /* PulseTurns.swift in Sources */,
+				6A3E1B3F39BF5992A86869E1 /* PlanGlance.swift in Sources */,
 				72C8B4DFB7B95847A02B9623 /* MarkdownView.swift in Sources */,
 				A10FDE4959955D12A8181EEC /* RenderMemo.swift in Sources */,
 				CBDDC5EC069D53FC8EB3004A /* PushRegistration.swift in Sources */,
@@ -1388,6 +1395,7 @@
 				AC28A1699AEA5DB0AEBFEA58 /* SnapshotStore.swift in Sources */,
 				D7C00225628C5B12B4634C05 /* RunnerPulse.swift in Sources */,
 				740AE424B29B5BCBB08D1DCC /* PulseTurns.swift in Sources */,
+				4BC16CCCE9115858A05989F9 /* PlanGlance.swift in Sources */,
 				E9D08E2F46EF5671ADD2D52A /* AnswerPermissionIntent.swift in Sources */,
 				69FE72D7B01058BAA2F58F33 /* GlancePermissions.swift in Sources */,
 				357D5024EDA4520A93562188 /* GlancePalette.swift in Sources */,
@@ -1427,6 +1435,7 @@
 				0D2B1F974A4250E999F6F707 /* SnapshotStore.swift in Sources */,
 				A28EAC79C39A5E8896A52F41 /* RunnerPulse.swift in Sources */,
 				23102B14A26B5D4480F77426 /* PulseTurns.swift in Sources */,
+				ED58DA596E975AF8A4693A67 /* PlanGlance.swift in Sources */,
 				DB6BF827A8BF54BEA2D7EF02 /* GlancePalette.swift in Sources */,
 				D80DD4E44E7C545899B69B9E /* GlanceMark.swift in Sources */,
 				AB7045FA90AE5235A0BA6167 /* GlanceType.swift in Sources */,
@@ -1443,6 +1452,7 @@
 				59D256C95C545020AA02BE79 /* SnapshotStore.swift in Sources */,
 				01999A00AE7B5D2297B69681 /* RunnerPulse.swift in Sources */,
 				46965003BCDA5F75B7D9D698 /* PulseTurns.swift in Sources */,
+				E3407426205B57E1A5F66F47 /* PlanGlance.swift in Sources */,
 				C26A6392BC0854D19F0D8573 /* GlancePalette.swift in Sources */,
 				346CF7EABB275DC284626335 /* GlanceMark.swift in Sources */,
 				9781A8953E2A51C3B7C4417A /* GlanceType.swift in Sources */,
@@ -1528,10 +1538,10 @@
 				FARCOOLER_CHANNEL = local;
 				FARCOOLER_URL_SCHEME = "farcooler-local";
 				FARCOOLER_APP_NAME = "FC Local";
-				FARCOOLER_DISPLAY_VERSION = "0.1.0 (local dc62f3ed)";
+				FARCOOLER_DISPLAY_VERSION = "0.1.0 (local 9e797193)";
 				FARCOOLER_WORKOS_CLIENT_ID = "client_01M03N3DFQNDCK819XSRTK2FJD";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
-				CURRENT_PROJECT_VERSION = 2476;
+				CURRENT_PROJECT_VERSION = 2495;
 				PRODUCT_NAME = FarCooler;
 				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.local;
 				INFOPLIST_FILE = FarCooler/Info.plist;
@@ -1555,10 +1565,10 @@
 				FARCOOLER_CHANNEL = local;
 				FARCOOLER_URL_SCHEME = "farcooler-local";
 				FARCOOLER_APP_NAME = "FC Local";
-				FARCOOLER_DISPLAY_VERSION = "0.1.0 (local dc62f3ed)";
+				FARCOOLER_DISPLAY_VERSION = "0.1.0 (local 9e797193)";
 				FARCOOLER_WORKOS_CLIENT_ID = "client_01M03N3DFQNDCK819XSRTK2FJD";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
-				CURRENT_PROJECT_VERSION = 2476;
+				CURRENT_PROJECT_VERSION = 2495;
 				PRODUCT_NAME = FarCooler;
 				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.local;
 				INFOPLIST_FILE = FarCooler/Info.plist;
@@ -1579,7 +1589,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 2476;
+				CURRENT_PROJECT_VERSION = 2495;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				FARCOOLER_URL_SCHEME = "farcooler-local";
@@ -1599,7 +1609,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 2476;
+				CURRENT_PROJECT_VERSION = 2495;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				FARCOOLER_URL_SCHEME = "farcooler-local";
@@ -1619,7 +1629,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 2476;
+				CURRENT_PROJECT_VERSION = 2495;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				PRODUCT_NAME = FarCoolerNotify;
@@ -1638,7 +1648,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 2476;
+				CURRENT_PROJECT_VERSION = 2495;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				PRODUCT_NAME = FarCoolerNotify;
@@ -1657,7 +1667,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 2476;
+				CURRENT_PROJECT_VERSION = 2495;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				PRODUCT_NAME = FarCoolerWatch;
@@ -1683,7 +1693,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 2476;
+				CURRENT_PROJECT_VERSION = 2495;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				PRODUCT_NAME = FarCoolerWatch;
@@ -1709,7 +1719,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 2476;
+				CURRENT_PROJECT_VERSION = 2495;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				PRODUCT_NAME = FarCoolerWatchWidgets;
@@ -1733,7 +1743,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 2476;
+				CURRENT_PROJECT_VERSION = 2495;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				PRODUCT_NAME = FarCoolerWatchWidgets;

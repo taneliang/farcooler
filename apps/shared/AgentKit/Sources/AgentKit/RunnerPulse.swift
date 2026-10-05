@@ -93,8 +93,8 @@ public struct RunnerPulse: Codable, Sendable, Equatable {
         case noCredential
         /// The relay answered, naming every runner that beats, and how each
         /// finished agent's last turn ended (`turns`, ov-239; none from an
-        /// older relay).
-        case answered([RunnerPulse], turns: [PulseTurn] = [])
+        /// older relay), and the plan's glance (ov-310; none without a plan).
+        case answered([RunnerPulse], turns: [PulseTurn] = [], plan: PlanGlance? = nil)
         /// The relay doesn't know this token: signed out elsewhere, the device
         /// revoked, or moved to another account. Asking again won't help.
         case refused
@@ -117,6 +117,9 @@ public struct RunnerPulse: Codable, Sendable, Equatable {
         /// How finished agents' turns ended, as the relay last said
         /// (`FleetSnapshot.settled(by:at:)`). Empty when the relay didn't say.
         public var turns: [PulseTurn] = []
+        /// The board the glance draws (ov-310), as the relay last said; nil
+        /// when it named none or wasn't asked.
+        public var glance: PlanGlance?
     }
 
     /// The widget's whole decision, kept here where it can be tested, so
@@ -145,7 +148,7 @@ public struct RunnerPulse: Codable, Sendable, Equatable {
             return Plan(quiet: [], nextLook: nil)
         case .failed:
             return Plan(quiet: [], nextLook: now.addingTimeInterval(every))
-        case .answered(let pulses, let turns):
+        case .answered(let pulses, let turns, let glance):
             let heardByApp = snapshot.complete && (snapshot.lostRunners ?? []).isEmpty
             let stale = pulses.filter { pulse in
                 !(heardByApp
@@ -153,9 +156,11 @@ public struct RunnerPulse: Codable, Sendable, Equatable {
             }
             return Plan(
                 quiet: quiet(stale),
-                nextLook: pulses.isEmpty ? nil : now.addingTimeInterval(every),
+                // A plan moves without a beat to see it by, so one keeps the
+                // look going too (ov-310).
+                nextLook: pulses.isEmpty && glance == nil ? nil : now.addingTimeInterval(every),
                 unstated: unstated(snapshot, quiet: stale.filter(\.isQuiet), account: account),
-                turns: turns)
+                turns: turns, glance: glance)
         }
     }
 
@@ -230,7 +235,7 @@ public struct RunnerPulse: Codable, Sendable, Equatable {
         else { return .failed }
         if status == 401 { return .refused }
         guard status == 200, let pulses = decode(data) else { return .failed }
-        return .answered(pulses, turns: decodeTurns(data))
+        return .answered(pulses, turns: decodeTurns(data), plan: decodePlan(data))
     }
 }
 

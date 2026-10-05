@@ -78,17 +78,8 @@ public struct PlanTheme: Decodable, Equatable, Identifiable, Sendable {
     public var trendTokens: [UInt64]?
 }
 
-/// Where a lane is. Moves go forward, with two loops back to fixing.
-public enum LaneState: String, Decodable, Sendable, CaseIterable {
-    case queued, building, review, fixing, landing, landed, dropped, unknown
-
-    public init(from decoder: Decoder) throws {
-        self = LaneState(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
-    }
-
-    /// Neither landed nor dropped.
-    public var isLive: Bool { self != .landed && self != .dropped }
-}
+// `LaneState` is in `PlanGlance.swift`, which the watch and the widgets
+// compile without this file (ov-310).
 
 public struct PlanAgent: Decodable, Equatable, Sendable {
     public var harness: String
@@ -424,18 +415,7 @@ public enum PlanWords {
     public static let notReported = TaskUsageFormat.notReported
 
     /// A lane's state alone.
-    public static func state(_ state: LaneState) -> String {
-        switch state {
-        case .queued: "Queued"
-        case .building: "Building"
-        case .review: "In Review"
-        case .fixing: "Fixing"
-        case .landing: "Landing"
-        case .landed: "Landed"
-        case .dropped: "Dropped"
-        case .unknown: "Unknown"
-        }
-    }
+    public static func state(_ state: LaneState) -> String { state.word }
 
     /// A lane's state with what it needs said beside it: "Fixing · round
     /// 1", "Landing · in integ-8", "Queued · 2nd", "Landed · ac840108".

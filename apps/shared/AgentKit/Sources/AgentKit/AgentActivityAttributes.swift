@@ -281,6 +281,11 @@ public struct AgentCardState: Codable, Hashable, Sendable {
     /// field. See `quietOf` in `services/relay/src/index.ts`.
     public var quiet: [String]
 
+    /// The board the glance draws (ov-310): its Needs You count, up to two
+    /// Now lanes and next up. Nil when no runner has a plan, and on every
+    /// card from a relay older than it. See `leadPlan` in the relay.
+    public var plan: PlanGlance?
+
     /// Whether this card can vouch for anything as now.
     ///
     /// Not when it's stale, ActivityKit's hour of silence
@@ -322,7 +327,8 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         ask: CardAsk? = nil,
         quiet: [String] = [],
         failedTurns: Int = 0,
-        failed: Bool? = nil
+        failed: Bool? = nil,
+        plan: PlanGlance? = nil
     ) {
         self.terminal = terminal
         self.label = label
@@ -344,12 +350,13 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         self.quiet = quiet
         self.failedTurns = failedTurns
         self.failed = failed
+        self.plan = plan
     }
 
     private enum CodingKeys: String, CodingKey {
         case terminal, label, machine, workspace, status, detail, startedAt
         case blocked, review, working, insertions, deletions, commits
-        case more, needsYou, rows, ask, quiet, failedTurns, failed
+        case more, needsYou, rows, ask, quiet, failedTurns, failed, plan
     }
 
     /// Hand-written for two reasons, and neither is the timestamp alone.
@@ -427,6 +434,8 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         // A count of the wrong shape is no count, never a card that throws.
         failedTurns = max(0, ((try? container.decodeIfPresent(Int.self, forKey: .failedTurns)) ?? nil) ?? 0)
         failed = (try? container.decodeIfPresent(Bool.self, forKey: .failed)) ?? nil
+        // A glance of the wrong shape is no glance, never a card that throws.
+        plan = (try? container.decodeIfPresent(PlanGlance.self, forKey: .plan)) ?? nil
     }
 
     /// The other half of the same decision, and it is not decorative
@@ -473,6 +482,7 @@ public struct AgentCardState: Codable, Hashable, Sendable {
         // On the relay's terms: absent for none, and absent for "not told".
         if failedTurns > 0 { try container.encode(failedTurns, forKey: .failedTurns) }
         try container.encodeIfPresent(failed, forKey: .failed)
+        try container.encodeIfPresent(plan, forKey: .plan)
     }
 }
 
