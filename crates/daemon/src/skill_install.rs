@@ -1060,11 +1060,11 @@ mod tests {
     /// haiku runs (ov-217) added 1 more: the exact commands a landing, a
     /// ruling and a dispatch end with, and a second round (a plan-lane line next
     /// to the dispatch, the watch in the Direct step, a card recipe in the
-    /// check-in) added 6 more.
+    /// check-in) added 6 more, and the two dispatch-paragraph rules of S10 and S13, 1.
     #[test]
     fn the_skill_is_short() {
         let lines = skill_body(Harness::Claude).lines().count();
-        assert!(lines <= 240, "{lines} lines");
+        assert!(lines <= 241, "{lines} lines");
     }
 
     #[test]

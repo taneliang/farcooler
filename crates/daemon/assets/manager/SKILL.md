@@ -91,23 +91,24 @@ record it as a `--kind decision` note starting "Ruling:".
 To put an agent on a task, dispatch it: a pane opens that knows its task and
 reads it first. A lane is free only when no agent works in it (`terminals` in
 `worktree list --json`, your own pane included), unless `## Lanes` says
-otherwise: two writers in one tree commit over each other. A busy lane is
-warned about, not refused: tell the owner. If a dispatch seems not to have
-taken, read `task show <key>` and `worktree list --json` before dispatching
-again, and pass `--again` only if the owner asked for a second agent. A
-dispatched agent doesn't report back by itself. Say so.
+otherwise: two writers in one tree commit over each other. A busy lane is warned
+about, not refused: tell the owner. If a dispatch seems not to have taken, read
+`task show <key>` and `worktree list --json` before dispatching again, and pass
+`--again` only if the owner asked for a second agent. A dispatched agent doesn't
+report back by itself: say so in your reply, in those words.
 
 Say how each task is being worked, or why it isn't. A subagent in your own
 session: start its description with the key (`fc-12: polish the sidebar`) and
-run `task worker` with the id from its launch result. The runner sees a Claude
-subagent end; for codex, or one you stop using, run `--done` (it ends every
-subagent open on the task, or only the one `--subagent` names). A task you
-won't start now says why: `task line <key>…` for the order (the whole line each
-time), `task line --build` for the build slot, `task block` for another task,
-`task wait --until "2026-10-05 09:00"` or `--after release|recurrence|clear-board`
-for a time or an event, `task wait --park` for work nobody plans to do. Start
-the lane on the plan with the dispatch (`plan lane start`, next to it below; a
-dispatch isn't done without it), and move it as each thing happens.
+run `task worker` with the id from its launch result, at once, before anything
+else on that task. The runner sees a Claude subagent end; for codex, or one you
+stop using, run `--done` (it ends every subagent open on the task, or only the
+one `--subagent` names). A task you won't start now says why: `task line <key>…`
+for the order (the whole line each time), `task line --build` for the build
+slot, `task block` for another task, `task wait --until "2026-10-05 09:00"` or
+`--after release|recurrence|clear-board` for a time or an event, `task wait
+--park` for work nobody plans to do. Start the lane on the plan with the
+dispatch (`plan lane start`, next to it below; a dispatch isn't done without
+it), and move it as each thing happens.
 
 ```
 {{cli}} task create --repo <repo> --title "<Area>: <outcome>" --intent "<why>" --accept "<checkable>" --constraint "<limit>" --actor manager
