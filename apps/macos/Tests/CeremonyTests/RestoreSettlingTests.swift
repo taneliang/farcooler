@@ -68,13 +68,18 @@ struct RestoreSettlingTests {
     }
 
     /// A restore's pass waits for the store to change, not for a quarter
-    /// second: a send ends a wait whose limit is a minute.
+    /// second: a send ends a wait long before its limit.
+    ///
+    /// The send needs the main actor, which the rest of the suite can hold
+    /// for over 30 seconds on CI (30.9 s on main's d411e6ee, with one suite
+    /// taking 77). So the limit is ten minutes and the bar is half of it:
+    /// wide enough that only the limit, never a busy runner, can cross it.
     @MainActor @Test func aChangeEndsTheRestoresWait() async {
         let publisher = ObservableObjectPublisher()
         let started = ContinuousClock.now
         // Runs once the wait below has subscribed and let the main actor go.
         Task { @MainActor in publisher.send() }
-        await ChangeWake.next(of: [publisher], orAfter: .seconds(60))
-        #expect(ContinuousClock.now - started < .seconds(30))
+        await ChangeWake.next(of: [publisher], orAfter: .seconds(600))
+        #expect(ContinuousClock.now - started < .seconds(300))
     }
 }
