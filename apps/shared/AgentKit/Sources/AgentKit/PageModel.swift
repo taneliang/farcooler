@@ -310,6 +310,13 @@ public struct PageStat: Equatable, Sendable {
     public var value: String
     public var detail: String?
     public var tone: PageTone
+
+    public init(label: String, value: String, detail: String? = nil, tone: PageTone = .neutral) {
+        self.label = label
+        self.value = value
+        self.detail = detail
+        self.tone = tone
+    }
 }
 
 /// A column of a table.
@@ -319,6 +326,12 @@ public struct PageColumn: Equatable, Sendable {
     public var align: Align
     /// Takes the width the others leave.
     public var grow: Bool
+
+    public init(title: String, align: Align = .start, grow: Bool = false) {
+        self.title = title
+        self.align = align
+        self.grow = grow
+    }
 }
 
 /// A row of a `list` block.
@@ -328,6 +341,14 @@ public struct PageItem: Equatable, Sendable {
     public var detail: String?
     public var ref: PageRef?
     public var tone: PageTone
+
+    public init(text: String, state: PageState = .none, detail: String? = nil, ref: PageRef? = nil, tone: PageTone = .neutral) {
+        self.text = text
+        self.state = state
+        self.detail = detail
+        self.ref = ref
+        self.tone = tone
+    }
 }
 
 /// An entry on a timeline: milliseconds since 1970, as the runner stores it.
@@ -335,18 +356,34 @@ public struct PageEntry: Equatable, Sendable {
     public var at: Int64
     public var text: String
     public var ref: PageRef?
+
+    public init(at: Int64, text: String, ref: PageRef? = nil) {
+        self.at = at
+        self.text = text
+        self.ref = ref
+    }
 }
 
 /// A step in a pipeline.
 public struct PageStep: Equatable, Sendable {
     public var label: String
     public var state: PageState
+
+    public init(label: String, state: PageState) {
+        self.label = label
+        self.state = state
+    }
 }
 
 /// A part of a progress bar.
 public struct PagePart: Equatable, Sendable {
     public var label: String
     public var count: Int
+
+    public init(label: String, count: Int) {
+        self.label = label
+        self.count = count
+    }
 }
 
 /// The nine blocks, and a tenth for any this build doesn't know.
