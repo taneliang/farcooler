@@ -45,7 +45,25 @@ pub fn workspace_json(w: &pb::Workspace) -> serde_json::Value {
         "charter": w.charter_path.as_deref().filter(|p| !p.is_empty()),
         // Null from a runner without `wake_on_answer`, which tells nobody.
         "wake_on_answer": w.wake_on_answer,
+        // How the board lands its work (ov-313): null from a runner without
+        // `landing`, and `landing` null on a runner that has it until somebody
+        // chooses. A word, never a number: `direct` or `pull_requests`.
+        "landing": w.landing.and_then(landing_word),
+        "base": w.base,
+        "budget_lines": w.pr_max_lines,
+        "pr_cost_line": w.pr_cost_line,
+        "direct_refused": w.direct_refused,
     })
+}
+
+/// A landing mode as its word, `None` for `UNSPECIFIED` and for a number this
+/// build does not define.
+pub fn landing_word(raw: i32) -> Option<&'static str> {
+    match pb::LandingMode::try_from(raw) {
+        Ok(pb::LandingMode::Direct) => Some("direct"),
+        Ok(pb::LandingMode::PullRequests) => Some("pull_requests"),
+        Ok(pb::LandingMode::Unspecified) | Err(_) => None,
+    }
 }
 
 /// A terminal's role as a word: `shell`, `agent` or `orchestrator`.
@@ -131,6 +149,31 @@ mod tests {
         let none = workspace_json(&pb::Workspace { is_main: true, wake_on_answer: Some(false), ..w });
         assert_eq!(none["is_main"], true);
         assert_eq!(none["wake_on_answer"], false);
+    }
+
+    /// How a board lands its work (ov-313): words, and null for what a runner
+    /// did not say, which is never "direct" and never "off".
+    #[test]
+    fn how_a_board_lands_is_a_word_and_what_was_not_said_is_null() {
+        let older = workspace_json(&pb::Workspace::default());
+        for key in ["landing", "base", "budget_lines", "pr_cost_line", "direct_refused"] {
+            assert!(older[key].is_null(), "{key}: {older}");
+        }
+        let chosen = workspace_json(&pb::Workspace {
+            landing: Some(pb::LandingMode::PullRequests as i32),
+            base: Some("trunk".into()),
+            pr_max_lines: Some(400),
+            pr_cost_line: Some(false),
+            direct_refused: Some("Landing straight on trunk won't work.".into()),
+            ..Default::default()
+        });
+        assert_eq!(chosen["landing"], "pull_requests");
+        assert_eq!((chosen["base"].as_str(), chosen["budget_lines"].as_u64()), (Some("trunk"), Some(400)));
+        assert_eq!(chosen["pr_cost_line"], false);
+        assert_eq!(chosen["direct_refused"], "Landing straight on trunk won't work.");
+        assert_eq!(landing_word(pb::LandingMode::Direct as i32), Some("direct"));
+        assert_eq!(landing_word(0), None);
+        assert_eq!(landing_word(77), None);
     }
 
     #[test]

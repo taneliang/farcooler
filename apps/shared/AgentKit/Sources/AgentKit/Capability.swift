@@ -27,6 +27,7 @@ public enum Capability: String, CaseIterable, Sendable {
     case orchestratorHandoff = "orchestrator_handoff"
     case needsYou = "needs_you"
     case wakeOnAnswer = "wake_on_answer"
+    case landing = "landing"
     case streamSizeMarkers = "stream_size_markers"
     case taskNotices = "task_notices"
     case report = "report"

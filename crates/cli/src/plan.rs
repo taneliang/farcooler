@@ -46,6 +46,8 @@ mod train;
 mod cost;
 #[path = "plan_stage.rs"]
 mod stage;
+#[path = "plan_pr_body.rs"]
+mod pr_body;
 
 /// What a runner without the layer is told.
 const NEEDS_UPDATE: &str = "This runner needs an update to keep a plan.";
@@ -291,6 +293,8 @@ enum LaneCmd {
         #[arg(long)]
         no_budget: bool,
     },
+    /// A pull request's description, from the card: what and why, acceptance, review, rulings.
+    PrBody(pr_body::PrBodyArgs),
     /// Add cards to a lane and take others off it.
     Cards {
         /// The lane's name.
@@ -771,6 +775,7 @@ async fn lane<L: DispatchLink>(
                 lane_text(found, &keys, &events, now)
             })
         }
+        LaneCmd::PrBody(args) => pr_body::pr_body(link, board, &plan, &keys, args, json).await,
         LaneCmd::Start { name, cards, reason, path, branch, harness, model, agent } => {
             let items = board_in(link, board, None, None).await?.items;
             keys.extend(&items);

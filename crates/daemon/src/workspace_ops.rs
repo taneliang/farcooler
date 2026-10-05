@@ -18,6 +18,7 @@
 
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1::{self as pb, Scope};
+use farcooler_store::landing::LandingPatch;
 use farcooler_store::models::Workspace;
 use uuid::Uuid;
 
@@ -30,7 +31,15 @@ use crate::wire;
 /// (`Service::live_orchestrator`: a lost one isn't named).
 fn pb_workspace(svc: &Service, workspace: &Workspace, scope: Scope) -> Result<pb::Workspace> {
     let orchestrator = svc.live_orchestrator(workspace.id)?.map(|t| t.id);
-    Ok(wire::workspace(workspace, orchestrator, &svc.workspace_home(workspace.id), scope))
+    let mut out = wire::workspace(workspace, orchestrator, &svc.workspace_home(workspace.id), scope);
+    // How it lands (ov-313): from its own table, and the last read's refusal.
+    let landing = svc.store.get_landing(workspace.id)?;
+    out.landing = landing.mode.map(|m| crate::landing_read::to_wire_mode(m) as i32);
+    out.base = landing.base.clone();
+    out.pr_max_lines = landing.budget_lines;
+    out.pr_cost_line = Some(landing.pr_cost_line);
+    out.direct_refused = crate::landing_read::refusal(workspace.id, landing.mode, landing.base.as_deref());
+    Ok(out)
 }
 
 /// The version a caller read, or the one there now when it named none.
@@ -117,13 +126,33 @@ pub fn set_settings(
     req: &pb::WorkspaceSetSettings,
     scope: Scope,
 ) -> Result<pb::Workspace> {
-    let Some(on) = req.wake_on_answer else {
-        return Err(DomainError::InvalidArgument { what: "settings" });
+    let landing = LandingPatch {
+        mode: req.landing.map(|raw| crate::landing_read::from_wire_mode(raw).ok_or(DomainError::InvalidArgument { what: "landing" })).transpose()?,
+        base: req.base.clone(),
+        budget_lines: req.pr_max_lines,
+        pr_cost_line: req.pr_cost_line,
     };
-    let expected = version(svc, id, req.expected_version)?;
-    let workspace = svc.store.set_workspace_wake_on_answer(id, expected, on)?;
+    if req.wake_on_answer.is_none() && landing.is_empty() {
+        return Err(DomainError::InvalidArgument { what: "settings" });
+    }
+    // The landing half first: it can be refused (a base that is no branch),
+    // and a refusal should leave the wake switch as it was.
+    let mut expected = version(svc, id, req.expected_version)?;
+    let mut workspace = None;
+    if !landing.is_empty() {
+        let w = svc.store.set_landing(id, expected, &landing)?;
+        // Another base is another branch: what was read of the old one is stale.
+        if landing.base.is_some() {
+            crate::landing_read::forget(id);
+        }
+        expected = w.resource_version;
+        workspace = Some(w);
+    }
+    if let Some(on) = req.wake_on_answer {
+        workspace = Some(svc.store.set_workspace_wake_on_answer(id, expected, on)?);
+    }
     watcher.announce_fleet_changed();
-    pb_workspace(svc, &workspace, scope)
+    pb_workspace(svc, &workspace.expect("one of the two settings was written"), scope)
 }
 
 /// `workspace.delete`: refused for Main and for a workspace anything still
@@ -263,16 +292,20 @@ mod tests {
         let main = list(&svc, Some(repo), Scope::Control).unwrap().items.remove(0);
         assert_eq!(main.wake_on_answer, Some(true), "on by default");
         let id = Uuid::from_slice(&main.id).unwrap();
-        let off = pb::WorkspaceSetSettings { wake_on_answer: Some(false), expected_version: None };
+        let off = pb::WorkspaceSetSettings { wake_on_answer: Some(false), ..Default::default() };
         let set = set_settings(&svc, &watcher, id, &off, Scope::Control).unwrap();
         assert_eq!(set.wake_on_answer, Some(false));
         assert_eq!(list(&svc, Some(repo), Scope::Read).unwrap().items[0].wake_on_answer, Some(false));
-        let nothing = pb::WorkspaceSetSettings { wake_on_answer: None, expected_version: None };
+        let nothing = pb::WorkspaceSetSettings::default();
         assert!(matches!(
             set_settings(&svc, &watcher, id, &nothing, Scope::Control),
             Err(DomainError::InvalidArgument { what: "settings" })
         ));
-        let stale = pb::WorkspaceSetSettings { wake_on_answer: Some(true), expected_version: Some(main.resource_version) };
+        let stale = pb::WorkspaceSetSettings {
+            wake_on_answer: Some(true),
+            expected_version: Some(main.resource_version),
+            ..Default::default()
+        };
         assert!(matches!(set_settings(&svc, &watcher, id, &stale, Scope::Control), Err(DomainError::ResourceConflict)));
     }
 

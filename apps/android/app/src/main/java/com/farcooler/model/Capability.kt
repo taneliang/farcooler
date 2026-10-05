@@ -30,6 +30,7 @@ enum class Capability(val wire: String) {
     ORCHESTRATOR_HANDOFF("orchestrator_handoff"),
     NEEDS_YOU("needs_you"),
     WAKE_ON_ANSWER("wake_on_answer"),
+    LANDING("landing"),
     STREAM_SIZE_MARKERS("stream_size_markers"),
     TASK_NOTICES("task_notices"),
     REPORT("report"),

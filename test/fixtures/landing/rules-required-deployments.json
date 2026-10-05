@@ -1,0 +1,1 @@
+[{"type":"required_deployments","parameters":{"required_deployment_environments":["staging"]},"ruleset_source_type":"Repository","ruleset_source":"acme/widgets","ruleset_id":4419}]

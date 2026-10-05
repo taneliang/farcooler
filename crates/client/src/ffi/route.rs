@@ -169,7 +169,9 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // Trains (ov-309) are read in `plan.get`'s answer too, and only the
         // orchestrator writes them.
         | Method::TrainStart
-        | Method::TrainSet => None,
+        | Method::TrainSet
+        // Landing detection (ov-313) is the CLI's, run with the owner's `gh`.
+        | Method::RepositoryLanding => None,
         // The CLI reads it today; the Summary page (ov-188 phase 3) will
         // route it here.
         Method::ReportGet => None,

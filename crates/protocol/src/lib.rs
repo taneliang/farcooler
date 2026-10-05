@@ -402,6 +402,15 @@ pub mod capability {
     /// the behavior: a client that reads it absent draws no switch rather
     /// than one that changes nothing.
     pub const WAKE_ON_ANSWER: &str = "wake_on_answer";
+    /// How a board lands its work (ov-313): `Workspace.landing`, `base`,
+    /// `budget_lines`, `pr_cost_line` and `direct_refused`, their writes on
+    /// `workspace.set_settings`, and `repository.landing`.
+    ///
+    /// Its own capability because an older daemon has none of it and drops the
+    /// fields of a settings write it does not know: a client that sets one
+    /// names this in the request, and one that reads it absent draws no
+    /// landing setting rather than one that changes nothing.
+    pub const LANDING: &str = "landing";
     /// `farcooler terminal stream --sizes`: a pane's byte stream carrying
     /// the pane's size, `ESC P > farcooler-size;<columns>;<rows> ESC \`, ahead
     /// of the first bytes written at each new size — and the promise that
@@ -587,7 +596,7 @@ pub mod capability {
             AGENTS_FOUND,
             TASK_WAITS, TASK_WORKERS, NOTICE_TASK, BOARD_READS, WORKTREE_FILES, TERMINAL_NAMES, TERMINAL_PORTS,
             READ_ONLY_FOLDERS, AGENT_QUEUE, BOARD_PLAN, LFS_POINTERS, BOARD_PAGES, BOARD_RULINGS,
-            BOARD_TRAINS, BOARD_COST,
+            BOARD_TRAINS, BOARD_COST, LANDING,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
@@ -783,6 +792,7 @@ pub mod method {
         RulingSet = "ruling.set" => BOARD_RULINGS,
         TrainStart = "train.start" => BOARD_TRAINS,
         TrainSet = "train.set" => BOARD_TRAINS,
+        RepositoryLanding = "repository.landing" => LANDING,
     }
 }
 

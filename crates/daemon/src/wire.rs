@@ -229,6 +229,12 @@ pub fn workspace(
         charter_path: admin(scope)
             .then(|| home.join(crate::workspace_home::CHARTER_FILE).to_string_lossy().into_owned()),
         wake_on_answer: Some(model.wake_on_answer),
+        // Landing lives in its own table; `workspace_ops::pb_workspace` fills it.
+        landing: None,
+        base: None,
+        pr_max_lines: None,
+        pr_cost_line: None,
+        direct_refused: None,
     }
 }
 

@@ -56,6 +56,8 @@ pub mod ci_watch;
 pub(crate) mod pr_stage;
 pub(crate) mod plan_stage;
 pub mod pr_watch;
+pub mod landing;
+pub mod landing_read;
 pub(crate) mod board_reads_ops;
 pub(crate) mod lfs_ops;
 pub mod task_ops;

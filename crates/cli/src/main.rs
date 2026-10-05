@@ -52,6 +52,8 @@ mod task_usage;
 mod confirmation;
 mod tasks;
 mod workspaces;
+mod workspace_settings;
+mod repo_landing;
 mod worktree_lfs;
 use terminal_requests::terminal_create_request;
 pub(crate) use daemon_link::{Link, connect_to, expect_value, req, req_for, with};
@@ -607,6 +609,12 @@ enum RepoCmd {
     /// Register an existing repository inside an allowlisted root.
     Register { path: PathBuf },
     List,
+    /// How this repository can land work: pull requests or straight on its
+    /// base branch, read from GitHub with the runner's own login (ov-313).
+    ///
+    /// Prints the way it suggests and why, and every fact behind it. It only
+    /// suggests: `workspace set --landing` is what chooses.
+    Landing(repo_landing::LandingArgs),
 }
 
 /// `worktree create`'s words, as clap parsed them.
@@ -2102,6 +2110,7 @@ async fn repo(runner: Option<&str>, cmd: RepoCmd, json: bool) -> Fallible {
                 println!("{}  {:20}  {}", short_bytes(&r.id), r.display_name, r.remote_summary);
             }
         }
+        RepoCmd::Landing(args) => repo_landing::landing(&mut link, args, json).await?,
     }
     Ok(())
 }

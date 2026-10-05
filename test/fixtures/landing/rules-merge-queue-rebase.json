@@ -1,0 +1,1 @@
+[{"type":"merge_queue","parameters":{"merge_method":"REBASE","grouping_strategy":"ALLGREEN"},"ruleset_source_type":"Repository","ruleset_source":"acme/widgets","ruleset_id":4419}]

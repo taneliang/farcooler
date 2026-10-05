@@ -18,6 +18,7 @@ mod backup;
 pub mod board_reads;
 mod compat;
 mod error;
+pub mod landing;
 pub mod lfs_pointers;
 mod migrate;
 pub mod pages;

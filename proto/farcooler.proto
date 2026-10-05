@@ -360,11 +360,17 @@ message Result {
     BoardRuling board_ruling = 180;
     // `train.start` and `train.set`, behind `board_trains`: the train.
     BoardTrain board_train = 190;
+    // `repository.landing` (ov-313), behind `landing`: what the runner read of
+    // the repository's base branch, and the mode it suggests. 200-209 are
+    // landing's, the rest held by `reserved` below.
+    RepositoryLanding repository_landing = 200;
   }
   // The rest of rulings' block, kept for them (review 1005a L1).
   reserved 181 to 189;
   // The rest of trains' block.
   reserved 191 to 199;
+  // The rest of landing's block.
+  reserved 201 to 209;
 }
 
 // ---------------------------------------------------------------------------
@@ -3543,6 +3549,32 @@ message Workspace {
   // off. Absent from a runner without the `wake_on_answer` capability,
   // which never tells anyone.
   optional bool wake_on_answer = 11;
+  // How this board lands its work (ov-313), behind the `landing` capability.
+  // Absent until somebody chooses: a runner's detection only ever suggests
+  // (`RepositoryLanding`), and never writes this.
+  optional LandingMode landing = 12;
+  // The branch work lands on, when it isn't the repository's default.
+  optional string base = 13;
+  // How many changed lines a pull request should stay under, when said.
+  // (The store and the CLI call it `budget_lines`, as the design does; the
+  // board's layer lint keeps that word out of this message.)
+  optional uint32 pr_max_lines = 14;
+  // Whether a pull request's description carries a cost line. Absent from a
+  // runner without `landing`; false (off) until the owner opts in.
+  optional bool pr_cost_line = 15;
+  // Set when the runner's last read found the base branch refuses direct
+  // pushes while `landing` isn't `PULL_REQUESTS`: why, in a sentence. The
+  // setting is never switched for the owner, so this is how it is shown.
+  optional string direct_refused = 16;
+}
+
+// How a board lands its work.
+enum LandingMode {
+  LANDING_MODE_UNSPECIFIED = 0;
+  // Push to the base branch.
+  LANDING_MODE_DIRECT = 1;
+  // One pull request per card, merged there.
+  LANDING_MODE_PULL_REQUESTS = 2;
 }
 
 message WorkspaceList { repeated Workspace items = 1; }
@@ -3577,6 +3609,14 @@ message WorkspaceSetSettings {
   optional bool wake_on_answer = 1;
   // As in `WorkspaceRename`.
   optional uint64 expected_version = 2;
+  // See `Workspace.landing`, `base`, `pr_max_lines` and `pr_cost_line`
+  // (ov-313), behind `landing`, which a client that sets one names in
+  // `Request.required_capabilities`: an older daemon drops the fields. An
+  // empty `base` and a `pr_max_lines` of 0 take the value away.
+  optional LandingMode landing = 3;
+  optional string base = 4;
+  optional uint32 pr_max_lines = 5;
+  optional bool pr_cost_line = 6;
 }
 
 // `task.move`: put tasks on another board in the same repository. All or
@@ -4630,4 +4670,56 @@ message PagesChanged {
   // As `TaskChanged.actor`.
   string actor = 4;
   bool removed = 5;
+}
+
+// ---------------------------------------------------------------------------
+// Landing (ov-313, team mode)
+//
+// `repository.landing`, at `control` (it spends the owner's gh), targeting a repository and carrying no
+// payload: what the runner's own `gh` says about the repository's base branch,
+// and the way of landing that follows. Detection suggests and never switches:
+// `Workspace.landing` is only ever written by `workspace.set_settings`.
+// Behind `landing`. Every fact the runner could not read is absent, never
+// false: a branch whose protection could not be read is not an unprotected one.
+// ---------------------------------------------------------------------------
+
+message RepositoryLanding {
+  // The branch read: the repository's default, or the board's `base`.
+  string base = 1;
+  // `UNSPECIFIED` when the runner could not read enough to suggest anything.
+  LandingMode suggested = 2;
+  // The base branch refuses direct pushes (a pull request or merge queue rule,
+  // or a read-only login), so `DIRECT` cannot work whatever is chosen.
+  bool direct_impossible = 3;
+  // Why, one sentence each, in the order they decided the suggestion.
+  repeated string reasons = 4;
+  // What will go wrong whatever the mode: a merge queue no workflow answers.
+  repeated string warnings = 5;
+  LandingFacts facts = 6;
+  // Unix milliseconds of the read.
+  int64 read_at = 7;
+}
+
+message LandingFacts {
+  // A `pull_request` rule on the base branch (rulesets).
+  optional bool pull_request_rule = 1;
+  // Its required approving reviews, when it asks for any.
+  optional uint32 required_approvals = 2;
+  // A `merge_queue` rule.
+  optional bool merge_queue = 3;
+  // The required status checks of the rules, by name.
+  repeated string required_checks = 4;
+  // Whether the branch is protected at all. Classic branch protection's
+  // details are admin-only, so a protected branch is all that is known of it.
+  optional bool branch_protected = 5;
+  optional bool squash_allowed = 6;
+  optional bool rebase_allowed = 7;
+  optional bool merge_commit_allowed = 8;
+  // The method a pull request should merge by: `squash`, `rebase` or `merge`.
+  optional string merge_method = 9;
+  optional bool codeowners = 10;
+  // `ADMIN`, `MAINTAIN`, `WRITE`, `TRIAGE` or `READ`, as GitHub says it.
+  optional string viewer_permission = 11;
+  // Whether any workflow in the base branch runs on `merge_group`.
+  optional bool merge_group_workflow = 12;
 }

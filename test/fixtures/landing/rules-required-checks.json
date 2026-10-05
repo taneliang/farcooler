@@ -1,0 +1,3 @@
+[
+  {"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":true,"do_not_enforce_on_create":false,"required_status_checks":[{"context":"rust","integration_id":15368}]},"ruleset_source_type":"Repository","ruleset_source":"acme/widgets","ruleset_id":4418}
+]

@@ -281,6 +281,10 @@ async fn run() -> Result<(), i32> {
     // landing every minute, and reads nothing while none is.
     tokio::spawn(farcooler_daemon::pr_watch::run(service.clone(), watcher.clone()));
 
+    // How each repository lands work (ov-313): re-read daily per workspace, so
+    // a base branch that came to refuse direct pushes is said, never switched.
+    tokio::spawn(farcooler_daemon::landing_read::run(service.clone(), watcher.clone()));
+
     // Expire pasted images. Once at startup and daily after that, because the
     // host this runs on is a laptop that is asleep more often than it is
     // up — an interval alone would let a directory grow for weeks between two

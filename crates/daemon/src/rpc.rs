@@ -444,6 +444,7 @@ fn scope_of(method: Method) -> Scope {
         | Method::ChangesMarkRead
         | Method::StackSetParent
         | Method::PrRefresh
+        | Method::RepositoryLanding
         // A file is source, the same as a diff (ov-189).
         | Method::WorktreeListDir
         | Method::WorktreeReadFile => Scope::Control,
@@ -2066,6 +2067,8 @@ impl Rpc {
             "page.list" | "page.get" | "page.set" | "page.remove" | "page.stats" => {
                 crate::rpc_pages::dispatch(svc, &self.watcher, req).await
             }
+
+            "repository.landing" => crate::landing_read::handle(svc, req).await, // ov-313
 
             // ---- workspaces ----
             //

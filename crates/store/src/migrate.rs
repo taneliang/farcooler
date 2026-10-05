@@ -78,6 +78,7 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     (crate::rulings::migration_0026_rulings, Older::Welcome), // ov-304: new tables only (rulings.rs says why)
     (crate::trains::migration_0027_trains, Older::Welcome), // ov-309: new tables only (trains.rs says why)
     (crate::plan_cost::migration_0028_plan_budgets, Older::Welcome), // ov-307: one new table (plan_cost.rs says why)
+    (crate::landing::migration_0029_workspace_landing, Older::Welcome), // ov-313: one new table (landing.rs says why)
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;

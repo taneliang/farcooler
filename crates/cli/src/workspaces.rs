@@ -29,6 +29,7 @@ use farcooler_transport::ClientError;
 use uuid::Uuid;
 
 use crate::tasks::{DispatchLink, Refused, refusal, said_about};
+use crate::workspace_settings::SettingsArgs;
 use crate::{
     Fallible, Link, connect_to, expect_value, id_bytes, list_worktrees, req, req_for, resolve,
     resolve_repository, short_bytes, truncate, uuid_of, with,
@@ -86,11 +87,8 @@ pub enum WorkspaceCmd {
     /// as they are.
     Set {
         workspace: String,
-        /// Whether answering one of this board's decisions types the answer
-        /// into the agent waiting on it (the task's agent, or else the
-        /// orchestrator) once it's idle. On unless turned off.
-        #[arg(long, value_name = "on|off")]
-        wake_on_answer: Option<OnOff>,
+        #[command(flatten)]
+        settings: SettingsArgs,
         #[arg(long)]
         repo: Option<String>,
     },
@@ -217,8 +215,8 @@ impl WorkspaceCmd {
     pub(crate) fn check(&self) -> Result<(), String> {
         match self {
             WorkspaceCmd::Create(args) => args.checked().map(drop),
-            WorkspaceCmd::Set { wake_on_answer: None, .. } => {
-                Err("name a setting to change, like --wake-on-answer off".into())
+            WorkspaceCmd::Set { settings, .. } if settings.is_empty() => {
+                Err("name a setting to change, like --wake-on-answer off or --landing pull-requests".into())
             }
             _ => Ok(()),
         }
@@ -352,19 +350,20 @@ async fn workspace_via(
             })?;
         }
 
-        WorkspaceCmd::Set { workspace, wake_on_answer, repo } => {
-            if !link.daemon_capabilities().iter().any(|c| c == capability::WAKE_ON_ANSWER) {
+        WorkspaceCmd::Set { workspace, settings, repo } => {
+            let has = |c: &str| link.daemon_capabilities().iter().any(|have| have == c);
+            if settings.wake_on_answer.is_some() && !has(capability::WAKE_ON_ANSWER) {
                 return Err("this runner's Far Cooler can't wake an agent when you answer yet. update it first".into());
+            }
+            if settings.touches_landing() && !has(capability::LANDING) {
+                return Err("this runner's Far Cooler can't keep how a board lands its work yet. update it first".into());
             }
             let (ws, _) = named(&mut link, repo.as_deref(), &workspace, env).await?;
             let r = link
-                .call(set_settings_request(uuid_of(&ws.id), ws.resource_version, wake_on_answer))
+                .call(settings.request(uuid_of(&ws.id), ws.resource_version))
                 .await
                 .map_err(|e| workspace_refused(e, GONE, "that setting could not be changed"))?;
-            done(r.value, json, |w| {
-                let state = if w.wake_on_answer == Some(false) { "off" } else { "on" };
-                format!("waking the agent when you answer is {state} for {}", w.name)
-            })?;
+            done(r.value, json, |w| settings.said(w))?;
         }
 
         WorkspaceCmd::Delete { workspace, repo } => {
@@ -509,21 +508,6 @@ pub(crate) async fn set_role(runner: Option<&str>, terminal: &str, role: Role, j
         println!("terminal {} is {said} now", short_bytes(&t.id));
     }
     Ok(())
-}
-
-/// `workspace.set_settings` for one workspace, at the version it was read.
-/// Names `wake_on_answer` among the capabilities it needs, so an older
-/// runner refuses rather than dropping a field it doesn't know.
-pub(crate) fn set_settings_request(workspace: Uuid, version: u64, wake_on_answer: Option<OnOff>) -> pb::Request {
-    let mut r = needs_workstreams(with(
-        req_for("workspace.set_settings", workspace),
-        request::Payload::WorkspaceSetSettings(pb::WorkspaceSetSettings {
-            wake_on_answer: wake_on_answer.map(|s| s == OnOff::On),
-            expected_version: Some(version),
-        }),
-    ));
-    r.required_capabilities.push(capability::WAKE_ON_ANSWER.to_string());
-    r
 }
 
 pub(crate) fn set_role_request(terminal: Uuid, role: Role) -> pb::Request {
@@ -1003,21 +987,21 @@ mod tests {
             crate::Command::Workspace(cmd) => cmd,
             _ => panic!("{line}"),
         };
-        let WorkspaceCmd::Set { wake_on_answer, .. } = parsed("farcooler workspace set Billing --wake-on-answer off")
-        else {
+        let WorkspaceCmd::Set { settings, .. } = parsed("farcooler workspace set Billing --wake-on-answer off") else {
             panic!("set")
         };
-        assert_eq!(wake_on_answer, Some(OnOff::Off));
+        assert_eq!(settings.wake_on_answer, Some(OnOff::Off));
         assert!(crate::Cli::try_parse_from(["farcooler", "workspace", "set", "Billing", "--wake-on-answer", "maybe"]).is_err());
 
-        let r = set_settings_request(Uuid::from_u128(1), 7, Some(OnOff::Off));
+        let r = settings.request(Uuid::from_u128(1), 7);
         assert_eq!(r.required_capabilities, [capability::WORKSTREAMS, capability::WAKE_ON_ANSWER]);
         assert_eq!(r.method, "workspace.set_settings");
         let Some(request::Payload::WorkspaceSetSettings(p)) = r.payload else { panic!("payload") };
         assert_eq!((p.wake_on_answer, p.expected_version), (Some(false), Some(7)));
-        let Some(request::Payload::WorkspaceSetSettings(p)) =
-            set_settings_request(Uuid::from_u128(1), 7, Some(OnOff::On)).payload
-        else {
+        let WorkspaceCmd::Set { settings: on, .. } = parsed("farcooler workspace set Billing --wake-on-answer on") else {
+            panic!("set")
+        };
+        let Some(request::Payload::WorkspaceSetSettings(p)) = on.request(Uuid::from_u128(1), 7).payload else {
             panic!("payload")
         };
         assert_eq!(p.wake_on_answer, Some(true));
@@ -1027,6 +1011,6 @@ mod tests {
             .await
             .expect_err("refused")
             .to_string();
-        assert!(said.contains("--wake-on-answer"), "{said}");
+        assert!(said.contains("--wake-on-answer") && said.contains("--landing"), "{said}");
     }
 }
