@@ -45,7 +45,7 @@ struct CompactTaskRow<Second: View>: View {
             HStack(alignment: .firstTextBaseline, spacing: 0) {
                 Text(key)
                     .font(TaskKeyColumn.font)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(SidebarInk.secondary)
                     .lineLimit(1)
                     .frame(width: keyWidth, alignment: .leading)
                     .gridMark(keyMark, .text)

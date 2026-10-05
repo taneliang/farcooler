@@ -117,7 +117,7 @@ struct ProjectTerminalsSection: View {
                             .gridMark("projectTerminalNew", .text)
                         Spacer(minLength: 0)
                     }
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(SidebarInk.secondary)
                     .padding(.vertical, NavigatorRhythm.air)
                     .contentShape(Rectangle())
                 }
@@ -149,7 +149,7 @@ private struct ProjectTerminalRow: View {
             HStack(alignment: .firstTextBaseline, spacing: 0) {
                 Image(systemName: "terminal")
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(SidebarInk.secondary)
                     .gridMark("projectTerminal", .icon)
                     .glyphColumn()
                 Text(terminal.label)
@@ -162,7 +162,7 @@ private struct ProjectTerminalRow: View {
                 if let port = terminal.portLabel {
                     Text(port)
                         .font(.system(size: WorkspaceStyle.PaneText.body))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(SidebarInk.secondary)
                         .lineLimit(1)
                         .fixedSize()
                         .padding(.trailing, SidebarGrid.gap)

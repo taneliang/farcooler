@@ -754,7 +754,7 @@ struct TaskBoardView: View {
             // leaves the last good board on screen.
             if store.hasRead, let trouble = store.trouble {
                 Image(systemName: "exclamationmark.triangle")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(SidebarInk.secondary)
                     .frame(width: SidebarGrid.control, height: SidebarGrid.control)
                     .help(trouble)
                     .accessibilityLabel(trouble)

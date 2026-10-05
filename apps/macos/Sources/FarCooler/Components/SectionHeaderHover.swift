@@ -73,7 +73,7 @@ struct MarkAllReadButton: View {
             Button(action: action) {
                 Text(Self.title(filtering: filtering))
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .foregroundStyle(hovered ? .primary : .secondary)
+                    .foregroundStyle(hovered ? Color.primary : SidebarInk.secondary)
                     .lineLimit(1)
                     .fixedSize()
                     .frame(minHeight: ColumnGrid.rowHeight)

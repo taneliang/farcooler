@@ -128,7 +128,7 @@ struct BoardWorktreesSection: View {
                             .font(.system(size: WorkspaceStyle.PaneText.body))
                         Spacer(minLength: 0)
                     }
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(SidebarInk.secondary)
                     .padding(.vertical, NavigatorRhythm.air)
                     .probed("board-new-worktree-line")
                     .contentShape(Rectangle())
@@ -155,14 +155,14 @@ struct BoardWorktreesSection: View {
                     HStack(spacing: SidebarGrid.gap) {
                         Text(worktree.task)
                             .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(SidebarInk.secondary)
                             .lineLimit(1)
                         Spacer(minLength: 0)
                         if let unhide = worktrees.onUnhide {
                             Button("Unhide") { unhide(worktree) }
                                 .buttonStyle(.plain)
                                 .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(SidebarInk.secondary)
                         }
                     }
                     .padding(.leading, NavigatorGrid.textInset)
@@ -200,7 +200,7 @@ private struct BoardWorktreeRow: View {
         HStack(alignment: .firstTextBaseline, spacing: 0) {
             Image(systemName: WorktreeSection.glyph)
                 .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(SidebarInk.secondary)
                 .gridMark("boardWorktree", .icon)
                 .glyphColumn()
             VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
@@ -211,7 +211,7 @@ private struct BoardWorktreeRow: View {
                     .gridMark("boardWorktree", .text)
                 Text(caption)
                     .font(.system(size: WorkspaceStyle.PaneText.minimum))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(SidebarInk.secondary)
                     .lineLimit(1)
             }
             Spacer(minLength: SidebarGrid.gap)
@@ -244,7 +244,7 @@ private struct BoardWorktreeTerminalRow: View {
             HStack(alignment: .firstTextBaseline, spacing: 0) {
                 Image(systemName: "terminal")
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(SidebarInk.secondary)
                     .glyphColumn()
                 Text(name)
                     .font(.system(size: WorkspaceStyle.PaneText.body))
