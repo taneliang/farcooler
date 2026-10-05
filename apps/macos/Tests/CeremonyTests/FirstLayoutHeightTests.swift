@@ -83,6 +83,9 @@ struct FirstLayoutHeightTests {
             lanes[index]["state_since"] = 1_800_000_000_000 - 3 * 24 * 3_600_000
         }
         plan["lanes"] = lanes
+        // And no Cost section (ov-307) under them either: this is about the
+        // theme cards' height, so the overview must end at them.
+        plan["cost"] = NSNull()
         calls.plan = try JSONSerialization.data(withJSONObject: plan)
         let store = try await PlanViewTests.store(plan: true, defaults: PlanViewTests.defaults(), calls: calls)
         await store.plan.reload()

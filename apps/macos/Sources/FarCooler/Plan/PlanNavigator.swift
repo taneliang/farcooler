@@ -161,6 +161,7 @@ struct PlanThemeRow: View {
     @State private var hovering = false
 
     private var asks: Bool { !theme.ownerAsk.isEmpty }
+    private var over: PlanBudget? { PlanWords.overBudget(theme) }
 
     static func glyph(_ state: String) -> String {
         switch state {
@@ -175,21 +176,34 @@ struct PlanThemeRow: View {
             HStack(alignment: .firstTextBaseline, spacing: 0) {
                 Image(systemName: Self.glyph(theme.state))
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .foregroundStyle(asks ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(SidebarInk.secondary))
+                    .foregroundStyle(asks || over != nil ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(SidebarInk.secondary))
                     .accessibilityHidden(true)
                     .glyphColumn()
-                Text(theme.name)
-                    .font(.system(size: WorkspaceStyle.PaneText.body))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .layoutPriority(1)
-                Spacer(minLength: SidebarGrid.gap)
-                Text(PlanNavigator.progress(theme.counts))
-                    .font(.system(size: WorkspaceStyle.PaneText.secondary).monospacedDigit())
-                    .foregroundStyle(SidebarInk.secondary)
-                    .lineLimit(1)
-                    .fixedSize()
-                    .probed("plan-theme-\(theme.name)-progress")
+                VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
+                    HStack(alignment: .firstTextBaseline, spacing: 0) {
+                        Text(theme.name)
+                            .font(.system(size: WorkspaceStyle.PaneText.body))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .layoutPriority(1)
+                        Spacer(minLength: SidebarGrid.gap)
+                        Text(PlanNavigator.progress(theme.counts))
+                            .font(.system(size: WorkspaceStyle.PaneText.secondary).monospacedDigit())
+                            .foregroundStyle(SidebarInk.secondary)
+                            .lineLimit(1)
+                            .fixedSize()
+                            .probed("plan-theme-\(theme.name)-progress")
+                    }
+                    // A theme past its token budget (ov-307): the one thing
+                    // besides an ask that's drawn in amber, with its words.
+                    if let over {
+                        Text(PlanWords.budgetLine(over))
+                            .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
+                            .foregroundStyle(Tint.attention(scheme))
+                            .lineLimit(1)
+                            .probed("plan-theme-\(theme.name)-over-budget")
+                    }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .navigatorRow(selected: selected, keyed: keyed, leading: 0)
@@ -211,6 +225,7 @@ struct PlanThemeRow: View {
         var parts = [theme.name, PlanWords.progress(theme.counts)]
         if theme.state != "active" { parts.append(theme.state.capitalized) }
         if asks { parts.append("Needs you: \(theme.ownerAsk)") }
+        if let over { parts.append(PlanWords.budgetSpoken(over)) }
         return parts.joined(separator: ", ")
     }
 }

@@ -54,6 +54,8 @@ struct PlanOverviewView: View {
             if model.hasNow { now(model) }
             if !model.nextUp.isEmpty { nextUp(model) }
             if !model.shownThemes.isEmpty { themes(model) }
+            // Behind `board_cost`: a runner without it sends no cost (ov-307).
+            if let cost = model.cost, cost.isWorthShowing { costSection(cost) }
             // After Themes (ov-269 design 6.1): only on a runner with pages.
             if !plan.listedPages.isEmpty || plan.hiddenCount > 0 { pages() }
             let landed = model.landedToday()
@@ -128,6 +130,22 @@ struct PlanOverviewView: View {
             .listChanges(PlanChanges.themes(model.shownThemes))
         }
         .identified("plan-themes")
+    }
+
+    /// The runner's week and cost per finished card by harness and model.
+    private func costSection(_ cost: PlanCostRead) -> some View {
+        CollapsibleSection("Cost", id: "plan.cost", style: .navigator, key: key("cost"), defaults: defaults,
+            expandedByDefault: false
+        ) {
+            PlanCostBlock(
+                cost: cost, bodyFont: .system(size: WorkspaceStyle.PaneText.body),
+                secondaryFont: .system(size: WorkspaceStyle.PaneText.secondary)
+            )
+            .padding(.leading, NavigatorGrid.textInset)
+            .padding(.vertical, NavigatorRhythm.card)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .identified("plan-cost-section")
     }
 
     private func pages() -> some View {
@@ -223,9 +241,10 @@ struct PlanLaneRow: View {
     @Environment(\.colorScheme) private var scheme
     @State private var hovering = false
 
-    /// Stale, or waiting on the owner: the only lanes drawn in color.
+    /// Stale, waiting on the owner, or over its token budget (ov-307): the
+    /// only lanes drawn in color.
     private var warning: String? {
-        waitsOnOwner ? "Needs you" : PlanWords.stale(lane, now: now)
+        waitsOnOwner ? "Needs you" : PlanWords.stale(lane, now: now) ?? PlanWords.overBudget(lane)
     }
 
     var body: some View {

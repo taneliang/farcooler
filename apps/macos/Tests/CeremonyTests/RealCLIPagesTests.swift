@@ -13,7 +13,7 @@ import Testing
 /// tmux, so a missing one fails here rather than the test going quiet.
 @MainActor
 struct RealCLIPagesTests {
-    nonisolated private static var cli: String? {
+    nonisolated static var cli: String? {
         if let bin = ProcessInfo.processInfo.environment["FARCOOLER_BIN"] { return bin }
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<5 { root.deleteLastPathComponent() }

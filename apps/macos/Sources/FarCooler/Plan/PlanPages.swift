@@ -223,6 +223,13 @@ struct PlanThemePage: View {
             }
             // After Needs You and before Lanes (ov-269 design 6.1).
             PlanAnchoredPages(pages: anchored, world: world, context: context, onHide: onHide)
+            if PlanThemeSpend.hasSomething(theme) {
+                PlanSection(title: "Spend") {
+                    PlanThemeSpend(
+                        theme: theme, bodyFont: .system(size: WorkspaceStyle.PaneText.title),
+                        secondaryFont: .system(size: WorkspaceStyle.PaneText.secondary))
+                }
+            }
             lanes
             cards
         }
@@ -411,6 +418,9 @@ struct PlanLanePage: View {
             PlanSection(title: "Spend") {
                 VStack(alignment: .leading, spacing: Spacing.tight) {
                     Text("\(PlanWords.spend(lane.spend)) · \(PlanWords.fixRounds(lane.fixRounds))").planBody()
+                    if let budget = PlanWords.budget(lane.spend, against: lane.budgetTokens) {
+                        PlanBudgetLine(budget: budget, font: .system(size: WorkspaceStyle.PaneText.secondary))
+                    }
                     if lane.spend.totalTokens > 0, (lane.spend.costMicros ?? 0) > 0 {
                         Text(TaskUsageFormat.apiEquivalent)
                             .font(.system(size: WorkspaceStyle.PaneText.secondary))
