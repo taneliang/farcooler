@@ -8,6 +8,7 @@ lists them (`gh api --paginate .../runs/ID/jobs?filter=all --jq '.jobs[]'`,
 one JSON object per line, every attempt included):
 
     scripts/canary-shipped.py JOBS.ndjson
+    scripts/canary-shipped.py --commit TITLE
     scripts/canary-shipped.py --self-test
 
 It prints why, and writes `shipped=true` or `shipped=false` to $GITHUB_OUTPUT.
@@ -33,6 +34,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -71,6 +73,17 @@ def shipped(jobs):
             elif started and step.get("conclusion") in ("cancelled", "failure", None):
                 reasons.append(f"{where}: {step['name']} ended {step.get('conclusion') or 'unfinished'} part way, so it may have landed")
     return reasons
+
+
+def commit_of(title):
+    """The commit a Canary run built, from its title, or None.
+
+    canary.yml is a workflow_run workflow, so the run's own head_sha is main's
+    head when it started, not the commit CI passed. Its `run-name` carries the
+    built commit instead: "Canary <40 hex>".
+    """
+    found = re.fullmatch(r"Canary ([0-9a-f]{40})", (title or "").strip())
+    return found.group(1) if found else None
 
 
 def read_jobs(path):
@@ -151,9 +164,19 @@ def self_test():
     if renamed == canary or not name_problems(renamed):
         failures.append("names: renaming the TestFlight upload step was not caught")
 
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    for title, want in [(f"Canary {sha}", sha), (f"Canary {sha}\n", sha), ("Canary", None),
+                        (f"Canary {sha[:39]}", None), (f"CI {sha}", None), (f"Canary {sha} extra", None),
+                        ("", None), (None, None)]:
+        if commit_of(title) != want:
+            failures.append(f"commit_of({title!r}): got {commit_of(title)!r}, want {want!r}")
+    run_name = re.search(r"^run-name:\s*(.*)$", canary, re.M)
+    if not run_name or "workflow_run.head_sha" not in run_name.group(1) or not run_name.group(1).startswith("Canary "):
+        failures.append("canary.yml's run-name no longer reads `Canary <workflow_run.head_sha>`, which commit_of parses")
+
     for f in failures:
         print(f"FAIL: {f}", file=sys.stderr)
-    count = len(cases) + 2
+    count = len(cases) + 2 + 9
     print(f"{count - len(failures)} passed, {len(failures)} failed")
     return 1 if failures else 0
 
@@ -161,8 +184,15 @@ def self_test():
 def main():
     if sys.argv[1:] == ["--self-test"]:
         return self_test()
+    if len(sys.argv) == 3 and sys.argv[1] == "--commit":
+        sha = commit_of(sys.argv[2])
+        if not sha:
+            print(f"::error::the Canary run's title {sys.argv[2]!r} names no commit, so nothing is recorded", file=sys.stderr)
+            return 1
+        print(sha)
+        return 0
     if len(sys.argv) != 2:
-        print("usage: canary-shipped.py JOBS.ndjson | --self-test", file=sys.stderr)
+        print("usage: canary-shipped.py JOBS.ndjson | --commit TITLE | --self-test", file=sys.stderr)
         return 2
     reasons = shipped(read_jobs(sys.argv[1]))
     for r in reasons:

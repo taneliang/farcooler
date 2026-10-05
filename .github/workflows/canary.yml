@@ -17,43 +17,111 @@
 # something.
 name: Canary
 
+# The name of every run says which commit it builds. A workflow_run workflow
+# runs with `github.sha` of main's head at the moment it starts, so the run
+# itself carries no trace of the commit CI passed; canary-baseline.yml reads
+# this title to learn which commit shipped (scripts/canary-shipped.py --commit).
+run-name: Canary ${{ github.event.workflow_run.head_sha || github.sha }}
+
+# EVERY COMMIT THAT SHIPS HAS PASSED CI (ov-301, owner's decision of Oct 5).
+# This used to run on `push`, beside CI, and shipped a commit whose CI was red
+# (4e444e85, Oct 5) because nothing here looked at CI's verdict. It also doubled
+# the macOS runner demand per push: GitHub gives this repository five macOS
+# runners, CI asked for seven and Canary for two, so pushes queued.
+#
+# `workflow_run` fires when CI completes, and a re-run of failed jobs completes
+# again, so a CI run that is fixed by a re-run reaches Canary too. It fires for
+# every conclusion; the `plan` job below lets only a success on main go on. The
+# cost is that Canary ships after CI, about twenty minutes later.
+#
+# WHAT A workflow_run RUN IS. GitHub takes this file from the default branch,
+# and `github.sha` and `github.ref` are main's head, not the commit CI ran. So
+# nothing below may use them: the commit is `needs.plan.outputs.sha`, which is
+# CI's `head_sha`. A workflow_run trigger cannot be tested from a branch; the
+# first push after this lands is the test.
 on:
-  push:
+  workflow_run:
+    # CI's `name:`. A name that matches nothing simply never runs; the
+    # self-test of scripts/proto-lint.py fails if the two drift apart.
+    workflows: [CI]
+    types: [completed]
     branches: [main]
-    # The relay has its own workflow and its own cadence, so a relay-only commit
-    # should not spend twenty minutes of macOS runner time shipping an identical
-    # app to TestFlight.
-    #
-    # proto/baseline/ too, though canary-baseline.yml should never need it: it
-    # pushes with the default GITHUB_TOKEN, and GitHub raises no workflow event
-    # for that push, so its commit re-triggers neither this workflow nor CI.
-    # This is the second lock on that loop, for the day someone swaps the token
-    # for an app token or a PAT, which DO trigger workflows. It only skips a
-    # push that touches nothing else.
-    paths-ignore: ['services/relay/**', 'docs/**', '**/*.md', 'proto/baseline/**']
   workflow_dispatch:
 
-# One canary at a time, and the newest wins. Two pushes a minute apart would
-# otherwise race to upload, and App Store Connect takes whichever finishes last
-# rather than whichever is newer.
-concurrency:
-  group: canary
-  cancel-in-progress: true
+# No workflow-level `concurrency`. It would cancel the run in flight when ANY
+# newer run starts, and every CI completion starts one, red and docs-only ones
+# included, which would cancel a build for nothing. The ship jobs each hold a
+# group of their own below, so a newer green commit supersedes an older one
+# only when it really builds. App Store Connect takes whichever upload finishes
+# last rather than whichever is newer, which is why one at a time matters.
 
 env:
   FARCOOLER_CHANNEL: canary
 
 jobs:
+  # Whether to build, and which commit. See scripts/canary-plan.py.
+  #
+  # Its `if` is the whole gate on CI's verdict. Every other job reaches it
+  # through `needs`, so a red, cancelled or fork CI run ends here with the rest
+  # skipped (and shows as a skipped Canary run in the list).
+  #
+  # Two conditions beyond the conclusion, because Canary holds the signing
+  # secrets and builds what it is pointed at: the CI run must be a push, and
+  # from this repository. A pull request from a fork can have a branch named
+  # `main`, and `branches: [main]` matches its head branch.
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository)
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+      sha: ${{ steps.plan.outputs.sha }}
+    steps:
+      # Main, whole: the script reads history to find the last green commit.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      # Main's successful CI runs, newest first. The script takes the nearest
+      # one in this commit's history, so the list's order does not matter.
+      - name: List the green CI runs
+        if: github.event_name == 'workflow_run'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=100" \
+            --jq '.workflow_runs[] | {head_sha, created_at}' > "$RUNNER_TEMP/green.ndjson"
+          echo "$(wc -l < "$RUNNER_TEMP/green.ndjson") green CI runs listed"
+      - name: Decide
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          HEAD: ${{ github.event.workflow_run.head_sha }}
+          SHA: ${{ github.sha }}
+          CANDIDATES: ${{ runner.temp }}/green.ndjson
+        run: ./scripts/canary-plan.py
+      - run: ./scripts/canary-plan.py --self-test
+
   # The wire lint, here, before anything ships. CI runs it too, but nothing
   # here waited for CI: a renumbered field went red there and out to TestFlight
   # here in the same push, and then it was recorded as the baseline Canary owes
   # compatibility to, so every later lint passed against the break.
   #
-  # A job of its own rather than waiting on CI's result for this commit. CI
-  # cancels its run when the next push lands, so a commit can have no CI
-  # verdict at all, and waiting for one means polling another workflow's
-  # checks. This takes seconds and needs no toolchain. `linux` and `ios` need
-  # it, and `macos` needs `linux`, so no ship job starts until it passes.
+  # A job of its own, though this workflow now waits for CI: it is the one
+  # check that needs history and the baseline, which CI's own `wire` job
+  # cannot see (CI's runs on a commit before the previous one has shipped).
+  # This takes seconds and needs no toolchain. `linux` and `ios` need it, and
+  # `macos` needs `linux`, so no ship job starts until it passes.
   # proto-lint.py's self-test fails if either `needs` goes.
   #
   # AND EVERY PROTO SINCE THE BASELINE. canary-baseline.yml records the
@@ -65,11 +133,14 @@ jobs:
   # refuses a shallow one rather than pass.
   wire:
     name: Wire compatibility
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
+          # The commit CI passed, not main's head.
+          ref: ${{ needs.plan.outputs.sha }}
           fetch-depth: 0
       - run: ./scripts/proto-lint.py --self-test
       - run: ./scripts/proto-lint.py --channel canary --since-baseline
@@ -91,10 +162,15 @@ jobs:
   # and the Linux binaries would otherwise be stamped `local` and write the
   # Local channel's runtime directory on every host they reached.
   linux:
-    needs: wire
+    needs: [wire, plan]
+    if: needs.plan.outputs.build == 'true'
+    concurrency:
+      group: canary-linux
+      cancel-in-progress: true
     uses: ./.github/workflows/linux-binaries.yml
     with:
       channel: canary
+      ref: ${{ needs.plan.outputs.sha }}
 
   ios:
     name: iOS (internal TestFlight)
@@ -102,13 +178,16 @@ jobs:
     # Xcode 27 is only on this label, which GitHub calls a public preview.
     # To go back, put `macos-latest` here again and drop the check step.
     runs-on: xcode-27
-    needs: wire
+    needs: [wire, plan]
     timeout-minutes: 45
+    concurrency:
+      group: canary-ios
+      cancel-in-progress: true
     # Without the App Store key this cannot upload anything. Through `vars`, not
     # `secrets`: the `secrets` context is unavailable in an `if`, so
     # `secrets.X != ''` compares '' to '' and is ALWAYS false — it fails closed,
     # which is exactly why it looks like it works.
-    if: vars.CANARY_TESTFLIGHT == 'true'
+    if: needs.plan.outputs.build == 'true' && vars.CANARY_TESTFLIGHT == 'true'
     steps:
       # The label promises Xcode 27. This makes the log say which one, and
       # stops the job if the image ever hands it a different major.
@@ -118,6 +197,7 @@ jobs:
           xcodebuild -version | head -1 | grep -q '^Xcode 27\.'
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.plan.outputs.sha }}
           # `git rev-list --count HEAD` is the App Store build number, and a
           # shallow clone makes it 1. scripts/version.sh refuses outright rather
           # than emitting a plausible wrong answer, so this is not optional.
@@ -348,7 +428,10 @@ jobs:
     # reason — release.yml pays it too, and says why at length: the app carries
     # those binaries, so a Mac job that started before they existed would build
     # an app that silently cannot install to a Linux host.
-    needs: linux
+    needs: [linux, plan]
+    concurrency:
+      group: canary-macos
+      cancel-in-progress: true
     # Hoisted so the steps can test them in an `if`: the `secrets` context is
     # not available there, and `secrets.X != ''` is always false — silently, so
     # the signing steps would skip and an unopenable dmg would ship looking
@@ -376,6 +459,7 @@ jobs:
           xcodebuild -version | head -1 | grep -q '^Xcode 27\.'
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.plan.outputs.sha }}
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -669,7 +753,7 @@ jobs:
             --file "$dmg" --content-type application/octet-stream --remote
 
           url="https://updates.farcooler.com/canary/Far%20Cooler-$build.dmg"
-          notes="${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}"
+          notes="${{ github.server_url }}/${{ github.repository }}/commit/${{ needs.plan.outputs.sha }}"
 
           ./scripts/appcast.py --channel canary \
             --version "$(scripts/version.sh)" --build "$build" \
