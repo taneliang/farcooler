@@ -41,12 +41,22 @@ extension StartTaskTests {
         let clock = HeldClock()
         client.watchingPause = { await clock.pause() }
         client.watchingNow = { clock.now }
+        // A pane of its own: `Notifier.shared` is one for the process, and a
+        // window another test shows (t-new) must not ride along, nor this one
+        // ride along with theirs.
+        var pane = Terminal(id: "t-renew", short: "r", title: "claude", preset: "claude", state: "running", epoch: 0)
+        pane.activity = "working"
+        client.fleet = Fleet(
+            runtimeHealthy: true, livePanes: 1,
+            worktrees: [Worktree(
+                id: "w-renew", short: "w", task: "renew", branch: "renew", repository: "shop", host: "",
+                path: "/tmp/renew", state: "active", terminals: [pane])])
         let a = UUID()
         defer { Notifier.shared.closeWindow(a) }
 
-        // Window A shows t-new; window B, covered, shows nothing, and calls last.
-        Notifier.shared.setWatching(["t-new"], window: a)
-        client.reportWatching(["t-new"])
+        // Window A shows t-renew; window B, covered, shows nothing, and calls last.
+        Notifier.shared.setWatching(["t-renew"], window: a)
+        client.reportWatching(["t-renew"])
         client.reportWatching([])
         await afterTheSentinel(client, runner)
         let before = runner.watchingCalls.count
@@ -62,6 +72,6 @@ extension StartTaskTests {
         }
         let renewals = runner.watchingCalls.dropFirst(before)
         #expect(renewals.count >= 3, "the claim was not renewed: \(runner.watchingCalls)")
-        #expect(renewals.allSatisfy { $0.contains("t-new") }, "\(runner.watchingCalls)")
+        #expect(renewals.allSatisfy { $0.contains("t-renew") }, "\(runner.watchingCalls)")
     }
 }
