@@ -18,8 +18,8 @@
 //! stored "running" flag, because none exists.
 
 mod agent_follow;
-mod app_update;
 mod agent_host;
+mod app_update;
 mod daemon_link;
 mod hook;
 mod notice_task;
