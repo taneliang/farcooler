@@ -23,7 +23,7 @@
 //! to the runner: a Claude turn's usage carries token counts and, at best, its
 //! own cost, and the one rate-limit event in the stream is ignored because it
 //! carries no figure. `week_tokens` is therefore the runner's tokens over the
-//! last seven days and nothing more; a client shows it with no percentage. A
+//! last seven UTC days (today so far) and nothing more; a client shows it with no percentage. A
 //! budget is the way to give the plan a number to measure against.
 
 use std::collections::HashMap;
@@ -122,36 +122,62 @@ pub(crate) fn trend_start(now_ms: i64) -> i64 {
     now_ms.div_euclid(DAY_MS) * DAY_MS - (TREND_DAYS as i64 - 1) * DAY_MS
 }
 
-/// A lane's tokens on each of the last seven UTC days, oldest first. A Claude
-/// agent shared with another lane counts here by its even split, as the
-/// lane's spend does, so summing lanes counts it once.
+/// `tokens` spent over `[started, ended]`, shared out over the seven UTC days
+/// from `window_start`, in proportion to the time on each day. A Claude
+/// subagent's run is one row that grows as the agent works, so a run that began
+/// Monday and was resumed Thursday must not land whole on Thursday. A row with
+/// no start, or one that began where it ended, lands on its end day. What fell
+/// before the window is not in it.
+pub(crate) fn spread(tokens: f64, started: Option<i64>, ended: i64, window_start: i64) -> [f64; TREND_DAYS] {
+    let mut days = [0.0; TREND_DAYS];
+    let start = started.filter(|s| *s < ended);
+    let Some(start) = start else {
+        let day = (ended - window_start).div_euclid(DAY_MS);
+        if (0..TREND_DAYS as i64).contains(&day) {
+            days[day as usize] = tokens;
+        }
+        return days;
+    };
+    let span = (ended - start) as f64;
+    for (i, slot) in days.iter_mut().enumerate() {
+        let from = window_start + i as i64 * DAY_MS;
+        let overlap = (ended.min(from + DAY_MS) - start.max(from)).max(0);
+        *slot = tokens * overlap as f64 / span;
+    }
+    days
+}
+
+/// A lane's tokens on each of the last seven UTC days, oldest first, each run
+/// spread over the days it ran (see `spread`). A Claude agent shared with
+/// another lane counts here by its even split, as the lane's spend does, so
+/// summing lanes counts it once.
 pub(crate) fn lane_days(conn: &Connection, lane: Uuid, start_ms: i64) -> Result<[f64; TREND_DAYS]> {
     let mut stmt = conn
         .prepare(
             "WITH lanes_of AS (
                  SELECT harness, agent_id, count(*) AS lanes FROM lane_agents GROUP BY harness, agent_id
              )
-             SELECT min(CAST((t.ended_at - ?2) / ?3 AS INTEGER), ?4),
+             SELECT t.started_at, t.ended_at,
                     sum((m.input_tokens + m.output_tokens + m.cache_read_tokens + m.cache_write_tokens) * 1.0 / s.lanes)
                FROM lane_agents a
                JOIN lanes_of s ON s.harness = a.harness AND s.agent_id = a.agent_id
                JOIN agent_turns t ON t.turn_key = 'claude-log:agent:' || a.agent_id
                JOIN agent_turn_models m ON m.turn_id = t.id
               WHERE a.lane_id = ?1 AND a.harness = 'claude' AND t.ended_at >= ?2
-              GROUP BY 1",
+              GROUP BY t.id",
         )
         .map_err(map_err)?;
     let rows = stmt
-        .query_map(params![uuid_blob(lane), start_ms, DAY_MS, TREND_DAYS as i64 - 1], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?))
+        .query_map(params![uuid_blob(lane), start_ms], |r| {
+            Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, i64>(1)?, r.get::<_, f64>(2)?))
         })
         .map_err(map_err)?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(map_err)?;
     let mut days = [0.0; TREND_DAYS];
-    for (day, tokens) in rows {
-        if let Some(slot) = days.get_mut(day.max(0) as usize) {
-            *slot += tokens;
+    for (started, ended, tokens) in rows {
+        for (sum, n) in days.iter_mut().zip(spread(tokens, started, ended, start_ms)) {
+            *sum += n;
         }
     }
     Ok(days)
@@ -159,15 +185,23 @@ pub(crate) fn lane_days(conn: &Connection, lane: Uuid, start_ms: i64) -> Result<
 
 /// The cost half of a board's plan read.
 pub(crate) fn cost_of(conn: &Connection, cards: &HashMap<Uuid, CardRef>, now_ms: i64) -> Result<PlanCost> {
-    let week_tokens: i64 = conn
-        .query_row(
-            "SELECT coalesce(sum(m.input_tokens + m.output_tokens + m.cache_read_tokens + m.cache_write_tokens), 0)
+    // One window for the week and the trend: the same seven UTC days, today
+    // so far, each run spread over the days it ran.
+    let window = trend_start(now_ms);
+    let mut stmt = conn
+        .prepare(
+            "SELECT t.started_at, t.ended_at,
+                    sum(m.input_tokens + m.output_tokens + m.cache_read_tokens + m.cache_write_tokens)
                FROM agent_turns t JOIN agent_turn_models m ON m.turn_id = t.id
-              WHERE t.ended_at >= ?1",
-            params![now_ms - TREND_DAYS as i64 * DAY_MS],
-            |r| r.get(0),
+              WHERE t.ended_at >= ?1 GROUP BY t.id",
         )
         .map_err(map_err)?;
+    let week_rows = stmt
+        .query_map(params![window], |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, i64>(1)?, r.get::<_, f64>(2)?)))
+        .map_err(map_err)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(map_err)?;
+    let week_tokens: f64 = week_rows.iter().map(|(s, e, t)| spread(*t, *s, *e, window).iter().sum::<f64>()).sum();
 
     // Per card first, so a finished card counts once for each pair that
     // worked it, and the filter to finished cards is the board's own status.
@@ -216,7 +250,7 @@ pub(crate) fn cost_of(conn: &Connection, cards: &HashMap<Uuid, CardRef>, now_ms:
         compare.push(HarnessModelCost { harness, model, cards: n, tokens, cost_micros: priced.then_some(micros) });
     }
     compare.sort_by(|a, b| b.cards.cmp(&a.cards).then_with(|| (&a.harness, &a.model).cmp(&(&b.harness, &b.model))));
-    Ok(PlanCost { week_tokens: week_tokens.max(0) as u64, compare, compare_held_back })
+    Ok(PlanCost { week_tokens: week_tokens.round().max(0.0) as u64, compare, compare_held_back })
 }
 
 impl Store {

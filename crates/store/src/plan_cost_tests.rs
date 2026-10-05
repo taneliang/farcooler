@@ -60,6 +60,27 @@ fn turn(
         .unwrap();
 }
 
+fn turn_between(store: &Store, key: &str, started: i64, ended: i64, tokens: u64) {
+    store
+        .record_turn(&NewTurn {
+            key: key.into(),
+            terminal_id: None,
+            worktree_id: None,
+            repository_id: None,
+            workspace_id: None,
+            task_id: None,
+            harness: "claude".into(),
+            surface: Surface::Terminal,
+            started_at: Some(started),
+            ended_at: ended,
+            active_ms: None,
+            usage: "reported",
+            models: vec![TurnModel::priced(Some("claude-opus-5".into()), counts(tokens), Some(1_000))],
+            kind: TurnKind::Subagent,
+        })
+        .unwrap();
+}
+
 fn card(task: &Task) -> LaneCard {
     LaneCard { task_id: task.id, slice: String::new() }
 }
@@ -142,6 +163,51 @@ fn a_theme_trend_is_its_lanes_by_day_and_shares_like_its_spend() {
     let view = plan.themes.iter().find(|v| v.theme.id == th.id).unwrap();
     assert_eq!(view.trend, [0, 0, 0, 0, 300, 0, 500], "oldest first, today last");
     assert_eq!(total(&view.spend), 500 + 340);
+}
+
+/// A run's row starts when the agent first spoke and ends when it last did: its
+/// tokens fall on the days it ran, in proportion, not all on the last one.
+#[test]
+fn a_run_is_spread_over_the_days_it_ran() {
+    let (store, main, t) = board(1);
+    let th = theme(&store, main, "Cost", &[&t[0]]);
+    lane(&store, main, "long", &[card(&t[0])], "a1");
+    let today = now_millis().div_euclid(DAY) * DAY;
+    // Four whole days: three before today's midnight, then today so far.
+    turn_between(&store, "claude-log:agent:a1", today - 3 * DAY, today + 1000, 3_000);
+    let plan = store.plan(main, 0).unwrap();
+    let view = plan.themes.iter().find(|v| v.theme.id == th.id).unwrap();
+    assert_eq!(view.trend[..3], [0, 0, 0], "before the run began");
+    assert!(view.trend[3] >= 999 && view.trend[3] <= 1001, "{:?}", view.trend);
+    assert!((view.trend[4] + view.trend[5]).abs_diff(2000) <= 2, "{:?}", view.trend);
+    assert!(view.trend[6] <= 2, "today holds its sliver, not the run: {:?}", view.trend);
+    assert_eq!(plan.cost.week_tokens, view.trend.iter().sum::<u64>(), "one window for both");
+}
+
+/// Part of a run that began before the window is not in the week or the trend.
+#[test]
+fn what_a_run_spent_before_the_window_is_not_in_it() {
+    let (store, main, _) = board(0);
+    let today = now_millis().div_euclid(DAY) * DAY;
+    // Two days that began a day and a half before the window and ended half a
+    // day into it: a quarter of the run is in.
+    let window = today - 6 * DAY;
+    turn_between(&store, "k1", window - DAY - DAY / 2, window + DAY / 2, 8_000);
+    let week = store.plan(main, 0).unwrap().cost.week_tokens;
+    assert!(week.abs_diff(2_000) <= 2, "a quarter of the run, not the whole: {week}");
+}
+
+/// An agent on two lanes gives each half its tokens each day.
+#[test]
+fn a_shared_agent_is_split_in_the_trend() {
+    let (store, main, t) = board(2);
+    let th = theme(&store, main, "Cost", &[&t[0]]);
+    lane(&store, main, "one", &[card(&t[0])], "a1");
+    lane(&store, main, "two", &[card(&t[1])], "a1");
+    agent_turn(&store, "a1", 1000, now_millis().div_euclid(DAY) * DAY + 1);
+    let plan = store.plan(main, 0).unwrap();
+    let view = plan.themes.iter().find(|v| v.theme.id == th.id).unwrap();
+    assert_eq!(view.trend[6], 500);
 }
 
 /// The week's tokens are the runner's own, every harness, and stop at seven days.
