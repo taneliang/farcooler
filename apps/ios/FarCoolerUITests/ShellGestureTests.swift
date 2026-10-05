@@ -213,10 +213,13 @@ final class ShellGestureTests: XCTestCase {
     /// The flick still has to escape after its own slow frame, so this cannot
     /// pass by zeroing every release.
     func testAFlickUpChoosesNoRowEvenAfterASlowFrame() throws {
-        try flickUpChoosesNoRow(launch(["-shell-slow-frame"]))
+        try flickUpChoosesNoRow(launch(["-shell-slow-frame"]), slowFrame: true)
     }
 
-    private func flickUpChoosesNoRow(_ app: XCUIApplication) throws {
+    /// `slowFrame` makes the helper check the hook really fired: `stalls` in
+    /// the probe counts the slow frames, and without them the slow-frame test
+    /// would be a copy of the plain one that can't fail.
+    private func flickUpChoosesNoRow(_ app: XCUIApplication, slowFrame: Bool = false) throws {
         XCTAssertEqual(try state(app)["tabs"], 3, "the canned worktree has three tabs")
         XCTAssertEqual(try state(app)["tab"], 0)
 
@@ -226,11 +229,20 @@ final class ShellGestureTests: XCTestCase {
         XCTAssertEqual(
             landed["tab"], 2,
             "the row under the finger is the one nearest the bar, which is the last tab")
+        if slowFrame {
+            XCTAssertGreaterThanOrEqual(
+                landed["stalls"] ?? 0, 1, "the 60-point lift had no slow frame, so nothing was reproduced")
+        }
 
         // The escape, and its negative control first: the same 140 points,
         // held still before the finger leaves, projects nowhere.
         liftBar(app, by: 140)
         let held = try state(app)
+        if slowFrame {
+            XCTAssertGreaterThan(
+                held["stalls"] ?? 0, landed["stalls"] ?? 0,
+                "the held 140-point lift had no slow frame, and it is the one CI failed on")
+        }
         XCTAssertEqual(held["tab"], 0, "a lift that stopped before letting go chose the top row, where the finger was")
 
         // Then the flick from a different tab, so a release that landed on a

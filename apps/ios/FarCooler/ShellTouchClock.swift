@@ -27,7 +27,9 @@ import UIKit
 ///
 /// A reference type held in `@State`, because it is written from UIKit on
 /// every touch and read once per release: nothing about it should ever cause
-/// a render.
+/// a render. `@MainActor` because UIKit writes it and SwiftUI's gesture
+/// callbacks read it, both on the main thread.
+@MainActor
 final class ShellTouchClock {
     /// The timestamp of the last sample that moved more than half a point —
     /// the same slop `ShellRootView.noteMovement` allows — or of touch-down,
@@ -38,11 +40,21 @@ final class ShellTouchClock {
     /// The release's timestamp, once UIKit has delivered it; nil while the
     /// finger is down.
     fileprivate var lifted: TimeInterval?
+    /// Whether another finger was on the glass at any point during this one.
+    ///
+    /// The clock times one touch, and with two down it can't know which of
+    /// them the shell's drag was following. A thumb resting on the terminal
+    /// while the other hand flicks the bar would otherwise lend the flick the
+    /// resting thumb's stillness. So a crowded touch answers nothing, and the
+    /// release falls back to `ShellRootView.lastMoved`, which reads the
+    /// drag's own deliveries.
+    fileprivate var crowded = false
 
-    /// How long the finger had been still when it lifted, or nil when this
-    /// touch's release has not been seen yet.
+    /// How long the finger had been still when it lifted. Nil when this
+    /// touch's release hasn't been seen yet, or when another finger was down
+    /// during it.
     var stillBeforeLift: TimeInterval? {
-        guard let lifted, let lastMoved else { return nil }
+        guard !crowded, let lifted, let lastMoved else { return nil }
         return lifted - lastMoved
     }
 
@@ -50,6 +62,7 @@ final class ShellTouchClock {
         lastMoved = touch.timestamp
         lastPoint = touch.location(in: nil)
         lifted = nil
+        crowded = false
     }
 
     fileprivate func sample(_ touch: UITouch) {
@@ -59,10 +72,19 @@ final class ShellTouchClock {
         lastPoint = point
     }
 
+    /// The release, stamped and nothing more.
+    ///
+    /// Its location is deliberately not a sample. A real finger rolls a
+    /// point or so as it leaves the glass, and counting that as movement
+    /// would make a held lift look like it moved at the instant it lifted —
+    /// the defect this type exists to fix. A finger that really was moving
+    /// produced a `touchesMoved` within a frame of lifting, well inside
+    /// `ShellRootView.stillFor`.
     fileprivate func up(_ touch: UITouch) {
-        sample(touch)
         lifted = touch.timestamp
     }
+
+    fileprivate func crowd() { crowded = true }
 }
 
 /// Installs the clock's recognizer on the window the shell is in.
@@ -105,9 +127,9 @@ struct ShellTouchClockInstaller: UIViewRepresentable {
 /// all off, and it recognizes simultaneously with everything and is never a
 /// failure requirement for anything.
 ///
-/// One finger: the first touch down is the one timed, and any other touch
-/// that lands while it is down is ignored, the way the shell's own
-/// single-finger drags ignore it.
+/// One finger: the first touch down is the one timed. Any other touch that
+/// lands while it is down marks it crowded, and a crowded touch gives no
+/// answer (see `ShellTouchClock.crowded`).
 final class ShellTouchClockRecognizer: UIGestureRecognizer, UIGestureRecognizerDelegate {
     weak var clock: ShellTouchClock?
     private weak var tracked: UITouch?
@@ -121,9 +143,14 @@ final class ShellTouchClockRecognizer: UIGestureRecognizer, UIGestureRecognizerD
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
-        guard tracked == nil, let touch = touches.first else { return }
+        guard tracked == nil else {
+            clock?.crowd()
+            return
+        }
+        guard let touch = touches.first else { return }
         tracked = touch
         clock?.down(touch)
+        if touches.count > 1 { clock?.crowd() }
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
@@ -139,6 +166,7 @@ final class ShellTouchClockRecognizer: UIGestureRecognizer, UIGestureRecognizerD
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
         guard let tracked, touches.contains(tracked) else { return }
         clock?.up(tracked)
+        if (event.allTouches?.count ?? 1) > 1 { clock?.crowd() }
         state = .failed
     }
 

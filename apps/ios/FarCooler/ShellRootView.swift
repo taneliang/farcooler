@@ -1001,6 +1001,16 @@ struct ShellRootView<Pane: View>: View {
 
     // MARK: - The probe
 
+    /// ` stalls=N` under `-shell-slow-frame`: how many slow frames the hook
+    /// really caused. See `ShellSlowFrame.count`. Empty outside DEBUG.
+    private var slowFrames: String {
+        #if DEBUG
+        return ShellSlowFrame.isRequested ? " stalls=\(ShellSlowFrame.count)" : ""
+        #else
+        return ""
+        #endif
+    }
+
     /// The one way a UI test can ask this shell where it is.
     ///
     /// The same technique `TerminalView.swift:387-392` uses and for the same
@@ -1031,7 +1041,7 @@ struct ShellRootView<Pane: View>: View {
                     + "stray=\(Int(strayed.rounded())) "
                     + "lockx=\(Int(lockedOn.width.rounded())) "
                     + "locky=\(Int(lockedOn.height.rounded())) "
-                    + "mount=\(mount)")
+                    + "mount=\(mount)" + slowFrames)
     }
 }
 

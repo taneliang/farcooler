@@ -300,10 +300,15 @@ final class ShellPaneScrollTests: XCTestCase {
     /// and turned the page. See `ShellTouchClock`.
     func testACodeLineAtItsEndHandsThePageTurnBackEvenAfterASlowFrame() throws {
         try codeLineAtItsEndHandsThePageTurnBack(
-            launch(["-shell-harness", "-shell-changes", "-shell-slow-frame"]))
+            launch(["-shell-harness", "-shell-changes", "-shell-slow-frame"]), slowFrame: true)
     }
 
-    private func codeLineAtItsEndHandsThePageTurnBack(_ app: XCUIApplication) throws {
+    /// `slowFrame` makes the helper check the hook really fired on every
+    /// drag: `stalls` in the probe counts the slow frames, and without them
+    /// the slow-frame test would be a copy of the plain one that can't fail.
+    private func codeLineAtItsEndHandsThePageTurnBack(
+        _ app: XCUIApplication, slowFrame: Bool = false
+    ) throws {
         _ = try state(app)
         let line = app.staticTexts.matching(
             NSPredicate(format: "label CONTAINS %@", "retry_after")).firstMatch
@@ -315,7 +320,9 @@ final class ShellPaneScrollTests: XCTestCase {
         // hunk's position rather than the shell's. Twelve is far more than the
         // fixture needs; the loop stops as soon as the code stops moving.
         var moved = false
+        var drags = 0
         for _ in 0..<12 {
+            drags += 1
             let was = line.frame.minX
             let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.62, dy: 0.55))
             from.press(
@@ -325,8 +332,13 @@ final class ShellPaneScrollTests: XCTestCase {
             moved = true
         }
         XCTAssertTrue(moved, "the canned line was never wide enough to scroll")
-        XCTAssertEqual(
-            try state(app)["tab"], 0, "reading the line to its end turned the page on the way")
+        let read = try state(app)
+        if slowFrame {
+            XCTAssertEqual(
+                read["stalls"], drags,
+                "not every sixty-point drag had its slow frame, so the last one, at the edge, may not have")
+        }
+        XCTAssertEqual(read["tab"], 0, "reading the line to its end turned the page on the way")
 
         // At the edge now: the same drag again, and this one is the shell's.
         swipe(app, at: 0.55, toward: -1)

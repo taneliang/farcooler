@@ -561,9 +561,22 @@ extension ShellRootView {
     /// together and the hold measures zero. That is how a held lift escaped
     /// and a held drag turned the page on CI; `ShellTouchClock` has the
     /// measurement. The `lastMoved` reading stays as the fallback for a
-    /// release whose touch the clock has not seen end, which in practice
-    /// never happens: UIKit hands the window's recognizers a touch's end
-    /// before SwiftUI's gesture reports it.
+    /// release the clock can't answer for: another finger was down, or the
+    /// clock hasn't seen this touch end yet.
+    ///
+    /// **That the clock has seen it end is measured, not documented.** On
+    /// the iOS 26 simulator the window's recognizer gets a touch's end before
+    /// SwiftUI's `onEnded` runs. If a future iOS reverses that order, every
+    /// release quietly takes the fallback and the CI flakes come back.
+    /// `ShellGestureTests.testAFlickUpChoosesNoRowEvenAfterASlowFrame` and
+    /// `ShellPaneScrollTests.testACodeLineAtItsEndHandsThePageTurnBackEvenAfterASlowFrame`
+    /// are the guard: they go red when the fallback answers.
+    ///
+    /// **Only stillness is fixed; speed is not.** When the finger was still
+    /// moving, the answer is `value.velocity`, which SwiftUI estimates from
+    /// the same squeezed deliveries. After a slow frame, a slowly moving
+    /// finger's release can carry an inflated velocity and project too far.
+    /// No test exercises that case.
     private func releaseVelocity(_ value: DragGesture.Value) -> CGSize {
         if let still = touchClock.stillBeforeLift {
             return still > Self.stillFor ? .zero : value.velocity

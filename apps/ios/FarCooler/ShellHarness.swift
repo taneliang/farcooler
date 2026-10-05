@@ -315,6 +315,11 @@ struct ShellPanePlaceholder: View {
 enum ShellSlowFrame {
     static let isRequested = CommandLine.arguments.contains("-shell-slow-frame")
     private static var spent = false
+    /// How many slow frames have actually happened, published as `stalls` in
+    /// the shell's probe. The slow-frame tests assert it, so a hook that
+    /// stops firing (moved, renamed, or a threshold past the drags' travel)
+    /// turns them red instead of leaving them as copies of the plain tests.
+    private(set) static var count = 0
 
     /// A new finger is down; it gets its own slow frame.
     static func rearm() { spent = false }
@@ -324,6 +329,7 @@ enum ShellSlowFrame {
             max(abs(travelled.width), abs(travelled.height)) >= 30
         else { return }
         spent = true
+        count += 1
         Thread.sleep(forTimeInterval: 1.2)
     }
 }
