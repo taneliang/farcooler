@@ -117,6 +117,47 @@ struct AppControlTests {
         #expect(Self.ask(path, #"{"op":"about"}"#).count == 1)
     }
 
+    /// `{"op":"about","a":{"a":…1…}}`, nested `depth` deep.
+    private static func nested(_ depth: Int) -> String {
+        #"{"op":"about","a":"# + String(repeating: #"{"a":"#, count: depth - 1) + "1"
+            + String(repeating: "}", count: depth)
+    }
+
+    /// The review's crash (ov-302 F1): dictionaries 480 deep, 2.9 KB,
+    /// overflowed the parsing thread's stack and took the app down with
+    /// SIGBUS. Refused while it's arriving now, before anything parses it.
+    @Test func anOversizeRequestIsHungUpOnAndTheAppKeepsAnswering() throws {
+        let path = Self.scratch()
+        let control = AppControl()
+        try control.start(at: path, handler: Self.echo)
+        defer { control.stop(removing: path) }
+
+        let line = Self.nested(480)
+        #expect(line.utf8.count > 2_800)
+        #expect(Self.ask(path, line).isEmpty)
+        #expect(Self.ask(path, #"{"op":"about"}"#).count == 1)
+    }
+
+    /// Nesting short enough to fit the size cap is refused too: a request
+    /// is one flat object.
+    @Test func aNestedRequestIsHungUpOnUnparsed() throws {
+        let path = Self.scratch()
+        let control = AppControl()
+        try control.start(at: path, handler: Self.echo)
+        defer { control.stop(removing: path) }
+
+        let line = Self.nested(40)
+        #expect(line.utf8.count < 512)
+        #expect(Self.ask(path, line).isEmpty)
+        #expect(Self.ask(path, #"{"op":"about","relaunch":false}"#).count == 1)
+    }
+
+    @Test func depthIsCountedOutsideStringsOnly() {
+        #expect(AppControl.depth(of: Data(#"{"op":"about"}"#.utf8)) == 1)
+        #expect(AppControl.depth(of: Data(#"{"op":"{{[[\"{"}"#.utf8)) == 1)
+        #expect(AppControl.depth(of: Data(#"{"a":[{"b":1}]}"#.utf8)) == 3)
+    }
+
     /// The requests, through `AppControlRequests.handle`, in the test
     /// bundle: it has no feed, so it's a build that doesn't update.
     @MainActor

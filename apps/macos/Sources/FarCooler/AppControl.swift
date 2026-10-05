@@ -165,7 +165,7 @@ final class AppControl: @unchecked Sendable {
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &wait, socklen_t(MemoryLayout<timeval>.size))
         let reply = Reply(fd: fd, queue: DispatchQueue(label: "com.farcooler.app-control.reply"))
         DispatchQueue.global().async {
-            guard let line = Self.readLine(fd),
+            guard let line = Self.readLine(fd), Self.depth(of: line) <= Self.deepest,
                 let request = try? JSONSerialization.jsonObject(with: line) as? [String: Any]
             else {
                 reply.close()
@@ -178,16 +178,58 @@ final class AppControl: @unchecked Sendable {
     /// Only this user. Root is not this user either.
     static func admits(peer: uid_t, own: uid_t) -> Bool { peer == own }
 
-    /// One request line, at most 4 KB.
+    /// The longest request line. A real one is about 40 bytes.
+    ///
+    /// Small for a reason beyond tidiness (ov-302 F1): `JSONSerialization`
+    /// recurses per level of nesting, and dictionaries 480 deep — 2.9 KB,
+    /// under the 4 KB this once allowed — overflowed a GCD thread's 512 KB
+    /// stack and took the app down with SIGBUS. A line past this is refused
+    /// while it arrives, before anything is buffered or parsed.
+    static let longest = 512
+
+    /// How deep a request may nest. A real one is one flat object.
+    static let deepest = 2
+
+    /// One request line, at most `longest` bytes.
     private static func readLine(_ fd: Int32) -> Data? {
         var line = Data()
         var byte: UInt8 = 0
-        while line.count < 4096 {
+        while line.count < longest {
             guard read(fd, &byte, 1) == 1 else { return nil }
             if byte == 0x0A { return line }
             line.append(byte)
         }
         return nil
+    }
+
+    /// How deeply `line`'s objects and arrays nest, outside strings. Read
+    /// before parsing, so nesting never reaches the parser's recursion.
+    static func depth(of line: Data) -> Int {
+        var depth = 0
+        var deepest = 0
+        var inString = false
+        var escaped = false
+        for byte in line {
+            if inString {
+                if escaped {
+                    escaped = false
+                } else if byte == UInt8(ascii: "\\") {
+                    escaped = true
+                } else if byte == UInt8(ascii: "\"") {
+                    inString = false
+                }
+                continue
+            }
+            switch byte {
+            case UInt8(ascii: "\""): inString = true
+            case UInt8(ascii: "{"), UInt8(ascii: "["):
+                depth += 1
+                deepest = max(deepest, depth)
+            case UInt8(ascii: "}"), UInt8(ascii: "]"): depth -= 1
+            default: break
+            }
+        }
+        return deepest
     }
 
     /// Whether something answers at `path`.
