@@ -115,15 +115,7 @@ fun PageView(page: BoardPage, world: PageWorld, onOpen: (PageDestination) -> Uni
 @Composable
 fun PageBlocks(doc: PageDoc, world: PageWorld, onOpen: (PageDestination) -> Unit, modifier: Modifier = Modifier) {
     val uri = LocalUriHandler.current
-    // The one place a destination is opened: a web link to the browser, after
-    // its check again, and everything else to the app.
-    val open: (PageDestination) -> Unit = { destination ->
-        if (destination is PageDestination.Url) {
-            if (PageLinks.https(destination.url) != null) runCatching { uri.openUri(destination.url) }
-        } else {
-            onOpen(destination)
-        }
-    }
+    val open: (PageDestination) -> Unit = { PageOpen.open(it, onOpen) { url -> runCatching { uri.openUri(url) } } }
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val width = maxWidth.value.toInt()
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -132,6 +124,17 @@ fun PageBlocks(doc: PageDoc, world: PageWorld, onOpen: (PageDestination) -> Unit
                 val gap = if (block is PageBlock.Heading && index > 0) 8.dp else 0.dp
                 Box(Modifier.padding(top = gap)) { PageBlockView(block, world, width, open) }
             }
+        }
+    }
+}
+
+/** The one place a destination is opened: a web link to the browser, after its check again, and everything else to the app. */
+object PageOpen {
+    fun open(destination: PageDestination, onOpen: (PageDestination) -> Unit, openUri: (String) -> Unit) {
+        if (destination is PageDestination.Url) {
+            if (PageLinks.https(destination.url) != null) openUri(destination.url)
+        } else {
+            onOpen(destination)
         }
     }
 }
