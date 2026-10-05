@@ -43,13 +43,26 @@ pub(super) fn parse_budget(raw: &str) -> Result<u64, String> {
         _ => (raw.as_str(), 1),
     };
     let said = "A budget is a number of tokens, like 5000000 or 5M.";
-    // A decimal such as 1.5M is fine; the product must still be whole tokens.
-    let n: f64 = digits.parse().map_err(|_| said.to_string())?;
-    let total = n * scale as f64;
-    if !total.is_finite() || total < 1.0 || total.fract() != 0.0 || total > 1e14 {
+    // In integers: 4.1M is 4,100,000 tokens, which a float can't say exactly.
+    let (whole, fraction) = digits.split_once('.').unwrap_or((digits, ""));
+    let all_digits = |t: &str| t.chars().all(|c| c.is_ascii_digit());
+    if (whole.is_empty() && fraction.is_empty()) || !all_digits(whole) || !all_digits(fraction) {
         return Err(said.to_string());
     }
-    Ok(total as u64)
+    // The fraction may not name a smaller unit than a token: 1.5k is 1,500, 1.0001k is not.
+    let places = scale.ilog10() as usize;
+    let fraction = fraction.trim_end_matches('0');
+    if fraction.len() > places {
+        return Err(said.to_string());
+    }
+    let padded = format!("{fraction:0<places$}");
+    let whole: u64 = if whole.is_empty() { 0 } else { whole.parse().map_err(|_| said.to_string())? };
+    let part: u64 = if padded.is_empty() { 0 } else { padded.parse().map_err(|_| said.to_string())? };
+    let total = whole.checked_mul(scale).and_then(|w| w.checked_add(part)).ok_or_else(|| said.to_string())?;
+    if !(1..=100_000_000_000_000).contains(&total) {
+        return Err(said.to_string());
+    }
+    Ok(total)
 }
 
 /// Refused before anything is sent, so an older runner never drops the field.

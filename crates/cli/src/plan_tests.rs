@@ -1070,7 +1070,26 @@ fn a_budget_reads_as_tokens() {
     assert_eq!(parse_budget("5M"), Ok(5_000_000));
     assert_eq!(parse_budget("1.5m"), Ok(1_500_000));
     assert_eq!(parse_budget("1,200,000"), Ok(1_200_000));
-    for bad in ["", "0", "-5", "lots", "1.0000001k", "5T"] {
+    // Every decimal a person writes is exact: these were refused when it went
+    // through a float (4.1 times a million is 4099999.9999999995).
+    assert_eq!(parse_budget("4.1M"), Ok(4_100_000));
+    assert_eq!(parse_budget("400k"), Ok(400_000));
+    assert_eq!(parse_budget("8.2m"), Ok(8_200_000));
+    assert_eq!(parse_budget("16.1k"), Ok(16_100));
+    assert_eq!(parse_budget("32.2M"), Ok(32_200_000));
+    assert_eq!(parse_budget("0.5M"), Ok(500_000));
+    assert_eq!(parse_budget(".5M"), Ok(500_000));
+    assert_eq!(parse_budget("2.50M"), Ok(2_500_000));
+    assert_eq!(parse_budget("1.000001B"), Ok(1_000_001_000));
+    assert_eq!(parse_budget("007"), Ok(7));
+    // Whole over the whole range of 1.1 to 999.9 in every unit.
+    for tenths in 11..=9999u64 {
+        for (suffix, scale) in [("k", 1_000u64), ("M", 1_000_000), ("B", 1_000_000_000)] {
+            let text = format!("{}.{}{suffix}", tenths / 10, tenths % 10);
+            assert_eq!(parse_budget(&text), Ok(tenths * scale / 10), "{text}");
+        }
+    }
+    for bad in ["", "0", "-5", "lots", "1.0000001k", "5T", "1.5", "1.5.5M", "M", "0M", "99999999999999999999"] {
         assert!(parse_budget(bad).is_err(), "{bad:?} is not a budget");
     }
 }
