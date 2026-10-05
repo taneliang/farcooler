@@ -60,6 +60,9 @@ private struct CopyReferenceButton: View {
                 .frame(minWidth: 44, minHeight: 44)
         }
         .buttonStyle(.borderless)
+        // Gray, as on the Mac: color is for what needs attention (review
+        // 1005a L5), and a List tints a borderless button's label otherwise.
+        .tint(.secondary)
         .accessibilityLabel(PlanWords.copyReference)
         .accessibilityIdentifier("plan-ruling-\(ruling.short)-copy")
     }
