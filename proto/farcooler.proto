@@ -230,12 +230,14 @@ message Request {
     PageRemove page_remove = 173;
     PageStatsRequest page_stats = 174;
     // Decided for you (ov-304), the plan layer's rulings, behind
-    // `board_rulings`. Experimental with the layer: 180-189 are reserved for
-    // them so withdrawing them never frees a tag for another meaning. Read
+    // `board_rulings`. Experimental with the layer: 180-189 are theirs, the
+    // rest held by `reserved` below, so withdrawing them never frees a tag for another meaning. Read
     // through `plan.get`'s `Plan.rulings`, so only the writes are here.
     RulingAdd ruling_add = 180;
     RulingSet ruling_set = 181;
   }
+  // The rest of rulings' block, kept for them (review 1005a L1).
+  reserved 182 to 189;
 }
 
 message Response {
@@ -349,6 +351,8 @@ message Result {
     // `ruling.add` and `ruling.set`, behind `board_rulings`: the ruling.
     BoardRuling board_ruling = 180;
   }
+  // The rest of rulings' block, kept for them (review 1005a L1).
+  reserved 181 to 189;
 }
 
 // ---------------------------------------------------------------------------
