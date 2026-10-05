@@ -82,6 +82,7 @@ SOURCES = [
     # view in the board's list, a theme's and a lane's page, and what the
     # connection reads of it. Deleting the layer deletes these three.
     "PlanBoardSections.swift",
+    "PlanTrainRow.swift",
     "PlanRulingsSection.swift",
     "PlanPageScreens.swift",
     "ConnectionPlan.swift",
@@ -572,6 +573,8 @@ AGENTKIT_SOURCES = [
     "PlanModel.swift",
     "PlanReading.swift",
     "PlanRulings.swift",
+    # Trains and the CI the runner reads for them and for pages (ov-309).
+    "PlanTrains.swift",
     # Orchestrator pages (ov-269): the document, its live references, the
     # layout rules and the renderer, one SwiftUI implementation the Mac and
     # the phone share (ov-284, ov-285). Experimental, and removable with pages.

@@ -107,7 +107,7 @@ final class PagesUITests: XCTestCase {
         // under its column's title, the lane's state live.
         let lane = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Lane, ov-274-phones.'")).firstMatch
         reach(app, lane, down: false)
-        XCTAssertTrue(lane.label.contains("State, In Review · train integ-10."), "the state isn't live: \(lane.label)")
+        XCTAssertTrue(lane.label.contains("State, In Review · in integ-10."), "the state isn't live: \(lane.label)")
         keep(app, "pages-train")
     }
 

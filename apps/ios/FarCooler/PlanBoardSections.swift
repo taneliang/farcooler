@@ -112,17 +112,26 @@ struct PlanBoardSections: View {
                     PlanHeader(title: "Next Up", count: plan.nextUp.count).accessibilityIdentifier("plan-next-up")
                 }
             }
-            let now = plan.working + plan.unranked
-            if !now.isEmpty {
+            // Each train not yet landed heads the lanes on it (ov-309), and the
+            // lanes on none follow.
+            let groups = plan.nowGroups
+            if !groups.isEmpty {
                 Section {
-                    ForEach(now) { lane in
-                        PlanLaneRow(
-                            lane: lane, theme: plan.theme(of: lane), rank: nil, now: plan.nowMs,
-                            waitsOnOwner: plan.waitsOnOwner(lane, statuses: hook.statuses)
-                        ) { hook.onOpen(.lane(lane.id)) }
+                    ForEach(groups) { group in
+                        if let train = group.train {
+                            PlanTrainRow(train: train, ci: plan.ci(of: train))
+                        }
+                        ForEach(group.lanes) { lane in
+                            PlanLaneRow(
+                                lane: lane, theme: plan.theme(of: lane), rank: nil, now: plan.nowMs,
+                                waitsOnOwner: plan.waitsOnOwner(lane, statuses: hook.statuses)
+                            ) { hook.onOpen(.lane(lane.id)) }
+                            .padding(.leading, group.train == nil ? 0 : PaneMetrics.card)
+                        }
                     }
                 } header: {
-                    PlanHeader(title: "Now", count: now.count).accessibilityIdentifier("plan-now")
+                    PlanHeader(title: "Now", count: groups.reduce(0) { $0 + $1.lanes.count + ($1.train == nil ? 0 : 1) })
+                        .accessibilityIdentifier("plan-now")
                 }
             }
             if !plan.shownThemes.isEmpty {

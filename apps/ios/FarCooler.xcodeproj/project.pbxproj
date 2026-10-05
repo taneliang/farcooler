@@ -33,6 +33,7 @@
 		53CF1F7F5C955DFBB5181DC6 /* TaskBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24C349F60D2257EBB5921A6F; };
 		65890CCFD8A15DCE9C0C1C60 /* BoardHistoryScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 979BBDFD84C6597288BB6BAE; };
 		8249C7C42FD7599189D46442 /* PlanBoardSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = D388439068315115A07907D8; };
+		D4F4ACB1720F5B5C8943A120 /* PlanTrainRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3E84222A3C35201912D93AF; };
 		4CEADFEC8C2156739659A1BF /* PlanRulingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16B362D6347251D1A775D2E3; };
 		BB4A09C0BDB15A9794D90D6A /* PlanPageScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52C09DAF961B54C88CC3CB62; };
 		F2516CB1D4EB59958BFF454D /* ConnectionPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2161F26536E5521AF6DEA3A; };
@@ -180,6 +181,7 @@
 		5E6175B7B0C05B0BA2F37B3A /* PlanModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03731DD36BF75BAC89D798CA; };
 		6B38C133DAA85A45B1D4168D /* PlanReading.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BE75E2B438F5282BE4818CB; };
 		28F74B71195B5EF0BC678C5D /* PlanRulings.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF4B3D10EF9257EC8494C12E; };
+		2B0229AFC90857F7BC5D2A80 /* PlanTrains.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51D6AB8D9F305C939DBBB891; };
 		019CC7CE63B55DF38981B341 /* PageModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13184761D21B5CECA7E25A66; };
 		E40C57DFECAD5534879D5A81 /* PageLive.swift in Sources */ = {isa = PBXBuildFile; fileRef = B46379FE6B5F5791A8F1B840; };
 		4D0B29F7886F50A8BCB35281 /* PageLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5299E0D947625EE7B1A40607; };
@@ -319,6 +321,7 @@
 		24C349F60D2257EBB5921A6F /* TaskBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskBoardView.swift; sourceTree = "<group>"; };
 		979BBDFD84C6597288BB6BAE /* BoardHistoryScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardHistoryScreen.swift; sourceTree = "<group>"; };
 		D388439068315115A07907D8 /* PlanBoardSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanBoardSections.swift; sourceTree = "<group>"; };
+		C3E84222A3C35201912D93AF /* PlanTrainRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanTrainRow.swift; sourceTree = "<group>"; };
 		16B362D6347251D1A775D2E3 /* PlanRulingsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanRulingsSection.swift; sourceTree = "<group>"; };
 		52C09DAF961B54C88CC3CB62 /* PlanPageScreens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanPageScreens.swift; sourceTree = "<group>"; };
 		E2161F26536E5521AF6DEA3A /* ConnectionPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionPlan.swift; sourceTree = "<group>"; };
@@ -466,6 +469,7 @@
 		03731DD36BF75BAC89D798CA /* PlanModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanModel.swift; sourceTree = "<group>"; };
 		9BE75E2B438F5282BE4818CB /* PlanReading.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanReading.swift; sourceTree = "<group>"; };
 		DF4B3D10EF9257EC8494C12E /* PlanRulings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanRulings.swift; sourceTree = "<group>"; };
+		51D6AB8D9F305C939DBBB891 /* PlanTrains.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanTrains.swift; sourceTree = "<group>"; };
 		13184761D21B5CECA7E25A66 /* PageModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageModel.swift; sourceTree = "<group>"; };
 		B46379FE6B5F5791A8F1B840 /* PageLive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageLive.swift; sourceTree = "<group>"; };
 		5299E0D947625EE7B1A40607 /* PageLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageLayout.swift; sourceTree = "<group>"; };
@@ -609,6 +613,7 @@
 				24C349F60D2257EBB5921A6F /* TaskBoardView.swift */,
 				979BBDFD84C6597288BB6BAE /* BoardHistoryScreen.swift */,
 				D388439068315115A07907D8 /* PlanBoardSections.swift */,
+				C3E84222A3C35201912D93AF /* PlanTrainRow.swift */,
 				16B362D6347251D1A775D2E3 /* PlanRulingsSection.swift */,
 				52C09DAF961B54C88CC3CB62 /* PlanPageScreens.swift */,
 				E2161F26536E5521AF6DEA3A /* ConnectionPlan.swift */,
@@ -861,6 +866,7 @@
 				03731DD36BF75BAC89D798CA /* PlanModel.swift */,
 				9BE75E2B438F5282BE4818CB /* PlanReading.swift */,
 				DF4B3D10EF9257EC8494C12E /* PlanRulings.swift */,
+				51D6AB8D9F305C939DBBB891 /* PlanTrains.swift */,
 				13184761D21B5CECA7E25A66 /* PageModel.swift */,
 				B46379FE6B5F5791A8F1B840 /* PageLive.swift */,
 				5299E0D947625EE7B1A40607 /* PageLayout.swift */,
@@ -1188,6 +1194,7 @@
 				53CF1F7F5C955DFBB5181DC6 /* TaskBoardView.swift in Sources */,
 				65890CCFD8A15DCE9C0C1C60 /* BoardHistoryScreen.swift in Sources */,
 				8249C7C42FD7599189D46442 /* PlanBoardSections.swift in Sources */,
+				D4F4ACB1720F5B5C8943A120 /* PlanTrainRow.swift in Sources */,
 				4CEADFEC8C2156739659A1BF /* PlanRulingsSection.swift in Sources */,
 				BB4A09C0BDB15A9794D90D6A /* PlanPageScreens.swift in Sources */,
 				F2516CB1D4EB59958BFF454D /* ConnectionPlan.swift in Sources */,
@@ -1335,6 +1342,7 @@
 				5E6175B7B0C05B0BA2F37B3A /* PlanModel.swift in Sources */,
 				6B38C133DAA85A45B1D4168D /* PlanReading.swift in Sources */,
 				28F74B71195B5EF0BC678C5D /* PlanRulings.swift in Sources */,
+				2B0229AFC90857F7BC5D2A80 /* PlanTrains.swift in Sources */,
 				019CC7CE63B55DF38981B341 /* PageModel.swift in Sources */,
 				E40C57DFECAD5534879D5A81 /* PageLive.swift in Sources */,
 				4D0B29F7886F50A8BCB35281 /* PageLayout.swift in Sources */,
@@ -1512,10 +1520,10 @@
 				FARCOOLER_CHANNEL = local;
 				FARCOOLER_URL_SCHEME = "farcooler-local";
 				FARCOOLER_APP_NAME = "FC Local";
-				FARCOOLER_DISPLAY_VERSION = "0.1.0 (local d77013f0)";
+				FARCOOLER_DISPLAY_VERSION = "0.1.0 (local 2718dd44)";
 				FARCOOLER_WORKOS_CLIENT_ID = "client_01M03N3DFQNDCK819XSRTK2FJD";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
-				CURRENT_PROJECT_VERSION = 2415;
+				CURRENT_PROJECT_VERSION = 2445;
 				PRODUCT_NAME = FarCooler;
 				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.local;
 				INFOPLIST_FILE = FarCooler/Info.plist;
@@ -1539,10 +1547,10 @@
 				FARCOOLER_CHANNEL = local;
 				FARCOOLER_URL_SCHEME = "farcooler-local";
 				FARCOOLER_APP_NAME = "FC Local";
-				FARCOOLER_DISPLAY_VERSION = "0.1.0 (local d77013f0)";
+				FARCOOLER_DISPLAY_VERSION = "0.1.0 (local 2718dd44)";
 				FARCOOLER_WORKOS_CLIENT_ID = "client_01M03N3DFQNDCK819XSRTK2FJD";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
-				CURRENT_PROJECT_VERSION = 2415;
+				CURRENT_PROJECT_VERSION = 2445;
 				PRODUCT_NAME = FarCooler;
 				PRODUCT_BUNDLE_IDENTIFIER = com.farcooler.ios.local;
 				INFOPLIST_FILE = FarCooler/Info.plist;
@@ -1563,7 +1571,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 2415;
+				CURRENT_PROJECT_VERSION = 2445;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				FARCOOLER_URL_SCHEME = "farcooler-local";
@@ -1583,7 +1591,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 2415;
+				CURRENT_PROJECT_VERSION = 2445;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				FARCOOLER_URL_SCHEME = "farcooler-local";
@@ -1603,7 +1611,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 2415;
+				CURRENT_PROJECT_VERSION = 2445;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				PRODUCT_NAME = FarCoolerNotify;
@@ -1622,7 +1630,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 2415;
+				CURRENT_PROJECT_VERSION = 2445;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				PRODUCT_NAME = FarCoolerNotify;
@@ -1641,7 +1649,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 2415;
+				CURRENT_PROJECT_VERSION = 2445;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				PRODUCT_NAME = FarCoolerWatch;
@@ -1667,7 +1675,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 2415;
+				CURRENT_PROJECT_VERSION = 2445;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				PRODUCT_NAME = FarCoolerWatch;
@@ -1693,7 +1701,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 2415;
+				CURRENT_PROJECT_VERSION = 2445;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				PRODUCT_NAME = FarCoolerWatchWidgets;
@@ -1717,7 +1725,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 2415;
+				CURRENT_PROJECT_VERSION = 2445;
 				FARCOOLER_APP_NAME = "FC Local";
 				FARCOOLER_APP_GROUP = group.com.farcooler.ios.local;
 				PRODUCT_NAME = FarCoolerWatchWidgets;
