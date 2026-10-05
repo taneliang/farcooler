@@ -93,6 +93,8 @@ fun LazyListScope.planItems(
     onRetry: () -> Unit,
     landedOpen: Boolean = false,
     onToggleLanded: () -> Unit = {},
+    /** The board's orchestrator pages (ov-285); null on a runner without `board_pages`. */
+    pages: PagesHook? = null,
 ) {
     when (state) {
         null, PlanReadState.Loading -> item(key = "plan/loading") {
@@ -111,7 +113,7 @@ fun LazyListScope.planItems(
                 }
             }
         }
-        is PlanReadState.Loaded -> loaded(state.plan, statuses, onOpen, landedOpen, onToggleLanded)
+        is PlanReadState.Loaded -> loaded(state.plan, statuses, onOpen, landedOpen, onToggleLanded, pages)
     }
 }
 
@@ -121,11 +123,13 @@ private fun LazyListScope.loaded(
     onOpen: (PlanPage) -> Unit,
     landedOpen: Boolean,
     onToggleLanded: () -> Unit,
+    pages: PagesHook?,
 ) {
     if (plan.isEmpty) {
         item(key = "plan/empty") {
             PlanNotice(PlanWords.NOTHING_PLANNED, PlanWords.NOTHING_PLANNED_DETAIL, Modifier.testTag("plan-empty"))
         }
+        pages?.let { pageItems(it, plan, onOpen) }
         return
     }
     val nextUp = plan.nextUp
@@ -155,6 +159,9 @@ private fun LazyListScope.loaded(
             }
         }
     }
+    // After Themes, as on the Mac and the iPhone (design 6.1): pages of their
+    // own, and anchored ones whose theme is gone.
+    pages?.let { pageItems(it, plan, onOpen) }
     val landed = plan.landedToday()
     if (landed.isNotEmpty()) {
         item(key = "plan/landed") {

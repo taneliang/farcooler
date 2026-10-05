@@ -194,7 +194,15 @@ fun BoardTab(
     val keepsPlan = daemon?.can(Capability.BOARD_PLAN) == true
     val showsPlan = com.farcooler.model.PlanChoice.showing(keepsPlan, planChosen)
     var landedOpen by rememberSaveable(workspace.id) { mutableStateOf(false) }
-    LaunchedEffect(showsPlan, workspace.id) { if (showsPlan) connection.plans.read(workspace) }
+    LaunchedEffect(showsPlan, workspace.id) {
+        if (showsPlan) {
+            connection.plans.read(workspace)
+            connection.pages.read(workspace)
+        }
+    }
+    // The board's orchestrator pages (ov-285), read with the plan.
+    val pageLists by connection.pages.lists.collectAsStateWithLifecycle()
+    val keepsPages = daemon?.can(Capability.BOARD_PAGES) == true
 
     // Read on opening, whatever was last read: the row that opened this may
     // be showing a count from before the last reconnect. While it is open, a
@@ -218,7 +226,10 @@ fun BoardTab(
                 scope.launch {
                     refreshing = true
                     connection.readBoard(workspace)
-                    if (showsPlan) connection.plans.read(workspace)
+                    if (showsPlan) {
+                        connection.plans.read(workspace)
+                        connection.pages.read(workspace)
+                    }
                     refreshing = false
                 }
             },
@@ -342,6 +353,11 @@ fun BoardTab(
                             onRetry = { scope.launch { connection.plans.read(workspace) } },
                             landedOpen = landedOpen,
                             onToggleLanded = { landedOpen = !landedOpen },
+                            pages = if (keepsPages) {
+                                PagesHook(pageLists[workspace.id], System.currentTimeMillis()) {
+                                    scope.launch { connection.pages.read(workspace) }
+                                }
+                            } else null,
                         )
                     } else if (board.unreadable.isNotEmpty()) {
                         item(key = "unreadable") {

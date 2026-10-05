@@ -275,7 +275,7 @@ fun WorkspaceScreen(
                     onOpenTask = { model.navigate(Route.BoardTask(route.hostId, route.workspaceId, it)) },
                     onOpenPlan = { page ->
                         model.navigate(
-                            Route.PlanPage(route.hostId, route.workspaceId, if (page is com.farcooler.model.PlanPage.Theme) "theme" else "lane", page.id),
+                            Route.PlanPage(route.hostId, route.workspaceId, page.kind, page.id),
                         )
                     },
                     onOpenHistory = { status ->

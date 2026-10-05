@@ -92,6 +92,8 @@ class PlanReads(
             when (page) {
                 is PlanPage.Theme -> put("theme", page.id)
                 is PlanPage.Lane -> put("lane", page.id)
+                // An orchestrator's page has no record: it's read whole with the board's pages.
+                is PlanPage.Page -> return
             }
         }
         val record = try {

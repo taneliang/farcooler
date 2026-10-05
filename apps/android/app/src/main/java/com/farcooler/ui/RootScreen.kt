@@ -383,7 +383,9 @@ private fun OverlayScreen(model: AppModel, route: Route, connections: List<Conne
                     workspaceId = route.workspaceId,
                     page = route.page,
                     onOpenTask = { model.navigate(Route.BoardTask(route.hostId, route.workspaceId, it)) },
-                    onOpenPage = { model.navigate(Route.PlanPage(route.hostId, route.workspaceId, if (it is com.farcooler.model.PlanPage.Theme) "theme" else "lane", it.id)) },
+                    onOpenPage = { model.navigate(Route.PlanPage(route.hostId, route.workspaceId, it.kind, it.id)) },
+                    onNeedsYou = { model.goHome() },
+                    onOpenTerminal = { model.openFromBoard(it) },
                     onBack = { model.back() },
                 )
             }

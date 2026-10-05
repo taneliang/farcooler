@@ -230,9 +230,10 @@ sealed interface Route {
     ) : Route
 
     /**
-     * A theme's or lane's page of the plan layer on that board (ov-274):
-     * [kind] is `theme` or `lane`, [pageId] the plan's own id. Not a place a
-     * relaunch reopens; its workspace is.
+     * A theme's or lane's page of the plan layer on that board (ov-274), or
+     * an orchestrator's page (ov-285): [kind] is `theme`, `lane` or `page`,
+     * [pageId] the plan's own id or the page's slot. Not a place a relaunch
+     * reopens; its workspace is.
      */
     @Serializable
     @SerialName("plan-page")
@@ -244,7 +245,7 @@ sealed interface Route {
     ) : Route {
         /** The page as the model names it. */
         val page: com.farcooler.model.PlanPage
-            get() = if (kind == "theme") com.farcooler.model.PlanPage.Theme(pageId) else com.farcooler.model.PlanPage.Lane(pageId)
+            get() = com.farcooler.model.PlanPage.of(kind, pageId)
     }
 
     /**

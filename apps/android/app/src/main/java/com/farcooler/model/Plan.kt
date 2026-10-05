@@ -518,12 +518,30 @@ data class PlanSegment(val kind: Kind, val count: Int) {
     enum class Kind { DONE, IN_REVIEW, IN_PROGRESS, NOT_STARTED }
 }
 
-/** A theme's or lane's page, by the plan's own id. */
+/** A theme's or lane's page, by the plan's own id, or an orchestrator's page by its slot (ov-285). */
 sealed interface PlanPage {
     val id: String
 
     data class Theme(override val id: String) : PlanPage
     data class Lane(override val id: String) : PlanPage
+
+    /** An orchestrator's page (ov-269): [id] is its slot, `train` or `spend`. */
+    data class Page(override val id: String) : PlanPage
+
+    /** The word [Route.PlanPage] keeps it under. */
+    val kind: String get() = when (this) {
+        is Theme -> "theme"
+        is Lane -> "lane"
+        is Page -> "page"
+    }
+
+    companion object {
+        fun of(kind: String, id: String): PlanPage = when (kind) {
+            "theme" -> Theme(id)
+            "page" -> Page(id)
+            else -> Lane(id)
+        }
+    }
 }
 
 /** The client core's `plan` notice: that a board's plan was written, naming the board. */

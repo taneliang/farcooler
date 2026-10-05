@@ -555,6 +555,9 @@ class Connection(
     /** The plan layer (ov-274), read on request behind `board_plan`. */
     val plans = PlanReads({ method, args -> core.call(method, args) }, runnerCan = { daemonBuild.current.value?.can(Capability.BOARD_PLAN) })
 
+    /** Orchestrator pages (ov-285), read with the plan behind `board_pages`. */
+    val pages = PageReads({ method, args -> core.call(method, args) }, runnerCan = { daemonBuild.current.value?.can(Capability.BOARD_PAGES) })
+
     /** A task's notes, from `task.get`, or null when the read didn't come back. */
     suspend fun taskNotes(taskId: String): List<com.farcooler.model.TaskNoteRow>? =
         attempt { core.call("task.get", kotlinx.serialization.json.buildJsonObject { put("task", taskId) }) }
@@ -714,6 +717,7 @@ class Connection(
             if (isForeground) scope.launch { readNeedsYou() }
         }
         scope.launch { plans.noticed(notice, boardList(), isForeground) }
+        scope.launch { pages.noticed(notice, boardList(), isForeground) }
         if (event != "task" && event != "resync") return
         scope.launch {
             // Boards are not read in the background — the fleet poll stops

@@ -42,7 +42,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.farcooler.model.BoardPage
 import com.farcooler.model.GlancePalette
+import com.farcooler.model.PageDestination
+import com.farcooler.model.PageShelf
+import com.farcooler.model.PageWorld
 import com.farcooler.model.Plan
 import com.farcooler.model.PlanCardRef
 import com.farcooler.model.PlanLane
@@ -72,8 +76,14 @@ fun PlanPageScreen(
     onOpenTask: (taskId: String) -> Unit,
     onOpenPage: (PlanPage) -> Unit,
     onBack: () -> Unit,
+    /** Back to Needs You, where a question a page names is answered (ov-285). */
+    onNeedsYou: () -> Unit = {},
+    /** A worktree's or terminal's pane, from a page's reference. */
+    onOpenTerminal: (com.farcooler.net.TerminalRef) -> Unit = {},
 ) {
     val states by connection.plans.states.collectAsStateWithLifecycle()
+    val pageLists by connection.pages.lists.collectAsStateWithLifecycle()
+    val fleet by connection.fleet.collectAsStateWithLifecycle()
     val records by connection.plans.records.collectAsStateWithLifecycle()
     val boards by connection.boards.collectAsStateWithLifecycle()
     val workspace = connection.board(workspaceId)
@@ -85,13 +95,20 @@ fun PlanPageScreen(
     }
     LaunchedEffect(page) {
         if (states[workspaceId] !is PlanReadState.Loaded) connection.plans.read(workspace)
+        // A page, and a theme's page that may draw pages inside it, read the
+        // board's pages when nothing has yet.
+        if (connection.pages.keeps && pageLists[workspaceId] == null) connection.pages.read(workspace)
         connection.plans.readRecord(page)
     }
     val plan = (state as? PlanReadState.Loaded)?.plan
+    val pages = (pageLists[workspaceId] as? com.farcooler.net.PageListState.Loaded)?.pages.orEmpty()
     val title = when (page) {
         is PlanPage.Theme -> plan?.themes?.firstOrNull { it.id == page.id }?.name ?: "Theme"
         is PlanPage.Lane -> plan?.lanes?.firstOrNull { it.id == page.id }?.name ?: "Lane"
+        is PlanPage.Page -> pages.firstOrNull { it.slot == page.id }?.title ?: "Page"
     }
+    val world = pageWorld(boards[workspaceId]?.rows.orEmpty(), plan, pages, fleet)
+    val router = PageRouter(connection.host.id, fleet, onOpenTask, onOpenPage, onNeedsYou, onOpenTerminal)
     Scaffold(
         topBar = {
             TopAppBar(
@@ -114,14 +131,23 @@ fun PlanPageScreen(
                         Text(PlanWords.TRY_AGAIN)
                     }
                 }
-                is PlanReadState.Loaded -> PlanPageBody(
-                    plan = state.plan,
-                    page = page,
-                    record = records[page],
-                    rows = boards[workspaceId]?.rows.orEmpty().associateBy { it.id },
-                    onOpenTask = onOpenTask,
-                    onOpenPage = onOpenPage,
-                )
+                is PlanReadState.Loaded -> if (page is PlanPage.Page) {
+                    OrchestratorPageBody(page.id, pageLists[workspaceId], world, router::open) {
+                        scope.launch { connection.pages.read(workspace) }
+                    }
+                } else {
+                    PlanPageBody(
+                        plan = state.plan,
+                        page = page,
+                        record = records[page],
+                        rows = boards[workspaceId]?.rows.orEmpty().associateBy { it.id },
+                        onOpenTask = onOpenTask,
+                        onOpenPage = onOpenPage,
+                        pages = pages,
+                        world = world,
+                        onDestination = router::open,
+                    )
+                }
             }
         }
     }
@@ -136,12 +162,21 @@ fun PlanPageBody(
     rows: Map<String, TaskRow>,
     onOpenTask: (String) -> Unit,
     onOpenPage: (PlanPage) -> Unit,
+    /** The board's orchestrator pages (ov-285): those a theme draws inside it, and one pushed. */
+    pages: List<BoardPage> = emptyList(),
+    world: PageWorld = PageWorld(),
+    onDestination: (PageDestination) -> Unit = {},
 ) {
     when (page) {
         is PlanPage.Theme -> {
             val theme = plan.themes.firstOrNull { it.id == page.id }
             if (theme == null) EmptyState("Theme not found", "", Modifier.fillMaxSize())
-            else PlanThemePage(theme, plan, record, rows, onOpenTask, onOpenPage)
+            else PlanThemePage(theme, plan, record, rows, onOpenTask, onOpenPage, PageShelf.anchored(pages, theme.id, plan), world, onDestination)
+        }
+        is PlanPage.Page -> {
+            val found = pages.firstOrNull { it.slot == page.id }
+            if (found == null) EmptyState("Page not found", "", Modifier.fillMaxSize())
+            else OrchestratorPage(found, world, onDestination)
         }
         is PlanPage.Lane -> {
             val lane = plan.lanes.firstOrNull { it.id == page.id }
@@ -181,6 +216,10 @@ fun PlanThemePage(
     rows: Map<String, TaskRow>,
     onOpenTask: (String) -> Unit,
     onOpenPage: (PlanPage) -> Unit,
+    /** The orchestrator's pages anchored here (ov-285), drawn after Needs you and before Lanes. */
+    anchored: List<BoardPage> = emptyList(),
+    world: PageWorld = PageWorld(),
+    onDestination: (PageDestination) -> Unit = {},
 ) {
     var showingChange by rememberSaveable(theme.id) { mutableStateOf(false) }
     val before = record?.previousStory
@@ -222,6 +261,7 @@ fun PlanThemePage(
                 }
             }
         }
+        anchoredPageItems(anchored, world, onOpenPage, onDestination)
         val lanes = plan.lanesIn(theme)
         if (lanes.isNotEmpty()) {
             item { PlanSectionTitle("Lanes") }
