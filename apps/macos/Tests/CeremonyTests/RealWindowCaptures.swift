@@ -54,6 +54,19 @@ struct RealWindowCaptures {
         }
     }
 
+    /// `FARCOOLER_CAPTURE_DEFAULTS`: one `key=true|false` per line, set for
+    /// every place and put back afterwards: a board's Plan view chosen, say,
+    /// as `board.plan.shown.local.<workspace>=true` (ov-284).
+    static func extraDefaults(_ text: String?) -> [String: Bool] {
+        var out: [String: Bool] = [:]
+        for line in (text ?? "").split(whereSeparator: \.isNewline) {
+            let parts = line.split(separator: "=", maxSplits: 1)
+            guard parts.count == 2, let value = Bool(String(parts[1])) else { continue }
+            out[String(parts[0])] = value
+        }
+        return out
+    }
+
     /// Each appearance a place is drawn in, by the suffix its file takes.
     static let variants: [(name: String, appearance: NSAppearance.Name)] = [
         ("light", .aqua), ("dark", .darkAqua),
@@ -84,9 +97,14 @@ struct RealWindowCaptures {
         // What every local test run shares (the xctest domain): put back as
         // it was when the captures are done (review L9).
         let defaults = UserDefaults.standard
-        let touched = ["window.sessions.v1", SelectionMemory.destinationKey, SelectionMemory.key]
+        let extra = Self.extraDefaults(env["FARCOOLER_CAPTURE_DEFAULTS"])
+        let touched = ["window.sessions.v1", SelectionMemory.destinationKey, SelectionMemory.key] + extra.keys.sorted()
         let saved = Dictionary(uniqueKeysWithValues: touched.map { ($0, defaults.object(forKey: $0)) })
         defer { Self.restore(saved, in: defaults) }
+        for (key, value) in extra { defaults.set(value, forKey: key) }
+        // A narrow window, for the layouts that degrade (`FARCOOLER_CAPTURE_WIDTH`).
+        let width = Double(env["FARCOOLER_CAPTURE_WIDTH"] ?? "") ?? 1360
+        let height = Double(env["FARCOOLER_CAPTURE_HEIGHT"] ?? "") ?? 860
         for place in places {
             // Where the window was, as a relaunch reads it, and nothing else:
             // no window record, no newer destination.
@@ -97,8 +115,14 @@ struct RealWindowCaptures {
             } else {
                 defaults.removeObject(forKey: SelectionMemory.key)
             }
-            let window = try await TitleBarHarness.window(ContentView(), width: 1360, height: CGFloat(Double(ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_HEIGHT"] ?? "") ?? 860))
+            let window = try await TitleBarHarness.window(ContentView(), width: width, height: height)
             try await Task.sleep(for: .seconds(wait))
+            // A plan page isn't kept across a relaunch (it reopens as its
+            // workspace), so the window is sent there as a click would.
+            if let selection = place.selection, selection.contains("|plan:") {
+                NotificationCenter.default.post(name: .captureOpen, object: selection)
+                try await Task.sleep(for: .seconds(wait))
+            }
             try await TitleBarHarness.settle(window)
             for variant in Self.variants {
                 window.appearance = NSAppearance(named: variant.appearance)
@@ -131,6 +155,10 @@ struct RealWindowCaptures {
         Self.restore(saved, in: defaults)
         #expect(defaults.string(forKey: "a") == "|kept|")
         #expect(defaults.object(forKey: "b") == nil)
+    }
+
+    @Test func extraDefaultsReadKeyAndBool() {
+        #expect(Self.extraDefaults("a=true\nb=false\nc=maybe\nnoequals") == ["a": true, "b": false])
     }
 
     @Test func extraPlacesReadNameAndSelection() {

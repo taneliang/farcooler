@@ -149,4 +149,14 @@ struct PageModelTests {
         #expect(list.pages.map(\.slot) == ["train"])
         #expect(list.pages[0].doc == nil)
     }
+
+    @Test("under a header that says its title, a first heading repeating it is left out, and only that")
+    func underItsTitle() throws {
+        let risks = try Self.doc("risks")
+        #expect(risks.under("Risks").blocks.count == 1)
+        #expect(risks.under(" risks ").blocks.count == 1)
+        #expect(risks.under("Visual language").blocks.count == 2)
+        let train = try Self.doc("train")
+        #expect(train.under("Lanes").blocks == train.blocks, "a heading that isn't first stays")
+    }
 }

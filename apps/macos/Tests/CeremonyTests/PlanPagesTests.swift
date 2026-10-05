@@ -179,6 +179,27 @@ struct PlanPagesTests {
         #expect(gone.contains("plan-page-not-found") && !gone.contains("plan-page-reading"), "\(gone)")
     }
 
+    @Test("A read cancelled while it asks for pages isn't a read: the next view to ask reads them")
+    func aCancelledReadReadsAgain() async throws {
+        let store = try await Self.store(defaults: PlanViewTests.defaults())
+        let answer = store.client.commandRunnerForTesting
+        store.client.commandRunnerForTesting = { args in
+            if args.starts(with: ["page", "list"]) {
+                try? await Task.sleep(for: .seconds(2))
+                if Task.isCancelled { return (nil, "Cancelled.") }
+            }
+            return await answer!(args)
+        }
+        let first = Task { await store.plan.readIfNeverRead() }
+        try await Task.sleep(for: .milliseconds(300))
+        first.cancel()
+        await first.value
+        #expect(store.plan.pages.isEmpty && !store.plan.hasRead)
+        store.client.commandRunnerForTesting = answer
+        await store.plan.readIfNeverRead()
+        #expect(store.plan.pages.map(\.slot) == ["train", "risks", "spend"])
+    }
+
     @Test("A page is kept across a relaunch, and its crumb is its title")
     func pageKept() {
         let page = ContentView.Selection.workspace(host: "h", workspace: "w", focus: .plan(.page("train")))

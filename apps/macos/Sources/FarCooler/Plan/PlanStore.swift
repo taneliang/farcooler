@@ -152,6 +152,10 @@ final class PlanStore: ObservableObject {
         trouble = nil
         if read != plan { plan = read }
         await readPages()
+        // A view that went away mid-read cancels it: not read, so the next
+        // view to ask reads again rather than drawing no pages until the
+        // runner says something moved.
+        if Task.isCancelled { return }
         hasRead = true
     }
 

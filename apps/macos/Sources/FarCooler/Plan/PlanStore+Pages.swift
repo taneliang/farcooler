@@ -77,8 +77,11 @@ extension DaemonClient {
     /// the shape AgentKit's `BoardPageList` decodes. In the background, as
     /// the plan's read is.
     func pageList(repository: String, workspace: String?) async -> (data: Data?, message: String?) {
-        await runRaw(
-            ["page", "list", "--repo", repository] + (workspace.map { ["--workspace", $0] } ?? []) + ["--json"],
-            background: true)
+        await runRaw(Self.pageListArguments(repository: repository, workspace: workspace), background: true)
+    }
+
+    /// What `pageList` asks the CLI, apart so a test can ask the real one.
+    nonisolated static func pageListArguments(repository: String, workspace: String?) -> [String] {
+        ["page", "list", "--repo", repository] + (workspace.map { ["--workspace", $0] } ?? []) + ["--json"]
     }
 }

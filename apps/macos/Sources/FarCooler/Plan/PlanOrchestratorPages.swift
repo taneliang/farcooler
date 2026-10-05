@@ -131,7 +131,7 @@ struct PlanAnchoredPages: View {
                 .identified("plan-anchored-open-\(page.slot)")
             } content: {
                 if let doc = page.doc {
-                    PageBlocksView(doc: doc, world: world, onOpen: context.onDestination)
+                    PageBlocksView(doc: doc.under(page.title), world: world, onOpen: context.onDestination)
                 } else {
                     Text(PageWords.unreadable).foregroundStyle(.secondary)
                 }

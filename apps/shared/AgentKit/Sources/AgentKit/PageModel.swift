@@ -136,6 +136,25 @@ public struct PageDoc: Decodable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey { case v, title, summary, glance, staleAfterMin, blocks }
 
+    /// The blocks to draw under a header that already says `title`: a first
+    /// heading that only repeats it is left out, so an anchored section
+    /// doesn't say "Risks" twice.
+    public func blocks(under title: String) -> [PageBlock] {
+        if case .heading(let text)? = blocks.first,
+            text.trimmingCharacters(in: .whitespaces).caseInsensitiveCompare(title.trimmingCharacters(in: .whitespaces)) == .orderedSame
+        {
+            return Array(blocks.dropFirst())
+        }
+        return blocks
+    }
+
+    /// This document under a header that says `title` (`blocks(under:)`).
+    public func under(_ title: String) -> PageDoc {
+        var doc = self
+        doc.blocks = blocks(under: title)
+        return doc
+    }
+
     /// A document alone: `test/fixtures/pages/normalized/*.json`.
     public static func decode(_ data: Data) throws -> PageDoc {
         try PlanJSON.decoder.decode(PageDoc.self, from: data)

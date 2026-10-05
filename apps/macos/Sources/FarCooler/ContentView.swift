@@ -408,6 +408,7 @@ struct ContentView: View {
         // on each one — so this hears a runner leaving, coming back as a new
         // client, and listing its projects without one.
         .onReceive(store.$fleet) { _ in pruneBoardStores() }
+        .captureOpening($selection)
         .onChange(of: store.fleet) { old, _ in
             // One rule for every way a terminal can disappear: exiting on its
             // own, being closed here, being closed from a phone, or its
