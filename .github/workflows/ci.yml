@@ -164,6 +164,11 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: crates/tailcat/go/go.mod
+          # The module lives under crates/, and setup-go looks for go.sum at
+          # the root by default: without this every run warned "Dependencies
+          # file is not found", restored nothing and built the tunnel cold
+          # (about a minute in each job that builds it; ov-301).
+          cache-dependency-path: crates/tailcat/go/go.sum
       # Unlike the Rust tree, which is hand-formatted and skips `fmt --check`
       # on purpose, this directory is gofmt's. It is one command and it has an
       # answer everybody agrees with.
@@ -606,6 +611,11 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: crates/tailcat/go/go.mod
+          # The module lives under crates/, and setup-go looks for go.sum at
+          # the root by default: without this every run warned "Dependencies
+          # file is not found", restored nothing and built the tunnel cold
+          # (about a minute in each job that builds it; ov-301).
+          cache-dependency-path: crates/tailcat/go/go.sum
 
       # Resolved ONCE, here, before the build step below runs `cargo build
       # --release`. That build rewrites the tracked `Cargo.lock` whenever it and
@@ -736,6 +746,11 @@ jobs:
 
   ios:
     name: iOS
+    # The plan says whether the UI shards will want this job's products. Not
+    # `success()`: a misplaced UI test class fails the plan, and that must not
+    # also stop the app from being built and checked here.
+    needs: ios-ui-plan
+    if: ${{ !cancelled() }}
     # Xcode 27 on macOS 27. `macos-latest` is still macOS 26 with Xcode 26.6;
     # Xcode 27 is only on this label, which GitHub calls a public preview.
     # To go back, put `macos-latest` here again and drop the check step.
@@ -755,28 +770,6 @@ jobs:
         with:
           targets: aarch64-apple-ios-sim, aarch64-apple-ios
       - uses: Swatinem/rust-cache@v2
-
-      # Here rather than beside the other shell tests in the `swift` job because
-      # what it covers is the iOS archive's signing, and it needs a Mac to have
-      # a keychain to cover it with.
-      - run: ./scripts/import-ios-certificate-test.sh
-
-      # What the generated project must be true of, and none of it is something
-      # the build below can catch. A watch app embedded in the extensions' slot,
-      # a bundle identifier that stops nesting, a target that names a different
-      # App Group — each compiles, links and signs, then fails at INSTALL, at
-      # launch, or as a widget that is permanently and silently empty. There is
-      # no `error:` line for any of them.
-      #
-      # Before the xcframeworks, because it needs neither them nor Xcode and
-      # answers in seconds: waiting out a Rust cross-compile to be told a bundle
-      # id stopped nesting is minutes spent learning nothing.
-      #
-      # Here rather than in `wire`: the generator shells out to
-      # scripts/icon-label.swift, which is AppKit, and AppKit does not exist on
-      # the Linux runner that job uses — the same reason icon-test.sh lives in
-      # `swift` instead.
-      - run: ./scripts/generator-test.sh
 
       # The xcframeworks are gitignored — they are build output — so CI has to
       # build them before the project that links them. Without this the app
@@ -825,16 +818,73 @@ jobs:
       # else.
       #
       # It does NOT run them. See the note below, which is unchanged.
+      #
+      # `-derivedDataPath` so the products are somewhere this job can name,
+      # outside the work tree: the UI shards below run these exact products
+      # rather than each compiling their own (ov-301).
       - name: Build, including the UI test bundle
         run: |
           xcodebuild -project apps/ios/FarCooler.xcodeproj \
             -scheme FarCooler \
             -destination 'generic/platform=iOS Simulator' \
             -configuration Debug \
+            -derivedDataPath "$RUNNER_TEMP/ios-dd" \
             ARCHS=arm64 \
             build-for-testing
         env:
           NSUnbufferedIO: YES
+
+      # The app, the UI test runner and the `.xctestrun` that ties them
+      # together, for the `ios-ui` shards. Each shard used to build all three
+      # itself: the Rust xcframeworks, the project, and about five minutes of
+      # Swift inside `xcodebuild test` — the same compile, three times over,
+      # on the runner pool everything else on macOS waits for.
+      #
+      # A tarball rather than the directory, because upload-artifact does not
+      # keep file modes: an app whose executable lost its x bit installs and
+      # then cannot launch. One `.xctestrun` exactly, or the shards would have
+      # to guess which to run.
+      - name: Package the products for the UI shards
+        if: needs.ios-ui-plan.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          runs=("$RUNNER_TEMP"/ios-dd/Build/Products/*.xctestrun)
+          [ "${#runs[@]}" -eq 1 ] && [ -f "${runs[0]}" ] || {
+            echo "expected one .xctestrun, found: ${runs[*]}" >&2; exit 1; }
+          tar -C "$RUNNER_TEMP/ios-dd/Build" -cf "$RUNNER_TEMP/ios-ui-products.tar" Products
+          ls -lh "$RUNNER_TEMP/ios-ui-products.tar"
+      - name: Upload the products for the UI shards
+        if: needs.ios-ui-plan.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ui-products
+          path: ${{ runner.temp }}/ios-ui-products.tar
+          retention-days: 1
+          # A re-run of this job replaces what the first attempt uploaded.
+          overwrite: true
+
+      # Here rather than beside the other shell tests in the `swift` job because
+      # what it covers is the iOS archive's signing, and it needs a Mac to have
+      # a keychain to cover it with.
+      - run: ./scripts/import-ios-certificate-test.sh
+
+      # What the generated project must be true of, and none of it is something
+      # the build above can catch. A watch app embedded in the extensions' slot,
+      # a bundle identifier that stops nesting, a target that names a different
+      # App Group — each compiles, links and signs, then fails at INSTALL, at
+      # launch, or as a widget that is permanently and silently empty. There is
+      # no `error:` line for any of them.
+      #
+      # After the build and its upload rather than before the xcframeworks
+      # (ov-301): a failure here then still leaves the UI shards their
+      # products, so they report on the app instead of on a missing artifact.
+      # It costs a red here two minutes later, which is the trade.
+      #
+      # Here rather than in `wire`: the generator shells out to
+      # scripts/icon-label.swift, which is AppKit, and AppKit does not exist on
+      # the Linux runner that job uses — the same reason icon-test.sh lives in
+      # `swift` instead.
+      - run: ./scripts/generator-test.sh
 
       # Run by the `ios-ui` job below: every class that stands on an in-app
       # harness and needs no runner. The rest of FarCoolerUITests needs a
@@ -911,7 +961,12 @@ jobs:
   # simulator and nothing else. A live-runner test that slipped into a shard
   # would skip with "NO LIVE RUNNER:", and the script turns that red.
   #
-  # Three shards, so none is the slowest job in CI by a distance. Measured
+  # Four shards since ov-301, at about 12 minutes of tests each; the seconds
+  # per class are in scripts/ios-ui-shards.py. Each shard now runs the
+  # products the `ios` job built (`test-without-building`), so its overhead
+  # is the download, the boot and the first launch, not a compile. The
+  # history, for the next rebalance: three shards, so none was the slowest
+  # job in CI by a distance. Measured
   # from run 37250352430 (main at adc85e94, 4 Oct), where the two-shard split
   # put 927 s of tests (45 tests) in `shell` and 1,842 s (20 classes) in
   # `phone`; the phone job then hit its 40-minute limit with every test
@@ -925,10 +980,15 @@ jobs:
   # expect about 24 minutes per job; 40 is the backstop, not the plan. Move a
   # class by its measured seconds when a shard's tests pass 15 minutes.
   # The iOS job above runs in 3 to 5 (last 12 green runs); its 15 stands.
+  #
+  # `!cancelled()` and not the implied `success()`: a red `ios` job that
+  # still uploaded its products (one of its script tests failed after the
+  # build) leaves the shards to run, and a build that produced nothing makes
+  # each shard fail on the download, saying so, rather than skip.
   ios-ui:
     name: iOS UI (${{ matrix.shard }})
-    needs: ios-ui-plan
-    if: needs.ios-ui-plan.outputs.run == 'true'
+    needs: [ios-ui-plan, ios]
+    if: ${{ !cancelled() && needs.ios-ui-plan.outputs.run == 'true' }}
     runs-on: xcode-27
     timeout-minutes: 40
     strategy:
@@ -943,20 +1003,23 @@ jobs:
         run: |
           xcodebuild -version
           xcodebuild -version | head -1 | grep -q '^Xcode 27\.'
+      # Only the scripts: the app comes from the `ios` job.
       - uses: actions/checkout@v4
+      - name: Download the products the iOS job built
+        uses: actions/download-artifact@v4
         with:
-          fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-ios-sim, aarch64-apple-ios
-      - uses: Swatinem/rust-cache@v2
-      - name: Build the Rust xcframeworks
-        run: ./scripts/build-ios-frameworks.sh
-      - name: Generate the Xcode project
-        run: apps/ios/generate-project.py
-      # The scheme embeds the watch app; see the same step in `ios`.
-      - name: Install the watchOS platform (several GB)
-        run: xcodebuild -downloadPlatform watchOS
+          name: ios-ui-products
+          path: ${{ runner.temp }}
+      - name: Unpack them
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/ios-dd"
+          tar -C "$RUNNER_TEMP/ios-dd" -xf "$RUNNER_TEMP/ios-ui-products.tar"
+          runs=("$RUNNER_TEMP"/ios-dd/Products/*.xctestrun)
+          [ "${#runs[@]}" -eq 1 ] && [ -f "${runs[0]}" ] || {
+            echo "expected one .xctestrun in the iOS job's products, found: ${runs[*]}" >&2; exit 1; }
+          echo "XCTESTRUN=${runs[0]}" >> "$GITHUB_ENV"
+          echo "Running ${runs[0]}"
 
       # By UDID, so the destination cannot be ambiguous. `iPhone 17` on the
       # newest iOS runtime when the image has one — every local timing and
@@ -1003,7 +1066,8 @@ jobs:
           xcrun simctl bootstatus "$SIMULATOR_ID" -b
 
       # The script, never xcodebuild directly: it fails a run where every test
-      # skipped, and one where a test skipped for want of a runner.
+      # skipped, and one where a test skipped for want of a runner. XCTESTRUN,
+      # set above, makes it `test-without-building` against those products.
       - name: Run the runnerless UI tests
         run: |
           # The class list is split into arguments on purpose.
@@ -1050,6 +1114,11 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: crates/tailcat/go/go.mod
+          # The module lives under crates/, and setup-go looks for go.sum at
+          # the root by default: without this every run warned "Dependencies
+          # file is not found", restored nothing and built the tunnel cold
+          # (about a minute in each job that builds it; ov-301).
+          cache-dependency-path: crates/tailcat/go/go.sum
 
       # Both `.so` are gitignored — they are build output — so CI has to build
       # them before the Gradle project that packages them. Without this the APK

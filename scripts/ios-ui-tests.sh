@@ -53,6 +53,13 @@
 # SKIP_TESTING is a space-separated list passed to -skip-testing, for a method
 # inside a class that is otherwise runnable — CI runs the runnerless classes
 # and has to leave out the one live test some of them carry.
+#
+# XCTESTRUN names a `.xctestrun` file from an earlier `build-for-testing`, and
+# then the script runs `test-without-building` against those products instead
+# of building the scheme. CI builds the app and its UI test bundle once, in the
+# `ios` job, and hands the products to every shard (ov-301); each shard used to
+# spend about five minutes compiling the same thing. Unset, the script builds
+# exactly as it always did.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -62,6 +69,14 @@ SIMULATOR_OS="${SIMULATOR_OS:-}"
 SIMULATOR_ID="${SIMULATOR_ID:-}"
 DEMO_HOST="${DEMO_HOST:-127.0.0.1:2222}"
 DEMO_USER="${DEMO_USER:-$(whoami)}"
+XCTESTRUN="${XCTESTRUN:-}"
+
+if [ -n "$XCTESTRUN" ]; then
+    [ -f "$XCTESTRUN" ] || { echo "ios-ui-tests: XCTESTRUN names $XCTESTRUN, which does not exist" >&2; exit 1; }
+    ACTION=(test-without-building -xctestrun "$XCTESTRUN")
+else
+    ACTION=(test -project apps/ios/FarCooler.xcodeproj -scheme FarCooler)
+fi
 
 # Expanded below as `${ONLY[@]+"${ONLY[@]}"}` rather than `"${ONLY[@]}"`,
 # because macOS ships bash 3.2, where an empty array is an unbound variable
@@ -85,6 +100,7 @@ fi
 # invisible in xcodebuild's output — it surfaces four screens away as an app
 # that will not connect.
 echo "runner:    $DEMO_USER@$DEMO_HOST"
+[ -z "$XCTESTRUN" ] || echo "products:  $XCTESTRUN (test-without-building)"
 if [ -n "$SIMULATOR_ID" ]; then
     echo "simulator: $SIMULATOR_ID"
 else
@@ -151,9 +167,7 @@ env \
     TEST_RUNNER_DEMO_USER="$DEMO_USER" \
     TEST_RUNNER_DEMO_HOST="$DEMO_HOST" \
     NSUnbufferedIO=YES \
-    xcodebuild test \
-    -project apps/ios/FarCooler.xcodeproj \
-    -scheme FarCooler \
+    xcodebuild "${ACTION[@]}" \
     -destination "$DESTINATION" \
     -collect-test-diagnostics never \
     ${ONLY[@]+"${ONLY[@]}"} 2>&1 | tee "$LOG"

@@ -139,6 +139,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: crates/tailcat/go/go.mod
+          # setup-go looks for go.sum at the root unless told; without this
+          # it restored nothing and built the tunnel cold every run (ov-301).
+          cache-dependency-path: crates/tailcat/go/go.sum
 
       # The musl cross-compiler, under the exact name `.cargo/config.toml`
       # already spells as the Rust linker for this target.
