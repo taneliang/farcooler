@@ -668,26 +668,65 @@ final class ShellGestureTests: XCTestCase {
         _ = try settledFingerprint(in: row(0))
         let rest = XCUIScreen.main.screenshot().image
 
-        var shot: XCUIScreenshot?
-        let taken = DispatchSemaphore(value: 0)
-        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + pressHold / 2) {
-            shot = XCUIScreen.main.screenshot()
-            taken.signal()
+        // **Sample while the finger is down, and keep the best reading.** A
+        // single shot on a wall-clock timer raced the press: on CI the
+        // synthesizer's own setup before "Synthesize event" can take longer
+        // than the timer, so the one shot caught the rest state (apart -0.05,
+        // main CI 37327971703, ov-326). Nothing the app reports says "the
+        // finger is down", so the measured quantity is polled instead, from
+        // the call until the press returns, and the threshold is untouched.
+        //
+        // A shot counts only if it finished a margin before the press
+        // returned: a release commits the tab under the thumb, and that row
+        // then stays lit with no finger on it, which would pass this test on
+        // the release alone. The deadline is the press itself (`pressHold`
+        // after the touch lands) and nothing else is waited on.
+        let samples = SampleBox()
+        let done = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            while !samples.finished {
+                let image = XCUIScreen.main.screenshot().image
+                samples.add(image, at: Date())
+            }
+            done.signal()
         }
         app.coordinate(withNormalizedOffset: .zero)
             .withOffset(CGVector(dx: frame.midX, dy: frame.maxY - CGFloat(rowHeight) * 1.5))
             .press(forDuration: pressHold)
-        XCTAssertEqual(taken.wait(timeout: .now() + 10), .success, "no screenshot was taken")
-        let pressed = try XCTUnwrap(shot).image
+        let released = Date()
+        samples.finish()
+        XCTAssertEqual(done.wait(timeout: .now() + 30), .success, "the screenshots never stopped")
+        // The release lands a moment before `press` returns, and the commit
+        // it makes takes a few frames to draw; 0.6 s clears both with room.
+        let held = samples.all.filter { $0.at <= released.addingTimeInterval(-0.6) }
+        XCTAssertFalse(held.isEmpty, "no screenshot finished while the finger was down")
 
-        let apart = try meanBrightness(pressed, in: row(0)) - meanBrightness(pressed, in: row(1))
+        var apart = -Double.infinity
+        for sample in held {
+            apart = max(
+                apart,
+                try meanBrightness(sample.image, in: row(0)) - meanBrightness(sample.image, in: row(1)))
+        }
         let atRest = try meanBrightness(rest, in: row(0)) - meanBrightness(rest, in: row(1))
         XCTAssertGreaterThan(
             apart, 8,
             "the row under the thumb stands \(String(format: "%.2f", apart)) above the row "
-                + "over it, against \(String(format: "%.2f", atRest)) with nothing touching "
-                + "either — a pinned column keeps its highlight on the tab you are already "
-                + "on until the finger lifts")
+                + "over it at best of \(held.count) shots, against \(String(format: "%.2f", atRest)) "
+                + "with nothing touching either — a pinned column keeps its highlight on the tab "
+                + "you are already on until the finger lifts")
+    }
+
+    /// Screenshots taken on a background thread while the press blocks the
+    /// test's own, with the time each one finished.
+    private final class SampleBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored: [(image: UIImage, at: Date)] = []
+        private var stop = false
+
+        var finished: Bool { lock.withLock { stop } }
+        var all: [(image: UIImage, at: Date)] { lock.withLock { stored } }
+        func add(_ image: UIImage, at date: Date) { lock.withLock { stored.append((image, date)) } }
+        func finish() { lock.withLock { stop = true } }
     }
 
     /// How long a finger stays down, and how long the control waits. One
