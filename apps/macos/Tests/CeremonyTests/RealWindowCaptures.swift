@@ -97,7 +97,7 @@ struct RealWindowCaptures {
             } else {
                 defaults.removeObject(forKey: SelectionMemory.key)
             }
-            let window = try await TitleBarHarness.window(ContentView(), width: 1360, height: 860)
+            let window = try await TitleBarHarness.window(ContentView(), width: 1360, height: CGFloat(Double(ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_HEIGHT"] ?? "") ?? 860))
             try await Task.sleep(for: .seconds(wait))
             try await TitleBarHarness.settle(window)
             for variant in Self.variants {

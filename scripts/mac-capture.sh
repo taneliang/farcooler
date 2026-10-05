@@ -25,6 +25,7 @@
 #   FARCOOLER_CAPTURE_ONLY    one place's name, to capture just that one
 #   FARCOOLER_CAPTURE_PLACES  extra places, "name=<selection>" per line, where
 #                             <selection> is what `SelectionMemory.key` stores
+#   FARCOOLER_CAPTURE_HEIGHT  the window's height in points (860)
 #   FARCOOLER_CAPTURE_WAIT    seconds a window settles before it's drawn (5)
 #   FARCOOLER_BIN             the CLI; unset, target/debug/farcooler and farcoolerd are built
 #   FARCOOLER_CAPTURE_APP_BIN the CLI the window runs, when it isn't FARCOOLER_BIN:
