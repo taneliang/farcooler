@@ -928,7 +928,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [shell, phone, phone2]
+        # scripts/ios-ui-shards.py --check fails when this list and its
+        # SHARDS disagree. Four since ov-301: PagesUITests alone takes about
+        # eleven minutes, and three shards ran `phone` into the 40-minute limit.
+        shard: [shell, agent, phone, phone2]
     steps:
       - name: Check the runner has Xcode 27
         run: |
