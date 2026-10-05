@@ -62,6 +62,10 @@ data class PlanTheme(
     val counts: PlanCounts,
     /** What its lanes spent on its cards, each lane's spend shared over its cards (ov-306); null from a runner before it. */
     val spend: PlanSpend? = null,
+    /** Its token budget (ov-307), counted as [spend] is; null when it has none or from a runner without `board_cost`. */
+    val budgetTokens: Long? = null,
+    /** Its tokens on each of the last seven UTC days, oldest first and today last (ov-307); null from a runner without `board_cost`. */
+    val trendTokens: List<Long>? = null,
 )
 
 /** Where a lane is. Moves go forward, with two loops back to fixing. */
@@ -128,6 +132,8 @@ data class PlanLane(
     val cards: List<PlanCardRef>,
     val agents: List<PlanAgent>,
     val spend: PlanSpend,
+    /** Its token budget (ov-307); null when it has none. */
+    val budgetTokens: Long? = null,
 )
 
 /** A card's row, as the plan read it: for a card the board hasn't read. */
@@ -151,6 +157,8 @@ data class Plan(
     val ci: List<PlanCiRead> = emptyList(),
     /** How many of the board's cards are in each status (ov-306); null from a runner before it. */
     val boardCounts: PlanCounts? = null,
+    /** The week's tokens and the harness and model comparison (ov-307); null from a runner without `board_cost`. */
+    val cost: PlanCostRead? = null,
 ) {
     /** Nothing planned: no theme and no lane. Rulings don't count: they never switch a board's layout (review 1005a F1). */
     val isEmpty: Boolean get() = themes.isEmpty() && lanes.isEmpty()
@@ -243,6 +251,7 @@ data class Plan(
             trains = PlanTrain.decodeAll(o),
             ci = PlanCiRead.decodeAll(o),
             boardCounts = (o["board_counts"] as? JsonObject)?.let(::counts),
+            cost = PlanCostRead.decode(o["cost"] as? JsonObject),
         )
 
         /** A status count object: a theme's, or the board's. */
@@ -273,6 +282,8 @@ data class Plan(
             cards = refs(o),
             counts = counts(o["counts"] as? JsonObject ?: JsonObject(emptyMap())),
             spend = (o["spend"] as? JsonObject)?.let(::spend),
+            budgetTokens = o["budget_tokens"]?.jsonPrimitive?.longOrNull,
+            trendTokens = (o["trend_tokens"] as? JsonArray)?.map { it.jsonPrimitive.longOrNull ?: 0L },
         )
 
         private fun lane(o: JsonObject): PlanLane {
@@ -292,6 +303,7 @@ data class Plan(
                     )
                 },
                 spend = spend(o["spend"] as? JsonObject),
+                budgetTokens = o["budget_tokens"]?.jsonPrimitive?.longOrNull,
             )
         }
     }

@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import com.farcooler.model.GlancePalette
 import com.farcooler.model.LaneState
 import com.farcooler.model.Plan
+import com.farcooler.model.PlanCostWords
 import com.farcooler.model.PlanCounts
 import com.farcooler.model.PlanLane
 import com.farcooler.model.ciOf
@@ -178,6 +179,11 @@ private fun LazyListScope.loaded(
             }
         }
     }
+    // Behind `board_cost`: a runner without it sends no cost (ov-307).
+    plan.cost?.takeIf { it.isWorthShowing }?.let { cost ->
+        item(key = "plan/cost") { PlanHeader("Cost", null, Modifier.testTag("plan-cost-header")) }
+        item(key = "plan/cost/block") { PlanCostBlock(cost) }
+    }
     // After Themes, as on the Mac and the iPhone (design 6.1): pages of their
     // own, and anchored ones whose theme is gone.
     pages?.let { pageItems(it, plan, onOpen) }
@@ -271,11 +277,12 @@ fun planGlyph(state: LaneState): ImageVector = when (state) {
 /**
  * One lane's row: its name and the theme it serves, then its reason or state.
  * In Next up its rank sits in the leading column; elsewhere its state's glyph
- * does, amber only when it's stale or waiting on you.
+ * does, amber only when it's stale, waiting on you or over its token budget
+ * (ov-307).
  */
 @Composable
 fun PlanLaneRow(lane: PlanLane, theme: PlanTheme?, rank: Int?, now: Long, waitsOnOwner: Boolean, onClick: () -> Unit) {
-    val warning = if (waitsOnOwner) "Needs you" else PlanWords.stale(lane, now)
+    val warning = if (waitsOnOwner) "Needs you" else PlanWords.stale(lane, now) ?: PlanCostWords.overBudget(lane)
     val amber = glanceColor(GlancePalette.amber)
     val second = if (rank != null) lane.reason.ifEmpty { PlanWords.cards(lane.cards.size) }
     else "${PlanWords.status(lane)} · ${PlanWords.cards(lane.cards.size)}"
@@ -330,6 +337,7 @@ fun PlanThemeRow(theme: PlanTheme, onClick: () -> Unit) {
     val spoken = listOfNotNull(
         theme.name, theme.outcome.ifEmpty { null }, PlanWords.progress(theme.counts),
         theme.next.ifEmpty { null }?.let { "Next: $it" }, theme.ownerAsk.ifEmpty { null }?.let { "Needs you: $it" },
+        PlanCostWords.overBudget(theme)?.let { PlanCostWords.budgetSpoken(it) },
     ).joinToString(". ")
     Row(
         verticalAlignment = Alignment.Top,
@@ -368,6 +376,8 @@ fun PlanThemeRow(theme: PlanTheme, onClick: () -> Unit) {
                 Text("Next: ${theme.next}", style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             if (theme.ownerAsk.isNotEmpty()) PlanAsk(theme.ownerAsk, maxLines = 2)
+            // Past its token budget (ov-307): amber, with its words.
+            PlanCostWords.overBudget(theme)?.let { PlanBudgetLine(it, Modifier.padding(top = 4.dp)) }
         }
         Icon(
             Icons.AutoMirrored.Outlined.KeyboardArrowRight,

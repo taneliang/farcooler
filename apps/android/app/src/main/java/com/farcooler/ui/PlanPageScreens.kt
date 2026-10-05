@@ -57,6 +57,7 @@ import com.farcooler.model.PlanPage
 import com.farcooler.model.PlanReadState
 import com.farcooler.model.PlanRecord
 import com.farcooler.model.PlanTheme
+import com.farcooler.model.PlanCostWords
 import com.farcooler.model.PlanWords
 import com.farcooler.model.TaskRow
 import com.farcooler.model.TaskUsageFormat
@@ -269,6 +270,12 @@ fun PlanThemePage(
             }
         }
         anchoredPageItems(anchored, world, onOpenPage, onDestination)
+        if (planThemeHasSpend(theme)) {
+            item {
+                PlanSectionTitle("Spend")
+                PlanThemeSpend(theme, Modifier.padding(horizontal = 16.dp))
+            }
+        }
         val lanes = plan.lanesIn(theme)
         if (lanes.isNotEmpty()) {
             item { PlanSectionTitle("Lanes") }
@@ -379,6 +386,7 @@ fun PlanLanePage(
             PlanSectionTitle("Spend")
             Column(Modifier.padding(horizontal = 16.dp).testTag("plan-lane-spend")) {
                 Text("${PlanWords.spend(lane.spend)} · ${PlanWords.fixRounds(lane.fixRounds)}", style = MaterialTheme.typography.bodyLarge)
+                PlanCostWords.budget(lane.spend, lane.budgetTokens)?.let { PlanBudgetLine(it) }
                 if (lane.spend.totalTokens > 0 && (lane.spend.costMicros ?: 0) > 0) {
                     Text(TaskUsageFormat.API_EQUIVALENT, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
