@@ -55,8 +55,13 @@ final class PhoneNavigator: ObservableObject {
     /// pane last chosen in it is `ShellFleetMap.resume`'s to remember, and
     /// it may have moved since.
     var stack: [PhoneRoute] {
-        path + (worktree.map { [.worktree(runner: $0.runner, worktree: $0.worktree, landing: .resume)] } ?? [])
+        let cover = worktree ?? pending?.cover
+        return path + (cover.map { [.worktree(runner: $0.runner, worktree: $0.worktree, landing: .resume)] } ?? [])
     }
+
+    /// A worktree waiting to cover the stack until the screens under it
+    /// have landed (see `place`).
+    private var pending: PendingCover?
 
     /// Keep where the phone is, for the next launch to reopen (ruling 1).
     ///
@@ -71,6 +76,7 @@ final class PhoneNavigator: ObservableObject {
     /// Open one screen over the one showing.
     func open(_ route: PhoneRoute) {
         moved = true
+        pending = nil
         if let cover = PhoneWorktree(route) {
             worktree = cover
             return
@@ -90,15 +96,78 @@ final class PhoneNavigator: ObservableObject {
     /// Reopen `stack`, as a launch does: no move of anybody's.
     func reopen(_ stack: [PhoneRoute]) { place(stack) }
 
+    /// Stand `stack` up whole: its screens pushed, then its worktree over
+    /// them, in that order and never in one pass (ov-337).
+    ///
+    /// A cover presented in the same pass as the pushes under it races them:
+    /// whenever the presentation began first, which a loaded simulator made
+    /// it do one run in two, the screens were pushed while it was in flight,
+    /// and the workspace pushed then lost its title the moment it came back
+    /// to the top. Its bar stayed unnamed for good, the bare
+    /// `NavigationStackHosting` CI read after Back from a notification's task
+    /// and from a relaunched one. Pushed first, the title holds. So the
+    /// worktree waits for the top screen under it to appear (`appeared`),
+    /// and covers at once when the stack is already that.
     private func place(_ stack: [PhoneRoute]) {
-        if let last = stack.last, let cover = PhoneWorktree(last) {
-            path = Array(stack.dropLast())
-            worktree = cover
-        } else {
+        guard let last = stack.last, let cover = PhoneWorktree(last) else {
+            pending = nil
             path = stack
             worktree = nil
+            return
+        }
+        let under = Array(stack.dropLast())
+        if under == path {
+            pending = nil
+            worktree = cover
+            return
+        }
+        let waiting = PendingCover(cover: cover, under: under)
+        pending = waiting
+        worktree = nil
+        #if DEBUG
+        if PhoneHarness.stackLags {
+            // The stack taking its pushes a beat late, as a loaded
+            // simulator's did, so the order above is what lands the bar's
+            // title and not the timing.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                guard self?.pending?.id == waiting.id else { return }
+                self?.path = under
+            }
+            return
+        }
+        #endif
+        path = under
+        // The backstop, for a top screen that never says it appeared: the
+        // place still opens, late rather than never.
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            self?.land(waiting)
         }
     }
+
+    /// The screen on top of the stack appeared: `route`, or Needs You for
+    /// nil. A worktree waiting on it covers it now.
+    func appeared(_ route: PhoneRoute?) {
+        guard let waiting = pending, route == waiting.under.last else { return }
+        land(waiting)
+    }
+
+    private func land(_ waiting: PendingCover) {
+        // Only over the stack it was placed on: somebody who went Back
+        // before it landed has moved past it.
+        guard pending?.id == waiting.id else { return }
+        pending = nil
+        guard path == waiting.under else { return }
+        worktree = waiting.cover
+    }
+}
+
+/// A worktree held back from covering the stack until the screens it was
+/// placed over are on it (`PhoneNavigator.place`).
+private struct PendingCover {
+    let id = UUID()
+    let cover: PhoneWorktree
+    let under: [PhoneRoute]
 }
 
 /// A worktree route, as the cover over the stack presents it.
@@ -133,8 +202,10 @@ struct PhoneRoot: View {
     var body: some View {
         NavigationStack(path: $navigator.path) {
             NeedsYouScreen(fleet: fleet, hosts: hosts, open: navigator.go)
+                .onAppear { navigator.appeared(nil) }
                 .navigationDestination(for: PhoneRoute.self) { route in
                     destination(route)
+                        .onAppear { navigator.appeared(route) }
                 }
         }
         .fullScreenCover(item: $navigator.worktree) { cover in

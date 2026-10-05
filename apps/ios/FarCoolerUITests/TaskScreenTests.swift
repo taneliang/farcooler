@@ -83,7 +83,19 @@ final class TaskScreenTests: XCTestCase {
     /// **A notification lands on its pane with the workspace and task under
     /// it**, so Back walks up: the pane, bil-9, Billing, Needs You.
     func testANotificationTapLandsWithTheWorkspaceUnderIt() throws {
-        let app = launch(["-deep-link", Self.agent])
+        try landsWithTheWorkspaceUnderIt(launch(["-deep-link", Self.agent]))
+    }
+
+    /// **The workspace under a link keeps its title when the stack is slow**
+    /// (ov-337): its screens are pushed a beat late, and the pane still
+    /// covers them only once they're on, so Back to the workspace reads
+    /// "Billing" on its bar at once. Covered first, the workspace came back
+    /// with an unnamed bar for good, as CI read it under load.
+    func testALinkLandsOverItsStackWhenTheStackLags() throws {
+        try landsWithTheWorkspaceUnderIt(launch(["-deep-link", Self.agent, "-phone-stack-lags"]))
+    }
+
+    private func landsWithTheWorkspaceUnderIt(_ app: XCUIApplication) throws {
         XCTAssertTrue(
             app.buttons["worktree-back"].firstMatch.waitForExistence(timeout: 30),
             "the link did not land on the pane: \(app.debugDescription)")
@@ -94,6 +106,8 @@ final class TaskScreenTests: XCTestCase {
         back(app)
         XCTAssertTrue(
             app.buttons["segment-board"].waitForExistence(timeout: 10), "no workspace under the task")
+        // Read once, with no wait: the title was on the workspace before
+        // the task went, so the bar is named the moment it's back (ov-337).
         XCTAssertEqual(app.navigationBars.firstMatch.identifier, "Billing")
         back(app)
         XCTAssertTrue(

@@ -26,6 +26,8 @@ import SwiftUI
 //                            tapped
 //   -phone-keep-stack        reopen the stack the last launch kept, rather
 //                            than forgetting it
+//   -phone-stack-lags        a placed stack takes its pushes 0.3 s late, as a
+//                            loaded simulator's did (ov-337)
 //   -phone-saved-gone        the last launch kept a stack whose task is gone
 //   -phone-billing-led       Billing has its orchestrator from the start
 //   -phone-onboarding        no runners: the onboarding screen, as a fresh install
@@ -65,6 +67,8 @@ import SwiftUI
 
 struct PhoneHarness: View {
     static var isRequested: Bool { CommandLine.arguments.contains("-phone-harness") }
+    /// `-phone-stack-lags`: see `PhoneNavigator.place`.
+    static var stackLags: Bool { isRequested && CommandLine.arguments.contains("-phone-stack-lags") }
     private static var onboarding: Bool { CommandLine.arguments.contains("-phone-onboarding") }
 
     @StateObject private var hosts = RunnerStore()
