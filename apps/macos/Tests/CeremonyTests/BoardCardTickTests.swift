@@ -34,7 +34,20 @@ struct BoardCardTickTests {
     }
 
     /// The card's pixels, to compare a redraw against.
+    ///
+    /// The process's appearance is Aqua for the draw and no longer: the pane
+    /// chrome the border is stroked over resolves its system color against
+    /// `NSApp.effectiveAppearance` (`blend` in Theme.swift), so on a Mac in
+    /// Dark mode the card resolves against dark chrome and reads as too dark
+    /// to count, whatever the host view says. It is set and put back within
+    /// this synchronous call. The test used to hold it across the awaits
+    /// below, five seconds in which every other main-actor test ran under a
+    /// process-wide Aqua they never asked for (ov-252).
     private static func pixels(_ view: NSView) -> [UInt32] {
+        let app = NSApplication.shared
+        let appearance = app.appearance
+        app.appearance = NSAppearance(named: .aqua)
+        defer { app.appearance = appearance }
         let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
         view.cacheDisplay(in: view.bounds, to: rep)
         var out: [UInt32] = []
@@ -72,15 +85,6 @@ struct BoardCardTickTests {
         // The card at a column's width and its own height, and the window
         // exactly that, so the regions `ink` reads are the card's and not
         // margin the window centers it in.
-        // The process's appearance as well as the view's: the pane chrome the
-        // border is stroked over resolves its system color against
-        // `NSApp.effectiveAppearance` (`blend` in Theme.swift), so on a Mac in
-        // Dark mode the card resolves against dark chrome and reads as too
-        // dark to count, whatever the host view says.
-        let app = NSApplication.shared
-        let appearance = app.appearance
-        app.appearance = NSAppearance(named: .aqua)
-        defer { app.appearance = appearance }
         let host = NSHostingView(
             rootView: card.frame(width: 260).fixedSize().environment(\.boardClock, clock.board))
         host.appearance = NSAppearance(named: .aqua)

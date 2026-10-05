@@ -34,15 +34,43 @@ struct DiffRowParityTests {
     func everyLineDrawsAsItDidBefore(clipped: Bool) throws {
         for scheme in [ColorScheme.light, .dark] {
             for line in Self.lines {
-                let now = try bytes(
-                    DiffLineRow(line: line, gutter: 34, font: Self.font, clipsLongLines: clipped), scheme)
-                let before = try bytes(
-                    FrozenDiffLineRow(line: line, gutter: 34, font: Self.font, clipsLongLines: clipped), scheme)
-                #expect(now.size == before.size, "line \(line.id), \(scheme), clipped \(clipped)")
-                #expect(now.pixels == before.pixels, "line \(line.id), \(scheme), clipped \(clipped)")
+                // A row that really changed draws differently every time, so
+                // it fails every attempt. A glitch of the renderer under load
+                // (see the note on `attempts`) draws the same row differently
+                // once, and a second look settles which this was.
+                var verdict = ""
+                var agreed = false
+                for attempt in 1...Self.attempts where !agreed {
+                    let now = try bytes(
+                        DiffLineRow(line: line, gutter: 34, font: Self.font, clipsLongLines: clipped), scheme)
+                    let before = try bytes(
+                        FrozenDiffLineRow(line: line, gutter: 34, font: Self.font, clipsLongLines: clipped), scheme)
+                    agreed = now.size == before.size && now.pixels == before.pixels
+                    if !agreed {
+                        let differing = zip(now.pixels, before.pixels).filter { $0 != $1 }.count
+                        verdict += " attempt \(attempt): \(now.size) vs \(before.size), \(differing) bytes differ;"
+                    }
+                }
+                #expect(agreed, "line \(line.id), \(scheme), clipped \(clipped):\(verdict)")
             }
         }
     }
+
+    /// How many times a pair may be drawn before a difference counts (ov-252).
+    ///
+    /// The suite failed here, only when the whole Mac suite or all of
+    /// `GlanceTests` ran, never alone and never twice in a row: on 3 Oct and
+    /// 4 Oct, and once more in the 14th full run made to find out why. Both
+    /// rows are drawn on the main actor in one synchronous stretch, so no test
+    /// can change the appearance, a default or a font between them; what is
+    /// shared is the process's text and image rendering, which the other
+    /// specimen suites are using at the same moment. That is the likeliest
+    /// cause and is not proven: the failure has been seen 3 times in about 100
+    /// runs and never made to happen on purpose. A difference that comes and
+    /// goes with the same inputs is not the row's doing either way. A change
+    /// to the row's padding, gutter, stripe or marker column is deterministic
+    /// and fails every attempt.
+    private static let attempts = 3
 
     /// One row, at a width a pane might be, as raw RGBA.
     private func bytes<V: View>(_ row: V, _ scheme: ColorScheme) throws -> (size: CGSize, pixels: [UInt8]) {
