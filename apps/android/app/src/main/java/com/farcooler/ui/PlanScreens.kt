@@ -18,9 +18,14 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.CheckCircleOutline
+import androidx.compose.material.icons.outlined.Circle
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.PauseCircleOutline
+import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.QuestionMark
 import androidx.compose.material.icons.outlined.Schedule
@@ -45,6 +50,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.farcooler.model.GlancePalette
@@ -58,7 +64,13 @@ import com.farcooler.model.nowGroups
 import com.farcooler.model.PlanPage
 import com.farcooler.model.PlanReadState
 import com.farcooler.model.PlanSegment
+import com.farcooler.model.PLAN_STORY_LINES
 import com.farcooler.model.PlanTheme
+import com.farcooler.model.PlanTrack
+import com.farcooler.model.storyAge
+import com.farcooler.model.track
+import com.farcooler.model.trackSpoken
+import com.farcooler.model.trackSummary
 import com.farcooler.model.PlanWords
 import com.farcooler.model.TaskStatus
 
@@ -173,9 +185,20 @@ private fun LazyListScope.loaded(
     val themes = plan.shownThemes
     if (themes.isNotEmpty()) {
         item(key = "plan/themes") { PlanHeader("Themes", themes.size, Modifier.testTag("plan-themes")) }
+        // The tally of what's moving, waiting on you and quiet (ov-331), as the section's one line.
+        plan.trackSummary()?.let { summary ->
+            item(key = "plan/themes/summary") {
+                Text(
+                    summary,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp).testTag("plan-themes-summary"),
+                )
+            }
+        }
         for (theme in themes) {
             item(key = "plan/theme/${theme.id}") {
-                PlanThemeRow(theme) { onOpen(PlanPage.Theme(theme.id)) }
+                PlanThemeRow(theme, plan.track(theme), plan.nowMs) { onOpen(PlanPage.Theme(theme.id)) }
             }
         }
     }
@@ -335,11 +358,11 @@ fun PlanLaneRow(lane: PlanLane, theme: PlanTheme?, rank: Int?, now: Long, waitsO
  * goal, ov-273).
  */
 @Composable
-fun PlanThemeRow(theme: PlanTheme, onClick: () -> Unit) {
+fun PlanThemeRow(theme: PlanTheme, track: PlanTrack, now: Long, onClick: () -> Unit) {
     val spoken = listOfNotNull(
-        theme.name, theme.outcome.ifEmpty { null }, PlanWords.progress(theme.counts),
+        theme.name, theme.outcome.ifEmpty { null }, PlanWords.progress(theme.counts), PlanWords.trackSpoken(track, now),
+        theme.story.ifEmpty { null }, PlanWords.storyAge(theme, now),
         theme.next.ifEmpty { null }?.let { "Next: $it" }, theme.ownerAsk.ifEmpty { null }?.let { "Needs you: $it" },
-        PlanCostWords.overBudget(theme)?.let { PlanCostWords.budgetSpoken(it) },
     ).joinToString(". ")
     Row(
         verticalAlignment = Alignment.Top,
@@ -374,12 +397,25 @@ fun PlanThemeRow(theme: PlanTheme, onClick: () -> Unit) {
                 style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            // Moving or quiet, in words; amber only past a token budget (ov-307, ov-331), which says so here.
+            PlanTrackLine(track, now)
+            // Where it stands, three lines, and how old that account is.
+            if (theme.story.isNotEmpty()) {
+                Text(
+                    theme.story,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = PLAN_STORY_LINES,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 4.dp).testTag("plan-theme-story-${theme.name}"),
+                )
+                PlanWords.storyAge(theme, now)?.let {
+                    Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+                }
+            }
             if (theme.next.isNotEmpty()) {
                 Text("Next: ${theme.next}", style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             if (theme.ownerAsk.isNotEmpty()) PlanAsk(theme.ownerAsk, maxLines = 2)
-            // Past its token budget (ov-307): amber, with its words.
-            PlanCostWords.overBudget(theme)?.let { PlanBudgetLine(it, Modifier.padding(top = 4.dp)) }
         }
         Icon(
             Icons.AutoMirrored.Outlined.KeyboardArrowRight,
@@ -388,6 +424,38 @@ fun PlanThemeRow(theme: PlanTheme, onClick: () -> Unit) {
             modifier = Modifier.padding(start = 8.dp, top = 2.dp),
         )
     }
+}
+
+/** "mac-ux is in review", "Queued, 1st up", "No lane · quiet for 3 days": neutral, and amber only for a budget gone over. */
+@Composable
+fun PlanTrackLine(track: PlanTrack, now: Long, modifier: Modifier = Modifier) {
+    val amber = glanceColor(GlancePalette.amber)
+    val attention = track.needsAttention
+    val color = if (attention) amber else MaterialTheme.colorScheme.onSurfaceVariant
+    Row(
+        modifier.semantics(mergeDescendants = true) { contentDescription = PlanWords.trackSpoken(track, now) }
+            .testTag(if (attention) "plan-budget-over" else "plan-theme-track"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(trackIcon(track), contentDescription = null, modifier = Modifier.size(16.dp), tint = color)
+        Spacer(Modifier.width(6.dp))
+        Text(
+            PlanWords.track(track, now),
+            style = MaterialTheme.typography.bodySmall.copy(fontWeight = if (attention) FontWeight.Medium else FontWeight.Normal),
+            color = color,
+        )
+    }
+}
+
+/** A glyph per state, so the state never rests on color alone. */
+private fun trackIcon(track: PlanTrack): ImageVector = when (track) {
+    is PlanTrack.OverBudget, is PlanTrack.Stuck -> Icons.Outlined.ErrorOutline
+    is PlanTrack.Moving -> Icons.Outlined.Sync
+    is PlanTrack.Queued -> Icons.Outlined.Schedule
+    is PlanTrack.Quiet -> Icons.Outlined.Bedtime
+    PlanTrack.Idle -> Icons.Outlined.Circle
+    PlanTrack.AllDone, PlanTrack.Done -> Icons.Outlined.CheckCircleOutline
+    PlanTrack.Paused -> Icons.Outlined.PauseCircleOutline
 }
 
 /** "● Needs you: …": the one colored mark a theme has, with words. */

@@ -134,15 +134,7 @@ struct PlanBoardSections: View {
                         .accessibilityIdentifier("plan-now")
                 }
             }
-            if !plan.shownThemes.isEmpty {
-                Section {
-                    ForEach(plan.shownThemes) { theme in
-                        PlanThemeRow(theme: theme) { hook.onOpen(.theme(theme.id)) }
-                    }
-                } header: {
-                    PlanHeader(title: "Themes", count: plan.shownThemes.count).accessibilityIdentifier("plan-themes")
-                }
-            }
+            if !plan.shownThemes.isEmpty { themesSection(plan) }
             // Behind `board_cost`: a runner without it sends no cost (ov-307).
             if let cost = plan.cost, cost.isWorthShowing {
                 Section {
@@ -182,6 +174,36 @@ struct PlanBoardSections: View {
 }
 
 extension PlanBoardSections {
+    /// Themes (ov-331): each active theme's row says what it's for, where it
+    /// stands and whether it's moving, in the board's order; paused and done
+    /// ones close into one disclosure at the end. The page has the rest.
+    @ViewBuilder func themesSection(_ plan: PlanModel) -> some View {
+        let shown = plan.shownThemes
+        let active = shown.filter { $0.state == "active" }
+        let closed = shown.filter { $0.state != "active" }
+        Section {
+            ForEach(active) { theme in
+                PlanThemeRow(theme: theme, track: plan.track(of: theme), now: plan.nowMs) { hook.onOpen(.theme(theme.id)) }
+            }
+            if !closed.isEmpty {
+                DisclosureGroup("Paused and Done") {
+                    ForEach(closed) { theme in
+                        PlanThemeRow(theme: theme, track: plan.track(of: theme), now: plan.nowMs) {
+                            hook.onOpen(.theme(theme.id))
+                        }
+                    }
+                }
+                .accessibilityIdentifier("plan-themes-closed")
+            }
+        } header: {
+            PlanHeader(title: "Themes", count: shown.count).accessibilityIdentifier("plan-themes")
+        } footer: {
+            if let summary = plan.trackSummary() {
+                Text(summary).accessibilityIdentifier("plan-themes-summary")
+            }
+        }
+    }
+
     /// After Themes, as on the Mac (design 6.1): pages of their own, and
     /// anchored ones whose theme is gone. Nothing on a runner without pages.
     @ViewBuilder
@@ -368,6 +390,9 @@ struct PlanLaneRow: View {
 /// goal, ov-273).
 struct PlanThemeRow: View {
     let theme: PlanTheme
+    /// Whether it's moving, from the plan (ov-331).
+    let track: PlanTrack
+    let now: Int64
     let action: () -> Void
     @Environment(\.colorScheme) private var scheme
 
@@ -392,6 +417,21 @@ struct PlanThemeRow: View {
                     Text(PlanWords.progress(theme.counts))
                         .font(.footnote.monospacedDigit())
                         .foregroundStyle(.secondary)
+                    // Moving or quiet, in words; amber only past a token budget
+                    // (ov-307, ov-331), which says so here.
+                    PlanTrackLine(track: track, now: now)
+                    // Where it stands, three lines, and how old that account is.
+                    if !theme.story.isEmpty {
+                        Text(theme.story)
+                            .font(.subheadline)
+                            .lineLimit(PlanWords.storyLines)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, PaneMetrics.tight)
+                            .accessibilityIdentifier("plan-theme-story")
+                        if let age = PlanWords.storyAge(theme, now: now) {
+                            Text(age).font(.footnote).foregroundStyle(.tertiary)
+                        }
+                    }
                     if !theme.next.isEmpty {
                         Text("\(Text("Next: ").foregroundStyle(.secondary))\(theme.next)")
                             .font(.footnote)
@@ -399,10 +439,6 @@ struct PlanThemeRow: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     if !theme.ownerAsk.isEmpty { PlanAsk(text: theme.ownerAsk, lines: 2) }
-                    // Past its token budget (ov-307): amber, with its words.
-                    if let over = PlanWords.overBudget(theme) {
-                        PlanBudgetLine(budget: over, font: .footnote).padding(.top, PaneMetrics.tight)
-                    }
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.forward")

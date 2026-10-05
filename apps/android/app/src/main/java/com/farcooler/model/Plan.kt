@@ -66,6 +66,8 @@ data class PlanTheme(
     val budgetTokens: Long? = null,
     /** Its tokens on each of the last seven UTC days, oldest first and today last (ov-307); null from a runner without `board_cost`. */
     val trendTokens: List<Long>? = null,
+    /** When it last moved by the runner's reckoning (its story, lanes, rulings and cards, ov-331); null from a runner before it. */
+    val lastMovedAt: Long? = null,
 )
 
 /** Where a lane is. Moves go forward, with two loops back to fixing. */
@@ -284,6 +286,7 @@ data class Plan(
             spend = (o["spend"] as? JsonObject)?.let(::spend),
             budgetTokens = o["budget_tokens"]?.jsonPrimitive?.longOrNull,
             trendTokens = (o["trend_tokens"] as? JsonArray)?.map { it.jsonPrimitive.longOrNull ?: 0L },
+            lastMovedAt = o["last_moved_at"]?.jsonPrimitive?.longOrNull,
         )
 
         private fun lane(o: JsonObject): PlanLane {
