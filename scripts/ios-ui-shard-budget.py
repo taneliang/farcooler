@@ -16,8 +16,8 @@ first.
   - A shard's time is its job's run time, from start to finish, setup
     included: that is what the timeout measures.
   - It is the median of the last three runs that measured the shard as it is
-    now, so one slow runner (the same class has taken 276 s and 442 s) does
-    not trip it alone.
+    now, and it needs at least two, so one slow runner (the same class has
+    taken 276 s and 442 s) does not trip it alone.
   - "As it is now": a run counts for a shard only when that shard's classes
     at the run's commit are a subset of its classes today. Moving a class
     out (a rebalance) makes the old times overstate it, so they no longer
@@ -47,6 +47,7 @@ SHARDS_FILE = "scripts/ios-ui-shards.py"
 REPO = "taneliang/farcooler"
 LIMIT = 0.75
 RUNS = 3
+AT_LEAST = 2
 JOB = re.compile(r"^iOS UI \((\w+)\)$")
 
 
@@ -118,7 +119,9 @@ def verdict(times, timeout_s):
         share = median / timeout_s
         runs = ", ".join(f"{t / 60:.1f}" for t in took)
         line = f"  {name}: {median / 60:.1f} min, {share:.0%} of {timeout_s / 60:.0f} (runs: {runs})"
-        if share > LIMIT:
+        if len(took) < AT_LEAST:
+            line += f"  (one run; judged from {AT_LEAST})"
+        elif share > LIMIT:
             over = True
             line += "  <- over 75%"
         lines.append(line)
@@ -201,6 +204,11 @@ def self_test():
     # 30 minutes exactly is at the limit, not past it.
     edge = [run([job("a", 20), job("b", 30)])] * 3
     expect("75% exactly passes", verdict(measure(edge, now, timeout), timeout)[1], False)
+    # One run alone is not enough to judge, however slow; two are.
+    one = [run([job("b", 35)])]
+    expect("a single slow run is not judged", verdict(measure(one, now, timeout), timeout)[1], False)
+    two = [run([job("b", 35)])] * 2
+    expect("two slow runs are", verdict(measure(two, now, timeout), timeout)[1], True)
     # One slow runner among three is the median's job to ignore.
     once = [run([job("b", 35)]), run([job("b", 20)]), run([job("b", 21)])]
     expect("one slow run is outvoted", verdict(measure(once, now, timeout), timeout)[1], False)
