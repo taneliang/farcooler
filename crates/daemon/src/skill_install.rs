@@ -474,6 +474,10 @@ pub fn remove_ours(path: &Path) -> bool {
 }
 
 #[cfg(test)]
+#[path = "skill_install_practice_tests.rs"]
+mod practice_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::os::unix::fs::MetadataExt;
@@ -1049,10 +1053,14 @@ mod tests {
     /// note is laid out for the owner, with a heredoc to carry its lines
     /// (ov-198), added 15, and it is read on every note. Saying how a task is
     /// worked or why it waits (ov-213) added about 8, paid for by trims.
+    /// The working practice (ov-217) added 46 after about 20 lines of trims:
+    /// the two landing modes, the plan and rulings, landing hygiene, and a
+    /// check-in with initiative. The owner asked for all of it in this skill,
+    /// and only the landing and check-in steps are read every turn.
     #[test]
     fn the_skill_is_short() {
         let lines = skill_body(Harness::Claude).lines().count();
-        assert!(lines <= 186, "{lines} lines");
+        assert!(lines <= 232, "{lines} lines");
     }
 
     #[test]
