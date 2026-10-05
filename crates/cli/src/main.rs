@@ -18,6 +18,7 @@
 //! stored "running" flag, because none exists.
 
 mod agent_follow;
+mod app_update;
 mod agent_host;
 mod daemon_link;
 mod hook;
@@ -102,6 +103,11 @@ struct Cli {
 enum Command {
     /// Show runner and daemon facts.
     Status,
+    /// This Mac's Far Cooler app: its version, and installing its newest build.
+    ///
+    /// Local only: the app answers this Mac's own user, never --runner.
+    #[command(subcommand)]
+    App(app_update::AppCmd),
     /// Start, stop, or replace this runner's daemon.
     ///
     /// Local only. `--runner` reaches another runner's daemon through ssh, and
@@ -1239,6 +1245,7 @@ async fn run() -> Fallible {
     let runner = cli.runner.as_deref();
     match cli.command {
         Command::Status => status(runner, cli.json).await,
+        Command::App(c) => app_update::app(runner, c, cli.json).await,
         Command::Daemon(c) => daemon(runner, c, cli.json).await,
         Command::Root(c) => root(runner, c, cli.json).await,
         Command::Repo(c) => repo(runner, c, cli.json).await,
