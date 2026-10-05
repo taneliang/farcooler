@@ -207,8 +207,8 @@ struct PlanModelTests {
                 Self.lane("e", "review", cards: [], train: "integ-9"), Self.lane("f", "building", cards: []),
             ])
         #expect(plan.lanes.map(PlanWords.status) == [
-            "Fixing · round 1", "Landing · train integ-8", "Queued · 2nd", "Landed · ac840108",
-            "In Review · train integ-9", "Building",
+            "Fixing · round 1", "Landing · in integ-8", "Queued · 2nd", "Landed · ac840108",
+            "In Review · in integ-9", "Building",
         ])
     }
 

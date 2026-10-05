@@ -18,7 +18,7 @@ struct PageSeededTests {
         let theme = try #require(plan.themes.first { $0.name == "Visual language" })
         #expect(PageShelf.anchored(pages, to: theme.id, plan: plan).map(\.slot) == ["risks"])
         let world = PageWorld(plan: plan, pages: pages)
-        #expect(world.resolve(PageRef(.lane("ov-181-review"))).status == "Fixing · round 1 · train integ-10")
+        #expect(world.resolve(PageRef(.lane("ov-181-review"))).status == "Fixing · round 1 · in integ-10")
         #expect(world.resolve(PageRef(.page("spend"))).name == "Spend")
     }
 }

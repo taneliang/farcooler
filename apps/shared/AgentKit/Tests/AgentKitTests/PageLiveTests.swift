@@ -50,7 +50,7 @@ struct PageLiveTests {
         let world = try Self.world()
         let lane = world.resolve(PageRef(.lane("ov-181-review")))
         #expect(lane.name == "ov-181-review" && lane.status == "Fixing · round 1" && lane.destination == .lane("lane-ov-181-review"))
-        #expect(world.cellText(PageCell(ref: PageRef(.lane("ov-274-phones")), show: .state)) == "In Review · train integ-10")
+        #expect(world.cellText(PageCell(ref: PageRef(.lane("ov-274-phones")), show: .state)) == "In Review · in integ-10")
         #expect(world.cellText(PageCell(ref: PageRef(.lane("ov-181-review")), show: .spend)) == "470K")
         let theme = world.resolve(PageRef(.theme("Visual language"), label: "Theme"))
         #expect(theme.name == "Theme" && theme.status == "3 of 5 done" && theme.destination == .theme("theme-Visual language"))

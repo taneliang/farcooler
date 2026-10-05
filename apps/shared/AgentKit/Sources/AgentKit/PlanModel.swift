@@ -67,6 +67,9 @@ public struct PlanTheme: Decodable, Equatable, Identifiable, Sendable {
     public var ordinal: Int64
     public var cards: [PlanCardRef]
     public var counts: PlanCounts
+    /// What its lanes spent on its cards, each lane's spend shared over its
+    /// cards (ov-306). Nil from a runner before it.
+    public var spend: PlanSpend?
 }
 
 /// Where a lane is. Moves go forward, with two loops back to fixing.
@@ -177,10 +180,20 @@ public struct PlanModel: Decodable, Equatable, Sendable {
     /// settled ones, in the runner's order. Empty from a runner without
     /// `board_rulings`, and absent from an older CLI's answer.
     public var rulings: [PlanRuling]
+    /// Trains (ov-309): those not landed or dropped, oldest first, then the
+    /// settled ones. Empty from a runner without `board_trains`.
+    public var trains: [PlanTrain]
+    /// What the runner last read of CI for each subject the board names: its
+    /// trains' pushed SHAs and its pages' CI references (ov-306).
+    public var ci: [PlanCIRead]
+    /// How many of the board's cards are in each status (ov-306), what a
+    /// page's card counts draw; nil from a runner before it.
+    public var boardCounts: PlanCounts?
 
     public init(
         nowMs: Int64 = 0, themes: [PlanTheme] = [], lanes: [PlanLane] = [], order: [String] = [],
-        cards: [PlanCard] = [], rulings: [PlanRuling] = []
+        cards: [PlanCard] = [], rulings: [PlanRuling] = [], trains: [PlanTrain] = [], ci: [PlanCIRead] = [],
+        boardCounts: PlanCounts? = nil
     ) {
         self.nowMs = nowMs
         self.themes = themes
@@ -188,6 +201,9 @@ public struct PlanModel: Decodable, Equatable, Sendable {
         self.order = order
         self.cards = cards
         self.rulings = rulings
+        self.trains = trains
+        self.ci = ci
+        self.boardCounts = boardCounts
     }
 
     public init(from decoder: Decoder) throws {
@@ -198,9 +214,12 @@ public struct PlanModel: Decodable, Equatable, Sendable {
         order = try c.decode([String].self, forKey: .order)
         cards = try c.decode([PlanCard].self, forKey: .cards)
         rulings = try c.decodeIfPresent([PlanRuling].self, forKey: .rulings) ?? []
+        trains = try c.decodeIfPresent([PlanTrain].self, forKey: .trains) ?? []
+        ci = try c.decodeIfPresent([PlanCIRead].self, forKey: .ci) ?? []
+        boardCounts = try c.decodeIfPresent(PlanCounts.self, forKey: .boardCounts)
     }
 
-    private enum CodingKeys: String, CodingKey { case nowMs, themes, lanes, order, cards, rulings }
+    private enum CodingKeys: String, CodingKey { case nowMs, themes, lanes, order, cards, rulings, trains, ci, boardCounts }
 
     public static let empty = PlanModel()
 
@@ -406,13 +425,13 @@ public enum PlanWords {
     }
 
     /// A lane's state with what it needs said beside it: "Fixing · round
-    /// 1", "Landing · train integ-8", "Queued · 2nd", "Landed · ac840108".
+    /// 1", "Landing · in integ-8", "Queued · 2nd", "Landed · ac840108".
     public static func status(_ lane: PlanLane) -> String {
         var parts = [state(lane.state)]
         if lane.state == .fixing, lane.fixRounds > 0 { parts.append("round \(lane.fixRounds)") }
         if lane.state == .queued, let rank = lane.planRank { parts.append(ordinal(rank)) }
         if lane.state == .landed, let sha = lane.landedSha, !sha.isEmpty { parts.append(String(sha.prefix(8))) }
-        if lane.state.isLive, let train = lane.train, !train.isEmpty { parts.append("train \(train)") }
+        if lane.state.isLive, let train = lane.train, !train.isEmpty { parts.append("in \(train)") }
         return parts.joined(separator: " · ")
     }
 

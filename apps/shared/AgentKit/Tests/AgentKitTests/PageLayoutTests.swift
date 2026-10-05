@@ -28,7 +28,7 @@ struct PageLayoutTests {
         ]
         #expect(
             PageLayout.spokenRow(columns: columns, cells: row, world: world)
-                == "Lane, ov-274-phones. Cards, ov-274. State, In Review · train integ-10.")
+                == "Lane, ov-274-phones. Cards, ov-274. State, In Review · in integ-10.")
     }
 
     @Test("a text block draws paragraphs and lists two deep; headings, fences and quotes are plain words")
