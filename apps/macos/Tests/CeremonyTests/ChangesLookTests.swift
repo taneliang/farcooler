@@ -40,7 +40,15 @@ struct ChangesLookTests {
         }
     }
 
-    @Test("The file filter is the system's rounded field: a well lighter than the paper around it, not a gray wash", arguments: lookScales)
+    // Off on CI (ov-287): CI's headless runner draws the system text field
+    // without its white well at either scale (1 row lighter than the paper,
+    // where every local Mac draws about 22), so this pixel check describes
+    // the OS's drawing there, not the app's. It still runs in every train's
+    // local gates, where it goes red on a gray wash.
+    @Test(
+        "The file filter is the system's rounded field: a well lighter than the paper around it, not a gray wash",
+        .enabled(if: ProcessInfo.processInfo.environment["CI"] == nil, "CI draws the system field without its well"),
+        arguments: lookScales)
     func theFilterIsTheSystemField(scale: Int) throws {
         let rep = try bitmap(.aqua, scale: scale)
         // The paper beside the column's left edge, below the field. Measured at
