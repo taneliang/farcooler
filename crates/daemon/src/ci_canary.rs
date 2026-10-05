@@ -100,6 +100,27 @@ pub fn pending(runs: &[GhRun], sha: &str, now_secs: i64) -> Option<GhRun> {
     })
 }
 
+/// A commit's runs, once Canary's are attributed: the newest of each workflow,
+/// plus a placeholder while Canary's run is yet to start.
+///
+/// `None`, which the watch reads as unknown and never lets replace a known
+/// read, when the answer would be a guess:
+///   - Canary's list could not be read (`canary` is `None`). Taking that for
+///     "no Canary run" let a red train read green until the next good read.
+///   - CI passed on a push more than `PENDING_FOR_SECS` ago and no Canary run
+///     names the commit. Its run may have aged out of the list's newest 50,
+///     and reading CI alone would flip a train whose Canary failed to green.
+pub fn settle(sha: &str, listed: Vec<GhRun>, canary: Option<Vec<GhRun>>, now_secs: i64) -> Option<Vec<GhRun>> {
+    let canary = canary?;
+    let mut runs = crate::ci_watch::latest_per_workflow(&attribute(sha, listed, canary));
+    match pending(&runs, sha, now_secs) {
+        Some(placeholder) => runs.push(placeholder),
+        None if runs.iter().any(ci_passed) && !runs.iter().any(|r| r.name == WORKFLOW) => return None,
+        None => {}
+    }
+    Some(runs)
+}
+
 #[cfg(test)]
 #[path = "ci_canary_tests.rs"]
 mod tests;

@@ -309,16 +309,15 @@ async fn runs_on(svc: &Service, tree: &Path, sha: &str) -> Option<Vec<GhRun>> {
     const RUNS: &str = "repos/{owner}/{repo}/actions/runs";
     let fields = [format!("head_sha={sha}"), "per_page=50".to_string()];
     let listed = gh_get(svc, tree, &api_args(RUNS, &fields, RUNS_JQ)).await.and_then(|b| parse_runs(&b))?;
+    // `None` when the list could not be read, which is not "no Canary run".
     let canary = if crate::ci_canary::worth_looking(&listed) {
         let fields = ["per_page=50".to_string()];
-        gh_get(svc, tree, &api_args(crate::ci_canary::WORKFLOW_RUNS, &fields, RUNS_JQ)).await.and_then(|b| parse_runs(&b)).unwrap_or_default()
+        gh_get(svc, tree, &api_args(crate::ci_canary::WORKFLOW_RUNS, &fields, RUNS_JQ)).await.and_then(|b| parse_runs(&b))
     } else {
-        Vec::new()
+        Some(Vec::new())
     };
-    let mut runs = latest_per_workflow(&crate::ci_canary::attribute(sha, listed, canary));
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
-    runs.extend(crate::ci_canary::pending(&runs, sha, now));
-    Some(runs)
+    crate::ci_canary::settle(sha, listed, canary, now)
 }
 
 /// Read one subject now.

@@ -52,3 +52,6 @@ apps/android/local.properties
 
 # Mockups from the brainstorming companion. Working material, not source.
 .superpowers/
+
+# Python bytecode from running scripts/*.py
+__pycache__/

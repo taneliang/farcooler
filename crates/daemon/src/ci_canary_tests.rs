@@ -112,3 +112,30 @@ fn canary_is_only_looked_for_after_ci_passes_on_a_push() {
     going.conclusion = None;
     assert!(!worth_looking(&[going]));
 }
+
+/// A failed read of Canary's list is unknown, not "no Canary run": a train
+/// whose Canary failed must not read green because gh went offline.
+#[test]
+fn an_unreadable_canary_list_is_unknown() {
+    assert_eq!(settle(TRAIN, vec![ci(TRAIN)], None, SOON), None);
+    assert_eq!(settle(TRAIN, vec![ci(TRAIN)], None, SOON + 10 * PENDING_FOR_SECS), None);
+}
+
+/// CI passed long ago and no Canary run names the commit (it may have aged out
+/// of the newest 50): keep the last read rather than read CI alone.
+#[test]
+fn a_commit_whose_canary_run_is_not_found_after_the_window_keeps_its_last_read() {
+    let late = SOON + 10 * PENDING_FOR_SECS;
+    assert_eq!(settle(TRAIN, vec![ci(TRAIN)], Some(vec![]), late), None);
+    // Within the window it is still the placeholder.
+    let soon = settle(TRAIN, vec![ci(TRAIN)], Some(vec![]), SOON).expect("a read");
+    assert_eq!(soon.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(), ["CI", "Canary"]);
+    // Found: its own read, however late.
+    let ours = run(6, "Canary", BOT, "workflow_run", &title(TRAIN), "completed", Some("failure"));
+    let found = settle(TRAIN, vec![ci(TRAIN)], Some(vec![ours]), late).expect("a read");
+    assert_eq!(found.len(), 2);
+    // Where CI never passed on a push there is nothing to wait for.
+    let mut red = ci(TRAIN);
+    red.conclusion = Some("failure".into());
+    assert_eq!(settle(TRAIN, vec![red], Some(vec![]), late).map(|r| r.len()), Some(1));
+}
