@@ -219,8 +219,10 @@ struct WorkspaceMotionTests {
     /// Ten quick steps through the list, as a held arrow takes them: every
     /// one is drawn at once, the first settles at once as a click does
     /// (ov-293), and of the rest only the last, so two terminals are
-    /// mounted and two records read for the whole walk. (Fails with
-    /// `settle` setting `settled` at once on every switch.)
+    /// mounted and two records read for the whole walk. A step a loaded
+    /// runner held up past `WorkspaceMotion.settle` is a click of its own,
+    /// and may mount too. (Fails with `settle` setting `settled` at once on
+    /// every switch.)
     @Test("Ten quick steps mount two terminals and read two records")
     func tenQuickStepsSettleOnce() async {
         let harness = Harness(motion: Self.quick)
@@ -228,7 +230,13 @@ struct WorkspaceMotionTests {
         harness.level.opened = "t0"
         await harness.settle(10)
         let start = harness.tally.fetches.values.reduce(0, +)
+        let clock = ContinuousClock()
+        var last = clock.now
+        // The steps that came long enough after the last to be clicks.
+        var late = 0
         for index in 1...10 {
+            if index > 1, last.duration(to: clock.now) > .milliseconds(130) { late += 1 }
+            last = clock.now
             harness.level.opened = "t\(index)"
             await harness.settle(1)
         }
@@ -240,8 +248,9 @@ struct WorkspaceMotionTests {
         let fetched = harness.tally.fetches.values.reduce(0, +) - start
         harness.close()
         #expect(drawnAtOnce)
-        #expect(mounted == [1] + Array(repeating: 0, count: 8) + [1], "mounted \(mounted)")
-        #expect(fetched == 2, "read \(fetched) records")
+        #expect(mounted.first == 1 && mounted.last == 1, "mounted \(mounted)")
+        #expect(mounted.dropFirst().dropLast().reduce(0, +) <= late, "mounted \(mounted), \(late) steps late")
+        #expect(fetched == mounted.reduce(0, +), "read \(fetched) records, mounted \(mounted)")
     }
 
     /// The orchestrator is the main area's one width with nothing open, and

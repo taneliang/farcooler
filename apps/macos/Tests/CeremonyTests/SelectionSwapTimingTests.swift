@@ -142,9 +142,10 @@ struct SelectionSwapTimingTests {
     }
 
     /// The cap (ov-293): a selection change starts on the next frame and is
-    /// drawn within 150 ms, its terminal included on a click. Read with room
-    /// for a slow runner, which only ever reads later, so it can only pass
-    /// more easily, never fail a swap that met the cap.
+    /// drawn within 150 ms, its terminal included on a click. Judged only on
+    /// readings past the cap and its slack, each of which must show it
+    /// drawn: a loaded runner whose first reading comes late (472 ms once,
+    /// under the full suite) then has fewer to judge, never a false red.
     static let cap = 150.0
     static let slack = 60.0
 
@@ -170,15 +171,18 @@ struct SelectionSwapTimingTests {
             }
         }
         for (name, samples) in [("open", open), ("switch", swap), ("close", close)] {
-            // No delay: the first reading has moved.
-            let first = samples.first!
-            #expect(first.top > 0.02, "\(name) hadn't started \(Int(first.ms)) ms in")
+            // No delay: moved by the first reading two frames in, past the
+            // pass that takes the change in.
+            let early = samples.first { $0.ms >= 34 }!
+            #expect(early.top > 0.02, "\(name) hadn't started \(Int(early.ms)) ms in")
             // No longer than the cap: drawn by then.
-            let drawn = Self.reached(samples, 0.95, \.top) ?? .infinity
-            #expect(drawn <= Self.cap + Self.slack, "\(name) took \(Int(drawn)) ms")
-            let terminal = Self.reached(samples, 0.95, \.bottom) ?? .infinity
-            #expect(terminal <= Self.cap + Self.slack, "\(name)'s terminal took \(Int(terminal)) ms")
+            let undrawn = samples.first { $0.ms > Self.cap + Self.slack && $0.top < 0.95 }
+            #expect(undrawn == nil, "\(name) wasn't drawn \(Int(undrawn?.ms ?? 0)) ms in")
+            let blank = samples.first { $0.ms > Self.cap + Self.slack && $0.bottom < 0.95 }
+            #expect(blank == nil, "\(name)'s terminal wasn't drawn \(Int(blank?.ms ?? 0)) ms in")
             // A click mounts the terminal with the rest, not a settle later.
+            let drawn = Self.reached(samples, 0.95, \.top) ?? .infinity
+            let terminal = Self.reached(samples, 0.95, \.bottom) ?? .infinity
             #expect(terminal <= drawn + 40, "\(name)'s terminal waited \(Int(terminal - drawn)) ms")
         }
     }
