@@ -42,6 +42,7 @@ mod event_lines;
 mod images;
 mod page;
 mod page_text;
+mod ci_words;
 mod plan;
 mod tell;
 use images::mime_for;

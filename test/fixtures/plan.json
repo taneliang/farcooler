@@ -19,6 +19,33 @@
       "title": "Title of ov-3"
     }
   ],
+  "ci": [
+    {
+      "changed_at": 1799998800000,
+      "fetched_at": 1799999940000,
+      "jobs": [
+        {
+          "name": "CI / Swift (shared + macOS)",
+          "state": "failed",
+          "url": ""
+        },
+        {
+          "name": "CI / Android",
+          "state": "passed",
+          "url": ""
+        },
+        {
+          "name": "Canary",
+          "state": "passed",
+          "url": ""
+        }
+      ],
+      "sha": "c85bf83dce46a6b71d7312afc623899ae7914658",
+      "status": "failed",
+      "subject": "sha:c85bf83d",
+      "url": "https://github.com/taneliang/farcooler/actions/runs/37275435256"
+    }
+  ],
   "landed_not_closed": [],
   "lanes": [
     {
@@ -225,6 +252,27 @@
       "state": "active",
       "story": "Tokens are on main.",
       "story_at": 1799996400000
+    }
+  ],
+  "trains": [
+    {
+      "actor": "manager",
+      "base": "origin/main",
+      "ci_subject": "sha:c85bf83d",
+      "created_at": 1799992800000,
+      "id": "00000000-0000-0000-0000-000000006001",
+      "landed_at": null,
+      "lanes": [
+        {
+          "lane": "00000000-0000-0000-0000-000000002002",
+          "name": "mac-ux"
+        }
+      ],
+      "name": "integ-9",
+      "pushed_sha": "c85bf83d",
+      "short": "00006001",
+      "state": "red",
+      "state_since": 1799998800000
     }
   ]
 }

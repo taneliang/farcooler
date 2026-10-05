@@ -97,6 +97,42 @@ fn rulings() -> Vec<pb::BoardRuling> {
     ]
 }
 
+/// A train (ov-309): integ-9, red, carrying mac-ux, and the runner's CI read
+/// of its SHA. The client's `plan_json` test builds the same, so one fixture
+/// holds both.
+fn trains() -> (Vec<pb::BoardTrain>, Vec<pb::BoardCiRead>) {
+    let job = |name: &str, state: &str| pb::BoardCiJob { name: name.into(), state: state.into(), url: String::new() };
+    let train = pb::BoardTrain {
+        id: tid(0x6001),
+        workspace_id: tid(0x0202),
+        name: "integ-9".into(),
+        base: "origin/main".into(),
+        pushed_sha: Some("c85bf83d".into()),
+        state: pb::BoardTrainState::Red as i32,
+        state_since: NOW - 20 * 60_000,
+        actor: "manager".into(),
+        created_at: NOW - 2 * HOUR,
+        landed_at: None,
+        lane_ids: vec![tid(0x2002)],
+        ci_subject: "sha:c85bf83d".into(),
+        resource_version: 3,
+    };
+    let read = pb::BoardCiRead {
+        subject: "sha:c85bf83d".into(),
+        sha: "c85bf83dce46a6b71d7312afc623899ae7914658".into(),
+        status: pb::BoardCiStatus::Failed as i32,
+        url: "https://github.com/taneliang/farcooler/actions/runs/37275435256".into(),
+        jobs: vec![job("CI / Swift (shared + macOS)", "failed"), job("CI / Android", "passed"), job("Canary", "passed")],
+        fetched_at: NOW - 60_000,
+        changed_at: NOW - 20 * 60_000,
+    };
+    (vec![train], vec![read])
+}
+
+fn tid(n: u128) -> bytes::Bytes {
+    id_bytes(Uuid::from_u128(n))
+}
+
 /// What the runner holds: a plan, and the board's cards.
 fn the_plan() -> pb::Plan {
     let mut queued = lane(1, "mac-fu3", pb::LaneState::Queued, &[2]);
@@ -122,6 +158,8 @@ fn the_plan() -> pb::Plan {
             pb::PlanCoverage { task_id: items()[2].id.clone(), live: 0, landed: 1 },
         ],
         rulings: rulings(),
+        trains: trains().0,
+        ci: trains().1,
     }
 }
 
@@ -137,7 +175,9 @@ struct Runner {
 
 fn runner() -> Runner {
     Runner {
-        capabilities: ["workstreams", "tasks", capability::BOARD_PLAN, capability::BOARD_RULINGS].map(String::from).to_vec(),
+        capabilities: ["workstreams", "tasks", capability::BOARD_PLAN, capability::BOARD_RULINGS, capability::BOARD_TRAINS]
+            .map(String::from)
+            .to_vec(),
         sent: vec![],
         refuse: None,
         events: vec![],
@@ -192,6 +232,26 @@ impl DispatchLink for Runner {
                     result::Value::Lane(moved)
                 }
                 ("lane.cards", _) => result::Value::Lane(plan.lanes[1].clone()),
+                ("train.start", Some(request::Payload::TrainStart(p))) => result::Value::BoardTrain(pb::BoardTrain {
+                    name: p.name,
+                    base: p.base,
+                    lane_ids: p.lane_ids,
+                    state: pb::BoardTrainState::Integrating as i32,
+                    state_since: NOW,
+                    ..Default::default()
+                }),
+                ("train.set", Some(request::Payload::TrainSet(p))) => {
+                    let mut moved = plan.trains.into_iter().find(|t| t.id == p.train_id).unwrap();
+                    if let Some(sha) = p.sha {
+                        moved.ci_subject = format!("sha:{sha}");
+                        moved.pushed_sha = Some(sha);
+                        moved.state = pb::BoardTrainState::Pushed as i32;
+                    }
+                    if p.state != 0 {
+                        moved.state = p.state;
+                    }
+                    result::Value::BoardTrain(moved)
+                }
                 ("ruling.add", Some(request::Payload::RulingAdd(p))) => result::Value::BoardRuling(pb::BoardRuling {
                     number: 3,
                     decision: p.decision,
@@ -307,7 +367,8 @@ async fn the_overview_reads_next_up_now_themes_and_landed() {
         "  1  mac-fu3          ov-2",
         "     Frees the Mac slot",
         "Now",
-        "  mac-ux           In review · train integ-9 · 1 card · 470K tokens",
+        "  integ-9 · Red · c85bf83d · CI Failed · 1 of 3 jobs failed",
+        "    mac-ux           In review · in integ-9 · 1 card · 470K tokens",
         "Themes",
         "  Visual language  1 of 3 done · active",
         "Decided for you",
@@ -502,7 +563,7 @@ async fn a_theme_is_made_rewritten_and_asked_about() {
 async fn show_reads_the_timeline() {
     let mut link = runner();
     let text = say(&mut link, "lane show mac-ux").await.unwrap();
-    assert!(text.starts_with("mac-ux · In review · train integ-9 · 1 card · 470K tokens"), "{text}");
+    assert!(text.starts_with("mac-ux · In review · in integ-9 · 1 card · 470K tokens"), "{text}");
     assert!(link.sent.iter().any(|r| r.method == "plan.events"));
     let text = say(&mut link, "theme show Visual").await.unwrap();
     assert!(text.starts_with("Visual language · active"), "{text}");
@@ -848,4 +909,70 @@ async fn ruling_list_reads_standing_first() {
     assert_eq!(json["rulings"][0]["cards"][0]["key"], "ov-1");
     assert_eq!(json["rulings"][0]["theme"], "Visual language");
     assert_eq!(json["rulings"][1]["state"], "confirmed");
+}
+
+// ---- trains (ov-309) ----
+
+/// `plan train start` names its lanes by name and sends them as ids, behind
+/// `board_trains` as well as the plan.
+#[tokio::test]
+async fn a_train_starts_with_its_lanes_by_name() {
+    let mut link = runner();
+    let said = say(&mut link, "train start integ-10 --lane mac-ux --lane mac-fu3 --base origin/main").await.unwrap();
+    let r = last(&link);
+    assert_eq!(r.method, "train.start");
+    assert_eq!(r.required_capabilities, [capability::BOARD_TRAINS.to_string()]);
+    let Some(request::Payload::TrainStart(p)) = &r.payload else { panic!("{r:?}") };
+    assert_eq!((p.name.as_str(), p.base.as_str(), p.actor.as_str()), ("integ-10", "origin/main", "manager"));
+    assert_eq!(p.lane_ids, vec![tid(0x2002), tid(0x2001)]);
+    assert!(said.starts_with("integ-10 · Integrating"), "{said}");
+    assert!(said.contains("Lanes: mac-ux, mac-fu3"), "{said}");
+    assert!(say(&mut link, "train start integ-11 --lane nope").await.unwrap_err().to_string().contains("No lane here is called"));
+}
+
+/// `plan train set` with a SHA sends it; a state goes as the wire's word.
+#[tokio::test]
+async fn a_train_is_set_by_name() {
+    let mut link = runner();
+    let said = say(&mut link, "train set INTEG-9 --sha 1a1b3275").await.unwrap();
+    let Some(request::Payload::TrainSet(p)) = &last(&link).payload else { panic!() };
+    assert_eq!((p.train_id.clone(), p.sha.as_deref(), p.state), (tid(0x6001), Some("1a1b3275"), 0));
+    assert!(said.starts_with("integ-9 · Pushed · 1a1b3275 · CI not read yet"), "{said}");
+    say(&mut link, "train set integ-9 --state landed --remove-lane mac-ux").await.unwrap();
+    let Some(request::Payload::TrainSet(p)) = &last(&link).payload else { panic!() };
+    assert_eq!((p.state, p.remove_lane_ids.clone()), (pb::BoardTrainState::Landed as i32, vec![tid(0x2002)]));
+    let err = say(&mut link, "train set integ-99 --state gating").await.unwrap_err();
+    assert!(err.to_string().contains("No train here is called"), "{err}");
+}
+
+/// A runner with the plan and no trains is told so before anything is sent.
+#[tokio::test]
+async fn a_runner_without_trains_is_told_before_anything_is_sent() {
+    let mut link = runner();
+    link.capabilities.retain(|c| c != capability::BOARD_TRAINS);
+    let err = say(&mut link, "train list").await.unwrap_err();
+    assert_eq!(err.to_string(), "This runner needs an update to keep trains.");
+    assert!(link.sent.is_empty());
+}
+
+/// `plan train list` says what the owner's Now says, and which jobs failed.
+#[tokio::test]
+async fn the_train_list_names_failed_jobs() {
+    let mut link = runner();
+    let text = say(&mut link, "train list").await.unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[0], "integ-9 · Red · c85bf83d · CI Failed · 1 of 3 jobs failed");
+    assert_eq!(lines[1], "  cut from origin/main · red for 20m");
+    assert_eq!(lines[2], "  Lanes: mac-ux");
+    assert_eq!(lines[3], "  Failed: CI / Swift (shared + macOS)");
+    assert!(lines[4].ends_with("runs/37275435256 · read 1m ago"), "{}", lines[4]);
+}
+
+/// The runner's refusals read as sentences.
+#[tokio::test]
+async fn a_settled_train_refusal_reads_as_a_sentence() {
+    let mut link = runner();
+    link.refuse = Some("train_settled");
+    let err = say(&mut link, "train set integ-9 --state gating").await.unwrap_err();
+    assert_eq!(err.to_string(), "That train has landed or been dropped, so it takes no more moves or SHAs.");
 }

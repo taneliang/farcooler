@@ -12,6 +12,7 @@
 //! farcooler plan theme list|show|create|set|cards
 //! farcooler plan lane  list|show|start|set|cards
 //! farcooler plan ruling add|set|list           decided for you (ov-304)
+//! farcooler plan train start|set|list          trains and their CI (ov-309)
 //! ```
 //!
 //! Nested under `plan` because `farcooler theme` already lists the terminal's
@@ -39,6 +40,8 @@ use crate::{Fallible, connect_to, expect_value, req_for, short_bytes, uuid_of, w
 
 #[path = "plan_ruling.rs"]
 mod ruling;
+#[path = "plan_train.rs"]
+mod train;
 
 /// What a runner without the layer is told.
 const NEEDS_UPDATE: &str = "This runner needs an update to keep a plan.";
@@ -88,6 +91,9 @@ enum PlanCmd {
     /// Rulings: calls made for the owner, which stand until they say otherwise.
     #[command(subcommand)]
     Ruling(ruling::RulingCmd),
+    /// Trains: lanes landing together, with the CI the runner reads for them.
+    #[command(subcommand)]
+    Train(train::TrainCmd),
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -344,6 +350,7 @@ async fn run_on<L: DispatchLink>(
         Some(PlanCmd::Theme(cmd)) => theme(link, board, ws, cmd, actor, json, now).await,
         Some(PlanCmd::Lane(cmd)) => lane(link, board, ws, cmd, actor, json, now).await,
         Some(PlanCmd::Ruling(cmd)) => ruling::ruling(link, board, ws, cmd, actor, json, now).await,
+        Some(PlanCmd::Train(cmd)) => train::train(link, board, ws, cmd, actor, json, now).await,
     }
 }
 
@@ -431,7 +438,7 @@ fn said_here(what: &str) -> Option<&'static str> {
 /// else the one `refused` makes.
 fn refused_here(err: ClientError, invalid: &str) -> Failed {
     if let ClientError::Daemon { code, what, .. } = &err
-        && let Some(said) = said_here(what).or_else(|| ruling::said_here(what))
+        && let Some(said) = said_here(what).or_else(|| ruling::said_here(what)).or_else(|| train::said_here(what))
     {
         return Box::new(Refused::naming(said.to_string(), *code, what.clone()));
     }
@@ -1045,7 +1052,7 @@ fn lane_status(l: &pb::Lane, now: i64) -> String {
         parts.push(if rank == 1 { "next up".to_string() } else { format!("{} in the plan", ordinal(rank)) });
     }
     if let Some(train) = &l.train {
-        parts.push(format!("train {train}"));
+        parts.push(format!("in {train}"));
     }
     parts.push(count(l.cards.len(), "card"));
     let spend = l.spend.unwrap_or_default();
@@ -1070,7 +1077,7 @@ fn ordinal(n: u32) -> String {
 /// What the Mac's overview shows, in text, so an orchestrator reads the same
 /// picture the owner sees.
 fn overview(plan: &pb::Plan, now: i64) -> String {
-    if plan.themes.is_empty() && plan.lanes.is_empty() && plan.rulings.is_empty() {
+    if plan.themes.is_empty() && plan.lanes.is_empty() && plan.rulings.is_empty() && plan.trains.is_empty() {
         return NOTHING_PLANNED.to_string();
     }
     let keys = Keys::of_plan(plan);
@@ -1093,9 +1100,22 @@ fn overview(plan: &pb::Plan, now: i64) -> String {
         .iter()
         .filter(|l| is_live(l.state) && l.state != pb::LaneState::Queued as i32)
         .collect();
-    if !now_lanes.is_empty() {
+    // Trains not yet landed head row groups of their lanes (ov-309); the
+    // lanes on none follow.
+    let trains: Vec<&pb::BoardTrain> = plan
+        .trains
+        .iter()
+        .filter(|t| t.state != pb::BoardTrainState::Landed as i32 && t.state != pb::BoardTrainState::Dropped as i32)
+        .collect();
+    if !now_lanes.is_empty() || !trains.is_empty() {
         out.push("Now".into());
-        out.extend(now_lanes.iter().map(|l| format!("  {:<16} {}", l.name, lane_status(l, now))));
+        for t in &trains {
+            out.push(format!("  {}", train::train_line(plan, t)));
+            let on: Vec<&pb::Lane> = plan.lanes.iter().filter(|l| t.lane_ids.contains(&l.id)).collect();
+            out.extend(on.iter().map(|l| format!("    {:<16} {}", l.name, lane_status(l, now))));
+        }
+        let grouped = |l: &pb::Lane| trains.iter().any(|t| t.lane_ids.contains(&l.id));
+        out.extend(now_lanes.iter().filter(|l| !grouped(l)).map(|l| format!("  {:<16} {}", l.name, lane_status(l, now))));
     }
     let unplanned: Vec<&pb::Lane> = plan
         .lanes
@@ -1373,6 +1393,8 @@ fn plan_json(plan: &pb::Plan, keys: &Keys) -> Value {
                 && (c.status == pb::TaskStatus::InProgress as i32 || c.status == pb::TaskStatus::InReview as i32)
         }),
         "rulings": plan.rulings.iter().map(|r| ruling::ruling_json(plan, r, keys)).collect::<Vec<_>>(),
+        "trains": plan.trains.iter().map(|t| train::train_json(plan, t, keys)).collect::<Vec<_>>(),
+        "ci": plan.ci.iter().map(train::ci_json).collect::<Vec<_>>(),
     })
 }
 
