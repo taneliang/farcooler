@@ -51,7 +51,7 @@ struct PlanOverviewView: View {
                 .identified("plan-empty")
         } else {
             // What's running, then what's next (ov-298: the owner's order).
-            if !model.working.isEmpty || !model.unranked.isEmpty { now(model) }
+            if model.hasNow { now(model) }
             if !model.nextUp.isEmpty { nextUp(model) }
             if !model.shownThemes.isEmpty { themes(model) }
             // After Themes (ov-269 design 6.1): only on a runner with pages.
@@ -81,22 +81,31 @@ struct PlanOverviewView: View {
         .identified("plan-next-up")
     }
 
+    /// Now (ov-309): each train not yet landed heads the lanes on it, and
+    /// the lanes on none follow.
     private func now(_ model: PlanModel) -> some View {
-        let lanes = model.working + model.unranked
+        let groups = model.nowGroups
         return CollapsibleSection("Now", id: "plan.now", style: .navigator, key: key("now"), defaults: defaults,
-            count: lanes.count
+            count: groups.reduce(0) { $0 + $1.lanes.count + ($1.train == nil ? 0 : 1) }
         ) {
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(lanes) { lane in
-                    PlanLaneRow(
-                        lane: lane, theme: model.theme(of: lane), rank: nil, now: model.nowMs,
-                        waitsOnOwner: model.waitsOnOwner(lane, statuses: statuses),
-                        selected: selected == .lane(lane.id), keyed: keyed
-                    ) { onOpen(.lane(lane.id)) }
-                    .changeWashed(lane.id)
+                ForEach(groups) { group in
+                    if let train = group.train {
+                        PlanTrainRow(train: train, ci: model.ci(of: train))
+                            .changeWashed(train.id)
+                    }
+                    ForEach(group.lanes) { lane in
+                        PlanLaneRow(
+                            lane: lane, theme: model.theme(of: lane), rank: nil, now: model.nowMs,
+                            waitsOnOwner: model.waitsOnOwner(lane, statuses: statuses),
+                            selected: selected == .lane(lane.id), keyed: keyed
+                        ) { onOpen(.lane(lane.id)) }
+                        .padding(.leading, group.train == nil ? 0 : NavigatorGrid.mark)
+                        .changeWashed(lane.id)
+                    }
                 }
             }
-            .listChanges(PlanChanges.lanes(lanes, model, statuses: statuses))
+            .listChanges(PlanChanges.now(model, statuses: statuses))
         }
         .identified("plan-now")
     }

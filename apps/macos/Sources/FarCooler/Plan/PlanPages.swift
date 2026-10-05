@@ -436,11 +436,11 @@ struct PlanLanePage: View {
         }
     }
 
-    /// ".claude/worktrees/mac-ux · mac-ux · Opus · train integ-9".
+    /// ".claude/worktrees/mac-ux · mac-ux · Opus · in integ-9".
     private var place: String {
         [
             lane.worktreePath, lane.branch == lane.worktreePath ? "" : lane.branch, PlanWords.model(lane.model),
-            lane.train.map { "train \($0)" } ?? "",
+            lane.train.map { "in \($0)" } ?? "",
         ].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 }
