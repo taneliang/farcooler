@@ -447,17 +447,20 @@ impl Store {
     }
 }
 
-/// When each card's status last moved, by task id (`tasks.status_since`).
+/// When each card last moved, by task id: `Task::updated_at`, the card's own
+/// clock (a status move, a note, an edit), so the runner, the Mac and the
+/// phones agree on "quiet".
 fn card_moves(conn: &Connection, workspace: &[u8]) -> Result<HashMap<Uuid, i64>> {
-    let mut stmt = conn.prepare("SELECT id, status_since FROM tasks WHERE workspace_id = ?1").map_err(map_err)?;
+    let mut stmt = conn
+        .prepare(&format!("SELECT id, {} FROM tasks WHERE workspace_id = ?1", crate::tasks::UPDATED_AT))
+        .map_err(map_err)?;
     let rows = stmt.query_map(params![workspace], |r| Ok((get_uuid(r, 0)?, r.get::<_, i64>(1)?))).map_err(map_err)?;
     rows.collect::<rusqlite::Result<HashMap<_, _>>>().map_err(map_err)
 }
 
 /// The newest of a theme's story, the lanes on its cards (a dropped lane is
-/// gone, and doesn't count), its rulings made or settled, and its cards'
-/// status moves (ov-331). The same rule the apps use (`PlanModel.lastMoved`),
-/// less the notes on a card that only the board's own read has.
+/// gone, and doesn't count), its rulings made or settled, and its cards' own
+/// last moves (ov-331). The same rule the apps use (`PlanModel.lastMoved`).
 fn theme_last_moved(view: &ThemeView, lanes: &[LaneView], rulings: &[Ruling], moved: &HashMap<Uuid, i64>) -> i64 {
     let tasks: HashSet<Uuid> = view.tasks.iter().copied().collect();
     let mut at = view.theme.story_at;
@@ -630,3 +633,7 @@ fn spend_of(conn: &Connection, lane: Uuid, agents: &[LaneAgent]) -> Result<LaneS
         shared_agents: shared.max(0) as u32,
     })
 }
+
+#[cfg(test)]
+#[path = "plan_moved_tests.rs"]
+mod moved_tests;

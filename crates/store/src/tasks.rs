@@ -240,7 +240,7 @@ macro_rules! updated_at_sql {
                         WHERE n.task_id = tasks.id AND n.kind != 'created'), 0))"
     };
 }
-const UPDATED_AT: &str = updated_at_sql!();
+pub(crate) const UPDATED_AT: &str = updated_at_sql!();
 
 /// Every column of `tasks` that `row_to_task` reads, in its order. Named once
 /// because several queries share it and a drifting column order is a silent
