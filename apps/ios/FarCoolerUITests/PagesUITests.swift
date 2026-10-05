@@ -201,11 +201,11 @@ final class PagesUITests: XCTestCase {
     /// The design's three mockups, light and dark: the train board, spend on
     /// a phone, and a theme's risks, with the Pages section they're listed in.
     /// Pictures for a person, not a check, so only on request
-    /// (`TEST_RUNNER_FARCOOLER_CAPTURES=1` before the script): CI never runs it.
+    /// (`TEST_RUNNER_FC_CAPTURES=1` before the script): CI never runs it.
     func testCaptures() throws {
         try XCTSkipUnless(
-            ProcessInfo.processInfo.environment["FARCOOLER_CAPTURES"] == "1",
-            "Captures run on request: TEST_RUNNER_FARCOOLER_CAPTURES=1")
+            ProcessInfo.processInfo.environment["FC_CAPTURES"] == "1",
+            "Captures run on request: TEST_RUNNER_FC_CAPTURES=1")
         for (name, appearance) in [("light", XCUIDevice.Appearance.light), ("dark", .dark)] {
             XCUIDevice.shared.appearance = appearance
             let app = openPlan()
