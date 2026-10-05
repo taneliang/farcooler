@@ -111,6 +111,35 @@ final class PagesUITests: XCTestCase {
         keep(app, "pages-train")
     }
 
+    /// At the largest Dynamic Type size, a timeline entry's live status sits
+    /// under its words, whole, rather than squeezed beside them into "Needs
+    /// Deci…" (review M2).
+    func testATimelineStatusIsWholeAtTheLargestTextSize() {
+        let app = XCUIApplication.phoneHarness([
+            "-phone-empty-inbox", "-phone-plan", "-phone-plan-file", Self.fixture, "-phone-pages",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
+        ])
+        // Rows this large run past the screen: scroll to each.
+        let billing = app.buttons["workspace-row-Billing"]
+        reach(app, billing)
+        billing.tap()
+        let board = app.buttons["segment-board"]
+        XCTAssertTrue(board.waitForExistence(timeout: 10), "no Board segment: \(app.debugDescription)")
+        board.tap()
+        let control = app.segmentedControls["plan-switch"]
+        reach(app, control, down: false)
+        control.buttons["Plan"].tap()
+        openTrain(app)
+        let entry = element(app, "page-entry-0")
+        reach(app, entry)
+        let words = entry.staticTexts["Review: one high finding"]
+        let status = entry.staticTexts["Needs Decision"]
+        XCTAssertTrue(words.exists && status.exists, "the entry's parts aren't there: \(entry.debugDescription)")
+        XCTAssertGreaterThanOrEqual(status.frame.minY, words.frame.maxY - 1, "the status is beside the words, not under them")
+        XCTAssertLessThanOrEqual(status.frame.maxX, app.frame.maxX, "the status runs off the screen")
+        keep(app, "pages-timeline-largest-text")
+    }
+
     /// A question still waiting goes back to Needs You, where it's answered.
     func testAnAskReferenceOpensNeedsYou() {
         let app = openPlan()

@@ -18,6 +18,11 @@ public enum PageLayout {
         return columns > 3 && width < narrow
     }
 
+    /// Whether a row's state and live status go under its words rather than
+    /// beside them: at accessibility text sizes, where beside them they'd be
+    /// cut short (review M2).
+    public static func trailerBelow(_ size: DynamicTypeSize) -> Bool { size.isAccessibilitySize }
+
     /// Whether steps go down the page rather than across.
     public static func stepsDown(width: CGFloat?) -> Bool {
         guard let width, width > 0 else { return false }

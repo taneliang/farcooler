@@ -314,7 +314,9 @@ struct PageRefTrailer: View {
                 Text(status)
                     .fontWeight(resolved.statusTone == .attention ? .medium : .regular)
                     .foregroundStyle(resolved.statusTone == .attention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.secondary))
-                    .lineLimit(1)
+                    // Wraps rather than truncating: the status is the point
+                    // of a live reference (review M2).
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if let destination = resolved.destination {
                 Image(systemName: destination.isExternal ? "arrow.up.right" : "chevron.forward")
@@ -355,12 +357,25 @@ struct PageListView: View {
     let onOpen: (PageDestination) -> Void
     @Environment(\.colorScheme) private var scheme
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                 let resolved = item.ref.map(world.resolve)
                 PageRow(destination: resolved?.destination, shaded: index % 2 == 1, onOpen: onOpen) {
+                    if PageLayout.trailerBelow(typeSize) {
+                        // At accessibility sizes the state and status go under
+                        // the words, whole, rather than squeezing beside them.
+                        HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
+                            PageStateGlyph(state: item.state, tone: item.tone)
+                            VStack(alignment: .leading, spacing: Spacing.tight / 2) {
+                                words(item)
+                                if let word = item.state.word { Text(word).foregroundStyle(.secondary) }
+                                if let resolved { PageRefTrailer(resolved: resolved).font(.subheadline) }
+                            }
+                        }
+                    } else {
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
                         PageStateGlyph(state: item.state, tone: item.tone)
                         VStack(alignment: .leading, spacing: Spacing.tight / 2) {
@@ -382,10 +397,24 @@ struct PageListView: View {
                             if let resolved { PageRefTrailer(resolved: resolved).font(.subheadline) }
                         }
                     }
+                    }
                 }
                 .accessibilityLabel(Self.spoken(item, resolved: resolved))
                 .accessibilityIdentifier("page-item-\(index)")
             }
+        }
+    }
+
+    /// An item's words and detail.
+    @ViewBuilder private func words(_ item: PageItem) -> some View {
+        Text(item.text)
+            .foregroundStyle(item.tone == .attention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.primary))
+            .fixedSize(horizontal: false, vertical: true)
+        if let detail = item.detail {
+            Text(detail)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -457,12 +486,24 @@ struct PageTimelineView: View {
     let entries: [PageEntry]
     let world: PageWorld
     let onOpen: (PageDestination) -> Void
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
                 let resolved = entry.ref.map(world.resolve)
                 PageRow(destination: resolved?.destination, shaded: false, onOpen: onOpen) {
+                    if PageLayout.trailerBelow(typeSize) {
+                        // At accessibility sizes: the time, the words, then
+                        // the status, each whole (review M2).
+                        VStack(alignment: .leading, spacing: Spacing.tight / 2) {
+                            Text(PageLayout.time(entry.at, now: world.nowMs))
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                            Text(entry.text).fixedSize(horizontal: false, vertical: true)
+                            if let resolved { PageRefTrailer(resolved: resolved).font(.subheadline) }
+                        }
+                    } else {
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.inset) {
                         Text(PageLayout.time(entry.at, now: world.nowMs))
                             .monospacedDigit()
@@ -471,6 +512,7 @@ struct PageTimelineView: View {
                         Text(entry.text).fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: Spacing.group)
                         if let resolved { PageRefTrailer(resolved: resolved).font(.subheadline) }
+                    }
                     }
                 }
                 .accessibilityLabel(
