@@ -54,7 +54,7 @@ struct PlanHomeContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: NavigatorRhythm.section) {
-            if !needsYou.items.isEmpty { needs }
+            if !needsYou.items.isEmpty || !asks.isEmpty { needs }
             if plan.available {
                 PlanOverviewView(plan: plan, statuses: statuses, selected: nil, onOpen: onOpen)
                 // The calls made for the owner (ov-304), last: they ask
@@ -68,14 +68,33 @@ struct PlanHomeContent: View {
         }
     }
 
+    /// The themes asking for the owner.
+    private var asks: [PlanTheme] { plan.plan.shownThemes.filter { !$0.ownerAsk.isEmpty } }
+
     /// Needs You: this workspace's questions, decisions and reviews, each
     /// answered here, most urgent first.
     private var needs: some View {
         CollapsibleSection(
             "Needs You", id: "plan.needs", style: .navigator, tone: .attention,
-            key: "board.plan.section.needs.\(plan.host).\(plan.workspace.id)", count: needsYou.items.count
+            key: "board.plan.section.needs.\(plan.host).\(plan.workspace.id)", count: needsYou.items.count + asks.count
         ) {
             VStack(alignment: .leading, spacing: Spacing.group) {
+                // A theme's ask, counted here as in the title bar and the
+                // tree's Needs You (ov-321 review M3).
+                ForEach(asks) { theme in
+                    Button { onOpen(.theme(theme.id)) } label: {
+                        VStack(alignment: .leading, spacing: Spacing.tight) {
+                            Text(theme.name)
+                                .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                                .foregroundStyle(.secondary)
+                            PlanAsk(text: theme.ownerAsk)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .identified("plan-home-theme-ask-\(theme.name)")
+                }
                 ForEach(needsYou.items) { item in
                     NeedsYouItemRow(
                         item: item, canAct: needsYou.canAct(item), onOpen: { needsYou.onOpen(item) },

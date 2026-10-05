@@ -39,7 +39,11 @@ extension ContentView {
         let open = { (page: PlanPage) in openPlan(page, host: host, workspace: summary.id) }
         return (
             AnyView(PlanHome(board: board, needsYou: needs, onOpen: open)),
-            AnyView(PlanStrip(plan: board.plan, needsYou: needs.items.count) { planPeeking = true }),
+            AnyView(
+                PlanStrip(
+                    plan: board.plan,
+                    needsYou: needs.items.count + board.plan.plan.shownThemes.filter { !$0.ownerAsk.isEmpty }.count
+                ) { planPeeking = true }),
             AnyView(PlanPeek(board: board, needsYou: needs, onOpen: open) { planPeeking = false })
         )
     }
