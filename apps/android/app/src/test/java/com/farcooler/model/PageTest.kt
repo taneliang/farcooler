@@ -22,10 +22,10 @@ import java.io.File
  * reader to the same words.
  */
 class PageTest {
-    /** The count reference "open" is "Not Done", as the Mac's tree filter and the iPhone say it (ov-330, R-13). */
+    /** The count reference "open" is "Not done" (Android's sentence case), as the Mac's tree filter and the iPhone say "Not Done" (ov-330, R-13). */
     @Test
-    fun `an open card count is called Not Done, never Open`() {
-        assertEquals("Not Done", PageWorld.statusName("open"))
+    fun `an open card count is called Not done, never Open`() {
+        assertEquals("Not done", PageWorld.statusName("open"))
     }
 
     private val seeded = Json.parseToJsonElement(repositoryFile("test/fixtures/pages-seeded.json")).jsonObject
