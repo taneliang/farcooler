@@ -195,6 +195,9 @@ final class PagesUITests: XCTestCase {
         reach(app, notice)
         XCTAssertEqual(notice.label, "Far Cooler couldn’t read this board’s pages.")
         XCTAssertTrue(element(app, "plan-pages-retry").exists)
+        // Not "Pages 0": a read that failed doesn't know how many there are.
+        let zero = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == 'plan-pages' AND label == '0'"))
+        XCTAssertEqual(zero.count, 0, "a count above a read that failed: \(app.debugDescription)")
         keep(app, "pages-unavailable")
     }
 

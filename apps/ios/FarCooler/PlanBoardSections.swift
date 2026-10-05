@@ -168,7 +168,9 @@ extension PlanBoardSections {
 /// and its count, trailing and tertiary, with a chevron when it opens.
 struct PlanHeader: View {
     let title: String
-    let count: Int
+    /// Nil when it isn't known, as over a read that failed: no count is
+    /// drawn, never a zero that says there's nothing.
+    let count: Int?
     /// Nil when the section doesn't open.
     var open: Bool?
 
@@ -176,9 +178,11 @@ struct PlanHeader: View {
         HStack(spacing: PaneMetrics.tight) {
             Text(title)
             Spacer()
-            Text("\(count)")
-                .font(.subheadline.monospacedDigit())
-                .foregroundStyle(.tertiary)
+            if let count {
+                Text("\(count)")
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
             if let open {
                 Image(systemName: "chevron.forward")
                     .font(.caption.weight(.semibold))

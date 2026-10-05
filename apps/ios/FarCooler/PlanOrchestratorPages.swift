@@ -30,7 +30,8 @@ struct PlanPagesSection: View {
                 Button(PlanWords.tryAgain) { Task { await read() } }
                     .accessibilityIdentifier("plan-pages-retry")
             } header: {
-                PlanHeader(title: "Pages", count: 0).accessibilityIdentifier("plan-pages")
+                // No count: the read failed, so how many there are isn't known.
+                PlanHeader(title: "Pages", count: nil).accessibilityIdentifier("plan-pages")
             }
         case .loaded(let pages):
             let listed = PageShelf.listed(pages, plan: plan)

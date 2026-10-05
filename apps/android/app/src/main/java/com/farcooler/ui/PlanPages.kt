@@ -51,12 +51,30 @@ import com.farcooler.net.TerminalRef
 /** What the Plan view needs to list a board's pages. Null on a runner without `board_pages`, which shows no section. */
 data class PagesHook(val state: PageListState?, val now: Long, val onRetry: () -> Unit)
 
+/** What the Pages section shows: nothing, a read that failed, or the pages listed outside their themes. */
+sealed interface PagesSection {
+    /** The count its header draws; null when it isn't known, never a zero that says there's nothing. */
+    val count: Int?
+
+    data object None : PagesSection { override val count: Int? get() = null }
+    data object Unavailable : PagesSection { override val count: Int? get() = null }
+    data class Listed(val pages: List<BoardPage>) : PagesSection { override val count: Int get() = pages.size }
+
+    companion object {
+        fun of(state: PageListState?, plan: Plan): PagesSection = when (state) {
+            null -> None
+            PageListState.Unavailable -> Unavailable
+            is PageListState.Loaded -> PageShelf.listed(state.pages, plan).let { if (it.isEmpty()) None else Listed(it) }
+        }
+    }
+}
+
 /** The Pages section: one row per page that isn't drawn inside a theme, each opening the page, pushed. */
 fun LazyListScope.pageItems(hook: PagesHook, plan: Plan, onOpen: (PlanPage) -> Unit) {
-    when (val state = hook.state) {
-        null -> Unit
-        PageListState.Unavailable -> {
-            item(key = "plan/pages") { PlanHeader("Pages", 0, Modifier.testTag("plan-pages")) }
+    when (val section = PagesSection.of(hook.state, plan)) {
+        PagesSection.None -> Unit
+        PagesSection.Unavailable -> {
+            item(key = "plan/pages") { PlanHeader("Pages", section.count, Modifier.testTag("plan-pages")) }
             item(key = "plan/pages/unavailable") {
                 Column(Modifier.testTag("plan-pages-unavailable")) {
                     PlanNotice(PageWords.COULDNT_READ, null)
@@ -68,11 +86,9 @@ fun LazyListScope.pageItems(hook: PagesHook, plan: Plan, onOpen: (PlanPage) -> U
                 }
             }
         }
-        is PageListState.Loaded -> {
-            val listed = PageShelf.listed(state.pages, plan)
-            if (listed.isEmpty()) return
-            item(key = "plan/pages") { PlanHeader("Pages", listed.size, Modifier.testTag("plan-pages")) }
-            for (page in listed) {
+        is PagesSection.Listed -> {
+            item(key = "plan/pages") { PlanHeader("Pages", section.count, Modifier.testTag("plan-pages")) }
+            for (page in section.pages) {
                 item(key = "plan/page/${page.slot}") { PlanPageRow(page, hook.now) { onOpen(PlanPage.Page(page.slot)) } }
             }
         }

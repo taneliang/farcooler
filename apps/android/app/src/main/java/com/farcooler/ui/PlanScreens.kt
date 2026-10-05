@@ -191,7 +191,7 @@ private fun LazyListScope.itemsIndexedLanes(
 
 /** A section's title and count, as the board's status headers read; a chevron when it opens. */
 @Composable
-fun PlanHeader(title: String, count: Int, modifier: Modifier = Modifier, open: Boolean? = null, onClick: (() -> Unit)? = null) {
+fun PlanHeader(title: String, count: Int?, modifier: Modifier = Modifier, open: Boolean? = null, onClick: (() -> Unit)? = null) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
@@ -201,17 +201,20 @@ fun PlanHeader(title: String, count: Int, modifier: Modifier = Modifier, open: B
             .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp)
             .semantics(mergeDescendants = true) {
                 heading()
-                contentDescription = "$title, $count"
+                contentDescription = if (count == null) title else "$title, $count"
                 if (open != null) stateDescription = if (open) "Expanded" else "Collapsed"
             },
     ) {
         Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.weight(1f))
-        Text(
-            "$count",
-            style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
-            color = MaterialTheme.colorScheme.outline,
-        )
+        // No count when it isn't known (a read that failed), never a zero.
+        if (count != null) {
+            Text(
+                "$count",
+                style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+                color = MaterialTheme.colorScheme.outline,
+            )
+        }
         if (open != null) {
             Spacer(Modifier.width(8.dp))
             Icon(
