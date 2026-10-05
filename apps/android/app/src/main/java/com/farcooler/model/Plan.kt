@@ -141,9 +141,11 @@ data class Plan(
     /** The queued lanes in the plan, by id; first is next up. */
     val order: List<String> = emptyList(),
     val cards: List<PlanCard> = emptyList(),
+    /** Decided for you (ov-304): standing rulings newest first, then the settled ones, in the runner's order. */
+    val rulings: List<PlanRuling> = emptyList(),
 ) {
-    /** Nothing planned: no theme and no lane. */
-    val isEmpty: Boolean get() = themes.isEmpty() && lanes.isEmpty()
+    /** Nothing planned: no theme, no lane and no ruling. */
+    val isEmpty: Boolean get() = themes.isEmpty() && lanes.isEmpty() && rulings.isEmpty()
 
     /** Next up: the plan's queued lanes, first is next. */
     val nextUp: List<PlanLane>
@@ -226,6 +228,7 @@ data class Plan(
                 val c = it.jsonObject
                 PlanCard(c.string("task"), c.string("key"), c.string("title"), c.string("status"))
             },
+            rulings = PlanRuling.decodeAll(o),
         )
 
         private fun refs(o: JsonObject) = o.list("cards").map {

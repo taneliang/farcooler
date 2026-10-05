@@ -41,6 +41,20 @@ class PlanWiringTest {
     }
 
     @Test
+    fun `rulings are gated on board_rulings, copied to the clipboard, and drawn after the plan`() {
+        val board = source("ui/BoardScreen.kt")
+        assertTrue("the capability", "val keepsRulings = daemon?.can(Capability.BOARD_RULINGS) == true" in board)
+        assertTrue(
+            "no hook without it",
+            "rulings = if (keepsRulings) RulingsHook { scope.launch { clipboard.writeText(\"Far Cooler\", it) } } else null" in board,
+        )
+        val screens = source("ui/PlanScreens.kt")
+        assertTrue("drawn after the plan", "rulingItems(state.plan, rulings)" in screens)
+        val rows = source("ui/PlanRulingRows.kt")
+        assertTrue("nothing without the hook", "if (hook == null || plan.rulings.isEmpty()) return" in rows)
+    }
+
+    @Test
     fun `a plan page says which page is open, so a notice reads only that record`() {
         val page = source("ui/PlanPageScreens.kt")
         assertTrue("open", "connection.plans.openPage = page" in page)

@@ -95,6 +95,8 @@ fun LazyListScope.planItems(
     onToggleLanded: () -> Unit = {},
     /** The board's orchestrator pages (ov-285); null on a runner without `board_pages`. */
     pages: PagesHook? = null,
+    /** Copy reference for rulings (ov-304); null on a runner without `board_rulings`. */
+    rulings: RulingsHook? = null,
 ) {
     when (state) {
         null, PlanReadState.Loading -> item(key = "plan/loading") {
@@ -113,7 +115,11 @@ fun LazyListScope.planItems(
                 }
             }
         }
-        is PlanReadState.Loaded -> loaded(state.plan, statuses, onOpen, landedOpen, onToggleLanded, pages)
+        is PlanReadState.Loaded -> {
+            loaded(state.plan, statuses, onOpen, landedOpen, onToggleLanded, pages)
+            // Last, as on the Mac and the iPhone: rulings ask nothing, and stand until the owner says otherwise.
+            rulingItems(state.plan, rulings)
+        }
     }
 }
 

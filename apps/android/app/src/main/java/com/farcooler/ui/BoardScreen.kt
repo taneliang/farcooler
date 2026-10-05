@@ -207,6 +207,8 @@ fun BoardTab(
     // The board's orchestrator pages (ov-285), read with the plan.
     val pageLists by connection.pages.lists.collectAsStateWithLifecycle()
     val keepsPages = daemon?.can(Capability.BOARD_PAGES) == true
+    val keepsRulings = daemon?.can(Capability.BOARD_RULINGS) == true
+    val clipboard = LocalClipboard.current
 
     // Read on opening, whatever was last read: the row that opened this may
     // be showing a count from before the last reconnect. While it is open, a
@@ -363,6 +365,7 @@ fun BoardTab(
                                     scope.launch { connection.pages.read(workspace) }
                                 }
                             } else null,
+                            rulings = if (keepsRulings) RulingsHook { scope.launch { clipboard.writeText("Far Cooler", it) } } else null,
                         )
                     } else if (board.unreadable.isNotEmpty()) {
                         item(key = "unreadable") {
