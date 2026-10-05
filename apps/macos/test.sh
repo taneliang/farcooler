@@ -35,4 +35,9 @@ export PATH="$HOME/.cargo/bin:$PATH"
 # daemons, each with a tmux server that `daemon stop` leaves running, and a
 # test that forgets to end one fails the run here rather than leaving a
 # server and a shell behind (`ScratchDaemon.stop`).
-exec ../../scripts/tmux-leak-check.py -- swift test "$@"
+#
+# And under the early-exit guard (ov-324): a test that exits the process ends
+# `swift test` with exit 0 and the rest unrun, so the run must print
+# swift-testing's final summary line and count at least the floor in
+# test-floor.txt. A change that adds tests raises that number.
+exec ../../scripts/swift-test-guard.sh test-floor.txt -- ../../scripts/tmux-leak-check.py -- swift test "$@"

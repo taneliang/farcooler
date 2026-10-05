@@ -18,7 +18,8 @@ trap 'rm -rf "$scratch"' EXIT
 mkdir -p "$scratch/apps/macos" "$scratch/bin" "$scratch/scripts"
 mkdir -p "$scratch/home/.cargo/bin"
 cp "$real" "$scratch/apps/macos/test.sh"
-cp scripts/tmux-leak-check.py "$scratch/scripts/"
+cp scripts/tmux-leak-check.py scripts/swift-test-guard.sh "$scratch/scripts/"
+echo 1 >"$scratch/apps/macos/test-floor.txt"
 
 cat >"$scratch/apps/macos/build-vt.sh" <<'STUB'
 #!/bin/bash
@@ -36,6 +37,7 @@ STUB
 cat >"$scratch/bin/swift" <<'STUB'
 #!/bin/bash
 echo "swift $* ${TMUX_TMPDIR:+(private tmux)}" >>"$LOG"
+echo "Test run with 2 tests in 1 suite passed after 1 second."
 STUB
 chmod +x "$scratch/apps/macos/build-vt.sh" "$scratch/bin/swift" "$scratch/home/.cargo/bin/cargo" "$scratch/apps/macos/test.sh"
 

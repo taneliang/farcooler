@@ -691,11 +691,17 @@ jobs:
 
       # `apps/macos/test.sh` builds the Rust cores before the Mac tests (ov-134).
       - run: ./scripts/macos-test-wrapper-test.sh
+      # A test run that ends early, or counts fewer tests than its floor, fails
+      # (ov-324): a test that exited the process once ended `swift test` with
+      # exit 0 and left every later test unrun.
+      - run: ./scripts/swift-test-guard-test.sh
       # The capture harness's stop ends its daemon and tmux with no CLI (ov-278).
       - run: ./scripts/mac-capture-stop-test.sh
 
       - name: Test AgentKit
-        run: swift test --package-path apps/shared/AgentKit
+        # Under the same early-exit guard as the Mac's tests (ov-324); a change
+        # that adds tests raises the floor in apps/shared/AgentKit/test-floor.txt.
+        run: ./scripts/swift-test-guard.sh apps/shared/AgentKit/test-floor.txt -- swift test --package-path apps/shared/AgentKit
 
       # The Mac app's own four test targets, which had never run here.
       #
