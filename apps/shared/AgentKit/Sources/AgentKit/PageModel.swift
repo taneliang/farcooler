@@ -127,10 +127,21 @@ public struct PageDoc: Decodable, Equatable, Sendable {
         // `.unknown`, never a page that doesn't draw.
         var list = try c.nestedUnkeyedContainer(forKey: .blocks)
         var blocks: [PageBlock] = []
+        var clamped = false
         while !list.isAtEnd {
             let any = try list.decode(PageAny.self)
-            blocks.append(PageBlock(any))
+            guard blocks.count < PageCaps.blocks else {
+                clamped = true
+                break
+            }
+            var cut = false
+            blocks.append(PageBlock(any, clamped: &cut))
+            clamped = clamped || cut
         }
+        // More than the design allows (a runner that didn't check, or a page
+        // edited by hand): what fits is drawn, then one line says so. Never a
+        // hang over thousands of rows.
+        if clamped { blocks.append(.unknown(type: PageCaps.tooLargeType, alt: PageWords.tooLarge)) }
         self.blocks = blocks
     }
 
@@ -403,17 +414,27 @@ public enum PageBlock: Equatable, Sendable {
     case unknown(type: String, alt: String?)
 
     init(_ any: PageAny) {
+        var ignored = false
+        self.init(any, clamped: &ignored)
+    }
+
+    /// A block, held to the design's caps (`PageCaps`); `clamped` is set when
+    /// anything was left out or cut short.
+    init(_ any: PageAny, clamped: inout Bool) {
         let o = any.object ?? [:]
         let type = o["type"]?.string ?? ""
-        let alt = o["alt"]?.string
-        func items(_ key: String) -> [PageAny] { o[key]?.array ?? [] }
+        var cut = false
+        defer { clamped = clamped || cut }
+        func items(_ key: String) -> [PageAny] { PageCaps.prefix(o[key]?.array ?? [], PageCaps.items(type, key), &cut) }
+        func text(_ value: String?, _ limit: Int = PageCaps.string) -> String? { value.map { PageCaps.cut($0, limit, &cut) } }
+        let alt = text(o["alt"]?.string, PageCaps.alt)
         switch type {
         case "heading":
-            guard let text = o["text"]?.string else { break }
-            self = .heading(text)
+            guard let heading = text(o["text"]?.string) else { break }
+            self = .heading(heading)
             return
         case "text":
-            guard let md = o["md"]?.string else { break }
+            guard let md = text(o["md"]?.string, PageCaps.md) else { break }
             self = .text(md: md, tone: PageTone(word: o["tone"]?.string))
             return
         case "stats":
@@ -444,23 +465,31 @@ public enum PageBlock: Equatable, Sendable {
                 return PageColumn(title: c["title"]?.string ?? "", align: align, grow: c["grow"]?.bool ?? false)
             }
             guard !columns.isEmpty else { break }
-            self = .table(columns: columns, rows: items("rows").map { ($0.array ?? []).map(PageCell.init) })
+            self = .table(
+                columns: columns,
+                rows: items("rows").map { row in
+                    PageCaps.prefix(row.array ?? [], columns.count, &cut).map { cell in
+                        var cell = PageCell(cell)
+                        cell.text = cell.text.map { PageCaps.cut($0, PageCaps.string, &cut) }
+                        return cell
+                    }
+                })
             return
         case "list":
             self = .list(
                 items("items").compactMap { i in
                     let i = i.object ?? [:]
-                    guard let text = i["text"]?.string else { return nil }
+                    guard let words = text(i["text"]?.string) else { return nil }
                     return PageItem(
-                        text: text, state: PageState(word: i["state"]?.string), detail: i["detail"]?.string,
+                        text: words, state: PageState(word: i["state"]?.string), detail: text(i["detail"]?.string),
                         ref: PageRef(i["ref"]), tone: PageTone(word: i["tone"]?.string))
                 })
             return
         case "timeline":
             let entries = items("entries").compactMap { e -> PageEntry? in
                 let e = e.object ?? [:]
-                guard let at = e["at"]?.int64, let text = e["text"]?.string else { return nil }
-                return PageEntry(at: at, text: text, ref: PageRef(e["ref"]))
+                guard let at = e["at"]?.int64, let words = text(e["text"]?.string) else { return nil }
+                return PageEntry(at: at, text: words, ref: PageRef(e["ref"]))
             }
             self = .timeline(entries, given: o["order"]?.string == "given")
             return
@@ -514,4 +543,42 @@ struct PageAny: Decodable, Equatable, Sendable {
         if case .number(let n) = value, n.isFinite, n == n.rounded(), abs(n) < 9.0e15 { Int64(n) } else { nil }
     }
     var int: Int? { int64.map { Int(clamping: $0) } }
+}
+
+/// The design's limits (section 7), held by the reader as well as the runner,
+/// so a page that breaks them draws what fits and says the rest didn't.
+public enum PageCaps {
+    public static let blocks = 60
+    public static let rows = 50
+    public static let columns = 8
+    public static let items = 50
+    public static let md = 2_000
+    public static let string = 200
+    public static let alt = 500
+    /// The block a clamped page ends with.
+    static let tooLargeType = "too-large"
+
+    /// The most of `key` a `type` block may hold.
+    static func items(_ type: String, _ key: String) -> Int {
+        switch (type, key) {
+        case ("stats", _): 6
+        case ("steps", _), ("links", _): 12
+        case ("progress", _): 6
+        case ("table", "columns"): columns
+        case ("table", _): rows
+        default: items
+        }
+    }
+
+    static func prefix<T>(_ values: [T], _ limit: Int, _ cut: inout Bool) -> [T] {
+        guard values.count > limit else { return values }
+        cut = true
+        return Array(values.prefix(limit))
+    }
+
+    static func cut(_ text: String, _ limit: Int, _ cut: inout Bool) -> String {
+        guard text.count > limit else { return text }
+        cut = true
+        return String(text.prefix(limit - 1)) + "…"
+    }
 }

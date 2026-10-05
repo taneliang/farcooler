@@ -100,6 +100,8 @@ public enum PageWords {
     public static let answered = "Answered"
     /// A block from a newer runner that brought no `alt`.
     public static let newerBlock = "This part needs a newer Far Cooler."
+    /// A page past the design's limits: what fits is drawn above it.
+    public static let tooLarge = "This page is too large to show in full."
     /// A page listed without a document this build can read.
     public static let unreadable = "Far Cooler can’t draw this page. Update Far Cooler to see it."
     public static let couldntRead = "Far Cooler couldn’t read this board’s pages."

@@ -159,4 +159,40 @@ struct PageModelTests {
         let train = try Self.doc("train")
         #expect(train.under("Lanes").blocks == train.blocks, "a heading that isn't first stays")
     }
+
+    /// A page far past the design's limits, as a runner that didn't check
+    /// (or a hand-edited store) could send: 100 blocks, a table of 10,000
+    /// rows and 12 columns, a 5,000-character text and a 1,000-character
+    /// cell.
+    static func oversize() -> Data {
+        let row = "[" + (0..<12).map { #""c\#($0)""# }.joined(separator: ",") + "]"
+        let long = String(repeating: "x", count: 1_000)
+        let table = #"{"type":"table","columns":[\#((0..<12).map { #"{"title":"T\#($0)"}"# }.joined(separator: ","))],"rows":[[{"text":"\#(long)"}],\#(Array(repeating: row, count: 10_000).joined(separator: ","))]}"#
+        let text = #"{"type":"text","md":"\#(String(repeating: "word ", count: 1_000))"}"#
+        let headings = (0..<98).map { #"{"type":"heading","text":"H\#($0)"}"# }
+        return Data(#"{"v":1,"title":"Huge","blocks":[\#(([table, text] + headings).joined(separator: ","))]}"#.utf8)
+    }
+
+    @Test("a page past the limits draws what fits, ends with one line saying so, and doesn't hang")
+    func oversizeIsClamped() throws {
+        let started = Date()
+        let doc = try PageDoc.decode(Self.oversize())
+        #expect(Date().timeIntervalSince(started) < 5, "decoding took too long")
+        #expect(doc.blocks.count == PageCaps.blocks + 1)
+        #expect(doc.blocks.last == .unknown(type: "too-large", alt: "This page is too large to show in full."))
+        guard case .table(let columns, let rows) = doc.blocks[0], case .text(let md, _) = doc.blocks[1] else {
+            Issue.record("the table and text didn't decode")
+            return
+        }
+        #expect(columns.count == 8 && rows.count == 50 && rows.allSatisfy { $0.count <= 8 })
+        #expect(rows[0][0].text?.count == 200)
+        #expect(md.count == 2_000)
+    }
+
+    @Test("a page inside the limits isn't marked")
+    func withinLimitsIsUntouched() throws {
+        for name in ["train", "spend", "risks", "blocks", "refs"] {
+            #expect(!(try Self.doc(name)).blocks.contains { if case .unknown("too-large", _) = $0 { true } else { false } }, "\(name)")
+        }
+    }
 }

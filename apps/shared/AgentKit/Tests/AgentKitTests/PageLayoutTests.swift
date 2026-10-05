@@ -101,6 +101,16 @@ struct PageLayoutTests {
         #expect(narrow > 2 * wide, "narrow \(narrow), wide \(wide)")
     }
 
+    @Test("a page past the limits draws, clamped, in well under a second")
+    func oversizeDraws() throws {
+        let doc = try PageDoc.decode(PageModelTests.oversize())
+        let started = Date()
+        let page = BoardPage(id: "huge", slot: "huge", title: "Huge", doc: doc)
+        let size = try #require(ImageRenderer(content: PageView(page: page, world: PageWorld(), onOpen: { _ in }).frame(width: 640)).nsImage?.size)
+        #expect(size.height > 100)
+        #expect(Date().timeIntervalSince(started) < 10)
+    }
+
     @Test("every fixture draws, references to things gone included, and an empty world draws too")
     func everyFixtureDraws() throws {
         for name in ["train", "spend", "risks", "blocks", "refs"] {
