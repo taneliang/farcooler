@@ -1272,6 +1272,8 @@ final class Connection: ObservableObject {
     let plans = PlanReads()
     /// Orchestrator pages, read with the plan (ov-285); see ConnectionPages.swift.
     let pages = PageReads()
+    /// Each task key's card, built once per read of the boards and plans (ov-299).
+    let taskKeyCards = TaskKeyCardCache()
 
     /// Every board this runner keeps, in the order the screens draw them:
     /// each repository's workspaces, or its one implicit board on a runner

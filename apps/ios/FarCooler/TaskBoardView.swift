@@ -427,6 +427,8 @@ struct TaskBoardCardRow: View {
                 words
             }
             .buttonStyle(.plain)
+            // A long press previews the card, with Open (ov-299).
+            .taskKeyCard(row.key, speaksTitle: false)
             // One element for the card's words, and the control beside it its
             // own: an identifier on the `HStack` would be pushed down onto the
             // Agent button too and rename it.

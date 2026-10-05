@@ -50,6 +50,8 @@ struct WorkspaceScreen: View {
         }
         .navigationTitle(summary.map(title) ?? "Workspace")
         .navigationBarTitleDisplayMode(.inline)
+        // Its board's and plan's keys preview their tasks (ov-299).
+        .environment(\.taskKeyLinker, connection.taskKeyLinker(navigator))
         .onAppear {
             UserDefaults.standard.set(place.stored, forKey: PhoneLaunch.lastWorkspaceKey)
         }

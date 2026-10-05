@@ -53,6 +53,8 @@ struct PlanPageScreen: View {
         .environment(\.taskKeyLinker, connection.taskKeyLinker(navigator))
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        // Its cards' keys preview their tasks (ov-299).
+        .environment(\.taskKeyLinker, connection.taskKeyLinker(navigator))
         .task(id: page) { await load() }
         .onAppear { reads.openPage = page }
         .onDisappear { if reads.openPage == page { reads.openPage = nil } }
@@ -262,7 +264,8 @@ private struct PlanPageLaneRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(lane.name).font(.subheadline.weight(.medium))
                     Text(PlanWords.status(lane)).font(.footnote).foregroundStyle(.secondary)
-                    Text(lane.cards.map(\.key).joined(separator: " "))
+                    // Each key's title in what VoiceOver says (ov-299).
+                    TaskKeyText(keysIn: lane.cards.map(\.key).joined(separator: " "))
                         .font(.system(.caption, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -296,6 +299,8 @@ private struct PlanCardRows: View {
                     card(key: row.key, title: row.title, status: row.status.title, slice: ref.slice)
                 }
                 .buttonStyle(.plain)
+                // A long press previews the card, with Open (ov-299).
+                .taskKeyCard(row.key, speaksTitle: false)
                 .accessibilityElement(children: .combine)
                 .accessibilityAddTraits(.isButton)
                 .accessibilityIdentifier("plan-card-\(row.key)")

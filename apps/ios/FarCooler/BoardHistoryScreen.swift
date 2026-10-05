@@ -54,6 +54,8 @@ struct BoardHistoryScreen: View {
                                 .contentShape(.rect)
                             }
                             .buttonStyle(.plain)
+                            // A long press previews the card, with Open (ov-299).
+                            .taskKeyCard(row.key, speaksTitle: false)
                             .accessibilityElement(children: .combine)
                             .accessibilityIdentifier("history-row-\(row.key)")
                         }
@@ -82,6 +84,8 @@ struct BoardHistoryScreen: View {
         .searchable(text: $query, prompt: "Keys and titles")
         .navigationTitle(BoardHistory.title(status))
         .navigationBarTitleDisplayMode(.inline)
+        // Its rows' keys preview their tasks (ov-299).
+        .environment(\.taskKeyLinker, connection.taskKeyLinker(navigator))
         .accessibilityIdentifier("board-history")
     }
 

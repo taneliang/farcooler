@@ -12,7 +12,11 @@ extension Connection {
     func taskKeyLinker(_ navigator: PhoneNavigator?) -> TaskKeyLinker {
         var open: (@MainActor (PhoneRoute) -> Void)?
         if let navigator { open = { navigator.open($0) } }
+        // Each key's card (ov-299), from the boards and the plans read.
+        let runner = hostId?.uuidString
+        let cards = taskKeyCards.cards(
+            runner: runner ?? "", boards: boards, plans: plans.states.compactMapValues(\.plan))
         // `TaskKeyLinker.phone` holds the wiring, where `swift test` reaches it.
-        return .phone(runner: hostId?.uuidString, workspaces: fleet.workspaces ?? [], boards: boards, open: open)
+        return .phone(runner: runner, workspaces: fleet.workspaces ?? [], boards: boards, cards: cards, open: open)
     }
 }

@@ -605,6 +605,11 @@ AGENTKIT_SOURCES = [
     "TaskKeyLinks.swift",
     # Which cell of a terminal's output a task key is in (ov-215).
     "TerminalTaskKeys.swift",
+    # What a task key is: its card, the cache it's built in, the view and
+    # the long-press preview, and keys in running text (ov-299).
+    "TaskKeyCards.swift",
+    "TaskKeyCardView.swift",
+    "TaskKeyText.swift",
     # What a worktree says about large files that weren't downloaded (ov-199).
     "LfsNotice.swift",
 ]

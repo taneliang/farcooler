@@ -50,12 +50,42 @@ final class TerminalTaskKeyTests: XCTestCase {
         press(surface, x: 24, y: 6 + CGFloat(rowHeight) / 2)
         let open = app.buttons["Open Task"]
         XCTAssertTrue(open.waitForExistence(timeout: 10), "a long press on bil-9 offered nothing; surface \(surface.frame) \(value)")
+        // What the task is, before opening it (ov-299): its card.
+        let card = app.descendants(matching: .any).matching(identifier: "task-key-card-bil-9").firstMatch
+        XCTAssertTrue(card.exists, "no card for bil-9")
+        XCTAssertTrue(card.label.contains("Invoice PDF export"), card.label)
         XCTAssertTrue(app.buttons["Copy"].exists)
         XCTAssertFalse(app.buttons["Open Link"].exists, "a task key is not a URL")
         open.tap()
         let heading = app.descendants(matching: .any).matching(identifier: "task-heading").firstMatch
         XCTAssertTrue(heading.waitForExistence(timeout: 15), "Open Task did not open the task")
         XCTAssertTrue(heading.label.contains("bil-9"), heading.label)
+    }
+
+    /// The held key's card, light and dark (ov-299). Opt-in, as
+    /// `PlanUITests.testCaptures` is: it flips the device's appearance.
+    /// `TEST_RUNNER_FC_CAPTURES=1 xcodebuild test …` turns it on.
+    func testCaptures() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["FC_CAPTURES"] == "1",
+            "capture-only; set TEST_RUNNER_FC_CAPTURES=1 to take the card")
+        defer { XCUIDevice.shared.appearance = .light }
+        for (name, appearance) in [("light", XCUIDevice.Appearance.light), ("dark", .dark)] {
+            XCUIDevice.shared.appearance = appearance
+            let app = launch()
+            let surface = try waitForSurface(app)
+            let value = (surface.value as? String) ?? ""
+            let rowHeight = value.split(separator: " ").first { $0.hasPrefix("cell=") }
+                .flatMap { Double($0.dropFirst(5)) } ?? 17
+            press(surface, x: 24, y: 6 + CGFloat(rowHeight) / 2)
+            XCTAssertTrue(app.buttons["Open Task"].waitForExistence(timeout: 10))
+            Thread.sleep(forTimeInterval: 1)
+            let shot = XCTAttachment(screenshot: app.screenshot())
+            shot.name = "capture-task-key-card-\(name)"
+            shot.lifetime = .keepAlways
+            add(shot)
+            app.terminate()
+        }
     }
 
     func testALongPressAwayFromAKeyOffersNothing() throws {

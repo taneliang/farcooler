@@ -804,6 +804,8 @@ struct TerminalView: View {
     /// with nothing to show is a dialog that will eventually be shown with
     /// nothing to show.
     @State private var heldLink: String?
+    /// Where the finger held it, for a task key's card (ov-299).
+    @State private var heldAt: CGPoint = .zero
     /// Why the runner refused this pane's last Restart or Dismiss, or nil.
     @State private var refused: ReviewTrouble?
 
@@ -1418,6 +1420,7 @@ struct TerminalView: View {
                     // inventing a second meaning here would be a gesture nobody
                     // asked for on a screen where every touch matters.
                     let target = cell(at: point, grid: grid, size: size)
+                    heldAt = point
                     heldLink = session.link(atRow: target.row, column: target.column, linker: linker)
                 },
                 accessory: AnyView(
@@ -1442,6 +1445,7 @@ struct TerminalView: View {
         // to switch to it did nothing at all.
         .frame(width: size.width, height: size.height)
         .clipped()
+        .taskKeyHeldPreview($heldLink, at: heldAt, linker: linker)
         // The keyboard on arrival.
         .onAppear { focusRequest += 1 }
     }
