@@ -29,7 +29,17 @@ struct PullDownMenuTests {
 
     /// Opens the menu from a real anchor in a real window and reads where the
     /// menu's window lands against the anchor's, then closes it. No input.
-    @Test func openMenuSitsBelowItsAnchor() async throws {
+    ///
+    /// Opt-in (FARCOOLER_REAL_MENU): `popUp` tracks the menu in a nested run
+    /// loop on the main thread, and in the full parallel run, beside
+    /// NavigatorFilterTests' synthetic presses, the test process then ended
+    /// with status 0 partway through, every test after it unrun and the run
+    /// reported green (integ-14: 1,189 tests run without it, the run stopping
+    /// about 21 s in with it). `originIsBelowTheAnchor` is the guard in the
+    /// default run; run this alone with
+    /// `FARCOOLER_REAL_MENU=1 swift test --filter PullDownMenuTests`.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["FARCOOLER_REAL_MENU"] != nil))
+    func openMenuSitsBelowItsAnchor() async throws {
         let window = try await TitleBarHarness.window(Color.clear, width: 600)
         let anchor = PullDownAnchorView(frame: NSRect(x: 100, y: 100, width: 120, height: 22))
         window.contentView?.addSubview(anchor)
