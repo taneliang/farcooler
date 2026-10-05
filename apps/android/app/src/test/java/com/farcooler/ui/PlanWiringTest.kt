@@ -59,6 +59,17 @@ class PlanWiringTest {
     }
 
     @Test
+    fun `the owner's marks need the write grant, and Reverse asks before it sends`() {
+        val board = source("ui/BoardScreen.kt")
+        assertTrue("a Read grant offers no marks", "canMark = keepsRulingActions && daemon?.grantedScope != \"read\"," in board)
+        val rows = source("ui/PlanRulingRows.kt")
+        assertTrue("the menu asks first", "onClick = { open = false; onReverse() }," in rows)
+        assertTrue("the dialog is what reverses", "TextButton(onClick = { confirming = false; hook.reverse(ruling) }" in rows)
+        assertTrue("TalkBack asks first too", "CustomAccessibilityAction(RulingWords.REVERSE) { onReverse(); true }" in rows)
+        assertTrue("nothing else calls reverse", rows.split("hook.reverse(ruling)").size == 2)
+    }
+
+    @Test
     fun `a plan page says which page is open, so a notice reads only that record`() {
         val page = source("ui/PlanPageScreens.kt")
         assertTrue("open", "connection.plans.openPage = page" in page)

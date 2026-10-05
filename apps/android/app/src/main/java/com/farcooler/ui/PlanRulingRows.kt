@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -39,6 +40,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.farcooler.model.Plan
 import com.farcooler.model.PlanRuling
+import com.farcooler.model.RulingActions
 import com.farcooler.model.RulingWords
 import com.farcooler.model.openRulings
 import com.farcooler.model.pastRulings
@@ -153,6 +155,23 @@ private fun CopyReferenceButton(ruling: PlanRuling, copy: (String) -> Unit) {
  */
 @Composable
 fun PlanRulingRow(ruling: PlanRuling, hook: RulingsHook, modifier: Modifier = Modifier) {
+    // Reverse asks first (ruling R-18): it sends the orchestrator off to change
+    // things. Keep and Discuss don't.
+    var confirming by remember { mutableStateOf(false) }
+    if (confirming) {
+        AlertDialog(
+            onDismissRequest = { confirming = false },
+            title = { Text(RulingActions.confirmTitle(ruling)) },
+            text = { Text(RulingActions.confirmMessage(ruling)) },
+            confirmButton = {
+                TextButton(onClick = { confirming = false; hook.reverse(ruling) }, modifier = Modifier.testTag("plan-ruling-${ruling.short}-reverse-confirm")) {
+                    Text(RulingWords.REVERSE)
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirming = false }) { Text("Cancel") } },
+            modifier = Modifier.testTag("plan-ruling-${ruling.short}-confirm"),
+        )
+    }
     ListItem(
         leadingContent = { ShortId(ruling) },
         headlineContent = { Text(ruling.decision, style = MaterialTheme.typography.titleSmall) },
@@ -165,14 +184,14 @@ fun PlanRulingRow(ruling: PlanRuling, hook: RulingsHook, modifier: Modifier = Mo
                 }
             }
         },
-        trailingContent = { RulingActionsMenu(ruling, hook) },
-        modifier = modifier.testTag("plan-ruling-${ruling.short}").rulingSemantics(ruling, hook),
+        trailingContent = { RulingActionsMenu(ruling, hook, onReverse = { confirming = true }) },
+        modifier = modifier.testTag("plan-ruling-${ruling.short}").rulingSemantics(ruling, hook, onReverse = { confirming = true }),
     )
 }
 
 /** Keep, and a menu with Reverse, Discuss and Copy reference. Reverse and Discuss are off, never hidden, with no orchestrator. */
 @Composable
-private fun RulingActionsMenu(ruling: PlanRuling, hook: RulingsHook) {
+private fun RulingActionsMenu(ruling: PlanRuling, hook: RulingsHook, onReverse: () -> Unit) {
     var open by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically) {
         if (hook.canMark) {
@@ -189,7 +208,7 @@ private fun RulingActionsMenu(ruling: PlanRuling, hook: RulingsHook) {
                     DropdownMenuItem(
                         text = { Text(RulingWords.REVERSE) },
                         enabled = hook.canAsk,
-                        onClick = { open = false; hook.reverse(ruling) },
+                        onClick = { open = false; onReverse() },
                         modifier = Modifier.testTag("plan-ruling-${ruling.short}-reverse"),
                     )
                     DropdownMenuItem(
@@ -256,14 +275,14 @@ private fun Labeled(label: String, text: String) {
 }
 
 /** One spoken label for the row, and its actions as TalkBack's custom actions. */
-private fun Modifier.rulingSemantics(ruling: PlanRuling, hook: RulingsHook): Modifier =
+private fun Modifier.rulingSemantics(ruling: PlanRuling, hook: RulingsHook, onReverse: () -> Unit = {}): Modifier =
     semantics(mergeDescendants = true) {
         contentDescription = RulingWords.accessibility(ruling)
         val actions = mutableListOf<CustomAccessibilityAction>()
         if (hook.canMark && ruling.isStanding) {
             actions += CustomAccessibilityAction(RulingWords.KEEP) { hook.keep(ruling); true }
             if (hook.canAsk) {
-                actions += CustomAccessibilityAction(RulingWords.REVERSE) { hook.reverse(ruling); true }
+                actions += CustomAccessibilityAction(RulingWords.REVERSE) { onReverse(); true }
                 actions += CustomAccessibilityAction(RulingWords.DISCUSS) { hook.discuss(ruling); true }
             }
         }

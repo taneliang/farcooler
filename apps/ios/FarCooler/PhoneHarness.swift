@@ -30,6 +30,7 @@ import SwiftUI
 //                            loaded simulator's did (ov-337)
 //   -phone-saved-gone        the last launch kept a stack whose task is gone
 //   -phone-billing-led       Billing has its orchestrator from the start
+//   -phone-orchestrator-chat its orchestrator is a chat pane, not a terminal
 //   -phone-onboarding        no runners: the onboarding screen, as a fresh install
 //   -phone-no-repositories   the runner lists no repository, workspace or worktree
 //   -phone-billing-blank     Billing's board has no task (Main's already has none)
@@ -410,7 +411,8 @@ final class HarnessRunner {
                     id: Self.billingOrchestrator, short: "d004", title: "claude",
                     preset: "claude", state: billingDead ? "exited" : "running",
                     exitCode: billingDead ? 127 : nil, activity: "idle", epoch: 1,
-                    paneMode: "terminal", chatCapable: false, workspace: Self.billing,
+                    paneMode: CommandLine.arguments.contains("-phone-orchestrator-chat") ? "agent" : "terminal",
+                    chatCapable: CommandLine.arguments.contains("-phone-orchestrator-chat"), workspace: Self.billing,
                     role: "orchestrator"))
         }
         return Fleet(
@@ -579,6 +581,14 @@ final class HarnessRunner {
                 throw ClientCore.CoreError.rejected("not safe to paste", word: "agent-not-connected")
             }
             sent.append("draft billing \(text)")
+            return try json([:])
+        case "terminal.agent_prompt":
+            // A message to a chat orchestrator (`-phone-orchestrator-chat`): what a
+            // ruling's Reverse sends (ov-333).
+            guard args["terminal"] as? String == Self.billingOrchestrator,
+                let text = args["text"] as? String, text.hasPrefix("Please reverse ruling ")
+            else { throw ClientCore.CoreError.rejected("bad prompt", word: "invalid-argument") }
+            sent.append("prompt billing \(text)")
             return try json([:])
         case "worktree.list_dir", "worktree.read_file":
             return try files(method, args)

@@ -37,7 +37,9 @@ struct PlanRulingsSection: View {
     var actions = PhoneRulingActions()
     var copy: (String) -> Void = { UIPasteboard.general.string = $0 }
 
-    @State private var pastOpen = false
+    /// Whether Past Decisions is open: the board's, as Landed Today's is, so a
+    /// re-read of the plan can't close it.
+    @Binding var pastOpen: Bool
     /// What the last Reverse or Discuss had to say, under the open rulings.
     @State private var notice: String?
 
@@ -53,6 +55,7 @@ struct PlanRulingsSection: View {
                 } header: {
                     HStack(spacing: PaneMetrics.tight) {
                         PlanHeader(title: PlanWords.decidedForYou, count: open.count)
+                            .accessibilityIdentifier("plan-rulings")
                         if actions.canMark, open.count > 1 {
                             Button(PlanWords.keepAllRulings) { actions.keepAll() }
                                 .font(.subheadline)
@@ -61,8 +64,6 @@ struct PlanRulingsSection: View {
                                 .accessibilityIdentifier("plan-rulings-keep-all")
                         }
                     }
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("plan-rulings")
                 } footer: {
                     if let notice {
                         Text(notice).accessibilityIdentifier("plan-rulings-notice")
@@ -74,20 +75,23 @@ struct PlanRulingsSection: View {
             }
             if !past.isEmpty {
                 Section {
-                    if pastOpen {
-                        ForEach(past) { ruling in
-                            PlanSettledRulingRow(ruling: ruling, copy: copy)
-                        }
-                    }
-                } header: {
+                    // A row of its own rather than the header's button: a tap on
+                    // a list section's header didn't open it under XCUITest.
                     Button { withAnimation { pastOpen.toggle() } } label: {
                         PlanHeader(title: PlanWords.pastDecisions, count: past.count, open: pastOpen)
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("\(PlanWords.pastDecisions), \(past.count)")
                     .accessibilityValue(pastOpen ? "Expanded" : "Collapsed")
                     .accessibilityIdentifier("plan-rulings-past-header")
+                    if pastOpen {
+                        ForEach(past) { ruling in
+                            PlanSettledRulingRow(ruling: ruling, copy: copy)
+                        }
+                    }
                 }
             }
         }
@@ -131,6 +135,9 @@ struct PlanRulingRow: View {
     var actions = PhoneRulingActions()
     let copy: (String) -> Void
     @Binding var notice: String?
+    /// Reverse asks first (ruling R-18): it sends the orchestrator off to change
+    /// things. Keep and Discuss don't.
+    @State private var confirming = false
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: PaneMetrics.tight) {
@@ -155,13 +162,13 @@ struct PlanRulingRow: View {
             Spacer(minLength: 0)
             CopyReferenceButton(ruling: ruling, copy: copy)
         }
-        .swipeActions(edge: .trailing, allowsFullSwipe: actions.canMark) {
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if actions.canMark {
                 // Gray, as everywhere on the phone: color is for what needs
                 // attention.
                 Button(PlanWords.keepRuling, systemImage: "checkmark") { actions.keep(ruling) }
                     .tint(.gray)
-                Button(PlanWords.reverseRuling, systemImage: "arrow.uturn.backward") { ask(actions.reverse) }
+                Button(PlanWords.reverseRuling, systemImage: "arrow.uturn.backward") { confirming = true }
                     .tint(.gray)
                     .disabled(!actions.canAsk)
                 Button(PlanWords.discussRuling, systemImage: "text.bubble") { ask(actions.discuss) }
@@ -172,12 +179,18 @@ struct PlanRulingRow: View {
         .contextMenu {
             if actions.canMark {
                 Button(PlanWords.keepRuling, systemImage: "checkmark") { actions.keep(ruling) }
-                Button(PlanWords.reverseRuling, systemImage: "arrow.uturn.backward") { ask(actions.reverse) }
+                Button(PlanWords.reverseRuling, systemImage: "arrow.uturn.backward") { confirming = true }
                     .disabled(!actions.canAsk)
                 Button(PlanWords.discussRuling, systemImage: "text.bubble") { ask(actions.discuss) }
                     .disabled(!actions.canAsk)
             }
             Button(PlanWords.copyReference, systemImage: "doc.on.doc") { copy(ruling.reference) }
+        }
+        .confirmationDialog(RulingActions.confirmTitle(ruling), isPresented: $confirming, titleVisibility: .visible) {
+            Button(PlanWords.reverseRuling) { ask(actions.reverse) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(RulingActions.confirmMessage(ruling))
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(PlanWords.rulingAccessibility(ruling))
@@ -185,7 +198,7 @@ struct PlanRulingRow: View {
         .accessibilityActions {
             if actions.canMark {
                 Button(PlanWords.keepRuling) { actions.keep(ruling) }
-                Button(PlanWords.reverseRuling) { ask(actions.reverse) }.disabled(!actions.canAsk)
+                Button(PlanWords.reverseRuling) { confirming = true }.disabled(!actions.canAsk)
                 Button(PlanWords.discussRuling) { ask(actions.discuss) }.disabled(!actions.canAsk)
             }
         }

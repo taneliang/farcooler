@@ -99,7 +99,7 @@ struct PlanRulingOwnerActionsTests {
     @Test("Reverse sends the ruling's recorded reversal to a chat orchestrator, and leaves the composer alone")
     func reverseSendsTheReversal() async {
         let calls = PlanViewTests.Calls()
-        let handoff = ComposerHandoff()
+        let before = ComposerHandoff.shared.waiting
         let outcome = await RulingOrchestrator.reverse(Self.ruling, seat: Self.seat(), client: Self.client(calls))
         #expect(outcome == .sent)
         let sends = calls.args.filter { $0.starts(with: ["terminal", "agent-prompt", "orch"]) }
@@ -108,7 +108,14 @@ struct PlanRulingOwnerActionsTests {
         #expect(text.contains("One token; every surface follows."), "the recorded reversal: \(text)")
         #expect(text.contains("`plan ruling reverse R-2 --sha <commit>`"))
         #expect(!calls.args.contains { $0.first == "plan" }, "reversing never marks the ruling itself")
-        #expect(handoff.waiting.isEmpty)
+        #expect(ComposerHandoff.shared.waiting == before, "the composer's shared handoff is untouched")
+    }
+
+    @Test("With no client, Reverse is a failure, never Asked")
+    func noClientIsNotSent() async {
+        let outcome = await RulingOrchestrator.reverse(Self.ruling, seat: Self.seat(), client: nil)
+        #expect(outcome == .failed)
+        #expect(RulingActions.notice(for: outcome, ruling: Self.ruling) == "Couldn’t reach the orchestrator. Try again.")
     }
 
     @Test("Reverse into a terminal orchestrator is typed with no Enter, and a refusal copies it")

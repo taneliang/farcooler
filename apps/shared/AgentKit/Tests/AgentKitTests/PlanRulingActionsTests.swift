@@ -60,7 +60,7 @@ struct PlanRulingActionsTests {
         #expect(unknown == .maybeDrafted)
         #expect(sent == 0, "a terminal pane is never sent a message")
         #expect(copied.count == 1 && copied[0].contains("One token"))
-        #expect(RulingActions.notice(for: .maybeDrafted, ruling: Self.ruling) == nil)
+        #expect(RulingActions.notice(for: .maybeDrafted, ruling: Self.ruling) == "Typed, not sent. Check the orchestrator’s input for the request.")
     }
 
     /// Discuss quotes the ruling into the composer, prefilled and unsent: it
@@ -119,5 +119,13 @@ struct PlanRulingActionsTests {
         #expect(plan.openRulings.map(\.short) == ["R-2"])
         #expect(plan.pastRulings.map(\.short) == ["R-1"])
         #expect(PlanWords.pastDecisions == "Past Decisions")
+    }
+
+    /// Reverse asks first, naming the ruling and the reversal the request will carry.
+    @Test func reverseConfirmsByNamingTheRulingAndItsReversal() {
+        #expect(RulingActions.confirmTitle(Self.ruling) == "Reverse R-12?")
+        let message = RulingActions.confirmMessage(Self.ruling)
+        #expect(message.contains("The inbox is amber."))
+        #expect(message.contains("One token; every surface follows."))
     }
 }

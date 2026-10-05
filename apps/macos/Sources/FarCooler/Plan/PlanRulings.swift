@@ -146,6 +146,9 @@ struct PlanRulingRow: View {
 
     @Environment(\.planRulingActions) private var actions
     @State private var hovering = false
+    /// Reverse asks first (ruling R-18): it sends the orchestrator off to change
+    /// things. Keep and Discuss don't.
+    @State private var confirming = false
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 0) {
@@ -162,7 +165,7 @@ struct PlanRulingRow: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .layoutPriority(1)
                     Spacer(minLength: 0)
-                    RulingRowActions(ruling: ruling)
+                    RulingRowActions(ruling: ruling, onReverse: { confirming = true })
                         .opacity(hovering || actions.alwaysShown ? 1 : 0)
                     CopyReferenceButton(ruling: ruling, copy: copy)
                 }
@@ -182,7 +185,13 @@ struct PlanRulingRow: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .contextMenu {
-            RulingMenu(ruling: ruling, copy: copy)
+            RulingMenu(ruling: ruling, copy: copy, onReverse: { confirming = true })
+        }
+        .confirmationDialog(RulingActions.confirmTitle(ruling), isPresented: $confirming, titleVisibility: .visible) {
+            Button(PlanWords.reverseRuling) { actions.reverse(ruling) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(RulingActions.confirmMessage(ruling))
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(PlanWords.rulingAccessibility(ruling))
@@ -190,7 +199,7 @@ struct PlanRulingRow: View {
         .accessibilityActions {
             if actions.canKeep {
                 Button(PlanWords.keepRuling) { actions.keep(ruling) }
-                Button(PlanWords.reverseRuling) { actions.reverse(ruling) }.disabled(!actions.canAsk)
+                Button(PlanWords.reverseRuling) { confirming = true }.disabled(!actions.canAsk)
                 Button(PlanWords.discussRuling) { actions.discuss(ruling) }.disabled(!actions.canAsk)
             }
         }
@@ -248,26 +257,32 @@ struct PlanSettledRulingRow: View {
 /// has no orchestrator to ask, and say what turns them on.
 private struct RulingRowActions: View {
     let ruling: PlanRuling
+    let onReverse: () -> Void
     @Environment(\.planRulingActions) private var actions
 
     var body: some View {
         if actions.canKeep {
             HStack(spacing: Spacing.group) {
                 Button(PlanWords.keepRuling) { actions.keep(ruling) }
+                    .foregroundStyle(.secondary)
                     .help("Keep this call. It stays as precedent for the orchestrator.")
                     .identified("plan-ruling-\(ruling.short)-keep")
-                Button(PlanWords.reverseRuling) { actions.reverse(ruling) }
+                Button(PlanWords.reverseRuling, action: onReverse)
+                    .foregroundStyle(actions.canAsk ? .secondary : .tertiary)
                     .disabled(!actions.canAsk)
                     .help(actions.canAsk ? "Ask the orchestrator to undo it" : PlanWords.rulingNeedsOrchestrator)
                     .identified("plan-ruling-\(ruling.short)-reverse")
                 Button(PlanWords.discussRuling) { actions.discuss(ruling) }
+                    .foregroundStyle(actions.canAsk ? .secondary : .tertiary)
                     .disabled(!actions.canAsk)
                     .help(actions.canAsk ? "Start a message to the orchestrator about it" : PlanWords.rulingNeedsOrchestrator)
                     .identified("plan-ruling-\(ruling.short)-discuss")
             }
             .buttonStyle(.borderless)
             .font(.system(size: WorkspaceStyle.PaneText.secondary))
-            .foregroundStyle(.secondary)
+            // Each button sets its own gray, and a Reverse or Discuss that's off
+            // is a lighter one: a single style over them all painted over the
+            // dimming a disabled button gets.
         }
     }
 }
@@ -276,12 +291,13 @@ private struct RulingRowActions: View {
 struct RulingMenu: View {
     let ruling: PlanRuling
     let copy: @MainActor (String) -> Void
+    let onReverse: () -> Void
     @Environment(\.planRulingActions) private var actions
 
     var body: some View {
         if actions.canKeep, ruling.isStanding {
             Button(PlanWords.keepRuling) { actions.keep(ruling) }
-            Button(PlanWords.reverseRuling) { actions.reverse(ruling) }.disabled(!actions.canAsk)
+            Button(PlanWords.reverseRuling, action: onReverse).disabled(!actions.canAsk)
             Button(PlanWords.discussRuling) { actions.discuss(ruling) }.disabled(!actions.canAsk)
             Divider()  // style-exempt: a menu divider, in the context menu RulingMenu builds
         }

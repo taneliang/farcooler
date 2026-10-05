@@ -32,10 +32,10 @@ final class PlanRulingsUITests: XCTestCase {
 
     /// Billing's board with Plan chosen, on a runner that keeps a plan and,
     /// unless `rulings` is false, rulings.
-    private func openPlan(rulings: Bool = true) -> XCUIApplication {
+    private func openPlan(rulings: Bool = true, extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication.phoneHarness(
             ["-phone-empty-inbox", "-phone-board-reads", "-phone-plan", "-phone-plan-file", Self.fixture]
-                + (rulings ? ["-phone-rulings"] : []))
+                + (rulings ? ["-phone-rulings"] : []) + extra)
         let billing = app.buttons["workspace-row-Billing"]
         XCTAssertTrue(billing.waitForExistence(timeout: 30), "no Billing row")
         billing.tap()
@@ -47,10 +47,19 @@ final class PlanRulingsUITests: XCTestCase {
         return app
     }
 
+    /// Scrolls to `id`, down the list and then back up it: an element that
+    /// was passed, or a list that moved when a ruling left it, is found too.
     private func reveal(_ app: XCUIApplication, _ id: String) -> XCUIElement {
         let target = element(app, id)
         for _ in 0..<8 where !(target.exists && target.isHittable) { app.swipeUp() }
+        for _ in 0..<16 where !(target.exists && target.isHittable) { app.swipeDown() }
         return target
+    }
+
+    private var sentLines: (XCUIApplication) -> [String] {
+        { app in
+            (self.element(app, "harness-sent").value as? String).map { $0.split(separator: "\n").map(String.init) } ?? []
+        }
     }
 
     func testOpenRulingsComeFirstNewestFirstAndTheRestFold() {
@@ -108,6 +117,83 @@ final class PlanRulingsUITests: XCTestCase {
         for short in ["R-4", "R-3", "R-2", "R-1"] {
             XCTAssertTrue(reveal(app, "plan-ruling-\(short)").label.hasSuffix("Kept"), short)
         }
+    }
+
+    /// A swipe reveals the three actions and performs none: a full swipe never
+    /// keeps a ruling by itself.
+    func testASwipeRevealsKeepReverseAndDiscussAndDoesNotKeep() {
+        let app = openPlan(extra: ["-phone-billing-led"])
+        let row = reveal(app, "plan-ruling-R-2")
+        row.swipeLeft()
+        for name in ["Keep", "Reverse", "Discuss"] {
+            XCTAssertTrue(app.buttons[name].firstMatch.waitForExistence(timeout: 5), "no \(name) on the swipe")
+        }
+        XCTAssertTrue(element(app, "plan-ruling-R-2").exists, "the swipe kept nothing")
+        XCTAssertFalse(sentLines(app).contains { $0.hasPrefix("ruling.keep") }, "\(sentLines(app))")
+    }
+
+    /// Reverse asks first, naming the ruling and the reversal, and sends
+    /// nothing until it's confirmed; Cancel sends nothing at all. Confirmed,
+    /// the request reaches the orchestrator (typed into its terminal here).
+    func testReverseConfirmsThenReachesTheOrchestrator() {
+        let app = openPlan(extra: ["-phone-billing-led"])
+        let row = reveal(app, "plan-ruling-R-2")
+        row.swipeLeft()
+        app.buttons["Reverse"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Reverse R-2?"].waitForExistence(timeout: 5), "no confirmation naming R-2")
+        XCTAssertFalse(sentLines(app).contains { $0.contains("Please reverse") }, "sent before it was confirmed")
+        // Cancel where the dialog draws one; a popover has none and goes away
+        // on a tap outside it.
+        if app.buttons["Cancel"].waitForExistence(timeout: 2) {
+            app.buttons["Cancel"].tap()
+        } else {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.12)).tap()
+        }
+        XCTAssertFalse(sentLines(app).contains { $0.contains("Please reverse") }, "Cancel sent it")
+        let again = reveal(app, "plan-ruling-R-2")
+        again.swipeLeft()
+        app.buttons["Reverse"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Reverse R-2?"].waitForExistence(timeout: 5))
+        app.buttons["Reverse"].firstMatch.tap()
+        let sent = NSPredicate { _, _ in self.sentLines(app).contains { $0.contains("Please reverse ruling R-2") } }
+        expectation(for: sent, evaluatedWith: nil)
+        waitForExpectations(timeout: 10)
+    }
+
+    /// With the orchestrator a chat pane, a confirmed Reverse is a sent message.
+    func testReverseSendsAMessageToAChatOrchestrator() {
+        let app = openPlan(extra: ["-phone-billing-led", "-phone-orchestrator-chat"])
+        let row = reveal(app, "plan-ruling-R-2")
+        row.swipeLeft()
+        app.buttons["Reverse"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Reverse R-2?"].waitForExistence(timeout: 5))
+        app.buttons["Reverse"].firstMatch.tap()
+        let sent = NSPredicate { _, _ in self.sentLines(app).contains { $0.hasPrefix("prompt billing Please reverse ruling R-2") } }
+        expectation(for: sent, evaluatedWith: nil)
+        waitForExpectations(timeout: 10)
+        XCTAssertTrue(sentLines(app).contains { $0.contains("Reversing it:") }, "the recorded reversal travels: \(sentLines(app))")
+    }
+
+    /// Discuss reaches the orchestrator as a quote, with no confirmation.
+    func testDiscussQuotesTheRulingToTheOrchestrator() {
+        let app = openPlan(extra: ["-phone-billing-led"])
+        let row = reveal(app, "plan-ruling-R-2")
+        row.swipeLeft()
+        app.buttons["Discuss"].firstMatch.tap()
+        let sent = NSPredicate { _, _ in self.sentLines(app).contains { $0.contains("About ruling R-2") } }
+        expectation(for: sent, evaluatedWith: nil)
+        waitForExpectations(timeout: 10)
+    }
+
+    /// A phone with a Read grant is offered no marks at all: Keep would flip
+    /// and silently put itself back.
+    func testAReadGrantOffersNoMarks() {
+        let app = openPlan(extra: ["-phone-billing-led", "-phone-read-scope"])
+        let row = reveal(app, "plan-ruling-R-2")
+        row.swipeLeft()
+        XCTAssertFalse(app.buttons["Keep"].firstMatch.waitForExistence(timeout: 2), "Keep on a Read grant")
+        XCTAssertFalse(element(app, "plan-rulings-keep-all").exists)
+        XCTAssertTrue(element(app, "plan-ruling-R-2-copy").exists, "Copy Reference stays")
     }
 
     func testCopyReferenceIsStillOnAnOpenRuling() {

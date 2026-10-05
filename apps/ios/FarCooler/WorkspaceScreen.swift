@@ -169,7 +169,7 @@ struct WorkspaceScreen: View {
             navigator?.open(.worktree(runner: place.runner, worktree: home.id, landing: .terminal(seat.id)))
         }
         return PhoneRulingActions(
-            canMark: connection.keepsRulingActions,
+            canMark: connection.keepsRulingActions && connection.knownBuild?.grantedScope != "read",
             canAsk: seat != nil,
             keep: { ruling in Task { await connection.keepRuling(ruling, in: summary) } },
             keepAll: { Task { await connection.keepAllRulings(in: summary) } },
@@ -180,7 +180,7 @@ struct WorkspaceScreen: View {
                     send: { await connection.sendPrompt(terminal: seat.id, text: $0) },
                     paste: { await connection.draftPrompt(terminal: seat.id, text: $0) },
                     copy: { UIPasteboard.general.string = $0 })
-                if outcome == .sent || outcome == .drafted { goToSeat() }
+                if outcome != .copied && outcome != .failed { goToSeat() }
                 return RulingActions.notice(for: outcome, ruling: ruling)
             },
             discuss: { ruling in

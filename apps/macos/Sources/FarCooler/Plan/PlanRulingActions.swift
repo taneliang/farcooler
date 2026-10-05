@@ -90,7 +90,11 @@ enum RulingOrchestrator {
     static func reverse(_ ruling: PlanRuling, seat: BoardPane, client: DaemonClient?) async -> RulingActions.Reversal {
         await RulingActions.reverse(
             ruling, isAgentPane: seat.terminal.isAgentPane,
-            send: { text in await client?.agentPrompt(terminal: seat.terminal.short, text: text) == nil },
+            // No client is no send: the owner is told, not shown "Asked".
+            send: { text in
+                guard let client else { return false }
+                return await client.agentPrompt(terminal: seat.terminal.short, text: text) == nil
+            },
             paste: { text in await paste(text, seat: seat, client: client) },
             copy: client?.copyToClipboard ?? AskOrchestrator.copyToPasteboard)
     }

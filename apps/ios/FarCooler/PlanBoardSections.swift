@@ -58,6 +58,7 @@ struct PlanBoardSections: View {
     @ObservedObject var reads: PlanReads
     @ObservedObject private var pages: PageReads
     @State private var landedOpen = false
+    @State private var pastRulingsOpen = false
 
     init(hook: PlanBoardHook) {
         self.hook = hook
@@ -100,7 +101,7 @@ struct PlanBoardSections: View {
                 }
             }
             pagesSection(plan)
-            PlanRulingsSection(plan: plan, keeps: hook.keepsRulings, actions: hook.rulingActions)
+            PlanRulingsSection(plan: plan, keeps: hook.keepsRulings, actions: hook.rulingActions, pastOpen: $pastRulingsOpen)
         } else {
             if !plan.nextUp.isEmpty {
                 Section {
@@ -170,7 +171,7 @@ struct PlanBoardSections: View {
             }
             // Last, as on the Mac: rulings ask nothing, and stand until the
             // owner says otherwise.
-            PlanRulingsSection(plan: plan, keeps: hook.keepsRulings, actions: hook.rulingActions)
+            PlanRulingsSection(plan: plan, keeps: hook.keepsRulings, actions: hook.rulingActions, pastOpen: $pastRulingsOpen)
         }
     }
 }

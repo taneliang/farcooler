@@ -377,7 +377,7 @@ fun BoardTab(
                             } else null,
                             rulings = if (keepsRulings) RulingsHook(
                                 copy = { scope.launch { clipboard.writeText("Far Cooler", it) } },
-                                canMark = keepsRulingActions,
+                                canMark = keepsRulingActions && daemon?.grantedScope != "read",
                                 canAsk = rulingSeat != null,
                                 pastOpen = pastRulingsOpen,
                                 onTogglePast = { pastRulingsOpen = !pastRulingsOpen },
@@ -393,7 +393,7 @@ fun BoardTab(
                                             copy = { text -> clipboard.writeText("Far Cooler", text) },
                                         )
                                         rulingNotice = RulingActions.notice(reversal, ruling)
-                                        if (reversal == RulingActions.Reversal.SENT || reversal == RulingActions.Reversal.DRAFTED) {
+                                        if (reversal != RulingActions.Reversal.COPIED && reversal != RulingActions.Reversal.FAILED) {
                                             onJump(TerminalRef(connection.host.id, seat.worktreeId, seat.terminal.id))
                                         }
                                     }

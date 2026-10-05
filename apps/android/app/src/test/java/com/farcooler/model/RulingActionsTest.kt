@@ -3,7 +3,6 @@ package com.farcooler.model
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -58,7 +57,7 @@ class RulingActionsTest {
         assertEquals(0, sent)
         assertEquals(1, copied.size)
         assertTrue("One token" in copied[0])
-        assertNull(RulingActions.notice(RulingActions.Reversal.MAYBE_DRAFTED, ruling))
+        assertEquals("Typed, not sent. Check the orchestrator’s input for the request.", RulingActions.notice(RulingActions.Reversal.MAYBE_DRAFTED, ruling))
     }
 
     @Test
@@ -101,5 +100,13 @@ class RulingActionsTest {
         assertEquals(listOf("R-12"), plan.openRulings.map { it.short })
         assertEquals(listOf("R-2", "R-1"), plan.pastRulings.map { it.short })
         assertEquals("board_ruling_actions", Capability.BOARD_RULING_ACTIONS.wire)
+    }
+
+    @Test
+    fun `reverse confirms by naming the ruling and its reversal`() {
+        assertEquals("Reverse R-12?", RulingActions.confirmTitle(ruling))
+        val message = RulingActions.confirmMessage(ruling)
+        assertTrue("The inbox is amber." in message)
+        assertTrue("One token; every surface follows." in message)
     }
 }

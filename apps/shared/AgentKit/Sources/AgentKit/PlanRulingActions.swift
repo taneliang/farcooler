@@ -30,7 +30,7 @@ public enum RulingActions {
         let short = AskAboutTask.oneLine(ruling.short)
         return "Please reverse ruling \(short) (“\(AskAboutTask.oneLine(ruling.decision))”). "
             + "Reversing it: \(AskAboutTask.oneLine(ruling.reversal)) "
-            + "When it's done, mark it with `plan ruling reverse \(short) --sha <commit>`."
+            + "When it's done, mark it with `plan ruling reverse \(short) --sha <commit>` (no commit: leave out --sha)."
     }
 
     /// Where a Reverse went.
@@ -86,13 +86,23 @@ public enum RulingActions {
             text: discussDraft(ruling), isAgentPane: isAgentPane, offer: offer, paste: paste, copy: copy)
     }
 
+    /// What Reverse asks before it sends anything (ruling R-18): the ruling
+    /// named, and the reversal the request will carry. Keep and Discuss don't
+    /// ask.
+    public static func confirmTitle(_ ruling: PlanRuling) -> String { "Reverse \(ruling.short)?" }
+
+    public static func confirmMessage(_ ruling: PlanRuling) -> String {
+        "This asks the orchestrator to reverse “\(AskAboutTask.oneLine(ruling.decision))”. "
+            + "Reversing it: \(AskAboutTask.oneLine(ruling.reversal))"
+    }
+
     /// What the window says after a Reverse, or nil when nothing needs saying.
     public static func notice(for reversal: Reversal, ruling: PlanRuling) -> String? {
         switch reversal {
         case .sent: "Asked the orchestrator to reverse \(ruling.short)."
         case .drafted: "Put the request in the orchestrator’s input. Press Return to send it."
         case .copied: "Copied the request to reverse \(ruling.short). Paste it into the orchestrator."
-        case .maybeDrafted: nil
+        case .maybeDrafted: "Typed, not sent. Check the orchestrator’s input for the request."
         case .failed: "Couldn’t reach the orchestrator. Try again."
         }
     }

@@ -135,9 +135,13 @@ struct PlanRulingsViewTests {
         await drawn.settle()
         #expect(kept == ["R-2"])
         #expect(asked.isEmpty, "Keep never reaches the orchestrator")
-        try Self.click(drawn, "plan-ruling-R-2-reverse")
         try Self.click(drawn, "plan-ruling-R-2-discuss")
-        #expect(asked == ["reverse R-2", "discuss R-2"])
+        #expect(asked == ["discuss R-2"])
+        // Reverse asks first: a click opens the confirmation (a sheet, which
+        // takes the clicks after it) and sends nothing.
+        try Self.click(drawn, "plan-ruling-R-2-reverse")
+        await drawn.settle()
+        #expect(asked == ["discuss R-2"], "Reverse waits for its confirmation: \(asked)")
     }
 
     @Test("Without an orchestrator, Reverse and Discuss are off, never hidden; without the capability there are no actions")
@@ -145,11 +149,19 @@ struct PlanRulingsViewTests {
         var asked = 0
         var actions = PlanRulingActions(canKeep: true, canAsk: false, alwaysShown: true)
         actions.reverse = { _ in asked += 1 }
+        actions.discuss = { _ in asked += 1 }
         let drawn = try await Self.draw(rulings: true, actions: actions)
         defer { drawn.window.close() }
-        #expect(drawn.seen.views["plan-ruling-R-2-reverse"] != nil)
-        try Self.click(drawn, "plan-ruling-R-2-reverse")
-        #expect(asked == 0, "a disabled Reverse sends nothing")
+        #expect(drawn.seen.views["plan-ruling-R-2-discuss"] != nil)
+        try Self.click(drawn, "plan-ruling-R-2-discuss")
+        #expect(asked == 0, "a disabled Discuss sends nothing")
+        // The control: the same click, at the same place, on an enabled one lands.
+        var control = PlanRulingActions(canKeep: true, canAsk: true, alwaysShown: true)
+        control.discuss = { _ in asked += 1 }
+        let enabled = try await Self.draw(rulings: true, actions: control)
+        defer { enabled.window.close() }
+        try Self.click(enabled, "plan-ruling-R-2-discuss")
+        #expect(asked == 1, "the click reaches an enabled Discuss, so the silence above is the disabling")
         let old = try await Self.draw(rulings: true, actions: PlanRulingActions(canKeep: false, canAsk: true, alwaysShown: true))
         defer { old.window.close() }
         #expect(old.seen.views["plan-ruling-R-2-keep"] == nil)
