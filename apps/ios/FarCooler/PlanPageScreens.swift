@@ -8,6 +8,7 @@ import SwiftUI
 struct PlanPageScreen: View {
     @ObservedObject var connection: Connection
     @ObservedObject private var reads: PlanReads
+    @ObservedObject private var pageReads: PageReads
     let place: PhoneWorkspace
     let page: PhonePlanPage
     @Environment(\.phoneNavigator) private var navigator
@@ -15,6 +16,7 @@ struct PlanPageScreen: View {
     init(connection: Connection, place: PhoneWorkspace, page: PhonePlanPage) {
         self.connection = connection
         reads = connection.plans
+        pageReads = connection.pages
         self.place = place
         self.page = page
     }
@@ -47,6 +49,8 @@ struct PlanPageScreen: View {
                 loaded(plan)
             }
         }
+        // A task key in a page's text opens its task, as one in a note does.
+        .environment(\.taskKeyLinker, connection.taskKeyLinker(navigator))
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .task(id: page) { await load() }
@@ -59,12 +63,16 @@ struct PlanPageScreen: View {
         switch page {
         case .theme(let id): return plan.themes.first { $0.id == id }?.name ?? page.word
         case .lane(let id): return plan.lanes.first { $0.id == id }?.name ?? page.word
+        case .page(let slot): return pageReads.pages(place.workspace).first { $0.slot == slot }?.title ?? page.word
         }
     }
 
     private func load() async {
         guard let summary else { return }
         if reads.state(place.workspace)?.plan == nil { await connection.readPlan(summary) }
+        // A page, and a theme's page that may draw pages inside it, read the
+        // board's pages when nothing has yet.
+        if connection.keepsPages, pageReads.state(place.workspace) == nil { await connection.readPages(summary) }
         await connection.readPlanRecord(page)
     }
 
@@ -74,7 +82,16 @@ struct PlanPageScreen: View {
             rows: Dictionary(
                 (connection.boards[place.workspace]?.rows ?? []).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
             onTask: { row in navigator?.open(.task(place, task: row.id)) },
-            onOpen: { page in navigator?.open(.plan(place, page: page)) })
+            onOpen: { page in navigator?.open(.plan(place, page: page)) },
+            pages: pageReads.pages(place.workspace),
+            world: summary.map { connection.pageWorld($0) } ?? PageWorld(),
+            onDestination: { destination in
+                switch connection.route(destination, from: place) {
+                case .push(let route)?: navigator?.open(route)
+                case .needsYou?: navigator?.go([])
+                case nil: break
+                }
+            })
         switch page {
         case .theme(let id):
             if let theme = plan.themes.first(where: { $0.id == id }) {
@@ -88,6 +105,23 @@ struct PlanPageScreen: View {
             } else {
                 ContentUnavailableView("Lane Not Found", systemImage: "map")
             }
+        case .page(let slot):
+            if let found = context.pages.first(where: { $0.slot == slot }) {
+                PlanOrchestratorPage(page: found, world: context.world, onDestination: context.onDestination)
+            } else if pageReads.state(place.workspace) == .unavailable {
+                ContentUnavailableView {
+                    Label(PageWords.couldntRead, systemImage: "exclamationmark.triangle")
+                } actions: {
+                    Button(PlanWords.tryAgain) { Task { await load() } }
+                        .accessibilityIdentifier("plan-pages-retry")
+                }
+            } else if pageReads.state(place.workspace) == nil {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                // Removed while it was open.
+                ContentUnavailableView("Page Not Found", systemImage: "doc.richtext")
+                    .accessibilityIdentifier("plan-page-gone")
+            }
         }
     }
 }
@@ -98,6 +132,13 @@ struct PlanPageContext {
     let rows: [String: TaskRow]
     let onTask: (TaskRow) -> Void
     let onOpen: (PhonePlanPage) -> Void
+    /// The board's orchestrator pages (ov-285): a page pushed, and those a
+    /// theme's page draws inside it.
+    var pages: [BoardPage] = []
+    /// What a page's references are drawn from.
+    var world = PageWorld()
+    /// Where a page's reference goes.
+    var onDestination: (PageDestination) -> Void = { _ in }
 }
 
 // MARK: - Theme
@@ -144,6 +185,11 @@ struct PlanThemePage: View {
                     if !theme.ownerAsk.isEmpty { PlanAsk(text: theme.ownerAsk).font(.body) }
                 }
             }
+            // The orchestrator's pages anchored here, after Needs You and
+            // before Lanes (design 6.1).
+            PlanAnchoredPages(
+                pages: PageShelf.anchored(context.pages, to: theme.id, plan: plan), world: context.world,
+                onOpen: context.onOpen, onDestination: context.onDestination)
             let lanes = plan.lanes(in: theme)
             if !lanes.isEmpty {
                 Section("Lanes") {

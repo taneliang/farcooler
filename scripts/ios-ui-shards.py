@@ -51,6 +51,7 @@ SHARDS = {
         "TerminalTaskKeyTests",  # -phone-harness -phone-terminal-key (ov-215)
         "AgentStoppedTests",  # -agent-layout-harness -stopped
         "ReadScopeTests",  # -phone-harness (TaskScreenTests.swift)
+        "PagesUITests",  # -phone-harness -phone-plan -phone-pages (ov-285)
     ],
     "phone2": [
         "PlanUITests",  # -phone-harness -phone-plan (ov-274)

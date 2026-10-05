@@ -23,6 +23,12 @@ import Foundation
 //   -phone-plan-outcomes  the first three themes carry an outcome of one line, of two and of
 //                         far too many, and no Next or Needs You line, so a test measures
 //                         how many lines an outcome gets from the rows' heights
+//   -phone-pages          the runner also advertises `board_pages` and answers `page.list`
+//                         from the file's `pages`, and Billing's board also holds the file's
+//                         `tasks`, so a page's references to them draw live (ov-285). With
+//                         `-phone-plan-file test/fixtures/pages-seeded.json`, read from a
+//                         scratch daemon seeded by `.claude/agent/reports/ov-284/seed-pages.sh`
+//   -phone-pages-fails    it advertises `board_pages` and refuses `page.list`
 //
 // Without any of these the runner is one from before the plan layer: no
 // `board_plan`, so the board has no control.
@@ -38,6 +44,24 @@ struct HarnessPlan {
     }
 
     private let capture: [String: Any]
+
+    /// Whether the runner keeps orchestrator pages (`-phone-pages`).
+    static var pagesAdvertised: Bool {
+        CommandLine.arguments.contains("-phone-pages") || CommandLine.arguments.contains("-phone-pages-fails")
+    }
+
+    /// The file's cards, on `board`: what a page's task and ask references
+    /// name. None without `-phone-pages`.
+    static func boardTasks(on board: String) -> [[String: Any]] {
+        guard CommandLine.arguments.contains("-phone-pages"), let plan = HarnessPlan(),
+            let tasks = plan.capture["tasks"] as? [[String: Any]]
+        else { return [] }
+        return tasks.map { task in
+            var task = task
+            task["workspace"] = board
+            return task
+        }
+    }
 
     init?() {
         guard Self.advertised,
@@ -57,6 +81,15 @@ struct HarnessPlan {
         lanes[at]["name"] = "\((lanes[at]["name"] as? String) ?? "")-v\(version + 1)"
         plan["lanes"] = lanes
         return plan
+    }
+
+    /// After a notice, the first page's title ends " v2".
+    private static func versioned(pages: Any) -> Any {
+        guard version > 0, var list = pages as? [String: Any], var rows = list["pages"] as? [[String: Any]], !rows.isEmpty
+        else { return pages }
+        rows[0]["title"] = "\((rows[0]["title"] as? String) ?? "") v\(version + 1)"
+        list["pages"] = rows
+        return list
     }
 
     /// `-phone-plan-outcomes`: three themes alike but for the length of their
@@ -94,6 +127,14 @@ struct HarnessPlan {
             guard let board = args["workspace"] as? String, boards.contains(board), let plan = capture["plan"]
             else { throw ClientCore.CoreError.rejected("bad workspace", word: "invalid-argument") }
             return try JSONSerialization.data(withJSONObject: Self.versioned(Self.measuring(plan)))
+        case "page.list":
+            guard Self.pagesAdvertised else { return nil }
+            if CommandLine.arguments.contains("-phone-pages-fails") {
+                throw ClientCore.CoreError.rejected("unavailable", word: "unavailable")
+            }
+            guard let board = args["workspace"] as? String, boards.contains(board), let pages = capture["pages"]
+            else { throw ClientCore.CoreError.rejected("bad workspace", word: "invalid-argument") }
+            return try JSONSerialization.data(withJSONObject: Self.versioned(pages: pages))
         case "plan.events":
             let subject = (args["theme"] as? String) ?? (args["lane"] as? String)
             guard let subject, let records = capture["records"] as? [String: Any], let record = records[subject]

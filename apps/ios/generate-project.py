@@ -84,6 +84,10 @@ SOURCES = [
     "PlanBoardSections.swift",
     "PlanPageScreens.swift",
     "ConnectionPlan.swift",
+    # Orchestrator pages in the Plan view (ov-285): the Pages section, a page
+    # pushed, a theme's anchored pages, and what the connection reads of them.
+    "PlanOrchestratorPages.swift",
+    "ConnectionPages.swift",
     "ConnectionNews.swift",
     "PhonePlanHarness.swift",
     "EmptyState.swift",
@@ -566,6 +570,14 @@ AGENTKIT_SOURCES = [
     # The plan layer as a client reads it, and how a phone reads it (ov-274).
     "PlanModel.swift",
     "PlanReading.swift",
+    # Orchestrator pages (ov-269): the document, its live references, the
+    # layout rules and the renderer, one SwiftUI implementation the Mac and
+    # the phone share (ov-284, ov-285). Experimental, and removable with pages.
+    "PageModel.swift",
+    "PageLive.swift",
+    "PageLayout.swift",
+    "PageView.swift",
+    "PageTable.swift",
     # The board: its model, which agent is on which card, and which
     # repositories get a Board row in the overview. The Mac has drawn the first
     # two since card -19; the phone draws the same cards off the same rules, so
@@ -814,6 +826,9 @@ UI_TEST_SOURCES = [
     # The plan layer's view on the canned runner (ov-274): opt-in, the
     # overview, its pages, and a read that is refused or never answered.
     "PlanUITests.swift",
+    # Orchestrator pages in the Plan view (ov-285), over the canned runner with
+    # a seeded board's plan, pages and cards (`-phone-pages`).
+    "PagesUITests.swift",
     "DynamicTypeTests.swift",
     # A task's agent and back, a notification landing with its workspace and
     # task under it, and a decision answered from Needs You. Needs no runner,

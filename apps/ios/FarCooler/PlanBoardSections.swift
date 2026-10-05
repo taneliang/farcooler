@@ -27,6 +27,9 @@ struct PlanBoardHook {
     /// The board's statuses by task id: a lane waits on you when one of its
     /// cards needs a decision.
     let statuses: [String: TaskStatus]
+    /// The board's orchestrator pages (ov-285), read with the plan. Nil on a
+    /// runner without `board_pages`, which shows no Pages section.
+    var pages: PageReads?
 }
 
 /// The Tasks | Plan control, a segmented picker as Apple's own lists have it.
@@ -48,11 +51,13 @@ struct PlanSwitch: View {
 struct PlanBoardSections: View {
     let hook: PlanBoardHook
     @ObservedObject var reads: PlanReads
+    @ObservedObject private var pages: PageReads
     @State private var landedOpen = false
 
     init(hook: PlanBoardHook) {
         self.hook = hook
         reads = hook.reads
+        pages = hook.pages ?? PageReads()
     }
 
     var body: some View {
@@ -85,6 +90,7 @@ struct PlanBoardSections: View {
                 PlanNotice(title: PlanWords.nothingPlanned, detail: PlanWords.nothingPlannedDetail)
                     .accessibilityIdentifier("plan-empty")
             }
+            pagesSection(plan)
         } else {
             if !plan.nextUp.isEmpty {
                 Section {
@@ -120,6 +126,7 @@ struct PlanBoardSections: View {
                     PlanHeader(title: "Themes", count: plan.shownThemes.count).accessibilityIdentifier("plan-themes")
                 }
             }
+            pagesSection(plan)
             let landed = plan.landedToday()
             if !landed.isEmpty {
                 Section {
@@ -142,6 +149,17 @@ struct PlanBoardSections: View {
                     .accessibilityIdentifier("plan-landed-header")
                 }
             }
+        }
+    }
+}
+
+extension PlanBoardSections {
+    /// After Themes, as on the Mac (design 6.1): pages of their own, and
+    /// anchored ones whose theme is gone. Nothing on a runner without pages.
+    @ViewBuilder
+    fileprivate func pagesSection(_ plan: PlanModel) -> some View {
+        if hook.pages != nil {
+            PlanPagesSection(state: pages.state(hook.summary.id), plan: plan, read: hook.read, onOpen: hook.onOpen)
         }
     }
 }

@@ -44,6 +44,9 @@ public struct PageView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // A container of its own, so the page's id doesn't stamp over every
+        // row's inside it (`page-item-0`, `page-steps`).
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("page-\(page.slot)")
     }
 

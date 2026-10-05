@@ -179,6 +179,14 @@ struct PhoneHarness: View {
             .onReceive(NotificationCenter.default.publisher(for: HarnessTaps.planNews)) { _ in
                 Task { await runner.deliver(["event": "plan", "workspace": HarnessRunner.billing]) }
             }
+            // A page written (ov-285), as the client core's `pages` line says it.
+            .onReceive(NotificationCenter.default.publisher(for: HarnessTaps.pagesNews)) { _ in
+                Task {
+                    await runner.deliver([
+                        "event": "pages", "workspace": HarnessRunner.billing, "slot": "train", "removed": false,
+                    ])
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: HarnessTaps.taskNews)) { _ in
                 Task {
                     await runner.deliver([
@@ -242,10 +250,11 @@ enum HarnessTaps {
     static let decision = Notification.Name("com.farcooler.harness.decision")
     static let planNews = Notification.Name("com.farcooler.harness.plan-news")
     static let taskNews = Notification.Name("com.farcooler.harness.task-news")
+    static let pagesNews = Notification.Name("com.farcooler.harness.pages-news")
 
     /// Listen, once per process.
     static let listening: Void = {
-        for name in [agent, decision, planNews, taskNews] {
+        for name in [agent, decision, planNews, taskNews, pagesNews] {
             CFNotificationCenterAddObserver(
                 CFNotificationCenterGetDarwinNotifyCenter(), nil,
                 { _, _, name, _, _ in
@@ -354,6 +363,7 @@ final class HarnessRunner {
                         + (Self.keepsReads ? ["board_reads"] : [])
                         + (CommandLine.arguments.contains("-phone-files-old") ? [] : ["worktree_files", "read_only_folders"])
                         + (HarnessPlan.advertised ? ["board_plan"] : [])
+                        + (HarnessPlan.pagesAdvertised ? ["board_pages"] : [])
                         + (CommandLine.arguments.contains("-phone-usage-old") ? [] : ["agent_usage"])
                         + (CommandLine.arguments.contains("-phone-queue-old") ? [] : ["agent_queue"])),
                 grantedScope: Self.readOnly ? "read" : "control",
@@ -586,12 +596,12 @@ final class HarnessRunner {
             sent.append("\(method) fc-3-webhooks")
             connection.standIn(on: fleet())
             return try json([:])
-        case "plan.get", "plan.events":
+        case "plan.get", "plan.events", "page.list":
             guard let plan = HarnessPlan(),
                 let data = try await plan.answer(method, args, boards: [Self.main, Self.billing])
             else { throw ClientCore.CoreError.rejected("not in the harness", word: "unimplemented") }
             sent.append(
-                method == "plan.get" ? "plan.get" : "plan.events \((args["theme"] as? String) ?? (args["lane"] as? String) ?? "")")
+                method == "plan.events" ? "plan.events \((args["theme"] as? String) ?? (args["lane"] as? String) ?? "")" : method)
             return data
         default:
             throw ClientCore.CoreError.rejected("not in the harness", word: "unimplemented")
@@ -769,7 +779,7 @@ final class HarnessRunner {
                 ],
             ]
         }
-        return startStates() + [
+        return startStates() + HarnessPlan.boardTasks(on: Self.billing) + [
             [
                 "id": Self.decisionTask, "key": "bil-7", "title": "Pick a PDF library",
                 "status": "needs_decision", "status_since": now - 600_000,

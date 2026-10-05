@@ -254,6 +254,7 @@ struct PageStackedTable: View {
                 .accessibilityIdentifier("page-stacked-row-\(index)")
             }
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("page-stacked-table")
     }
 }

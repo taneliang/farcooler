@@ -224,3 +224,29 @@ public enum PageLinks {
         return url
     }
 }
+
+/// Where a board's pages are drawn (design 6.1): in the Plan view's Pages
+/// section, or as sections of the theme they're anchored to. A page whose
+/// theme is gone or dropped falls back into the Pages section, so it's never
+/// lost. The phones read it from here (ov-285); the Mac's `PlanStore` has the
+/// same rule beside its own hidden pages.
+public enum PageShelf {
+    /// The themes a page can be drawn inside: those the plan still has and
+    /// hasn't dropped. None without a plan.
+    public static func liveThemes(_ plan: PlanModel?) -> Set<String> {
+        Set((plan?.themes ?? []).filter { $0.state != "dropped" }.map(\.id))
+    }
+
+    /// The Pages section's rows: pages of their own, and anchored pages whose
+    /// theme is gone, in the runner's order.
+    public static func listed(_ pages: [BoardPage], plan: PlanModel?) -> [BoardPage] {
+        let themes = liveThemes(plan)
+        return pages.filter { page in page.themeAnchor.map { !themes.contains($0) } ?? true }
+    }
+
+    /// The pages drawn inside `theme`'s page.
+    public static func anchored(_ pages: [BoardPage], to theme: String, plan: PlanModel?) -> [BoardPage] {
+        guard liveThemes(plan).contains(theme) else { return [] }
+        return pages.filter { $0.themeAnchor == theme }
+    }
+}

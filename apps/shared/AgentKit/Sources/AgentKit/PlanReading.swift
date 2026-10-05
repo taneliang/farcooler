@@ -124,16 +124,20 @@ extension PlanWords {
     public static let tryAgain = "Try Again"
 }
 
-/// A theme's or lane's page on a phone, by the plan's own id.
+/// A theme's or lane's page on a phone, by the plan's own id, or an
+/// orchestrator's page by its slot (ov-285).
 public enum PhonePlanPage: Hashable, Codable, Sendable {
     case theme(String)
     case lane(String)
+    /// An orchestrator's page (ov-269), by slot: `train`, `spend`.
+    case page(String)
 
     /// What it is, for a title with no name to give it.
     public var word: String {
         switch self {
         case .theme: "Theme"
         case .lane: "Lane"
+        case .page: "Page"
         }
     }
 }

@@ -1270,6 +1270,8 @@ final class Connection: ObservableObject {
 
     /// The plan layer, read on request (ov-274); see ConnectionPlan.swift.
     let plans = PlanReads()
+    /// Orchestrator pages, read with the plan (ov-285); see ConnectionPages.swift.
+    let pages = PageReads()
 
     /// Every board this runner keeps, in the order the screens draw them:
     /// each repository's workspaces, or its one implicit board on a runner

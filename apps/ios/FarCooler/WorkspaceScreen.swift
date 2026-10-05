@@ -139,11 +139,15 @@ struct WorkspaceScreen: View {
     private func planHook(_ summary: WorkspaceSummary) -> PlanBoardHook {
         PlanBoardHook(
             summary: summary, place: place, reads: connection.plans, keeps: connection.keepsPlan,
-            read: { await connection.readPlan(summary) },
+            read: {
+                await connection.readPlan(summary)
+                await connection.readPages(summary)
+            },
             onOpen: { page in navigator?.open(.plan(place, page: page)) },
             statuses: Dictionary(
                 (connection.boards[summary.id]?.rows ?? []).map { ($0.id, $0.status) },
-                uniquingKeysWith: { first, _ in first }))
+                uniquingKeysWith: { first, _ in first }),
+            pages: connection.keepsPages ? connection.pages : nil)
     }
 
     /// Whether the workspace has an orchestrator that isn't dead.

@@ -118,16 +118,21 @@ public struct PageDoc: Decodable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        var clamped = false
         v = try c.decodeIfPresent(Int.self, forKey: .v) ?? 1
-        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
-        summary = try c.decodeIfPresent(String.self, forKey: .summary) ?? ""
-        glance = try c.decodeIfPresent(String.self, forKey: .glance)
+        title = PageCaps.cut(try c.decodeIfPresent(String.self, forKey: .title) ?? "", PageCaps.title, &clamped)
+        summary = PageCaps.cut(try c.decodeIfPresent(String.self, forKey: .summary) ?? "", PageCaps.summary, &clamped)
+        glance = try c.decodeIfPresent(String.self, forKey: .glance).map { PageCaps.cut($0, PageCaps.glance, &clamped) }
         staleAfterMin = try c.decodeIfPresent(Int.self, forKey: .staleAfterMin)
         // One block at a time, so a block this build can't read is one
         // `.unknown`, never a page that doesn't draw.
         var list = try c.nestedUnkeyedContainer(forKey: .blocks)
         var blocks: [PageBlock] = []
-        var clamped = false
+        // What's left of the document's 32 KiB, counted in the bytes of the
+        // words drawn (never more than they serialize to, so a page the
+        // runner took always fits), and of its 200 references.
+        var bytes = PageCaps.documentBytes
+        var refs = PageCaps.refs
         while !list.isAtEnd {
             let any = try list.decode(PageAny.self)
             guard blocks.count < PageCaps.blocks else {
@@ -135,7 +140,13 @@ public struct PageDoc: Decodable, Equatable, Sendable {
                 break
             }
             var cut = false
-            blocks.append(PageBlock(any, clamped: &cut))
+            let block = PageBlock(any, clamped: &cut).limitingRefs(&refs, clamped: &cut)
+            bytes -= block.textBytes
+            guard bytes >= 0 else {
+                clamped = true
+                break
+            }
+            blocks.append(block)
             clamped = clamped || cut
         }
         // More than the design allows (a runner that didn't check, or a page
@@ -510,6 +521,76 @@ public enum PageBlock: Equatable, Sendable {
     }
 }
 
+extension PageBlock {
+    /// The UTF-8 bytes of the words it draws: less than it takes written
+    /// out, so what it counts against the document's cap never over-counts.
+    var textBytes: Int {
+        func n(_ s: String?) -> Int { s?.utf8.count ?? 0 }
+        func ref(_ r: PageRef?) -> Int { n(r?.label) + n(r?.target.rawName) }
+        switch self {
+        case .heading(let text): return n(text)
+        case .text(let md, _): return n(md)
+        case .stats(let items): return items.reduce(0) { $0 + n($1.label) + n($1.value) + n($1.detail) }
+        case .progress(let label, _, _, let detail, let parts): return n(label) + n(detail) + parts.reduce(0) { $0 + n($1.label) }
+        case .table(let columns, let rows):
+            return columns.reduce(0) { $0 + n($1.title) } + rows.joined().reduce(0) { $0 + n($1.text) + ref($1.ref) }
+        case .list(let items): return items.reduce(0) { $0 + n($1.text) + n($1.detail) + ref($1.ref) }
+        case .timeline(let entries, _): return entries.reduce(0) { $0 + n($1.text) + ref($1.ref) }
+        case .steps(let steps): return steps.reduce(0) { $0 + n($1.label) }
+        case .links(let refs): return refs.reduce(0) { $0 + ref($1) }
+        case .unknown(_, let alt): return n(alt)
+        }
+    }
+
+    /// This block with its references held to what's left of the page's
+    /// `budget`: past it, a reference is dropped and its words draw as plain
+    /// text, and `clamped` says so.
+    func limitingRefs(_ budget: inout Int, clamped: inout Bool) -> PageBlock {
+        func keep(_ ref: PageRef?) -> PageRef? {
+            guard let ref else { return nil }
+            guard budget > 0 else {
+                clamped = true
+                return nil
+            }
+            budget -= 1
+            return ref
+        }
+        switch self {
+        case .table(let columns, let rows):
+            return .table(
+                columns: columns,
+                rows: rows.map { row in
+                    row.map { cell in
+                        var cell = cell
+                        if let ref = cell.ref, keep(ref) == nil {
+                            // Words a reference drew live become the name it
+                            // was written with.
+                            cell.text = cell.text ?? (ref.label ?? ref.target.rawName)
+                            cell.ref = nil
+                        }
+                        return cell
+                    }
+                })
+        case .list(let items):
+            return .list(items.map { item in
+                var item = item
+                item.ref = keep(item.ref)
+                return item
+            })
+        case .timeline(let entries, let given):
+            return .timeline(entries.map { entry in
+                var entry = entry
+                entry.ref = keep(entry.ref)
+                return entry
+            }, given: given)
+        case .links(let refs):
+            return .links(refs.compactMap { keep($0) })
+        default:
+            return self
+        }
+    }
+}
+
 /// Any JSON value, read loosely: what lets one malformed block cost only
 /// itself.
 struct PageAny: Decodable, Equatable, Sendable {
@@ -555,6 +636,13 @@ public enum PageCaps {
     public static let md = 2_000
     public static let string = 200
     public static let alt = 500
+    public static let title = 60
+    public static let summary = 120
+    public static let glance = 60
+    /// A document, serialized.
+    public static let documentBytes = 32 * 1024
+    /// References on one page.
+    public static let refs = 200
     /// The block a clamped page ends with.
     static let tooLargeType = "too-large"
 
