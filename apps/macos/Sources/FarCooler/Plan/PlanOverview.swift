@@ -133,7 +133,7 @@ struct PlanOverviewView: View {
                         .font(.system(size: WorkspaceStyle.PaneText.secondary))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                        .padding(.trailing, NavigatorGrid.gap)
+                        .padding(.trailing, NavigatorGrid.gap * 2)
                         .probed("plan-themes-summary")
                 }
             }

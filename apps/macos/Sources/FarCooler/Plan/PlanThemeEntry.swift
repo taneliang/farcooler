@@ -270,6 +270,7 @@ struct PlanThemeEntry: View {
                 Image(systemName: PlanGlyph.name(lane.state))
                     .font(Self.secondaryFont)
                     .foregroundStyle(.secondary)
+                    .frame(width: NavigatorGrid.mark, alignment: .center)  // one column, whatever the glyph's width
                     .accessibilityHidden(true)
                 Text(lane.name)
                     .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
