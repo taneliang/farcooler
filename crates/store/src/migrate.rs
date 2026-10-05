@@ -79,11 +79,7 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     // touches, whose rows go with their workspace or task by cascade and lose
     // a theme by SET NULL. No column on a table old code writes, no trigger.
     (crate::rulings::migration_0026_rulings, Older::Welcome),
-    // Two new tables (ov-309), the plan layer's trains and the CI the runner
-    // reads for them and for pages, only trains.rs and board_ci.rs touch,
-    // whose rows go with their workspace by cascade. No column on a table old
-    // code writes, no trigger.
-    (crate::trains::migration_0027_trains, Older::Welcome),
+    (crate::trains::migration_0027_trains, Older::Welcome), // ov-309: new tables only (trains.rs says why)
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
