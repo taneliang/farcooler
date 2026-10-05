@@ -27,6 +27,8 @@ final class UpdateErrand {
     private(set) var offer: [String: Any]?
     /// The CLI has had its last line.
     private(set) var finished = false
+    /// Sparkle was told to install and relaunch, and the CLI told so.
+    private(set) var installing = false
 
     init(
         relaunch: Bool, from: [String: Any], send: @escaping ([String: Any]) -> Void,
@@ -65,10 +67,22 @@ final class UpdateErrand {
     /// Downloaded, verified and ready: relaunch into it now, or leave it to
     /// install when the app quits. `offer` is the build, when this errand
     /// took the session over at this point and never saw it found.
+    ///
+    /// With a relaunch the CLI hears `installing` and the line stays open:
+    /// Sparkle can still fail from here (an installer error, a copy this
+    /// user can't write), and that failure is the CLI's to report (ov-302
+    /// F2). The app quitting to install is what closes it.
     func readyToInstall(offer: [String: Any]? = nil) -> SPUUserUpdateChoice {
         if let offer { self.offer = offer }
-        finish(["event": relaunch ? "installing" : "pending", "from": from, "to": self.offer ?? [:]])
-        return relaunch ? .install : .dismiss
+        guard relaunch else {
+            finish(["event": "pending", "from": from, "to": self.offer ?? [:]])
+            return .dismiss
+        }
+        if !finished, !installing {
+            installing = true
+            send(["event": "installing", "from": from, "to": self.offer ?? [:]])
+        }
+        return .install
     }
 
     /// Nothing newer, or nothing this Mac can run.
@@ -86,9 +100,15 @@ final class UpdateErrand {
         refuse(Self.code(error), detail: Self.chain(error).map { "\($0.domain) \($0.code)" }.joined(separator: " < "))
     }
 
-    /// The session ended. Anything still unsaid is a failure to install.
+    /// The session ended. Before `installing`, anything still unsaid is a
+    /// failure to install. After it, there's nothing more to say: the CLI
+    /// waits for the relaunch, and tells an app that never quit from one
+    /// that came back.
     func ended() {
-        refuse("install-failed")
+        guard installing else { return refuse("install-failed") }
+        guard !finished else { return }
+        finished = true
+        done()
     }
 
     /// The CLI's word for a Sparkle error. The sentence is the CLI's.
@@ -128,7 +148,7 @@ final class UpdateErrand {
     }
 
     private func progress(_ word: String) {
-        guard !finished else { return }
+        guard !finished, !installing else { return }
         send(["event": word])
     }
 
@@ -159,9 +179,16 @@ final class UpdateErrand {
 /// question it is waiting on is answered by the errand, and the alert closes.
 @MainActor
 final class UpdateUserDriver: NSObject, SPUUserDriver {
-    private let standard: SPUStandardUserDriver
+    /// The alerts: `SPUStandardUserDriver`, or a recording one in tests.
+    private let standard: any SPUUserDriver
     /// The command line's update, for as long as Sparkle's session runs.
     var errand: UpdateErrand?
+
+    /// The errand, while it still has something to tell the CLI. One that
+    /// finished answers nothing more: a later session, or the rest of this
+    /// one, is the alerts' (ov-302 F3), so a stale errand can never install
+    /// and relaunch on Sparkle's own schedule.
+    private var active: UpdateErrand? { errand.flatMap { $0.finished ? nil : $0 } }
 
     /// A question the alerts are showing, which an errand can answer instead.
     private enum Waiting {
@@ -188,7 +215,7 @@ final class UpdateUserDriver: NSObject, SPUUserDriver {
     /// The build an alert is asking about, for `farcooler app version`.
     var offerShown: [String: Any]? { shown }
 
-    init(standard: SPUStandardUserDriver) {
+    init(standard: any SPUUserDriver) {
         self.standard = standard
     }
 
@@ -213,7 +240,7 @@ final class UpdateUserDriver: NSObject, SPUUserDriver {
     }
 
     func showUserInitiatedUpdateCheck(cancellation: @escaping () -> Void) {
-        guard let errand else { return standard.showUserInitiatedUpdateCheck(cancellation: cancellation) }
+        guard let errand = active else { return standard.showUserInitiatedUpdateCheck(cancellation: cancellation) }
         errand.checking()
     }
 
@@ -225,7 +252,7 @@ final class UpdateUserDriver: NSObject, SPUUserDriver {
             version: appcastItem.displayVersionString, build: appcastItem.versionString,
             notes: appcastItem.releaseNotesURL)
         let informationOnly = appcastItem.isInformationOnlyUpdate
-        if let errand { return reply(errand.found(offer, informationOnly: informationOnly, stage: state.stage)) }
+        if let errand = active { return reply(errand.found(offer, informationOnly: informationOnly, stage: state.stage)) }
         standard.showUpdateFound(
             with: appcastItem, state: state,
             reply: alertAsks(offer, informationOnly: informationOnly, stage: state.stage, reply: reply))
@@ -247,54 +274,57 @@ final class UpdateUserDriver: NSObject, SPUUserDriver {
     }
 
     func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {
-        guard errand == nil else { return }
+        guard active == nil else { return }
         standard.showUpdateReleaseNotes(with: downloadData)
     }
 
     func showUpdateReleaseNotesFailedToDownloadWithError(_ error: any Error) {
-        guard errand == nil else { return }
+        guard active == nil else { return }
         standard.showUpdateReleaseNotesFailedToDownloadWithError(error)
     }
 
     func showUpdateNotFoundWithError(_ error: any Error, acknowledgement: @escaping () -> Void) {
-        guard let errand else { return standard.showUpdateNotFoundWithError(error, acknowledgement: acknowledgement) }
+        guard let errand = active else { return standard.showUpdateNotFoundWithError(error, acknowledgement: acknowledgement) }
         errand.notFound(error as NSError)
         acknowledgement()
     }
 
     func showUpdaterError(_ error: any Error, acknowledgement: @escaping () -> Void) {
-        guard let errand else { return standard.showUpdaterError(error, acknowledgement: acknowledgement) }
+        guard let errand = active else { return standard.showUpdaterError(error, acknowledgement: acknowledgement) }
         errand.failed(error as NSError)
-        acknowledgement()
+        // Past `installing`, the person sees it as well: the app they're in
+        // didn't update, and Sparkle's alert says why.
+        guard errand.installing else { return acknowledgement() }
+        standard.showUpdaterError(error, acknowledgement: acknowledgement)
     }
 
     func showDownloadInitiated(cancellation: @escaping () -> Void) {
-        guard let errand else { return standard.showDownloadInitiated(cancellation: cancellation) }
+        guard let errand = active else { return standard.showDownloadInitiated(cancellation: cancellation) }
         errand.downloading()
     }
 
     func showDownloadDidReceiveExpectedContentLength(_ expectedContentLength: UInt64) {
-        guard errand == nil else { return }
+        guard active == nil else { return }
         standard.showDownloadDidReceiveExpectedContentLength(expectedContentLength)
     }
 
     func showDownloadDidReceiveData(ofLength length: UInt64) {
-        guard errand == nil else { return }
+        guard active == nil else { return }
         standard.showDownloadDidReceiveData(ofLength: length)
     }
 
     func showDownloadDidStartExtractingUpdate() {
-        guard let errand else { return standard.showDownloadDidStartExtractingUpdate() }
+        guard let errand = active else { return standard.showDownloadDidStartExtractingUpdate() }
         errand.extracting()
     }
 
     func showExtractionReceivedProgress(_ progress: Double) {
-        guard errand == nil else { return }
+        guard active == nil else { return }
         standard.showExtractionReceivedProgress(progress)
     }
 
     func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) {
-        if let errand { return reply(errand.readyToInstall()) }
+        if let errand = active { return reply(errand.readyToInstall()) }
         let once = Once(reply)
         waiting = .ready(offer: shown, reply: once)
         standard.showReady { [weak self] choice in
@@ -306,27 +336,30 @@ final class UpdateUserDriver: NSObject, SPUUserDriver {
     func showInstallingUpdate(
         withApplicationTerminated applicationTerminated: Bool, retryTerminatingApplication: @escaping () -> Void
     ) {
-        guard errand == nil else { return }
+        guard active == nil else { return }
         standard.showInstallingUpdate(
             withApplicationTerminated: applicationTerminated,
             retryTerminatingApplication: retryTerminatingApplication)
     }
 
     func showUpdateInstalledAndRelaunched(_ relaunched: Bool, acknowledgement: @escaping () -> Void) {
-        guard errand == nil else { return acknowledgement() }
+        guard active == nil else { return acknowledgement() }
         standard.showUpdateInstalledAndRelaunched(relaunched, acknowledgement: acknowledgement)
     }
 
     func showUpdateInFocus() {
-        guard errand == nil else { return }
-        standard.showUpdateInFocus()
+        guard active == nil else { return }
+        standard.showUpdateInFocus?()
     }
 
     func dismissUpdateInstallation() {
         waiting = nil
         shown = nil
-        guard let errand else { return standard.dismissUpdateInstallation() }
-        errand.ended()
+        let errand = self.errand
         self.errand = nil
+        // An errand still talking showed nothing; anything else may be on
+        // screen in the alerts.
+        guard let errand, !errand.finished else { return standard.dismissUpdateInstallation() }
+        errand.ended()
     }
 }

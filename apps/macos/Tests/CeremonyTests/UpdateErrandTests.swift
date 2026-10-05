@@ -34,7 +34,26 @@ struct UpdateErrandTests {
         #expect(heard.events == ["checking", "downloading", "installing"])
         #expect((heard.lines.last?["to"] as? [String: Any])?["build"] as? String == "2329")
         #expect((heard.lines.last?["from"] as? [String: Any])?["build"] as? String == "2328")
+        // The line stays open: Sparkle can still fail from here.
+        #expect(heard.done == 0)
+        errand.ended()
+        #expect(heard.events == ["checking", "downloading", "installing"])
         #expect(heard.done == 1)
+    }
+
+    /// Review 1004q F2: a failure after `installing` reached nobody, and the
+    /// CLI blamed the app for not reopening.
+    @Test func aFailureAfterInstallingIsToldToTheCLI() {
+        let heard = Heard()
+        let errand = Self.errand(relaunch: true, heard)
+        #expect(errand.found(Self.offer, informationOnly: false, stage: .notDownloaded) == .install)
+        #expect(errand.readyToInstall() == .install)
+        errand.failed(NSError(domain: SUSparkleErrorDomain, code: Int(SUError.installationError.rawValue)))
+        #expect(heard.events == ["installing", "refused"])
+        #expect(heard.lines.last?["code"] as? String == "install-failed")
+        #expect(heard.done == 1)
+        errand.ended()
+        #expect(heard.events == ["installing", "refused"])
     }
 
     @Test func withoutARelaunchTheReadyUpdateWaitsForTheNextQuit() {
@@ -110,24 +129,84 @@ struct UpdateErrandTests {
     }
 
     /// Through the user driver Sparkle actually calls: the errand answers,
-    /// and lets go when the session ends.
+    /// a failure after `installing` reaches the CLI and the alerts both, and
+    /// the errand lets go when the session ends.
     @Test func theDriverLetsTheErrandAnswerSparkle() {
         let heard = Heard()
-        let driver = UpdateUserDriver(standard: SPUStandardUserDriver(hostBundle: .main, delegate: nil))
+        let alerts = Alerts()
+        let driver = UpdateUserDriver(standard: alerts)
         driver.errand = Self.errand(relaunch: true, heard)
 
         var replied: SPUUserUpdateChoice?
         driver.showReady { replied = $0 }
         #expect(replied == .install)
+        #expect(alerts.shown.isEmpty)
 
         var acknowledged = false
         driver.showUpdaterError(NSError(domain: SUSparkleErrorDomain, code: 0)) { acknowledged = true }
         #expect(acknowledged)
+        #expect(heard.events == ["installing", "refused"])
+        #expect(alerts.shown == ["error"])
 
         driver.dismissUpdateInstallation()
         #expect(driver.errand == nil)
-        #expect(heard.events == ["installing"])
+        #expect(alerts.shown == ["error", "dismiss"])
     }
+
+    /// Review 1004q F3: an errand that finished answers nothing more, so a
+    /// later session is the alerts', not an unasked install and relaunch.
+    @Test func aFinishedErrandLeavesTheNextQuestionToTheAlerts() {
+        let heard = Heard()
+        let alerts = Alerts()
+        let driver = UpdateUserDriver(standard: alerts)
+        let errand = Self.errand(relaunch: true, heard)
+        errand.notFound(NSError(domain: SUSparkleErrorDomain, code: Int(SUError.noUpdateError.rawValue)))
+        driver.errand = errand
+
+        var replied: SPUUserUpdateChoice?
+        driver.showReady { replied = $0 }
+        #expect(replied == nil)
+        #expect(alerts.shown == ["ready"])
+        #expect(heard.events == ["upToDate"])
+    }
+}
+
+/// Sparkle's alerts, recorded rather than shown. Every acknowledgement is
+/// made at once; questions are left unanswered.
+@MainActor
+final class Alerts: NSObject, SPUUserDriver {
+    var shown: [String] = []
+
+    func show(_ request: SPUUpdatePermissionRequest, reply: @escaping (SUUpdatePermissionResponse) -> Void) {
+        shown.append("permission")
+    }
+    func showUserInitiatedUpdateCheck(cancellation: @escaping () -> Void) { shown.append("checking") }
+    func showUpdateFound(
+        with appcastItem: SUAppcastItem, state: SPUUserUpdateState, reply: @escaping (SPUUserUpdateChoice) -> Void
+    ) { shown.append("found") }
+    func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {}
+    func showUpdateReleaseNotesFailedToDownloadWithError(_ error: any Error) {}
+    func showUpdateNotFoundWithError(_ error: any Error, acknowledgement: @escaping () -> Void) {
+        shown.append("notFound")
+        acknowledgement()
+    }
+    func showUpdaterError(_ error: any Error, acknowledgement: @escaping () -> Void) {
+        shown.append("error")
+        acknowledgement()
+    }
+    func showDownloadInitiated(cancellation: @escaping () -> Void) { shown.append("downloading") }
+    func showDownloadDidReceiveExpectedContentLength(_ expectedContentLength: UInt64) {}
+    func showDownloadDidReceiveData(ofLength length: UInt64) {}
+    func showDownloadDidStartExtractingUpdate() {}
+    func showExtractionReceivedProgress(_ progress: Double) {}
+    func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) { shown.append("ready") }
+    func showInstallingUpdate(
+        withApplicationTerminated applicationTerminated: Bool, retryTerminatingApplication: @escaping () -> Void
+    ) {}
+    func showUpdateInstalledAndRelaunched(_ relaunched: Bool, acknowledgement: @escaping () -> Void) {
+        acknowledgement()
+    }
+    func dismissUpdateInstallation() { shown.append("dismiss") }
 }
 
 /// An update the alerts are already asking about, as Sparkle's own
