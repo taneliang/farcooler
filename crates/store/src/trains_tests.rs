@@ -333,3 +333,18 @@ fn an_unknown_read_leaves_when_it_was_last_read() {
     store.record_ci(main, &read("run:9", CiStatus::Unknown)).unwrap();
     assert_eq!(store.ci_read(main, "run:9").unwrap().unwrap().fetched_at, 0);
 }
+
+/// A dropped train lets its lanes go: they no longer say they're in it
+/// (review train-1005c L1). A landed train keeps them, as its record.
+#[test]
+fn a_dropped_train_lets_its_lanes_go() {
+    let (store, main, _) = board(0);
+    let (a, b) = (lane(&store, main, "a"), lane(&store, main, "b"));
+    let dropped = start(&store, main, "integ-30", &[a.id]).unwrap();
+    let landed = start(&store, main, "integ-31", &[b.id]).unwrap();
+    state(&store, &dropped, TrainState::Dropped).unwrap();
+    sha(&store, &landed, "1a1b3275").unwrap();
+    state(&store, &landed, TrainState::Landed).unwrap();
+    assert_eq!(store.lane(a.id).unwrap().train, None);
+    assert_eq!(store.lane(b.id).unwrap().train.as_deref(), Some("integ-31"));
+}

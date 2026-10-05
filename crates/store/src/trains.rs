@@ -364,6 +364,16 @@ impl Store {
         )
         .map_err(map_err)?;
         board_lanes(&tx, &before.name, &update.add_lanes, &update.remove_lanes)?;
+        // A dropped train lets its lanes go, so none still says it's in it
+        // (review train-1005c L1). A landed one keeps them, as its record.
+        if moved && to == TrainState::Dropped {
+            tx.execute(
+                "UPDATE lanes SET train = NULL, resource_version = resource_version + 1
+                  WHERE workspace_id = ?1 AND train = ?2 COLLATE NOCASE",
+                params![uuid_blob(before.workspace_id), before.name],
+            )
+            .map_err(map_err)?;
+        }
         let after = train_in(&tx, train)?;
         tx.commit().map_err(map_err)?;
         Ok(after)

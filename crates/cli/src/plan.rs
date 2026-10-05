@@ -1042,7 +1042,7 @@ fn lane_row(l: &pb::Lane, keys: &Keys, now: i64) -> String {
     row
 }
 
-/// "In review · train integ-9 · 5 cards · 470k tokens".
+/// "In review · in integ-9 · 5 cards · 470k tokens".
 fn lane_status(l: &pb::Lane, now: i64) -> String {
     let mut parts = vec![state_word(l.state).to_string()];
     if l.state == pb::LaneState::Fixing as i32 && l.fix_rounds > 0 {
