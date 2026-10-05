@@ -1,6 +1,7 @@
 package com.farcooler.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -85,6 +86,7 @@ import com.farcooler.model.orchestratorTerminalId
 import com.farcooler.model.startLine
 import com.farcooler.model.TaskAgentPresence
 import com.farcooler.model.TaskBoard
+import com.farcooler.model.TaskKeyCard
 import com.farcooler.model.TaskRow
 import com.farcooler.model.Terminal
 import com.farcooler.model.Worktree
@@ -191,6 +193,8 @@ fun BoardTab(
     val planKey = com.farcooler.model.PlanChoice.key(connection.host.id, workspace.id)
     var planChosen by remember(planKey) { mutableStateOf(planPrefs.getBoolean(planKey, false)) }
     val planStates by connection.plans.states.collectAsStateWithLifecycle()
+    // Each row's card, for a long press (ov-299); Open goes through the row's own open.
+    val taskKeys = rememberTaskKeyLinker(connection) {}
     val keepsPlan = daemon?.can(Capability.BOARD_PLAN) == true
     val showsPlan = com.farcooler.model.PlanChoice.showing(keepsPlan, planChosen)
     var landedOpen by rememberSaveable(workspace.id) { mutableStateOf(false) }
@@ -340,6 +344,7 @@ fun BoardTab(
                                         onOpenTask(row.id)
                                     },
                                     onJump = jump,
+                                    card = taskKeys.card(row.key),
                                 )
                                 Separator()
                             }
@@ -523,8 +528,14 @@ internal fun TaskCardRow(
     presence: TaskAgentPresence,
     onOpen: () -> Unit,
     onJump: (Terminal) -> Unit,
+    /** Its card, which a long press shows (ov-299). */
+    card: TaskKeyCard? = null,
 ) {
     val now = rememberMinuteClock()
+    var held by remember { mutableStateOf(false) }
+    if (held && card != null) {
+        TaskKeyCardDialog(card, onOpen = { held = false; onOpen() }, onCopy = null, onDismiss = { held = false })
+    }
     ListItem(
         overlineContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -539,7 +550,7 @@ internal fun TaskCardRow(
         supportingContent = { CardDetails(row, now, speaks) },
         trailingContent = { AgentControl(row.key, agents, orchestrator, presence, onJump) },
         modifier = Modifier
-            .clickable(onClick = onOpen)
+            .combinedClickable(onClick = onOpen, onLongClick = card?.let { { held = true } }, onLongClickLabel = card?.let { "Show ${it.key}" })
             .testTag("board-card-${row.key}"),
     )
 }

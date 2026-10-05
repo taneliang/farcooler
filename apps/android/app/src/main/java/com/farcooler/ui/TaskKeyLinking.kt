@@ -19,6 +19,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import com.farcooler.model.Markdown
+import com.farcooler.model.Plan
+import com.farcooler.model.PlanReadState
+import com.farcooler.model.TaskKeyCard
+import com.farcooler.model.TaskKeyCards
 import com.farcooler.model.TaskKeyIndex
 import com.farcooler.model.TaskKeyLinks
 import com.farcooler.model.TaskBoard
@@ -34,7 +38,27 @@ import com.farcooler.net.Connection
  * Equal when it links the same keys: [open] is left out, since a screen makes
  * a new one on every pass and a transcript's text shouldn't restyle for that.
  */
-class TaskKeyLinker(val index: TaskKeyIndex, val open: (TaskKeyTarget) -> Unit) {
+class TaskKeyLinker(
+    val index: TaskKeyIndex,
+    /** Each key's card (ov-299), from the same reads as [index]. */
+    val cards: TaskKeyCards = TaskKeyCards.EMPTY,
+    val open: (TaskKeyTarget) -> Unit,
+) {
+    /** The card for a key this linker links, on its own runner, or null. */
+    fun card(key: String): TaskKeyCard? =
+        if (index.targets.containsKey(key) && cards.runner == index.runner) cards.card(key) else null
+
+    /** The card a task link names, when it's this linker's runner's. */
+    fun cardFor(url: String): TaskKeyCard? {
+        val (runner, key) = TaskKeyLinks.parse(url) ?: return null
+        return if (runner == index.runner) card(key) else null
+    }
+
+    /** Open the task under [key], when this linker links it. */
+    fun open(key: String) {
+        index.targets[key]?.let(open)
+    }
+
     /**
      * Open the task [url] names, when it's on this runner's boards: true when
      * it named one, opened or not, so a task link is never handed on.
@@ -45,13 +69,13 @@ class TaskKeyLinker(val index: TaskKeyIndex, val open: (TaskKeyTarget) -> Unit) 
         return true
     }
 
-    override fun equals(other: Any?): Boolean = other is TaskKeyLinker && other.index == index
+    override fun equals(other: Any?): Boolean = other is TaskKeyLinker && other.index == index && other.cards == cards
 
-    override fun hashCode(): Int = index.hashCode()
+    override fun hashCode(): Int = 31 * index.hashCode() + cards.hashCode()
 
     companion object {
         /** No keys, nothing to open: what text gets when no screen set one. */
-        val NONE = TaskKeyLinker(TaskKeyIndex.EMPTY) {}
+        val NONE = TaskKeyLinker(TaskKeyIndex.EMPTY, TaskKeyCards.EMPTY) {}
     }
 }
 
@@ -62,10 +86,13 @@ val LocalTaskKeyLinker = compositionLocalOf { TaskKeyLinker.NONE }
 fun rememberTaskKeyLinker(connection: Connection, navigate: (Route) -> Unit): TaskKeyLinker {
     val boards by connection.boards.collectAsStateWithLifecycle()
     val fleet by connection.fleet.collectAsStateWithLifecycle()
+    val plans by connection.plans.states.collectAsStateWithLifecycle()
     val navigator by rememberUpdatedState(navigate)
     val runner = connection.host.id
-    return remember(runner, fleet.workspaces, boards) {
-        taskKeyLinker(runner, fleet.workspaces.orEmpty(), boards) { navigator(it) }
+    // Built once per read of the boards and plans, not per long press (ov-299).
+    return remember(runner, fleet.workspaces, boards, plans) {
+        val read = plans.mapNotNull { (id, state) -> (state as? PlanReadState.Loaded)?.let { id to it.plan } }.toMap()
+        taskKeyLinker(runner, fleet.workspaces.orEmpty(), boards, read) { navigator(it) }
     }
 }
 
@@ -77,8 +104,10 @@ fun taskKeyLinker(
     runner: String,
     workspaces: List<WorkspaceSummary>,
     boards: Map<String, TaskBoard>,
+    plans: Map<String, Plan> = emptyMap(),
     navigate: (Route) -> Unit,
-): TaskKeyLinker = TaskKeyLinker(TaskKeyIndex.of(runner, workspaces, boards)) { navigate(it.route()) }
+): TaskKeyLinker =
+    TaskKeyLinker(TaskKeyIndex.of(runner, workspaces, boards), TaskKeyCards.of(runner, boards, plans)) { navigate(it.route()) }
 
 /** Where a key's task opens: its own task screen, as a board row or History opens one. */
 fun TaskKeyTarget.route(): Route = Route.BoardTask(runner, workspace, task)
@@ -95,7 +124,10 @@ fun TaskKeyLinker.targets(text: AnnotatedString): List<TaskKeyTarget> =
 
 /** [targets] as accessibility actions, each opening its task as a tap on the link would. */
 fun TaskKeyLinker.actions(text: AnnotatedString): List<CustomAccessibilityAction> =
-    targets(text).map { target -> CustomAccessibilityAction("Open ${target.key}") { open(target); true } }
+    targets(text).map { target ->
+        // Its title too, when its card is known (ov-299).
+        CustomAccessibilityAction("Open ${card(target.key)?.accessibilityLabel ?: target.key}") { open(target); true }
+    }
 
 /**
  * A line's inline spans as one styled string, with each task key [linker]

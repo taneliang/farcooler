@@ -30,6 +30,15 @@ fun HeldLinkDialog(
 ) {
     val uri = LocalUriHandler.current
     val key = TaskKeyLinks.parse(link)?.second
+    // A key with a card shows what the task is (ov-299).
+    val card = linker.cardFor(link)
+    if (card != null) {
+        TaskKeyCardDialog(
+            card, failure = failure, onOpen = { onOpen(TerminalPress.open(link, linker, uri::openUri)) },
+            onCopy = { onCopy(card.key) }, onDismiss = onDismiss,
+        )
+        return
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(key ?: "Link") },

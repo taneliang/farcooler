@@ -54,7 +54,24 @@ object Capture {
         }
     }
 
-    private fun one(file: File, content: @androidx.compose.runtime.Composable () -> Unit) {
+    /**
+     * [both], with the dialog [content] opens drawn over the screen where the
+     * phone puts it: centered, over Material's scrim. A dialog is a window of
+     * its own, which the screen's bitmap doesn't hold (ov-299).
+     */
+    fun bothWithDialog(name: String, content: @androidx.compose.runtime.Composable () -> Unit) {
+        Themes.merge(listOf(lightTheme), "capture")
+        for ((mode, theme) in listOf("light" to lightTheme.name, "dark" to "Nord")) {
+            Themes.select(theme)
+            one(File(outDir, "$name-$mode.png"), content, withDialog = true)
+        }
+    }
+
+    private fun one(
+        file: File,
+        content: @androidx.compose.runtime.Composable () -> Unit,
+        withDialog: Boolean = false,
+    ) {
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 activity.setContent {
@@ -64,7 +81,19 @@ object Capture {
                 }
             }
             ShadowLooper.idleMainLooper()
-            scenario.onActivity { it.window.decorView.drawToBitmap().captureRoboImage(file.path) }
+            scenario.onActivity { activity ->
+                val screen = activity.window.decorView.drawToBitmap()
+                val dialog = if (withDialog) org.robolectric.shadows.ShadowDialog.getLatestDialog() else null
+                if (dialog == null) {
+                    screen.captureRoboImage(file.path)
+                } else {
+                    val card = dialog.window!!.decorView.drawToBitmap()
+                    val canvas = android.graphics.Canvas(screen)
+                    canvas.drawColor(android.graphics.Color.argb(82, 0, 0, 0))
+                    canvas.drawBitmap(card, (screen.width - card.width) / 2f, (screen.height - card.height) / 2f, null)
+                    screen.captureRoboImage(file.path)
+                }
+            }
         }
     }
 }

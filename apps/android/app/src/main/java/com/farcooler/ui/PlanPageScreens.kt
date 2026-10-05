@@ -1,6 +1,9 @@
 package com.farcooler.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -102,6 +105,7 @@ fun PlanPageScreen(
     }
     val plan = (state as? PlanReadState.Loaded)?.plan
     val pages = (pageLists[workspaceId] as? com.farcooler.net.PageListState.Loaded)?.pages.orEmpty()
+    val taskKeys = rememberTaskKeyLinker(connection) {}
     val title = when (page) {
         is PlanPage.Theme -> plan?.themes?.firstOrNull { it.id == page.id }?.name ?: "Theme"
         is PlanPage.Lane -> plan?.lanes?.firstOrNull { it.id == page.id }?.name ?: "Lane"
@@ -131,22 +135,25 @@ fun PlanPageScreen(
                         Text(PlanWords.TRY_AGAIN)
                     }
                 }
-                is PlanReadState.Loaded -> if (page is PlanPage.Page) {
-                    OrchestratorPageBody(page.id, pageLists[workspaceId], world, router::open) {
-                        scope.launch { connection.pages.read(workspace) }
+                // Each card's key previews its task on a long press (ov-299).
+                is PlanReadState.Loaded -> CompositionLocalProvider(LocalTaskKeyLinker provides taskKeys) {
+                    if (page is PlanPage.Page) {
+                        OrchestratorPageBody(page.id, pageLists[workspaceId], world, router::open) {
+                            scope.launch { connection.pages.read(workspace) }
+                        }
+                    } else {
+                        PlanPageBody(
+                            plan = state.plan,
+                            page = page,
+                            record = records[page],
+                            rows = boards[workspaceId]?.rows.orEmpty().associateBy { it.id },
+                            onOpenTask = onOpenTask,
+                            onOpenPage = onOpenPage,
+                            pages = pages,
+                            world = world,
+                            onDestination = router::open,
+                        )
                     }
-                } else {
-                    PlanPageBody(
-                        plan = state.plan,
-                        page = page,
-                        record = records[page],
-                        rows = boards[workspaceId]?.rows.orEmpty().associateBy { it.id },
-                        onOpenTask = onOpenTask,
-                        onOpenPage = onOpenPage,
-                        pages = pages,
-                        world = world,
-                        onDestination = router::open,
-                    )
                 }
             }
         }
@@ -290,7 +297,13 @@ private fun PageLaneRow(lane: PlanLane, onClick: () -> Unit) {
         supportingContent = {
             Column {
                 Text(PlanWords.status(lane))
-                Text(lane.cards.joinToString(" ") { it.key }, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // TalkBack hears each key's title (ov-299).
+                val linker = LocalTaskKeyLinker.current
+                val spoken = lane.cards.joinToString("; ") { ref -> linker.card(ref.key)?.accessibilityLabel ?: ref.key }
+                Text(
+                    lane.cards.joinToString(" ") { it.key }, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.semantics { contentDescription = spoken },
+                )
             }
         },
         trailingContent = { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.outline) },
@@ -305,11 +318,23 @@ private fun LazyListScope.cardRows(refs: List<PlanCardRef>, plan: Plan, rows: Ma
             val row = rows[ref.task]
             val card = plan.card(ref.task)
             val status = row?.status?.title ?: card?.status.orEmpty()
+            val keyCard = row?.let { LocalTaskKeyLinker.current.card(it.key) }
+            var held by remember { mutableStateOf(false) }
+            if (held && keyCard != null && row != null) {
+                TaskKeyCardDialog(keyCard, onOpen = { held = false; onOpenTask(row.id) }, onCopy = null, onDismiss = { held = false })
+            }
             ListItem(
                 overlineContent = { Text(row?.key ?: ref.key, fontFamily = FontFamily.Monospace) },
                 headlineContent = { Text(row?.title ?: card?.title.orEmpty(), maxLines = 3, overflow = TextOverflow.Ellipsis) },
                 supportingContent = { Text(if (ref.slice.isEmpty()) status else "$status · ${ref.slice}") },
-                modifier = (if (row != null) Modifier.clickable { onOpenTask(row.id) } else Modifier)
+                modifier = (
+                    if (row != null) {
+                        Modifier.combinedClickable(
+                            onClick = { onOpenTask(row.id) }, onLongClick = keyCard?.let { { held = true } },
+                            onLongClickLabel = keyCard?.let { "Show ${it.key}" },
+                        )
+                    } else Modifier
+                    )
                     .testTag("plan-card-${row?.key ?: ref.key}").semantics(mergeDescendants = true) {},
             )
         }
