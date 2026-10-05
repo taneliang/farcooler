@@ -34,10 +34,10 @@ struct PlanViewTests {
         var plan: Data?
     }
 
-    /// The fixture with nothing planned: no theme, no lane.
+    /// The fixture with nothing planned: no theme, no lane, no ruling.
     static func emptyPlan() throws -> Data {
         var object = try #require(try JSONSerialization.jsonObject(with: fixture()) as? [String: Any])
-        for key in ["themes", "lanes", "order", "cards"] { object[key] = [] }
+        for key in ["themes", "lanes", "order", "cards", "rulings"] { object[key] = [] }
         return try JSONSerialization.data(withJSONObject: object)
     }
 

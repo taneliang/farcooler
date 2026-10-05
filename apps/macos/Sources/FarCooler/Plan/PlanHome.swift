@@ -7,7 +7,7 @@ import SwiftUI
 // the orchestrator's chat column, the plan fills the canvas until something
 // is opened in its place. Needs You first, this workspace's only and answered
 // in place (the toolbar's tray stays every workspace's), then the overview:
-// Now, Next Up, Themes, Pages and Landed Today.
+// Now, Next Up, Themes, Pages and Landed Today, then Decided For You.
 //
 // A window too narrow for the canvas folds it away: the chat carries the
 // plan's one-line strip (Concept C, 3.3), and a click on it or ⌥⌘P peeks the
@@ -57,6 +57,9 @@ struct PlanHomeContent: View {
             if !needsYou.items.isEmpty { needs }
             if plan.available {
                 PlanOverviewView(plan: plan, statuses: statuses, selected: nil, onOpen: onOpen)
+                // The calls made for the owner (ov-304), last: they ask
+                // nothing, and stand until the owner says otherwise.
+                PlanRulingsSection(plan: plan)
             } else if needsYou.items.isEmpty {
                 // A runner too old to keep a plan: said, once.
                 PlanNotice(title: PlanWords.needsUpdate, detail: nil)

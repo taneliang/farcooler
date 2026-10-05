@@ -173,14 +173,34 @@ public struct PlanModel: Decodable, Equatable, Sendable {
     /// The queued lanes in the plan, by id; first is next up.
     public var order: [String]
     public var cards: [PlanCard]
+    /// Decided for you (ov-304): standing rulings newest first, then the
+    /// settled ones, in the runner's order. Empty from a runner without
+    /// `board_rulings`, and absent from an older CLI's answer.
+    public var rulings: [PlanRuling]
 
-    public init(nowMs: Int64 = 0, themes: [PlanTheme] = [], lanes: [PlanLane] = [], order: [String] = [], cards: [PlanCard] = []) {
+    public init(
+        nowMs: Int64 = 0, themes: [PlanTheme] = [], lanes: [PlanLane] = [], order: [String] = [],
+        cards: [PlanCard] = [], rulings: [PlanRuling] = []
+    ) {
         self.nowMs = nowMs
         self.themes = themes
         self.lanes = lanes
         self.order = order
         self.cards = cards
+        self.rulings = rulings
     }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        nowMs = try c.decode(Int64.self, forKey: .nowMs)
+        themes = try c.decode([PlanTheme].self, forKey: .themes)
+        lanes = try c.decode([PlanLane].self, forKey: .lanes)
+        order = try c.decode([String].self, forKey: .order)
+        cards = try c.decode([PlanCard].self, forKey: .cards)
+        rulings = try c.decodeIfPresent([PlanRuling].self, forKey: .rulings) ?? []
+    }
+
+    private enum CodingKeys: String, CodingKey { case nowMs, themes, lanes, order, cards, rulings }
 
     public static let empty = PlanModel()
 
@@ -188,8 +208,8 @@ public struct PlanModel: Decodable, Equatable, Sendable {
         try PlanJSON.decoder.decode(PlanModel.self, from: data)
     }
 
-    /// Nothing planned: no theme and no lane.
-    public var isEmpty: Bool { themes.isEmpty && lanes.isEmpty }
+    /// Nothing planned: no theme, no lane and no ruling.
+    public var isEmpty: Bool { themes.isEmpty && lanes.isEmpty && rulings.isEmpty }
 }
 
 /// One entry in a theme's or lane's record, oldest first.
