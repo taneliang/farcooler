@@ -105,11 +105,10 @@ struct PlanOverviewView: View {
         CollapsibleSection("Themes", id: "plan.themes", style: .navigator, key: key("themes"), defaults: defaults,
             count: model.shownThemes.count
         ) {
-            // One column in a narrow navigator, more as it widens.
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: PlanMetrics.themeCardMinimum), spacing: Spacing.group, alignment: .top)],
-                alignment: .leading, spacing: Spacing.group
-            ) {
+            // One column when narrow, more as it widens. Not a lazy grid: a
+            // handful of cards, each its real height on the first pass, so
+            // nothing under them jumps as an estimate gives way (ov-298).
+            AdaptiveColumns(minimum: PlanMetrics.themeCardMinimum, spacing: Spacing.group) {
                 ForEach(model.shownThemes) { theme in
                     PlanThemeCard(theme: theme, selected: selected == .theme(theme.id), keyed: keyed) {
                         onOpen(.theme(theme.id))
@@ -447,5 +446,45 @@ extension TaskBoardModel {
     /// waits on the owner.
     var statuses: [String: TaskStatus] {
         Dictionary(rows.map { ($0.id, $0.status) }, uniquingKeysWith: { a, _ in a })
+    }
+}
+
+/// Equal columns at least `minimum` wide, as many as fit, filled row by row,
+/// each row as tall as its tallest: an adaptive grid that measures every
+/// item in the pass that places it.
+struct AdaptiveColumns: Layout {
+    let minimum: CGFloat
+    let spacing: CGFloat
+
+    private func columns(_ width: CGFloat) -> Int { max(1, Int((width + spacing) / (minimum + spacing))) }
+
+    private func rows(_ width: CGFloat, _ subviews: Subviews) -> (column: CGFloat, heights: [CGFloat]) {
+        let count = columns(width)
+        let column = max(0, (width - CGFloat(count - 1) * spacing) / CGFloat(count))
+        var heights: [CGFloat] = []
+        for start in stride(from: 0, to: subviews.count, by: count) {
+            heights.append(subviews[start..<min(start + count, subviews.count)]
+                .map { $0.sizeThatFits(.init(width: column, height: nil)).height }.max() ?? 0)
+        }
+        return (column, heights)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? minimum
+        let heights = rows(width, subviews).heights
+        return CGSize(width: width, height: heights.reduce(0, +) + CGFloat(max(heights.count - 1, 0)) * spacing)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let count = columns(bounds.width)
+        let (column, heights) = rows(bounds.width, subviews)
+        var y = bounds.minY
+        for (row, height) in heights.enumerated() {
+            for index in row * count..<min((row + 1) * count, subviews.count) {
+                let x = bounds.minX + CGFloat(index - row * count) * (column + spacing)
+                subviews[index].place(at: CGPoint(x: x, y: y), anchor: .topLeading, proposal: .init(width: column, height: nil))
+            }
+            y += height + spacing
+        }
     }
 }

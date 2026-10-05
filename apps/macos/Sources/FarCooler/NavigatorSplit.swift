@@ -278,38 +278,44 @@ struct NavigatorSplitView: View {
     var body: some View {
         GeometryReader { proxy in
           ScrollViewReader { scroller in
+            // For the rules' drags, VoiceOver and keeping the selected row
+            // in sight: the heights as last drawn. Where each pane is drawn
+            // is `NavigatorSplitLayout`'s, measured in the same pass it
+            // places them (ov-298).
             let room = room(in: proxy.size.height)
             let heights = NavigatorSplit.viewports(model, room: room, chosen: NavigatorSplit.decode(kept))
             // Never taller than the window: the panes squeeze (`viewports`)
             // rather than the navigator scrolling (ov-292).
-            VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(panes.enumerated()), id: \.element.id) { index, pane in
-                        if index > 0 { rule(index, heights: heights, room: room) }
-                        let isLast = index == panes.count - 1
-                        // Fixed chrome, so the rule's room over it and, in a
-                        // closed pane, under it, are its own (ov-258).
-                        pane.header
-                            .padding(.top, NavigatorSplit.headerTop(index))  // rhythm-exempt: NavigatorRhythm.rule, or none over the first
-                            .padding(.bottom, NavigatorSplit.headerBottom(expanded: pane.expanded, last: isLast))  // rhythm-exempt: NavigatorRhythm.rule in a closed pane over a rule
-                            .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { headers[pane.id] = $0 }
-                        if pane.expanded {
-                            ScrollView {
-                                // The room under the last row is in the
-                                // content, so the scroll view itself meets
-                                // the rule with no gap.
-                                pane.content
-                                    .padding(.bottom, NavigatorSplit.contentBottom(last: isLast))  // rhythm-exempt: NavigatorRhythm.rule, or none in the last
-                                    .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) {
-                                        contents[pane.id] = $0
-                                    }
-                            }
-                            .scrollBounceBehavior(.basedOnSize)
-                            .frame(height: heights[pane.id] ?? 0)
-                            .probed("navigator-pane-\(pane.id)")
-                        }
+            NavigatorSplitLayout(panes: panes.map { ($0.id, $0.fills, $0.expanded) }, chosen: NavigatorSplit.decode(kept)) {
+                ForEach(Array(panes.enumerated()), id: \.element.id) { index, pane in
+                    if index > 0 {
+                        rule(index, heights: heights, room: room).layoutValue(key: NavigatorSplitRole.self, value: .rule)
                     }
-                    Spacer(minLength: NavigatorRhythm.band)
+                    let isLast = index == panes.count - 1
+                    // Fixed chrome, so the rule's room over it and, in a
+                    // closed pane, under it, are its own (ov-258).
+                    pane.header
+                        .padding(.top, NavigatorSplit.headerTop(index))  // rhythm-exempt: NavigatorRhythm.rule, or none over the first
+                        .padding(.bottom, NavigatorSplit.headerBottom(expanded: pane.expanded, last: isLast))  // rhythm-exempt: NavigatorRhythm.rule in a closed pane over a rule
+                        .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { headers[pane.id] = $0 }
+                        .layoutValue(key: NavigatorSplitRole.self, value: .header(index))
+                    if pane.expanded {
+                        ScrollView {
+                            // The room under the last row is in the
+                            // content, so the scroll view itself meets
+                            // the rule with no gap.
+                            pane.content
+                                .padding(.bottom, NavigatorSplit.contentBottom(last: isLast))  // rhythm-exempt: NavigatorRhythm.rule, or none in the last
+                                .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) {
+                                    contents[pane.id] = $0
+                                }
+                        }
+                        .scrollBounceBehavior(.basedOnSize)
+                        .probed("navigator-pane-\(pane.id)")
+                        .layoutValue(key: NavigatorSplitRole.self, value: .content(index))
+                    }
                 }
+            }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)  // rhythm-exempt: the window's height
             .clipped()
             .probed("navigator-split")
@@ -499,6 +505,66 @@ struct NavigatorArrowsProbe: ViewModifier {
             content.transformPreference(NavigatorArrowsKey.self) { $0.append(NavigatorArrowsReport(arrow: arrow)) }
         } else {
             content
+        }
+    }
+}
+
+/// What a subview of `NavigatorSplitLayout` is.
+enum NavigatorSplitRole: LayoutValueKey, Equatable {
+    case rule
+    case header(Int)
+    case content(Int)
+    static let defaultValue = NavigatorSplitRole.rule
+}
+
+/// The navigator's panes, placed one under the next with each open pane as
+/// tall as `NavigatorSplit.viewports` says, from its rows' real height
+/// measured in the same layout pass (ov-298). Measured a beat later, from a
+/// geometry reading, a pane was first drawn at a guess and then corrected:
+/// a gap that closed a moment after the navigator appeared, or a section
+/// that jumped as a lazy grid's estimate gave way to its rows.
+struct NavigatorSplitLayout: Layout {
+    /// Each pane's id, whether it fills, and whether it's open, in order.
+    let panes: [(id: String, fills: Bool, expanded: Bool)]
+    /// The heights drags chose (`NavigatorSplit.decode`).
+    let chosen: [String: CGFloat]
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        proposal.replacingUnspecifiedDimensions()
+    }
+
+    /// Each pane's height for its rows, in a column `size` big.
+    func heights(in size: CGSize, subviews: Subviews) -> [Int: CGFloat] {
+        var fixed: CGFloat = NavigatorRhythm.band
+        var content: [Int: CGFloat] = [:]
+        for subview in subviews {
+            switch subview[NavigatorSplitRole.self] {
+            case .rule: fixed += NavigatorSplit.ruleSlot
+            case .header: fixed += subview.sizeThatFits(.init(width: size.width, height: nil)).height
+            case .content(let index):
+                // A scroll view's ideal height is its rows'.
+                content[index] = subview.sizeThatFits(.init(width: size.width, height: nil)).height
+            }
+        }
+        let model = panes.enumerated().map { index, pane in
+            NavigatorSplit.Pane(id: pane.id, fills: pane.fills, expanded: pane.expanded, content: content[index] ?? 0)
+        }
+        let viewports = NavigatorSplit.viewports(model, room: size.height - fixed, chosen: chosen)
+        return Dictionary(uniqueKeysWithValues: panes.enumerated().map { ($0.offset, viewports[$0.element.id] ?? 0) })
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let heights = heights(in: bounds.size, subviews: subviews)
+        var y = bounds.minY
+        for subview in subviews {
+            let height: CGFloat
+            switch subview[NavigatorSplitRole.self] {
+            case .rule: height = NavigatorSplit.ruleSlot
+            case .header: height = subview.sizeThatFits(.init(width: bounds.width, height: nil)).height
+            case .content(let index): height = heights[index] ?? 0
+            }
+            subview.place(at: CGPoint(x: bounds.minX, y: y), anchor: .topLeading, proposal: .init(width: bounds.width, height: height))
+            y += height
         }
     }
 }
