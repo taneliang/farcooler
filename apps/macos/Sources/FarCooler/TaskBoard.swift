@@ -710,7 +710,9 @@ struct TaskBoardView: View {
         .task(id: ObjectIdentifier(store)) { await store.readIfNeverRead() }
         // The plan, read wherever the runner keeps one: it decides how the
         // navigator is drawn (ov-298), and moves as the runner says it did.
-        .task(id: [planStore.available ? 1 : 0, planStore.generation]) {
+        // Asked again once the board itself reads: a first ask can go out
+        // before the runner answers anything.
+        .task(id: [planStore.available ? 1 : 0, store.hasRead ? 1 : 0, planStore.generation]) {
             guard planStore.available else { return }
             await planStore.reloadIfMoved()
             // A first read that didn't come back is asked again here.
