@@ -88,6 +88,8 @@ pub fn rename(
     let expected = version(svc, id, req.expected_version)?;
     let workspace = svc.store.rename_workspace(id, expected, &req.name)?;
     watcher.announce_fleet_changed();
+    // The glance names the board (ov-310 review L3).
+    watcher.schedule_count_notice();
     pb_workspace(svc, &workspace, scope)
 }
 
@@ -133,6 +135,8 @@ pub fn delete(svc: &Service, watcher: &Watcher, id: Uuid) -> Result<pb::Empty> {
     svc.store.delete_workspace(id)?;
     crate::service::remove_orchestrator_settings(svc.root_dir(), id);
     watcher.announce_fleet_changed();
+    // A deleted board leaves the glance (ov-310 review L3).
+    watcher.schedule_count_notice();
     Ok(pb::Empty {})
 }
 
