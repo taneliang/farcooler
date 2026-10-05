@@ -102,7 +102,11 @@ fn a_reversible_call_is_recorded_as_a_ruling() {
 fn landing_is_watched_and_cleaned_up() {
     for h in ALL {
         let land = section(&prose(h), "4. Land");
-        assert!(land.contains("After every push or CI rerun, start `gh run watch"), "{h:?}: {land}");
+        assert!(land.contains("After every push or CI rerun, take its run from `gh run list`"), "{h:?}: {land}");
+        // A local bare remote made Sonnet decide there was no CI and skip
+        // the watch (ov-323, S18): the run list decides, never the URL.
+        assert!(land.contains("never decide there is no CI from the remote's URL"), "{h:?}: {land}");
+        assert!(land.contains("start `gh run watch <id> --exit-status`"), "{h:?}: {land}");
         assert!(land.contains("as a background command"), "{h:?}: {land}");
         assert!(land.contains("delete its build output, and `worktree remove` it"), "{h:?}: {land}");
         assert!(land.contains("tick each verified `--met` line"), "{h:?}: {land}");
