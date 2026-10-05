@@ -82,6 +82,7 @@ SOURCES = [
     # view in the board's list, a theme's and a lane's page, and what the
     # connection reads of it. Deleting the layer deletes these three.
     "PlanBoardSections.swift",
+    "PlanRulingsSection.swift",
     "PlanPageScreens.swift",
     "ConnectionPlan.swift",
     # Orchestrator pages in the Plan view (ov-285): the Pages section, a page
@@ -570,6 +571,7 @@ AGENTKIT_SOURCES = [
     # The plan layer as a client reads it, and how a phone reads it (ov-274).
     "PlanModel.swift",
     "PlanReading.swift",
+    "PlanRulings.swift",
     # Orchestrator pages (ov-269): the document, its live references, the
     # layout rules and the renderer, one SwiftUI implementation the Mac and
     # the phone share (ov-284, ov-285). Experimental, and removable with pages.
@@ -834,6 +836,9 @@ UI_TEST_SOURCES = [
     # Orchestrator pages in the Plan view (ov-285), over the canned runner with
     # a seeded board's plan, pages and cards (`-phone-pages`).
     "PagesUITests.swift",
+    # Decided For You in the Plan view (ov-304), over the canned runner with a
+    # seeded board's rulings (`-phone-rulings`).
+    "PlanRulingsUITests.swift",
     "DynamicTypeTests.swift",
     # A task's agent and back, a notification landing with its workspace and
     # task under it, and a decision answered from Needs You. Needs no runner,

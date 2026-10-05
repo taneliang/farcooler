@@ -58,6 +58,7 @@ SHARDS = {
     ],
     "phone": [
         "PagesUITests",  # -phone-harness -phone-plan -phone-pages (ov-285); 650 s
+        "PlanRulingsUITests",  # -phone-harness -phone-plan -phone-rulings (ov-304)
         "WorkspaceScreenTests",  # -phone-harness; 221 s
         "PhoneReopenTests",  # -phone-harness; 129 s
     ],

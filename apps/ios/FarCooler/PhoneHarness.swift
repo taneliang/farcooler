@@ -364,6 +364,7 @@ final class HarnessRunner {
                         + (CommandLine.arguments.contains("-phone-files-old") ? [] : ["worktree_files", "read_only_folders"])
                         + (HarnessPlan.advertised ? ["board_plan"] : [])
                         + (HarnessPlan.pagesAdvertised ? ["board_pages"] : [])
+                        + (HarnessPlan.rulingsAdvertised ? ["board_rulings"] : [])
                         + (CommandLine.arguments.contains("-phone-usage-old") ? [] : ["agent_usage"])
                         + (CommandLine.arguments.contains("-phone-queue-old") ? [] : ["agent_queue"])),
                 grantedScope: Self.readOnly ? "read" : "control",

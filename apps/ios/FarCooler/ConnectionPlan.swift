@@ -64,6 +64,8 @@ extension Connection {
     /// Whether this runner keeps a plan: only then is there a control. A
     /// runner not read yet, or too old, offers nothing new.
     var keepsPlan: Bool { knownBuild?.can(.boardPlan) == true }
+    /// Whether it keeps rulings too (ov-304): its plan carries Decided For You.
+    var keepsRulings: Bool { knownBuild?.can(.boardRulings) == true }
 
     /// How long a read waits for the runner. A UI test shortens it
     /// (`-phone-plan-timeout`), so an unanswered read is seen to end.

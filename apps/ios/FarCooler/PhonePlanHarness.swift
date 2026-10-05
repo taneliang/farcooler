@@ -29,6 +29,10 @@ import Foundation
 //                         `-phone-plan-file test/fixtures/pages-seeded.json`, read from a
 //                         scratch daemon seeded by `.claude/agent/reports/ov-284/seed-pages.sh`
 //   -phone-pages-fails    it advertises `board_pages` and refuses `page.list`
+//   -phone-rulings        the runner also advertises `board_rulings` (ov-304), so the plan's
+//                         `rulings` draw as Decided For You. With `-phone-plan-file
+//                         test/fixtures/plan-rulings-seeded.json`: `farcooler plan --json` from a
+//                         scratch daemon given four rulings with `plan ruling add` and `set`
 //
 // Without any of these the runner is one from before the plan layer: no
 // `board_plan`, so the board has no control.
@@ -44,6 +48,9 @@ struct HarnessPlan {
     }
 
     private let capture: [String: Any]
+
+    /// Whether the runner keeps rulings (`-phone-rulings`).
+    static var rulingsAdvertised: Bool { CommandLine.arguments.contains("-phone-rulings") }
 
     /// Whether the runner keeps orchestrator pages (`-phone-pages`).
     static var pagesAdvertised: Bool {

@@ -149,7 +149,8 @@ struct WorkspaceScreen: View {
             statuses: Dictionary(
                 (connection.boards[summary.id]?.rows ?? []).map { ($0.id, $0.status) },
                 uniquingKeysWith: { first, _ in first }),
-            pages: connection.keepsPages ? connection.pages : nil)
+            pages: connection.keepsPages ? connection.pages : nil,
+            keepsRulings: connection.keepsRulings)
     }
 
     /// Whether the workspace has an orchestrator that isn't dead.

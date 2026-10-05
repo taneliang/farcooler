@@ -30,6 +30,9 @@ struct PlanBoardHook {
     /// The board's orchestrator pages (ov-285), read with the plan. Nil on a
     /// runner without `board_pages`, which shows no Pages section.
     var pages: PageReads?
+    /// Whether this runner advertises `board_rulings` (ov-304): without it,
+    /// no Decided For You.
+    var keepsRulings = false
 }
 
 /// The Tasks | Plan control, a segmented picker as Apple's own lists have it.
@@ -149,6 +152,9 @@ struct PlanBoardSections: View {
                     .accessibilityIdentifier("plan-landed-header")
                 }
             }
+            // Last, as on the Mac: rulings ask nothing, and stand until the
+            // owner says otherwise.
+            PlanRulingsSection(plan: plan, keeps: hook.keepsRulings)
         }
     }
 }
