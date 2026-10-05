@@ -11,6 +11,7 @@
 //! farcooler plan set LANE...                  queued lanes, first is next up
 //! farcooler plan theme list|show|create|set|cards
 //! farcooler plan lane  list|show|start|set|cards
+//! farcooler plan ruling add|set|list           decided for you (ov-304)
 //! ```
 //!
 //! Nested under `plan` because `farcooler theme` already lists the terminal's
@@ -35,6 +36,9 @@ use serde_json::{Value, json};
 use crate::tasks::{Board, DispatchLink, Refused, actor_for, board_for, board_in, find_task, refused};
 use crate::workspaces::{WORKSPACE_ENV, workspaces_on};
 use crate::{Fallible, connect_to, expect_value, req_for, short_bytes, uuid_of, with};
+
+#[path = "plan_ruling.rs"]
+mod ruling;
 
 /// What a runner without the layer is told.
 const NEEDS_UPDATE: &str = "This runner needs an update to keep a plan.";
@@ -81,6 +85,9 @@ enum PlanCmd {
     /// Lanes: one agent, or a chain of them, in one worktree on one branch.
     #[command(subcommand)]
     Lane(LaneCmd),
+    /// Rulings: calls made for the owner, which stand until they say otherwise.
+    #[command(subcommand)]
+    Ruling(ruling::RulingCmd),
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -336,6 +343,7 @@ async fn run_on<L: DispatchLink>(
         }
         Some(PlanCmd::Theme(cmd)) => theme(link, board, ws, cmd, actor, json, now).await,
         Some(PlanCmd::Lane(cmd)) => lane(link, board, ws, cmd, actor, json, now).await,
+        Some(PlanCmd::Ruling(cmd)) => ruling::ruling(link, board, ws, cmd, actor, json, now).await,
     }
 }
 
@@ -423,7 +431,7 @@ fn said_here(what: &str) -> Option<&'static str> {
 /// else the one `refused` makes.
 fn refused_here(err: ClientError, invalid: &str) -> Failed {
     if let ClientError::Daemon { code, what, .. } = &err
-        && let Some(said) = said_here(what)
+        && let Some(said) = said_here(what).or_else(|| ruling::said_here(what))
     {
         return Box::new(Refused::naming(said.to_string(), *code, what.clone()));
     }
@@ -1062,7 +1070,7 @@ fn ordinal(n: u32) -> String {
 /// What the Mac's overview shows, in text, so an orchestrator reads the same
 /// picture the owner sees.
 fn overview(plan: &pb::Plan, now: i64) -> String {
-    if plan.themes.is_empty() && plan.lanes.is_empty() {
+    if plan.themes.is_empty() && plan.lanes.is_empty() && plan.rulings.is_empty() {
         return NOTHING_PLANNED.to_string();
     }
     let keys = Keys::of_plan(plan);
@@ -1104,6 +1112,7 @@ fn overview(plan: &pb::Plan, now: i64) -> String {
             out.push(format!("  {}", theme_row(view)));
         }
     }
+    out.extend(ruling::overview_lines(plan));
     let day = 24 * 60 * 60 * 1000;
     let landed: Vec<&str> = plan
         .lanes
@@ -1363,6 +1372,7 @@ fn plan_json(plan: &pb::Plan, keys: &Keys) -> Value {
             live == 0 && landed == 0
                 && (c.status == pb::TaskStatus::InProgress as i32 || c.status == pb::TaskStatus::InReview as i32)
         }),
+        "rulings": plan.rulings.iter().map(|r| ruling::ruling_json(plan, r, keys)).collect::<Vec<_>>(),
     })
 }
 

@@ -149,6 +149,47 @@
   "order": [
     "00000000-0000-0000-0000-000000002001"
   ],
+  "rulings": [
+    {
+      "actor": "manager",
+      "cards": [
+        {
+          "key": "ov-1",
+          "task": "00000000-0000-0000-0000-000000001001"
+        }
+      ],
+      "created_at": 1799996400000,
+      "decision": "The inbox is amber.",
+      "id": "00000000-0000-0000-0000-000000005002",
+      "note": "",
+      "number": 2,
+      "reversal": "One token; every surface follows.",
+      "settled_at": null,
+      "settled_by": null,
+      "short": "R-2",
+      "state": "standing",
+      "theme": "Visual language",
+      "theme_id": "00000000-0000-0000-0000-000000003001",
+      "why": "It's the one attention color, so the inbox reads as needing you."
+    },
+    {
+      "actor": "manager",
+      "cards": [],
+      "created_at": 1799982000000,
+      "decision": "Unread stays on the phones.",
+      "id": "00000000-0000-0000-0000-000000005001",
+      "note": "Keep it.",
+      "number": 1,
+      "reversal": "A setting and two screens.",
+      "settled_at": 1799992800000,
+      "settled_by": "manager",
+      "short": "R-1",
+      "state": "confirmed",
+      "theme": "",
+      "theme_id": null,
+      "why": "The owner reads there first."
+    }
+  ],
   "themes": [
     {
       "cards": [

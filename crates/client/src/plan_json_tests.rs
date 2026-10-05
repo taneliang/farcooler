@@ -101,6 +101,40 @@ fn the_plan() -> pb::Plan {
             pb::PlanCoverage { task_id: id(0x1002), live: 1, landed: 0 },
             pb::PlanCoverage { task_id: id(0x1003), live: 0, landed: 1 },
         ],
+        // The CLI test's two rulings (ov-304): R-2 standing, R-1 confirmed.
+        rulings: vec![
+            pb::BoardRuling {
+                id: id(0x5002),
+                workspace_id: id(0x0202),
+                number: 2,
+                decision: "The inbox is amber.".into(),
+                why: "It's the one attention color, so the inbox reads as needing you.".into(),
+                reversal: "One token; every surface follows.".into(),
+                task_ids: vec![id(0x1001)],
+                theme_id: Some(id(0x3001)),
+                state: pb::BoardRulingState::Standing as i32,
+                actor: "manager".into(),
+                created_at: NOW - HOUR,
+                resource_version: 1,
+                ..Default::default()
+            },
+            pb::BoardRuling {
+                id: id(0x5001),
+                workspace_id: id(0x0202),
+                number: 1,
+                decision: "Unread stays on the phones.".into(),
+                why: "The owner reads there first.".into(),
+                reversal: "A setting and two screens.".into(),
+                state: pb::BoardRulingState::Confirmed as i32,
+                note: "Keep it.".into(),
+                actor: "manager".into(),
+                created_at: NOW - 5 * HOUR,
+                settled_by: Some("manager".into()),
+                settled_at: Some(NOW - 2 * HOUR),
+                resource_version: 2,
+                ..Default::default()
+            },
+        ],
     }
 }
 

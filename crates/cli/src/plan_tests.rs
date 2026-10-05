@@ -58,6 +58,44 @@ fn theme(n: u128, name: &str, cards: &[u128], done: u32) -> pb::BoardThemeView {
     }
 }
 
+/// Two rulings (ov-304): R-2 standing on ov-1 and the theme, R-1 confirmed.
+/// The client's `plan_json` test builds the same two, so one fixture holds both.
+fn rulings() -> Vec<pb::BoardRuling> {
+    vec![
+        pb::BoardRuling {
+            id: id_bytes(Uuid::from_u128(0x5002)),
+            workspace_id: id_bytes(WORKSPACE),
+            number: 2,
+            decision: "The inbox is amber.".into(),
+            why: "It's the one attention color, so the inbox reads as needing you.".into(),
+            reversal: "One token; every surface follows.".into(),
+            task_ids: vec![id_bytes(Uuid::from_u128(0x1001))],
+            theme_id: Some(id_bytes(Uuid::from_u128(0x3001))),
+            state: pb::BoardRulingState::Standing as i32,
+            actor: "manager".into(),
+            created_at: NOW - HOUR,
+            resource_version: 1,
+            ..Default::default()
+        },
+        pb::BoardRuling {
+            id: id_bytes(Uuid::from_u128(0x5001)),
+            workspace_id: id_bytes(WORKSPACE),
+            number: 1,
+            decision: "Unread stays on the phones.".into(),
+            why: "The owner reads there first.".into(),
+            reversal: "A setting and two screens.".into(),
+            state: pb::BoardRulingState::Confirmed as i32,
+            note: "Keep it.".into(),
+            actor: "manager".into(),
+            created_at: NOW - 5 * HOUR,
+            settled_by: Some("manager".into()),
+            settled_at: Some(NOW - 2 * HOUR),
+            resource_version: 2,
+            ..Default::default()
+        },
+    ]
+}
+
 /// What the runner holds: a plan, and the board's cards.
 fn the_plan() -> pb::Plan {
     let mut queued = lane(1, "mac-fu3", pb::LaneState::Queued, &[2]);
@@ -82,6 +120,7 @@ fn the_plan() -> pb::Plan {
             pb::PlanCoverage { task_id: items()[1].id.clone(), live: 1, landed: 0 },
             pb::PlanCoverage { task_id: items()[2].id.clone(), live: 0, landed: 1 },
         ],
+        rulings: rulings(),
     }
 }
 
@@ -97,7 +136,7 @@ struct Runner {
 
 fn runner() -> Runner {
     Runner {
-        capabilities: ["workstreams", "tasks", capability::BOARD_PLAN].map(String::from).to_vec(),
+        capabilities: ["workstreams", "tasks", capability::BOARD_PLAN, capability::BOARD_RULINGS].map(String::from).to_vec(),
         sent: vec![],
         refuse: None,
         events: vec![],
@@ -152,6 +191,24 @@ impl DispatchLink for Runner {
                     result::Value::Lane(moved)
                 }
                 ("lane.cards", _) => result::Value::Lane(plan.lanes[1].clone()),
+                ("ruling.add", Some(request::Payload::RulingAdd(p))) => result::Value::BoardRuling(pb::BoardRuling {
+                    number: 3,
+                    decision: p.decision,
+                    why: p.why,
+                    reversal: p.reversal,
+                    task_ids: p.task_ids,
+                    theme_id: p.theme_id,
+                    state: pb::BoardRulingState::Standing as i32,
+                    actor: p.actor,
+                    created_at: NOW,
+                    ..Default::default()
+                }),
+                ("ruling.set", Some(request::Payload::RulingSet(p))) => {
+                    let mut set = plan.rulings.into_iter().find(|r| r.id == p.ruling_id).unwrap();
+                    set.state = p.state;
+                    set.note = p.note.unwrap_or_default();
+                    result::Value::BoardRuling(set)
+                }
                 ("task.get_by_key", _) => result::Value::TaskList(pb::TaskList {
                     items: vec![task(40, "ov-40", pb::TaskStatus::Backlog, OTHER_BOARD)],
                     reads: None,
@@ -252,6 +309,8 @@ async fn the_overview_reads_next_up_now_themes_and_landed() {
         "  mac-ux           In review · train integ-9 · 1 card · 470K tokens",
         "Themes",
         "  Visual language  1 of 3 done · active",
+        "Decided for you",
+        "  R-2    The inbox is amber.",
         "Landed today",
         "  fix-ac84",
     ];
@@ -656,4 +715,118 @@ fn progress_leaves_cancelled_cards_out() {
     assert_eq!(theme_row(&view), "Visual language  1 of 2 done · active");
     view.counts = Some(pb::PlanStatusCounts { cancelled: 3, ..Default::default() });
     assert_eq!(done_of(&view), "0 of 0 done", "only cancelled cards: nothing to do, as the Mac says");
+}
+
+// ---- rulings (ov-304) ----
+
+/// `plan ruling ...` with its words as given, a quoted decision included.
+async fn rule(link: &mut Runner, args: &[&str], json: bool) -> Result<String, Failed> {
+    let argv = ["farcooler", "plan", "ruling"].iter().chain(args).chain(&["--workspace", "main"]).map(|s| s.to_string());
+    let cmd = match crate::Cli::try_parse_from(argv.collect::<Vec<_>>()).unwrap_or_else(|e| panic!("{args:?}: {e}")).command {
+        crate::Command::Plan(a) => a.cmd,
+        _ => panic!("not plan"),
+    };
+    run_on(link, &the_board(), cmd, "manager", json, NOW).await
+}
+
+/// A runner with the plan and without rulings is told before anything is
+/// sent; one without the plan at all hears the plan's sentence first.
+#[tokio::test]
+async fn a_runner_without_rulings_is_told_before_anything_is_sent() {
+    let mut link = runner();
+    link.capabilities.retain(|c| c != capability::BOARD_RULINGS);
+    for args in [&["list"][..], &["add", "x", "--why", "y", "--reversal", "z"], &["set", "R-2", "--state", "confirmed"]] {
+        let err = rule(&mut link, args, false).await.unwrap_err();
+        assert_eq!(err.to_string(), "This runner needs an update to keep rulings.", "{args:?}");
+    }
+    assert!(link.sent.is_empty(), "sent {:?}", link.sent.iter().map(|r| &r.method).collect::<Vec<_>>());
+    link.capabilities.retain(|c| c != capability::BOARD_PLAN);
+    assert_eq!(rule(&mut link, &["list"], false).await.unwrap_err().to_string(), NEEDS_UPDATE);
+}
+
+/// `ruling add` sends what was decided, why, what reversing costs, the cards
+/// by id and the theme by id, naming the capability and the actor, in one
+/// write after one read.
+#[tokio::test]
+async fn ruling_add_is_one_write_with_everything_in_it() {
+    let mut link = runner();
+    let said = rule(
+        &mut link,
+        &["add", "The gutter is 12 points.", "--why", "Tiled panes use it.", "--reversal", "One constant.", "--card", "ov-1",
+          "--card", "ov-2", "--theme", "visual"],
+        false,
+    )
+    .await
+    .unwrap();
+    assert_eq!(said, "Recorded R-3: The gutter is 12 points.");
+    let r = last(&link);
+    assert_eq!(r.method, "ruling.add");
+    assert_eq!(r.required_capabilities, [capability::BOARD_RULINGS.to_string()]);
+    let Some(request::Payload::RulingAdd(p)) = &r.payload else { panic!("{r:?}") };
+    assert_eq!((p.decision.as_str(), p.why.as_str(), p.reversal.as_str()), ("The gutter is 12 points.", "Tiled panes use it.", "One constant."));
+    assert_eq!(p.task_ids, vec![items()[0].id.clone(), items()[1].id.clone()]);
+    assert_eq!(p.theme_id, Some(id_bytes(Uuid::from_u128(0x3001))));
+    assert_eq!(p.actor, "manager");
+    assert_eq!(link.sent.iter().filter(|r| r.method.starts_with("ruling.")).count(), 1);
+}
+
+/// `--why` and `--reversal` are required: a ruling always says both.
+#[test]
+fn a_ruling_without_why_or_reversal_does_not_parse() {
+    for argv in ["farcooler plan ruling add x --reversal z", "farcooler plan ruling add x --why y"] {
+        assert!(crate::Cli::try_parse_from(argv.split_whitespace()).is_err(), "{argv}");
+    }
+}
+
+/// `ruling set` takes the short id as the owner says it, and sends the
+/// ruling's id with the move and the note.
+#[tokio::test]
+async fn ruling_set_takes_the_short_id_as_said() {
+    for id in ["R-2", "r-2", "2"] {
+        let mut link = runner();
+        let said = rule(&mut link, &["set", id, "--state", "reversed", "--note", "Owner: blue."], false).await.unwrap();
+        assert_eq!(said, "R-2 is reversed.", "{id}");
+        let Some(request::Payload::RulingSet(p)) = &last(&link).payload else { panic!() };
+        assert_eq!(p.ruling_id, id_bytes(Uuid::from_u128(0x5002)));
+        assert_eq!((p.state, p.note.as_deref()), (pb::BoardRulingState::Reversed as i32, Some("Owner: blue.")));
+    }
+    let mut link = runner();
+    let err = rule(&mut link, &["set", "R-9", "--state", "confirmed"], false).await.unwrap_err();
+    assert_eq!(err.to_string(), "There's no ruling R-9 on this board. `plan ruling list` shows them.");
+    assert!(link.sent.iter().all(|r| r.method == "plan.get"), "nothing written");
+}
+
+/// A refused move reads as this module's sentence, not the runner's word.
+#[tokio::test]
+async fn a_refused_move_says_how_rulings_move() {
+    let mut link = runner();
+    link.refuse = Some("ruling_state");
+    let err = rule(&mut link, &["set", "R-1", "--state", "confirmed"], false).await.unwrap_err();
+    assert!(err.to_string().starts_with("A ruling can't make that move."), "{err}");
+}
+
+/// `ruling list` reads standing first with why and what reversing costs,
+/// then the settled ones a line each; `--json` is the plan's `rulings`.
+#[tokio::test]
+async fn ruling_list_reads_standing_first() {
+    let mut link = runner();
+    let text = rule(&mut link, &["list"], false).await.unwrap();
+    let expected = [
+        "Decided for you",
+        "  R-2    The inbox is amber.",
+        "         Why: It's the one attention color, so the inbox reads as needing you.",
+        "         Reversing: One token; every surface follows.",
+        "         ov-1 · Visual language · by manager 1h ago",
+        "Settled",
+        "  R-1    Confirmed · Unread stays on the phones.",
+        "         Note: Keep it.",
+    ];
+    assert_eq!(text.lines().collect::<Vec<_>>(), expected, "{text}");
+    let Some(request::Payload::PlanGet(p)) = &link.sent[0].payload else { panic!() };
+    assert!(p.include_closed, "every ruling, not the last week's");
+    let json: Value = serde_json::from_str(&rule(&mut link, &["list"], true).await.unwrap()).unwrap();
+    assert_eq!(json["rulings"][0]["short"], "R-2");
+    assert_eq!(json["rulings"][0]["cards"][0]["key"], "ov-1");
+    assert_eq!(json["rulings"][0]["theme"], "Visual language");
+    assert_eq!(json["rulings"][1]["state"], "confirmed");
 }

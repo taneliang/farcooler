@@ -123,13 +123,48 @@ fn lane_json(plan: &pb::Plan, l: &pb::Lane) -> Value {
     })
 }
 
+fn ruling_state_word(state: i32) -> &'static str {
+    match pb::BoardRulingState::try_from(state) {
+        Ok(pb::BoardRulingState::Standing) => "standing",
+        Ok(pb::BoardRulingState::Confirmed) => "confirmed",
+        Ok(pb::BoardRulingState::Reversed) => "reversed",
+        _ => "unknown",
+    }
+}
+
+/// A ruling (ov-304), with its short id and its theme's name ("" when it
+/// names none, or one the plan no longer lists).
+fn ruling_json(plan: &pb::Plan, r: &pb::BoardRuling) -> Value {
+    let theme = r.theme_id.as_ref().and_then(|id| {
+        plan.themes.iter().filter_map(|v| v.theme.as_ref()).find(|t| t.id == *id).map(|t| t.name.clone())
+    });
+    json!({
+        "id": id_text(&r.id),
+        "short": format!("R-{}", r.number),
+        "number": r.number,
+        "decision": r.decision,
+        "why": r.why,
+        "reversal": r.reversal,
+        "cards": r.task_ids.iter().map(|id| json!({ "task": id_text(id), "key": key_of(plan, id) })).collect::<Vec<_>>(),
+        "theme_id": r.theme_id.as_deref().map(id_text),
+        "theme": theme.unwrap_or_default(),
+        "state": ruling_state_word(r.state),
+        "note": r.note,
+        "actor": r.actor,
+        "created_at": r.created_at,
+        "settled_by": r.settled_by,
+        "settled_at": r.settled_at,
+    })
+}
+
 /// Cards that are neither done nor canceled.
 fn is_open(status: i32) -> bool {
     status != pb::TaskStatus::Done as i32 && status != pb::TaskStatus::Cancelled as i32
 }
 
 /// `plan.get`'s answer: the whole plan, with the two flags the CLI's
-/// reconciliation derives, `landed_not_closed` and `no_lane`.
+/// reconciliation derives, `landed_not_closed` and `no_lane`, and the
+/// rulings (ov-304) in the runner's order: standing first, newest first.
 pub fn plan_json(plan: &pb::Plan) -> Value {
     let flagged = |wanted: fn(&pb::PlanCard, u32, u32) -> bool| -> Vec<Value> {
         plan.cards
@@ -156,6 +191,7 @@ pub fn plan_json(plan: &pb::Plan) -> Value {
                 && landed == 0
                 && (c.status == pb::TaskStatus::InProgress as i32 || c.status == pb::TaskStatus::InReview as i32)
         }),
+        "rulings": plan.rulings.iter().map(|r| ruling_json(plan, r)).collect::<Vec<_>>(),
     })
 }
 
