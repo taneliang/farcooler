@@ -213,12 +213,12 @@ fn stat(v: &Value, path: &str, ctx: &mut Ctx) -> R<Stat> {
         Some(r) => Some(reference(r, &join(path, "ref"), ctx)?),
         None => None,
     };
+    // With a reference, a value is the fallback an app from before live data
+    // draws, and without one the reference's name stands in, so such an app
+    // never drops the figure (review train-1005c M4).
     let value = match (m.get("value"), &reference) {
-        (Some(_), Some(_)) => {
-            return err(&join(path, "value"), "a figure is a value or a ref drawn live, not both. Take out the value: the ref keeps it current.");
-        }
-        (Some(v), None) => text(v, &join(path, "value"), caps.string_chars, false, false)?,
-        (None, Some(_)) => String::new(),
+        (Some(v), _) => text(v, &join(path, "value"), caps.string_chars, false, false)?,
+        (None, Some(r)) => r.label.clone().unwrap_or_else(|| r.target.default_name()),
         (None, None) => return err(&join(path, "value"), "is required, or a ref that draws it live."),
     };
     let show = match m.get("show") {
@@ -502,7 +502,14 @@ fn reference(v: &Value, path: &str, ctx: &mut Ctx) -> R<Reference> {
     if ctx.refs > caps.refs {
         return err(path, format!("a page has at most {} references.", caps.refs));
     }
-    Ok(Reference { target, label: optional_text(m, "label", path, caps.string_chars)? })
+    let mut label = optional_text(m, "label", path, caps.string_chars)?;
+    // An app from before CI and card-count references reads one as unknown
+    // and draws its label: it gets the name the newer app would draw (review
+    // train-1005c M4).
+    if label.is_none() && matches!(target, Target::Ci(_) | Target::Cards(_)) {
+        label = Some(target.default_name());
+    }
+    Ok(Reference { target, label })
 }
 
 // ---- the small readers ----

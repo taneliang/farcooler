@@ -538,5 +538,5 @@ fn live_data_draws_what_the_runner_last_read() {
     assert!(text.contains("- The run that failed -> CI run (ci run:37275435256)"), "a run the runner hasn't read is its label: {text}");
 
     let nothing = crate::page_text::render(&stored, &page, None, &crate::page_text::Live::default(), NOW);
-    assert!(nothing.contains("Main: Main · integ-13b: c85bf83d (pushed at midnight) · In review: in_review"), "{nothing}");
+    assert!(nothing.contains("Main: Main · integ-13b: c85bf83d (pushed at midnight) · In review: In review"), "{nothing}");
 }

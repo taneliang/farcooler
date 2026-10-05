@@ -57,7 +57,7 @@ pub fn reference_text() -> String {
     let fields = [
         ("heading", "text"),
         ("text", "md (a Markdown subset: paragraphs, bullets, bold, italic, code, https links whose words don't name another domain), tone?"),
-        ("stats", "items[1..6] of {label, value or ref (with show?), detail?, tone?}"),
+        ("stats", "items[1..6] of {label, value and/or ref (with show?), detail?, tone?}; beside a ref, value is what older apps draw"),
         ("progress", "label, done, total, detail?, parts?[..6] of {label, count}"),
         ("table", "columns[1..8] of {title, align?, grow?}, rows[..50] of one cell per column; a cell is a string or {text?, ref?, show?, tone?, mono?}"),
         ("list", "items[1..50] of {text, state?, detail?, ref?, tone?}"),

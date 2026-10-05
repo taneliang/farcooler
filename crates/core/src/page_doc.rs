@@ -376,13 +376,13 @@ impl Block {
 }
 
 /// One figure in a stats row: a value as written, or a reference drawn live
-/// (ov-306), never both.
+/// (ov-306). With a reference, `value` is what an app from before live data
+/// draws instead: as written, or the reference's own name.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Stat {
     /// What it measures.
     pub label: String,
-    /// The figure, as written; empty when a reference draws it.
-    #[serde(skip_serializing_if = "String::is_empty")]
+    /// The figure as written, or with a reference its fallback; never empty.
     pub value: String,
     /// What draws the figure live.
     #[serde(rename = "ref", skip_serializing_if = "Option::is_none")]
@@ -588,6 +588,31 @@ impl Target {
     /// Every target's key, in the order the refusals list them.
     pub const KINDS: [&'static str; 10] =
         ["task", "ask", "lane", "theme", "page", "worktree", "terminal", "url", "ci", "cards"];
+
+    /// What it's called without a label: "Main", "Run 812", a commit's first
+    /// eight digits, "In review", a lane's or theme's name, a card's key. What
+    /// an app from before a target kind draws for it (review train-1005c M4).
+    pub fn default_name(&self) -> String {
+        match self {
+            Target::Ci(s) if s == "main" => "Main".to_string(),
+            Target::Ci(s) => match s.strip_prefix("run:") {
+                Some(id) => format!("Run {id}"),
+                None => s.chars().take(8).collect(),
+            },
+            Target::Cards(s) => match s.as_str() {
+                "backlog" => "Backlog",
+                "todo" => "To do",
+                "needs_decision" => "Needs decision",
+                "in_progress" => "In progress",
+                "in_review" => "In review",
+                "done" => "Done",
+                "cancelled" => "Canceled",
+                _ => "Open",
+            }
+            .to_string(),
+            other => other.name().to_string(),
+        }
+    }
 
     /// The CI subject a `ci` target is read under (`main`, `sha:<sha>`,
     /// `run:<id>`), as the runner keeps it.

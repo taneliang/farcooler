@@ -360,6 +360,28 @@ fn live_references_name_what_the_runner_reads() {
     let subjects: Vec<String> = refs.iter().filter_map(|r| r.reference.target.ci_subject()).collect();
     assert_eq!(subjects, ["main", "sha:c85bf83d", "sha:c85bf83d", "run:37275435256", "main", "main", "sha:c85bf83d"]);
     let Block::Stats { items } = &live.blocks[1] else { panic!("the stats") };
-    assert_eq!((items[4].show, items[4].value.as_str()), (Some(Show::Spend), ""));
+    assert_eq!((items[4].show, items[4].value.as_str()), (Some(Show::Spend), "Visual language"), "the fallback older apps draw");
     assert!(live.shape().contains("ref-ci:7") && live.shape().contains("ref-cards:3"), "{}", live.shape());
+}
+
+/// An app from before live data reads a live page with something in every
+/// place (review train-1005c M4): a figure keeps a value (it drops a figure
+/// without one) and a CI or card-count reference keeps a label (it draws an
+/// unknown reference's label), each the reference's own name, which a newer
+/// app replaces with the live value.
+#[test]
+fn an_older_app_reads_live_data_as_its_names() {
+    let live = page("live");
+    let Block::Stats { items } = &live.blocks[1] else { panic!("the stats") };
+    let values: Vec<&str> = items.iter().map(|s| s.value.as_str()).collect();
+    assert_eq!(values, ["Main", "c85bf83d", "In review", "Open", "Visual language", "mac-ux"]);
+    for at in live.references() {
+        if matches!(at.reference.target, Target::Ci(_) | Target::Cards(_)) {
+            assert!(at.reference.label.as_deref().is_some_and(|l| !l.is_empty()), "{} has no label", at.path);
+        }
+    }
+    // A value written beside a reference is the fallback, kept as written.
+    let json = r#"{"v":1,"title":"T","blocks":[{"type":"stats","items":[{"label":"Main","value":"Green","ref":{"ci":"main"}}]}]}"#;
+    let Block::Stats { items } = &parse(json, &Caps::default()).unwrap().blocks[0] else { panic!() };
+    assert_eq!((items[0].value.as_str(), items[0].reference.is_some()), ("Green", true));
 }

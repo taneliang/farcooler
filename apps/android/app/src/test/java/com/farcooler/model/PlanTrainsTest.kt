@@ -84,8 +84,9 @@ class PlanTrainsTest {
     @Test
     fun `figures on the live page draw from the plan, failed CI in amber`() {
         val stats = live.blocks[1] as PageBlock.Stats
-        assertEquals(PageRef(PageTarget.Ci("main")), stats.items[0].ref)
-        assertEquals("", stats.items[0].value)
+        // The runner gives a live figure the value and the reference the label an older app draws (review train-1005c M4).
+        assertEquals(PageRef(PageTarget.Ci("main"), "Main"), stats.items[0].ref)
+        assertEquals("Main", stats.items[0].value)
         val world = PageWorld(plan = plan)
         val shown = stats.items.map(world::statText)
         // Main isn't read in the fixture: its name, as plain text.

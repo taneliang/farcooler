@@ -9,41 +9,51 @@
         {
           "label": "Main",
           "ref": {
-            "ci": "main"
-          }
+            "ci": "main",
+            "label": "Main"
+          },
+          "value": "Main"
         },
         {
           "detail": "pushed at midnight",
           "label": "integ-13b",
           "ref": {
-            "ci": "c85bf83d"
-          }
+            "ci": "c85bf83d",
+            "label": "c85bf83d"
+          },
+          "value": "c85bf83d"
         },
         {
           "label": "In review",
           "ref": {
-            "cards": "in_review"
-          }
+            "cards": "in_review",
+            "label": "In review"
+          },
+          "value": "In review"
         },
         {
           "label": "Open cards",
           "ref": {
-            "cards": "open"
-          }
+            "cards": "open",
+            "label": "Open"
+          },
+          "value": "Open"
         },
         {
           "label": "Visual language",
           "ref": {
             "theme": "Visual language"
           },
-          "show": "spend"
+          "show": "spend",
+          "value": "Visual language"
         },
         {
           "label": "mac-ux",
           "ref": {
             "lane": "mac-ux"
           },
-          "show": "spend"
+          "show": "spend",
+          "value": "mac-ux"
         }
       ],
       "type": "stats"
@@ -93,7 +103,8 @@
           },
           {
             "ref": {
-              "cards": "done"
+              "cards": "done",
+              "label": "Done"
             }
           },
           {
@@ -110,7 +121,8 @@
       "items": [
         {
           "ref": {
-            "ci": "c85bf83d"
+            "ci": "c85bf83d",
+            "label": "c85bf83d"
           },
           "text": "CI on the pushed SHA"
         },
@@ -123,7 +135,8 @@
         },
         {
           "ref": {
-            "ci": "main"
+            "ci": "main",
+            "label": "Main"
           },
           "text": "Main after it lands"
         }
@@ -137,7 +150,8 @@
           "label": "Main's CI"
         },
         {
-          "ci": "c85bf83d"
+          "ci": "c85bf83d",
+          "label": "c85bf83d"
         }
       ],
       "type": "links"

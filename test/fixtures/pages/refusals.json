@@ -610,17 +610,6 @@
   ]
  },
  {
-  "file": "refused/stat-value-and-ref.json",
-  "path": "blocks[0].items[0].value",
-  "says": "not both",
-  "fix": [
-   {
-    "pointer": "/blocks/0/items/0/value",
-    "remove": true
-   }
-  ]
- },
- {
   "file": "refused/stat-needs-a-value.json",
   "path": "blocks[0].items[0].value",
   "says": "or a ref that draws it live",

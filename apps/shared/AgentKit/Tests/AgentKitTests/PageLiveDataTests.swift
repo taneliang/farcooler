@@ -39,7 +39,7 @@ struct PageLiveDataTests {
         try PageDoc.decode(Data(contentsOf: PageModelTests.root.appendingPathComponent("test/fixtures/pages/normalized/live.json")))
     }
 
-    @Test("the live page decodes whole: figures with references and no value, CI and card targets")
+    @Test("the live page decodes whole: figures with references and their fallbacks, CI and card targets")
     func decodes() throws {
         let doc = try Self.live()
         guard case .stats(let items) = doc.blocks[1] else {
@@ -47,9 +47,11 @@ struct PageLiveDataTests {
             return
         }
         #expect(items.count == 6)
-        #expect(items[0].ref == PageRef(.ci("main")) && items[0].value.isEmpty)
-        #expect(items[1].ref == PageRef(.ci("c85bf83d")) && items[1].detail == "pushed at midnight")
-        #expect(items[2].ref == PageRef(.cards("in_review")))
+        // The runner gives a live figure the value and the reference the label
+        // an older app draws (review train-1005c M4).
+        #expect(items[0].ref == PageRef(.ci("main"), label: "Main") && items[0].value == "Main")
+        #expect(items[1].ref == PageRef(.ci("c85bf83d"), label: "c85bf83d") && items[1].detail == "pushed at midnight")
+        #expect(items[2].ref == PageRef(.cards("in_review"), label: "In review") && items[2].value == "In review")
         #expect(items[4].ref == PageRef(.theme("Visual language")) && items[4].show == .spend)
     }
 

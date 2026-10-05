@@ -64,7 +64,7 @@ class PageConformanceTest {
 
     @Test
     fun `the reader reads every fixture, all but the one that isn't an object`() {
-        assertEquals("a fixture came or went", 74, fixtures.size)
+        assertEquals("a fixture came or went", 73, fixtures.size)
         for (name in fixtures) {
             if (name == "refused/not-an-object.json") {
                 try {
