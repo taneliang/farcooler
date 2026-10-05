@@ -18,7 +18,7 @@
 /// else on an entry is dropped, and a value of the wrong shape costs its
 /// board, never the notice.
 
-import { cut, quietAfterMs, ROW_RETENTION_MS, WORKSPACE_BUDGET } from './index'
+import { cut, quietAfterMs, ROW_RETENTION_MS, WORKSPACE_BUDGET } from './bounds'
 
 /// A lane in Now: its name, and its state as the runner's store spells it
 /// (`building`, `review`, `fixing`, `landing`). The apps say the word.
