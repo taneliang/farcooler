@@ -9,15 +9,13 @@ import SwiftUI
 extension ContentView {
     /// The navigator's tree for `workspace`, or nil while the navigator
     /// draws the Board view (View ▸ Tasks by Status).
-    func oneTreeSidebar(
-        host: String, workspace: WorkspaceSummary, client: DaemonClient, orchestrator: NavigatorOrchestrator?
-    ) -> OneTreeSidebar? {
+    func oneTreeSidebar(host: String, workspace: WorkspaceSummary, client: DaemonClient) -> OneTreeSidebar? {
         guard !showsBoardList else { return nil }
         let board = boardStore(for: workspace, client: client, host: host)
         return OneTreeSidebar(
             tree: { filter in
                 board.plan.oneTree(
-                    oneTreeInput(host: host, workspace: workspace, client: client, orchestrator: orchestrator, filter: filter))
+                    oneTreeInput(host: host, workspace: workspace, client: client, filter: filter))
             },
             selected: treeTarget(selection, workspace: workspace.id),
             hint: treeHint, key: "\(host)|\(workspace.id)",
@@ -76,8 +74,7 @@ extension ContentView {
     /// and pages, its worktrees and the project's checkout, and its own
     /// Needs You, whose count is the title bar's.
     func oneTreeInput(
-        host: String, workspace: WorkspaceSummary, client: DaemonClient, orchestrator: NavigatorOrchestrator?,
-        filter: OneTreeFilter
+        host: String, workspace: WorkspaceSummary, client: DaemonClient, filter: OneTreeFilter
     ) -> OneTreeInput {
         let board = boardStore(for: workspace, client: client, host: host)
         let worktrees = boardWorktrees(host: host, workspace: workspace, client: client, board: board.board)
@@ -104,12 +101,8 @@ extension ContentView {
             },
             asks: OneTreeAsks(items: needs.items, plan: plan),
             filter: filter,
-            // No word beside "Orchestrator" when there's none: the row
-            // saying "No Orchestrator" twice over reads as noise.
-            orchestratorWord: orchestrator.flatMap { $0.state == .none ? nil : OrchestratorRow.word($0.state) },
             needsYouCount: needsYouCount(
-                host: host, workspace: workspace, client: client, columnCount: board.board.waitingOnYou),
-            hasOrchestrator: orchestrator != nil)
+                host: host, workspace: workspace, client: client, columnCount: board.board.waitingOnYou))
     }
 
     /// A worktree as the tree reads it: its own panes, not an orchestrator
@@ -218,11 +211,10 @@ extension ContentView {
     /// one opened from History still has its path.
     func pathTree(host: String, workspace: WorkspaceSummary) -> OneTree? {
         guard !showsBoardList, let client = store.clients[host] else { return nil }
-        let orchestrator = navigatorOrchestrator(host: host, workspace: workspace)
         // From the board's cache: the jump bar and ⌘↑'s menu state each ask
         // on every draw, and build only when what the tree reads changed.
         return boardStore(for: workspace, client: client, host: host).plan.oneTree(
-            oneTreeInput(host: host, workspace: workspace, client: client, orchestrator: orchestrator, filter: .all))
+            oneTreeInput(host: host, workspace: workspace, client: client, filter: .all))
     }
 
     /// The jump bar's crumbs through the tree for `place`: the workspace,

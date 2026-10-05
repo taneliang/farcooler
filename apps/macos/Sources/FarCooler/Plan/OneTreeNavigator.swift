@@ -330,6 +330,7 @@ struct OneTreeRowView: View {
         .contentShape(Rectangle())
         .onTapGesture(perform: onChoose)
         .onHover { hovering = $0 }
+        .help(ifAny: node.kind == .page ? OneTreeWords.pageHelp : nil)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibility)
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)

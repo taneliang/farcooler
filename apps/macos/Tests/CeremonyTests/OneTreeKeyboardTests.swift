@@ -86,7 +86,7 @@ struct OneTreeKeyboardTests {
         return (window, level, heard)
     }
 
-    @Test("The window's request gives the tree the keyboard; ↓ chooses rows, never the orchestrator")
+    @Test("The window's request gives the tree the keyboard; ↓ chooses rows, and ↑ stops at Needs You")
     func requestThenArrows() async throws {
         let (window, level, heard) = await window(selected: .plan)
         defer { window.close() }
@@ -97,8 +97,8 @@ struct OneTreeKeyboardTests {
         Self.key(125, NSDownArrowFunctionKey, in: window)
         await Self.settle(window.contentView!)
         #expect(heard.chosen.isEmpty)
-        // ↑ twice: Needs You is chosen; the orchestrator's row, above it,
-        // takes the cursor without moving the keyboard into the chat.
+        // ↑ twice: the plan, then Needs You, the top row: there's no
+        // Orchestrator row above it (R-14), and a third ↑ holds at the top.
         Self.key(126, NSUpArrowFunctionKey, in: window)
         Self.key(126, NSUpArrowFunctionKey, in: window)
         await Self.settle(window.contentView!)

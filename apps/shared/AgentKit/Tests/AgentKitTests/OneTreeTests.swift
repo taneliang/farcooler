@@ -100,10 +100,10 @@ struct OneTreeTests {
     @Test("Top to bottom: three places, the themes in plan order, No Theme, then Main Checkout and Loose Worktrees")
     func theShape() throws {
         let tree = OneTree.build(try Self.board())
-        #expect(tree.places.map(\.title) == ["Orchestrator", "Needs You", "Plan"])
+        #expect(tree.places.map(\.title) == ["Needs You", "Plan"])
         #expect(tree.tree.map(\.title) == ["Plan", "Mac", "No Theme"])
         #expect(tree.below.map(\.title) == ["Main Checkout", "Loose Worktrees"])
-        #expect(tree.places[1].detail == "2")
+        #expect(tree.places[0].detail == "2")
     }
 
     @Test("Under a theme: its open cards in the theme's order, then its done ones folded, then its pages")
@@ -229,12 +229,12 @@ struct OneTreeTests {
     @Test("Pages anchored to a theme sit under it; the rest sit under Plan")
     func pages() throws {
         let tree = OneTree.build(try Self.board())
-        #expect(tree.places[2].children.map(\.title) == ["Train"])
-        #expect(tree.places[2].children[0].target == .page("train"))
+        #expect(tree.places[1].children.map(\.title) == ["Train"])
+        #expect(tree.places[1].children[0].target == .page("train"))
         // Anchored to a theme the tree doesn't show: under Plan, never lost.
         var input = try Self.board()
         input.pages.append(OneTreePage(slot: "old", title: "Old", themeID: "theme-gone"))
-        #expect(OneTree.build(input).places[2].children.map(\.title) == ["Train", "Old"])
+        #expect(OneTree.build(input).places[1].children.map(\.title) == ["Train", "Old"])
     }
 
     @Test("No Theme holds the unthemed open cards, needing a decision first, then the most recently moved")
@@ -397,8 +397,8 @@ struct OneTreeTests {
         input.plan = .empty
         input.pages = []
         let tree = OneTree.build(input)
-        #expect(tree.places.map(\.title) == ["Orchestrator", "Needs You", "Plan"])
-        #expect(tree.places[2].children.isEmpty)
+        #expect(tree.places.map(\.title) == ["Needs You", "Plan"])
+        #expect(tree.places[1].children.isEmpty)
         #expect(tree.tree.map(\.title) == ["No Theme"])
         #expect(tree.tree[0].expandedByDefault)
         #expect(tree.tree[0].children.map(\.key) == ["ov-4", "ov-6", "ov-5", "ov-1", "ov-3", "ov-2", ""])
@@ -411,9 +411,9 @@ struct OneTreeTests {
         #expect(rows.contains { $0.node.key == "ov-4" })
     }
 
-    @Test("An empty board: the places and nothing else, and no orchestrator row where there's none")
+    @Test("An empty board: the places and nothing else; the orchestrator is the chat column, never a row (R-14)")
     func emptyBoard() {
-        let tree = OneTree.build(OneTreeInput(tasks: [], hasOrchestrator: false))
+        let tree = OneTree.build(OneTreeInput(tasks: []))
         #expect(tree.places.map(\.title) == ["Needs You", "Plan"])
         #expect(tree.tree.isEmpty)
         #expect(tree.below.isEmpty)

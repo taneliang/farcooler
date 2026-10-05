@@ -419,14 +419,20 @@ extension ContentView {
         key(step.keyboard)
     }
 
-    /// The orchestrator selected (⌥⌘1, its row, ↑ or ↓ onto it): whatever
-    /// was open goes, and `keyboard` says where the keyboard goes, into the
+    /// The orchestrator revealed and given the keyboard (⌥⌘1, the title
+    /// bar's Orchestrator item): the plan peeked over its chat is put away,
+    /// and where the chat is its own column beside the canvas, what's open
+    /// stays (`OrchestratorReveal`); where it's the main area, whatever was
+    /// open goes. `keyboard` says where the keyboard goes, into the
     /// orchestrator or staying on the navigator.
     func selectOrchestrator(keyboard: WorkspaceNavigation.KeyTarget) {
         guard let current = selection, let scene = workspaceScene(current) else { return }
-        trail = nil
+        let reveal = OrchestratorReveal.step(
+            conversation: drawnArrangement(of: scene)?.conversation, somethingOpen: current.focus != nil || scene.opened != nil)
         focusColumn = false
-        if let board = scene.board, current.focus != nil || scene.opened != nil {
+        if reveal.endsPeek { planPeeking = false }
+        if reveal.leavesWhatIsOpen { trail = nil }
+        if reveal.leavesWhatIsOpen, let board = scene.board {
             if keyboard == .board { boardKeyboardPending = true }
             selection = .workspace(host: scene.host, workspace: board, focus: nil)
         }

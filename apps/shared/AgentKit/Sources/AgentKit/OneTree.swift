@@ -242,19 +242,15 @@ public struct OneTreeInput: Equatable, Sendable {
     public var unreadable: [OneTreeUnreadable] = []
     public var asks: OneTreeAsks
     public var filter: OneTreeFilter
-    /// The pinned places' trailing words: the orchestrator's state, and
-    /// the Needs You count (the title bar's number, the same).
-    public var orchestratorWord: String?
+    /// The Needs You place's trailing count (the title bar's number, the
+    /// same).
     public var needsYouCount: Int
-    /// Whether the workspace has an orchestrator to focus.
-    public var hasOrchestrator: Bool
 
     public init(
         tasks: [OneTreeTask], plan: PlanModel = .empty, worktrees: [OneTreeWorktree] = [],
         mainCheckout: OneTreeWorktree? = nil, pages: [OneTreePage] = [], unreadable: [OneTreeUnreadable] = [],
         asks: OneTreeAsks = OneTreeAsks(),
-        filter: OneTreeFilter = .open, orchestratorWord: String? = nil, needsYouCount: Int = 0,
-        hasOrchestrator: Bool = true
+        filter: OneTreeFilter = .open, needsYouCount: Int = 0
     ) {
         self.tasks = tasks
         self.plan = plan
@@ -264,9 +260,7 @@ public struct OneTreeInput: Equatable, Sendable {
         self.unreadable = unreadable
         self.asks = asks
         self.filter = filter
-        self.orchestratorWord = orchestratorWord
         self.needsYouCount = needsYouCount
-        self.hasOrchestrator = hasOrchestrator
     }
 }
 
@@ -377,9 +371,10 @@ public struct OneTree: Equatable, Sendable {
 // MARK: - Words
 
 public enum OneTreeWords {
-    public static let orchestrator = "Orchestrator"
     public static let needsYou = "Needs You"
     public static let plan = "Plan"
+    /// What a page under Plan is, for its tooltip (ov-332).
+    public static let pageHelp = "A page the orchestrator wrote to explain where things stand. It updates as the work does."
     public static let noTheme = "No Theme"
     public static let mainCheckout = "Main Checkout"
     public static let looseWorktrees = "Loose Worktrees"
@@ -548,14 +543,9 @@ struct OneTreeBuilder {
 
     func places() -> [OneTreeNode] {
         var out: [OneTreeNode] = []
-        if input.hasOrchestrator {
-            var node = OneTreeNode(
-                id: "place:orchestrator", kind: .place, title: OneTreeWords.orchestrator,
-                detail: input.orchestratorWord ?? "", glyph: OneTreeGlyph.orchestrator, target: .orchestrator)
-            node.asks = input.asks.orchestrator
-            node.holdsAsk = node.asks
-            out.append(node)
-        }
+        // No Orchestrator row (R-14): the chat column is the orchestrator,
+        // always beside the canvas, and ⌥⌘1 and the title bar's item go to it.
+        // A row that went nowhere but the plan was two ways to say one thing.
         out.append(
             OneTreeNode(
                 id: "place:needs-you", kind: .place, title: OneTreeWords.needsYou,

@@ -93,7 +93,7 @@ struct OneTreeWindowTests {
             let sidebar = OneTree.build(
                 OneTreeInput(
                     tasks: store.board.rows.map(OneTreeTask.init(row:)), needsYouCount: count(store.board.waitingOnYou)))
-            #expect(sidebar.places[1].detail == "\(title.needYou)", "read \(read), served \(served)")
+            #expect(sidebar.places[0].detail == "\(title.needYou)", "read \(read), served \(served)")
         }
     }
 

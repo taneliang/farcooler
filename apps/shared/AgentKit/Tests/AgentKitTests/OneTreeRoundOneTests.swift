@@ -101,11 +101,10 @@ struct OneTreeRoundOneTests {
         #expect(OneTreeKeys.step(rows, from: rows.last?.id, by: 1) == .none)
     }
 
-    @Test("Arriving on the orchestrator or a subagent doesn't take the keyboard into the chat")
+    @Test("Arriving on a subagent doesn't take the keyboard into the chat; the first place is Needs You, not an Orchestrator row")
     func arrivalNeverLeaves() throws {
         let tree = OneTree.build(try T.board())
-        let orchestrator = try #require(tree.places.first)
-        #expect(!OneTreeKeys.choosesOnArrival(orchestrator))
+        #expect(try #require(tree.places.first).target == .needsYou)
         let subagent = try #require(tree.allNodes.first { $0.kind == .subagent })
         #expect(!OneTreeKeys.choosesOnArrival(subagent))
         #expect(!OneTreeKeys.choosesOnArrival(try #require(tree.tree.last)))

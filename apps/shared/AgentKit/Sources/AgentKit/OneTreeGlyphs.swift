@@ -6,7 +6,11 @@ import Foundation
 /// to draw one thing two ways. Add a kind here, never as a literal at a call
 /// site; `OneTreeGlyphTests` and `JumpBarGlyphTests` read both sides.
 public enum OneTreeGlyph {
-    public static let orchestrator = "bubble.left.and.text.bubble.right"
+    /// The orchestrator's symbol: the title bar's mark at rest and the jump
+    /// bar's Orchestrator row. The sidebar has no Orchestrator row now (R-14);
+    /// the row it had drew a speech bubble where the title bar drew this
+    /// person, two symbols for one thing.
+    public static let orchestrator = "person.wave.2"
     public static let needsYou = "flag"
     public static let plan = "map"
     public static let page = "doc.text"

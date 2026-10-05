@@ -75,7 +75,7 @@ extension ContentView {
                 split: $navigatorSplit,
                 planPage: planPage(host: host, workspace: workspace.id),
                 onPlan: { page in openPlan(page, host: host, workspace: workspace.id) },
-                tree: oneTreeSidebar(host: host, workspace: workspace, client: client, orchestrator: orchestrator)
+                tree: oneTreeSidebar(host: host, workspace: workspace, client: client)
             )
         } else {
             // Said, rather than the generic "Select a worktree": this

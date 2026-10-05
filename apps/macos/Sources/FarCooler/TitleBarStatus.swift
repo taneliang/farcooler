@@ -587,9 +587,10 @@ struct OrchestratorMark: View {
         }
     }
 
-    /// The orchestrator's symbol, as the navigator's row draws it at rest.
+    /// The orchestrator's symbol at rest (`OneTreeGlyph.orchestrator`).
+    static let glyphName = OneTreeGlyph.orchestrator
     static var glyph: some View {
-        Image(systemName: "person.wave.2").font(.system(size: 10))
+        Image(systemName: glyphName).font(.system(size: 10))
     }
 
     /// The glyph shown when nothing runs; its frame is the one every other

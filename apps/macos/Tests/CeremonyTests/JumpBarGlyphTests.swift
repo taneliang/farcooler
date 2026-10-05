@@ -109,7 +109,9 @@ struct JumpBarGlyphTests {
     @Test("The orchestrator's and a loose worktree's menu rows have their sidebar symbols")
     func orchestratorAndWorktreeRowsMatch() throws {
         let (tree, _) = try Self.tree()
-        let orchestrator = try #require(tree.places.first { $0.target == .orchestrator })
+        // The sidebar has no Orchestrator row (R-14); the bar's row wears the
+        // title bar's symbol, which is the one `OneTreeGlyph` names.
+        #expect(tree.places.allSatisfy { $0.target != .orchestrator })
         let loose = try #require(tree.below.last?.children.first { $0.kind == .worktree })
         let wt = Worktree(
             id: "wt", short: "wt", task: "spike", branch: "spike", repository: "r", host: "", path: "/tmp/wt",
@@ -119,7 +121,7 @@ struct JumpBarGlyphTests {
             orchestrator: nil, board: TaskBoardModel(columns: []), taskStatus: { _ in nil }, taskWorktree: { _ in nil },
             loose: [wt], worktreeStatus: { _ in nil }, opening: { _ in .workspace(host: "", workspace: "w", focus: nil) },
             tab: nil)
-        #expect(menu.items.first { $0.id == "orchestrator" }?.glyph == orchestrator.glyph)
+        #expect(menu.items.first { $0.id == "orchestrator" }?.glyph == OrchestratorMark.glyphName)
         #expect(menu.items.first { $0.id == "wt|wt" }?.glyph == loose.glyph)
         let sibling = WorkspaceWorktrees.MenuItem(
             title: "spike", subtitle: nil, target: .workspace(host: "", workspace: "w", focus: nil), current: false)
