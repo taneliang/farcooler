@@ -282,13 +282,13 @@ struct OrchestratorRowView: View {
                             .font(.system(size: WorkspaceStyle.PaneText.secondary))
                             // Its status's ink (`Status.tone`): amber for needs you, red
                             // for failed; the accent is for controls.
-                            .foregroundStyle(model.state.status?.tone.color(scheme) ?? Color.secondary)
+                            .foregroundStyle(model.state.status?.tone.color(scheme) ?? SidebarInk.secondary)
                             .lineLimit(1)
                     }
                     if let doing = model.nowDoing {
                         Text(doing)
                             .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(SidebarInk.secondary)
                             .lineLimit(1)
                             .truncationMode(.tail)
                             .help(doing)
@@ -297,7 +297,7 @@ struct OrchestratorRowView: View {
                     if let foot = OrchestratorRow.foot(agent: model.agent, inProgress: inProgress) {
                         Text(foot)
                             .font(.system(size: WorkspaceStyle.PaneText.minimum))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(SidebarInk.secondary)
                             .lineLimit(1)
                     }
                 }
@@ -380,7 +380,7 @@ struct NavigatorFilterField: View {
         HStack(spacing: 0) {
             Image(systemName: glyph)
                 .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(SidebarInk.secondary)
                 .gridMark("filter", .icon)
                 .glyphColumn()
             TextField(placeholder, text: $text)
@@ -398,7 +398,7 @@ struct NavigatorFilterField: View {
                 Button { text = "" } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(SidebarInk.secondary)
                 }
                 .buttonStyle(.plain)
                 .help("Clear Filter")

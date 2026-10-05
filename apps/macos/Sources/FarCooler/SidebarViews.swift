@@ -60,7 +60,7 @@ struct WorktreeDot: View {
     private var color: Color {
         switch StateKind.parse(state) {
         case .error: return .red
-        case .hidden: return Color(nsColor: .tertiaryLabelColor)
+        case .hidden: return SidebarInk.secondary
         // Red, not a dimmed amber. `StatusGlyph` spends amber on one state —
         // an agent is waiting on you — and a directory that is gone is not
         // waiting for anything. It is the worktree-level `Status.lost`, and
@@ -74,7 +74,7 @@ struct WorktreeDot: View {
         // `active` falls here with `ready` and `creating`: a healthy worktree
         // is a healthy worktree, and the difference between one with a live
         // pane and one without is a fact the rows underneath state outright.
-        default: return .secondary
+        default: return SidebarInk.secondary
         }
     }
 
@@ -156,7 +156,7 @@ struct WorktreeDetail: View {
                 }
                 Text(worktree.branch)
                     .font(.system(size: 13, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(SidebarInk.secondary)
             }
 
             HStack(spacing: 8) {
@@ -208,10 +208,10 @@ struct WorktreeDetail: View {
     private var hostedNote: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Image(systemName: "person.wave.2")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(SidebarInk.secondary)
             Text(Self.hostedSentence(hosted.map(\.name)))
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(SidebarInk.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
             ForEach(Array(hosted.enumerated()), id: \.offset) { _, seat in
@@ -236,11 +236,11 @@ struct WorktreeDetail: View {
         VStack(spacing: 8) {
             Image(systemName: "terminal")
                 .font(.system(size: 28))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(SidebarInk.secondary)
             Text("No terminals").font(.callout.weight(.medium))
             Text("A terminal runs one agent, or one shell, inside this worktree.")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(SidebarInk.secondary)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 40)
@@ -256,7 +256,7 @@ struct WorktreeDetail: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(t.label).font(.system(size: 14, weight: .medium))
-                    Text(t.preset).font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text(t.preset).font(.system(size: 12)).foregroundStyle(SidebarInk.secondary)
                 }
 
                 Spacer()
@@ -264,12 +264,12 @@ struct WorktreeDetail: View {
                 Ticking(paused: t.status != .working && t.status != .blocked, since: t.displayDurationSince) { now in
                     Text(t.displayDuration(at: now).map { "\(t.status.label) \($0)" } ?? t.status.label)
                         .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(SidebarInk.secondary)
                 }
 
                 Image(systemName: "chevron.right")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(SidebarInk.secondary)
             }
             .padding(.vertical, 12)
             .padding(.horizontal, 14)  // grid-exempt: a card's inset on the detail page
@@ -307,10 +307,10 @@ struct WorktreeDetail: View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "folder")
                 .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(SidebarInk.secondary)
             Text(worktree.path)
                 .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(SidebarInk.secondary)
                 .textSelection(.enabled)
                 .lineLimit(2)
                 .truncationMode(.middle)

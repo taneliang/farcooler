@@ -732,13 +732,21 @@ enum MainWindowChrome {
     /// measured); 600 sent the tray to the overflow menu. 640 leaves some room.
     static let minimumWidth: CGFloat = 640
 
+    /// The toolbar's band shows the window's plane (ov-289): a transparent
+    /// titlebar with no rule under it, so the toolbar, the navigator and the
+    /// gutters are one frosted surface, and Increase Contrast's and Reduce
+    /// Transparency's opaque fallback is the plane's own.
+    static func unify(_ window: NSWindow) {
+        if window.toolbarStyle != toolbarStyle { window.toolbarStyle = toolbarStyle }
+        if !window.titlebarAppearsTransparent { window.titlebarAppearsTransparent = true }
+        if window.titlebarSeparatorStyle != .none { window.titlebarSeparatorStyle = .none }
+    }
+
     struct Setter: NSViewRepresentable {
         final class Probe: NSView {
             override func viewDidMoveToWindow() {
                 super.viewDidMoveToWindow()
-                if let window, window.toolbarStyle != MainWindowChrome.toolbarStyle {
-                    window.toolbarStyle = MainWindowChrome.toolbarStyle
-                }
+                if let window { MainWindowChrome.unify(window) }
             }
         }
         func makeNSView(context: Context) -> NSView { Probe() }

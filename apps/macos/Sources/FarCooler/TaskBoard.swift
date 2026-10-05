@@ -1222,7 +1222,7 @@ private struct CardTimeLines: View {
             } else if let time = row.timeNote(at: now) {
                 Text(time)
                     .font(.system(size: timeSize))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(SidebarInk.secondary)
             }
         }
     }
@@ -1267,7 +1267,7 @@ private struct UnreadableColumnView: View {
                     .gridMark("unreadable", .text)
                 Text("This runner uses states this Far Cooler doesn’t have yet.")
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(SidebarInk.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.leading, NavigatorGrid.textInset)
@@ -1278,11 +1278,11 @@ private struct UnreadableColumnView: View {
                             .system(
                                 size: WorkspaceStyle.PaneText.secondary, design: .monospaced)
                         )
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(SidebarInk.secondary)
                     Text(row.title).font(.system(size: WorkspaceStyle.PaneText.body))
                     Text(row.status)
                         .font(.system(size: WorkspaceStyle.PaneText.minimum, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(SidebarInk.secondary)
                 }
                 .padding(.horizontal, NavigatorGrid.textInset)
                 .padding(.vertical, NavigatorRhythm.card)

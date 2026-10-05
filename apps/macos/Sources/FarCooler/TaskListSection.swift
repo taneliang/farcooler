@@ -115,7 +115,7 @@ struct SectionFootButton: View {
         Button(title, action: action)
             .buttonStyle(.plain)
             .font(.system(size: WorkspaceStyle.PaneText.secondary))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(SidebarInk.secondary)
             .padding(.vertical, NavigatorRhythm.air)
             .padding(.leading, NavigatorGrid.textInset)
             .accessibilityIdentifier(id)
@@ -135,7 +135,7 @@ struct HistoryRow: View {
             HStack(spacing: 6) {
                 Text(BoardDone.historyTitle(status))
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(SidebarInk.secondary)
                 Spacer(minLength: SidebarGrid.gap)
                 SectionCount(count: total, gridRow: nil)
                 // Forward, a way to a page: not a disclosure's chevron. It is
@@ -143,7 +143,7 @@ struct HistoryRow: View {
                 // the count stands before it, as Mail's and Settings' do.
                 Image(systemName: "chevron.forward")
                     .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(SidebarInk.secondary)
                     .gridMark("historyRow", .trailing)
             }
             .padding(.leading, NavigatorGrid.textInset)

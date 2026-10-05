@@ -13,9 +13,14 @@ import SwiftUI
 /// it is in one place. Reduce Transparency and Increase Contrast are the
 /// system's to honor: the view draws an opaque fill under either.
 struct WindowPlane: NSViewRepresentable {
+    /// The one material of the window's chrome (ov-289): the toolbar, the
+    /// navigator, the gutters and the headers all show this, because the
+    /// titlebar draws none of its own (`MainWindowChrome.unify`).
+    static let material: NSVisualEffectView.Material = .sidebar
+
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
-        view.material = .sidebar
+        view.material = Self.material
         view.blendingMode = .behindWindow
         // Dims with the window, as every sidebar does.
         view.state = .followsWindowActiveState
@@ -23,6 +28,18 @@ struct WindowPlane: NSViewRepresentable {
     }
 
     func updateNSView(_ view: NSVisualEffectView, context: Context) {}
+}
+
+/// Text on the plane that isn't the primary label (ov-289): the system's
+/// secondary and tertiary labels are 3.95:1 and lower in light, and the plane
+/// is frosted, so a bright or dark wallpaper moves the ground under them.
+/// The text color (the primary label without its 85% alpha) at 70% is 5:1 or better on the plane's fallback and on a
+/// ground pushed 20% toward the wallpaper's worst case, in light and dark
+/// (`SurfaceTests`). One level: a hierarchy among the plane's texts is by size
+/// and weight, as a source list's is.
+enum SidebarInk {
+    static let opacity: Double = 0.7
+    static let secondary = Color(nsColor: .textColor).opacity(opacity)  // style-exempt: the plane's one readable secondary ink
 }
 
 /// The space between a card and the window's edge, and between cards.

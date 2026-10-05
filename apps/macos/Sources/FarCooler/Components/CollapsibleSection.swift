@@ -66,10 +66,10 @@ struct SectionTitle: View {
     private var color: Color { Self.color(style: style, tone: tone, scheme: scheme) }
 
     static func color(style: SectionHeaderStyle, tone: Tone, scheme: ColorScheme) -> Color {
-        if style != .group { return .secondary }
+        if style != .group { return SidebarInk.secondary }
         switch tone {
         case .primary: return .primary
-        case .quiet: return .secondary
+        case .quiet: return SidebarInk.secondary
         case .attention: return Tint.attention(scheme)
         }
     }
@@ -138,7 +138,7 @@ struct DisclosureChevron: View {
         Image(systemName: "chevron.right")
             .font(.system(size: 9, weight: .bold))
             .rotationEffect(.degrees(expanded ? 90 : 0))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(SidebarInk.secondary)
             .opacity(visible ? 1 : 0)
             .accessibilityHidden(true)
     }
@@ -510,7 +510,7 @@ struct SectionCount: View {
         Text(text)
             .font(.system(size: WorkspaceStyle.PaneText.secondary))
             .monospacedDigit()
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(SidebarInk.secondary)
             .lineLimit(1)
     }
 }
