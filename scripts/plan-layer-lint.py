@@ -14,6 +14,10 @@ populated database and checks every board read is the same bytes.
 Rulings (ov-304), the decided-for-you calls, are part of the layer: their
 tables and types are names the board must not use either.
 
+So are budgets and cost (ov-307): the table of token budgets, and the cost reads
+(a theme's trend, the week's tokens, the harness and model comparison) that the
+plan carries.
+
 So are trains (ov-309) and the CI reads the runner keeps for trains and
 pages: their tables, types and store calls are names the board must not use.
 
@@ -78,17 +82,19 @@ FORBIDDEN = [
         r"|board_rulings?|board_ruling_tasks|BoardRuling\w*|RulingState|NewRuling|ruling_id|rulings_of"
         # Its trains and CI reads (ov-309).
         r"|board_trains?|board_ci|BoardTrain\w*|TrainState|NewTrain|TrainUpdate|TrainView|train_id|trains_of"
-        r"|CiRead|CiStatus|ci_of|follow_ci)\b"
+        r"|CiRead|CiStatus|ci_of|follow_ci"
+        # Its budgets and cost reads (ov-307).
+        r"|plan_budgets|plan_cost|rpc_cost|PlanCost|HarnessModelCost|budget_tokens|budgets_of|cost_of|lane_days)\b"
     ),
     re.compile(r"\b(FROM|JOIN|INTO|UPDATE|TABLE)\s+lanes\b", re.I),
     # Any `use` that brings the layer in, braces and all.
-    re.compile(r"\buse\b[^;]*\b(plan|plan_read|rpc_plan|rulings|plan_ruling|trains|board_ci|rpc_trains|ci_watch)\b[^;]*;"),
+    re.compile(r"\buse\b[^;]*\b(plan|plan_read|rpc_plan|rulings|plan_ruling|trains|board_ci|rpc_trains|ci_watch|plan_cost)\b[^;]*;"),
     # A path through the module: `crate::plan::..`, `farcooler_store::plan::..`, `plan::Lane`.
-    re.compile(r"(?<![\w.])(plan|rulings|trains|board_ci|ci_watch)::"),
+    re.compile(r"(?<![\w.])(plan|rulings|trains|board_ci|ci_watch|plan_cost)::"),
     # The layer's reads and writes, called on a store or a service.
     re.compile(r"\.(plan|board_theme|create_theme|update_theme|theme_cards|create_lane|update_lane"
                r"|lane_cards|record_lane_agent|set_plan|plan_events|add_ruling|set_ruling|ruling"
-               r"|start_train|set_train|train|train_named|trains_following_ci|record_ci|keep_ci|ci_read)\s*\("),
+               r"|start_train|set_train|train|train_named|trains_following_ci|record_ci|keep_ci|ci_read|set_budget)\s*\("),
 ]
 
 # Task-shaped proto messages: their fields never name the layer.
@@ -96,7 +102,7 @@ GUARDED_MESSAGES = ["Task", "TaskDetail", "TaskList", "TaskNote", "TaskWorker", 
 PROTO = "proto/farcooler.proto"
 PROTO_FORBIDDEN = re.compile(
     r"\b(lane_\w+|\w*lane_id|board_theme\w*|theme_id|plan_rank|plan_event\w*|ruling\w*|\w*_ruling\w*"
-    r"|trains?|\w*_train\w*|train_\w+|ci_\w+)\b"
+    r"|trains?|\w*_train\w*|train_\w+|ci_\w+|budget\w*|\w*_budget\w*)\b"
     r"|\bBoardTheme\b|\bBoardRuling\b|\bBoardTrain\b|\bCiRead\b|\bLane\b|\bPlan\b"
 )
 
@@ -220,6 +226,11 @@ def self_test() -> int:
             "let t = store.start_train(ws, &new, &[], actor)?;",
             "let r = crate::board_ci::ci_of(&conn, ws)?;",
             "fn f(s: TrainState) {}",
+            "SELECT * FROM tasks t JOIN plan_budgets b ON b.lane_id = t.id;",
+            "use crate::plan_cost::PlanCost;",
+            "let n = store.set_budget(subject, Some(5), actor)?;",
+            "let c = crate::plan_cost::cost_of(&conn, &cards, now)?;",
+            "let b = view.budget_tokens;",
         ]
         for text in cases:
             clean_tree()
@@ -255,6 +266,10 @@ def self_test() -> int:
         put(PROTO, clean_proto.replace("bytes worktree_id = 1;", "bytes worktree_id = 1;\n  string train = 2;", 1))
         if not any("message Task" in h[0] and "train" in h[2] for h in scan(root)):
             failures.append("missed a train field on message Task")
+        clean_tree()
+        put(PROTO, clean_proto.replace("bytes worktree_id = 1;", "bytes worktree_id = 1;\n  uint64 budget_tokens = 2;", 1))
+        if not any("message Task" in h[0] and "budget" in h[2] for h in scan(root)):
+            failures.append("missed a budget field on message Task")
     if failures:
         print("\n".join(failures))
         return 1

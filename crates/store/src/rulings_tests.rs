@@ -39,7 +39,7 @@ fn the_migration_is_welcome() {
     let last = &crate::migrate::MIGRATIONS[25];
     assert!(std::ptr::fn_addr_eq(last.0, migration_0026_rulings as fn(&Transaction) -> rusqlite::Result<()>));
     assert_eq!(last.1, Older::Welcome);
-    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 27);
+    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 28);
 }
 
 /// A ruling starts standing, keeps what it was given trimmed, and takes the

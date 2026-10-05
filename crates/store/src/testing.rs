@@ -72,14 +72,14 @@ pub fn note_from_a_newer_build(store: &crate::Store, task: Uuid, kind: &str, act
 }
 
 /// Remove the plan layer from a database: its six tables, the two of its
-/// rulings (ov-304) and the two of its trains (ov-309), children first.
+/// rulings (ov-304) the two of its trains (ov-309) and its budgets (ov-307), children first.
 /// What deleting the experiment's migration would leave behind (ov-268), for
 /// the drill that checks the board reads the same without it.
 pub fn drop_plan_layer(store: &crate::Store) {
     store
         .conn()
         .execute_batch(
-            "DROP TABLE board_ci; DROP TABLE board_trains;
+            "DROP TABLE plan_budgets; DROP TABLE board_ci; DROP TABLE board_trains;
              DROP TABLE board_ruling_tasks; DROP TABLE board_rulings;
              DROP TABLE plan_events; DROP TABLE lane_agents; DROP TABLE lane_tasks; DROP TABLE lanes;
              DROP TABLE board_theme_tasks; DROP TABLE board_themes;",

@@ -75,11 +75,9 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     // build never reads them, so a rollback past the experiment keeps a
     // working database.
     (crate::pages::migration_0025_pages, Older::Welcome),
-    // Two new tables (ov-304), the plan layer's rulings, only rulings.rs
-    // touches, whose rows go with their workspace or task by cascade and lose
-    // a theme by SET NULL. No column on a table old code writes, no trigger.
-    (crate::rulings::migration_0026_rulings, Older::Welcome),
+    (crate::rulings::migration_0026_rulings, Older::Welcome), // ov-304: new tables only (rulings.rs says why)
     (crate::trains::migration_0027_trains, Older::Welcome), // ov-309: new tables only (trains.rs says why)
+    (crate::plan_cost::migration_0028_plan_budgets, Older::Welcome), // ov-307: one new table (plan_cost.rs says why)
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;

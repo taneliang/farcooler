@@ -25,6 +25,7 @@ use crate::plan::{
 use crate::rulings::{Ruling, rulings_of};
 use crate::board_ci::{CiRead, ci_of};
 use crate::trains::{Train, trains_of};
+use crate::plan_cost::{PlanCost, TREND_DAYS, budgets_of, cost_of, lane_days, trend_start};
 use crate::store::Store;
 use crate::tasks::now_millis;
 
@@ -86,6 +87,11 @@ pub struct ThemeView {
     /// lane working two themes' cards is counted once across them. Every lane
     /// that ever worked its cards, finished ones included.
     pub spend: LaneSpend,
+    /// Its token budget, when it has one (ov-307).
+    pub budget_tokens: Option<u64>,
+    /// Its tokens on each of the last seven UTC days, oldest first, today
+    /// last: each lane's days shared out over its cards as `spend` is.
+    pub trend: [u64; TREND_DAYS],
 }
 
 /// What a lane's agents have spent, from the runner's own record of their
@@ -123,6 +129,8 @@ pub struct LaneView {
     /// How many times it moved into `fixing`.
     pub fix_rounds: u32,
     pub spend: LaneSpend,
+    /// Its token budget, when it has one (ov-307).
+    pub budget_tokens: Option<u64>,
     /// Has sat in a state that isn't `queued` or finished for over an hour.
     pub stale: bool,
 }
@@ -171,6 +179,9 @@ pub struct Plan {
     /// How many of the board's cards are in each status, every card counted
     /// (ov-306): what a page's card-count references draw.
     pub board_counts: StatusCounts,
+    /// The week's tokens, and finished cards' cost by harness and model
+    /// (ov-307).
+    pub cost: PlanCost,
 }
 
 impl Store {
@@ -237,13 +248,23 @@ impl Store {
                         named.insert(id, ());
                     }
                 }
-                themes.push(ThemeView { theme, tasks, counts, spend: LaneSpend::default() });
+                themes.push(ThemeView {
+                    theme,
+                    tasks,
+                    counts,
+                    spend: LaneSpend::default(),
+                    budget_tokens: None,
+                    trend: [0; TREND_DAYS],
+                });
             }
         }
 
         let theme_of: HashMap<Uuid, usize> =
             themes.iter().enumerate().flat_map(|(i, v)| v.tasks.iter().map(move |t| (*t, i))).collect();
         let mut shares = vec![Shares::default(); themes.len()];
+        let budgets = budgets_of(&conn, workspace)?;
+        let trend_from = trend_start(now_ms);
+        let mut trends = vec![[0.0f64; TREND_DAYS]; themes.len()];
         let mut lanes = Vec::new();
         let mut order: Vec<(u32, Uuid)> = Vec::new();
         let mut live: HashMap<Uuid, u32> = HashMap::new();
@@ -287,6 +308,14 @@ impl Store {
                     for (theme, cards) in per_theme {
                         shares[theme].add(spend, cards as f64 / linked.len() as f64);
                     }
+                    if !in_themes.is_empty() {
+                        let days = lane_days(&conn, lane.id, trend_from)?;
+                        for theme in &in_themes {
+                            for (sum, n) in trends[*theme].iter_mut().zip(days) {
+                                *sum += n / linked.len() as f64;
+                            }
+                        }
+                    }
                 }
                 if !in_window {
                     continue;
@@ -303,12 +332,15 @@ impl Store {
                 let stale = !lane.state.is_closed()
                     && lane.state != LaneState::Queued
                     && now_ms - lane.state_since > STALE_AFTER_MS;
-                lanes.push(LaneView { lane, cards, agents, fix_rounds, spend, stale });
+                let budget_tokens = budgets.get(&lane.id).copied();
+                lanes.push(LaneView { lane, cards, agents, fix_rounds, spend, budget_tokens, stale });
             }
         }
         order.sort();
-        for (view, share) in themes.iter_mut().zip(&shares) {
+        for ((view, share), days) in themes.iter_mut().zip(&shares).zip(&trends) {
             view.spend = share.total();
+            view.budget_tokens = budgets.get(&view.theme.id).copied();
+            view.trend = days.map(|n| n.round().max(0.0) as u64);
         }
 
         // A ruling's cards carry their own keys and stay out of `cards`, which
@@ -348,7 +380,8 @@ impl Store {
             .collect();
         coverage.sort_by_key(|c| c.task_id);
         let order = order.into_iter().map(|(_, id)| id).collect();
-        Ok(Plan { now_ms, themes, lanes, order, cards, coverage, rulings, trains, ci, board_counts })
+        let cost = cost_of(&conn, &statuses, now_ms)?;
+        Ok(Plan { now_ms, themes, lanes, order, cards, coverage, rulings, trains, ci, board_counts, cost })
     }
 
     /// A theme's or lane's timeline, oldest first, from `since_ms` on.
