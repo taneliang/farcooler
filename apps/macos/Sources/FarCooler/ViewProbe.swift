@@ -71,6 +71,7 @@ private struct BaselineProbe: ViewModifier {
     func body(content: Content) -> some View {
         if probing, let id {
             content.background(alignment: Alignment(horizontal: .leading, vertical: .firstTextBaseline)) {
+                // style-exempt: an invisible test probe on the baseline, not a rule
                 Color.clear.frame(width: 1, height: 0).probed(id)
             }
         } else {
