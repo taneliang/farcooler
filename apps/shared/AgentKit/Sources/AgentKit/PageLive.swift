@@ -1,0 +1,220 @@
+import Foundation
+
+// References that draw live (ov-269 design 3.4, the owner's ruling on Q4): a
+// page names a card, a lane or a theme, and the app draws that thing's
+// *current* words from what it already holds, so a page can't go stale about
+// anything the board knows. A name nothing answers to (a dropped lane, a
+// runner without the plan layer, a key on another board) draws its label or
+// its name as plain text with no link: never an error, never an empty block.
+//
+// Navigation is the only action (Q3): a reference opens something the app
+// already opens. A link outside the app opens only for `https`, with its
+// domain drawn beside it (Q5), so a label can't hide where it goes.
+
+/// Where a reference opens.
+public enum PageDestination: Equatable, Hashable, Sendable {
+    /// A task, by id.
+    case task(String)
+    /// A task's open question, by the task's id.
+    case ask(String)
+    /// A lane's page, by id.
+    case lane(String)
+    /// A theme's page, by id.
+    case theme(String)
+    /// Another page, by slot.
+    case page(String)
+    /// A worktree, by id.
+    case worktree(String)
+    /// A terminal pane in a worktree, by the worktree's id and the pane's name.
+    case terminal(worktree: String, name: String)
+    /// A web page, opened in the system browser. Only ever `https`.
+    case url(URL)
+}
+
+/// What the app holds that a page's references are drawn from. Each platform
+/// fills one from its own board, plan and worktrees; nothing here asks the
+/// runner for anything.
+public struct PageWorld: Equatable, Sendable {
+    /// The board's cards by key (`ov-274`), lowercased.
+    public var tasks: [String: TaskRow]
+    /// The plan, or nil on a runner without `board_plan`: lane and theme
+    /// references then draw as plain text.
+    public var plan: PlanModel?
+    /// The board's pages, by slot.
+    public var pages: [String: BoardPage]
+    /// Worktree ids by name.
+    public var worktrees: [String: String]
+    /// The terminals the app knows by name, as `worktree id/name`.
+    public var terminals: Set<String>
+    /// Now, for "Updated 12 min ago".
+    public var nowMs: Int64
+
+    public init(
+        tasks: [TaskRow] = [], plan: PlanModel? = nil, pages: [BoardPage] = [], worktrees: [String: String] = [:],
+        terminals: Set<String> = [], nowMs: Int64 = 0
+    ) {
+        self.tasks = Dictionary(tasks.map { ($0.key.lowercased(), $0) }, uniquingKeysWith: { a, _ in a })
+        self.plan = plan
+        self.pages = Dictionary(pages.map { ($0.slot, $0) }, uniquingKeysWith: { a, _ in a })
+        self.worktrees = worktrees
+        self.terminals = terminals
+        self.nowMs = nowMs
+    }
+
+    /// A terminal's key in `terminals`.
+    public static func terminalKey(worktree: String, name: String) -> String { "\(worktree)/\(name)" }
+}
+
+/// A reference as it's drawn now.
+public struct PageResolved: Equatable, Sendable {
+    /// Its name: a key, a lane's name, a theme's, a page's title, a link's
+    /// label, or for one that resolves to nothing, its label or raw name.
+    public var name: String
+    /// Its live words, when it has some: a card's status, a lane's state, a
+    /// theme's progress, a link's domain.
+    public var status: String?
+    /// Amber only for a question that's still open.
+    public var statusTone: PageTone
+    /// Where it opens; nil when it resolves to nothing, so it draws as plain
+    /// text.
+    public var destination: PageDestination?
+    /// What VoiceOver says for it.
+    public var spoken: String
+
+    public init(name: String, status: String? = nil, statusTone: PageTone = .neutral, destination: PageDestination? = nil, spoken: String? = nil) {
+        self.name = name
+        self.status = status
+        self.statusTone = statusTone
+        self.destination = destination
+        self.spoken = spoken ?? ([name] + [status].compactMap { $0 }).joined(separator: ", ")
+    }
+
+    /// Whether it resolved to something the app can open.
+    public var resolved: Bool { destination != nil }
+}
+
+/// The words pages draw that aren't the orchestrator's.
+public enum PageWords {
+    /// What a question still waiting on the owner reads as.
+    public static let needsYou = "Needs you"
+    public static let answered = "Answered"
+    /// A block from a newer runner that brought no `alt`.
+    public static let newerBlock = "This part needs a newer Far Cooler."
+    /// A page listed without a document this build can read.
+    public static let unreadable = "Far Cooler can’t draw this page. Update Far Cooler to see it."
+    public static let couldntRead = "Far Cooler couldn’t read this board’s pages."
+    public static let fromTheOrchestrator = "From the orchestrator"
+
+    /// "Updated 12 min ago", or past the page's own limit, "Not updated for
+    /// 3 hours": secondary, never amber, since a stale page isn't the owner's
+    /// problem.
+    public static func updated(_ page: BoardPage, now: Int64) -> String {
+        let minutes = max(0, now - page.updatedAtMs) / 60_000
+        if let limit = page.doc?.staleAfterMin, limit > 0, minutes > Int64(limit) {
+            return "Not updated for \(span(minutes: minutes))"
+        }
+        return "Updated \(PlanWords.ago(page.updatedAtMs, now: now))"
+    }
+
+    /// Whether `updated` says the page is past its limit.
+    public static func isStale(_ page: BoardPage, now: Int64) -> Bool {
+        guard let limit = page.doc?.staleAfterMin, limit > 0 else { return false }
+        return max(0, now - page.updatedAtMs) / 60_000 > Int64(limit)
+    }
+
+    /// "40 minutes", "3 hours", "2 days".
+    static func span(minutes: Int64) -> String {
+        func plural(_ n: Int64, _ unit: String) -> String { n == 1 ? "1 \(unit)" : "\(n) \(unit)s" }
+        switch minutes {
+        case ..<60: return plural(minutes, "minute")
+        case ..<1440: return plural(minutes / 60, "hour")
+        default: return plural(minutes / 1440, "day")
+        }
+    }
+
+    /// "2 of 4".
+    public static func progress(done: Int, total: Int) -> String { "\(done) of \(total)" }
+
+    /// A lane's tokens for a table cell: "470K", or "Not reported".
+    public static func tokens(_ spend: PlanSpend) -> String {
+        spend.totalTokens > 0 ? TaskUsageFormat.tokens(spend.totalTokens) : PlanWords.notReported
+    }
+}
+
+extension PageWorld {
+    /// `ref` as it's drawn now.
+    public func resolve(_ ref: PageRef) -> PageResolved {
+        let label = ref.label.flatMap { $0.isEmpty ? nil : $0 }
+        let plain = PageResolved(name: label ?? ref.target.rawName)
+        switch ref.target {
+        case .task(let key):
+            guard let row = tasks[key.lowercased()] else { return plain }
+            return PageResolved(
+                name: label ?? row.key, status: row.status.title, destination: .task(row.id),
+                spoken: [label ?? row.key, row.title, row.status.title].joined(separator: ", "))
+        case .ask(let key):
+            guard let row = tasks[key.lowercased()] else { return plain }
+            let open = row.status == .needsDecision
+            return PageResolved(
+                name: label ?? row.key, status: open ? PageWords.needsYou : PageWords.answered,
+                statusTone: open ? .attention : .neutral, destination: open ? .ask(row.id) : .task(row.id),
+                spoken: [label ?? row.key, row.title, open ? PageWords.needsYou : PageWords.answered].joined(separator: ", "))
+        case .lane(let name):
+            guard let lane = plan?.lanes.first(where: { $0.name == name }) else { return plain }
+            return PageResolved(name: label ?? lane.name, status: PlanWords.status(lane), destination: .lane(lane.id))
+        case .theme(let name):
+            guard let theme = plan?.themes.first(where: { $0.name == name || $0.short == name }) else { return plain }
+            return PageResolved(name: label ?? theme.name, status: PlanWords.progress(theme.counts), destination: .theme(theme.id))
+        case .page(let slot):
+            guard let page = pages[slot] else { return plain }
+            return PageResolved(name: label ?? page.title, destination: .page(slot))
+        case .worktree(let name):
+            guard let id = worktrees[name] else { return plain }
+            return PageResolved(name: label ?? name, destination: .worktree(id))
+        case .terminal(let worktree, let name):
+            guard let id = worktrees[worktree], terminals.contains(Self.terminalKey(worktree: id, name: name)) else { return plain }
+            return PageResolved(name: label ?? name, destination: .terminal(worktree: id, name: name))
+        case .url(let raw):
+            guard let url = PageLinks.https(raw), let host = url.host() else { return plain }
+            return PageResolved(
+                name: label ?? host, status: label == nil ? nil : host, destination: .url(url),
+                spoken: label.map { "\($0), link to \(host)" } ?? "Link to \(host)")
+        case .unknown:
+            return plain
+        }
+    }
+
+    /// What a reference cell draws: its own text when it has some, else the
+    /// target's name, a lane's state words or a lane's tokens.
+    public func cellText(_ cell: PageCell) -> String {
+        if let text = cell.text { return text }
+        guard let ref = cell.ref else { return "" }
+        let resolved = resolve(ref)
+        switch cell.show {
+        case .name:
+            return resolved.name
+        case .state:
+            return lane(of: ref).map(PlanWords.status) ?? resolved.name
+        case .spend:
+            return lane(of: ref).map { PageWords.tokens($0.spend) } ?? resolved.name
+        }
+    }
+
+    private func lane(of ref: PageRef) -> PlanLane? {
+        guard case .lane(let name) = ref.target else { return nil }
+        return plan?.lanes.first { $0.name == name }
+    }
+}
+
+/// The one rule for links leaving the app.
+public enum PageLinks {
+    /// `raw` as a URL the browser may open: `https`, with a host, and no
+    /// user name or password to dress one domain up as another. Anything
+    /// else is nil, and draws as plain text.
+    public static func https(_ raw: String) -> URL? {
+        guard let url = URL(string: raw), url.scheme?.lowercased() == "https", let host = url.host(), !host.isEmpty,
+            url.user() == nil, url.password() == nil
+        else { return nil }
+        return url
+    }
+}
