@@ -79,6 +79,16 @@
   "outcome": "",
   "owner_ask": "",
   "short": "00003001",
+  "spend": {
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0,
+    "cost_micros": 15500000,
+    "input_tokens": 235000,
+    "output_tokens": 85000,
+    "runs": 2,
+    "shared_agents": 0,
+    "unmeasured_agents": 0
+  },
   "state": "active",
   "story": "",
   "story_at": 0

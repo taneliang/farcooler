@@ -62,6 +62,24 @@ fn key_of(plan: &pb::Plan, task: &[u8]) -> String {
     plan.cards.iter().find(|c| c.task_id == task).map_or_else(|| short(task), |c| c.key.clone())
 }
 
+/// A spend as the JSON carries it: a lane's, or a theme's share (ov-306).
+fn spend_json(s: &pb::LaneSpend) -> Value {
+    json!({
+        "input_tokens": s.input_tokens, "output_tokens": s.output_tokens,
+        "cache_read_tokens": s.cache_read_tokens, "cache_write_tokens": s.cache_write_tokens,
+        "cost_micros": s.cost_micros, "runs": s.runs, "unmeasured_agents": s.unmeasured_agents,
+        "shared_agents": s.shared_agents,
+    })
+}
+
+/// Status counts as the JSON carries them: a theme's, or the board's (ov-306).
+fn counts_json(c: &pb::PlanStatusCounts) -> Value {
+    json!({
+        "backlog": c.backlog, "todo": c.todo, "needs_decision": c.needs_decision,
+        "in_progress": c.in_progress, "in_review": c.in_review, "done": c.done, "cancelled": c.cancelled,
+    })
+}
+
 fn theme_json(plan: &pb::Plan, view: &pb::BoardThemeView) -> Value {
     let t = view.theme.clone().unwrap_or_default();
     let c = view.counts.unwrap_or_default();
@@ -77,10 +95,8 @@ fn theme_json(plan: &pb::Plan, view: &pb::BoardThemeView) -> Value {
         "state": theme_state_word(t.state),
         "ordinal": t.ordinal,
         "cards": view.task_ids.iter().map(|id| json!({ "task": id_text(id), "key": key_of(plan, id) })).collect::<Vec<_>>(),
-        "counts": {
-            "backlog": c.backlog, "todo": c.todo, "needs_decision": c.needs_decision,
-            "in_progress": c.in_progress, "in_review": c.in_review, "done": c.done, "cancelled": c.cancelled,
-        },
+        "counts": counts_json(&c),
+        "spend": spend_json(&view.spend.unwrap_or_default()),
     })
 }
 
@@ -253,6 +269,7 @@ pub fn plan_json(plan: &pb::Plan) -> Value {
         "rulings": plan.rulings.iter().map(|r| ruling_json(plan, r)).collect::<Vec<_>>(),
         "trains": plan.trains.iter().map(|t| train_json(plan, t)).collect::<Vec<_>>(),
         "ci": plan.ci.iter().map(ci_json).collect::<Vec<_>>(),
+        "board_counts": counts_json(&plan.board_counts.unwrap_or_default()),
     })
 }
 

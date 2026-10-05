@@ -1281,6 +1281,24 @@ fn id_text(id: &[u8]) -> String {
     uuid_of(id).to_string()
 }
 
+/// A spend as the JSON carries it: a lane's, or a theme's share (ov-306).
+fn spend_json(s: &pb::LaneSpend) -> Value {
+    json!({
+        "input_tokens": s.input_tokens, "output_tokens": s.output_tokens,
+        "cache_read_tokens": s.cache_read_tokens, "cache_write_tokens": s.cache_write_tokens,
+        "cost_micros": s.cost_micros, "runs": s.runs, "unmeasured_agents": s.unmeasured_agents,
+        "shared_agents": s.shared_agents,
+    })
+}
+
+/// Status counts as the JSON carries them: a theme's, or the board's (ov-306).
+fn counts_json(c: &pb::PlanStatusCounts) -> Value {
+    json!({
+        "backlog": c.backlog, "todo": c.todo, "needs_decision": c.needs_decision,
+        "in_progress": c.in_progress, "in_review": c.in_review, "done": c.done, "cancelled": c.cancelled,
+    })
+}
+
 fn theme_json(view: &pb::BoardThemeView, keys: &Keys) -> Value {
     let t = view.theme.clone().unwrap_or_default();
     let c = view.counts.unwrap_or_default();
@@ -1296,10 +1314,8 @@ fn theme_json(view: &pb::BoardThemeView, keys: &Keys) -> Value {
         "state": state_of_theme(t.state),
         "ordinal": t.ordinal,
         "cards": view.task_ids.iter().map(|id| json!({ "task": id_text(id), "key": keys.of(id) })).collect::<Vec<_>>(),
-        "counts": {
-            "backlog": c.backlog, "todo": c.todo, "needs_decision": c.needs_decision,
-            "in_progress": c.in_progress, "in_review": c.in_review, "done": c.done, "cancelled": c.cancelled,
-        },
+        "counts": counts_json(&c),
+        "spend": spend_json(&view.spend.unwrap_or_default()),
     })
 }
 
@@ -1395,6 +1411,7 @@ fn plan_json(plan: &pb::Plan, keys: &Keys) -> Value {
         "rulings": plan.rulings.iter().map(|r| ruling::ruling_json(plan, r, keys)).collect::<Vec<_>>(),
         "trains": plan.trains.iter().map(|t| train::train_json(plan, t, keys)).collect::<Vec<_>>(),
         "ci": plan.ci.iter().map(train::ci_json).collect::<Vec<_>>(),
+        "board_counts": counts_json(&plan.board_counts.unwrap_or_default()),
     })
 }
 

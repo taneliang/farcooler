@@ -81,6 +81,11 @@ pub struct ThemeView {
     /// Its cards, oldest first.
     pub tasks: Vec<Uuid>,
     pub counts: StatusCounts,
+    /// What its lanes spent on its cards (ov-306): each lane's spend shared
+    /// out over the lane's cards, and the theme's cards' shares summed, so a
+    /// lane working two themes' cards is counted once across them. Every lane
+    /// that ever worked its cards, finished ones included.
+    pub spend: LaneSpend,
 }
 
 /// What a lane's agents have spent, from the runner's own record of their
@@ -163,6 +168,9 @@ pub struct Plan {
     /// What the runner last read of CI for the subjects the board names: its
     /// trains' pushed SHAs, and its pages' CI references (ov-306).
     pub ci: Vec<CiRead>,
+    /// How many of the board's cards are in each status, every card counted
+    /// (ov-306): what a page's card-count references draw.
+    pub board_counts: StatusCounts,
 }
 
 impl Store {
@@ -229,10 +237,13 @@ impl Store {
                         named.insert(id, ());
                     }
                 }
-                themes.push(ThemeView { theme, tasks, counts });
+                themes.push(ThemeView { theme, tasks, counts, spend: LaneSpend::default() });
             }
         }
 
+        let theme_of: HashMap<Uuid, usize> =
+            themes.iter().enumerate().flat_map(|(i, v)| v.tasks.iter().map(move |t| (*t, i))).collect();
+        let mut shares = vec![Shares::default(); themes.len()];
         let mut lanes = Vec::new();
         let mut order: Vec<(u32, Uuid)> = Vec::new();
         let mut live: HashMap<Uuid, u32> = HashMap::new();
@@ -251,14 +262,26 @@ impl Store {
             for lane in found {
                 let cards = lane_cards_of(&conn, lane.id, &statuses)?;
                 let linked: HashSet<Uuid> = cards.iter().map(|c| c.task_id).collect();
-                for task in linked {
+                for task in &linked {
                     match lane.state {
-                        LaneState::Landed => *landed.entry(task).or_default() += 1,
+                        LaneState::Landed => *landed.entry(*task).or_default() += 1,
                         LaneState::Dropped => {}
-                        _ => *live.entry(task).or_default() += 1,
+                        _ => *live.entry(*task).or_default() += 1,
                     }
                 }
-                if lane.state.is_closed() && lane.state_since < closed_since_ms {
+                let in_themes: Vec<usize> = linked.iter().filter_map(|t| theme_of.get(t).copied()).collect();
+                let in_window = !(lane.state.is_closed() && lane.state_since < closed_since_ms);
+                let lane_spend = if in_window || !in_themes.is_empty() {
+                    Some(spend_of(&conn, lane.id, &agents_of(&conn, lane.id)?)?)
+                } else {
+                    None
+                };
+                if let Some(spend) = &lane_spend {
+                    for theme in &in_themes {
+                        shares[*theme].add(spend, 1.0 / linked.len() as f64);
+                    }
+                }
+                if !in_window {
                     continue;
                 }
                 for card in &cards {
@@ -269,7 +292,7 @@ impl Store {
                 }
                 let agents = agents_of(&conn, lane.id)?;
                 let fix_rounds = fix_rounds_of(&conn, lane.id)?;
-                let spend = spend_of(&conn, lane.id, &agents)?;
+                let spend = lane_spend.unwrap_or_default();
                 let stale = !lane.state.is_closed()
                     && lane.state != LaneState::Queued
                     && now_ms - lane.state_since > STALE_AFTER_MS;
@@ -277,6 +300,9 @@ impl Store {
             }
         }
         order.sort();
+        for (view, share) in themes.iter_mut().zip(&shares) {
+            view.spend = share.total();
+        }
 
         // A ruling's cards carry their own keys and stay out of `cards`, which
         // the reconciliation reads: a card a ruling names is in no lane by
@@ -296,6 +322,10 @@ impl Store {
             trains.push(TrainView { train, lanes });
         }
         let ci = ci_of(&conn, workspace)?;
+        let mut board_counts = StatusCounts::default();
+        for card in statuses.values() {
+            board_counts.add(card.status);
+        }
 
         let cards = named.keys().filter_map(|id| statuses.get(id).cloned()).collect();
         let mut coverage: Vec<Coverage> = live
@@ -311,7 +341,7 @@ impl Store {
             .collect();
         coverage.sort_by_key(|c| c.task_id);
         let order = order.into_iter().map(|(_, id)| id).collect();
-        Ok(Plan { now_ms, themes, lanes, order, cards, coverage, rulings, trains, ci })
+        Ok(Plan { now_ms, themes, lanes, order, cards, coverage, rulings, trains, ci, board_counts })
     }
 
     /// A theme's or lane's timeline, oldest first, from `since_ms` on.
@@ -349,6 +379,46 @@ impl Store {
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(map_err)?;
         Ok(rows)
+    }
+}
+
+/// A theme's share of its lanes' spend, summed before rounding.
+#[derive(Debug, Clone, Default)]
+struct Shares {
+    tokens: [f64; 4],
+    cost: Option<f64>,
+    runs: u32,
+    unmeasured: u32,
+    shared: u32,
+}
+
+impl Shares {
+    /// `part` of `spend`: the share of a lane's cards that are the theme's.
+    fn add(&mut self, spend: &LaneSpend, part: f64) {
+        let tokens = [spend.input_tokens, spend.output_tokens, spend.cache_read_tokens, spend.cache_write_tokens];
+        for (sum, n) in self.tokens.iter_mut().zip(tokens) {
+            *sum += n as f64 * part;
+        }
+        if let Some(micros) = spend.cost_micros {
+            *self.cost.get_or_insert(0.0) += micros as f64 * part;
+        }
+        self.runs += spend.runs;
+        self.unmeasured += spend.unmeasured_agents;
+        self.shared += spend.shared_agents;
+    }
+
+    fn total(&self) -> LaneSpend {
+        let n = |v: f64| v.round().max(0.0) as u64;
+        LaneSpend {
+            input_tokens: n(self.tokens[0]),
+            output_tokens: n(self.tokens[1]),
+            cache_read_tokens: n(self.tokens[2]),
+            cache_write_tokens: n(self.tokens[3]),
+            cost_micros: self.cost.map(|c| c.round() as i64),
+            runs: self.runs,
+            unmeasured_agents: self.unmeasured,
+            shared_agents: self.shared,
+        }
     }
 }
 

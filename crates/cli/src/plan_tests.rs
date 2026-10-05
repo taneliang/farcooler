@@ -55,6 +55,7 @@ fn theme(n: u128, name: &str, cards: &[u128], done: u32) -> pb::BoardThemeView {
         }),
         task_ids: cards.iter().map(|c| id_bytes(Uuid::from_u128(0x1000 + c))).collect(),
         counts: Some(pb::PlanStatusCounts { done, backlog: cards.len() as u32 - done, ..Default::default() }),
+        spend: None,
     }
 }
 
@@ -145,7 +146,7 @@ fn the_plan() -> pb::Plan {
     landed.state_since = NOW - HOUR;
     pb::Plan {
         now_ms: NOW,
-        themes: vec![theme(1, "Visual language", &[1, 2, 3], 1)],
+        themes: vec![pb::BoardThemeView { spend: Some(theme_spend()), ..theme(1, "Visual language", &[1, 2, 3], 1) }],
         order: vec![queued.id.clone()],
         lanes: vec![queued, review, landed],
         cards: items()
@@ -160,7 +161,18 @@ fn the_plan() -> pb::Plan {
         rulings: rulings(),
         trains: trains().0,
         ci: trains().1,
+        board_counts: Some(board_counts()),
     }
+}
+
+/// The theme's share of its lanes' spend, and the board's counts (ov-306).
+/// The client's `plan_json` test builds the same.
+fn theme_spend() -> pb::LaneSpend {
+    pb::LaneSpend { input_tokens: 235_000, output_tokens: 85_000, cost_micros: Some(15_500_000), runs: 2, ..Default::default() }
+}
+
+fn board_counts() -> pb::PlanStatusCounts {
+    pb::PlanStatusCounts { backlog: 4, in_progress: 2, in_review: 3, done: 11, ..Default::default() }
 }
 
 /// A runner that answers the reads from fixed state, echoes each write as the

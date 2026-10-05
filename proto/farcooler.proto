@@ -3952,6 +3952,10 @@ message BoardThemeView {
   BoardTheme theme = 1;
   repeated bytes task_ids = 2;
   PlanStatusCounts counts = 3;
+  // What its lanes spent on its cards (ov-306): each lane's spend shared out
+  // over the lane's cards, and this theme's cards' shares summed, finished
+  // lanes included. Unset from a runner before it; a client says nothing then.
+  LaneSpend spend = 4;
 }
 
 // A card a lane works, or one slice of it.
@@ -4064,6 +4068,10 @@ message Plan {
   // trains' pushed SHAs and its pages' CI references (ov-306). Behind
   // `board_trains`; empty without it, and a CI reference then draws as text.
   repeated BoardCiRead ci = 9;
+  // How many of the board's cards are in each status, every card counted
+  // (ov-306): what a page's card-count references draw. Unset from a runner
+  // before it, and such a reference then draws as text.
+  PlanStatusCounts board_counts = 10;
 }
 
 // `plan.get`, at `read`.

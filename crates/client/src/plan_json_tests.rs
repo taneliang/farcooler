@@ -88,6 +88,13 @@ fn the_plan() -> pb::Plan {
             }),
             task_ids: vec![id(0x1001), id(0x1002), id(0x1003)],
             counts: Some(pb::PlanStatusCounts { done: 1, backlog: 2, ..Default::default() }),
+            spend: Some(pb::LaneSpend {
+                input_tokens: 235_000,
+                output_tokens: 85_000,
+                cost_micros: Some(15_500_000),
+                runs: 2,
+                ..Default::default()
+            }),
         }],
         order: vec![queued.id.clone()],
         lanes: vec![queued, review, landed],
@@ -138,6 +145,7 @@ fn the_plan() -> pb::Plan {
         ],
         trains: trains().0,
         ci: trains().1,
+        board_counts: Some(pb::PlanStatusCounts { backlog: 4, in_progress: 2, in_review: 3, done: 11, ..Default::default() }),
     }
 }
 

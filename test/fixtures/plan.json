@@ -1,4 +1,13 @@
 {
+  "board_counts": {
+    "backlog": 4,
+    "cancelled": 0,
+    "done": 11,
+    "in_progress": 2,
+    "in_review": 3,
+    "needs_decision": 0,
+    "todo": 0
+  },
   "cards": [
     {
       "key": "ov-1",
@@ -249,6 +258,16 @@
       "outcome": "Every Mac surface reads as one app.",
       "owner_ask": "Should the sidebar tint follow the terminal theme?",
       "short": "00003001",
+      "spend": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_micros": 15500000,
+        "input_tokens": 235000,
+        "output_tokens": 85000,
+        "runs": 2,
+        "shared_agents": 0,
+        "unmeasured_agents": 0
+      },
       "state": "active",
       "story": "Tokens are on main.",
       "story_at": 1799996400000

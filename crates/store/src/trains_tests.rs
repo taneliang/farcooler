@@ -234,3 +234,64 @@ fn only_pushed_trains_are_followed() {
     assert_eq!(followed, vec![b.id]);
     assert!(!followed.contains(&a.id));
 }
+
+// ---- live page data (ov-306) ----
+
+/// One run of `agent`'s, `tokens` in and nothing else.
+fn turn(store: &Store, agent: &str, tokens: u64) {
+    use crate::usage::{NewTurn, Surface, TurnKind, TurnModel};
+    use farcooler_core::usage::TokenCounts;
+    store
+        .record_turn(&NewTurn {
+            key: format!("claude-log:agent:{agent}"),
+            terminal_id: None,
+            worktree_id: None,
+            repository_id: None,
+            workspace_id: None,
+            task_id: None,
+            harness: "claude".into(),
+            surface: Surface::Terminal,
+            started_at: None,
+            ended_at: 1000,
+            active_ms: None,
+            usage: "reported",
+            models: vec![TurnModel::priced(
+                Some("claude-opus-5".into()),
+                TokenCounts { input: tokens, output: 0, cache_read: 0, cache_write: 0, cache_write_1h: 0 },
+                Some(2_000),
+            )],
+            kind: TurnKind::Subagent,
+        })
+        .unwrap();
+}
+
+/// A theme's spend is its lanes' spend shared out over their cards: a lane on
+/// one of the theme's cards and one outside gives it half, and a finished lane
+/// still counts. The board's counts cover every card.
+#[test]
+fn a_theme_spends_its_share_of_its_lanes() {
+    use crate::plan::{AgentRecord, AgentRole, LaneCard, NewTheme};
+    let (store, main, t) = board(3);
+    let theme = store.create_theme(main, &NewTheme { name: "Visual".into(), outcome: String::new() }, &[t[0].id, t[1].id], Actor::Manager).unwrap();
+    let agent = |id: &str| AgentRecord { harness: "claude".into(), agent_id: id.into(), role: AgentRole::Build, model: None, ended: false };
+    let card = |task: &Task| LaneCard { task_id: task.id, slice: String::new() };
+    let half = store
+        .create_lane(main, &NewLane { name: "half".into(), ..Default::default() }, &[card(&t[0]), card(&t[2])], Some(&agent("a1")), Actor::Manager)
+        .unwrap();
+    let whole = store
+        .create_lane(main, &NewLane { name: "whole".into(), ..Default::default() }, &[card(&t[1])], Some(&agent("a2")), Actor::Manager)
+        .unwrap();
+    turn(&store, "a1", 1000);
+    turn(&store, "a2", 300);
+    store.update_lane(whole.id, &crate::plan::LaneUpdate { state: Some(crate::plan::LaneState::Dropped), ..Default::default() }, Actor::Manager).unwrap();
+
+    let plan = store.plan(main, i64::MAX).unwrap();
+    assert!(plan.lanes.iter().all(|l| l.lane.id != whole.id), "the dropped lane is out of the window");
+    let view = plan.themes.iter().find(|v| v.theme.id == theme.id).unwrap();
+    let total = |s: &crate::plan_read::LaneSpend| s.input_tokens + s.output_tokens + s.cache_read_tokens + s.cache_write_tokens;
+    let half_spend = total(&plan.lanes.iter().find(|l| l.lane.id == half.id).unwrap().spend);
+    assert_eq!(half_spend, 1000);
+    assert_eq!(total(&view.spend), 500 + 300);
+    assert_eq!(view.spend.runs, 2);
+    assert_eq!((plan.board_counts.backlog, plan.board_counts.total()), (3, 3));
+}
