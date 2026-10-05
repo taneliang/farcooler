@@ -23,6 +23,13 @@ first.
     out (a rebalance) makes the old times overstate it, so they no longer
     count, and the check waits for main to measure the new split. Adding a
     class keeps the old times, as a floor, until the next run measures it.
+  - A skipped shard measures nothing. Since ov-301 a push to main whose changes
+    do not touch the iOS app skips all four shards (scripts/ios-ui-plan.py), and
+    a skipped job reports no run time, or a zero one that would pass for a fast
+    run and drag the median down. Only success, failure and a cancel at the
+    timeout are read, and a job whose name is still the unexpanded matrix
+    template (how GitHub lists a skipped matrix job) matches no shard. Such runs
+    still use up the window of runs read, so it is wider than it was.
   - A job cancelled well short of its timeout was superseded by a newer push
     and measured nothing. One cancelled at the timeout counts, at the timeout.
 
@@ -220,6 +227,17 @@ def self_test():
     expect("a superseded cancel is skipped", measure(sup, now, timeout)["b"], [1920.0, 1920.0])
     hit = [run([job("b", 40, "cancelled")])] * 2 + [run([job("b", 20)])]
     expect("a timeout counts as the timeout", verdict(measure(hit, now, timeout), timeout)[1], True)
+    # Skipped shards (ov-301): a push that skips them lists the jobs as
+    # skipped, with no times or a zero-length run, and must read as nothing.
+    skipped = {"conclusion": "skipped", "started_at": "2026-10-05T00:00:00Z", "completed_at": "2026-10-05T00:00:00Z"}
+    zero = [run([{**skipped, "name": "iOS UI (b)"}])] * 3
+    expect("skipped shards measure nothing", measure(zero, now, timeout)["b"], [])
+    unexpanded = [run([{**skipped, "name": "iOS UI (${{ matrix.shard }})"}, {"name": "iOS UI (b)", "conclusion": "skipped"}])] * 3
+    expect("a skipped matrix job is not a shard", measure(unexpanded, now, timeout)["b"], [])
+    # They do not pull a slow shard's median down: two slow runs among skipped
+    # ones still judge, and skipped runs are not counted as fast ones.
+    mixed = [run([{**skipped, "name": "iOS UI (b)"}]), run([job("b", 35)]), run([{**skipped, "name": "iOS UI (b)"}]), run([job("b", 35)])]
+    expect("skipped runs do not dilute a slow shard", verdict(measure(mixed, now, timeout), timeout)[1], True)
     # A shard whose classes moved out since: its old time is not its time now.
     moved = [run([job("a", 35)], {"a": {"X", "Y", "W"}, "b": {"Z"}})] * 3
     expect("a rebalanced shard waits for a new time", measure(moved, now, timeout)["a"], [])
@@ -262,7 +280,7 @@ def main(argv):
         return 2
     current = shards_in((ROOT / SHARDS_FILE).read_text())
     try:
-        runs = fetch(RUNS * 3)
+        runs = fetch(RUNS * 6)
     except RuntimeError as error:
         print(f"ios-ui-shard-budget: {error}", file=sys.stderr)
         return 2
