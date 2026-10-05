@@ -120,6 +120,22 @@ public struct OneTreeWorktree: Equatable, Sendable {
     }
 }
 
+/// A card in a status this build doesn't know.
+public struct OneTreeUnreadable: Equatable, Sendable {
+    public var id: String
+    public var key: String
+    public var title: String
+    /// The runner's word for its status, shown as it is.
+    public var status: String
+
+    public init(id: String, key: String, title: String, status: String) {
+        self.id = id
+        self.key = key
+        self.title = title
+        self.status = status
+    }
+}
+
 /// An orchestrator's page, and the theme it's anchored to.
 public struct OneTreePage: Equatable, Sendable {
     public var slot: String
@@ -204,6 +220,8 @@ public struct OneTreeInput: Equatable, Sendable {
     /// The repository's own checkout, holding the project terminals.
     public var mainCheckout: OneTreeWorktree?
     public var pages: [OneTreePage]
+    /// Cards in a status this build can't read, by the runner's word.
+    public var unreadable: [OneTreeUnreadable] = []
     public var asks: OneTreeAsks
     public var filter: OneTreeFilter
     /// The pinned places' trailing words: the orchestrator's state, and
@@ -298,6 +316,9 @@ public struct OneTreeNode: Equatable, Sendable, Identifiable {
     public var quiet = false
     /// For a lane: its state, so the view can tint a stale or waiting one.
     public var laneState: LaneState?
+    /// The worktree a lane, a worktree or a terminal row is in: what its
+    /// menu acts on.
+    public var worktreeID: String?
 
     public var hasChildren: Bool { !children.isEmpty }
 
@@ -343,6 +364,9 @@ public enum OneTreeWords {
     public static let mainCheckout = "Main Checkout"
     public static let looseWorktrees = "Loose Worktrees"
     public static let subagentCaption = "No terminal; runs inside the orchestrator"
+    public static let hidden = "Hidden"
+    public static let notOnThisVersion = "Not On This Version"
+    public static let notOnThisVersionCaption = "This runner uses states this Far Cooler doesn’t have yet."
 
     /// "4 done".
     public static func done(_ n: Int) -> String { "\(n) done" }
@@ -407,6 +431,14 @@ struct OneTreeBuilder {
     let laneWorktrees: [String: OneTreeWorktree]
     /// The theme expanded by default.
     let newestTheme: String?
+    /// The joins, indexed once (ov-321 review H2): a lane's cards, a card's
+    /// lanes, the worktrees by id and by the cards they hold, and the
+    /// lane-reached worktrees. Every node then reads them in constant time,
+    /// so a build is linear in the board.
+    let lanesByTask: [String: [PlanLane]]
+    let worktreesByID: [String: OneTreeWorktree]
+    let worktreesByTask: [String: [OneTreeWorktree]]
+    let laneWorktreeIDs: Set<String>
 
     init(_ input: OneTreeInput) {
         self.input = input
@@ -418,18 +450,33 @@ struct OneTreeBuilder {
         tasksByID = byID
         themes = input.plan.shownThemes
         lanes = input.plan.lanes.filter { $0.state != .dropped }
+        var byTask: [String: [PlanLane]] = [:]
+        for lane in lanes {
+            var seen = Set<String>()
+            for card in lane.cards where seen.insert(card.task).inserted { byTask[card.task, default: []].append(lane) }
+        }
+        lanesByTask = byTask
+        var wtByID: [String: OneTreeWorktree] = [:]
+        var wtByTask: [String: [OneTreeWorktree]] = [:]
+        for worktree in input.worktrees where wtByID[worktree.id] == nil {
+            wtByID[worktree.id] = worktree
+            for task in Set(worktree.taskIDs) { wtByTask[task, default: []].append(worktree) }
+        }
+        worktreesByID = wtByID
+        worktreesByTask = wtByTask
+        let join = OneTreeJoin(input.worktrees)
         var joined: [String: OneTreeWorktree] = [:]
         for lane in lanes {
-            if let worktree = OneTreeBuilder.worktree(of: lane, in: input.worktrees) { joined[lane.id] = worktree }
+            if let worktree = join.worktree(of: lane) { joined[lane.id] = worktree }
         }
         laneWorktrees = joined
-        newestTheme = OneTreeBuilder.newestTheme(
-            themes.filter { $0.state == "active" }.isEmpty ? themes : themes.filter { $0.state == "active" },
-            tasks: byID, lanes: lanes)
+        laneWorktreeIDs = Set(joined.values.map(\.id))
+        let active = themes.filter { $0.state == "active" }
+        newestTheme = OneTreeBuilder.newestTheme(active.isEmpty ? themes : active, tasks: byID, lanesByTask: byTask)
     }
 
     func build() -> OneTree {
-        let tree = themeNodes() + [noThemeNode()].compactMap { $0 }
+        let tree = themeNodes() + [noThemeNode(), unreadableNode()].compactMap { $0 }
         return OneTree(places: places(), tree: tree, below: [mainCheckoutNode(), looseNode()].compactMap { $0 })
     }
 
@@ -439,25 +486,20 @@ struct OneTreeBuilder {
     /// recorded relative to the repository) the one whose path ends with
     /// it, else the one on its branch. Nil for a lane with no worktree yet.
     static func worktree(of lane: PlanLane, in worktrees: [OneTreeWorktree]) -> OneTreeWorktree? {
-        let path = lane.worktreePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        if !path.isEmpty {
-            if let exact = worktrees.first(where: { $0.path == lane.worktreePath }) { return exact }
-            if let suffix = worktrees.first(where: { $0.path.hasSuffix("/" + path) }) { return suffix }
-        }
-        if !lane.branch.isEmpty, let branch = worktrees.first(where: { $0.branch == lane.branch }) { return branch }
-        return nil
+        OneTreeJoin(worktrees).worktree(of: lane)
     }
 
     /// The theme with the newest activity: its story, its cards' moves and
     /// its lanes' state changes. The earlier on the board when two tie.
-    static func newestTheme(_ themes: [PlanTheme], tasks: [String: OneTreeTask], lanes: [PlanLane]) -> String? {
+    static func newestTheme(_ themes: [PlanTheme], tasks: [String: OneTreeTask], lanesByTask: [String: [PlanLane]])
+        -> String?
+    {
         var best: (id: String, at: Int64)?
         for theme in themes {
-            let ids = Set(theme.cards.map(\.task))
             var at = theme.storyAt
-            for id in ids { at = max(at, tasks[id]?.activityMs ?? 0) }
-            for lane in lanes where lane.cards.contains(where: { ids.contains($0.task) }) {
-                at = max(at, lane.stateSince)
+            for card in theme.cards {
+                at = max(at, tasks[card.task]?.activityMs ?? 0)
+                for lane in lanesByTask[card.task] ?? [] { at = max(at, lane.stateSince) }
             }
             if best == nil || at > best!.at { best = (theme.id, at) }
         }
@@ -466,22 +508,17 @@ struct OneTreeBuilder {
 
     /// The lanes working `task`, in the plan's order: a fix round's lane
     /// after the lane it fixes.
-    func lanes(of task: String) -> [PlanLane] {
-        lanes.filter { lane in lane.cards.contains { $0.task == task } }
-    }
-
-    /// Every worktree a lane reaches.
-    var laneWorktreeIDs: Set<String> { Set(laneWorktrees.values.map(\.id)) }
+    func lanes(of task: String) -> [PlanLane] { lanesByTask[task] ?? [] }
 
     /// The worktrees `task` works in with no lane recorded: its own, and
     /// any holding its panes, that no lane already stands for.
     func ownWorktrees(of task: OneTreeTask) -> [OneTreeWorktree] {
         let taken = Set(lanes(of: task.id).compactMap { laneWorktrees[$0.id]?.id })
         var out: [OneTreeWorktree] = []
-        if let own = task.worktreeID, let found = input.worktrees.first(where: { $0.id == own }), !taken.contains(own) {
+        if let own = task.worktreeID, let found = worktreesByID[own], !taken.contains(own) {
             out.append(found)
         }
-        for worktree in input.worktrees where worktree.taskIDs.contains(task.id) {
+        for worktree in worktreesByTask[task.id] ?? [] {
             if !taken.contains(worktree.id), !out.contains(where: { $0.id == worktree.id }) { out.append(worktree) }
         }
         return out
@@ -534,6 +571,9 @@ struct OneTreeBuilder {
             let id = "theme:\(theme.id)"
             var children = shown.map { taskNode($0, under: id, theme: theme.id) }
             if input.filter == .open {
+                // A finished card keeps its id under the theme whichever
+                // filter built the tree, so a row chosen in the fold is the
+                // same node in the jump bar's tree (review L2).
                 let done = ids.compactMap { tasksByID[$0] }.filter { $0.status == .done }
                 if !done.isEmpty {
                     let fold = "\(id)/done"
@@ -541,7 +581,7 @@ struct OneTreeBuilder {
                         finish(
                             OneTreeNode(
                                 id: fold, kind: .doneFold, title: OneTreeWords.done(done.count), glyph: "checkmark",
-                                children: done.map { taskNode($0, under: fold, theme: theme.id) }, quiet: true)))
+                                children: done.map { taskNode($0, under: id, theme: theme.id) }, quiet: true)))
                 }
             }
             children += input.pages.filter { $0.themeID == theme.id }.map { pageNode($0, under: id) }
@@ -567,11 +607,22 @@ struct OneTreeBuilder {
                 if l.element.activityMs != r.element.activityMs { return l.element.activityMs > r.element.activityMs }
                 return l.offset < r.offset
             }.map(\.element)
-        guard !mine.isEmpty else { return nil }
+        // Under Open, its finished cards fold as a theme's do (review L5).
+        let done = input.filter == .open
+            ? input.tasks.filter { !themed.contains($0.id) && $0.status == .done } : []
+        guard !mine.isEmpty || !done.isEmpty else { return nil }
         let id = "group:no-theme"
+        var children = mine.map { taskNode($0, under: id, theme: nil) }
+        if !done.isEmpty {
+            children.append(
+                finish(
+                    OneTreeNode(
+                        id: "\(id)/done", kind: .doneFold, title: OneTreeWords.done(done.count), glyph: "checkmark",
+                        children: done.map { taskNode($0, under: id, theme: nil) }, quiet: true)))
+        }
         var node = OneTreeNode(
             id: id, kind: .group, title: OneTreeWords.noTheme, detail: "\(mine.count)", glyph: "tray",
-            children: mine.map { taskNode($0, under: id, theme: nil) })
+            children: children)
         node.expandedByDefault = themes.isEmpty
         return finish(node)
     }
@@ -609,6 +660,7 @@ struct OneTreeBuilder {
             also: OneTreeWords.also(others), glyph: OneTreeWords.glyph(lane.state), target: .lane(lane.id),
             children: children, quiet: !lane.state.isLive)
         node.laneState = lane.state
+        node.worktreeID = laneWorktrees[lane.id]?.id
         return finish(node)
     }
 
@@ -619,15 +671,16 @@ struct OneTreeBuilder {
         return finish(
             OneTreeNode(
                 id: id, kind: .lane, title: worktree.name, glyph: "arrow.triangle.branch",
-                target: .worktree(worktree.id), children: terminalNodes(worktree, under: id)))
+                target: .worktree(worktree.id), children: terminalNodes(worktree, under: id),
+                worktreeID: worktree.id))
     }
 
     func terminalNodes(_ worktree: OneTreeWorktree, under parent: String) -> [OneTreeNode] {
         worktree.terminals.filter { !$0.isOrchestrator }.map { terminal in
             var node = OneTreeNode(
                 id: "\(parent)/terminal:\(terminal.id)", kind: .terminal, title: terminal.title,
-                detail: terminal.isAgent ? "Agent" : "Shell", glyph: terminal.isAgent ? "sparkles" : "terminal",
-                target: .terminal(worktree: worktree.id, terminal: terminal.id))
+                detail: terminal.isAgent ? "Agent" : "", glyph: terminal.isAgent ? "sparkles" : "terminal",
+                target: .terminal(worktree: worktree.id, terminal: terminal.id), worktreeID: worktree.id)
             node.asks = input.asks.terminals.contains(terminal.id)
             node.holdsAsk = node.asks
             return node
@@ -650,7 +703,20 @@ struct OneTreeBuilder {
                 }
             }
         }
-        return task.workers.filter(\.state.isOpen).enumerated().map { index, worker in
+        // The cards' own record (`task_workers`): each card's open subagents
+        // sit on its newest live lane only, so a lane and its fix round
+        // don't list one agent twice, and a lane's copies under its cards
+        // list the same ones (review L3).
+        let workers: [TaskWorker]
+        if let lane {
+            workers = lane.cards.flatMap { card -> [TaskWorker] in
+                guard lanes(of: card.task).last(where: { $0.state.isLive })?.id == lane.id else { return [] }
+                return tasksByID[card.task]?.workers ?? []
+            }
+        } else {
+            workers = task.workers
+        }
+        return workers.filter(\.state.isOpen).enumerated().map { index, worker in
             subagentNode(
                 id: "\(parent)/worker:\(index)",
                 title: OneTreeWords.subagent(role: "Subagent", model: worker.model.isEmpty ? worker.harness : worker.model))
@@ -679,23 +745,53 @@ struct OneTreeBuilder {
     /// reaches, whatever the filter shows. Leftovers, for cleanup: closed.
     func looseNode() -> OneTreeNode? {
         let reached = laneWorktreeIDs.union(input.tasks.compactMap(\.worktreeID))
-        let loose = input.worktrees.filter { worktree in
-            !worktree.isMainCheckout && !worktree.isHidden && worktree.id != input.mainCheckout?.id
+        let unreached = input.worktrees.filter { worktree in
+            !worktree.isMainCheckout && worktree.id != input.mainCheckout?.id
                 && !reached.contains(worktree.id)
                 && !worktree.taskIDs.contains { tasksByID[$0] != nil }
         }
-        guard !loose.isEmpty else { return nil }
+        let loose = unreached.filter { !$0.isHidden }
+        // The hidden ones, in a closed group of their own: where Unhide is
+        // (review M2).
+        let hidden = unreached.filter(\.isHidden)
+        guard !loose.isEmpty || !hidden.isEmpty else { return nil }
         let id = "group:loose"
+        func row(_ worktree: OneTreeWorktree, under parent: String) -> OneTreeNode {
+            let node = "\(parent)/worktree:\(worktree.id)"
+            return finish(
+                OneTreeNode(
+                    id: node, kind: .worktree, title: worktree.name, glyph: "arrow.triangle.branch",
+                    target: .worktree(worktree.id), children: terminalNodes(worktree, under: node),
+                    quiet: worktree.isHidden, worktreeID: worktree.id))
+        }
+        var children = loose.map { row($0, under: id) }
+        if !hidden.isEmpty {
+            let group = "\(id)/hidden"
+            children.append(
+                finish(
+                    OneTreeNode(
+                        id: group, kind: .group, title: OneTreeWords.hidden, detail: "\(hidden.count)",
+                        glyph: "eye.slash", children: hidden.map { row($0, under: group) }, quiet: true)))
+        }
         return finish(
             OneTreeNode(
                 id: id, kind: .group, title: OneTreeWords.looseWorktrees, detail: "\(loose.count)",
-                glyph: "archivebox",
-                children: loose.map { worktree in
-                    let node = "\(id)/worktree:\(worktree.id)"
-                    return finish(
-                        OneTreeNode(
-                            id: node, kind: .worktree, title: worktree.name, glyph: "arrow.triangle.branch",
-                            target: .worktree(worktree.id), children: terminalNodes(worktree, under: node)))
+                glyph: "archivebox", children: children))
+    }
+
+    /// Cards in a status this build doesn't know: said, in a group of
+    /// their own, rather than dropped (review M2; `UnreadableColumnView`).
+    func unreadableNode() -> OneTreeNode? {
+        guard !input.unreadable.isEmpty else { return nil }
+        let id = "group:unreadable"
+        return finish(
+            OneTreeNode(
+                id: id, kind: .group, title: OneTreeWords.notOnThisVersion, detail: "\(input.unreadable.count)",
+                caption: OneTreeWords.notOnThisVersionCaption, glyph: "questionmark.square.dashed",
+                children: input.unreadable.map { card in
+                    OneTreeNode(
+                        id: "\(id)/card:\(card.id)", kind: .task, title: card.title, key: card.key, detail: card.status,
+                        glyph: "questionmark.circle", quiet: true)
                 }))
     }
 
@@ -704,6 +800,38 @@ struct OneTreeBuilder {
         var node = node
         node.holdsAsk = node.asks || node.children.contains(where: \.holdsAsk)
         return node
+    }
+}
+
+/// Lanes to worktrees, by path and by branch, indexed once.
+struct OneTreeJoin {
+    var byPath: [String: OneTreeWorktree] = [:]
+    /// By every trailing run of path components: "worktrees/x", "x".
+    var bySuffix: [String: OneTreeWorktree] = [:]
+    var byBranch: [String: OneTreeWorktree] = [:]
+
+    init(_ worktrees: [OneTreeWorktree]) {
+        for worktree in worktrees {
+            if byPath[worktree.path] == nil { byPath[worktree.path] = worktree }
+            let parts = worktree.path.split(separator: "/")
+            for start in parts.indices {
+                let key = parts[start...].joined(separator: "/")
+                if bySuffix[key] == nil { bySuffix[key] = worktree }
+            }
+            if !worktree.branch.isEmpty, byBranch[worktree.branch] == nil { byBranch[worktree.branch] = worktree }
+        }
+    }
+
+    /// The worktree a lane works in: the one at its path, else (a path
+    /// recorded relative to the repository) the one whose path ends with
+    /// it, else the one on its branch. Nil for a lane with no worktree yet.
+    func worktree(of lane: PlanLane) -> OneTreeWorktree? {
+        let path = lane.worktreePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if !path.isEmpty {
+            if let exact = byPath[lane.worktreePath] { return exact }
+            if let suffix = bySuffix[path] { return suffix }
+        }
+        return lane.branch.isEmpty ? nil : byBranch[lane.branch]
     }
 }
 
@@ -731,7 +859,32 @@ public struct OneTreeExpansion: Equatable, Sendable, Codable {
 
     public init(choices: [String: Bool] = [:]) { self.choices = choices }
 
-    public func isExpanded(_ node: OneTreeNode) -> Bool { choices[node.id] ?? node.expandedByDefault }
+    /// The key that says the defaults were taken (`seed(from:)`).
+    static let seededKey = "#seeded"
+
+    /// Whether this window has taken its defaults: after that, a node no
+    /// one chose stays closed, however activity moves.
+    public var isSeeded: Bool { choices[Self.seededKey] == true }
+
+    public func isExpanded(_ node: OneTreeNode) -> Bool {
+        choices[node.id] ?? (isSeeded ? false : node.expandedByDefault)
+    }
+
+    /// Take each node's default once, per window and workspace, and keep
+    /// it (review M1): the theme with the newest activity opens when the
+    /// window first draws the tree, and doesn't move as activity does.
+    /// Choices already made stay. Nothing after the first call.
+    public mutating func seed(from nodes: [OneTreeNode]) {
+        guard !isSeeded else { return }
+        func walk(_ nodes: [OneTreeNode]) {
+            for node in nodes where node.hasChildren {
+                if choices[node.id] == nil, node.expandedByDefault { choices[node.id] = true }
+                walk(node.children)
+            }
+        }
+        walk(nodes)
+        choices[Self.seededKey] = true
+    }
 
     public mutating func toggle(_ node: OneTreeNode) { choices[node.id] = !isExpanded(node) }
 

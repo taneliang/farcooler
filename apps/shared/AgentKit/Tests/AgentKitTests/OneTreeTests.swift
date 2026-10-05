@@ -145,7 +145,8 @@ struct OneTreeTests {
         let tree = OneTree.build(try Self.board())
         let copy = try #require(Self.node(tree, "theme:theme-Plan/task:t2/lane:lane-copy"))
         #expect(copy.children.map(\.title) == ["claude", "zsh"])
-        #expect(copy.children.map(\.detail) == ["Agent", "Shell"])
+        // An agent says so; a shell says nothing beside its name (review L6).
+        #expect(copy.children.map(\.detail) == ["Agent", ""])
         #expect(copy.children[0].target == .terminal(worktree: "wt-copy", terminal: "c1"))
     }
 
@@ -400,7 +401,10 @@ struct OneTreeTests {
         #expect(tree.places[2].children.isEmpty)
         #expect(tree.tree.map(\.title) == ["No Theme"])
         #expect(tree.tree[0].expandedByDefault)
-        #expect(tree.tree[0].children.map(\.key) == ["ov-4", "ov-6", "ov-5", "ov-1", "ov-3", "ov-2"])
+        #expect(tree.tree[0].children.map(\.key) == ["ov-4", "ov-6", "ov-5", "ov-1", "ov-3", "ov-2", ""])
+        // Its finished cards fold, as a theme's do (review L5).
+        #expect(tree.tree[0].children.last?.title == "1 done")
+        #expect(tree.tree[0].children.last?.children.map(\.id) == ["group:no-theme/task:t9"])
         // No lanes: every worktree is loose.
         #expect(tree.below.last?.children.map(\.title) == ["primary", "copy", "fix", "spike"])
         let rows = OneTree.rows(tree.roots, expansion: OneTreeExpansion())
