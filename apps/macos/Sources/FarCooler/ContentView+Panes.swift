@@ -174,11 +174,12 @@ extension ContentView {
 
     /// The detail with no workspace to show: the fleet's own state first,
     /// before it has anything in it (`FleetPlaceholder`), then "choose one".
-    /// While a restore waits for its runner, read again every second, so
-    /// "Connecting…" turns to unreachable at `FleetPlaceholder.connectingLimit`.
+    /// While a restore waits for its runner, read again once more at
+    /// `FleetPlaceholder.connectingLimit`, when "Connecting…" turns to
+    /// unreachable: one wake, not a clock (`IdleCostTests`).
     @ViewBuilder var placeholder: some View {
         if let runner = restoringRunner, let since = restoring?.since {
-            TimelineView(.periodic(from: .now, by: 1)) { context in
+            TimelineView(.explicit([Date(), since.addingTimeInterval(FleetPlaceholder.connectingLimit)])) { context in
                 placeholder(restoringOn: runner, waited: context.date.timeIntervalSince(since))
             }
         } else {
