@@ -4,14 +4,15 @@
 
 use farcooler_protocol::v1 as pb;
 
-/// A CI read's status: "Passed", "Failed", "Running", "Queued", "No runs
-/// yet", or "CI unknown" when `gh` couldn't say.
+/// A CI read's status: "Passed", "Failed", "Running", "Queued",
+/// "Superseded", "No runs yet", or "CI unknown" when `gh` couldn't say.
 pub(crate) fn status_word(status: i32) -> &'static str {
     match pb::BoardCiStatus::try_from(status) {
         Ok(pb::BoardCiStatus::Passed) => "Passed",
         Ok(pb::BoardCiStatus::Failed) => "Failed",
         Ok(pb::BoardCiStatus::Running) => "Running",
         Ok(pb::BoardCiStatus::Queued) => "Queued",
+        Ok(pb::BoardCiStatus::Superseded) => "Superseded",
         Ok(pb::BoardCiStatus::None) => "No runs yet",
         _ => "CI unknown",
     }
@@ -34,8 +35,8 @@ pub(crate) fn summary(read: &pb::BoardCiRead) -> String {
     let jobs = |k: usize| if k == 1 { "job" } else { "jobs" };
     match pb::BoardCiStatus::try_from(read.status) {
         Ok(pb::BoardCiStatus::Failed) => {
-            let failed = n("failed") + n("canceled");
-            format!("{word} · {failed} of {total} {} failed", jobs(total))
+            // A canceled job is superseded, not failed (review train-1005c H1).
+            format!("{word} · {} of {total} {} failed", n("failed"), jobs(total))
         }
         Ok(pb::BoardCiStatus::Running | pb::BoardCiStatus::Queued) => {
             let done = total - n("running") - n("queued");
@@ -93,6 +94,7 @@ pub(crate) fn status_key(status: i32) -> &'static str {
         Ok(pb::BoardCiStatus::Failed) => "failed",
         Ok(pb::BoardCiStatus::Running) => "running",
         Ok(pb::BoardCiStatus::Queued) => "queued",
+        Ok(pb::BoardCiStatus::Superseded) => "superseded",
         Ok(pb::BoardCiStatus::None) => "none",
         _ => "unknown",
     }

@@ -412,8 +412,9 @@ pub(crate) fn follow_ci(conn: &Connection, workspace: Uuid, subject: &str, statu
         CiStatus::Passed => TrainState::Green,
         CiStatus::Failed => TrainState::Red,
         CiStatus::Running | CiStatus::Queued => TrainState::Pushed,
-        // Nothing ran yet, or GitHub couldn't be asked: the train stays put.
-        CiStatus::None | CiStatus::Unknown => return Ok(Vec::new()),
+        // Nothing ran yet, GitHub couldn't be asked, or a newer push canceled
+        // its run: the train stays put.
+        CiStatus::None | CiStatus::Unknown | CiStatus::Superseded => return Ok(Vec::new()),
     };
     let mut stmt = conn
         .prepare(&format!(

@@ -295,3 +295,21 @@ fn a_theme_spends_its_share_of_its_lanes() {
     assert_eq!(view.spend.runs, 2);
     assert_eq!((plan.board_counts.backlog, plan.board_counts.total()), (3, 3));
 }
+
+// ---- a superseded run (review train-1005c H1) ----
+
+/// CI cancels a run a newer push supersedes. A commit whose only run that
+/// didn't pass was canceled isn't failed, and its train doesn't go red: it
+/// waits, pushed.
+#[test]
+fn a_canceled_run_is_superseded_not_red() {
+    let (store, main, _) = board(0);
+    let train = start(&store, main, "integ-20", &[]).unwrap();
+    sha(&store, &train, "1a1b3275").unwrap();
+    let status = crate::board_ci::status_of(&["passed", "canceled", "passed"]);
+    assert_ne!(status, CiStatus::Failed, "canceled is superseded, not failed");
+    store.record_ci(main, &read(&sha_subject("1a1b3275"), status)).unwrap();
+    assert_eq!(store.train(train.id).unwrap().state, TrainState::Pushed);
+    // A real failure beside a cancel is still red.
+    assert_eq!(crate::board_ci::status_of(&["failed", "canceled"]), CiStatus::Failed);
+}

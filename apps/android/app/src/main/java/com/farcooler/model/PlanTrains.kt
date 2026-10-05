@@ -68,6 +68,8 @@ enum class CiStatus(val wire: String) {
     FAILED("failed"),
     RUNNING("running"),
     QUEUED("queued"),
+    /** Nothing failed and a run was canceled, as CI does when a newer push supersedes it: neutral, never red. */
+    SUPERSEDED("superseded"),
     NONE("none"),
     UNKNOWN("unknown");
 
@@ -169,6 +171,7 @@ object TrainWords {
         CiStatus.FAILED -> "Failed"
         CiStatus.RUNNING -> "Running"
         CiStatus.QUEUED -> "Queued"
+        CiStatus.SUPERSEDED -> "Superseded"
         CiStatus.NONE -> "No runs yet"
         CiStatus.UNKNOWN -> "CI unknown"
     }
@@ -180,7 +183,8 @@ object TrainWords {
         fun n(state: String) = read.jobs.count { it.state == state }
         val jobs = if (total == 1) "job" else "jobs"
         return when (read.status) {
-            CiStatus.FAILED -> "${n("failed") + n("canceled")} of $total $jobs failed"
+            // A canceled job is superseded, not failed (review train-1005c H1).
+            CiStatus.FAILED -> "${n("failed")} of $total $jobs failed"
             CiStatus.RUNNING, CiStatus.QUEUED -> "${total - n("running") - n("queued")} of $total $jobs done"
             else -> "$total $jobs"
         }

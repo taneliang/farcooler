@@ -97,3 +97,19 @@ fn every_call_is_a_read() {
     assert_eq!(&args[..4], ["api", "-X", "GET", "repos/{owner}/{repo}/actions/runs"]);
     assert_eq!(&args[4..], ["-f", "head_sha=abc", "--jq", RUNS_JQ]);
 }
+
+/// The failed commit's CI run, canceled instead of failed, as a newer push
+/// does: the subject is superseded, not failed, and links the first run
+/// (review train-1005c H1).
+#[test]
+fn a_canceled_run_reads_superseded() {
+    let mut runs = parse_runs(&fixture("runs-sha-failed.json")).unwrap();
+    for run in &mut runs {
+        if run.name == "CI" {
+            run.conclusion = Some("cancelled".into());
+        }
+    }
+    let read = summarize("sha:c85bf83d", &runs.into_iter().map(|r| (r, None)).collect::<Vec<_>>());
+    assert_eq!(read.status, CiStatus::Superseded);
+    assert_eq!(read.jobs.iter().find(|j| j.name == "CI").map(|j| j.state.as_str()), Some("canceled"));
+}

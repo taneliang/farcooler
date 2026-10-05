@@ -4335,7 +4335,7 @@ enum BoardCiStatus {
   BOARD_CI_STATUS_UNSPECIFIED = 0;
   // Every run finished and none failed.
   BOARD_CI_STATUS_PASSED = 1;
-  // A run failed, timed out, was canceled or needs approval.
+  // A run failed, timed out or needs approval.
   BOARD_CI_STATUS_FAILED = 2;
   BOARD_CI_STATUS_RUNNING = 3;
   // Waiting for a runner; none going yet.
@@ -4344,6 +4344,9 @@ enum BoardCiStatus {
   BOARD_CI_STATUS_NONE = 5;
   // `gh` couldn't say: logged out, offline, no such run. Never read as green.
   BOARD_CI_STATUS_UNKNOWN = 6;
+  // Nothing failed, and a run was canceled, as CI does when a newer push
+  // supersedes it. Not red: a train waits.
+  BOARD_CI_STATUS_SUPERSEDED = 7;
 }
 
 message BoardCiJob {

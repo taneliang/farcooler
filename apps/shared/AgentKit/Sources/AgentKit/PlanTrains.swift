@@ -47,7 +47,9 @@ public struct PlanTrain: Decodable, Equatable, Identifiable, Sendable {
 
 /// Where a CI subject stands, over all its runs.
 public enum PlanCIStatus: String, Decodable, Sendable, CaseIterable {
-    case passed, failed, running, queued, none, unknown
+    /// `superseded`: nothing failed and a run was canceled, as CI does when a
+    /// newer push supersedes it. Neutral, never red.
+    case passed, failed, running, queued, superseded, none, unknown
 
     public init(from decoder: Decoder) throws {
         self = PlanCIStatus(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
@@ -190,6 +192,7 @@ extension PlanWords {
         case .failed: "Failed"
         case .running: "Running"
         case .queued: "Queued"
+        case .superseded: "Superseded"
         case .none: "No Runs Yet"
         case .unknown: "CI Unknown"
         }
@@ -203,7 +206,8 @@ extension PlanWords {
         let n = { (state: String) in read.jobs.filter { $0.state == state }.count }
         let jobs = total == 1 ? "job" : "jobs"
         switch read.status {
-        case .failed: return "\(n("failed") + n("canceled")) of \(total) \(jobs) failed"
+        // A canceled job is superseded, not failed (review train-1005c H1).
+        case .failed: return "\(n("failed")) of \(total) \(jobs) failed"
         case .running, .queued: return "\(total - n("running") - n("queued")) of \(total) \(jobs) done"
         default: return "\(total) \(jobs)"
         }

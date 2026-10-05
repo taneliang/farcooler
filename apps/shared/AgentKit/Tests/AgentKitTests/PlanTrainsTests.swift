@@ -85,7 +85,8 @@ struct PlanTrainsTests {
     @Test("CI words: each status, and how the jobs stand")
     func ciWords() {
         let jobs = [PlanCIJob(name: "a", state: "failed"), PlanCIJob(name: "b", state: "canceled"), PlanCIJob(name: "c", state: "passed")]
-        #expect(PlanWords.ciSummary(PlanCIRead(subject: "main", status: .failed, jobs: jobs)) == "Failed · 2 of 3 jobs failed")
+        #expect(PlanWords.ciSummary(PlanCIRead(subject: "main", status: .failed, jobs: jobs)) == "Failed · 1 of 3 jobs failed", "a canceled job isn't a failed one")
+        #expect(PlanWords.ciSummary(PlanCIRead(subject: "main", status: .superseded, jobs: [jobs[1], jobs[2]])) == "Superseded · 2 jobs")
         #expect(PlanWords.ciSummary(PlanCIRead(subject: "main", status: .passed, jobs: [jobs[2]])) == "Passed · 1 job")
         #expect(PlanWords.ciSummary(PlanCIRead(subject: "main", status: .none)) == "No Runs Yet")
         #expect(PlanWords.ciSummary(PlanCIRead(subject: "main", status: .unknown)) == "CI Unknown")

@@ -128,6 +128,7 @@ pub(crate) fn pb_ci(r: &CiRead) -> pb::BoardCiRead {
             CiStatus::Failed => pb::BoardCiStatus::Failed,
             CiStatus::Running => pb::BoardCiStatus::Running,
             CiStatus::Queued => pb::BoardCiStatus::Queued,
+            CiStatus::Superseded => pb::BoardCiStatus::Superseded,
             CiStatus::None => pb::BoardCiStatus::None,
             CiStatus::Unknown => pb::BoardCiStatus::Unknown,
         }) as i32,

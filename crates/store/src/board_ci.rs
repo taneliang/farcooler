@@ -46,6 +46,9 @@ pub enum CiStatus {
     Running,
     /// Runs are waiting for a runner, none going yet.
     Queued,
+    /// Nothing failed, and a run was canceled: CI cancels a run a newer push
+    /// supersedes (review train-1005c H1). Not red; a train waits on it.
+    Superseded,
     /// GitHub has no run for it (yet).
     None,
     /// `gh` couldn't say: logged out, offline, no such run.
@@ -54,7 +57,7 @@ pub enum CiStatus {
 
 impl CiStatus {
     /// Every status's stored word.
-    pub const WORDS: [&'static str; 6] = ["passed", "failed", "running", "queued", "none", "unknown"];
+    pub const WORDS: [&'static str; 7] = ["passed", "failed", "running", "queued", "superseded", "none", "unknown"];
 
     /// The stored word.
     pub fn as_str(self) -> &'static str {
@@ -63,6 +66,7 @@ impl CiStatus {
             CiStatus::Failed => "failed",
             CiStatus::Running => "running",
             CiStatus::Queued => "queued",
+            CiStatus::Superseded => "superseded",
             CiStatus::None => "none",
             CiStatus::Unknown => "unknown",
         }
@@ -75,15 +79,17 @@ impl CiStatus {
             "failed" => CiStatus::Failed,
             "running" => CiStatus::Running,
             "queued" => CiStatus::Queued,
+            "superseded" => CiStatus::Superseded,
             "none" => CiStatus::None,
             "unknown" => CiStatus::Unknown,
             _ => return None,
         })
     }
 
-    /// Whether nothing more will happen without someone re-running it.
+    /// Whether nothing more will happen without someone re-running it or
+    /// pushing again.
     pub fn is_finished(self) -> bool {
-        matches!(self, CiStatus::Passed | CiStatus::Failed)
+        matches!(self, CiStatus::Passed | CiStatus::Failed | CiStatus::Superseded)
     }
 }
 
@@ -150,17 +156,20 @@ pub fn job_state(status: &str, conclusion: Option<&str>) -> &'static str {
 }
 
 /// A subject's status from its runs' states (as `job_state` words): failed if
-/// any failed or was canceled, else running if any runs, else queued if any
-/// waits, else passed; none without runs.
+/// any failed, else running if any runs, else queued if any waits, else
+/// superseded if one was canceled (CI cancels a run a newer push supersedes,
+/// which isn't a failure), else passed; none without runs.
 pub fn status_of(run_states: &[&str]) -> CiStatus {
     if run_states.is_empty() {
         CiStatus::None
-    } else if run_states.iter().any(|s| matches!(*s, "failed" | "canceled")) {
+    } else if run_states.contains(&"failed") {
         CiStatus::Failed
     } else if run_states.contains(&"running") {
         CiStatus::Running
     } else if run_states.contains(&"queued") {
         CiStatus::Queued
+    } else if run_states.contains(&"canceled") {
+        CiStatus::Superseded
     } else {
         CiStatus::Passed
     }

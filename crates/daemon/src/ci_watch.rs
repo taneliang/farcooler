@@ -151,7 +151,7 @@ fn run_state(run: &GhRun) -> &'static str {
 pub fn summarize(subject: &str, runs: &[(GhRun, Option<Vec<GhJob>>)]) -> CiRead {
     let states: Vec<&str> = runs.iter().map(|(r, _)| run_state(r)).collect();
     let status = board_ci::status_of(&states);
-    let failing = runs.iter().find(|(r, _)| matches!(run_state(r), "failed" | "canceled"));
+    let failing = runs.iter().find(|(r, _)| run_state(r) == "failed");
     let url = failing.or(runs.first()).map(|(r, _)| r.html_url.clone()).unwrap_or_default();
     let mut jobs = Vec::new();
     for (run, its) in runs {

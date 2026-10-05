@@ -194,6 +194,7 @@ fn ci_status_word(status: i32) -> &'static str {
         Ok(pb::BoardCiStatus::Failed) => "failed",
         Ok(pb::BoardCiStatus::Running) => "running",
         Ok(pb::BoardCiStatus::Queued) => "queued",
+        Ok(pb::BoardCiStatus::Superseded) => "superseded",
         Ok(pb::BoardCiStatus::None) => "none",
         _ => "unknown",
     }
