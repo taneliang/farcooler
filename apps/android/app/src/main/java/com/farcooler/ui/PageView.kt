@@ -339,7 +339,7 @@ private fun PageGridTable(columns: List<PageColumn>, rows: List<List<PageCell>>,
         rows.forEachIndexed { index, row ->
             Row(
                 Modifier.fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(Radius.small))
                     .background(if (index % 2 == 1) MaterialTheme.colorScheme.surfaceContainer else Color.Transparent)
                     .padding(horizontal = 8.dp, vertical = 6.dp)
                     .testTag("page-row-$index")
@@ -365,7 +365,7 @@ private fun PageStackedTable(columns: List<PageColumn>, rows: List<List<PageCell
         rows.forEachIndexed { index, row ->
             Column(
                 Modifier.fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(Radius.small))
                     .background(if (index % 2 == 1) MaterialTheme.colorScheme.surfaceContainer else Color.Transparent)
                     .padding(horizontal = 8.dp, vertical = 8.dp)
                     .testTag("page-stacked-row-$index")
@@ -451,7 +451,7 @@ private fun PageRow(destination: PageDestination?, shaded: Boolean, spoken: Stri
     Box(
         Modifier.fillMaxWidth()
             .heightIn(min = 40.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(Radius.small))
             .background(if (shaded) MaterialTheme.colorScheme.surfaceContainer else Color.Transparent)
             .then(if (destination != null) Modifier.clickable(role = Role.Button) { open(destination) } else Modifier)
             .padding(horizontal = 8.dp, vertical = 8.dp)
@@ -575,7 +575,7 @@ private fun PageLinksRow(refs: List<PageRef>, world: PageWorld, open: (PageDesti
             } else {
                 Surface(
                     onClick = { open(destination) },
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(Radius.small),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     modifier = Modifier.heightIn(min = 40.dp).testTag("page-link-$index").semantics { contentDescription = resolved.spoken },
                 ) {
