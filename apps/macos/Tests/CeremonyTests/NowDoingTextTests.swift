@@ -105,4 +105,15 @@ struct NowDoingTextTests {
         #expect(TitleStatus.showsActivityButton(doing, form: .wide))
         #expect(!TitleStatus.showsActivityButton(doing, form: .short))
     }
+
+    @Test("A cut line keeps its full text in the tooltip; a whole one keeps the usual help")
+    func tooltip() {
+        let long = "Reading ov-192’s jump bar diff, then the integration report for integ-4 and its captures"
+        let cut = TitleStatus.Model(orchestrator: .working, status: nil, nowDoing: long, needYou: 0, running: [], inReview: [])
+        #expect(TitleStatus.orchestratorTooltip(cut, form: .medium) == "Orchestrator · Working: \(long)")
+        let whole = TitleStatus.Model(orchestrator: .working, status: nil, nowDoing: "Reviewing", needYou: 0, running: [], inReview: [])
+        #expect(TitleStatus.orchestratorTooltip(whole, form: .wide) == TitleStatus.orchestratorHelp)
+        let none = TitleStatus.Model(orchestrator: .working, status: nil, nowDoing: nil, needYou: 0, running: [], inReview: [])
+        #expect(TitleStatus.orchestratorTooltip(none, form: .medium) == TitleStatus.orchestratorHelp)
+    }
 }

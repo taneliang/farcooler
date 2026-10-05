@@ -14,8 +14,10 @@ extension TitleStatus {
     /// count that's showing. Estimates, a little over, like `leading`'s.
     static func reserved(_ model: Model, form: Form) -> CGFloat {
         let gap: CGFloat = form >= .medium ? 14 : 8
-        // The mark, the symbol, their gaps, and the caret.
-        var width: CGFloat = 24 + 6 + 16 + 6 + 16
+        // The mark and the symbol with their gap, and the caret's cell:
+        // measured in the 900 pt capture, where 68 left the caret floating
+        // 22 pt from the words (review 8).
+        var width: CGFloat = 24 + 6 + 12 + 4 + 6
         if showsActivityButton(model, form: form) { width += gap + textWidth("Activity") + 6 + textWidth("⌘K") }
         func count(_ words: String?, _ n: Int) -> CGFloat {
             gap + 16 + 4 + textWidth(form == .wide ? (words ?? "") : number(n))
@@ -43,6 +45,14 @@ extension TitleStatus {
         let base = orchestratorWords(state)
         // Never less than the state, which is the status itself.
         return fit(full, room: max(room, textWidth(base)), keeping: base)
+    }
+
+    /// The tooltip over the orchestrator's part: what it shows, or, where the
+    /// line was cut to fit, all of it (review 8).
+    static func orchestratorTooltip(_ model: Model, form: Form) -> String {
+        guard let state = model.orchestrator, state != .none, model.nowDoing != nil else { return orchestratorHelp }
+        let full = orchestratorWords(state, doing: model.nowDoing)
+        return fittedWords(model, form: form) == full ? orchestratorHelp : full
     }
 
     /// `text` cut at its tail with an ellipsis until it's `room` wide, never

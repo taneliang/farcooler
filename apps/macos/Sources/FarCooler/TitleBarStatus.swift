@@ -369,7 +369,7 @@ struct TitleStatusView: View {
         // at every width). Padded above by twice that and still centered,
         // its words come down to the same baseline.
         .padding(.top, 2 * TitleStatus.menuBaselineNudge)
-        .help(TitleStatus.orchestratorHelp)
+        .help(TitleStatus.orchestratorTooltip(model, form: form))
         .accessibilityLabel(TitleStatus.orchestratorLabel(model) ?? "Orchestrator")
         .accessibilityIdentifier("title-status-orchestrator")
     }
