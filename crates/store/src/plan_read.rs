@@ -22,6 +22,7 @@ use crate::models::{TaskStatus, get_uuid, uuid_blob};
 use crate::plan::{
     AgentRole, BoardTheme, LANE_COLS, THEME_COLS, Lane, LaneAgent, LaneCard, LaneState, PlanEvent, Subject, row_to_lane, row_to_theme,
 };
+use crate::rulings::{Ruling, rulings_of};
 use crate::store::Store;
 use crate::tasks::now_millis;
 
@@ -142,11 +143,15 @@ pub struct Plan {
     /// Every card any theme or lane names, once.
     pub cards: Vec<CardRef>,
     pub coverage: Vec<Coverage>,
+    /// Decided for you (ov-304): every standing ruling, newest first, then
+    /// those settled since `closed_since_ms`, most recently settled first.
+    pub rulings: Vec<Ruling>,
 }
 
 impl Store {
-    /// A board's plan layer. Finished lanes (landed or dropped) appear only if
-    /// their last move was at or after `closed_since_ms`.
+    /// A board's plan layer. Finished lanes (landed or dropped) and settled
+    /// rulings appear only if their last move was at or after
+    /// `closed_since_ms`.
     pub fn plan(&self, workspace: Uuid, closed_since_ms: i64) -> Result<Plan> {
         let conn = self.conn();
         crate::plan::board_exists(&conn, workspace)?;
@@ -256,6 +261,13 @@ impl Store {
         }
         order.sort();
 
+        let rulings = rulings_of(&conn, workspace, closed_since_ms, &statuses)?;
+        for ruling in &rulings {
+            for task in &ruling.tasks {
+                named.insert(*task, ());
+            }
+        }
+
         let cards = named.keys().filter_map(|id| statuses.get(id).cloned()).collect();
         let mut coverage: Vec<Coverage> = live
             .keys()
@@ -269,7 +281,7 @@ impl Store {
             })
             .collect();
         coverage.sort_by_key(|c| c.task_id);
-        Ok(Plan { now_ms, themes, lanes, order: order.into_iter().map(|(_, id)| id).collect(), cards, coverage })
+        Ok(Plan { now_ms, themes, lanes, order: order.into_iter().map(|(_, id)| id).collect(), cards, coverage, rulings })
     }
 
     /// A theme's or lane's timeline, oldest first, from `since_ms` on.

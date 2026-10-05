@@ -254,14 +254,14 @@ fn the_cards_on_a_board_are_known_by_key_in_lower_case() {
 // ---- the migration ----
 
 /// The migration is the 25th and `Welcome`, so the build before it can still
-/// open the file.
+/// open the file. ov-304's rulings follow it as 0026.
 #[test]
 fn the_migration_is_welcome() {
     use crate::compat::Older;
     let last = &crate::migrate::MIGRATIONS[24];
     assert!(std::ptr::fn_addr_eq(last.0, migration_0025_pages as fn(&Transaction) -> rusqlite::Result<()>));
     assert_eq!(last.1, Older::Welcome);
-    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 25);
+    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 26);
 }
 
 /// Nothing existing carries a column for pages, nothing points into the pages'

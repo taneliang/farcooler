@@ -463,7 +463,7 @@ pub(crate) fn board_exists(conn: &Connection, workspace: Uuid) -> Result<()> {
 
 /// Each card must exist and be on `workspace`'s own board: a theme and a lane
 /// belong to one board, as a line does.
-fn check_cards(conn: &Connection, workspace: Uuid, tasks: &[Uuid]) -> Result<()> {
+pub(crate) fn check_cards(conn: &Connection, workspace: Uuid, tasks: &[Uuid]) -> Result<()> {
     for task in tasks {
         let board: Option<Vec<u8>> = conn
             .query_row("SELECT workspace_id FROM tasks WHERE id = ?1", params![uuid_blob(*task)], |r| r.get(0))

@@ -24,6 +24,7 @@ pub mod pages;
 pub mod plan;
 pub mod plan_read;
 pub mod review;
+pub mod rulings;
 pub mod models;
 mod store;
 mod tasks;

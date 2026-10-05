@@ -369,15 +369,15 @@ fn an_agent_recorded_twice_is_one_agent() {
 }
 
 /// The migration is the 23rd and `Welcome`, so the build before it can still
-/// open the file. ov-199's LFS record follows it as 0024, and ov-269's pages
-/// as 0025.
+/// open the file. ov-199's LFS record follows it as 0024, ov-269's pages as
+/// 0025, and ov-304's rulings as 0026.
 #[test]
 fn the_migration_is_welcome() {
     use crate::compat::Older;
     let last = &crate::migrate::MIGRATIONS[22];
     assert!(std::ptr::fn_addr_eq(last.0, migration_0023_plan_layer as fn(&Transaction) -> rusqlite::Result<()>));
     assert_eq!(last.1, Older::Welcome);
-    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 25);
+    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 26);
 }
 
 /// Nothing existing carries a column for the layer: every table old code
@@ -388,12 +388,15 @@ fn no_existing_table_gained_a_column() {
     let conn = store.conn();
     let mut stmt = conn.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").unwrap();
     let tables: Vec<String> = stmt.query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect();
-    let ours = ["board_themes", "board_theme_tasks", "lanes", "lane_tasks", "lane_agents", "plan_events"];
+    let ours = [
+        "board_themes", "board_theme_tasks", "lanes", "lane_tasks", "lane_agents", "plan_events", "board_rulings",
+        "board_ruling_tasks",
+    ];
     for table in tables.iter().filter(|t| !ours.contains(&t.as_str())) {
         let mut info = conn.prepare(&format!("SELECT name FROM pragma_table_info('{table}')")).unwrap();
         let cols: Vec<String> = info.query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect();
         assert!(
-            !cols.iter().any(|c| c.contains("lane") || c.contains("theme") || c.contains("plan_")),
+            !cols.iter().any(|c| c.contains("lane") || c.contains("theme") || c.contains("plan_") || c.contains("ruling")),
             "{table} has a column for the plan layer: {cols:?}"
         );
     }
@@ -453,6 +456,15 @@ fn populated() -> (Store, Uuid, Vec<Task>) {
     set_state(&store, &a, LaneState::Review).unwrap();
     let q = lane(&store, main, "next-one", &[&t[3]]);
     store.set_plan(main, &[q.id], Actor::Manager).unwrap();
+    let ruling = crate::rulings::NewRuling {
+        decision: "The inbox is amber.".into(),
+        why: "It's the one attention color.".into(),
+        reversal: "One token.".into(),
+        theme_id: Some(theme.id),
+    };
+    let r = store.add_ruling(main, &ruling, &[t[0].id, t[2].id], Actor::Manager).unwrap();
+    store.set_ruling(r.id, crate::rulings::RulingState::Confirmed, Some("Fine."), Actor::Manager).unwrap();
+    store.add_ruling(main, &ruling, &[t[1].id], Actor::Manager).unwrap();
     (store, main, t)
 }
 
@@ -474,12 +486,13 @@ fn board_reads(store: &Store, main: Uuid, tasks: &[Task]) -> String {
     out
 }
 
-/// Drop the layer's six tables, children first.
+/// Drop the layer's six tables and its rulings' two, children first.
 fn drop_the_layer(store: &Store) {
     store
         .conn()
         .execute_batch(
-            "DROP TABLE plan_events; DROP TABLE lane_agents; DROP TABLE lane_tasks; DROP TABLE lanes;
+            "DROP TABLE board_ruling_tasks; DROP TABLE board_rulings;
+             DROP TABLE plan_events; DROP TABLE lane_agents; DROP TABLE lane_tasks; DROP TABLE lanes;
              DROP TABLE board_theme_tasks; DROP TABLE board_themes;",
         )
         .unwrap();

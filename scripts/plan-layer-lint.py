@@ -11,6 +11,9 @@ and writes tasks never NAMES the layer. The other half is
 `crates/store/src/plan_tests.rs`, which drops the layer's six tables from a
 populated database and checks every board read is the same bytes.
 
+Rulings (ov-304), the decided-for-you calls, are part of the layer: their
+tables and types are names the board must not use either.
+
 Guarded: the store files and daemon files that serve the board, and the
 `Task`-shaped proto messages. A match is the layer's table or module name, or
 one of its names in SQL, not the word "lane" in prose (a worktree has always
@@ -67,22 +70,27 @@ FORBIDDEN = [
     re.compile(
         r"\b(board_themes?|board_theme_tasks|lane_tasks|lane_agents|plan_events|plan_read|rpc_plan"
         r"|plan_layer|plan_rank|BoardTheme\w*|PlanChanged|LaneView|ThemeView|LaneState|LaneCard"
-        r"|LaneAgent\w*|AgentRecord|lane_id|theme_id)\b"
+        r"|LaneAgent\w*|AgentRecord|lane_id|theme_id"
+        # Its rulings (ov-304): decided-for-you calls kept on the layer.
+        r"|board_rulings?|board_ruling_tasks|BoardRuling\w*|RulingState|NewRuling|ruling_id|rulings_of)\b"
     ),
     re.compile(r"\b(FROM|JOIN|INTO|UPDATE|TABLE)\s+lanes\b", re.I),
     # Any `use` that brings the layer in, braces and all.
-    re.compile(r"\buse\b[^;]*\b(plan|plan_read|rpc_plan)\b[^;]*;"),
+    re.compile(r"\buse\b[^;]*\b(plan|plan_read|rpc_plan|rulings|plan_ruling)\b[^;]*;"),
     # A path through the module: `crate::plan::..`, `farcooler_store::plan::..`, `plan::Lane`.
-    re.compile(r"(?<![\w.])plan::"),
+    re.compile(r"(?<![\w.])(plan|rulings)::"),
     # The layer's reads and writes, called on a store or a service.
     re.compile(r"\.(plan|board_theme|create_theme|update_theme|theme_cards|create_lane|update_lane"
-               r"|lane_cards|record_lane_agent|set_plan|plan_events)\s*\("),
+               r"|lane_cards|record_lane_agent|set_plan|plan_events|add_ruling|set_ruling|ruling)\s*\("),
 ]
 
 # Task-shaped proto messages: their fields never name the layer.
 GUARDED_MESSAGES = ["Task", "TaskDetail", "TaskList", "TaskNote", "TaskWorker", "TaskBlock", "Workspace"]
 PROTO = "proto/farcooler.proto"
-PROTO_FORBIDDEN = re.compile(r"\b(lane_\w+|\w*lane_id|board_theme\w*|theme_id|plan_rank|plan_event\w*)\b|\bBoardTheme\b|\bLane\b|\bPlan\b")
+PROTO_FORBIDDEN = re.compile(
+    r"\b(lane_\w+|\w*lane_id|board_theme\w*|theme_id|plan_rank|plan_event\w*|ruling\w*|\w*_ruling\w*)\b"
+    r"|\bBoardTheme\b|\bBoardRuling\b|\bLane\b|\bPlan\b"
+)
 
 
 def files_under(root: pathlib.Path, rel: str):
@@ -195,6 +203,10 @@ def self_test() -> int:
             'conn.execute("UPDATE tasks SET plan_rank = 1")',
             "let t = \"board_themes\";",
             "fn f(s: LaneState) {}",
+            "SELECT * FROM tasks t JOIN board_ruling_tasks r ON r.task_id = t.id;",
+            "use crate::rulings::Ruling;",
+            "let r = store.add_ruling(ws, &new, &[], actor)?;",
+            "let n = crate::rulings::rulings_of(&conn, ws, 0, &cards)?;",
         ]
         for text in cases:
             clean_tree()
@@ -222,6 +234,10 @@ def self_test() -> int:
         put(PROTO, clean_proto.replace("bytes worktree_id = 1;", "bytes worktree_id = 1;\n  bytes lane_id = 2;", 1))
         if not any("message Task" in h[0] and "lane_id" in h[2] for h in scan(root)):
             failures.append("missed a lane field on message Task")
+        clean_tree()
+        put(PROTO, clean_proto.replace("bytes worktree_id = 1;", "bytes worktree_id = 1;\n  repeated BoardRuling rulings = 2;", 1))
+        if not any("message Task" in h[0] and "rulings" in h[2] for h in scan(root)):
+            failures.append("missed a rulings field on message Task")
     if failures:
         print("\n".join(failures))
         return 1
