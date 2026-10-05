@@ -102,6 +102,10 @@ struct RealWindowCaptures {
         let saved = Dictionary(uniqueKeysWithValues: touched.map { ($0, defaults.object(forKey: $0)) })
         defer { Self.restore(saved, in: defaults) }
         for (key, value) in extra { defaults.set(value, forKey: key) }
+        // `FARCOOLER_CAPTURE_HOVER`: jump bar pieces drawn as if the pointer
+        // were on them, by name, one per line ("Go to Billing"), no input sent.
+        JumpBarHover.forced = Set((env["FARCOOLER_CAPTURE_HOVER"] ?? "").split(whereSeparator: \.isNewline).map(String.init))
+        defer { JumpBarHover.forced = [] }
         // A narrow window, for the layouts that degrade (`FARCOOLER_CAPTURE_WIDTH`).
         let width = Double(env["FARCOOLER_CAPTURE_WIDTH"] ?? "") ?? 1360
         let height = Double(env["FARCOOLER_CAPTURE_HEIGHT"] ?? "") ?? 860

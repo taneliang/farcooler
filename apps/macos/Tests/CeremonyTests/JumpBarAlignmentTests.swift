@@ -92,4 +92,33 @@ struct JumpBarAlignmentTests {
             #expect(abs(y - first) <= tolerance, "\(id)'s baseline is at \(y), the label's at \(first)")
         }
     }
+
+    /// A label's and a caret's hover backing (review 1004o #7): drawn only
+    /// while the pointer is on it, and never moving the bar. The pointer is
+    /// `JumpBarHover`, so no event is sent.
+    @Test("A hover backing shows only on hover and moves nothing")
+    func hoverMovesNothing() async throws {
+        let (still, at) = try await bar(scale: 1)
+        defer { still.close() }
+        let names: Set = [DrillBreadcrumb.labelName("Billing"), DrillBreadcrumb.caretName(0, crumbs: 1)]
+        JumpBarHover.forced = names
+        defer { JumpBarHover.forced = [] }
+        let (hovered, hoverAt) = try await bar(scale: 1)
+        defer { hovered.close() }
+        #expect(at == hoverAt, "the bar moved on hover")
+        let plain = try #require(still.contentView?.lookBitmap(scale: 1))
+        let lit = try #require(hovered.contentView?.lookBitmap(scale: 1))
+        // A point inside each hit area, off its glyph: the label's inset,
+        // and a caret's edge (its glyph is centered in 20 pt). Whole points,
+        // read from a 1x bitmap.
+        for (id, x) in [("jump-label-0", 1.0), ("jump-caret-0", 2.0)] {
+            let frame = try #require(at[id])
+            let px = Int(frame.minX + x), py = Int(frame.midY)
+            let a = plain.color(atPoint: px, py), b = lit.color(atPoint: px, py)
+            #expect(a != b, "\(id) drew no hover backing at \(px),\(py): \(a)")
+        }
+        // Nothing else hovered: the worktree's label stays as it was.
+        let other = try #require(at["breadcrumb-worktrees"])
+        #expect(plain.color(atPoint: Int(other.minX + 1), Int(other.midY)) == lit.color(atPoint: Int(other.minX + 1), Int(other.midY)))
+    }
 }

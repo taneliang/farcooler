@@ -90,6 +90,16 @@ extension DrillBreadcrumb {
     }
 }
 
+/// A capture's pointer (review 1004o #5, #7): the jump bar's labels and
+/// carets whose `name` (what VoiceOver calls them) is here draw their hover
+/// backing as if the pointer rested on them, with no input sent. Set only by
+/// tests and `RealWindowCaptures` (`FARCOOLER_CAPTURE_HOVER`); empty in the
+/// app, and read when a piece is drawn.
+@MainActor
+enum JumpBarHover {
+    static var forced: Set<String> = []
+}
+
 /// A segment's label as a control: its own hover highlight, apart from the
 /// caret's.
 struct JumpLabelButton<Label: View>: View {
@@ -104,7 +114,7 @@ struct JumpLabelButton<Label: View>: View {
             label()
                 .padding(.horizontal, JumpBar.labelInset)
                 .jumpCell()
-                .background(RoundedRectangle.control.fill(hovering ? Fill.hover : Color.clear))
+                .background(RoundedRectangle.control.fill(hovering || JumpBarHover.forced.contains(name) ? Fill.hover : Color.clear))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -141,7 +151,7 @@ struct JumpCaretButton: View {
                 .baselineProbed(probe)
                 .jumpCell()
                 .frame(minWidth: Self.minWidth, minHeight: Self.minHeight)
-                .background(RoundedRectangle.control.fill(hovering ? Fill.hover : Color.clear))
+                .background(RoundedRectangle.control.fill(hovering || JumpBarHover.forced.contains(name) ? Fill.hover : Color.clear))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
