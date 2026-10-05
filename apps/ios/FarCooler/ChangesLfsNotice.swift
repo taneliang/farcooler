@@ -88,8 +88,8 @@ extension ChangesLfs {
         else { return nil }
         return ChangesLfs(notice: notice) {
             await Task.yield()
-            do { try await Task.sleep(for: .seconds(2)) } catch { return false }
-            return true
+            do { try await Task.sleep(for: .seconds(2)) } catch { return LfsNotice.unreachable }
+            return nil
         }
     }
 }
