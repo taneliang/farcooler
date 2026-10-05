@@ -617,16 +617,16 @@ private struct LockScreenCard: View {
     /// three lines go last, under whichever card this is.
     let plan: PlanGlance?
 
+    /// Two lines in the card's fixed type, never more (review H3); a quiet
+    /// runner's says it can't be reached, and a stale card drops Now (L4).
+    private var planLines: PlanGlanceView? {
+        plan.map { PlanGlanceView($0, style: .card, caveat: $0.cardCaveat, stale: stale) }
+    }
+
     var body: some View {
         if let layout {
-            VStack(alignment: .leading, spacing: 0) {
-                GlanceCardView(layout: layout)
-                if let plan {
-                    PlanGlanceView(plan, style: .lines)
-                        .padding(.horizontal, 14)
-                        .padding(.bottom, 12)
-                }
-            }
+            // The plan takes the tail's row, so the card keeps its height.
+            GlanceCardView(layout: layout, plan: planLines)
         } else {
             VStack(alignment: .leading, spacing: 10) {
                 LeaderRow(
@@ -640,9 +640,9 @@ private struct LockScreenCard: View {
                         .opacity(tail.dimsLine ? 0.6 : 1)
                         .lineLimit(1)
                 }
-                if let plan {
+                if let planLines {
                     Divider()  // style-exempt: a rule between a widget's lines
-                    PlanGlanceView(plan, style: .lines)
+                    planLines
                 }
             }
             .padding(16)

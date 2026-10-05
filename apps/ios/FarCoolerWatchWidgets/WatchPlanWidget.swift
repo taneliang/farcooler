@@ -23,8 +23,8 @@ struct WatchPlanWidget: Widget {
 
 struct WatchPlanEntry: TimelineEntry {
     let date: Date
-    /// The board the relay named, or nil for none.
-    let glance: PlanGlance?
+    /// What to show. See `PlanGlanceMemory.shown`.
+    let shown: PlanGlanceShown
 }
 
 struct WatchPlanProvider: TimelineProvider {
@@ -33,12 +33,12 @@ struct WatchPlanProvider: TimelineProvider {
     private static let lookEvery: TimeInterval = 60 * 60
 
     func placeholder(in context: Context) -> WatchPlanEntry {
-        WatchPlanEntry(date: Date(), glance: WatchPlanSamples.main)
+        WatchPlanEntry(date: Date(), shown: .plan(WatchPlanSamples.main, caveat: nil))
     }
 
     func getSnapshot(in context: Context, completion: @escaping (WatchPlanEntry) -> Void) {
         if context.isPreview { return completion(placeholder(in: context)) }
-        Task { completion(WatchPlanEntry(date: Date(), glance: await Self.read().glance)) }
+        Task { completion(WatchPlanEntry(date: Date(), shown: PlanGlanceMemory.look(await Self.read()))) }
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<WatchPlanEntry>) -> Void) {
@@ -47,7 +47,7 @@ struct WatchPlanProvider: TimelineProvider {
             let reading = await Self.read()
             let policy: TimelineReloadPolicy =
                 reading.nextPlanLook(at: now, every: Self.lookEvery).map { .after($0) } ?? .never
-            completion(Timeline(entries: [WatchPlanEntry(date: now, glance: reading.glance)], policy: policy))
+            completion(Timeline(entries: [WatchPlanEntry(date: now, shown: PlanGlanceMemory.look(reading, at: now))], policy: policy))
         }
     }
 
@@ -64,14 +64,15 @@ struct WatchPlanView: View {
     let entry: WatchPlanEntry
 
     var body: some View {
-        if let glance = entry.glance {
+        switch entry.shown {
+        case let .plan(glance, caveat):
             if family == .accessoryInline {
-                Text([glance.heading, glance.nextLine].compactMap { $0 }.joined(separator: " · "))
+                Text([caveat?.line, glance.heading, glance.next.map { "Next: \($0)" }].compactMap { $0 }.joined(separator: " · "))
             } else {
-                PlanGlanceView(glance, style: .lines)
+                PlanGlanceView(glance, style: .lines, caveat: caveat)
             }
-        } else {
-            Text(WatchPlanSamples.none)
+        default:
+            Text(entry.shown.message ?? "")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -79,8 +80,6 @@ struct WatchPlanView: View {
 }
 
 enum WatchPlanSamples {
-    static let none = "No board has a plan yet."
-
     static let main = PlanGlance(
         workspace: "Main", needsYou: 2,
         now: [.init(name: "mac-ux", state: .review), .init(name: "ov-310", state: .building)],
@@ -91,7 +90,8 @@ enum WatchPlanSamples {
     #Preview("Rectangular", as: .accessoryRectangular) {
         WatchPlanWidget()
     } timeline: {
-        WatchPlanEntry(date: .now, glance: WatchPlanSamples.main)
-        WatchPlanEntry(date: .now, glance: nil)
+        WatchPlanEntry(date: .now, shown: .plan(WatchPlanSamples.main, caveat: nil))
+        WatchPlanEntry(date: .now, shown: .plan(WatchPlanSamples.main, caveat: PlanCaveat(age: 3 * 3600, cantReach: "Studio")))
+        WatchPlanEntry(date: .now, shown: .noPlan)
     }
 #endif

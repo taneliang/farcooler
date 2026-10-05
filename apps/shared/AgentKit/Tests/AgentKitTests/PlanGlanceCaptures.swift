@@ -34,18 +34,18 @@ import Testing
 
         static let surfaces = [
             // A small home screen widget, on the container's tertiary fill.
-            Surface(name: "widget-small", size: CGSize(width: 170, height: 170), padding: 16, style: .rows) {
+            Surface(name: "widget-small", size: CGSize(width: 141, height: 141), padding: 16, style: .rows) {
                 $0 == .dark ? Color(white: 0.11) : Color(white: 0.95)
             },
             Surface(name: "widget-medium", size: CGSize(width: 364, height: 170), padding: 16, style: .rows) {
                 $0 == .dark ? Color(white: 0.11) : Color(white: 0.95)
             },
             // The lock screen's rectangular accessory.
-            Surface(name: "lock-rectangular", size: CGSize(width: 172, height: 76), padding: 0, style: .lines) {
+            Surface(name: "lock-rectangular", size: CGSize(width: 157, height: 66), padding: 0, style: .lines) {
                 $0 == .dark ? Color(white: 0.05) : Color(white: 0.85)
             },
-            // The watch's Smart Stack slot, 45 mm.
-            Surface(name: "watch-rectangular", size: CGSize(width: 184, height: 89), padding: 8, style: .lines) {
+            // The watch's Smart Stack slot, 40 mm.
+            Surface(name: "watch-rectangular", size: CGSize(width: 162, height: 69), padding: 0, style: .lines) {
                 $0 == .dark ? Color.black : Color(white: 0.2)
             },
             // The watch app's Plan section row.
@@ -61,37 +61,44 @@ import Testing
             let dir = URL(fileURLWithPath: try #require(Self.out))
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             let glance = PlanGlanceTests.main
+            // Current, a quiet runner's last word, and remembered when the
+            // relay couldn't be asked (review H2).
+            let caveats: [(String, PlanCaveat?)] = [
+                ("", nil), ("-quiet", PlanCaveat(age: 3 * 3600, cantReach: "Studio")), ("-remembered", PlanCaveat(age: 3 * 3600)),
+            ]
             for scheme in [ColorScheme.light, .dark] {
                 let suffix = scheme == .dark ? "dark" : "light"
                 for surface in Self.surfaces {
-                    // The watch draws dark whatever the phone's appearance.
-                    let drawn: ColorScheme = surface.name.hasPrefix("watch") ? .dark : scheme
-                    let view = PlanGlanceView(glance, style: surface.style)
-                        .padding(surface.padding)
-                        .frame(width: surface.size.width, height: surface.size.height, alignment: .topLeading)
-                        .background(surface.ground(scheme))
-                    try write(view, scheme: drawn, to: dir.appendingPathComponent("\(surface.name)-\(suffix).png"))
+                    for (name, caveat) in caveats {
+                        // The watch draws dark whatever the phone's appearance.
+                        let drawn: ColorScheme = surface.name.hasPrefix("watch") ? .dark : scheme
+                        let view = PlanGlanceView(glance, style: surface.style, caveat: caveat)
+                            .padding(surface.padding)
+                            .frame(width: surface.size.width, height: surface.size.height, alignment: .topLeading)
+                            .background(surface.ground(scheme))
+                        try write(view, scheme: drawn, to: dir.appendingPathComponent("\(surface.name)\(name)-\(suffix).png"))
+                    }
                 }
-                try write(liveActivity(scheme), scheme: scheme, to: dir.appendingPathComponent("live-activity-\(suffix).png"))
+                for (name, caveat) in caveats {
+                    try write(
+                        liveActivity(scheme, caveat: caveat), scheme: scheme,
+                        to: dir.appendingPathComponent("live-activity\(name)-\(suffix).png"))
+                }
             }
         }
 
-        /// The Live Activity's rows card with the plan under it, as
-        /// `LockScreenCard` stacks them, from the relay's card fixture.
-        private func liveActivity(_ scheme: ColorScheme) throws -> some View {
+        /// The Live Activity's rows card with the plan in its tail, as
+        /// `LockScreenCard` draws it, from the relay's card fixture, at the
+        /// narrowest lock screen's 343 × 160.
+        private func liveActivity(_ scheme: ColorScheme, caveat: PlanCaveat?) throws -> some View {
             let update = try #require(try Contracts.object("live-activity/running/plan.json")["aps"] as? [String: Any])
             let state = try JSONSerialization.data(withJSONObject: try #require(update["content-state"]))
             let card = try JSONDecoder().decode(AgentCardState.self, from: state)
             let now = Date(timeIntervalSince1970: 1_791_019_830)
             let layout = try #require(AgentCardLayout(state: card, now: now, stale: false))
             let plan = try #require(card.plan)
-            return VStack(alignment: .leading, spacing: 0) {
-                GlanceCardView(layout: layout)
-                PlanGlanceView(plan, style: .lines)
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 12)
-            }
-            .frame(width: 364, height: 200, alignment: .top)
+            return GlanceCardView(layout: layout, plan: PlanGlanceView(plan, style: .card, caveat: caveat))
+                .frame(width: 343, height: 160, alignment: .top)
             .background(scheme == .dark ? GlancePalette.card.dark.color : Color(white: 0.73))
         }
 

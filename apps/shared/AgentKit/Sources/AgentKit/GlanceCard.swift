@@ -65,9 +65,14 @@ public struct GlanceCardView: View {
     @Environment(\.colorScheme) private var scheme
 
     private let layout: AgentCardLayout
+    /// The plan's board (ov-310), drawn in the tail's place: its two lines
+    /// take the rings' row, so the card stays inside its 160 points (review
+    /// H3, `PlanGlanceFitTests`).
+    private let plan: PlanGlanceView?
 
-    public init(layout: AgentCardLayout) {
+    public init(layout: AgentCardLayout, plan: PlanGlanceView? = nil) {
         self.layout = layout
+        self.plan = plan
     }
 
     public var body: some View {
@@ -115,7 +120,24 @@ public struct GlanceCardView: View {
         }
     }
 
-    private var tail: some View {
+    @ViewBuilder private var tail: some View {
+        if let plan {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                plan
+                if let line = layout.line {
+                    Text(line)
+                        .glanceType(.monoFigures)
+                        .foregroundStyle(GlancePalette.ink2(scheme))
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                }
+            }
+        } else {
+            rings
+        }
+    }
+
+    private var rings: some View {
         HStack(spacing: 8) {
             HStack(spacing: 4) {
                 ForEach(Array(layout.rings.enumerated()), id: \.offset) { _, mark in

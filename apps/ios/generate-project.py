@@ -490,6 +490,7 @@ AGENTKIT_SOURCES = [
     # `AgentActivityAttributes.swift` in every list that has either.
     "PlanGlance.swift",
     "PlanGlanceView.swift",
+    "PlanGlanceShown.swift",
     # The markdown renderer, shared for the same reason the reducer is: the
     # phone drew agent replies as plain `Text`, so a table arrived as a wall of
     # pipes and a heading as a line beginning with a hash. Same conversation,
@@ -724,6 +725,7 @@ WATCH_AGENTKIT_SOURCES = [
     # `AgentActivityAttributes.swift` in every list that has either.
     "PlanGlance.swift",
     "PlanGlanceView.swift",
+    "PlanGlanceShown.swift",
     # The color, the mark and the type scale, which the watch app's own detail
     # header draws at
     # the 22pt lone-indicator size. Measured to typecheck for
@@ -803,6 +805,7 @@ WATCH_WIDGET_AGENTKIT_SOURCES = [
     # `AgentActivityAttributes.swift` in every list that has either.
     "PlanGlance.swift",
     "PlanGlanceView.swift",
+    "PlanGlanceShown.swift",
     "GlancePalette.swift",
     "GlanceMark.swift",
     "GlanceType.swift",
@@ -1023,6 +1026,7 @@ activity_build_ids = {
         # `AgentActivityAttributes.swift` in every list that has either.
         "PlanGlance.swift",
         "PlanGlanceView.swift",
+        "PlanGlanceShown.swift",
         # The card's buttons. `AnswerPermissionIntent` is what a button is wired
         # to and `GlancePermissions` is where its labels come from — the
         # extension can reach no runner, so the agent's own option names arrive

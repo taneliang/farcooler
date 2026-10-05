@@ -38,15 +38,41 @@ public struct PlanGlance: Codable, Sendable, Hashable {
     public var now: [Lane]
     /// The lane next up, or nil when nothing is queued.
     public var next: String?
+    /// The runner that said it, by the name it beats with (ov-310 review H2).
+    /// Nil from a relay before it.
+    public var runner: String?
+    /// How long ago, in milliseconds, the relay last heard that runner, by
+    /// the relay's own clock. Nil from a relay before it.
+    public var heardAgo: Double?
+    /// The runner has gone quiet: this is its last word, and its Now is a
+    /// claim nobody has vouched for since.
+    public var quiet: Bool
 
-    public init(workspace: String, needsYou: Int, now: [Lane], next: String? = nil) {
+    public init(
+        workspace: String, needsYou: Int, now: [Lane], next: String? = nil,
+        runner: String? = nil, heardAgo: Double? = nil, quiet: Bool = false
+    ) {
         self.workspace = workspace
         self.needsYou = needsYou
         self.now = now
         self.next = next
+        self.runner = runner
+        self.heardAgo = heardAgo
+        self.quiet = quiet
     }
 
-    private enum CodingKeys: String, CodingKey { case workspace, needsYou, now, next }
+    private enum CodingKeys: String, CodingKey { case workspace, needsYou, now, next, runner, heardAgo, quiet }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(workspace, forKey: .workspace)
+        try container.encode(needsYou, forKey: .needsYou)
+        try container.encode(now, forKey: .now)
+        try container.encodeIfPresent(next, forKey: .next)
+        try container.encodeIfPresent(runner, forKey: .runner)
+        try container.encodeIfPresent(heardAgo, forKey: .heardAgo)
+        if quiet { try container.encode(true, forKey: .quiet) }
+    }
 
     /// Lenient, as the card around it is: a lane of the wrong shape costs the
     /// lane, and a count of the wrong shape reads as none.
@@ -61,6 +87,10 @@ public struct PlanGlance: Codable, Sendable, Hashable {
         now = (((try? container.decodeIfPresent([Loose].self, forKey: .now)) ?? nil) ?? []).compactMap(\.lane)
         let next = (try? container.decodeIfPresent(String.self, forKey: .next)) ?? nil
         self.next = next?.isEmpty == false ? next : nil
+        let runner = (try? container.decodeIfPresent(String.self, forKey: .runner)) ?? nil
+        self.runner = runner?.isEmpty == false ? runner : nil
+        heardAgo = ((try? container.decodeIfPresent(Double.self, forKey: .heardAgo)) ?? nil).map { max(0, $0) }
+        quiet = ((try? container.decodeIfPresent(Bool.self, forKey: .quiet)) ?? nil) ?? false
     }
 
     // MARK: - Words

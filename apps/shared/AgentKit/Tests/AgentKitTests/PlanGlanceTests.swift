@@ -16,8 +16,11 @@ struct PlanGlanceTests {
     @Test("The relay's pulse answer carries the board the watch draws")
     func thePulseCarriesThePlan() throws {
         let data = try Contracts.data("pulse/plan.json")
-        #expect(RunnerPulse.decodePlan(data) == Self.main)
-        #expect(RunnerPulse.decode(data) == [], "the runners still decode beside it")
+        var said = Self.main
+        said.runner = "Studio"
+        said.heardAgo = 90_000
+        #expect(RunnerPulse.decodePlan(data) == said)
+        #expect(RunnerPulse.decode(data)?.map(\.displayName) == ["Studio"], "the runners still decode beside it")
         // An account with no plan, and every relay before ov-310: none.
         #expect(RunnerPulse.decodePlan(try Contracts.data("pulse/response.json")) == nil)
     }
@@ -28,10 +31,14 @@ struct PlanGlanceTests {
         #expect(update["event"] as? String == "update")
         let state = try JSONSerialization.data(withJSONObject: try #require(update["content-state"]))
         let card = try JSONDecoder().decode(AgentCardState.self, from: state)
-        #expect(card.plan == Self.main)
+        var said = Self.main
+        said.runner = "Studio"
+        said.heardAgo = 0
+        #expect(card.plan == said)
+        #expect(card.plan?.cardCaveat == nil, "a beating runner's plan is as current as its push")
         #expect(card.needsYou == 2)
         let again = try JSONDecoder().decode(AgentCardState.self, from: JSONEncoder().encode(card))
-        #expect(again.plan == Self.main)
+        #expect(again.plan == said)
 
         // The card before it says no plan, and a glance of the wrong shape
         // costs the glance, never the card.

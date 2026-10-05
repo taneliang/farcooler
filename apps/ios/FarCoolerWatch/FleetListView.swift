@@ -62,6 +62,10 @@ struct FleetListView<Client: FleetClient>: View {
     /// keys are made with. See `RunnerPulse.key`.
     @State private var account: String?
 
+    /// The plan to show, from each reading and the memory beside the
+    /// snapshot. See `PlanGlanceMemory.shown`.
+    @State private var planShown: PlanGlanceShown = .unknown
+
     /// What `RunnerPulse.plan` makes of `reading` against this snapshot: the
     /// quiet runners to name, and the agents to stop stating.
     private func plan(_ snapshot: FleetSnapshot?, at now: Date) -> RunnerPulse.Plan {
@@ -110,6 +114,7 @@ struct FleetListView<Client: FleetClient>: View {
             let credential = vault.flatMap(PulseStore.read(from:))
             account = credential?.account
             reading = await RunnerPulse.read(credential, held: vault?.holds ?? false)
+            planShown = PlanGlanceMemory.look(reading, at: now)
             let plan = plan(client.state.snapshot, at: now)
             guard let next = plan.nextLook else { return }
             try? await Task.sleep(for: .seconds(max(60, next.timeIntervalSince(now))))
@@ -174,14 +179,16 @@ struct FleetListView<Client: FleetClient>: View {
             // The board with a plan (ov-310): its Needs You count, Now and
             // next up, as the relay's pulse said them. The watch hears the
             // plan from the relay alone; it can't reach a runner.
-            if let glance = plan.glance {
-                Section("Plan") { PlanGlanceView(glance, style: .rows) }
+            // Its last plan with its age when the relay can't be asked, and a
+            // quiet runner's said as one (review H2). See `planShown`.
+            if case let .plan(glance, caveat) = planShown {
+                Section("Plan") { PlanGlanceView(glance, style: .rows, caveat: caveat) }
             }
             Section {
                 agents(snapshot, at: now)
             } header: {
                 // Named only when there's a section above to tell it from.
-                if !items.isEmpty || plan.glance != nil { Text("Agents") }
+                if !items.isEmpty || planShown.message == nil { Text("Agents") }
             }
             if let hedge = snapshot.hedge(quiet: quiet) { PartialFooter(hedge: hedge) }
         }
