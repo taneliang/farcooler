@@ -10,11 +10,11 @@ import SwiftUI
 /// they didn’t.
 struct ChangesLfsNotice: View {
     let notice: LfsNotice
-    /// Asks the runner to try again, and returns whether it could be asked.
-    let retry: @MainActor () async -> Bool
+    /// Asks the runner to try again, and returns why it couldn’t be asked, or nil.
+    let retry: @MainActor () async -> String?
 
     @State private var working = false
-    @State private var failed = false
+    @State private var failure: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -23,13 +23,13 @@ struct ChangesLfsNotice: View {
                 Text(LfsNotice.title).font(.footnote).foregroundStyle(.primary)
                 Spacer(minLength: 0)
             }
-            Text(failed ? LfsNotice.unreachable : LfsNotice.detail).font(.footnote).foregroundStyle(.secondary)
+            Text(failure ?? LfsNotice.detail).font(.footnote).foregroundStyle(.secondary)
             if notice.canRetry {
                 Button(working ? LfsNotice.retrying : LfsNotice.retry) {
                     working = true
-                    failed = false
+                    failure = nil
                     Task {
-                        failed = !(await retry())
+                        failure = await retry()
                         working = false
                     }
                 }
@@ -48,13 +48,14 @@ struct ChangesLfsNotice: View {
 extension Connection {
     /// `worktree.hydrate_lfs`: the runner tries again to download a worktree’s
     /// large files. What it found comes back through the fleet’s next count;
-    /// this says whether the runner could be asked at all.
-    func hydrateLfs(_ worktree: String) async -> Bool {
+    /// this says why the runner couldn’t be asked, or nil. A refusal says what
+    /// `RunnerRefusal` says; anything else is `LfsNotice.unreachable`.
+    func hydrateLfs(_ worktree: String) async -> String? {
         do {
             _ = try await core.call("worktree.hydrate_lfs", ["worktree": worktree])
-            return true
+            return nil
         } catch {
-            return false
+            return LfsNotice.failure(word: ClientCore.refusalWord(of: error))
         }
     }
 }
@@ -73,7 +74,7 @@ extension ChangesView {
 /// A notice and the way to retry it, as one value `ChangesView` can be given.
 struct ChangesLfs {
     let notice: LfsNotice
-    let retry: @MainActor () async -> Bool
+    let retry: @MainActor () async -> String?
 }
 
 extension ChangesLfs {

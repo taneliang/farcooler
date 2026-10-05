@@ -41,6 +41,13 @@ public struct LfsNotice: Equatable, Sendable {
         "Try Again fills in any that are already on this runner. To download the rest, run “git lfs pull” in this worktree."
     /// Said in place of the detail when the runner couldn’t be asked.
     public static let unreachable = "Couldn’t ask the runner to try again. Check that it’s connected."
+    /// Said in place of the detail when the runner answered with a refusal: the
+    /// shared sentence for its word, or `unreachable` for no word or one
+    /// `RunnerRefusal` has none for.
+    public static func failure(word: String?) -> String {
+        guard let word, let refusal = RunnerRefusal(rawValue: word) else { return unreachable }
+        return "Couldn’t ask the runner to try again. \(refusal.sentence)"
+    }
     public static let retry = "Try Again"
     /// Not "Downloading…": the runner only copies from its own LFS store.
     public static let retrying = "Trying Again…"

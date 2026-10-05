@@ -13,8 +13,9 @@ use farcooler_protocol::v1::{self as pb, result};
 use crate::tasks::{DispatchLink, Refused, refused};
 use crate::{Fallible, expect_value, find_worktree, list_worktrees, req_for, short_bytes, uuid_of};
 
-/// What a runner without `lfs_pointers` is told.
-const NO_LFS: &str = "this runner's Far Cooler is older than large-file retries. update it and try again";
+/// What a runner without `lfs_pointers` is told, in the style of the other
+/// old-runner refusals (`This runner needs an update to show pages.`).
+pub(crate) const NO_LFS: &str = "This runner needs an update to download large files again.";
 
 /// Ask the runner to try again for `worktree`, and print what's left.
 pub(crate) async fn hydrate<L: DispatchLink>(link: &mut L, worktree: &str, json: bool) -> Fallible {
@@ -47,3 +48,7 @@ pub(crate) async fn hydrate_lfs<L: DispatchLink>(
         _ => Err(crate::daemon_link::UNREADABLE.into()),
     }
 }
+
+#[cfg(test)]
+#[path = "worktree_lfs_tests.rs"]
+mod tests;

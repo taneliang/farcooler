@@ -27,6 +27,15 @@ struct LfsNoticeTests {
         #expect(LfsNotice.retry == "Try Again")
     }
 
+    @Test("A refusal says the shared sentence, and anything else says the runner couldn’t be asked")
+    func failures() {
+        #expect(
+            LfsNotice.failure(word: "capability-unsupported")
+                == "Couldn’t ask the runner to try again. This runner’s Far Cooler is too old for this. Update it there, then try again.")
+        #expect(LfsNotice.failure(word: nil) == LfsNotice.unreachable)
+        #expect(LfsNotice.failure(word: "no-such-word") == LfsNotice.unreachable)
+    }
+
     @Test("A worktree row decodes its pointer count under lfs_pointers")
     func decodes() throws {
         let row = #"{"id":"w1","short":"w1","task":"t","branch":"b","worktree":"/x","state":"ready","terminals":[],"lfs_pointers":3}"#

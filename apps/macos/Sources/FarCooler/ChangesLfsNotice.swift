@@ -52,7 +52,7 @@ struct ChangesLfsNotice: View {
         failure = nil
         Task {
             let message = await client.hydrateLfs(worktree)
-            if message != nil { failure = LfsNotice.unreachable }
+            if let message { failure = LfsNotice.failure(word: TaskFailure.code(in: message)) }
             working = false
         }
     }

@@ -30,6 +30,20 @@ struct LfsNoticeTests {
         #expect(await client.hydrateLfs("w-1") != nil, "a runner that can’t be reached is said not to have been")
     }
 
+    /// The stderr is what `farcooler worktree hydrate-lfs --json` prints for a
+    /// runner without `lfs_pointers` (held by the CLI's
+    /// `an_old_runner_is_refused_in_a_sentence_before_the_wire`), so the Mac
+    /// says the shared sentence, never the CLI's own.
+    @Test func anOldRunnersRefusalReadsAsTheSharedSentence() async {
+        let stderr = "error: This runner needs an update to download large files again.\ncode: capability-unsupported"
+        let client = DaemonClient(target: "", notifications: NotificationCenter())
+        client.commandRunnerForTesting = { _ in (nil, stderr) }
+        let message = await client.hydrateLfs("w-1")
+        let said = LfsNotice.failure(word: message.flatMap { TaskFailure.code(in: $0) })
+        #expect(said == "Couldn’t ask the runner to try again. \(RunnerRefusal.capabilityUnsupported.sentence)")
+        #expect(!said.contains("needs an update"), "the CLI’s own sentence stayed off the screen")
+    }
+
     @Test func theCountDecodesUnderLfsPointersAndIsAbsentFromAnOlderRunner() {
         func fleet(_ pointers: Int?) throws -> Worktree {
             let extra = pointers.map { #","lfs_pointers":\#($0)"# } ?? ""
