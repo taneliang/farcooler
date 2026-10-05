@@ -200,6 +200,20 @@ struct PlanPagesTests {
         #expect(store.plan.pages.map(\.slot) == ["train", "risks", "spend"])
     }
 
+    @Test("A waiting question opens in Needs You at its own item; an answered one, or another reference, doesn't")
+    func askOpensNeedsYou() {
+        func item(_ id: String, task: String, kind: NeedsYouKind) -> NeedsYouItem {
+            NeedsYouItem(
+                id: id, kind: kind, rank: 1, since: nil, task: NeedsYouTask(id: task, key: "ov-1", title: "T", status: "needs_decision"),
+                question: "Which?", runner: "local")
+        }
+        let items = [item("review:t-2", task: "t-2", kind: .review), item("decision:t-1", task: "t-1", kind: .decision)]
+        #expect(ContentView.askItem(.ask("t-1"), in: items)?.itemID == "decision:t-1")
+        #expect(ContentView.askItem(.ask("t-9"), in: items) == nil, "answered: not in Needs You")
+        #expect(ContentView.askItem(.task("t-1"), in: items) == nil, "a card reference opens the card")
+        #expect(ContentView.askItem(.ask("t-2"), in: items) == nil, "a review isn't the question")
+    }
+
     @Test("A page is kept across a relaunch, and its crumb is its title")
     func pageKept() {
         let page = ContentView.Selection.workspace(host: "h", workspace: "w", focus: .plan(.page("train")))
@@ -227,6 +241,7 @@ struct PlanPagesTests {
         func go(_ d: PageDestination) -> ContentView.Selection? {
             ContentView.pageSelection(d, host: "h", workspace: "w", worktrees: [worktree])
         }
+        // A question no longer in Needs You opens its task.
         #expect(go(.ask("t-1")) == .workspace(host: "h", workspace: "w", focus: .task("t-1")))
         #expect(go(.page("spend")) == .workspace(host: "h", workspace: "w", focus: .plan(.page("spend"))))
         #expect(go(.lane("l-1")) == .workspace(host: "h", workspace: "w", focus: .plan(.lane("l-1"))))
