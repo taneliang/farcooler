@@ -20,7 +20,7 @@ enum AppCommand: String {
     /// View ▸ Show Plan (⌥⌘P): the canvas back to the plan, or, with the
     /// canvas folded away, the plan peeked over the chat (ov-298).
     case showPlan
-    /// View ▸ Board: the navigator draws the task list by status, the
+    /// View ▸ Tasks by Status: the navigator draws the task list by status, the
     /// Board view, in place of the one tree, or the tree again (ov-321).
     case boardView
     /// ⌘↑: up the one tree, to the node over the selection's (ov-321).
@@ -166,7 +166,7 @@ struct FarCoolerCommands: Commands {
                 .disabled(!MainWindowFocus.goes(\.inWorkspace, mainWindow))
             // A checkmark while the navigator draws the Board view: a state,
             // and the same item puts the tree back (ov-321).
-            Toggle("Board", isOn: Binding(get: { mainWindow?.boardView == true }, set: { _ in AppCommand.boardView.post() }))
+            Toggle("Tasks by Status", isOn: Binding(get: { mainWindow?.boardView == true }, set: { _ in AppCommand.boardView.post() }))
                 .disabled(!MainWindowFocus.goes(\.inWorkspace, mainWindow))
         }
 

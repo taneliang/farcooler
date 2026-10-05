@@ -171,8 +171,10 @@ enum PaletteIndex {
         // The Board view, by its name, in a workspace (ov-321): `boardView`
         // is whether it's drawn now, so the row says the way back.
         if let boardView {
-            let title = boardView ? "Show Tree" : "Show Board"
-            if let score = [title, "Board", "Tasks by Status"].compactMap({ Fuzzy.score($0, query) }).max() {
+            // Named as View ▸ Tasks by Status is, never "Show Board", which
+            // is ⇧⌘B's (review M5).
+            let title = boardView ? "Show Tree" : "Show Tasks by Status"
+            if let score = [title, "Tasks by Status", "Status", "Board"].compactMap({ Fuzzy.score($0, query) }).max() {
                 scored.append((
                     PaletteEntry(
                         id: "board-view", action: .boardView, title: title,

@@ -179,7 +179,7 @@ struct ContentView: View {
     /// lane under two cards the jump bar's path and ⌘↑ go through.
     @State var treeHint: String?
     /// The navigator draws the Board view, the task list by status (View ▸
-    /// Board), in place of the one tree (ov-321).
+    /// Tasks by Status), in place of the one tree (ov-321).
     @State var showsBoardList = false
     /// The navigator's pane heights a drag chose, this window's (ov-244).
     /// Kept in this window's record, not `@SceneStorage`: that comes back only
