@@ -273,8 +273,11 @@ struct PlanLaneRow: View {
 
     /// Stale, or waiting on you: the only lanes drawn in color.
     private var warning: String? {
-        waitsOnOwner ? "Needs you" : PlanWords.stale(lane, now: now) ?? PlanWords.overBudget(lane)
+        waitsOnOwner ? "Needs you" : PlanWords.stale(lane, now: now)
     }
+
+    /// Over its token budget (ov-307), drawn beside whatever else it is.
+    private var overBudget: String? { PlanWords.overBudget(lane) }
 
     var body: some View {
         Button(action: action) {
@@ -299,10 +302,11 @@ struct PlanLaneRow: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
-                    if let warning {
-                        Text(warning)
+                    ForEach([warning, overBudget].compactMap { $0 }, id: \.self) { line in
+                        Text(line)
                             .font(.footnote.weight(.medium))
                             .foregroundStyle(GlancePalette.amber(scheme))
+                            .accessibilityLabel(line == overBudget ? (PlanWords.overBudgetSpoken(lane) ?? line) : line)
                     }
                 }
                 Image(systemName: "chevron.forward")
@@ -353,7 +357,7 @@ struct PlanLaneRow: View {
         } else {
             Image(systemName: PlanGlyph.name(lane.state))
                 .font(.subheadline)
-                .foregroundStyle(warning == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(GlancePalette.amber(scheme)))
+                .foregroundStyle(warning == nil && overBudget == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(GlancePalette.amber(scheme)))
                 .accessibilityHidden(true)
         }
     }

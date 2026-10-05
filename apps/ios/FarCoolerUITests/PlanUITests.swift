@@ -120,8 +120,9 @@ final class PlanUITests: XCTestCase {
         }
         XCTAssertTrue(said("Over budget"), "nothing says a theme or lane is over budget")
         XCTAssertTrue(said("tokens in the last 7 days"), "no week: \(app.debugDescription)")
-        XCTAssertTrue(said("held back until three cards have finished"), "the pair with too few cards isn't said to be held back")
-        XCTAssertTrue(said("4 finished cards"), "no comparison row with its n")
+        XCTAssertTrue(said("held back until three cards have landed"), "the pair with too few cards isn't said to be held back")
+        XCTAssertTrue(said("tokens on cards that haven’t landed"), "the spend on unlanded cards isn't said apart")
+        XCTAssertTrue(said("3.6 finished cards"), "no comparison row with its share")
         keep(app, "plan-cost")
         for _ in 0..<6 { app.swipeDown() }
         let theme = element(app, "plan-theme-Invoices")
