@@ -50,6 +50,8 @@ class PlanTrainsTest {
         assertEquals(listOf(listOf("mac-ux")), groups.map { g -> g.lanes.map { it.name } })
         assertEquals("Red · c85bf83d · CI Failed · 1 of 3 jobs failed", TrainWords.train(groups[0].train!!, plan.ciOf(groups[0].train!!)))
         assertTrue(TrainWords.needsAttention(groups[0].train!!, null))
+        // "CI unknown" once, never "CI CI unknown" (review train-1005c L2).
+        assertEquals("Red · c85bf83d · CI unknown", TrainWords.train(groups[0].train!!, PlanCiRead("sha:c85bf83d", status = CiStatus.UNKNOWN)))
         assertEquals("In review · in integ-9", PlanWords.status(plan.lanes[1]))
     }
 

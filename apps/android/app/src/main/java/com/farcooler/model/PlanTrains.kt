@@ -207,7 +207,9 @@ object TrainWords {
         val parts = mutableListOf(state(train.state))
         train.pushedSha?.takeIf { it.isNotEmpty() }?.let { parts += it.take(8) }
         if (ci != null) {
-            parts += "CI ${ciSummary(ci)}"
+            // "CI unknown" already says CI (review train-1005c L2).
+            val said = ciSummary(ci)
+            parts += if (said.startsWith("CI ")) said else "CI $said"
             ciStale(ci, now)?.let { parts += it }
         }
         if (ci == null && train.pushedSha != null && !train.state.isSettled) parts += "CI not read yet"

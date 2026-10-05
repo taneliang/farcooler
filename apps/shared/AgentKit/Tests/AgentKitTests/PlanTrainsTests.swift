@@ -76,6 +76,8 @@ struct PlanTrainsTests {
         #expect(PlanWords.train(train, ci: ci) == "Pushed · c85bf83d · CI Running · 1 of 2 jobs done")
         #expect(!PlanWords.trainNeedsAttention(train, ci: ci))
         #expect(PlanWords.train(train, ci: nil) == "Pushed · c85bf83d · CI not read yet")
+        // "CI Unknown" once, never "CI CI Unknown" (review train-1005c L2).
+        #expect(PlanWords.train(train, ci: PlanCIRead(subject: "sha:c85bf83d", status: .unknown)) == "Pushed · c85bf83d · CI Unknown")
         let red = PlanTrain(
             id: "t", short: "t", name: "t", base: "", pushedSha: nil, state: .red, stateSince: 0, actor: "", createdAt: 0,
             landedAt: nil, lanes: [], ciSubject: "")

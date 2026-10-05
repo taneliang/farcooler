@@ -241,7 +241,9 @@ extension PlanWords {
         var parts = [trainState(train.state)]
         if let sha = train.pushedSha, !sha.isEmpty { parts.append(String(sha.prefix(8))) }
         if let ci {
-            parts.append("CI \(ciSummary(ci))")
+            // "CI Unknown" already says CI (review train-1005c L2).
+            let said = ciSummary(ci)
+            parts.append(said.hasPrefix("CI ") ? said : "CI \(said)")
             if let stale = ciStale(ci, now: now) { parts.append(stale) }
         } else if train.pushedSha != nil && !train.state.isSettled {
             parts.append("CI not read yet")

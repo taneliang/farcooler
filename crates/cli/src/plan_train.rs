@@ -212,7 +212,9 @@ pub(super) fn train_line(plan: &pb::Plan, t: &pb::BoardTrain) -> String {
         parts.push(sha.chars().take(8).collect());
     }
     if let Some(read) = ci_of(plan, t) {
-        parts.push(format!("CI {}", summary(read)));
+        // "CI unknown" already says CI (review train-1005c L2).
+        let said = summary(read);
+        parts.push(if said.starts_with("CI ") { said } else { format!("CI {said}") });
         parts.extend(crate::ci_words::stale(read, plan.now_ms));
     } else if t.pushed_sha.is_some() && !is_settled(t) {
         parts.push("CI not read yet".into());

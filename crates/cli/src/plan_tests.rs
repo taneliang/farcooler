@@ -1000,6 +1000,16 @@ async fn a_train_refusal_reads_as_a_train_sentence() {
     assert_eq!(lane.to_string(), "That's too long.", "a lane's words are the lane's");
 }
 
+/// A first read that failed says "CI unknown" once, not "CI CI unknown"
+/// (review train-1005c L2).
+#[test]
+fn an_unknown_read_says_ci_once() {
+    let mut plan = the_plan();
+    plan.ci[0].status = pb::BoardCiStatus::Unknown as i32;
+    plan.ci[0].jobs.clear();
+    assert_eq!(train::train_line(&plan, &plan.trains[0]), "integ-9 · Red · c85bf83d · CI unknown");
+}
+
 /// A read that stopped working says how old it is (review train-1005c M1).
 #[test]
 fn a_stale_ci_read_says_how_old_it_is() {
