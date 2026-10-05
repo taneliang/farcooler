@@ -18,6 +18,10 @@
 //! from a real `gh` against this repository. A `gh` that's missing, logged out
 //! or offline reads `unknown`, which never replaces a known read.
 //!
+//! Canary runs after CI and carries main's head, not the commit it builds, so
+//! its run is found by name, and a commit reads queued until it exists
+//! (`ci_canary`, ov-301).
+//!
 //! Part of the plan layer and as removable: only the real daemon runs it
 //! (`main.rs`), never a `--stdio` session.
 
@@ -40,9 +44,10 @@ pub const BUSY: Duration = Duration::from_secs(60);
 pub const QUIET: Duration = Duration::from_secs(10 * 60);
 
 /// What a list of runs is cut down to: the fields read here, nothing more.
-pub const RUNS_JQ: &str = "[.workflow_runs[] | {id, name, head_sha, status, conclusion, html_url, created_at}]";
+pub const RUNS_JQ: &str =
+    "[.workflow_runs[] | {id, name, head_sha, status, conclusion, html_url, created_at, display_title, event, updated_at}]";
 /// One run, the same fields.
-pub const RUN_JQ: &str = "{id, name, head_sha, status, conclusion, html_url, created_at}";
+pub const RUN_JQ: &str = "{id, name, head_sha, status, conclusion, html_url, created_at, display_title, event, updated_at}";
 /// A run's jobs.
 pub const JOBS_JQ: &str = "[.jobs[] | {name, status, conclusion, html_url}]";
 
@@ -119,6 +124,13 @@ pub struct GhRun {
     pub conclusion: Option<String>,
     pub html_url: String,
     pub created_at: String,
+    /// The run's name: Canary's carries the commit it builds (`ci_canary`).
+    #[serde(default)]
+    pub display_title: String,
+    #[serde(default)]
+    pub event: String,
+    #[serde(default)]
+    pub updated_at: String,
 }
 
 /// One job, as `JOBS_JQ` prints it.
@@ -251,6 +263,10 @@ async fn with_jobs(
     memo: &mut HashMap<u64, (String, Option<String>, Vec<GhJob>)>,
     run: GhRun,
 ) -> (GhRun, Option<Vec<GhJob>>) {
+    if run.id == 0 {
+        // The placeholder for a Canary run that has not started (`ci_canary`).
+        return (run, None);
+    }
     if let Some((s, c, jobs)) = memo.get(&run.id) {
         if memo_holds(&run.status) && (s, c) == (&run.status, &run.conclusion) {
             return (run, Some(jobs.clone()));
@@ -286,11 +302,23 @@ async fn commit_of(svc: &Service, tree: &Path, reference: &str) -> Option<String
     found.map(|b| String::from_utf8_lossy(&b).trim().to_string()).filter(|s| s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
-/// The newest run of each workflow on one commit.
+/// The newest run of each workflow on one commit, with Canary's run found by
+/// its name rather than its SHA, and a placeholder while it has yet to start
+/// (`ci_canary`).
 async fn runs_on(svc: &Service, tree: &Path, sha: &str) -> Option<Vec<GhRun>> {
     const RUNS: &str = "repos/{owner}/{repo}/actions/runs";
     let fields = [format!("head_sha={sha}"), "per_page=50".to_string()];
-    gh_get(svc, tree, &api_args(RUNS, &fields, RUNS_JQ)).await.and_then(|b| parse_runs(&b)).map(|r| latest_per_workflow(&r))
+    let listed = gh_get(svc, tree, &api_args(RUNS, &fields, RUNS_JQ)).await.and_then(|b| parse_runs(&b))?;
+    let canary = if crate::ci_canary::worth_looking(&listed) {
+        let fields = ["per_page=50".to_string()];
+        gh_get(svc, tree, &api_args(crate::ci_canary::WORKFLOW_RUNS, &fields, RUNS_JQ)).await.and_then(|b| parse_runs(&b)).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let mut runs = latest_per_workflow(&crate::ci_canary::attribute(sha, listed, canary));
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+    runs.extend(crate::ci_canary::pending(&runs, sha, now));
+    Some(runs)
 }
 
 /// Read one subject now.
