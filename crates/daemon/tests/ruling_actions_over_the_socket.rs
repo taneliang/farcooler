@@ -198,3 +198,43 @@ async fn open_rulings_never_reach_needs_you_or_a_notification() {
     }
     assert_eq!(other, 0, "nothing but plan_changed is announced for a ruling");
 }
+
+/// Keeping is the owner's mark on every path: a `ruling.set` to confirmed from
+/// the orchestrator, or from an agent, is refused by name and writes nothing;
+/// the owner's goes through, and reversing stays the orchestrator's.
+#[tokio::test]
+async fn only_the_owner_can_set_a_ruling_kept() {
+    let h = start(Scope::Control).await;
+    let repo = a_repository(&h);
+    let r = open(&h, repo.workspace, "A");
+    let mut a = connect(&h).await;
+    let kept = pb::BoardRulingState::Confirmed;
+    for actor in ["manager", "agent:00000000-0000-0000-0000-000000000001"] {
+        let said = refused(call(&mut a, "ruling.set", BOARD_RULINGS, set(r, kept, actor, None)).await);
+        assert_eq!(said, "actor", "{actor}");
+    }
+    assert_eq!(plan(&mut a, repo.workspace).await.rulings[0].state, pb::BoardRulingState::Standing as i32);
+    call(&mut a, "ruling.set", BOARD_RULINGS, set(r, kept, "user", None)).await.expect("the owner keeps");
+    let reversed = pb::BoardRulingState::Reversed;
+    call(&mut a, "ruling.set", BOARD_RULINGS, set(r, reversed, "manager", None)).await.expect("the orchestrator reverses, with no commit");
+}
+
+/// Past Decisions and `plan ruling reverse` see every settled ruling when the
+/// read asks for all (`include_closed`), however many there are.
+#[tokio::test]
+async fn a_read_for_all_sees_more_than_a_hundred_settled_rulings() {
+    let h = start(Scope::Control).await;
+    let repo = a_repository(&h);
+    for i in 0..103 {
+        let id = open(&h, repo.workspace, &format!("R{i}"));
+        h.service.store.set_ruling(id, farcooler_store::rulings::RulingState::Confirmed, None, Actor::User).unwrap();
+    }
+    let mut a = connect(&h).await;
+    let all = payload::Payload::PlanGet(pb::PlanGetRequest { workspace_id: id(repo.workspace), include_closed: true });
+    let read = match call(&mut a, "plan.get", BOARD_PLAN, all).await.unwrap() {
+        result::Value::Plan(p) => p,
+        other => panic!("wrong result: {other:?}"),
+    };
+    assert_eq!(read.rulings.len(), 103, "include_closed is all of them");
+    assert_eq!(plan(&mut a, repo.workspace).await.rulings.len(), 100, "the ordinary read stays capped");
+}

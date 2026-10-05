@@ -160,6 +160,8 @@ fn the_settled_history_is_capped_unless_all_is_asked_for() {
     assert_eq!(capped[1], format!("R-{total}"), "the newest settled first");
     assert!(!capped.contains(&"R-1".to_string()), "the oldest fell off the end");
     assert_eq!(shorts(&store, main, 0).len(), total + 1, "all, when asked for");
+    // The daemon asks for all with `i64::MIN` (`include_closed`), not 0.
+    assert_eq!(shorts(&store, main, i64::MIN).len(), total + 1, "i64::MIN is all too");
 }
 
 /// Keep is the owner's mark: it settles the ruling as confirmed, records who

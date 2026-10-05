@@ -44,6 +44,11 @@ pub(crate) fn dispatch(svc: &Service, watcher: &Watcher, req: Request) -> Result
                 Ok(pb::BoardRulingState::Reversed) => RulingState::Reversed,
                 _ => return Err(DomainError::InvalidArgument { what: "state" }),
             };
+            // Keeping is the owner's mark, on every path: the orchestrator is
+            // asked in chat, and never settles a ruling as kept itself.
+            if state == RulingState::Confirmed && actor != Actor::User {
+                return Err(DomainError::InvalidArgument { what: "actor" });
+            }
             // A marked reversal is the orchestrator's note that the work is
             // done, with the commit that did it (ov-333).
             let ruling = match (state, p.sha.as_deref()) {

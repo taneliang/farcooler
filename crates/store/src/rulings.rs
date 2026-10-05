@@ -397,8 +397,8 @@ impl Store {
 }
 
 /// A board's rulings for the plan read: every standing one, newest first, then
-/// the settled ones, most recently settled first. `settled_since_ms == 0` (the
-/// read that asked for everything) sends every settled one; any other read
+/// the settled ones, most recently settled first. `settled_since_ms <= 0` (the
+/// read that asked for everything, `i64::MIN` from the daemon) sends every settled one; any other read
 /// sends the last `SETTLED_READ_CAP`, however old (ov-333: Past Decisions is
 /// history, so a ruling no longer ages out after a week). A card now on
 /// another board is left out of a ruling's cards.
@@ -408,7 +408,8 @@ pub(crate) fn rulings_of(
     settled_since_ms: i64,
     on_board: &HashMap<Uuid, CardRef>,
 ) -> Result<Vec<Ruling>> {
-    let cap = if settled_since_ms == 0 { i64::MAX } else { SETTLED_READ_CAP as i64 };
+    // 0 or less is "all": the daemon passes `i64::MIN` for `include_closed`.
+    let cap = if settled_since_ms <= 0 { i64::MAX } else { SETTLED_READ_CAP as i64 };
     let mut stmt = conn
         .prepare(&format!(
             "SELECT {COLS} FROM board_rulings

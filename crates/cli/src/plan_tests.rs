@@ -922,7 +922,7 @@ async fn ruling_set_takes_the_short_id_as_said() {
         assert_eq!((p.state, p.note.as_deref()), (pb::BoardRulingState::Reversed as i32, Some("Owner: blue.")));
     }
     let mut link = runner();
-    let err = rule(&mut link, &["set", "R-9", "--state", "confirmed"], false).await.unwrap_err();
+    let err = rule(&mut link, &["set", "R-9", "--state", "reversed"], false).await.unwrap_err();
     assert_eq!(err.to_string(), "There's no ruling R-9 on this board. `plan ruling list` shows them.");
     assert!(link.sent.iter().all(|r| r.method == "plan.get"), "nothing written");
 }
@@ -980,6 +980,17 @@ async fn keep_all_is_one_request_for_the_board() {
     }
 }
 
+/// `set --state confirmed` is Keep by another name: refused for anyone but the
+/// owner, with Keep's sentence, and nothing is sent; the owner's own works.
+#[tokio::test]
+async fn set_confirmed_is_the_owner_s_alone() {
+    let mut link = runner();
+    let err = rule(&mut link, &["set", "R-2", "--state", "confirmed"], false).await.unwrap_err();
+    assert!(err.to_string().starts_with("Keeping a ruling is the owner's call."), "{err}");
+    assert!(link.sent.is_empty(), "{:?}", link.sent.iter().map(|r| &r.method).collect::<Vec<_>>());
+    assert_eq!(rule_as_owner(&mut link, &["set", "R-2", "--state", "confirmed"], false).await.unwrap(), "R-2 is confirmed.");
+}
+
 /// The orchestrator never keeps a ruling for the owner, and nothing is sent.
 #[tokio::test]
 async fn the_orchestrator_cannot_keep() {
@@ -999,7 +1010,12 @@ async fn reverse_marks_a_ruling_with_its_commit() {
     assert_eq!(said, "R-2 is reversed in 6e7e5618.");
     let Some(request::Payload::RulingSet(p)) = &last(&link).payload else { panic!() };
     assert_eq!((p.state, p.sha.as_deref(), p.note.as_deref()), (pb::BoardRulingState::Reversed as i32, Some("6e7e5618"), Some("Blue again.")));
-    assert!(crate::Cli::try_parse_from(["farcooler", "plan", "ruling", "reverse", "R-2"]).is_err(), "--sha is required");
+    // A reversal with no commit (a setting, a process call) is marked without one.
+    let mut link = runner();
+    assert_eq!(rule(&mut link, &["reverse", "R-2"], false).await.unwrap(), "R-2 is reversed.");
+    let Some(request::Payload::RulingSet(p)) = &last(&link).payload else { panic!() };
+    assert_eq!((p.state, p.sha.as_deref()), (pb::BoardRulingState::Reversed as i32, None));
+    let mut link = runner();
     link.refuse = Some("reversed_sha");
     let err = rule(&mut link, &["reverse", "R-2", "--sha", "zz"], false).await.unwrap_err();
     assert!(err.to_string().starts_with("Give the commit that reversed it"), "{err}");
@@ -1016,7 +1032,7 @@ async fn a_runner_without_the_owner_s_actions_is_told() {
         assert_eq!(err.to_string(), "This runner needs an update to keep or reverse rulings.", "{args:?}");
     }
     assert!(link.sent.is_empty());
-    assert!(rule(&mut link, &["set", "R-2", "--state", "confirmed"], false).await.is_ok(), "set still works");
+    assert!(rule(&mut link, &["set", "R-2", "--state", "reversed"], false).await.is_ok(), "set still works");
 }
 
 /// `list --state` filters in the owner's words; JSON carries the filter and
@@ -1040,7 +1056,7 @@ async fn list_filters_by_state() {
 async fn a_refused_move_says_how_rulings_move() {
     let mut link = runner();
     link.refuse = Some("ruling_state");
-    let err = rule(&mut link, &["set", "R-1", "--state", "confirmed"], false).await.unwrap_err();
+    let err = rule_as_owner(&mut link, &["set", "R-1", "--state", "confirmed"], false).await.unwrap_err();
     assert!(err.to_string().starts_with("A ruling can't make that move."), "{err}");
 }
 

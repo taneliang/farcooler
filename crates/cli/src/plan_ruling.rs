@@ -10,7 +10,7 @@
 //! farcooler plan ruling add "The inbox is amber." --why "..." --reversal "..." [--card ov-1]... [--theme NAME]
 //! farcooler plan ruling set R-12 --state confirmed|reversed [--note "..."]
 //! farcooler plan ruling keep R-12 | --all          (the owner's mark, ov-333)
-//! farcooler plan ruling reverse R-12 --sha <sha> [--note "..."]
+//! farcooler plan ruling reverse R-12 [--sha <sha>] [--note "..."]
 //! farcooler plan ruling list [--state open|kept|reversed]
 //! ```
 //!
@@ -58,7 +58,8 @@ pub(super) enum RulingCmd {
         #[arg(long)]
         theme: Option<String>,
     },
-    /// Confirm or reverse a ruling, as the owner said.
+    /// Mark a ruling reversed, or kept (the owner's own call: `keep` is the
+    /// usual word). Confirming as anyone but the owner is refused.
     Set {
         /// The ruling's short id: R-12, or 12.
         id: String,
@@ -83,9 +84,9 @@ pub(super) enum RulingCmd {
     Reverse {
         /// The ruling's short id: R-12, or 12.
         id: String,
-        /// The commit that reversed it.
+        /// The commit that reversed it. Leave it out when there isn't one.
         #[arg(long)]
-        sha: String,
+        sha: Option<String>,
         /// Anything worth knowing about how it went.
         #[arg(long)]
         note: Option<String>,
@@ -194,7 +195,9 @@ pub(super) async fn ruling<L: DispatchLink>(
     }
     // Keep is the owner's mark, so the owner's actor: the orchestrator is
     // asked in chat for what changes the plan, and keeps nothing for them.
-    if matches!(cmd, RulingCmd::Keep { .. }) && actor != "user" {
+    let keeps = matches!(cmd, RulingCmd::Keep { .. })
+        || matches!(cmd, RulingCmd::Set { state: RulingStateArg::Confirmed, .. });
+    if keeps && actor != "user" {
         return Err("Keeping a ruling is the owner's call. Ask them to keep it from Decided For You.".into());
     }
     let plan = get_plan(link, &ws, true).await?;
@@ -244,13 +247,16 @@ pub(super) async fn ruling<L: DispatchLink>(
                 state: pb::BoardRulingState::Reversed as i32,
                 note,
                 actor: actor.into(),
-                sha: Some(sha),
+                sha,
             });
             let set = send(link, board, "ruling.set", p).await?;
             Ok(if json {
                 ruling_json(&plan, &set, &keys).to_string()
             } else {
-                format!("R-{} is reversed in {}.", set.number, set.reversed_sha.as_deref().unwrap_or("the commit you named"))
+                match set.reversed_sha.as_deref() {
+                    Some(sha) => format!("R-{} is reversed in {sha}.", set.number),
+                    None => format!("R-{} is reversed.", set.number),
+                }
             })
         }
         RulingCmd::Add { decision, why, reversal, cards, theme } => {

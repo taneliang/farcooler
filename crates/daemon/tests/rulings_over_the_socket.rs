@@ -41,7 +41,8 @@ fn set(ruling: &pb::BoardRuling, state: pb::BoardRulingState, note: Option<&str>
         ruling_id: ruling.id.clone(),
         state: state as i32,
         note: note.map(str::to_string),
-        actor: "manager".into(),
+        // Keeping is the owner's mark (ov-333): only `user` may confirm.
+        actor: if state == pb::BoardRulingState::Confirmed { "user".into() } else { "manager".into() },
         sha: None,
     })
 }
@@ -90,7 +91,7 @@ async fn a_ruling_round_trips_through_the_plan_and_announces() {
     assert_eq!(first.task_ids, vec![id(task.id)]);
     let second = ruling(&mut a, add(repo.workspace, "The gutter is 12 points.", &[]), "ruling.add").await;
     let confirmed = ruling(&mut a, set(&first, pb::BoardRulingState::Confirmed, Some("Yes.")), "ruling.set").await;
-    assert_eq!((confirmed.note.as_str(), confirmed.settled_by.as_deref()), ("Yes.", Some("manager")));
+    assert_eq!((confirmed.note.as_str(), confirmed.settled_by.as_deref()), ("Yes.", Some("user")));
     assert!(confirmed.settled_at.is_some());
 
     let read = plan(&mut a, repo.workspace, false).await;
