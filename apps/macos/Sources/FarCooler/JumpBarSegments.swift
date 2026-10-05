@@ -101,8 +101,8 @@ struct JumpLabelButton<Label: View>: View {
     var body: some View {
         Button(action: action) {
             label()
-                .padding(.horizontal, 3)
-                .frame(minHeight: JumpCaretButton.minHeight)
+                .padding(.horizontal, JumpBar.labelInset)
+                .frame(minHeight: JumpBar.cell)
                 .background(RoundedRectangle.control.fill(hovering ? Fill.hover : Color.clear))
                 .contentShape(Rectangle())
         }
@@ -114,7 +114,8 @@ struct JumpLabelButton<Label: View>: View {
 }
 
 /// A segment's caret: at least `minWidth` wide and `minHeight` tall to hit,
-/// with its own hover highlight. A label is as tall to hit.
+/// with its own hover highlight, which is that hit area and is drawn only on
+/// hover, so it never moves the layout. A label is as tall to hit.
 struct JumpCaretButton: View {
     let name: String
     let style: JumpBar.Style
@@ -123,9 +124,9 @@ struct JumpCaretButton: View {
     /// The narrowest a caret's hit area is (ov-267).
     static let minWidth: CGFloat = 20
 
-    /// The shortest a caret's or a label's hit area is (ov-267 review): a
-    /// label's own text is 13 to 15 pt, too small a target beside a caret.
-    static let minHeight: CGFloat = 28
+    /// The shortest a caret's or a label's hit area is (ov-267 review, ov-290):
+    /// one cell, which every piece of the bar is, so they share a center.
+    static let minHeight: CGFloat = JumpBar.cell
 
     @State private var hovering = false
 

@@ -505,15 +505,18 @@ struct DrillBreadcrumb: View {
         let pieces = Self.pieces(crumbs, worktrees: worktrees, menus: menus.count)
         let segments = built ?? []
         HStack(spacing: JumpBar.spacing) {
-            // The segments on one baseline; the bar centered in the header.
-            HStack(alignment: .firstTextBaseline, spacing: JumpBar.spacing) {
-            ForEach(Array(pieces.enumerated()), id: \.offset) { _, piece in
+            // The segments on one center: every piece is one `JumpBar.cell`
+            // tall, so labels, carets and separators share a line (ov-290).
+            HStack(alignment: .center, spacing: JumpBar.spacing) {
+            ForEach(Array(pieces.enumerated()), id: \.offset) { offset, piece in
                 switch piece.kind {
                 case .separator:
                     Image(systemName: JumpBar.separatorGlyph)
                         .font(piece.style.font)
                         .foregroundStyle(piece.style.color)
+                        .frame(width: JumpBar.separatorWidth, height: JumpBar.cell)
                         .accessibilityHidden(true)
+                        .identified("jump-separator-\(offset)")
                 case .crumb(let index):
                     crumb(crumbs[index], index: index, style: piece.style)
                 case .crumbCaret(let index):
@@ -532,9 +535,11 @@ struct DrillBreadcrumb: View {
                             Text(terminal.title).font(piece.style.font).lineLimit(1)
                         }
                         .foregroundStyle(piece.style.color)
+                        .padding(.horizontal, JumpBar.labelInset)
+                        .frame(minHeight: JumpBar.cell)
                         .background(ring(crumbs.count + 1))
                         .accessibilityElement(children: .combine)
-                        .accessibilityIdentifier("breadcrumb-terminal")
+                        .identified("breadcrumb-terminal")
                     }
                 case .terminalChevron:
                     caret(piece.kind, segment: crumbs.count + 1, style: piece.style, segments: segments)
@@ -683,6 +688,8 @@ struct DrillBreadcrumb: View {
         } else {
             text
                 .truncationMode(.middle)
+                .padding(.horizontal, JumpBar.labelInset)
+                .frame(minHeight: JumpBar.cell)
                 .layoutPriority(-1)
                 .background(ring(index))
                 .accessibilityIdentifier("jump-segment-\(index)")

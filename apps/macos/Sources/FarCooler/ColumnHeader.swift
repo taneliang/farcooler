@@ -74,6 +74,18 @@ enum JumpBar {
     static let chevron = Style(size: ColumnHeader.textSize - 3, weight: .semibold, tone: .tertiary)
     static let separatorGlyph = "chevron.right"
     static let menuGlyph = "chevron.down"
-    /// Between a segment and a separator, each side.
-    static let spacing: CGFloat = 6
+    /// Between one piece and the next: none. Each piece is a cell that carries
+    /// its own room (ov-290), so a caret's gap to a separator is the two cells'
+    /// padding, the same wherever it falls.
+    static let spacing: CGFloat = 0
+    /// The height of every piece's cell, labels, carets and separators alike:
+    /// a control's square (`SidebarGrid.control`), so every piece centers on
+    /// one line and a hover backing is as tall as the hit area it stands for.
+    static let cell: CGFloat = SidebarGrid.control
+    /// A separator's cell: the room its glyph has either side, a step and a half
+    /// of the vertical rhythm.
+    static let separatorWidth: CGFloat = ColumnGrid.rhythm * 1.5
+    /// A plain (non-control) label's inset, as a label button's: so a segment
+    /// without a link starts where one with it does.
+    static let labelInset: CGFloat = 3
 }

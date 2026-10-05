@@ -194,7 +194,7 @@ struct WorktreeTerminalNavigationTests {
         #expect(DrillBreadcrumb.caretName(3, crumbs: 2) == "Show other terminals")
     }
 
-    @Test("In a real bar, the labels go and the carets are their own controls, at least 20 pt wide and 28 pt tall")
+    @Test("In a real bar, the labels go and the carets are their own controls, at least 20 pt wide and one cell tall")
     func inARealBar() async throws {
         final class Heard { var jumps: [JumpTarget] = [] }
         let heard = Heard()
