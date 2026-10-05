@@ -40,7 +40,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 # guarded, so a file added tomorrow is guarded without being listed.
 SEARCHED = ["crates"]
 
-# The pages' own code, and the registries that list every feature. Each entry
+# The pages' own code. Each entry
 # is a file, or a directory whose whole tree is the pages'. A path that isn't
 # there fails the check, so a rename can't leave an allowance for nothing.
 PAGE_FILES = [
@@ -48,43 +48,49 @@ PAGE_FILES = [
     "crates/core/src/page_doc.rs",
     "crates/core/src/page_doc",
     "crates/core/src/page_schema.rs",
-    # The refusal that carries a page's sentence.
-    "crates/core/src/error.rs",
     # The store.
     "crates/store/src/pages.rs",
     "crates/store/src/pages_tests.rs",
-    # Registries and test support that list every table, module and capability.
-    "crates/core/src/lib.rs",
-    "crates/store/src/lib.rs",
-    "crates/store/src/migrate.rs",
-    "crates/store/src/testing.rs",
-    "crates/protocol/src/lib.rs",
     "crates/protocol/src/page_wire_tests.rs",
     # The daemon.
     "crates/daemon/src/rpc_pages.rs",
-        "crates/daemon/src/watch/pages.rs",
-    "crates/daemon/src/rpc.rs",
-    "crates/daemon/src/lib.rs",
-    "crates/daemon/src/watch.rs",
+    "crates/daemon/src/watch/pages.rs",
     "crates/daemon/tests/pages_over_the_socket.rs",
-    # The client: pages as JSON for the phones, and the registries that route
-    # or ignore every method and event.
+    # The client: pages as JSON for the phones.
     "crates/client/src/page_json.rs",
     "crates/client/src/page_json_tests.rs",
     "crates/client/src/session/pages.rs",
     "crates/client/src/ffi/page_phone_tests.rs",
-    "crates/client/src/ffi/route.rs",
-    "crates/client/src/ffi.rs",
-    "crates/client/src/lib.rs",
-    "crates/client/src/session.rs",
-    "crates/client/src/session/results.rs",
     # The CLI.
     "crates/cli/src/page.rs",
     "crates/cli/src/page_text.rs",
     "crates/cli/src/page_tests.rs",
-    "crates/cli/src/main.rs",
-    "crates/cli/src/event_lines.rs",
 ]
+
+# The registries: files that list every feature, and so have to name pages once.
+# Each is guarded like any other file except for the lines its pattern matches,
+# which are the exact registration: the module line, the dispatch arm, the enum
+# variant, the FFI export. A page read planted anywhere else in them fails, so
+# `svc.store.list_pages(ws)` in a task route is caught though `rpc.rs` is on this
+# list. A path that isn't there fails the check, as PAGE_FILES' do. A comment
+# line is never a match.
+REGISTRIES = {
+    "crates/core/src/lib.rs": r"^\s*pub mod page_(doc|schema);\s*$",
+    "crates/core/src/error.rs": r"\bPageRefused\b",
+    "crates/store/src/lib.rs": r"^\s*pub mod pages;\s*$",
+    "crates/store/src/migrate.rs": r"migration_0025_pages",
+    "crates/store/src/testing.rs": r"DROP TABLE page_events; DROP TABLE board_pages;",
+    "crates/protocol/src/lib.rs": r"\bBOARD_PAGES\b|^\s*mod page_wire_tests;",
+    "crates/daemon/src/lib.rs": r"^\s*pub\(crate\) mod rpc_pages;\s*$",
+    "crates/daemon/src/rpc.rs": r"^\s*(\| )?Method::Page(List|Get|Stats|Set|Remove)\b.*(=> Scope::(Read|Control),|\|)?\s*$|crate::rpc_pages::dispatch\(svc, &self\.watcher, req\)\.await",
+    "crates/client/src/ffi/route.rs": r"^\s*\| Method::Page(List|Get|Set|Remove|Stats)\b",
+    "crates/client/src/ffi.rs": r"Ok\(crate::page_json::pages?_json\(&pages?\)\)|session\.pages?\(id\(\"workspace\"\)\?",
+    "crates/client/src/lib.rs": r"^\s*pub mod page_json;\s*$",
+    "crates/client/src/session.rs": r"^\s*Payload::PagesChanged\(p\) => Some\(FleetEvent::Pages \{",
+    "crates/client/src/session/results.rs": r"^\s*result::Value::(BoardPageList|BoardPage|PageSetResult|PageStatsList)\(_\) =>",
+    "crates/cli/src/main.rs": r"event::Payload::PagesChanged\(p\) => event_lines::pages_event_json\(&p\),|\(Payload::PagesChanged\(Default::default\(\)\), \"pages\"\),",
+    "crates/cli/src/event_lines.rs": r"pages_event_json|pb::PagesChanged",
+}
 
 # What names pages, by meaning rather than by one spelling. Matched over the
 # whole file, so a statement split over lines is still one statement.
@@ -100,6 +106,8 @@ FORBIDDEN = [
     re.compile(r"(?<![\w.])pages::"),
     re.compile(r"\.(list_pages|get_page|set_page|set_page_at|remove_page|page_stats|page_card_keys)\s*\("),
     re.compile(r"\bMethod::Page\w*"),
+    # The client session's page reads, called as methods.
+    re.compile(r"\bsession\.pages?\s*\("),
 ]
 
 # Messages the board and the plan layer put on the wire: their fields never
@@ -118,6 +126,13 @@ def rust_files(root: pathlib.Path):
         base = root / rel
         if base.exists():
             yield from sorted(p for p in base.rglob("*.rs") if "target" not in p.relative_to(root).parts)
+
+
+def line_allowed(rel: str, line: str) -> bool:
+    if line.strip().startswith("//"):
+        return True
+    pattern = REGISTRIES.get(rel)
+    return bool(pattern and re.search(pattern, line))
 
 
 def allowed(root: pathlib.Path, path: pathlib.Path) -> bool:
@@ -148,13 +163,19 @@ def scan(root: pathlib.Path):
     for entry in PAGE_FILES:
         if not (root / entry).exists():
             hits.append((entry, 0, "an allowed path is missing: it moved, so the allowance covers nothing. Update PAGE_FILES."))
+    for entry in REGISTRIES:
+        if not (root / entry).exists():
+            hits.append((entry, 0, "a registry is missing: it moved, so its allowance covers nothing. Update REGISTRIES."))
     for path in rust_files(root):
         if allowed(root, path):
             continue
         text = path.read_text()
+        rel = path.relative_to(root).as_posix()
         for pattern in FORBIDDEN:
             for m in pattern.finditer(text):
                 n = line_of(text, m.start())
+                if line_allowed(rel, text.splitlines()[n - 1]):
+                    continue
                 hits.append((str(path.relative_to(root)), n, text.splitlines()[n - 1].strip()))
     proto = root / PROTO
     if not proto.exists():
@@ -188,6 +209,26 @@ def check() -> int:
     return 0
 
 
+# One line each registry's pattern allows, for the self-test.
+REGISTRY_LINES = {
+    "crates/core/src/lib.rs": "pub mod page_doc;",
+    "crates/core/src/error.rs": "PageRefused { said: String },",
+    "crates/store/src/lib.rs": "pub mod pages;",
+    "crates/store/src/migrate.rs": "(crate::pages::migration_0025_pages, Older::Welcome),",
+    "crates/store/src/testing.rs": "store.conn().execute_batch(\"DROP TABLE page_events; DROP TABLE board_pages;\").unwrap();",
+    "crates/protocol/src/lib.rs": "pub const BOARD_PAGES: &str = \"board_pages\";",
+    "crates/daemon/src/lib.rs": "pub(crate) mod rpc_pages;",
+    "crates/daemon/src/rpc.rs": "crate::rpc_pages::dispatch(svc, &self.watcher, req).await",
+    "crates/client/src/ffi/route.rs": "        | Method::PageList",
+    "crates/client/src/ffi.rs": "Ok(crate::page_json::pages_json(&pages))",
+    "crates/client/src/lib.rs": "pub mod page_json;",
+    "crates/client/src/session.rs": "Payload::PagesChanged(p) => Some(FleetEvent::Pages { workspace: w }),",
+    "crates/client/src/session/results.rs": "result::Value::BoardPage(_) => \"board_page\",",
+    "crates/cli/src/main.rs": "event::Payload::PagesChanged(p) => event_lines::pages_event_json(&p),",
+    "crates/cli/src/event_lines.rs": "pub(crate) fn pages_event_json() {}",
+}
+
+
 def self_test() -> int:
     failures = []
     clean_proto = "".join(f"message {m} {{\n  // The page of a lane's story.\n  bytes worktree_id = 1;\n}}\n" for m in GUARDED_MESSAGES)
@@ -207,6 +248,8 @@ def self_test() -> int:
                     put(entry, "// the pages' own code may name board_pages and use crate::pages;\n")
                 else:
                     put(entry + "/mod.rs", "fn ok() {}\n")
+            for rel, text in REGISTRY_LINES.items():
+                put(rel, text + "\nfn other() {}\n")
             # Files that must stay clean, among them the board's and the plan layer's.
             for rel in [
                 "crates/store/src/tasks.rs",
@@ -252,6 +295,18 @@ def self_test() -> int:
                 put(rel, text + "\n")
                 if not any(h[0] == rel for h in scan(root)):
                     failures.append(f"missed in {rel}: {text!r}")
+        # A registry allows its registration lines and nothing else in the file:
+        # a page read planted in a task route fails though the file is a registry.
+        for rel in REGISTRY_LINES:
+            for planted in ["let n = svc.store.list_pages(ws)?;", "use crate::pages::StoredPage;", "let t = \"board_pages\";", "session.page(ws, slot)"]:
+                clean_tree()
+                put(rel, REGISTRY_LINES[rel] + "\n" + planted + "\n")
+                if not any(h[0] == rel for h in scan(root)):
+                    failures.append(f"missed in registry {rel}: {planted!r}")
+            clean_tree()
+            (root / rel).unlink()
+            if not any("registry is missing" in h[2] for h in scan(root)):
+                failures.append(f"a registry that moved was not flagged: {rel}")
         # A file nobody listed, new or old: guarded by default.
         for rel in ["crates/daemon/src/report/new_file.rs", "crates/store/src/waits.rs", "crates/store/src/brand_new.rs"]:
             clean_tree()
