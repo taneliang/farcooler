@@ -26,7 +26,6 @@ public struct PlanTrendBars: View {
                     .fill(index == heights.count - 1 ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
                     .frame(maxWidth: .infinity)
                     .frame(height: max(share > 0 ? 2 : 0, height * share))
-                    .clipShape(Capsule())
             }
         }
         .frame(height: height, alignment: .bottom)
