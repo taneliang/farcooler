@@ -159,7 +159,7 @@ private fun LazyListScope.loaded(
         item(key = "plan/now") { PlanHeader("Now", count, Modifier.testTag("plan-now")) }
         for (group in groups) {
             val train = group.train
-            if (train != null) item(key = "plan/train/${train.id}") { PlanTrainRow(train, plan.ciOf(train)) }
+            if (train != null) item(key = "plan/train/${train.id}") { PlanTrainRow(train, plan.ciOf(train), plan.nowMs) }
             itemsIndexedLanes(group.lanes, "now") { _, lane ->
                 Box(Modifier.padding(start = if (train == null) 0.dp else 16.dp)) {
                     PlanLaneRow(lane, plan.themeOf(lane), rank = null, now = plan.nowMs, waitsOnOwner = plan.waitsOnOwner(lane, statuses)) {

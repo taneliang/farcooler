@@ -140,5 +140,6 @@ pub(crate) fn pb_ci(r: &CiRead) -> pb::BoardCiRead {
             .collect(),
         fetched_at: r.fetched_at,
         changed_at: r.changed_at,
+        asked_at: r.asked_at,
     }
 }

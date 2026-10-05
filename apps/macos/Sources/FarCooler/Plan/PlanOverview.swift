@@ -91,7 +91,7 @@ struct PlanOverviewView: View {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(groups) { group in
                     if let train = group.train {
-                        PlanTrainRow(train: train, ci: model.ci(of: train))
+                        PlanTrainRow(train: train, ci: model.ci(of: train), now: model.nowMs)
                             .changeWashed(train.id)
                     }
                     ForEach(group.lanes) { lane in

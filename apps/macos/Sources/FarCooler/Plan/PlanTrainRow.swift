@@ -10,11 +10,13 @@ import SwiftUI
 struct PlanTrainRow: View {
     let train: PlanTrain
     let ci: PlanCIRead?
+    /// The runner's clock, for how old a stale read is.
+    var now: Int64 = 0
     @Environment(\.colorScheme) private var scheme
     @Environment(\.openURL) private var openURL
     @State private var hovering = false
 
-    private var words: String { PlanWords.train(train, ci: ci) }
+    private var words: String { PlanWords.train(train, ci: ci, now: now) }
     private var attention: Bool { PlanWords.trainNeedsAttention(train, ci: ci) }
     private var run: URL? { ci.flatMap { PageLinks.https($0.url) } }
 
@@ -63,7 +65,7 @@ extension PlanChanges {
     static func now(_ model: PlanModel, statuses: [String: TaskStatus]) -> [ListChangeRow] {
         model.nowGroups.flatMap { group -> [ListChangeRow] in
             let head = group.train.map { train in
-                [ListChangeRow(id: train.id, signature: PlanWords.train(train, ci: model.ci(of: train)))]
+                [ListChangeRow(id: train.id, signature: PlanWords.train(train, ci: model.ci(of: train), now: model.nowMs))]
             } ?? []
             return head + lanes(group.lanes, model, statuses: statuses)
         }

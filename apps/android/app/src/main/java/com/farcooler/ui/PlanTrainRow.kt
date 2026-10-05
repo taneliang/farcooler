@@ -35,8 +35,8 @@ import com.farcooler.model.TrainWords
  * CI run in the browser, the one place it goes.
  */
 @Composable
-fun PlanTrainRow(train: PlanTrain, ci: PlanCiRead?) {
-    val words = TrainWords.train(train, ci)
+fun PlanTrainRow(train: PlanTrain, ci: PlanCiRead?, now: Long = 0) {
+    val words = TrainWords.train(train, ci, now)
     val attention = TrainWords.needsAttention(train, ci)
     val amber = glanceColor(GlancePalette.amber)
     val run = ci?.url?.takeIf { PageLinks.https(it) != null }

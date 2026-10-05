@@ -59,6 +59,21 @@ pub(crate) fn read_for<'a>(ci: &'a [pb::BoardCiRead], subject: &str) -> Option<&
     })
 }
 
+/// A read older than this is stale: the watch reads a finished subject every
+/// ten minutes, so two and a half of those missed is GitHub not answering
+/// (review train-1005c M1). The apps hold the same number.
+pub(crate) const STALE_AFTER_MS: i64 = 25 * 60_000;
+
+/// "as of 2h ago" for a read that worked once and not since; nil while it's
+/// current, or never worked (its status says that).
+pub(crate) fn stale(read: &pb::BoardCiRead, now: i64) -> Option<String> {
+    let age = now - read.fetched_at;
+    (read.fetched_at > 0 && age > STALE_AFTER_MS).then(|| {
+        let minutes = age / 60_000;
+        if minutes < 120 { format!("as of {minutes}m ago") } else { format!("as of {}h ago", minutes / 60) }
+    })
+}
+
 /// A train's state, as a person reads it.
 pub(crate) fn train_state_word(state: i32) -> &'static str {
     match pb::BoardTrainState::try_from(state) {

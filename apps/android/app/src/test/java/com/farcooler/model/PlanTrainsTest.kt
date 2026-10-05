@@ -54,6 +54,16 @@ class PlanTrainsTest {
     }
 
     @Test
+    fun `a read that stopped working says how old it is`() {
+        val now = 1_800_000_000_000L
+        val read = PlanCiRead("main", status = CiStatus.PASSED, fetchedAt = now - 3 * 3_600_000L)
+        assertEquals("as of 3 h ago", TrainWords.ciStale(read, now))
+        assertNull(TrainWords.ciStale(read.copy(fetchedAt = now - 60_000), now))
+        val world = PageWorld(plan = Plan(nowMs = now, ci = listOf(read)))
+        assertEquals("Passed · as of 3 h ago", world.resolve(PageRef(PageTarget.Ci("main"))).status)
+    }
+
+    @Test
     fun `an older answer with no trains still reads`() {
         val old = Plan.decode("""{"now_ms": 1, "themes": [], "lanes": [], "order": [], "cards": []}""")
         assertTrue(old.trains.isEmpty() && old.ci.isEmpty())

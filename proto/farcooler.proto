@@ -4368,9 +4368,13 @@ message BoardCiRead {
   // The run's page: for several runs, the first failing one's, else the first.
   string url = 4;
   repeated BoardCiJob jobs = 5;
-  // When the runner last asked, and when what it heard last changed.
+  // When a read last worked (what's here is as of then; 0 if none has), and
+  // when what it heard last changed.
   int64 fetched_at = 6;
   int64 changed_at = 7;
+  // When the runner last asked, answered or not: a read whose `fetched_at`
+  // lags far behind is stale, and clients say how old it is.
+  int64 asked_at = 8;
 }
 
 // `train.start`, at `control`: a train, integrating, with these lanes on it.

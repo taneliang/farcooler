@@ -44,6 +44,7 @@ fn read(subject: &str, status: CiStatus) -> CiRead {
         jobs: vec![CiJob { name: "CI / rust".into(), state: "running".into(), url: String::new() }],
         fetched_at: 0,
         changed_at: 0,
+        asked_at: 0,
     }
 }
 
@@ -312,4 +313,23 @@ fn a_canceled_run_is_superseded_not_red() {
     assert_eq!(store.train(train.id).unwrap().state, TrainState::Pushed);
     // A real failure beside a cancel is still red.
     assert_eq!(crate::board_ci::status_of(&["failed", "canceled"]), CiStatus::Failed);
+}
+
+// ---- a read that goes stale (review train-1005c M1) ----
+
+/// When GitHub can't be asked, the last read stands but says when it was
+/// made: `fetched_at` stays the last read that worked, and `asked_at` moves.
+#[test]
+fn an_unknown_read_leaves_when_it_was_last_read() {
+    let (store, main, _) = board(0);
+    store.record_ci(main, &read("main", CiStatus::Passed)).unwrap();
+    let first = store.ci_read(main, "main").unwrap().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    store.record_ci(main, &read("main", CiStatus::Unknown)).unwrap();
+    let after = store.ci_read(main, "main").unwrap().unwrap();
+    assert_eq!(after.fetched_at, first.fetched_at, "the last read that worked");
+    assert!(after.asked_at > first.fetched_at, "the last time it was asked");
+    // Never read at all: nothing was fetched.
+    store.record_ci(main, &read("run:9", CiStatus::Unknown)).unwrap();
+    assert_eq!(store.ci_read(main, "run:9").unwrap().unwrap().fetched_at, 0);
 }

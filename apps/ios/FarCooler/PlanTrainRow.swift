@@ -8,10 +8,12 @@ import SwiftUI
 struct PlanTrainRow: View {
     let train: PlanTrain
     let ci: PlanCIRead?
+    /// The runner's clock, for how old a stale read is.
+    var now: Int64 = 0
     @Environment(\.colorScheme) private var scheme
     @Environment(\.openURL) private var openURL
 
-    private var words: String { PlanWords.train(train, ci: ci) }
+    private var words: String { PlanWords.train(train, ci: ci, now: now) }
     private var attention: Bool { PlanWords.trainNeedsAttention(train, ci: ci) }
     private var run: URL? { ci.flatMap { PageLinks.https($0.url) } }
 

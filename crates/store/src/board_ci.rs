@@ -135,10 +135,13 @@ pub struct CiRead {
     /// first one's.
     pub url: String,
     pub jobs: Vec<CiJob>,
-    /// When the runner last asked.
+    /// When a read last worked: what was heard is as of then. 0 if none has.
     pub fetched_at: i64,
     /// When what it heard last changed.
     pub changed_at: i64,
+    /// When the runner last asked, whether or not GitHub answered (review
+    /// train-1005c M1): a read whose `fetched_at` lags this is stale.
+    pub asked_at: i64,
 }
 
 /// How GitHub's words for a job, or a run, read here: `status` is queued,
@@ -175,7 +178,7 @@ pub fn status_of(run_states: &[&str]) -> CiStatus {
     }
 }
 
-const COLS: &str = "subject, sha, status, url, jobs, fetched_at, changed_at";
+const COLS: &str = "subject, sha, status, url, jobs, fetched_at, changed_at, asked_at";
 
 fn row_to_read(r: &rusqlite::Row) -> rusqlite::Result<CiRead> {
     let status: String = r.get(2)?;
@@ -188,6 +191,7 @@ fn row_to_read(r: &rusqlite::Row) -> rusqlite::Result<CiRead> {
         jobs: jobs_from(&jobs),
         fetched_at: r.get(5)?,
         changed_at: r.get(6)?,
+        asked_at: r.get(7)?,
     })
 }
 
@@ -225,7 +229,7 @@ impl Store {
         if read.status == CiStatus::Unknown {
             if let Some(before) = &before {
                 tx.execute(
-                    "UPDATE board_ci SET fetched_at = ?3 WHERE workspace_id = ?1 AND subject = ?2",
+                    "UPDATE board_ci SET asked_at = ?3 WHERE workspace_id = ?1 AND subject = ?2",
                     params![uuid_blob(workspace), before.subject, now],
                 )
                 .map_err(map_err)?;
@@ -241,11 +245,11 @@ impl Store {
             _ => now,
         };
         tx.execute(
-            "INSERT INTO board_ci (workspace_id, subject, sha, status, url, jobs, fetched_at, changed_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            "INSERT INTO board_ci (workspace_id, subject, sha, status, url, jobs, fetched_at, changed_at, asked_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT (workspace_id, subject) DO UPDATE SET
                  sha = excluded.sha, status = excluded.status, url = excluded.url, jobs = excluded.jobs,
-                 fetched_at = excluded.fetched_at, changed_at = excluded.changed_at",
+                 fetched_at = excluded.fetched_at, changed_at = excluded.changed_at, asked_at = excluded.asked_at",
             params![
                 uuid_blob(workspace),
                 read.subject,
@@ -253,8 +257,10 @@ impl Store {
                 read.status.as_str(),
                 read.url,
                 jobs_json(&read.jobs),
-                now,
+                // Nothing known yet and nothing heard: never fetched.
+                if read.status == CiStatus::Unknown { 0 } else { now },
                 changed_at,
+                now,
             ],
         )
         .map_err(map_err)?;

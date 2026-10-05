@@ -167,7 +167,8 @@ data class PageWorld(
                 val name = label ?: ciName(t)
                 val read = plan?.ci(t.ciSubject) ?: return PageResolved(name)
                 PageResolved(
-                    name, TrainWords.ciSummary(read), if (read.needsAttention) PageTone.ATTENTION else PageTone.NEUTRAL,
+                    name, listOfNotNull(TrainWords.ciSummary(read), TrainWords.ciStale(read, plan?.nowMs ?: nowMs)).joinToString(" · "),
+                    if (read.needsAttention) PageTone.ATTENTION else PageTone.NEUTRAL,
                     PageLinks.https(read.url)?.let { PageDestination.Url(read.url) },
                 )
             }
@@ -194,7 +195,9 @@ data class PageWorld(
         val resolved = resolve(ref)
         return when (val t = ref.target) {
             is PageTarget.Ci -> plan?.ci(t.ciSubject)?.let { read ->
-                StatShown(TrainWords.ciStatus(read.status), stat.detail ?: TrainWords.ciJobs(read), if (read.needsAttention) PageTone.ATTENTION else stat.tone)
+                // A stale read says how old it is before anything else under it.
+                val detail = TrainWords.ciStale(read, plan?.nowMs ?: nowMs) ?: stat.detail ?: TrainWords.ciJobs(read)
+                StatShown(TrainWords.ciStatus(read.status), detail, if (read.needsAttention) PageTone.ATTENTION else stat.tone)
             } ?: StatShown(resolved.name, stat.detail, stat.tone)
             is PageTarget.Cards -> StatShown(resolved.status ?: resolved.name, stat.detail, stat.tone)
             is PageTarget.Lane -> StatShown(

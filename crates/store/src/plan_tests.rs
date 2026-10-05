@@ -482,6 +482,7 @@ fn populated() -> (Store, Uuid, Vec<Task>) {
         jobs: vec![],
         fetched_at: 0,
         changed_at: 0,
+        asked_at: 0,
     };
     store.record_ci(main, &ci).unwrap();
     (store, main, t)

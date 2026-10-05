@@ -127,7 +127,14 @@ fn live_value(reference: &Reference, show: Option<Show>, live: &Live) -> (String
             }
         }
         Target::Ci(_) => match ci_read(reference, live) {
-            Some(read) => (format!("{}: {}", ci_name(reference), ci_words::summary(read)), ci_words::needs_attention(read)),
+            Some(read) => {
+                let now = live.plan.as_ref().map_or(0, |p| p.now_ms);
+                let mut said = format!("{}: {}", ci_name(reference), ci_words::summary(read));
+                if let Some(stale) = ci_words::stale(read, now) {
+                    said.push_str(&format!(" · {stale}"));
+                }
+                (said, ci_words::needs_attention(read))
+            }
             None => (ci_name(reference), false),
         },
         Target::Cards(status) => match card_count(status, live) {
@@ -194,7 +201,9 @@ fn stat_value(s: &Stat, live: &Live) -> (String, Option<String>, bool) {
     if let (Target::Ci(_), Some(read)) = (&reference.target, ci_read(reference, live)) {
         let summary = ci_words::summary(read);
         let (word, jobs) = summary.split_once(" · ").map_or((summary.as_str(), None), |(w, j)| (w, Some(j.to_string())));
-        return (word.to_string(), s.detail.clone().or(jobs), ci_words::needs_attention(read));
+        // A stale read says how old it is before anything else under it.
+        let stale = ci_words::stale(read, live.plan.as_ref().map_or(0, |p| p.now_ms));
+        return (word.to_string(), stale.or(s.detail.clone()).or(jobs), ci_words::needs_attention(read));
     }
     let (value, attention) = match (&reference.target, s.show) {
         (Target::Theme(name), None) => {

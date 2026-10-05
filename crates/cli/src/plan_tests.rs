@@ -126,6 +126,7 @@ fn trains() -> (Vec<pb::BoardTrain>, Vec<pb::BoardCiRead>) {
         jobs: vec![job("CI / Swift (shared + macOS)", "failed"), job("CI / Android", "passed"), job("Canary", "passed")],
         fetched_at: NOW - 60_000,
         changed_at: NOW - 20 * 60_000,
+        asked_at: NOW - 60_000,
     };
     (vec![train], vec![read])
 }
@@ -997,4 +998,16 @@ async fn a_train_refusal_reads_as_a_train_sentence() {
     link.refuse = Some("sha");
     let lane = say(&mut link, "lane set mac-ux --sha abc").await.unwrap_err();
     assert_eq!(lane.to_string(), "That's too long.", "a lane's words are the lane's");
+}
+
+/// A read that stopped working says how old it is (review train-1005c M1).
+#[test]
+fn a_stale_ci_read_says_how_old_it_is() {
+    let mut plan = the_plan();
+    plan.ci[0].fetched_at = NOW - 3 * HOUR;
+    plan.ci[0].asked_at = NOW;
+    let line = train::train_line(&plan, &plan.trains[0]);
+    assert_eq!(line, "integ-9 · Red · c85bf83d · CI Failed · 1 of 3 jobs failed · as of 3h ago");
+    plan.ci[0].fetched_at = NOW - 60_000;
+    assert!(!train::train_line(&plan, &plan.trains[0]).contains("as of"));
 }

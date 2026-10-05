@@ -119,7 +119,7 @@ struct PlanBoardSections: View {
                 Section {
                     ForEach(groups) { group in
                         if let train = group.train {
-                            PlanTrainRow(train: train, ci: plan.ci(of: train))
+                            PlanTrainRow(train: train, ci: plan.ci(of: train), now: plan.nowMs)
                         }
                         ForEach(group.lanes) { lane in
                             PlanLaneRow(

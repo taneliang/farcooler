@@ -177,6 +177,7 @@ fn trains() -> (Vec<pb::BoardTrain>, Vec<pb::BoardCiRead>) {
         jobs: vec![job("CI / Swift (shared + macOS)", "failed"), job("CI / Android", "passed"), job("Canary", "passed")],
         fetched_at: NOW - 60_000,
         changed_at: NOW - 20 * 60_000,
+        asked_at: NOW - 60_000,
     };
     (vec![train], vec![read])
 }

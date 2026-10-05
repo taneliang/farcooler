@@ -172,6 +172,7 @@ pub fn summarize(subject: &str, runs: &[(GhRun, Option<Vec<GhJob>>)]) -> CiRead 
         jobs,
         fetched_at: 0,
         changed_at: 0,
+        asked_at: 0,
     }
 }
 
@@ -185,6 +186,7 @@ fn unknown(subject: &str) -> CiRead {
         jobs: Vec::new(),
         fetched_at: 0,
         changed_at: 0,
+        asked_at: 0,
     }
 }
 

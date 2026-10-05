@@ -80,12 +80,15 @@ public struct PlanCIRead: Decodable, Equatable, Sendable {
     /// The run's page, or the first failing one's.
     public var url: String
     public var jobs: [PlanCIJob]
+    /// When a read last worked: what's here is as of then. 0 if none has.
     public var fetchedAt: Int64
     public var changedAt: Int64
+    /// When the runner last asked, answered or not.
+    public var askedAt: Int64?
 
     public init(
         subject: String, sha: String = "", status: PlanCIStatus, url: String = "", jobs: [PlanCIJob] = [],
-        fetchedAt: Int64 = 0, changedAt: Int64 = 0
+        fetchedAt: Int64 = 0, changedAt: Int64 = 0, askedAt: Int64? = nil
     ) {
         self.subject = subject
         self.sha = sha
@@ -94,6 +97,7 @@ public struct PlanCIRead: Decodable, Equatable, Sendable {
         self.jobs = jobs
         self.fetchedAt = fetchedAt
         self.changedAt = changedAt
+        self.askedAt = askedAt
     }
 
     /// A failed run needs the owner: the one CI state drawn in color.
@@ -213,6 +217,18 @@ extension PlanWords {
         }
     }
 
+    /// Older than this, a read is stale: the runner reads a finished subject
+    /// every ten minutes, so this is GitHub not answering (review train-1005c
+    /// M1). The CLI and Android hold the same number.
+    public static let ciStaleAfterMs: Int64 = 25 * 60_000
+
+    /// "as of 3 h ago" for a read that worked once and not lately; nil while
+    /// it's current or never worked.
+    public static func ciStale(_ read: PlanCIRead, now: Int64) -> String? {
+        guard read.fetchedAt > 0, now - read.fetchedAt > ciStaleAfterMs else { return nil }
+        return "as of \(ago(read.fetchedAt, now: now))"
+    }
+
     /// "Failed · 1 of 3 jobs failed": the status and how its jobs stand.
     public static func ciSummary(_ read: PlanCIRead) -> String {
         [ciStatus(read.status), ciJobs(read)].compactMap { $0 }.joined(separator: " · ")
@@ -221,11 +237,12 @@ extension PlanWords {
     /// A train's line under its name: "Red · c85bf83d · CI Failed · 1 of 3
     /// jobs failed", or "CI not read yet" once pushed and before the runner
     /// has read it.
-    public static func train(_ train: PlanTrain, ci: PlanCIRead?) -> String {
+    public static func train(_ train: PlanTrain, ci: PlanCIRead?, now: Int64 = 0) -> String {
         var parts = [trainState(train.state)]
         if let sha = train.pushedSha, !sha.isEmpty { parts.append(String(sha.prefix(8))) }
         if let ci {
             parts.append("CI \(ciSummary(ci))")
+            if let stale = ciStale(ci, now: now) { parts.append(stale) }
         } else if train.pushedSha != nil && !train.state.isSettled {
             parts.append("CI not read yet")
         }

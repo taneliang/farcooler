@@ -230,6 +230,7 @@ fn ci_json(r: &pb::BoardCiRead) -> Value {
         "jobs": r.jobs.iter().map(|j| json!({ "name": j.name, "state": j.state, "url": j.url })).collect::<Vec<_>>(),
         "fetched_at": r.fetched_at,
         "changed_at": r.changed_at,
+        "asked_at": r.asked_at,
     })
 }
 

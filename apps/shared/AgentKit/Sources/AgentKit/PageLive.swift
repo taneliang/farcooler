@@ -184,8 +184,10 @@ extension PageWorld {
         case .ci:
             let name = label ?? Self.ciName(ref.target)
             guard let subject = ref.target.ciSubject, let read = plan?.ci(subject) else { return PageResolved(name: name) }
+            let stale = PlanWords.ciStale(read, now: plan?.nowMs ?? nowMs)
             return PageResolved(
-                name: name, status: PlanWords.ciSummary(read), statusTone: read.needsAttention ? .attention : .neutral,
+                name: name, status: ([PlanWords.ciSummary(read)] + [stale].compactMap { $0 }).joined(separator: " · "),
+                statusTone: read.needsAttention ? .attention : .neutral,
                 destination: PageLinks.https(read.url).map(PageDestination.url))
         case .cards(let status):
             let name = label ?? Self.statusName(status)
@@ -229,7 +231,9 @@ extension PageWorld {
             guard let subject = ref.target.ciSubject, let read = plan?.ci(subject) else {
                 return (resolved.name, stat.detail, stat.tone)
             }
-            return (PlanWords.ciStatus(read.status), stat.detail ?? PlanWords.ciJobs(read), read.needsAttention ? .attention : stat.tone)
+            // A stale read says how old it is before anything else under it.
+            let detail = PlanWords.ciStale(read, now: plan?.nowMs ?? nowMs) ?? stat.detail ?? PlanWords.ciJobs(read)
+            return (PlanWords.ciStatus(read.status), detail, read.needsAttention ? .attention : stat.tone)
         case .cards:
             return (resolved.status ?? resolved.name, stat.detail, stat.tone)
         case .lane:

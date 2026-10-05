@@ -88,6 +88,8 @@ data class PlanCiRead(
     val status: CiStatus,
     val url: String = "",
     val jobs: List<PlanCiJob> = emptyList(),
+    /** When a read last worked: what's here is as of then. 0 if none has. */
+    val fetchedAt: Long = 0,
 ) {
     /** A failed run needs the owner: the one CI state drawn in color. */
     val needsAttention: Boolean get() = status == CiStatus.FAILED
@@ -97,7 +99,7 @@ data class PlanCiRead(
             val o = it.jsonObject
             PlanCiRead(
                 subject = o.text("subject"), sha = o.text("sha"), status = CiStatus.parse(o.maybeText("status")),
-                url = o.text("url"),
+                url = o.text("url"), fetchedAt = o["fetched_at"]?.jsonPrimitive?.longOrNull ?: 0L,
                 jobs = o.items("jobs").map { j -> j.jsonObject.let { PlanCiJob(it.text("name"), it.text("state"), it.text("url")) } },
             )
         }
@@ -190,15 +192,25 @@ object TrainWords {
         }
     }
 
+    /** Older than this a read is stale: GitHub hasn't answered (review train-1005c M1); the CLI and AgentKit hold the same. */
+    const val CI_STALE_AFTER_MS = 25 * 60_000L
+
+    /** "as of 3 h ago" for a read that worked once and not lately; null while current or never read. */
+    fun ciStale(read: PlanCiRead, now: Long): String? =
+        if (read.fetchedAt > 0 && now - read.fetchedAt > CI_STALE_AFTER_MS) "as of ${PlanWords.ago(read.fetchedAt, now)}" else null
+
     /** "Failed · 1 of 3 jobs failed". */
     fun ciSummary(read: PlanCiRead): String = listOfNotNull(ciStatus(read.status), ciJobs(read)).joinToString(" · ")
 
     /** "Red · c85bf83d · CI Failed · 1 of 3 jobs failed", or "CI not read yet" once pushed. */
-    fun train(train: PlanTrain, ci: PlanCiRead?): String {
+    fun train(train: PlanTrain, ci: PlanCiRead?, now: Long = 0): String {
         val parts = mutableListOf(state(train.state))
         train.pushedSha?.takeIf { it.isNotEmpty() }?.let { parts += it.take(8) }
-        if (ci != null) parts += "CI ${ciSummary(ci)}"
-        else if (train.pushedSha != null && !train.state.isSettled) parts += "CI not read yet"
+        if (ci != null) {
+            parts += "CI ${ciSummary(ci)}"
+            ciStale(ci, now)?.let { parts += it }
+        }
+        if (ci == null && train.pushedSha != null && !train.state.isSettled) parts += "CI not read yet"
         return parts.joinToString(" · ")
     }
 

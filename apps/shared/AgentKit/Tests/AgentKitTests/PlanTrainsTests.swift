@@ -82,6 +82,17 @@ struct PlanTrainsTests {
         #expect(PlanWords.trainNeedsAttention(red, ci: nil))
     }
 
+    @Test("a read that stopped working says how old it is, on the train and on a page (review train-1005c M1)")
+    func aStaleReadSaysHowOld() throws {
+        let read = PlanCIRead(subject: "main", status: .passed, fetchedAt: Self.now - 3 * 3_600_000)
+        #expect(PlanWords.ciStale(read, now: Self.now) == "as of 3 h ago")
+        #expect(PlanWords.ciStale(PlanCIRead(subject: "main", status: .passed, fetchedAt: Self.now - 60_000), now: Self.now) == nil)
+        #expect(PlanWords.ciStale(PlanCIRead(subject: "main", status: .unknown), now: Self.now) == nil, "never read: its status says so")
+        let world = PageWorld(plan: PlanModel(nowMs: Self.now, ci: [read]))
+        #expect(world.resolve(PageRef(.ci("main"))).status == "Passed · as of 3 h ago")
+        #expect(world.statText(PageStat(label: "Main", value: "", ref: PageRef(.ci("main")))).detail == "as of 3 h ago")
+    }
+
     @Test("CI words: each status, and how the jobs stand")
     func ciWords() {
         let jobs = [PlanCIJob(name: "a", state: "failed"), PlanCIJob(name: "b", state: "canceled"), PlanCIJob(name: "c", state: "passed")]

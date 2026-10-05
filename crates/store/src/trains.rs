@@ -69,8 +69,11 @@ pub(crate) fn migration_0027_trains(tx: &Transaction) -> rusqlite::Result<()> {
             url TEXT NOT NULL DEFAULT '',
             -- JSON: [{"name", "state", "url"}], in the order GitHub lists them.
             jobs TEXT NOT NULL DEFAULT '[]',
+            -- When a read last worked; 0 if none has.
             fetched_at INTEGER NOT NULL,
             changed_at INTEGER NOT NULL,
+            -- When the runner last asked, whether or not GitHub answered.
+            asked_at INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (workspace_id, subject)
         );
         "#,
