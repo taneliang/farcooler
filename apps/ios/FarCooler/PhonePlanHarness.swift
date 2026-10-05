@@ -92,6 +92,24 @@ struct HarnessPlan {
         return list
     }
 
+    /// The pages as old as they were when the file was captured, not as old
+    /// as the file: each `updated_at_ms` moves by the time since the plan's
+    /// `now_ms`. Read as written, a page with `stale_after_min` went stale
+    /// two hours after the capture, and "Updated" turned into "Not updated
+    /// for 2 hours" on every run after that.
+    static func current(_ pages: Any, plan: Any?, now: Date = Date()) -> Any {
+        guard var list = pages as? [String: Any], var rows = list["pages"] as? [[String: Any]],
+            let captured = ((plan as? [String: Any])?["now_ms"] as? NSNumber)?.int64Value
+        else { return pages }
+        let shift = Int64(now.timeIntervalSince1970 * 1000) - captured
+        for index in rows.indices {
+            guard let updated = (rows[index]["updated_at_ms"] as? NSNumber)?.int64Value else { continue }
+            rows[index]["updated_at_ms"] = updated + shift
+        }
+        list["pages"] = rows
+        return list
+    }
+
     /// `-phone-plan-outcomes`: three themes alike but for the length of their
     /// outcomes.
     private static func measuring(_ plan: Any) -> Any {
@@ -134,7 +152,7 @@ struct HarnessPlan {
             }
             guard let board = args["workspace"] as? String, boards.contains(board), let pages = capture["pages"]
             else { throw ClientCore.CoreError.rejected("bad workspace", word: "invalid-argument") }
-            return try JSONSerialization.data(withJSONObject: Self.versioned(pages: pages))
+            return try JSONSerialization.data(withJSONObject: Self.versioned(pages: Self.current(pages, plan: capture["plan"])))
         case "plan.events":
             let subject = (args["theme"] as? String) ?? (args["lane"] as? String)
             guard let subject, let records = capture["records"] as? [String: Any], let record = records[subject]
