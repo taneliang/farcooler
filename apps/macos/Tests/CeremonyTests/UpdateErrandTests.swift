@@ -121,3 +121,38 @@ struct UpdateErrandTests {
         #expect(heard.events == ["installing"])
     }
 }
+
+/// An update the alerts are already asking about, as Sparkle's own
+/// scheduled check leaves it: the command line answers it instead.
+@MainActor
+struct UpdateAdoptionTests {
+    @Test func anErrandAnswersTheQuestionAnAlertIsWaitingOn() {
+        let driver = UpdateUserDriver(standard: SPUStandardUserDriver(hostBundle: .main, delegate: nil))
+        var replies: [SPUUserUpdateChoice] = []
+        let offer = UpdateErrand.offer(version: "0.1.0", build: "2329", notes: nil)
+        let alertAnswers = driver.alertAsks(offer, informationOnly: false, stage: .notDownloaded) { replies.append($0) }
+        #expect(driver.offerShown?["build"] as? String == "2329")
+
+        var events: [String] = []
+        let errand = UpdateErrand(relaunch: true, from: [:]) { events.append($0["event"] as? String ?? "") } done: {}
+        #expect(driver.adopt(errand))
+        #expect(replies == [.install])
+        #expect(driver.errand === errand)
+
+        // The person clicking the alert's button afterwards changes nothing.
+        alertAnswers(.skip)
+        #expect(replies == [.install])
+
+        var ready: SPUUserUpdateChoice?
+        driver.showReady { ready = $0 }
+        #expect(ready == .install)
+        #expect(events == ["installing"])
+    }
+
+    @Test func withNoAlertWaitingThereIsNothingToAdopt() {
+        let driver = UpdateUserDriver(standard: SPUStandardUserDriver(hostBundle: .main, delegate: nil))
+        let errand = UpdateErrand(relaunch: true, from: [:]) { _ in } done: {}
+        #expect(!driver.adopt(errand))
+        #expect(driver.errand == nil)
+    }
+}

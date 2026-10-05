@@ -60,9 +60,10 @@ final class Updates: NSObject, SPUUpdaterDelegate {
         // An errand that finished is done with once its session is; Sparkle
         // doesn't promise to say so (`dismissUpdateInstallation`) every time.
         let free = driver.errand.map(\.finished) ?? true
-        guard free, updater.canCheckForUpdates, !updater.sessionInProgress else {
-            return errand.refuse("busy")
-        }
+        guard free else { return errand.refuse("busy") }
+        // An alert already asking about the update: the errand answers it.
+        if driver.adopt(errand) { return }
+        guard updater.canCheckForUpdates, !updater.sessionInProgress else { return errand.refuse("busy") }
         driver.errand = errand
         updater.checkForUpdates()
     }
@@ -71,6 +72,8 @@ final class Updates: NSObject, SPUUpdaterDelegate {
     /// isn't known. Sparkle reads the feed; nothing is shown.
     func latest(_ answer: @escaping (_ latest: [String: Any]?, _ unknown: String?) -> Void) {
         guard let updater else { return answer(nil, "updates-off") }
+        // The alerts are showing a build already: that's the newest.
+        if let shown = driver?.offerShown { return answer(shown, nil) }
         guard !updater.sessionInProgress else { return answer(nil, "busy") }
         probes.append(answer)
         guard probes.count == 1 else { return }
