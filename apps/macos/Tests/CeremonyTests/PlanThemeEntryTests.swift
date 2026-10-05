@@ -83,12 +83,13 @@ struct PlanThemeEntryTests {
     @Test("Open, it says the outcome, the bar, the track, the story and its age, the ask, Next, the lanes and the ruling, in that order")
     func openComposition() async throws {
         let drawn = await Self.frames(try Self.entry(try Self.model()), width: 640)
-        for part in ["head", "outcome", "story", "story-age", "next", "ruling-R-2", "lane-mac-ux", "over-budget"] {
+        for part in ["head", "outcome", "story", "story-age", "next", "ruling-R-2", "lane-mac-ux", "landed", "over-budget"] {
             #expect(drawn[Self.id(part)] != nil, "\(part) is drawn: \(drawn.keys.sorted())")
         }
         #expect(drawn["plan-ask"] != nil, "the owner's ask")
-        let order = ["head", "outcome", "over-budget", "story", "story-age", "next", "lane-mac-ux", "ruling-R-2"]
-            .compactMap { drawn[Self.id($0)]?.minY }
+        let parts = ["head", "outcome", "over-budget", "story", "story-age", "next", "lane-mac-ux", "landed", "ruling-R-2"]
+        let order = parts.compactMap { drawn[Self.id($0)]?.minY }
+        #expect(order.count == parts.count, "every part is drawn")
         #expect(order == order.sorted(), "top to bottom: \(order)")
         let ask = try #require(drawn["plan-ask"])
         let story = try #require(drawn[Self.id("story-age")])
@@ -101,7 +102,7 @@ struct PlanThemeEntryTests {
         let model = try Self.model()
         let drawn = await Self.frames(try Self.entry(model, expanded: false), width: 640)
         for part in ["head", "outcome", "over-budget"] { #expect(drawn[Self.id(part)] != nil, "\(part) stays") }
-        for part in ["story", "story-age", "next", "lane-mac-ux", "ruling-R-2"] {
+        for part in ["story", "story-age", "next", "lane-mac-ux", "landed", "ruling-R-2"] {
             #expect(drawn[Self.id(part)] == nil, "\(part) folds away")
         }
     }
@@ -151,7 +152,8 @@ struct PlanThemeEntryTests {
             }
             let story = try #require(drawn[Self.id("story")])
             let line = try await Self.line(width: width)
-            #expect(story.height / line < 6.0, "the story is clamped to four lines: \(story.height / line)")
+            let lines = story.height / line
+            #expect(lines > 3.5 && lines < 4.5, "the story is clamped to exactly four lines: \(lines)")
         }
     }
 
@@ -267,5 +269,54 @@ struct PlanThemeEntryTests {
         let decided = try #require(drawn["plan-theme-decided"], "the theme's ruling R-2 is on its page")
         #expect(ask.minY < next.minY, "the ask comes before Next: \(ask) \(next)")
         #expect(next.minY < decided.minY, "Decided comes after")
+    }
+
+    // MARK: Around the entries
+
+    @Test("The Themes summary is drawn when it has something to say, and not when only a done theme asks")
+    func summaryAccessory() async throws {
+        let asking = try await PlanCostViewTests.drawn(PlanViewTests.fixture())
+        #expect(asking["plan-themes-summary"] != nil, "one active theme asks: \(asking.keys.sorted())")
+        let done = try await PlanCostViewTests.drawn(PlanCostViewTests.plan { _, theme in theme["state"] = "done" })
+        #expect(done["plan-themes-summary"] == nil, "a done theme's ask isn't counted: \(done.keys.sorted())")
+    }
+
+    @Test("The footer counts what's outside every theme, and lists the cards to tidy")
+    func outsideFooter() async throws {
+        let none = try await PlanCostViewTests.drawn(PlanViewTests.fixture())
+        #expect(none["plan-outside"] == nil && none["plan-outside-tidy"] == nil, "every card is in a theme")
+        let outside = try await PlanCostViewTests.drawn(
+            PlanCostViewTests.edit { object in
+                var themes = try #require(object["themes"] as? [[String: Any]])
+                themes[0]["cards"] = []
+                object["themes"] = themes
+                object["no_lane"] = [["task": PlanViewTests.tasks[0].0, "key": "ov-1", "status": "in_review"]]
+            })
+        #expect(outside["plan-outside"] != nil, "open cards in no theme: \(outside.keys.sorted())")
+        #expect(outside["plan-outside-tidy"] != nil, "and a cards-to-tidy button")
+        let cards = [PlanFlaggedCard(task: "a", key: "ov-1", status: "in_review"), PlanFlaggedCard(task: "b", key: "ov-2", status: "in_progress")]
+        let list = await Self.frames(PlanTidyList(cards: cards), width: 300)
+        #expect(list["plan-tidy-ov-1"] != nil && list["plan-tidy-ov-2"] != nil, "each card is listed: \(list.keys.sorted())")
+        let tidy = try #require(list["plan-tidy-ov-1"]).minY < (try #require(list["plan-tidy-ov-2"])).minY
+        #expect(tidy, "in the CLI's order")
+    }
+
+    @Test("Option-click on a chevron folds every theme to match it; a plain click folds one")
+    func optionClickFoldsAll() throws {
+        let defaults = PlanViewTests.defaults()
+        var themes = [try #require(try Self.model().themes.first)]
+        for name in ["B", "C"] {
+            var more = themes[0]
+            more.id = "id-\(name)"
+            more.name = name
+            themes.append(more)
+        }
+        func open(_ t: PlanTheme) -> Bool { PlanThemeFold.isExpanded(theme: t, host: "h", workspace: "w", in: defaults) }
+        let closed = PlanThemeFold.toggle(themes[0], all: false, among: themes, host: "h", workspace: "w", in: defaults)
+        #expect(!closed && !open(themes[0]) && open(themes[1]) && open(themes[2]), "a plain click folds one")
+        let all = PlanThemeFold.toggle(themes[1], all: true, among: themes, host: "h", workspace: "w", in: defaults)
+        #expect(!all && themes.allSatisfy { !open($0) }, "option folds all to match the one clicked")
+        PlanThemeFold.toggle(themes[2], all: true, among: themes, host: "h", workspace: "w", in: defaults)
+        #expect(themes.allSatisfy(open), "and again opens them all")
     }
 }

@@ -37,14 +37,22 @@ struct PlanOutsideRow: View {
         }
     }
 
-    /// Each card the CLI's "Worth a look" names, with why.
-    private var tidyList: some View {
+    private var tidyList: some View { PlanTidyList(cards: outside.tidy) }
+}
+
+/// Each card the CLI's "Worth a look" names, with why, a key to hover each.
+struct PlanTidyList: View {
+    let cards: [PlanFlaggedCard]
+
+    var body: some View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
-            ForEach(outside.tidy, id: \.task) { card in
+            ForEach(cards, id: \.task) { card in
                 TaskKeyText(keysIn: "\(card.key) · \(card.status.replacingOccurrences(of: "_", with: " ").capitalized)")
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                    .probed("plan-tidy-\(card.key)")
             }
         }
         .padding(Spacing.inset)
+        .identified("plan-tidy-list")
     }
 }

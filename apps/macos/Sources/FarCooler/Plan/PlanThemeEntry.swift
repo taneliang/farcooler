@@ -39,6 +39,21 @@ enum PlanThemeFold {
     static func set(_ expanded: Bool, theme: String, host: String, workspace: String, in defaults: UserDefaults) {
         defaults.set(expanded, forKey: key(theme: theme, host: host, workspace: workspace))
     }
+
+    /// What a click on an entry's chevron does: it folds the entry or opens
+    /// it, and with ⌥ held, every theme to match it, as the Finder does.
+    /// Returns whether the clicked entry is now open.
+    @discardableResult
+    static func toggle(
+        _ theme: PlanTheme, all: Bool, among themes: [PlanTheme], host: String, workspace: String,
+        in defaults: UserDefaults
+    ) -> Bool {
+        let open = !isExpanded(theme: theme, host: host, workspace: workspace, in: defaults)
+        for target in all ? themes : [theme] {
+            set(open, theme: target.id, host: host, workspace: workspace, in: defaults)
+        }
+        return open
+    }
 }
 
 struct PlanThemeEntry: View {
@@ -220,7 +235,7 @@ struct PlanThemeEntry: View {
         Grid(alignment: .topLeading, horizontalSpacing: Spacing.group, verticalSpacing: Spacing.tight) {
             if !brief.moving.isEmpty {
                 GridRow {
-                    label("Moving It")
+                    label("Moving it")
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(brief.moving) { lane in laneRow(lane) }
                         if brief.movingMore > 0 { more(brief.movingMore) }
@@ -229,7 +244,7 @@ struct PlanThemeEntry: View {
             }
             if let landed = brief.landed {
                 GridRow {
-                    label("Landed This Week")
+                    label("Landed this week")
                     Text(landed)
                         .font(Self.secondaryFont)
                         .lineLimit(2)

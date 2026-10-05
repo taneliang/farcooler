@@ -178,13 +178,11 @@ struct PlanOverviewView: View {
     }
 
     /// Fold or unfold one entry on the shared spring, or, with ⌥, every theme
-    /// to match it, as the Finder does.
+    /// to match it, as the Finder does (`PlanThemeFold.toggle`).
     private func fold(_ theme: PlanTheme, all: Bool, among themes: [PlanTheme]) {
-        let open = !isExpanded(theme)
         BoardMotion.toggle(reduceMotion: reduceMotion, slowedBy: slowdown) {
-            for target in all ? themes : [theme] {
-                PlanThemeFold.set(open, theme: target.id, host: plan.host, workspace: plan.workspace.id, in: defaults)
-            }
+            PlanThemeFold.toggle(
+                theme, all: all, among: themes, host: plan.host, workspace: plan.workspace.id, in: defaults)
             folds += 1
         }
     }
