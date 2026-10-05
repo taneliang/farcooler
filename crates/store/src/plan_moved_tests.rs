@@ -18,7 +18,7 @@ fn a_theme_last_moved_is_the_newest_of_its_story_cards_lanes_and_rulings() {
     let store = Store::open_in_memory().unwrap();
     let repo = store.register_repository_for_test("overnight");
     let main = store.ensure_main_workspace(repo).unwrap().id;
-    let mut theme_and_card = |name: &str| {
+    let theme_and_card = |name: &str| {
         let task = store.create_task(main, &format!("card of {name}"), Actor::Manager).unwrap();
         let theme = store
             .create_theme(main, &NewTheme { name: name.into(), outcome: String::new() }, &[task.id], Actor::Manager)
@@ -26,8 +26,8 @@ fn a_theme_last_moved_is_the_newest_of_its_story_cards_lanes_and_rulings() {
         (theme, task)
     };
     let (ruled, ruled_card) = theme_and_card("Ruled");
-    let (dropped, dropped_card) = theme_and_card("Dropped");
-    let (live, live_card) = theme_and_card("Live");
+    let (_dropped, dropped_card) = theme_and_card("Dropped");
+    let (_live, live_card) = theme_and_card("Live");
     let (told, _) = theme_and_card("Told");
     let (edited, edited_card) = theme_and_card("Edited");
     let (other, _) = theme_and_card("Other");
