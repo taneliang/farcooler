@@ -52,8 +52,16 @@ on:
 # newer run starts, and every CI completion starts one, red and docs-only ones
 # included, which would cancel a build for nothing. The ship jobs each hold a
 # group of their own below, so a newer green commit supersedes an older one
-# only when it really builds. App Store Connect takes whichever upload finishes
+# that is still building. App Store Connect takes whichever upload finishes
 # last rather than whichever is newer, which is why one at a time matters.
+#
+# `cancel-in-progress` is an expression, true only when this run builds
+# (`needs.plan.outputs.build`). GitHub's documentation does not say whether a
+# SKIPPED job enters its concurrency group, and a red CI run produces a Canary
+# run whose build jobs are all skipped; if skipped jobs did enter the group
+# they would cancel the previous green commit's build for nothing. With the
+# expression, a run that does not build cannot cancel one that does, whichever
+# way GitHub behaves. proto-lint.py's self-test fails if it goes.
 
 env:
   FARCOOLER_CHANNEL: canary
@@ -166,7 +174,7 @@ jobs:
     if: needs.plan.outputs.build == 'true'
     concurrency:
       group: canary-linux
-      cancel-in-progress: true
+      cancel-in-progress: ${{ needs.plan.outputs.build == 'true' }}
     uses: ./.github/workflows/linux-binaries.yml
     with:
       channel: canary
@@ -182,7 +190,7 @@ jobs:
     timeout-minutes: 45
     concurrency:
       group: canary-ios
-      cancel-in-progress: true
+      cancel-in-progress: ${{ needs.plan.outputs.build == 'true' }}
     # Without the App Store key this cannot upload anything. Through `vars`, not
     # `secrets`: the `secrets` context is unavailable in an `if`, so
     # `secrets.X != ''` compares '' to '' and is ALWAYS false — it fails closed,
@@ -431,7 +439,7 @@ jobs:
     needs: [linux, plan]
     concurrency:
       group: canary-macos
-      cancel-in-progress: true
+      cancel-in-progress: ${{ needs.plan.outputs.build == 'true' }}
     # Hoisted so the steps can test them in an `if`: the `secrets` context is
     # not available there, and `secrets.X != ''` is always false — silently, so
     # the signing steps would skip and an unopenable dmg would ship looking

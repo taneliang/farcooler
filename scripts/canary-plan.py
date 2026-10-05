@@ -250,6 +250,14 @@ def self_test():
         env.update(EVENT="workflow_dispatch", SHA=c)
         done = subprocess.run([sys.executable, __file__], cwd=repo, env=env, capture_output=True, text=True)
         expect("a dispatch builds what it was given", outputs.read_text(), f"build=true\nsha={c}\n")
+        # A shallow checkout cannot show the history the range needs, so the
+        # script refuses rather than guess.
+        shallow = pathlib.Path(tmp) / "shallow-clone"
+        subprocess.run(["git", "clone", "-q", "--depth", "1", f"file://{repo}", str(shallow)], check=True, capture_output=True)
+        env.update(EVENT="workflow_run", HEAD=i)
+        done = subprocess.run([sys.executable, __file__], cwd=shallow, env=env, capture_output=True, text=True)
+        expect("a shallow checkout is refused", done.returncode, 2)
+        expect("... saying why", "shallow" in done.stderr, True)
         env.update(EVENT="pull_request")
         done = subprocess.run([sys.executable, __file__], cwd=repo, env=env, capture_output=True, text=True)
         expect("an unexpected event is an error", done.returncode, 2)

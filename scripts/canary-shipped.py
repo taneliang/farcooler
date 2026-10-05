@@ -165,18 +165,21 @@ def self_test():
         failures.append("names: renaming the TestFlight upload step was not caught")
 
     sha = "0123456789abcdef0123456789abcdef01234567"
+    checks = len(cases) + 2
     for title, want in [(f"Canary {sha}", sha), (f"Canary {sha}\n", sha), ("Canary", None),
                         (f"Canary {sha[:39]}", None), (f"CI {sha}", None), (f"Canary {sha} extra", None),
                         ("", None), (None, None)]:
+        checks += 1
         if commit_of(title) != want:
             failures.append(f"commit_of({title!r}): got {commit_of(title)!r}, want {want!r}")
     run_name = re.search(r"^run-name:\s*(.*)$", canary, re.M)
+    checks += 1
     if not run_name or "workflow_run.head_sha" not in run_name.group(1) or not run_name.group(1).startswith("Canary "):
         failures.append("canary.yml's run-name no longer reads `Canary <workflow_run.head_sha>`, which commit_of parses")
 
     for f in failures:
         print(f"FAIL: {f}", file=sys.stderr)
-    count = len(cases) + 2 + 9
+    count = checks
     print(f"{count - len(failures)} passed, {len(failures)} failed")
     return 1 if failures else 0
 
