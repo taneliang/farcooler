@@ -59,6 +59,8 @@ final class AppControl: @unchecked Sendable {
 
     private let queue = DispatchQueue(label: "com.farcooler.app-control")
     private var listener: Int32 = -1
+    /// `app.sock.lock`, held while this copy listens.
+    private var lockFD: Int32 = -1
     private var source: DispatchSourceRead?
     /// Every connection is asked who it is. Replaced in tests, which cannot
     /// be another user.
@@ -108,12 +110,27 @@ final class AppControl: @unchecked Sendable {
             raw.copyBytes(from: Array(path.utf8) + [0])
         }
 
+        // One copy at a time holds `app.sock.lock` for as long as it runs,
+        // and only the holder may replace the socket. Checking whether the
+        // socket answers and then unlinking it was a race: two copies
+        // launching together could both find it dead, and the second unlink
+        // the first's live socket (ov-302 F9).
+        let lock = open(path + ".lock", O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+        guard lock >= 0 else { throw .system("lock") }
+        guard flock(lock, LOCK_EX | LOCK_NB) == 0 else {
+            Darwin.close(lock)
+            throw .taken
+        }
         // A file left by a copy that quit is taken over; one a running copy
-        // answers on is left to it.
+        // answers on, from a build before the lock, is left to it.
         if FileManager.default.fileExists(atPath: path) {
-            if Self.answers(path) { throw .taken }
+            if Self.answers(path) {
+                Darwin.close(lock)
+                throw .taken
+            }
             unlink(path)
         }
+        lockFD = lock
 
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw .system("socket") }
@@ -124,11 +141,13 @@ final class AppControl: @unchecked Sendable {
         }
         guard bound == 0 else {
             Darwin.close(fd)
+            releaseLock()
             throw .system("bind")
         }
         chmod(path, 0o600)
         guard listen(fd, 8) == 0 else {
             Darwin.close(fd)
+            releaseLock()
             throw .system("listen")
         }
         listener = fd
@@ -140,11 +159,21 @@ final class AppControl: @unchecked Sendable {
         self.source = source
     }
 
-    /// Stop listening, and remove the socket file if it is still ours.
+    /// Stop listening and remove the socket file. Unconditional, which is
+    /// safe only because the lock is still held here: no other copy can have
+    /// replaced the file meanwhile. The app never calls it — a quit leaves
+    /// the file for the next launch to take over — and tests do.
     func stop(removing path: String) {
         source?.cancel()
         source = nil
         unlink(path)
+        releaseLock()
+    }
+
+    private func releaseLock() {
+        guard lockFD >= 0 else { return }
+        Darwin.close(lockFD)
+        lockFD = -1
     }
 
     private func accept(handler: @escaping Handler) {

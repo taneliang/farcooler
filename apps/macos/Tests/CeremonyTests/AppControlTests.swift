@@ -16,6 +16,12 @@ struct AppControlTests {
         return dir + "/app.sock"
     }
 
+    /// Stop `control`, and remove the scratch directory `path` is in.
+    private static func done(_ control: AppControl, _ path: String) {
+        control.stop(removing: path)
+        try? FileManager.default.removeItem(atPath: (path as NSString).deletingLastPathComponent)
+    }
+
     /// Connect to `path`, send `line`, and read until the app hangs up.
     private static func ask(_ path: String, _ line: String) -> [[String: Any]] {
         lines(heard(path, line))
@@ -79,7 +85,7 @@ struct AppControlTests {
         let path = Self.scratch()
         let control = AppControl()
         try control.start(at: path, handler: Self.echo)
-        defer { control.stop(removing: path) }
+        defer { Self.done(control, path) }
 
         let lines = Self.ask(path, #"{"op":"about"}"#)
         #expect(lines.count == 1)
@@ -93,7 +99,7 @@ struct AppControlTests {
         let control = AppControl()
         control.ownUser = getuid() + 1
         try control.start(at: path, handler: Self.echo)
-        defer { control.stop(removing: path) }
+        defer { Self.done(control, path) }
 
         #expect(Self.ask(path, #"{"op":"about"}"#).isEmpty)
     }
@@ -103,7 +109,7 @@ struct AppControlTests {
         FileManager.default.createFile(atPath: path, contents: Data())
         let control = AppControl()
         try control.start(at: path, handler: Self.echo)
-        defer { control.stop(removing: path) }
+        defer { Self.done(control, path) }
         #expect(Self.ask(path, #"{"op":"about"}"#).count == 1)
     }
 
@@ -111,10 +117,23 @@ struct AppControlTests {
         let path = Self.scratch()
         let first = AppControl()
         try first.start(at: path, handler: Self.echo)
-        defer { first.stop(removing: path) }
+        defer { Self.done(first, path) }
 
         #expect(throws: AppControl.Failure.taken) { try AppControl().start(at: path, handler: Self.echo) }
         #expect(Self.ask(path, #"{"op":"about"}"#).count == 1)
+    }
+
+    /// Review 1004q F9: the running copy holds the socket by its lock, not
+    /// only by answering. A second copy that found the file gone, or dead
+    /// for a moment, used to bind over the first.
+    @Test func aRunningCopysLockKeepsASecondCopyOut() throws {
+        let path = Self.scratch()
+        let first = AppControl()
+        try first.start(at: path, handler: Self.echo)
+        defer { Self.done(first, path) }
+        unlink(path)
+
+        #expect(throws: AppControl.Failure.taken) { try AppControl().start(at: path, handler: Self.echo) }
     }
 
     /// `{"op":"about","a":{"a":…1…}}`, nested `depth` deep.
@@ -130,7 +149,7 @@ struct AppControlTests {
         let path = Self.scratch()
         let control = AppControl()
         try control.start(at: path, handler: Self.echo)
-        defer { control.stop(removing: path) }
+        defer { Self.done(control, path) }
 
         let line = Self.nested(480)
         #expect(line.utf8.count > 2_800)
@@ -144,7 +163,7 @@ struct AppControlTests {
         let path = Self.scratch()
         let control = AppControl()
         try control.start(at: path, handler: Self.echo)
-        defer { control.stop(removing: path) }
+        defer { Self.done(control, path) }
 
         let line = Self.nested(40)
         #expect(line.utf8.count < 512)
@@ -168,7 +187,7 @@ struct AppControlTests {
             let op = request["op"] as? String ?? ""
             Task { @MainActor in AppControlRequests.handle(op: op, relaunch: true, reply: reply) }
         }
-        defer { control.stop(removing: path) }
+        defer { Self.done(control, path) }
         return lines(await Task.detached { heard(path, #"{"op":"\#(op)"}"#) }.value)
     }
 
