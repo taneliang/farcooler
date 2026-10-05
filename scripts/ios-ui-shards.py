@@ -27,7 +27,9 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TESTS = ROOT / "apps/ios/FarCoolerUITests"
 
-# Measured shard times are in the `ios-ui` job's comment in ci.yml.
+# Measured shard times are in the `ios-ui` job's comment in ci.yml. Rebalance by
+# class durations from a CI log ("Test Suite '<Class>' started/passed"), not by
+# test count: PlanUITests alone is six minutes.
 SHARDS = {
     "shell": [
         "ShellGestureTests",  # -shell-harness
@@ -40,25 +42,27 @@ SHARDS = {
     ],
     "phone": [
         "WorkspaceScreenTests",  # -phone-harness
-        "BoardUnreadUITests",  # -phone-harness (ov-113)
-        "TaskScreenTests",  # -phone-harness
-        "ReadScopeTests",  # -phone-harness (TaskScreenTests.swift)
-        "TaskUsageUITests",  # -phone-harness (ov-195, landed after this lane branched)
-        "PhoneReopenTests",  # -phone-harness
-        "FilesBrowserTests",  # -phone-harness (ov-259)
-        "AgentDraftTests",  # -agent-layout-harness
-        "ChangesPullRequestTests",  # -changes-layout-harness
-        "ChangesPatchNoticeTests",  # -changes-layout-harness
-        "ChangesLfsNoticeTests",  # -changes-layout-harness -lfs-pointers (ov-199)
-        "TerminalTaskKeyTests",  # -phone-harness -phone-terminal-key (ov-215)
-        "AgentRetrySendTests",  # -agent-layout-harness
-        "AgentStoppedTests",  # -agent-layout-harness -stopped
         "ActionFailureTests",  # -phone-harness and -agent-layout-harness
+        "FilesBrowserTests",  # -phone-harness (ov-259)
+        "TaskScreenTests",  # -phone-harness
+        "PhoneReopenTests",  # -phone-harness
         "ComposerKeyboardTests",  # -agent-layout-harness
         "DynamicTypeTests",  # -agent-layout-harness
-        "RunnerReachTests",  # seeded -hosts at an address that never answers
-        "FirstRunUITests",  # -phone-harness (ov-205 lane P, placed by integ-9)
+        "TerminalTaskKeyTests",  # -phone-harness -phone-terminal-key (ov-215)
+        "AgentStoppedTests",  # -agent-layout-harness -stopped
+        "ReadScopeTests",  # -phone-harness (TaskScreenTests.swift)
+    ],
+    "phone2": [
         "PlanUITests",  # -phone-harness -phone-plan (ov-274)
+        "FirstRunUITests",  # -phone-harness (ov-205 lane P, placed by integ-9)
+        "AgentDraftTests",  # -agent-layout-harness
+        "BoardUnreadUITests",  # -phone-harness (ov-113)
+        "ChangesPatchNoticeTests",  # -changes-layout-harness
+        "TaskUsageUITests",  # -phone-harness (ov-195, landed after this lane branched)
+        "ChangesLfsNoticeTests",  # -changes-layout-harness -lfs-pointers (ov-199)
+        "ChangesPullRequestTests",  # -changes-layout-harness
+        "AgentRetrySendTests",  # -agent-layout-harness
+        "RunnerReachTests",  # seeded -hosts at an address that never answers
     ],
 }
 
