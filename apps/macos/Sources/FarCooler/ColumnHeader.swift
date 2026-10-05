@@ -67,6 +67,11 @@ enum JumpBar {
         }
     }
 
+    /// The room a segment's or a menu row's icon has, so every symbol, wide
+    /// or narrow, leaves its title at one edge (ov-328): a hair over the
+    /// widest of the glyphs `OneTreeGlyph` names at the text's size.
+    static let glyphWidth: CGFloat = 14
+
     /// A segment's icon (the worktree's ⎇): the text's own size and weight.
     static func icon(_ role: Role, isHere: Bool = false) -> Style { style(role, isHere: isHere) }
 

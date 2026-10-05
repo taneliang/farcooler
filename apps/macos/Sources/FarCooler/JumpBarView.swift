@@ -21,7 +21,7 @@ struct JumpMenuView: View {
     static let maxHeight: CGFloat = 440
     /// What a row spends besides its words: its padding, the checkmark's
     /// and the ring's columns, the gaps, and room for a count.
-    static let rowChrome: CGFloat = 8 + 4 + 12 + 6 + StatusGlyph.inline + 6 + 6 + 8 + 28 + 8
+    static let rowChrome: CGFloat = 8 + 4 + 12 + 6 + StatusGlyph.inline + 6 + JumpBar.glyphWidth + 6 + 6 + 8 + 28 + 8
 
     /// The menu's width, as an `NSMenu` sizes itself: its widest row, title
     /// and subtitle at the row's size, between `minWidth` and `maxWidth`;
@@ -127,6 +127,15 @@ private struct JumpMenuRow: View {
                 StatusGlyph(status: status)
             } else {
                 Color.clear.frame(width: StatusGlyph.inline, height: StatusGlyph.inline)
+                    .accessibilityHidden(true)
+            }
+            // The sidebar's own glyph for this kind of row (ov-328), in the
+            // bar's secondary tint, its column kept for a row with none.
+            // Decorative: the row's name is its title alone.
+            if let glyph = item.glyph {
+                Image(systemName: glyph)
+                    .foregroundStyle(highlighted ? AnyShapeStyle(.white.opacity(0.75)) : AnyShapeStyle(JumpBar.icon(.ancestor).color))
+                    .frame(width: JumpBar.glyphWidth)
                     .accessibilityHidden(true)
             }
             Text(item.title)

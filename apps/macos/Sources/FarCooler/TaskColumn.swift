@@ -503,6 +503,10 @@ enum WorkspaceNavigation {
         var title: String
         /// Where clicking it goes: nil for the level you're at.
         var target: Selection?
+        /// The SF Symbol its row has in the sidebar (`OneTreeGlyph`), drawn
+        /// before its title in the jump bar (ov-328); nil for a segment the
+        /// sidebar has no row for, the workspace.
+        var glyph: String? = nil
     }
 
     /// The breadcrumb for `selection`: Workspace › Task, Workspace › Task ›

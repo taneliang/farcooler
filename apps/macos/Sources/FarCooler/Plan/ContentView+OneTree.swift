@@ -126,8 +126,13 @@ extension ContentView {
     nonisolated static func treeTerminal(_ terminal: Terminal) -> OneTreeTerminal {
         OneTreeTerminal(
             id: terminal.id, title: terminal.label,
-            isAgent: terminal.isAgentPane || AgentActivity.parse(terminal.activity).isAgent,
-            isOrchestrator: terminal.isOrchestrator)
+            isAgent: isAgent(terminal), isOrchestrator: terminal.isOrchestrator)
+    }
+
+    /// Whether the tree draws `terminal` as an agent's, and so the jump
+    /// bar's menu does, in one glyph (ov-328, `OneTreeGlyph.terminal`).
+    nonisolated static func isAgent(_ terminal: Terminal) -> Bool {
+        terminal.isAgentPane || AgentActivity.parse(terminal.activity).isAgent
     }
 
     /// The node `selection` is, in `workspace`'s tree: the plan for the
@@ -232,11 +237,20 @@ extension ContentView {
         let path = tree.crumbs(to: target, hint: treeHint)
         guard path.count > 1 || (path.count == 1 && target != .plan) else { return nil }
         let top = WorkspaceNavigation.Crumb(title: name, target: .workspace(host: host, workspace: workspace.id, focus: nil))
-        return [top] + path.enumerated().map { index, crumb in
+        return Self.crumbs(top: top, through: path) { treeSelection($0, host: host, workspace: workspace.id) }
+    }
+
+    /// The crumbs after the workspace's, one for each node on `path`, each
+    /// a way there but the last, and each with the glyph its row has in the
+    /// sidebar (ov-328). Pure, so a test reads them as the bar does.
+    nonisolated static func crumbs(
+        top: WorkspaceNavigation.Crumb, through path: [(title: String, target: OneTreeTarget?, glyph: String)],
+        resolve: (OneTreeTarget) -> Selection?
+    ) -> [WorkspaceNavigation.Crumb] {
+        [top] + path.enumerated().map { index, crumb in
             let last = index == path.count - 1
             return WorkspaceNavigation.Crumb(
-                title: crumb.title,
-                target: last ? nil : crumb.target.flatMap { treeSelection($0, host: host, workspace: workspace.id) })
+                title: crumb.title, target: last ? nil : crumb.target.flatMap(resolve), glyph: crumb.glyph)
         }
     }
 

@@ -692,7 +692,7 @@ struct DrillBreadcrumb: View {
                 case .terminalTitle:
                     if let terminal = worktrees?.terminal {
                         HStack(alignment: .firstTextBaseline, spacing: 3) {
-                            Image(systemName: "terminal").font(piece.style.font)
+                            Image(systemName: OneTreeGlyph.terminal(isAgent: false)).font(piece.style.font)
                             Text(terminal.title).font(piece.style.font).lineLimit(1)
                         }
                         .foregroundStyle(piece.style.color)
@@ -837,8 +837,22 @@ struct DrillBreadcrumb: View {
     /// title, gives way, cut in its middle.
     @ViewBuilder
     private func crumb(_ crumb: WorkspaceNavigation.Crumb, index: Int, style: JumpBar.Style) -> some View {
-        let text = Text(crumb.title).font(style.font).foregroundStyle(style.color).lineLimit(1)
+        let title = Text(crumb.title).font(style.font).foregroundStyle(style.color).lineLimit(1)
             .baselineProbed("jump-label-\(index)-baseline")
+        // The sidebar's glyph for what it names (ov-328), before the title on
+        // the one baseline, in a secondary tint whatever the title's. Hidden
+        // from VoiceOver: the label is the title alone.
+        let text = HStack(alignment: .firstTextBaseline, spacing: 3) {
+            if let glyph = crumb.glyph {
+                Image(systemName: glyph)
+                    .font(JumpBar.icon(.ancestor).font)
+                    .foregroundStyle(JumpBar.icon(.ancestor).color)
+                    .frame(width: JumpBar.glyphWidth)
+                    .accessibilityHidden(true)
+                    .identified("jump-glyph-\(index)")
+            }
+            title
+        }
         if crumb.target != nil {
             JumpLabelButton(name: Self.labelName(crumb.title)) {
                 perform(Self.click(.crumb(index), crumbs: crumbs, worktrees: worktrees))

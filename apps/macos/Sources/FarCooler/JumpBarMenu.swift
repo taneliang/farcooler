@@ -52,6 +52,10 @@ struct JumpItem: Identifiable, Equatable {
     var key: String?
     /// The app's own ring, or nil for a row that's no terminal's or task's.
     var status: Status?
+    /// The SF Symbol the sidebar draws for the same kind of row
+    /// (`OneTreeGlyph`), before the title (ov-328); nil for a row with no
+    /// sidebar row to match: a workspace, a tab, a way to History, an action.
+    var glyph: String?
     /// A workspace's waiting count, as the switcher badges it.
     var waiting = 0
     /// Where the window is: checked.
@@ -190,7 +194,7 @@ enum JumpMenus {
                     title: "",
                     items: [
                         JumpItem(
-                            id: "orchestrator", title: "Orchestrator", status: orchestrator,
+                            id: "orchestrator", title: "Orchestrator", status: orchestrator, glyph: OneTreeGlyph.orchestrator,
                             target: .go(.workspace(host: host, workspace: workspace, focus: nil)))
                     ]))
         }
@@ -201,7 +205,7 @@ enum JumpMenus {
             func item(_ row: TaskRow) -> JumpItem {
                 JumpItem(
                     id: "task|\(row.id)", title: "\(row.key) \(row.title)", subtitle: taskWorktree(row), key: row.key,
-                    status: taskStatus(row), current: Self.isTask(row.id, place),
+                    status: taskStatus(row), glyph: OneTreeGlyph.task(row.status), current: Self.isTask(row.id, place),
                     target: .go(open(.task(row.id))))
             }
             var items = shown.map(item)
@@ -224,6 +228,7 @@ enum JumpMenus {
                 items: loose.map { worktree in
                     JumpItem(
                         id: "wt|\(worktree.id)", title: worktree.task, status: worktreeStatus(worktree),
+                        glyph: OneTreeGlyph.worktree,
                         target: .go(opening(worktree)))
                 }))
         return JumpMenu(sections)
@@ -244,7 +249,8 @@ enum JumpMenus {
     ) -> JumpMenu {
         func item(_ m: WorkspaceWorktrees.MenuItem) -> JumpItem {
             JumpItem(
-                id: "sib|\(String(describing: m.target))", title: m.title, subtitle: m.subtitle, current: m.current,
+                id: "sib|\(String(describing: m.target))", title: m.title, subtitle: m.subtitle,
+                glyph: OneTreeGlyph.worktree, current: m.current,
                 target: m.trail.map { .open(m.target, from: $0) } ?? .go(m.target))
         }
         var sections = [
@@ -280,6 +286,7 @@ enum JumpMenus {
         func item(_ t: Terminal) -> JumpItem {
             JumpItem(
                 id: "term|\(t.id)", title: worktree.name(of: t), subtitle: Terminal.name(of: t.preset), status: t.status,
+                glyph: OneTreeGlyph.terminal(isAgent: ContentView.isAgent(t)),
                 current: named == pane(t), target: .go(ContentView.opening(worktree, terminal: t.id, in: fleet)))
         }
         func isLost(_ t: Terminal) -> Bool { LostPane.Kind(state: t.state) == .lost }

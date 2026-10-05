@@ -533,7 +533,7 @@ struct OneTreeBuilder {
         if input.hasOrchestrator {
             var node = OneTreeNode(
                 id: "place:orchestrator", kind: .place, title: OneTreeWords.orchestrator,
-                detail: input.orchestratorWord ?? "", glyph: "bubble.left.and.text.bubble.right", target: .orchestrator)
+                detail: input.orchestratorWord ?? "", glyph: OneTreeGlyph.orchestrator, target: .orchestrator)
             node.asks = input.asks.orchestrator
             node.holdsAsk = node.asks
             out.append(node)
@@ -541,19 +541,19 @@ struct OneTreeBuilder {
         out.append(
             OneTreeNode(
                 id: "place:needs-you", kind: .place, title: OneTreeWords.needsYou,
-                detail: input.needsYouCount > 0 ? "\(input.needsYouCount)" : "", glyph: "flag", target: .needsYou))
+                detail: input.needsYouCount > 0 ? "\(input.needsYouCount)" : "", glyph: OneTreeGlyph.needsYou, target: .needsYou))
         let shownThemes = Set(themes.map(\.id))
         let unanchored = input.pages.filter { page in page.themeID.map { !shownThemes.contains($0) } ?? true }
         out.append(
             finish(
                 OneTreeNode(
-                    id: "place:plan", kind: .place, title: OneTreeWords.plan, glyph: "map", target: .plan,
+                    id: "place:plan", kind: .place, title: OneTreeWords.plan, glyph: OneTreeGlyph.plan, target: .plan,
                     children: unanchored.map { pageNode($0, under: "place:plan") })))
         return out
     }
 
     func pageNode(_ page: OneTreePage, under parent: String) -> OneTreeNode {
-        OneTreeNode(id: "\(parent)/page:\(page.slot)", kind: .page, title: page.title, glyph: "doc.text", target: .page(page.slot))
+        OneTreeNode(id: "\(parent)/page:\(page.slot)", kind: .page, title: page.title, glyph: OneTreeGlyph.page, target: .page(page.slot))
     }
 
     // MARK: Themes
@@ -582,14 +582,14 @@ struct OneTreeBuilder {
                     children.append(
                         finish(
                             OneTreeNode(
-                                id: fold, kind: .doneFold, title: OneTreeWords.done(done.count), glyph: "checkmark",
+                                id: fold, kind: .doneFold, title: OneTreeWords.done(done.count), glyph: OneTreeGlyph.doneFold,
                                 children: done.map { taskNode($0, under: id, theme: theme.id) }, quiet: true)))
                 }
             }
             children += input.pages.filter { $0.themeID == theme.id }.map { pageNode($0, under: id) }
             var node = OneTreeNode(
                 id: id, kind: .theme, title: theme.name, detail: OneTreeWords.progress(theme.counts),
-                glyph: theme.state == "paused" ? "pause.circle" : theme.state == "done" ? "checkmark.circle" : "map",
+                glyph: OneTreeGlyph.theme(state: theme.state),
                 target: .theme(theme.id), children: children)
             node.asks = input.asks.themes.contains(theme.id)
             node.expandedByDefault = theme.id == newestTheme
@@ -619,11 +619,11 @@ struct OneTreeBuilder {
             children.append(
                 finish(
                     OneTreeNode(
-                        id: "\(id)/done", kind: .doneFold, title: OneTreeWords.done(done.count), glyph: "checkmark",
+                        id: "\(id)/done", kind: .doneFold, title: OneTreeWords.done(done.count), glyph: OneTreeGlyph.doneFold,
                         children: done.map { taskNode($0, under: id, theme: nil) }, quiet: true)))
         }
         var node = OneTreeNode(
-            id: id, kind: .group, title: OneTreeWords.noTheme, detail: "\(mine.count)", glyph: "tray",
+            id: id, kind: .group, title: OneTreeWords.noTheme, detail: "\(mine.count)", glyph: OneTreeGlyph.noTheme,
             children: children)
         node.expandedByDefault = themes.isEmpty
         return finish(node)
@@ -641,7 +641,7 @@ struct OneTreeBuilder {
             children += subagents(lane: nil, task: task, under: id)
         }
         var node = OneTreeNode(
-            id: id, kind: .task, title: task.title, key: task.key, glyph: TaskStatusGlyph.name(task.status),
+            id: id, kind: .task, title: task.title, key: task.key, glyph: OneTreeGlyph.task(task.status),
             target: .task(task.id), children: children, quiet: task.status.isFinished)
         node.asks = input.asks.tasks.contains(task.id)
         // A card being worked opens on its lanes inside the theme that's
@@ -659,7 +659,7 @@ struct OneTreeBuilder {
         children += subagents(lane: lane, task: task, under: id)
         var node = OneTreeNode(
             id: id, kind: .lane, title: lane.name, detail: PlanWords.state(lane.state),
-            also: OneTreeWords.also(others), glyph: OneTreeWords.glyph(lane.state), target: .lane(lane.id),
+            also: OneTreeWords.also(others), glyph: OneTreeGlyph.lane(lane.state), target: .lane(lane.id),
             children: children, quiet: !lane.state.isLive)
         node.laneState = lane.state
         node.worktreeID = laneWorktrees[lane.id]?.id
@@ -672,7 +672,7 @@ struct OneTreeBuilder {
         let id = "\(parent)/worktree:\(worktree.id)"
         return finish(
             OneTreeNode(
-                id: id, kind: .lane, title: worktree.name, glyph: "arrow.triangle.branch",
+                id: id, kind: .lane, title: worktree.name, glyph: OneTreeGlyph.worktree,
                 target: .worktree(worktree.id), children: terminalNodes(worktree, under: id),
                 worktreeID: worktree.id))
     }
@@ -681,7 +681,7 @@ struct OneTreeBuilder {
         worktree.terminals.filter { !$0.isOrchestrator }.map { terminal in
             var node = OneTreeNode(
                 id: "\(parent)/terminal:\(terminal.id)", kind: .terminal, title: terminal.title,
-                detail: terminal.isAgent ? "Agent" : "", glyph: terminal.isAgent ? "sparkles" : "terminal",
+                detail: terminal.isAgent ? "Agent" : "", glyph: OneTreeGlyph.terminal(isAgent: terminal.isAgent),
                 target: .terminal(worktree: worktree.id, terminal: terminal.id), worktreeID: worktree.id)
             node.asks = input.asks.terminals.contains(terminal.id)
             node.holdsAsk = node.asks
@@ -727,7 +727,7 @@ struct OneTreeBuilder {
 
     func subagentNode(id: String, title: String) -> OneTreeNode {
         OneTreeNode(
-            id: id, kind: .subagent, title: title, caption: OneTreeWords.subagentCaption, glyph: "person.crop.circle.dashed",
+            id: id, kind: .subagent, title: title, caption: OneTreeWords.subagentCaption, glyph: OneTreeGlyph.subagent,
             target: .orchestrator)
     }
 
@@ -740,7 +740,7 @@ struct OneTreeBuilder {
         return finish(
             OneTreeNode(
                 id: id, kind: .group, title: OneTreeWords.mainCheckout, detail: OneTreeWords.shells(terminals.count),
-                glyph: "house", target: .worktree(checkout.id), children: terminals))
+                glyph: OneTreeGlyph.mainCheckout, target: .worktree(checkout.id), children: terminals))
     }
 
     /// Loose Worktrees: the workspace's worktrees no lane and no card
@@ -762,7 +762,7 @@ struct OneTreeBuilder {
             let node = "\(parent)/worktree:\(worktree.id)"
             return finish(
                 OneTreeNode(
-                    id: node, kind: .worktree, title: worktree.name, glyph: "arrow.triangle.branch",
+                    id: node, kind: .worktree, title: worktree.name, glyph: OneTreeGlyph.worktree,
                     target: .worktree(worktree.id), children: terminalNodes(worktree, under: node),
                     quiet: worktree.isHidden, worktreeID: worktree.id))
         }
@@ -773,12 +773,12 @@ struct OneTreeBuilder {
                 finish(
                     OneTreeNode(
                         id: group, kind: .group, title: OneTreeWords.hidden, detail: "\(hidden.count)",
-                        glyph: "eye.slash", children: hidden.map { row($0, under: group) }, quiet: true)))
+                        glyph: OneTreeGlyph.hidden, children: hidden.map { row($0, under: group) }, quiet: true)))
         }
         return finish(
             OneTreeNode(
                 id: id, kind: .group, title: OneTreeWords.looseWorktrees, detail: "\(loose.count)",
-                glyph: "archivebox", children: children))
+                glyph: OneTreeGlyph.looseWorktrees, children: children))
     }
 
     /// Cards in a status this build doesn't know: said, in a group of
@@ -789,11 +789,11 @@ struct OneTreeBuilder {
         return finish(
             OneTreeNode(
                 id: id, kind: .group, title: OneTreeWords.notOnThisVersion, detail: "\(input.unreadable.count)",
-                caption: OneTreeWords.notOnThisVersionCaption, glyph: "questionmark.square.dashed",
+                caption: OneTreeWords.notOnThisVersionCaption, glyph: OneTreeGlyph.notOnThisVersion,
                 children: input.unreadable.map { card in
                     OneTreeNode(
                         id: "\(id)/card:\(card.id)", kind: .task, title: card.title, key: card.key, detail: card.status,
-                        glyph: "questionmark.circle", quiet: true)
+                        glyph: OneTreeGlyph.unreadableCard, quiet: true)
                 }))
     }
 
@@ -968,11 +968,13 @@ extension OneTree {
 
     /// The breadcrumb for `target`: the targets on its path, each named,
     /// the pinned places left out (the jump bar's own first crumb is the
-    /// workspace).
-    public func crumbs(to target: OneTreeTarget, hint: String? = nil) -> [(title: String, target: OneTreeTarget?)] {
+    /// workspace), each with its row's glyph (ov-328).
+    public func crumbs(to target: OneTreeTarget, hint: String? = nil)
+        -> [(title: String, target: OneTreeTarget?, glyph: String)]
+    {
         guard let path = path(to: target, hint: hint) else { return [] }
         return path.filter { $0.kind != .place && $0.kind != .doneFold }.map { node in
-            (node.key.isEmpty ? node.title : "\(node.key) \(node.title)", node.target)
+            (node.key.isEmpty ? node.title : "\(node.key) \(node.title)", node.target, node.glyph)
         }
     }
 

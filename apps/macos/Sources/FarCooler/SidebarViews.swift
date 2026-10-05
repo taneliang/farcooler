@@ -25,7 +25,7 @@ extension View {
 /// navigator's rows and the breadcrumb's menu.
 enum WorktreeSection {
     /// What a worktree is drawn as in its glyph column: a branch.
-    static let glyph = "arrow.triangle.branch"
+    static let glyph = OneTreeGlyph.worktree
 }
 
 /// A worktree's own status, for its heading.
