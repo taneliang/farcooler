@@ -226,7 +226,7 @@ struct NavigatorSplitTests {
     static func view(
         _ store: TaskBoardStore, terminals: Int = 2, kept: Binding<String>? = nil, closed: [String] = [],
         defaults: UserDefaults = UserDefaults(suiteName: "split-\(UUID().uuidString)")!,
-        current: NavigatorItem? = nil, onStep: ((NavigatorItem) -> Void)? = nil
+        current: NavigatorItem? = nil, keyed: Bool? = nil, onStep: ((NavigatorItem) -> Void)? = nil
     ) -> TaskBoardView {
         var shell = ProjectTerminals(
             terminals: (0..<terminals).map {
@@ -243,7 +243,7 @@ struct NavigatorSplitTests {
         for id in closed { defaults.set(true, forKey: TaskBoardView.closedKey(id, store: store)) }
         return TaskBoardView(
             store: store, client: store.client, agents: .none, onGoTo: { _ in }, defaults: defaults,
-            hasKeyboard: current != nil, worktrees: { _ in loose },
+            hasKeyboard: keyed ?? (current != nil), worktrees: { _ in loose },
             orchestrator: NavigatorOrchestrator(state: .working, agent: "claude", status: .working, nowDoing: "Reading"),
             current: current, onStep: onStep, split: kept)
     }

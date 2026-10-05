@@ -254,6 +254,10 @@ struct NavigatorSplitView: View {
     /// A rule took the keyboard, or gave it up: ↑ and ↓ resize while it
     /// has it, rather than step through the rows.
     var onRuleFocus: (Bool) -> Void = { _ in }
+    /// The selected row's id, as its content tags it with `.id`: kept in
+    /// sight, scrolled by as little as that takes, whenever the selection
+    /// moves or the panes' heights do (ov-295). Nothing moves while it shows.
+    var reveal: AnyHashable?
 
     @State private var headers: [String: CGFloat] = [:]
     @State private var contents: [String: CGFloat] = [:]
@@ -273,6 +277,7 @@ struct NavigatorSplitView: View {
 
     var body: some View {
         GeometryReader { proxy in
+          ScrollViewReader { scroller in
             let room = room(in: proxy.size.height)
             let heights = NavigatorSplit.viewports(model, room: room, chosen: NavigatorSplit.decode(kept))
             // Never taller than the window: the panes squeeze (`viewports`)
@@ -308,7 +313,28 @@ struct NavigatorSplitView: View {
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)  // rhythm-exempt: the window's height
             .clipped()
             .probed("navigator-split")
+            // The selected row stays in sight: when it changes (a short
+            // spring), and when a pane's height or openness does, a window
+            // resize, a drag, a collapse, or the first layout of a launch or
+            // restore (no animation). `scrollTo` with no anchor moves by the
+            // least it takes, and not at all for a row already in view.
+            .onChange(of: reveal) { _, row in
+                guard let row else { return }
+                withAnimation(WorkspaceMotion.spring) { scroller.scrollTo(row) }
+            }
+            .onChange(of: heights, initial: true) { _, _ in show(reveal, with: scroller) }
+            // Rows arriving or leaving above it move it without a pane's
+            // height changing: the Unread lines settling after a launch.
+            .onChange(of: contents) { _, _ in show(reveal, with: scroller) }
+          }
         }
+    }
+
+    /// Scroll `row` into view once the heights that were just set are laid
+    /// out: a pane that has just opened or been resized hasn't yet.
+    private func show(_ row: AnyHashable?, with scroller: ScrollViewProxy) {
+        guard let row else { return }
+        DispatchQueue.main.async { scroller.scrollTo(row) }
     }
 
     /// Keep what the rule over pane `index` does, gone `dy` down from where

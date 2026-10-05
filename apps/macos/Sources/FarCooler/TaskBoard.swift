@@ -795,6 +795,17 @@ struct TaskBoardView: View {
     /// at (`Navigator.place`).
     private var place: NavigatorItem? { Navigator.place(current, line: unreadLine) }
 
+    /// The id the selected row carries in its pane, to keep it in sight
+    /// (ov-295): a task's own, or the row's item. The orchestrator's row is
+    /// no pane's.
+    private var revealed: AnyHashable? {
+        switch place {
+        case .task(let id): id
+        case .terminal, .worktree: place
+        case .orchestrator, .unread, nil: nil
+        }
+    }
+
     /// The Unread line lit, if the selection is lit there.
     private var litLine: String? {
         if case .unread(let line)? = place { return line }
@@ -844,7 +855,7 @@ struct TaskBoardView: View {
         let showsTasks = plan.showsTasks(unreadable: unreadable) || store.plan.showing
         let ruleUnderOrchestrator = orchestrator != nil && plan.showsOrchestrator
             && (showsTasks || terminals.isShown || plan.showsWorktrees)
-        return ScrollViewReader { proxy in
+        return Group {
             // The orchestrator's row stays put over the panes; each pane
             // scrolls on its own under its header (`NavigatorSplitView`,
             // ov-244). Slots touch, each keeping its own room
@@ -873,21 +884,10 @@ struct TaskBoardView: View {
                 }
                 NavigatorSplitView(panes: panes(
                     showsTasks: showsTasks, plan: plan, shown: shown, worktrees: worktrees, terminals: terminals),
-                    kept: split, onRuleFocus: { heard.ruleFocused = $0 })
+                    kept: split, onRuleFocus: { heard.ruleFocused = $0 }, reveal: revealed)
             }
             .padding(.top, NavigatorRhythm.band)
             .unanimatedWhenFiltering(filter)
-            // The row selected stays in sight as ↑ and ↓ step past the edge,
-            // scrolled by as little as that takes.
-            .onChange(of: place) { _, item in
-                guard let item, hasKeyboard else { return }
-                withAnimation(WorkspaceMotion.spring) {
-                    switch item {
-                    case .task(let id): proxy.scrollTo(id)
-                    default: proxy.scrollTo(item)
-                    }
-                }
-            }
         }
         .focusable()
         .focused($listFocused)
