@@ -57,6 +57,9 @@ struct OneTreeNavigator: View {
     @SceneStorage private var keptFilter: String
     @State private var heldExpansion: String?
     @State private var heldFilter: String?
+    /// The heights the dividers were dragged to (`NavigatorSplit.encode`).
+    @SceneStorage private var keptSplit: String
+    @State private var heldSplit: String?
     @FocusState private var focused: Bool
     /// The keyboard's row, while it's on one the window doesn't show (a
     /// group, the orchestrator's row): nil follows the selection.
@@ -75,6 +78,7 @@ struct OneTreeNavigator: View {
         self.onEnter = onEnter
         _keptExpansion = SceneStorage(wrappedValue: "", "oneTree.expansion.\(sidebar.key)")
         _keptFilter = SceneStorage(wrappedValue: OneTreeFilter.open.rawValue, "oneTree.filter.\(sidebar.key)")
+        _keptSplit = SceneStorage(wrappedValue: "", "oneTree.split.\(sidebar.key)")
     }
 
     private var expansionText: String {
@@ -101,35 +105,19 @@ struct OneTreeNavigator: View {
         let tree = sidebar.tree(filter)
         let groups = shown(tree)
         let rows = groups.flatMap { $0 }
-        ScrollViewReader { scroller in
-            ScrollView {
-                // Lazy: a long board draws the rows in sight (review H2).
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    section(groups[0], in: tree)
-                    rule
-                    filterRow(tree)
-                    section(groups[1], in: tree)
-                    if !groups[2].isEmpty {
-                        rule
-                        section(groups[2], in: tree)
-                    }
-                }
-                .padding(.horizontal, NavigatorGrid.edge)
-                .padding(.top, NavigatorRhythm.band)
-                .padding(.bottom, NavigatorRhythm.section)
-                // Rows come, go and move on the shared spring; a row whose
-                // words change washes. What arrives by opening a node is
-                // told apart from what's new by the whole tree's signature.
-                .listChanges(
-                    rows.map { Self.change($0.node) }, arrivals: tree.allNodes.map(Self.change))
-            }
-            .scrollBounceBehavior(.basedOnSize)
-            // Again when the path to it appears: the window can open on a
-            // terminal before the plan that puts its lane under a card is read.
-            .onChange(of: RevealKey(target: sidebar.settled() ? sidebar.selected : nil, path: sidebar.selected.map { tree.ancestors(of: $0, hint: sidebar.hint) } ?? []), initial: true) { _, key in
-                reveal(key.target, in: tree)
-                if let id = selectedRow(rows)?.id { withAnimation(nil) { scroller.scrollTo(id) } }
-            }
+        // Three areas, each scrolling on its own, the dividers fixed unless
+        // dragged (ov-335): the places, the plan's tree under its filter, and
+        // the shells below. Each is as tall as its rows while the room allows;
+        // the places and the shells stop at a share of it and scroll; the tree
+        // takes what's left. The outer container never scrolls.
+        NavigatorSplitView(
+            panes: panes(groups, tree: tree), kept: splitBinding, reveal: selectedRow(rows)?.id
+        )
+        .padding(.top, NavigatorRhythm.band)
+        // Again when the path to it appears: the window can open on a
+        // terminal before the plan that puts its lane under a card is read.
+        .onChange(of: RevealKey(target: sidebar.settled() ? sidebar.selected : nil, path: sidebar.selected.map { tree.ancestors(of: $0, hint: sidebar.hint) } ?? []), initial: true) { _, key in
+            reveal(key.target, in: tree)
         }
         .focusable()
         .focused($focused)
@@ -174,26 +162,67 @@ struct OneTreeNavigator: View {
             id: node.id, signature: [node.title, node.detail, node.also, "\(node.holdsAsk)"].joined(separator: "\u{1}"))
     }
 
+    /// The rows of one area: not lazy, because the split sizes each area from
+    /// its rows' real height in the pass that places it, and a lazy stack's
+    /// estimate left a gap under the last row until it settled (ov-298).
     private func section(_ rows: [OneTreeRow], in tree: OneTree) -> some View {
-        ForEach(rows) { row in
-            OneTreeRowView(
-                row: row, selected: isSelected(row.node) || (cursor == row.id && focused), keyed: keyed,
-                onToggle: { toggle(row.node, in: tree) },
-                onChoose: {
-                    cursor = row.node.target == nil ? row.id : nil
-                    choose(row.node)
-                },
-                menu: { sidebar.menu(row.node) })
-            .changeWashed(row.id)
-            .id(row.id)
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(rows) { row in
+                OneTreeRowView(
+                    row: row, selected: isSelected(row.node) || (cursor == row.id && focused), keyed: keyed,
+                    onToggle: { toggle(row.node, in: tree) },
+                    onChoose: {
+                        cursor = row.node.target == nil ? row.id : nil
+                        choose(row.node)
+                    },
+                    menu: { sidebar.menu(row.node) })
+                .changeWashed(row.id)
+                .id(row.id)
+            }
         }
+        // Rows come, go and move on the shared spring; a row whose words
+        // change washes. What arrives by opening a node is told apart from
+        // what's new by the whole tree's signature.
+        .listChanges(rows.map { Self.change($0.node) }, arrivals: tree.allNodes.map(Self.change))
+        .padding(.horizontal, NavigatorGrid.edge)
     }
 
-    /// Between the places and the tree, and over the checkout: the edge a
-    /// group ends at, as the navigator's rules between panes are.
-    private var rule: some View {
-        Divider()  // style-exempt: the navigator's rule between groups, as NavigatorSplit's (ov-243)
-            .padding(.vertical, NavigatorRhythm.rule)
+    /// The areas drawn: each with rows, the tree's under the filter.
+    private func panes(_ groups: [[OneTreeRow]], tree: OneTree) -> [NavigatorSplitPane] {
+        var out: [NavigatorSplitPane] = []
+        if !groups[0].isEmpty {
+            out.append(
+                NavigatorSplitPane(
+                    id: "places", maxShare: Self.placesShare, expanded: true, header: AnyView(EmptyView()),
+                    content: AnyView(section(groups[0], in: tree))))
+        }
+        // The tree stays even with no rows, so the filter does.
+        out.append(
+            NavigatorSplitPane(
+                id: "tree", fills: true, expanded: true, header: AnyView(filterRow(tree).padding(.horizontal, NavigatorGrid.edge)),
+                content: AnyView(section(groups[1], in: tree))))
+        if !groups[2].isEmpty {
+            out.append(
+                NavigatorSplitPane(
+                    id: "shells", maxShare: NavigatorSplit.capShare, expanded: true, header: AnyView(EmptyView()),
+                    content: AnyView(section(groups[2], in: tree))))
+        }
+        return out
+    }
+
+    /// The most of the sidebar the places take before they scroll: they are
+    /// short, and it takes a very tall one to reach it.
+    static let placesShare: CGFloat = 0.5
+
+    /// What drags of the dividers chose, kept for the window (the keys the
+    /// other choices use), and held here where there's no scene to keep it.
+    private var splitBinding: Binding<String> {
+        Binding(
+            get: { heldSplit ?? keptSplit },
+            set: {
+                heldSplit = $0
+                keptSplit = $0
+            })
     }
 
     /// Status, as a filter on the tree: Not Done, In Review, All; and beside

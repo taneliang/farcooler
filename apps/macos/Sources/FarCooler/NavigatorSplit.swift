@@ -25,6 +25,16 @@ enum NavigatorSplit {
         var expanded = true
         /// How tall its rows are, all of them.
         var content: CGFloat
+        /// The most of the room its rows are drawn at, before they scroll,
+        /// where it has a cap: the One tree's places and shells (ov-335).
+        var maxShare: CGFloat? = nil
+    }
+
+    /// The tallest `pane`'s rows are drawn in `room`: all of them, or, for a
+    /// capped pane, its share of the room, never under its floor.
+    static func ceiling(_ pane: Pane, room: CGFloat) -> CGFloat {
+        guard let share = pane.maxShare else { return pane.content }
+        return min(pane.content, max(floor(pane), room * share))
     }
 
     /// One row of a pane, near enough: a one-line row's slot, its line and
@@ -85,12 +95,12 @@ enum NavigatorSplit {
         // share what it leaves.
         let left = room - heights.filter { id, _ in !free.contains { $0.id == id } }.values.reduce(0, +)
         func drawn(_ pane: Pane, at level: CGFloat) -> CGFloat {
-            min(pane.content, max(floor(pane, fill: pane.fills), level))
+            min(ceiling(pane, room: room), max(floor(pane, fill: pane.fills), level))
         }
         // The level is found exactly: the total rises linearly between any two
         // of the floors and row heights, so it is read off the segment where
         // it reaches `left`.
-        let marks = Set(free.flatMap { [floor($0, fill: $0.fills), $0.content] }).sorted()
+        let marks = Set(free.flatMap { [floor($0, fill: $0.fills), ceiling($0, room: room)] }).sorted()
         var level = marks.last ?? 0
         for (from, to) in zip(marks, marks.dropFirst()) {
             let at = free.reduce(0) { $0 + drawn($1, at: from) }
@@ -237,6 +247,8 @@ enum NavigatorSplit {
 struct NavigatorSplitPane: Identifiable {
     let id: String
     var fills = false
+    /// The most of the room its rows take before they scroll (`NavigatorSplit.Pane.maxShare`).
+    var maxShare: CGFloat? = nil
     var expanded: Bool
     let header: AnyView
     let content: AnyView
@@ -265,7 +277,9 @@ struct NavigatorSplitView: View {
     @State private var dragStart: [String: CGFloat]?
 
     private var model: [NavigatorSplit.Pane] {
-        panes.map { .init(id: $0.id, fills: $0.fills, expanded: $0.expanded, content: contents[$0.id] ?? 0) }
+        panes.map {
+            .init(id: $0.id, fills: $0.fills, expanded: $0.expanded, content: contents[$0.id] ?? 0, maxShare: $0.maxShare)
+        }
     }
 
     /// The room the panes' rows have in `height`: what the headers and the
@@ -286,7 +300,7 @@ struct NavigatorSplitView: View {
             let heights = NavigatorSplit.viewports(model, room: room, chosen: NavigatorSplit.decode(kept))
             // Never taller than the window: the panes squeeze (`viewports`)
             // rather than the navigator scrolling (ov-292).
-            NavigatorSplitLayout(panes: panes.map { ($0.id, $0.fills, $0.expanded) }, chosen: NavigatorSplit.decode(kept)) {
+            NavigatorSplitLayout(panes: panes.map { ($0.id, $0.fills, $0.expanded, $0.maxShare) }, chosen: NavigatorSplit.decode(kept)) {
                 ForEach(Array(panes.enumerated()), id: \.element.id) { index, pane in
                     if index > 0 {
                         rule(index, heights: heights, room: room).layoutValue(key: NavigatorSplitRole.self, value: .rule)
@@ -384,6 +398,7 @@ struct NavigatorSplitView: View {
     /// The names the rules read for VoiceOver, by pane.
     static let titles = [
         "themes": "Themes", "pages": "Pages", "tasks": "Tasks", "terminals": "Terminals", "worktrees": "Worktrees",
+        "places": "Places", "tree": "Plan", "shells": "Shells",
     ]
 }
 
@@ -525,7 +540,7 @@ enum NavigatorSplitRole: LayoutValueKey, Equatable {
 /// that jumped as a lazy grid's estimate gave way to its rows.
 struct NavigatorSplitLayout: Layout {
     /// Each pane's id, whether it fills, and whether it's open, in order.
-    let panes: [(id: String, fills: Bool, expanded: Bool)]
+    let panes: [(id: String, fills: Bool, expanded: Bool, maxShare: CGFloat?)]
     /// The heights drags chose (`NavigatorSplit.decode`).
     let chosen: [String: CGFloat]
 
@@ -547,7 +562,9 @@ struct NavigatorSplitLayout: Layout {
             }
         }
         let model = panes.enumerated().map { index, pane in
-            NavigatorSplit.Pane(id: pane.id, fills: pane.fills, expanded: pane.expanded, content: content[index] ?? 0)
+            NavigatorSplit.Pane(
+                id: pane.id, fills: pane.fills, expanded: pane.expanded, content: content[index] ?? 0,
+                maxShare: pane.maxShare)
         }
         let viewports = NavigatorSplit.viewports(model, room: size.height - fixed, chosen: chosen)
         return Dictionary(uniqueKeysWithValues: panes.enumerated().map { ($0.offset, viewports[$0.element.id] ?? 0) })
