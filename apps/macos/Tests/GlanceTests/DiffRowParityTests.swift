@@ -58,19 +58,29 @@ struct DiffRowParityTests {
 
     /// How many times a pair may be drawn before a difference counts (ov-252).
     ///
-    /// The suite failed here, only when the whole Mac suite or all of
-    /// `GlanceTests` ran, never alone and never twice in a row: on 3 Oct and
-    /// 4 Oct, and once more in the 14th full run made to find out why. Both
-    /// rows are drawn on the main actor in one synchronous stretch, so no test
-    /// can change the appearance, a default or a font between them; what is
-    /// shared is the process's text and image rendering, which the other
-    /// specimen suites are using at the same moment. That is the likeliest
-    /// cause and is not proven: the failure has been seen 3 times in about 100
-    /// runs and never made to happen on purpose. A difference that comes and
-    /// goes with the same inputs is not the row's doing either way. A change
-    /// to the row's padding, gutter, stripe or marker column is deterministic
-    /// and fails every attempt.
-    private static let attempts = 3
+    /// The suite failed here about 1 run in 24 to 100, only when the whole Mac
+    /// suite or all of `GlanceTests` ran, never alone and never twice in a row.
+    /// Both rows are drawn on the main actor in one synchronous stretch, so no
+    /// test can change the appearance, a default or a font between them.
+    ///
+    /// The cause is not named, and what was measured says why a fix has
+    /// nothing to hold on to. In 10 full runs with the mismatch logged, one
+    /// pair differed: `DiffLineRow` against the frozen copy, 46 bytes in the
+    /// glyph rows, and the frozen row drawn a second time matched its first
+    /// drawing while the `DiffLineRow` drawing did not match either. The next
+    /// attempt agreed. The row has no state, no animation and no clock, so the
+    /// same inputs drew two ways. Reproduction on purpose failed: 750 pairs
+    /// beside four threads drawing text into bitmaps gave no difference, and
+    /// neither did the forced appearances and looped runs of the first
+    /// attempt. Memory pressure that purges a render cache is the remaining
+    /// candidate and cannot be forced without hitting the owner's apps.
+    ///
+    /// So a retry is the right model: a change to the row's padding, gutter,
+    /// stripe or marker column is deterministic and fails every attempt (a
+    /// 1 pt change was checked), and a one-off glyph difference of the
+    /// renderer settles on the second look. Raise `attempts` only with a
+    /// new log of a failure that needed more than one.
+        private static let attempts = 3
 
     /// One row, at a width a pane might be, as raw RGBA.
     private func bytes<V: View>(_ row: V, _ scheme: ColorScheme) throws -> (size: CGSize, pixels: [UInt8]) {
