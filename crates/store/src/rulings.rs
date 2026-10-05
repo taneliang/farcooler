@@ -242,6 +242,10 @@ impl Store {
     /// It takes the board's next number.
     pub fn add_ruling(&self, workspace: Uuid, new: &NewRuling, tasks: &[Uuid], actor: Actor) -> Result<Ruling> {
         let decision = required(&new.decision, DECISION_MAX, "decision")?;
+        // One line: it's what the owner quotes back (review 1005a L4).
+        if decision.contains(['\n', '\r']) {
+            return Err(invalid("decision"));
+        }
         let why = required(&new.why, WHY_MAX, "why")?;
         let reversal = required(&new.reversal, REVERSAL_MAX, "reversal")?;
         let mut conn = self.conn();

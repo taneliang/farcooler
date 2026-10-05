@@ -783,7 +783,7 @@ fn a_ruling_without_why_or_reversal_does_not_parse() {
 /// ruling's id with the move and the note.
 #[tokio::test]
 async fn ruling_set_takes_the_short_id_as_said() {
-    for id in ["R-2", "r-2", "2"] {
+    for id in ["R-2", "r-2", "2", "R2", "#2"] {
         let mut link = runner();
         let said = rule(&mut link, &["set", id, "--state", "reversed", "--note", "Owner: blue."], false).await.unwrap();
         assert_eq!(said, "R-2 is reversed.", "{id}");

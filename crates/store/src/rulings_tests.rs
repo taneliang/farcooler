@@ -98,6 +98,7 @@ fn every_part_is_required_and_bounded() {
     assert_eq!(blank(|r| r.why = String::new()), "why");
     assert_eq!(blank(|r| r.reversal = " ".into()), "reversal");
     assert_eq!(blank(|r| r.decision = "x".repeat(301)), "decision");
+    assert_eq!(blank(|r| r.decision = "Two\nlines".into()), "decision");
     assert_eq!(blank(|r| r.why = "x".repeat(601)), "why");
     assert_eq!(blank(|r| r.reversal = "x".repeat(301)), "reversal");
     let a = store.add_ruling(main, &new(&"x".repeat(300)), &[], Actor::Manager).unwrap();

@@ -97,11 +97,11 @@ async fn send<L: DispatchLink>(link: &mut L, board: &Board, method: &str, p: req
     }
 }
 
-/// `R-12`, `r-12` or `12`, as the number.
+/// `R-12`, `r-12`, `R12`, `#12` or `12`, as the number.
 fn number_of(id: &str) -> Option<u32> {
-    let id = id.trim();
-    let digits = id.strip_prefix("R-").or_else(|| id.strip_prefix("r-")).unwrap_or(id);
-    digits.parse().ok()
+    let id = id.trim().trim_start_matches('#');
+    let id = id.strip_prefix(['R', 'r']).unwrap_or(id);
+    id.strip_prefix('-').unwrap_or(id).parse().ok()
 }
 
 /// One `plan ruling` command on `board`, answering what to print.
