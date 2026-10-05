@@ -92,7 +92,10 @@ public enum PageMarkdown {
         }
     }
 
-    /// Inline Markdown with only `https` and task links kept.
+    /// Inline Markdown with only `https` and task links kept, and each web
+    /// link followed by its domain in secondary text, so a label can't hide
+    /// where it goes (design 7, the owner's ruling on Q5). A label that is
+    /// already its domain isn't repeated.
     public static func inline(_ text: String) -> AttributedString {
         var parsed = Markdown.inline(text)
         for run in parsed.runs {
@@ -100,6 +103,20 @@ public enum PageMarkdown {
             if PageLinks.https(url.absoluteString) == nil && TaskKeyLinks.parse(url) == nil {
                 parsed[run.range].link = nil
             }
+        }
+        // Whole links, however many styled runs each spans; last first, so
+        // an insertion doesn't move a range still to come.
+        var domains: [(AttributedString.Index, String)] = []
+        for (link, range) in parsed.runs[\.link] {
+            guard let link, PageLinks.https(link.absoluteString) != nil, let host = link.host() else { continue }
+            let label = String(parsed[range].characters).trimmingCharacters(in: .whitespaces).lowercased()
+            if label == host.lowercased() || label == link.absoluteString.lowercased() { continue }
+            domains.append((range.upperBound, host))
+        }
+        for (at, host) in domains.reversed() {
+            var domain = AttributedString(" \(host)")
+            domain.foregroundColor = .secondary
+            parsed.insert(domain, at: at)
         }
         return parsed
     }

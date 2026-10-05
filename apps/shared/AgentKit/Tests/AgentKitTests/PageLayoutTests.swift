@@ -47,7 +47,19 @@ struct PageLayoutTests {
         let text = PageMarkdown.inline("[a](https://github.com/x) [b](http://github.com/x) [c](mailto:a@b.c) [d](file:///etc)")
         let links = text.runs.compactMap { run in run.link.map { (String(text[run.range].characters), $0.absoluteString) } }
         #expect(links.map(\.0) == ["a"])
-        #expect(String(text.characters) == "a b c d")
+        #expect(String(text.characters) == "a github.com b c d")
+    }
+
+    @Test("a link in text shows its domain after its label, unless the label is its domain")
+    func textLinksShowTheirDomain() {
+        #expect(String(PageMarkdown.inline("See [Open the dashboard](https://evil.example/x) now").characters) == "See Open the dashboard evil.example now")
+        #expect(String(PageMarkdown.inline("[**bold** label](https://github.com/x)").characters) == "bold label github.com")
+        #expect(String(PageMarkdown.inline("[github.com](https://github.com/x)").characters) == "github.com")
+        #expect(String(PageMarkdown.inline("<https://example.com/a>").characters) == "https://example.com/a")
+        // The domain is words, not part of the link.
+        let text = PageMarkdown.inline("[Docs](https://docs.example/a)")
+        let linked = text.runs.filter { $0.link != nil }.map { String(text[$0.range].characters) }
+        #expect(linked == ["Docs"])
     }
 
     @Test("a timeline is newest first unless given; ties keep their order")
