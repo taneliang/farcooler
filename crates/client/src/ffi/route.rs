@@ -161,7 +161,11 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // A phone neither writes a page nor reads how often one is published.
         | Method::PageSet
         | Method::PageRemove
-        | Method::PageStats => None,
+        | Method::PageStats
+        // Rulings (ov-304) are read in `plan.get`'s answer. Only the
+        // orchestrator writes one: the owner asks it, citing the short id.
+        | Method::RulingAdd
+        | Method::RulingSet => None,
         // The CLI reads it today; the Summary page (ov-188 phase 3) will
         // route it here.
         Method::ReportGet => None,

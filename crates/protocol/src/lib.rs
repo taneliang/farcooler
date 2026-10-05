@@ -541,6 +541,16 @@ pub mod capability {
     /// that reads it absent hides pages, and a CLI refuses before sending,
     /// saying the runner needs an update to show pages.
     pub const BOARD_PAGES: &str = "board_pages";
+    /// Decided for you (ov-304): `ruling.add`, `ruling.set`, and
+    /// `Plan.rulings` on `plan.get`.
+    ///
+    /// **Experimental, with the plan layer it is part of.** A ruling is a
+    /// reversible call the orchestrator made for the owner. Its own capability
+    /// because a runner with `board_plan` alone has none: a client that reads
+    /// it absent shows no Decided For You section, and a CLI refuses a ruling
+    /// verb before sending, saying the runner needs an update to keep rulings.
+    /// Needs `board_plan`, since rulings are read through the plan.
+    pub const BOARD_RULINGS: &str = "board_rulings";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -554,7 +564,7 @@ pub mod capability {
             NEEDS_YOU, WAKE_ON_ANSWER, STREAM_SIZE_MARKERS, TASK_NOTICES, REPORT, AGENT_USAGE,
             AGENTS_FOUND,
             TASK_WAITS, TASK_WORKERS, NOTICE_TASK, BOARD_READS, WORKTREE_FILES, TERMINAL_NAMES, TERMINAL_PORTS,
-            READ_ONLY_FOLDERS, AGENT_QUEUE, BOARD_PLAN, LFS_POINTERS, BOARD_PAGES,
+            READ_ONLY_FOLDERS, AGENT_QUEUE, BOARD_PLAN, LFS_POINTERS, BOARD_PAGES, BOARD_RULINGS,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
@@ -746,6 +756,8 @@ pub mod method {
         PageSet = "page.set" => BOARD_PAGES,
         PageRemove = "page.remove" => BOARD_PAGES,
         PageStats = "page.stats" => BOARD_PAGES,
+        RulingAdd = "ruling.add" => BOARD_RULINGS,
+        RulingSet = "ruling.set" => BOARD_RULINGS,
     }
 }
 
@@ -799,6 +811,8 @@ mod board_reads_tests;
 mod page_wire_tests;
 #[cfg(test)]
 mod plan_layer_tests;
+#[cfg(test)]
+mod ruling_wire_tests;
 #[cfg(test)]
 mod task_starts_tests;
 

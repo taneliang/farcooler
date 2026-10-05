@@ -48,6 +48,7 @@ pub mod task_link;
 pub(crate) mod rpc_board;
 pub(crate) mod rpc_pages;
 pub(crate) mod rpc_plan;
+pub(crate) mod rpc_rulings;
 pub(crate) mod board_reads_ops;
 pub(crate) mod lfs_ops;
 pub mod task_ops;

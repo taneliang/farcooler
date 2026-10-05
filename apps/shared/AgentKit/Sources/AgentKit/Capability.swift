@@ -44,4 +44,5 @@ public enum Capability: String, CaseIterable, Sendable {
     case boardPlan = "board_plan"
     case lfsPointers = "lfs_pointers"
     case boardPages = "board_pages"
+    case boardRulings = "board_rulings"
 }
