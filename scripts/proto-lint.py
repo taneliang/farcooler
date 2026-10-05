@@ -328,6 +328,13 @@ def canary_gate_problems(text):
         problems.append(f"`{gate}` lints against the baseline alone, which lags the run still shipping; add --since-baseline")
     if not re.search(r"^fetch-depth:\s*0$", body.get("steps", ""), re.M):
         problems.append(f"`{gate}` checks out shallow, so --since-baseline cannot read main's history")
+    # What the lint itself waits for (`plan`, which holds CI's verdict) is
+    # upstream of it, so it cannot also need it.
+    upstream, todo = set(), [gate]
+    while todo:
+        for need in needs_of(jobs.get(todo.pop(), {}).get("needs")) - upstream:
+            upstream.add(need)
+            todo.append(need)
     for job, keys in jobs.items():
         if job == gate:
             continue
@@ -338,7 +345,7 @@ def canary_gate_problems(text):
             for need in needs_of(jobs.get(todo.pop(), {}).get("needs")) - seen:
                 seen.add(need)
                 todo.append(need)
-        if gate not in seen:
+        if gate not in seen and job not in upstream:
             problems.append(f"`{job}` does not need `{gate}`, directly or through another job, so a wire break can ship")
     return problems
 
@@ -428,8 +435,55 @@ def recorder_problems(text, canary_text):
         problems.append(f"`{writers[0]}`'s `if` filters on the run's outcome, but a cancelled run can have shipped")
     if "scripts/canary-shipped.py" not in job.get("steps", ""):
         problems.append(f"`{writers[0]}` does not ask scripts/canary-shipped.py what shipped")
-    if "workflow_run.head_sha" not in job.get("steps", "") or "github.sha" in job.get("steps", ""):
-        problems.append(f"`{writers[0]}` must record workflow_run.head_sha; github.sha is main's head, not what shipped")
+    # Canary runs on workflow_run now, so ITS run's head_sha is main's head
+    # when it started, not what it built; the commit is in the run's title.
+    steps = job.get("steps", "")
+    if "workflow_run.display_title" not in steps or "canary-shipped.py --commit" not in steps:
+        problems.append(f"`{writers[0]}` must record the commit named in the Canary run's title (workflow_run.display_title, through canary-shipped.py --commit)")
+    if "github.sha" in steps or "workflow_run.head_sha" in steps:
+        problems.append(f"`{writers[0]}` records github.sha or the Canary run's head_sha, which are main's head when Canary started, not what shipped")
+    if not re.search(r"^run-name:.*workflow_run\.head_sha", canary_text, re.M):
+        problems.append("canary.yml's run-name does not carry workflow_run.head_sha, so the recorder cannot tell which commit shipped")
+    return problems
+
+
+def canary_trigger_problems(text):
+    """How canary.yml could ship a commit CI did not pass, as sentences.
+
+    It runs on workflow_run of CI, whose `github.sha` and `github.ref` are
+    main's head rather than the commit CI ran, so neither may be used outside
+    the manual-dispatch fallback, and only a pushed success from this
+    repository may start a build.
+    """
+    top = top_level(text)
+    trigger = top.get("on", "")
+    problems = []
+    if "workflow_run:" not in trigger or "CI" not in listed(trigger, "workflows"):
+        problems.append("it is not triggered by workflow_run of CI, so it ships commits CI never judged")
+    if listed(trigger, "types") != ["completed"]:
+        problems.append("its workflow_run types must be exactly [completed]")
+    if re.search(r"^  push:", trigger, re.M) or "push:" in trigger.splitlines():
+        problems.append("it still triggers on push, beside CI instead of after it")
+    if "concurrency" in top:
+        problems.append("it has a workflow-level concurrency group, which a red or docs-only CI run would use to cancel a build in flight")
+    jobs = workflow_jobs(text)
+    plan = jobs.get("plan", {})
+    gate_if = plan.get("if", "")
+    for want in ("workflow_run.conclusion == 'success'", "workflow_run.event == 'push'",
+                 "workflow_run.head_repository.full_name == github.repository"):
+        if want not in gate_if:
+            problems.append(f"`plan`'s `if` lacks `{want}`")
+    if not re.search(r"^run: \./scripts/canary-plan\.py$", plan.get("steps", ""), re.M):
+        problems.append("`plan` does not run scripts/canary-plan.py")
+    for job, keys in jobs.items():
+        if job != "plan" and "needs.plan.outputs.sha" not in str(keys) and ("checkout" in keys.get("steps", "")):
+            problems.append(f"`{job}` checks out without `needs.plan.outputs.sha`, so it builds main's moving head")
+    body = re.sub(r"(?m)^\s*#.*$", "", text)
+    for var in ("github.sha", "github.ref"):
+        # Only `plan` may read it, as the dispatch fallback, and the run-name.
+        outside = [l for l in body.splitlines() if var in l and "SHA: ${{ github.sha }}" not in l and not l.startswith("run-name:")]
+        if outside:
+            problems.append(f"`{var}` is main's head here, not the commit CI ran: {outside[0].strip()}")
     return problems
 
 
@@ -778,18 +832,19 @@ def self_test():
     # And the gate check itself, against the ways a gate is lost while every
     # `needs` line still reads correctly, plus a valid spelling it must accept.
     gate_cases = [
-        ("ios's needs removed", "    runs-on: xcode-27\n    needs: wire\n", "    runs-on: xcode-27\n", 1),
-        ("macos's needs removed", "    needs: linux\n", "", 1),
-        ("always() on ios", "    if: vars.CANARY_TESTFLIGHT == 'true'\n", "    if: always() && vars.CANARY_TESTFLIGHT == 'true'\n", 1),
-        ("!cancelled() on linux", "  linux:\n    needs: wire\n", "  linux:\n    needs: wire\n    if: ${{ !cancelled() }}\n", 1),
+        ("ios's needs removed", "    runs-on: xcode-27\n    needs: [wire, plan]\n", "    runs-on: xcode-27\n    needs: plan\n", 1),
+        ("macos's needs removed", "    needs: [linux, plan]\n", "    needs: plan\n", 1),
+        ("always() on ios", "    if: needs.plan.outputs.build == 'true' && vars.CANARY_TESTFLIGHT == 'true'\n", "    if: always() && vars.CANARY_TESTFLIGHT == 'true'\n", 1),
+        ("!cancelled() on linux", "  linux:\n    needs: [wire, plan]\n    if: needs.plan.outputs.build == 'true'\n", "  linux:\n    needs: [wire, plan]\n    if: ${{ !cancelled() }}\n", 1),
         ("|| true on the lint", "--channel canary --since-baseline\n", "--channel canary --since-baseline || true\n", 1),
         ("continue-on-error on the lint job", "  wire:\n    name: Wire compatibility\n", "  wire:\n    name: Wire compatibility\n    continue-on-error: true\n", 1),
         ("continue-on-error on a lint step", "      - run: ./scripts/proto-lint.py --channel canary --since-baseline\n", "      - run: ./scripts/proto-lint.py --channel canary --since-baseline\n        continue-on-error: true\n", 1),
-        ("needs as a block list", "  linux:\n    needs: wire\n", "  linux:\n    needs:\n      - wire\n", 0),
+        ("needs as a block list", "  linux:\n    needs: [wire, plan]\n", "  linux:\n    needs:\n      - wire\n      - plan\n", 0),
         ("--since-baseline dropped", "--channel canary --since-baseline\n", "--channel canary\n", 1),
         ("a shallow checkout", "          fetch-depth: 0\n      - run: ./scripts/proto-lint.py --self-test\n",
          "      - run: ./scripts/proto-lint.py --self-test\n", 1),
-        ("needs as a flow list", "    needs: linux\n", "    needs: [wire, linux]\n", 0),
+        ("needs as a flow list", "    needs: [linux, plan]\n", "    needs: [wire, linux, plan]\n", 0),
+        ("a new job that skips the lint", "\njobs:\n", "\njobs:\n  extra:\n    needs: plan\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    steps:\n      - run: echo\n", 1),
     ]
     for what, old, new, want in gate_cases:
         count += 1
@@ -799,6 +854,32 @@ def self_test():
         got = canary_gate_problems(canary.replace(old, new, 1))
         if bool(got) != bool(want):
             failures.append(f"gate case {what!r}: expected {'a problem' if want else 'none'}, got {got}")
+
+    # Canary ships only what CI passed, and builds that commit rather than
+    # main's moving head.
+    count += 1
+    for problem in canary_trigger_problems(canary):
+        failures.append(f"canary.yml: {problem}")
+    trigger_cases = [
+        ("a push trigger back", "  workflow_dispatch:\n", "  push:\n    branches: [main]\n  workflow_dispatch:\n", 1),
+        ("another workflow named", "workflows: [CI]", "workflows: [Relay]", 1),
+        ("success dropped", "github.event.workflow_run.conclusion == 'success' &&", "true &&", 1),
+        ("the push check dropped", "      github.event.workflow_run.event == 'push' &&\n", "", 1),
+        ("the repository check dropped", " &&\n      github.event.workflow_run.head_repository.full_name == github.repository)", ")", 1),
+        ("a workflow-level concurrency group", "env:\n  FARCOOLER_CHANNEL", "concurrency:\n  group: canary\n\nenv:\n  FARCOOLER_CHANNEL", 1),
+        ("a checkout of main's head", "          ref: ${{ needs.plan.outputs.sha }}\n          fetch-depth: 0\n      - run: ./scripts/proto-lint.py --self-test",
+         "          fetch-depth: 0\n      - run: ./scripts/proto-lint.py --self-test", 1),
+        ("github.sha in the release notes", "commit/${{ needs.plan.outputs.sha }}", "commit/${{ github.sha }}", 1),
+        ("the plan script dropped", "run: ./scripts/canary-plan.py\n", "run: echo\n", 1),
+    ]
+    for what, old, new, want in trigger_cases:
+        count += 1
+        if old not in canary:
+            failures.append(f"trigger case {what!r}: canary.yml no longer contains {old!r}")
+            continue
+        got = canary_trigger_problems(canary.replace(old, new, 1))
+        if bool(got) != bool(want):
+            failures.append(f"trigger case {what!r}: expected {'a problem' if want else 'none'}, got {got}")
 
     # Every job in every workflow has a timeout. Without one, a hang holds a
     # runner until GitHub kills it at six hours.
@@ -926,7 +1007,8 @@ def self_test():
         ("contents: read only", "      contents: write\n", "      contents: read\n", 1),
         ("success only", "    if: github.event.workflow_run.head_branch == 'main'\n",
          "    if: github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success'\n", 1),
-        ("github.sha recorded", "${{ github.event.workflow_run.head_sha }}", "${{ github.sha }}", 1),
+        ("github.sha recorded", "${{ github.event.workflow_run.display_title }}", "${{ github.sha }}", 1),
+        ("the Canary run's head_sha recorded", "${{ github.event.workflow_run.display_title }}", "${{ github.event.workflow_run.head_sha }}", 1),
         ("workflows as a block list", "workflows: [Canary]", "workflows:\n      - Canary", 0),
         ("main-only dropped", "    if: github.event.workflow_run.head_branch == 'main'\n", "", 1),
         ("main-only widened", "head_branch == 'main'\n", "head_branch == 'main' || true\n", 1),

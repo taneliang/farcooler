@@ -32,6 +32,10 @@
 # This file runs as it is on main, whatever the Canary run's commit: GitHub
 # takes a workflow_run workflow from the default branch. The commit only
 # supplies the proto, which is read as data.
+#
+# CANARY RUNS AFTER CI (ov-301), so the Canary run is itself a workflow_run run
+# and its head_sha is main's head when it started. Which commit it built is in
+# its title; canary.yml's run-name puts it there.
 name: Canary wire baseline
 
 on:
@@ -77,10 +81,16 @@ jobs:
           gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs?filter=all&per_page=100" \
             --jq '.jobs[]' > "$RUNNER_TEMP/jobs.ndjson"
           scripts/canary-shipped.py "$RUNNER_TEMP/jobs.ndjson"
-      # The run's commit — the one that shipped — not github.sha, which here
-      # is main's head when this workflow started.
+      # The commit that shipped, from the Canary run's title ("Canary <sha>",
+      # its run-name). Not github.sha, which is main's head when this workflow
+      # started, and not the Canary run's own head_sha either: Canary is a
+      # workflow_run workflow, so that is main's head when IT started. A title
+      # that names no commit fails the job rather than record a wrong one.
       - name: Record the shipped proto
         if: steps.shipped.outputs.shipped == 'true'
         env:
-          SHIPPED: ${{ github.event.workflow_run.head_sha }}
-        run: scripts/canary-baseline.sh "$SHIPPED"
+          TITLE: ${{ github.event.workflow_run.display_title }}
+        run: |
+          set -euo pipefail
+          shipped=$(scripts/canary-shipped.py --commit "$TITLE")
+          scripts/canary-baseline.sh "$shipped"
