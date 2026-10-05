@@ -181,8 +181,65 @@ extension PageWorld {
             return PageResolved(
                 name: label ?? host, status: label == nil ? nil : host, destination: .url(url),
                 spoken: label.map { "\($0), link to \(host)" } ?? "Link to \(host)")
+        case .ci:
+            let name = label ?? Self.ciName(ref.target)
+            guard let subject = ref.target.ciSubject, let read = plan?.ci(subject) else { return PageResolved(name: name) }
+            return PageResolved(
+                name: name, status: PlanWords.ciSummary(read), statusTone: read.needsAttention ? .attention : .neutral,
+                destination: PageLinks.https(read.url).map(PageDestination.url))
+        case .cards(let status):
+            let name = label ?? Self.statusName(status)
+            guard let count = plan?.cardCount(status) else { return PageResolved(name: name) }
+            return PageResolved(name: name, status: "\(count)", spoken: "\(name), \(count)")
         case .unknown:
             return plain
+        }
+    }
+
+    /// What a CI reference is called without a label: "Main", "Run 812", or
+    /// the commit's first eight digits.
+    static func ciName(_ target: PageTarget) -> String {
+        guard case .ci(let s) = target else { return target.rawName }
+        if s == "main" { return "Main" }
+        if s.hasPrefix("run:") { return "Run \(s.dropFirst(4))" }
+        return String(s.prefix(8))
+    }
+
+    /// A card-count reference's status, as the board says it.
+    static func statusName(_ word: String) -> String {
+        if word == "open" { return "Open" }
+        return TaskStatus(rawValue: word)?.title ?? word
+    }
+
+    /// A theme by its name or short id.
+    private func theme(of ref: PageRef) -> PlanTheme? {
+        guard case .theme(let name) = ref.target else { return nil }
+        return plan?.themes.first { $0.name == name || $0.short == name }
+    }
+
+    /// What a figure draws (ov-306): its value as written, or its reference's
+    /// live value, with a detail and whether it needs the owner. A CI figure is
+    /// its status word, with how its jobs stand as the detail unless the page
+    /// gave one; a card count is the number.
+    public func statText(_ stat: PageStat) -> (value: String, detail: String?, tone: PageTone) {
+        guard let ref = stat.ref else { return (stat.value, stat.detail, stat.tone) }
+        let resolved = resolve(ref)
+        switch ref.target {
+        case .ci:
+            guard let subject = ref.target.ciSubject, let read = plan?.ci(subject) else {
+                return (resolved.name, stat.detail, stat.tone)
+            }
+            return (PlanWords.ciStatus(read.status), stat.detail ?? PlanWords.ciJobs(read), read.needsAttention ? .attention : stat.tone)
+        case .cards:
+            return (resolved.status ?? resolved.name, stat.detail, stat.tone)
+        case .lane:
+            let value = stat.show == .spend ? lane(of: ref).map { PageWords.tokens($0.spend) } : lane(of: ref).map(PlanWords.status)
+            return (value ?? resolved.name, stat.detail, stat.tone)
+        case .theme:
+            let value = stat.show == .spend ? theme(of: ref).map { PageWords.tokens($0.spend ?? PlanSpend()) } : resolved.status
+            return (value ?? resolved.name, stat.detail, stat.tone)
+        default:
+            return (resolved.status ?? resolved.name, stat.detail, resolved.statusTone == .attention ? .attention : stat.tone)
         }
     }
 
@@ -194,10 +251,15 @@ extension PageWorld {
         let resolved = resolve(ref)
         switch cell.show {
         case .name:
-            return resolved.name
+            // Live data draws its value (ov-306): CI's status, a count.
+            switch ref.target {
+            case .ci, .cards: return resolved.status ?? resolved.name
+            default: return resolved.name
+            }
         case .state:
             return lane(of: ref).map(PlanWords.status) ?? resolved.name
         case .spend:
+            if let theme = theme(of: ref) { return PageWords.tokens(theme.spend ?? PlanSpend()) }
             return lane(of: ref).map { PageWords.tokens($0.spend) } ?? resolved.name
         }
     }

@@ -110,7 +110,7 @@ struct PageBlockView: View {
         case .text(let md, let tone):
             PageTextView(md: md, tone: tone)
         case .stats(let items):
-            PageStatsView(items: items)
+            PageStatsView(items: items, world: world, onOpen: onOpen)
         case .progress(let label, let done, let total, let detail, let parts):
             PageProgressView(label: label, done: done, total: total, detail: detail, parts: parts)
         case .table(let columns, let rows):
@@ -192,27 +192,45 @@ extension PageView {
 /// A row of figures that wraps.
 struct PageStatsView: View {
     let items: [PageStat]
+    let world: PageWorld
+    let onOpen: (PageDestination) -> Void
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         PageFlow(spacing: Spacing.section * 2, lineSpacing: Spacing.section) {
-            ForEach(Array(items.enumerated()), id: \.offset) { _, stat in
-                VStack(alignment: .leading, spacing: Spacing.tight / 2) {
-                    Text(stat.label)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Text(stat.value)
-                        .font(.title2.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(stat.tone == .attention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.primary))
-                    if let detail = stat.detail {
-                        Text(detail)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+            ForEach(Array(items.enumerated()), id: \.offset) { index, stat in
+                // A figure drawn live (ov-306) opens what it reads, when that
+                // is something the app opens: a CI run's page.
+                let shown = world.statText(stat)
+                let destination = stat.ref.flatMap { world.resolve($0).destination }
+                Group {
+                    if let destination {
+                        Button { onOpen(destination) } label: { figure(stat, shown) }
+                            .buttonStyle(.plain)
+                    } else {
+                        figure(stat, shown)
                     }
                 }
-                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("page-stat-\(index)")
             }
         }
+    }
+
+    private func figure(_ stat: PageStat, _ shown: (value: String, detail: String?, tone: PageTone)) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.tight / 2) {
+            Text(stat.label)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Text(shown.value)
+                .font(.title2.weight(.semibold).monospacedDigit())
+                .foregroundStyle(shown.tone == .attention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.primary))
+            if let detail = shown.detail {
+                Text(detail)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 

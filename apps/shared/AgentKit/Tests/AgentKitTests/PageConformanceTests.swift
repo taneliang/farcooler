@@ -38,7 +38,7 @@ struct PageConformanceTests {
     @Test("the reader reads every fixture: all of them decode, but the one that isn't an object")
     func everyFixtureIsRead() throws {
         let names = try Self.fixtures()
-        #expect(names.count == 66, "a fixture came or went: \(names.count)")
+        #expect(names.count == 74, "a fixture came or went: \(names.count)")
         for name in names {
             if name == "refused/not-an-object.json" {
                 #expect(throws: (any Error).self) { try Self.read(name) }
@@ -153,6 +153,7 @@ struct PageConformanceTests {
             case .list(let items): total + items.filter { $0.ref != nil }.count
             case .timeline(let entries, _): total + entries.filter { $0.ref != nil }.count
             case .links(let refs): total + refs.count
+            case .stats(let items): total + items.filter { $0.ref != nil }.count
             default: total
             }
         }

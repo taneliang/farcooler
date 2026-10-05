@@ -234,16 +234,31 @@ public enum PageTarget: Equatable, Hashable, Sendable {
     case worktree(String)
     case terminal(worktree: String, name: String)
     case url(String)
+    /// CI (ov-306): `main`, a commit's SHA, or `run:<id>`, read by the runner
+    /// through `gh` while a page names it.
+    case ci(String)
+    /// How many of the board's cards are in a status (ov-306): a status's
+    /// word, or `open`.
+    case cards(String)
     /// A target this build doesn't know: drawn as its label, as plain text.
     case unknown
 
     /// The name it was written with: what an unresolved reference draws.
     public var rawName: String {
         switch self {
-        case .task(let s), .ask(let s), .lane(let s), .theme(let s), .page(let s), .worktree(let s), .url(let s): s
+        case .task(let s), .ask(let s), .lane(let s), .theme(let s), .page(let s), .worktree(let s), .url(let s),
+            .ci(let s), .cards(let s):
+            s
         case .terminal(let worktree, let name): "\(worktree)/\(name)"
         case .unknown: ""
         }
+    }
+
+    /// The CI subject a `ci` target is read under: `main`, `run:<id>` or
+    /// `sha:<sha>`.
+    public var ciSubject: String? {
+        guard case .ci(let s) = self else { return nil }
+        return s == "main" || s.hasPrefix("run:") ? s : "sha:\(s)"
     }
 }
 
@@ -276,6 +291,10 @@ public struct PageRef: Equatable, Sendable {
             target = .terminal(worktree: w, name: n)
         } else if let s = o["url"]?.string {
             target = .url(s)
+        } else if let s = o["ci"]?.string {
+            target = .ci(s.lowercased())
+        } else if let s = o["cards"]?.string {
+            target = .cards(s)
         } else {
             target = .unknown
         }
@@ -288,7 +307,7 @@ public enum PageShow: Sendable, Equatable {
     case name
     /// A lane's state words: "Fixing · round 1".
     case state
-    /// A lane's tokens.
+    /// A lane's tokens, or a theme's share of its lanes' (ov-306).
     case spend
 }
 
@@ -314,30 +333,43 @@ public struct PageCell: Equatable, Sendable {
             return
         }
         let o = any.object ?? [:]
-        let show: PageShow =
-            switch o["show"]?.string {
-            case "state": .state
-            case "spend": .spend
-            default: .name
-            }
+        let show = PageShow(word: o["show"]?.string)
         self.init(
             text: o["text"]?.string, ref: PageRef(o["ref"]), show: show, tone: PageTone(word: o["tone"]?.string),
             mono: o["mono"]?.bool ?? false)
     }
 }
 
-/// A figure in a `stats` row.
+extension PageShow {
+    init(word: String?) {
+        switch word {
+        case "state": self = .state
+        case "spend": self = .spend
+        default: self = .name
+        }
+    }
+}
+
+/// A figure in a `stats` row: a value as written, or a reference drawn live
+/// (ov-306), when `value` is empty.
 public struct PageStat: Equatable, Sendable {
     public var label: String
     public var value: String
     public var detail: String?
     public var tone: PageTone
+    public var ref: PageRef?
+    public var show: PageShow
 
-    public init(label: String, value: String, detail: String? = nil, tone: PageTone = .neutral) {
+    public init(
+        label: String, value: String, detail: String? = nil, tone: PageTone = .neutral, ref: PageRef? = nil,
+        show: PageShow = .name
+    ) {
         self.label = label
         self.value = value
         self.detail = detail
         self.tone = tone
+        self.ref = ref
+        self.show = show
     }
 }
 
@@ -452,8 +484,13 @@ public enum PageBlock: Equatable, Sendable {
             self = .stats(
                 items("items").compactMap { s in
                     let s = s.object ?? [:]
-                    guard let label = s["label"]?.string, let value = s["value"]?.string else { return nil }
-                    return PageStat(label: label, value: value, detail: s["detail"]?.string, tone: PageTone(word: s["tone"]?.string))
+                    let ref = PageRef(s["ref"])
+                    guard let label = s["label"]?.string, let value = s["value"]?.string ?? (ref == nil ? nil : "") else {
+                        return nil
+                    }
+                    return PageStat(
+                        label: label, value: value, detail: s["detail"]?.string, tone: PageTone(word: s["tone"]?.string),
+                        ref: ref, show: PageShow(word: s["show"]?.string))
                 })
             return
         case "progress":
@@ -530,7 +567,7 @@ extension PageBlock {
         switch self {
         case .heading(let text): return n(text)
         case .text(let md, _): return n(md)
-        case .stats(let items): return items.reduce(0) { $0 + n($1.label) + n($1.value) + n($1.detail) }
+        case .stats(let items): return items.reduce(0) { $0 + n($1.label) + n($1.value) + n($1.detail) + ref($1.ref) }
         case .progress(let label, _, _, let detail, let parts): return n(label) + n(detail) + parts.reduce(0) { $0 + n($1.label) }
         case .table(let columns, let rows):
             return columns.reduce(0) { $0 + n($1.title) } + rows.joined().reduce(0) { $0 + n($1.text) + ref($1.ref) }
@@ -585,6 +622,15 @@ extension PageBlock {
             }, given: given)
         case .links(let refs):
             return .links(refs.compactMap { keep($0) })
+        case .stats(let items):
+            return .stats(items.map { stat in
+                var stat = stat
+                if let ref = stat.ref, keep(ref) == nil {
+                    stat.value = stat.value.isEmpty ? (ref.label ?? ref.target.rawName) : stat.value
+                    stat.ref = nil
+                }
+                return stat
+            })
         default:
             return self
         }
