@@ -192,7 +192,9 @@ EOF
     git -C "$repo" rev-parse integ-3 > "$dir/integ-3.sha"
     git -C "$repo" switch -q main
     printf 'KEY   STATUS     AGE  TITLE\nfc-9  in_review  1h   Docs: the README spells receive right\n' > "$dir/board/list.txt"
-    printf 'Now\n  integ-3  Landing · 1 card (fc-9) · reviewed, gates green\n' > "$dir/board/plan.txt" ;;
+    # A train on the plan since ov-309: the manager records the push on it
+    # (plan train set --sha) and lands it.
+    printf 'Now\n  integ-3 · Gating\n    readme  Landing · in integ-3 · 1 card (fc-9) · reviewed, gates green\n' > "$dir/board/plan.txt" ;;
   S19)
     # A quiet board with a visible gap: tests/ covers addition only, and the
     # README still says "recieve". The charter says suggest only.

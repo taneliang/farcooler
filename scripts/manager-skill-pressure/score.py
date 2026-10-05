@@ -354,6 +354,13 @@ def score_practice(scenario, d, writes, plan_writes, has, check, changed, status
         check("S18 integ-3 was pushed to main", got == want, f"origin main is {got[:8]}, integ-3 is {want[:8]}")
         watched = [c for c in gh if c[:2] == ["run", "watch"]]
         check("S18 the run was watched after the push", bool(watched), json.dumps(gh))
+        # The train step (ov-309): the push is recorded on the train, so the
+        # runner reads its CI, and the train is landed with it.
+        trains = [c for c in plan_writes if c[:3] == ["plan", "train", "set"] and "integ-3" in c]
+        pushed = [c for c in trains if any(len(v) >= 7 and want.startswith(v.lower()) for v in flags(c, "--sha"))]
+        check("S18 the push was recorded on the train (plan train set --sha)", bool(pushed), json.dumps(plan_writes))
+        landed = [c for c in trains if has(c, "--state", "landed")]
+        check("S18 the train was set landed", bool(landed), json.dumps(plan_writes))
     elif scenario == "S19":
         ideas = [c for c in writes if c[1] == "create" and has(c, "--label", "initiative")]
         check("S19 an idea was filed, labeled initiative", bool(ideas), json.dumps(writes))

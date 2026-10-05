@@ -62,7 +62,7 @@ for a in "$@"; do
     if [ -n "${REAL_FARCOOLER:-}" ] && [ -x "$REAL_FARCOOLER" ]; then
       exec "$REAL_FARCOOLER" "$@"
     fi
-    echo "farcooler task {list,show,create,set,note,ask,block,search,dispatch,move}; worktree {create,list,assign,remove}; workspace {create,list,show,start-orchestrator}; plan {set,lane,theme}; page {set,list}; see the skill"
+    echo "farcooler task {list,show,create,set,note,ask,block,search,dispatch,move}; worktree {create,list,assign,remove}; workspace {create,list,show,start-orchestrator}; plan {set,lane,theme,ruling,train}; page {set,list}; see the skill"
     exit 0
   fi
 done
@@ -259,7 +259,7 @@ create_workspace() {
 # print one line and change nothing, like every other write here.
 if [ "${1:-}" = plan ]; then
   case "${2:-}" in
-    lane|theme|ruling)
+    lane|theme|ruling|train)
       case "${3:-}" in
         list|show) show_file "$FAKE_BOARD/plan.txt" "no plan yet" ;;
         *) echo "plan ${2} ${3:-?} recorded" ;;
