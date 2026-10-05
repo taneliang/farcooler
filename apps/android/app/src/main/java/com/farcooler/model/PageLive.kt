@@ -163,7 +163,49 @@ data class PageWorld(
                     spoken = label?.let { "$it, link to $host" } ?: "Link to $host",
                 )
             } ?: plain
+            is PageTarget.Ci -> {
+                val name = label ?: ciName(t)
+                val read = plan?.ci(t.ciSubject) ?: return PageResolved(name)
+                PageResolved(
+                    name, TrainWords.ciSummary(read), if (read.needsAttention) PageTone.ATTENTION else PageTone.NEUTRAL,
+                    PageLinks.https(read.url)?.let { PageDestination.Url(read.url) },
+                )
+            }
+            is PageTarget.Cards -> {
+                val name = label ?: statusName(t.status)
+                val count = plan?.cardCount(t.status) ?: return PageResolved(name)
+                PageResolved(name, "$count", spoken = "$name, $count")
+            }
             PageTarget.Unknown -> plain
+        }
+    }
+
+    private fun themeOf(ref: PageRef): PlanTheme? =
+        (ref.target as? PageTarget.Theme)?.let { t -> plan?.themes?.firstOrNull { it.name == t.name } }
+
+    private fun laneOf(ref: PageRef): PlanLane? =
+        (ref.target as? PageTarget.Lane)?.let { t -> plan?.lanes?.firstOrNull { it.name == t.name } }
+
+    /** A figure as it's drawn (ov-306): its value as written, or its reference's live value, with a detail and a tone. */
+    data class StatShown(val value: String, val detail: String?, val tone: PageTone)
+
+    fun statText(stat: PageStat): StatShown {
+        val ref = stat.ref ?: return StatShown(stat.value, stat.detail, stat.tone)
+        val resolved = resolve(ref)
+        return when (val t = ref.target) {
+            is PageTarget.Ci -> plan?.ci(t.ciSubject)?.let { read ->
+                StatShown(TrainWords.ciStatus(read.status), stat.detail ?: TrainWords.ciJobs(read), if (read.needsAttention) PageTone.ATTENTION else stat.tone)
+            } ?: StatShown(resolved.name, stat.detail, stat.tone)
+            is PageTarget.Cards -> StatShown(resolved.status ?: resolved.name, stat.detail, stat.tone)
+            is PageTarget.Lane -> StatShown(
+                laneOf(ref)?.let { if (stat.show == PageShow.SPEND) PageWords.tokens(it.spend) else PlanWords.status(it) } ?: resolved.name,
+                stat.detail, stat.tone,
+            )
+            is PageTarget.Theme -> StatShown(
+                (if (stat.show == PageShow.SPEND) themeOf(ref)?.let { PageWords.tokens(it.spend ?: PlanSpend()) } else resolved.status) ?: resolved.name,
+                stat.detail, stat.tone,
+            )
+            else -> StatShown(resolved.status ?: resolved.name, stat.detail, if (resolved.statusTone == PageTone.ATTENTION) PageTone.ATTENTION else stat.tone)
         }
     }
 
@@ -171,11 +213,13 @@ data class PageWorld(
     fun cellText(cell: PageCell): String {
         cell.text?.let { return it }
         val ref = cell.ref ?: return ""
-        val lane = (ref.target as? PageTarget.Lane)?.let { t -> plan?.lanes?.firstOrNull { it.name == t.name } }
+        val lane = laneOf(ref)
         return when (cell.show) {
-            PageShow.NAME -> resolve(ref).name
+            // Live data draws its value (ov-306): CI's status, a count.
+            PageShow.NAME -> resolve(ref).let { if (ref.target is PageTarget.Ci || ref.target is PageTarget.Cards) it.status ?: it.name else it.name }
             PageShow.STATE -> lane?.let(PlanWords::status) ?: resolve(ref).name
-            PageShow.SPEND -> lane?.let { PageWords.tokens(it.spend) } ?: resolve(ref).name
+            PageShow.SPEND -> themeOf(ref)?.let { PageWords.tokens(it.spend ?: PlanSpend()) }
+                ?: lane?.let { PageWords.tokens(it.spend) } ?: resolve(ref).name
         }
     }
 
@@ -199,6 +243,17 @@ data class PageWorld(
 
     companion object {
         fun terminalKey(worktree: String, name: String) = "$worktree/$name"
+
+        /** What a CI reference is called without a label: "Main", "Run 812", or the commit's first eight digits. */
+        fun ciName(t: PageTarget.Ci): String = when {
+            t.subject == "main" -> "Main"
+            t.subject.startsWith("run:") -> "Run ${t.subject.removePrefix("run:")}"
+            else -> t.subject.take(8)
+        }
+
+        /** A card-count reference's status, as the board says it. */
+        fun statusName(word: String): String =
+            if (word == "open") "Open" else TaskStatus.entries.firstOrNull { it.wire == word }?.title ?: word
     }
 }
 

@@ -60,6 +60,8 @@ data class PlanTheme(
     val ordinal: Long,
     val cards: List<PlanCardRef>,
     val counts: PlanCounts,
+    /** What its lanes spent on its cards, each lane's spend shared over its cards (ov-306); null from a runner before it. */
+    val spend: PlanSpend? = null,
 )
 
 /** Where a lane is. Moves go forward, with two loops back to fixing. */
@@ -143,6 +145,12 @@ data class Plan(
     val cards: List<PlanCard> = emptyList(),
     /** Decided for you (ov-304): standing rulings newest first, then the settled ones, in the runner's order. */
     val rulings: List<PlanRuling> = emptyList(),
+    /** Trains (ov-309): those not landed or dropped, oldest first, then the settled ones. */
+    val trains: List<PlanTrain> = emptyList(),
+    /** What the runner last read of CI for each subject the board names (ov-306). */
+    val ci: List<PlanCiRead> = emptyList(),
+    /** How many of the board's cards are in each status (ov-306); null from a runner before it. */
+    val boardCounts: PlanCounts? = null,
 ) {
     /** Nothing planned: no theme and no lane. Rulings don't count: they never switch a board's layout (review 1005a F1). */
     val isEmpty: Boolean get() = themes.isEmpty() && lanes.isEmpty()
@@ -232,31 +240,42 @@ data class Plan(
                 PlanCard(c.string("task"), c.string("key"), c.string("title"), c.string("status"))
             },
             rulings = PlanRuling.decodeAll(o),
+            trains = PlanTrain.decodeAll(o),
+            ci = PlanCiRead.decodeAll(o),
+            boardCounts = (o["board_counts"] as? JsonObject)?.let(::counts),
         )
+
+        /** A status count object: a theme's, or the board's. */
+        internal fun counts(c: JsonObject): PlanCounts {
+            fun n(name: String) = c[name]?.jsonPrimitive?.intOrNull ?: 0
+            return PlanCounts(n("backlog"), n("todo"), n("needs_decision"), n("in_progress"), n("in_review"), n("done"), n("cancelled"))
+        }
+
+        /** A spend object: a lane's, or a theme's share. */
+        private fun spend(s: JsonObject?): PlanSpend {
+            fun n(name: String) = s?.get(name)?.jsonPrimitive?.longOrNull ?: 0L
+            return PlanSpend(
+                n("input_tokens"), n("output_tokens"), n("cache_read_tokens"), n("cache_write_tokens"),
+                s?.get("cost_micros")?.jsonPrimitive?.longOrNull, n("runs").toInt(), n("unmeasured_agents").toInt(),
+                n("shared_agents").toInt(),
+            )
+        }
 
         private fun refs(o: JsonObject) = o.list("cards").map {
             val c = it.jsonObject
             PlanCardRef(c.string("task"), c.string("key"), c.string("slice"))
         }
 
-        private fun theme(o: JsonObject): PlanTheme {
-            val c = o["counts"] as? JsonObject
-            fun n(name: String) = c?.get(name)?.jsonPrimitive?.intOrNull ?: 0
-            return PlanTheme(
-                id = o.string("id"), name = o.string("name"), outcome = o.string("outcome"),
-                story = o.string("story"), storyAt = o.long("story_at"), next = o.string("next"),
-                ownerAsk = o.string("owner_ask"), state = o.string("state"), ordinal = o.long("ordinal"),
-                cards = refs(o),
-                counts = PlanCounts(
-                    n("backlog"), n("todo"), n("needs_decision"), n("in_progress"), n("in_review"), n("done"),
-                    n("cancelled"),
-                ),
-            )
-        }
+        private fun theme(o: JsonObject): PlanTheme = PlanTheme(
+            id = o.string("id"), name = o.string("name"), outcome = o.string("outcome"),
+            story = o.string("story"), storyAt = o.long("story_at"), next = o.string("next"),
+            ownerAsk = o.string("owner_ask"), state = o.string("state"), ordinal = o.long("ordinal"),
+            cards = refs(o),
+            counts = counts(o["counts"] as? JsonObject ?: JsonObject(emptyMap())),
+            spend = (o["spend"] as? JsonObject)?.let(::spend),
+        )
 
         private fun lane(o: JsonObject): PlanLane {
-            val s = o["spend"] as? JsonObject
-            fun n(name: String) = s?.get(name)?.jsonPrimitive?.longOrNull ?: 0L
             return PlanLane(
                 id = o.string("id"), name = o.string("name"), state = LaneState.parse(o.maybe("state")),
                 reason = o.string("reason"), planRank = o["plan_rank"]?.jsonPrimitive?.intOrNull,
@@ -272,11 +291,7 @@ data class Plan(
                         a.long("started_at"), a["ended_at"]?.jsonPrimitive?.longOrNull,
                     )
                 },
-                spend = PlanSpend(
-                    n("input_tokens"), n("output_tokens"), n("cache_read_tokens"), n("cache_write_tokens"),
-                    s?.get("cost_micros")?.jsonPrimitive?.longOrNull, n("runs").toInt(), n("unmeasured_agents").toInt(),
-                    n("shared_agents").toInt(),
-                ),
+                spend = spend(o["spend"] as? JsonObject),
             )
         }
     }
@@ -420,13 +435,13 @@ object PlanWords {
         LaneState.UNKNOWN -> "Unknown"
     }
 
-    /** A lane's state with what it needs said beside it: "Fixing · round 1", "Landing · train integ-8", "Queued · 2nd". */
+    /** A lane's state with what it needs said beside it: "Fixing · round 1", "Landing · in integ-8", "Queued · 2nd". */
     fun status(lane: PlanLane): String {
         val parts = mutableListOf(state(lane.state))
         if (lane.state == LaneState.FIXING && lane.fixRounds > 0) parts += "round ${lane.fixRounds}"
         lane.planRank?.let { if (lane.state == LaneState.QUEUED) parts += ordinal(it) }
         lane.landedSha?.let { if (lane.state == LaneState.LANDED && it.isNotEmpty()) parts += it.take(8) }
-        lane.train?.let { if (lane.state.isLive && it.isNotEmpty()) parts += "train $it" }
+        lane.train?.let { if (lane.state.isLive && it.isNotEmpty()) parts += "in $it" }
         return parts.joinToString(" · ")
     }
 

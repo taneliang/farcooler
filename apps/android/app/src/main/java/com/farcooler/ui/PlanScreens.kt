@@ -52,6 +52,8 @@ import com.farcooler.model.LaneState
 import com.farcooler.model.Plan
 import com.farcooler.model.PlanCounts
 import com.farcooler.model.PlanLane
+import com.farcooler.model.ciOf
+import com.farcooler.model.nowGroups
 import com.farcooler.model.PlanPage
 import com.farcooler.model.PlanReadState
 import com.farcooler.model.PlanSegment
@@ -149,12 +151,21 @@ private fun LazyListScope.loaded(
             }
         }
     }
-    val now = plan.working + plan.unranked
-    if (now.isNotEmpty()) {
-        item(key = "plan/now") { PlanHeader("Now", now.size, Modifier.testTag("plan-now")) }
-        itemsIndexedLanes(now, "now") { _, lane ->
-            PlanLaneRow(lane, plan.themeOf(lane), rank = null, now = plan.nowMs, waitsOnOwner = plan.waitsOnOwner(lane, statuses)) {
-                onOpen(PlanPage.Lane(lane.id))
+    // Each train not yet landed heads the lanes on it (ov-309), and the lanes
+    // on none follow.
+    val groups = plan.nowGroups
+    if (groups.isNotEmpty()) {
+        val count = groups.sumOf { it.lanes.size + (if (it.train == null) 0 else 1) }
+        item(key = "plan/now") { PlanHeader("Now", count, Modifier.testTag("plan-now")) }
+        for (group in groups) {
+            val train = group.train
+            if (train != null) item(key = "plan/train/${train.id}") { PlanTrainRow(train, plan.ciOf(train)) }
+            itemsIndexedLanes(group.lanes, "now") { _, lane ->
+                Box(Modifier.padding(start = if (train == null) 0.dp else 16.dp)) {
+                    PlanLaneRow(lane, plan.themeOf(lane), rank = null, now = plan.nowMs, waitsOnOwner = plan.waitsOnOwner(lane, statuses)) {
+                        onOpen(PlanPage.Lane(lane.id))
+                    }
+                }
             }
         }
     }

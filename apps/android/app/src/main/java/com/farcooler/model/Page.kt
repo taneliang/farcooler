@@ -180,6 +180,14 @@ sealed interface PageTarget {
     data class Worktree(val name: String) : PageTarget { override val rawName get() = name }
     data class Terminal(val worktree: String, val name: String) : PageTarget { override val rawName get() = "$worktree/$name" }
     data class Url(val raw: String) : PageTarget { override val rawName get() = raw }
+    /** CI (ov-306): `main`, a commit's SHA, or `run:<id>`, read by the runner through `gh` while a page names it. */
+    data class Ci(val subject: String) : PageTarget {
+        override val rawName get() = subject
+        /** The subject the runner reads it under: `main`, `run:<id>` or `sha:<sha>`. */
+        val ciSubject: String get() = if (subject == "main" || subject.startsWith("run:")) subject else "sha:$subject"
+    }
+    /** How many of the board's cards are in a status (ov-306): a status's word, or `open`. */
+    data class Cards(val status: String) : PageTarget { override val rawName get() = status }
 
     /** A target this build doesn't know: drawn as its label, as plain text. */
     data object Unknown : PageTarget { override val rawName get() = "" }
@@ -201,6 +209,8 @@ data class PageRef(val target: PageTarget, val label: String? = null) {
                 terminal?.str("worktree") != null && terminal.str("name") != null ->
                     PageTarget.Terminal(terminal.str("worktree")!!, terminal.str("name")!!)
                 o.str("url") != null -> PageTarget.Url(o.str("url")!!)
+                o.str("ci") != null -> PageTarget.Ci(o.str("ci")!!.lowercase())
+                o.str("cards") != null -> PageTarget.Cards(o.str("cards")!!)
                 else -> PageTarget.Unknown
             }
             return PageRef(target, o.str("label"))
@@ -208,8 +218,18 @@ data class PageRef(val target: PageTarget, val label: String? = null) {
     }
 }
 
-/** What a reference cell draws when it has no text of its own. */
-enum class PageShow { NAME, STATE, SPEND }
+/** What a reference cell draws when it has no text of its own: a lane's state, or a lane's or a theme's spend (ov-306). */
+enum class PageShow {
+    NAME, STATE, SPEND;
+
+    companion object {
+        fun of(word: String?): PageShow = when (word) {
+            "state" -> STATE
+            "spend" -> SPEND
+            else -> NAME
+        }
+    }
+}
 
 /** A table cell: text, a live reference, or text that links somewhere. */
 data class PageCell(
@@ -223,18 +243,21 @@ data class PageCell(
         fun of(element: JsonElement): PageCell {
             (element as? JsonPrimitive)?.takeIf { it.isString }?.let { return PageCell(text = it.content) }
             val o = element as? JsonObject ?: return PageCell()
-            val show = when (o.str("show")) {
-                "state" -> PageShow.STATE
-                "spend" -> PageShow.SPEND
-                else -> PageShow.NAME
-            }
+            val show = PageShow.of(o.str("show"))
             return PageCell(o.str("text"), PageRef.of(o["ref"]), show, PageTone.of(o.str("tone")), o.bool("mono") ?: false)
         }
     }
 }
 
-/** A figure in a `stats` row. */
-data class PageStat(val label: String, val value: String, val detail: String? = null, val tone: PageTone = PageTone.NEUTRAL)
+/** A figure in a `stats` row: a value as written, or a reference drawn live (ov-306), when [value] is empty. */
+data class PageStat(
+    val label: String,
+    val value: String,
+    val detail: String? = null,
+    val tone: PageTone = PageTone.NEUTRAL,
+    val ref: PageRef? = null,
+    val show: PageShow = PageShow.NAME,
+)
 
 /** A column of a table. */
 data class PageColumn(val title: String, val align: Align = Align.START, val grow: Boolean = false) {
@@ -284,7 +307,7 @@ sealed interface PageBlock {
             return when (this) {
                 is Heading -> n(text)
                 is Text -> n(md)
-                is Stats -> items.sumOf { n(it.label) + n(it.value) + n(it.detail) }
+                is Stats -> items.sumOf { n(it.label) + n(it.value) + n(it.detail) + ref(it.ref) }
                 is Progress -> n(label) + n(detail) + parts.sumOf { n(it.label) }
                 is Table -> columns.sumOf { n(it.title) } + rows.flatten().sumOf { n(it.text) + ref(it.ref) }
                 is ListBlock -> items.sumOf { n(it.text) + n(it.detail) + ref(it.ref) }
@@ -320,6 +343,10 @@ sealed interface PageBlock {
             is ListBlock -> copy(items = items.map { it.copy(ref = keep(it.ref)) })
             is Timeline -> copy(entries = entries.map { it.copy(ref = keep(it.ref)) })
             is Links -> copy(refs = refs.mapNotNull { keep(it) })
+            is Stats -> copy(items = items.map { stat ->
+                val ref = stat.ref
+                if (ref != null && keep(ref) == null) stat.copy(value = stat.value.ifEmpty { ref.label ?: ref.target.rawName }, ref = null) else stat
+            })
             else -> this
         }
     }
@@ -338,8 +365,9 @@ sealed interface PageBlock {
                 "stats" -> Stats(items("items").mapNotNull { s ->
                     val s = s as? JsonObject ?: return@mapNotNull null
                     val label = s.str("label") ?: return@mapNotNull null
-                    val value = s.str("value") ?: return@mapNotNull null
-                    PageStat(label, value, s.str("detail"), PageTone.of(s.str("tone")))
+                    val ref = PageRef.of(s["ref"])
+                    val value = s.str("value") ?: (if (ref != null) "" else return@mapNotNull null)
+                    PageStat(label, value, s.str("detail"), PageTone.of(s.str("tone")), ref, PageShow.of(s.str("show")))
                 })
                 "progress" -> {
                     val label = o.str("label")

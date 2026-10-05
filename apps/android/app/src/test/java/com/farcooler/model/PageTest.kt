@@ -81,13 +81,13 @@ class PageTest {
             world.resolve(PageRef(PageTarget.Task("OV-274"))),
         )
         val lane = plan.lanes.first { it.name == "ov-274-phones" }
-        assertEquals(PageResolved("ov-274-phones", "In review · train integ-10", destination = PageDestination.Lane(lane.id)), world.resolve(PageRef(PageTarget.Lane("ov-274-phones"))))
+        assertEquals(PageResolved("ov-274-phones", "In review · in integ-10", destination = PageDestination.Lane(lane.id)), world.resolve(PageRef(PageTarget.Lane("ov-274-phones"))))
         val theme = world.resolve(PageRef(PageTarget.Theme("Visual language"), label = "Visual"))
         assertEquals("Visual", theme.name)
         assertEquals("0 of 4 done", theme.status)
         assertEquals(PageResolved("Spend", destination = PageDestination.Page("spend")), world.resolve(PageRef(PageTarget.Page("spend"))))
         assertEquals(PageDestination.Terminal("wt-1", "build"), world.resolve(PageRef(PageTarget.Terminal("integ-10", "build"))).destination)
-        assertEquals("In review · train integ-10", world.cellText(PageCell(ref = PageRef(PageTarget.Lane("ov-274-phones")), show = PageShow.STATE)))
+        assertEquals("In review · in integ-10", world.cellText(PageCell(ref = PageRef(PageTarget.Lane("ov-274-phones")), show = PageShow.STATE)))
         assertEquals("Not reported", world.cellText(PageCell(ref = PageRef(PageTarget.Lane("mac-ux")), show = PageShow.SPEND)))
     }
 
@@ -158,7 +158,7 @@ class PageTest {
         assertTrue(PageLayout.stepsDown(411))
         val table = page("train").doc!!.blocks[4] as PageBlock.Table
         assertEquals(
-            "Lane, ov-274-phones. Cards, ov-274. Gate, iOS UI class, Android captures. State, In review · train integ-10.",
+            "Lane, ov-274-phones. Cards, ov-274. Gate, iOS UI class, Android captures. State, In review · in integ-10.",
             PageLayout.spokenRow(table.columns, table.rows[0], world),
         )
         assertEquals(listOf("Open ov-274-phones", "Open ov-274"), world.actions(table.rows[0]).map { it.first })

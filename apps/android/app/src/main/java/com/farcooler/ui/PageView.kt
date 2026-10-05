@@ -149,7 +149,7 @@ private fun PageBlockView(block: PageBlock, world: PageWorld, width: Int, open: 
             modifier = Modifier.semantics { heading() },
         )
         is PageBlock.Text -> PageText(block.md, block.tone, open)
-        is PageBlock.Stats -> PageStats(block)
+        is PageBlock.Stats -> PageStats(block, world, open)
         is PageBlock.Progress -> PageProgress(block)
         is PageBlock.Table ->
             if (PageLayout.stacks(block.columns.size, width)) PageStackedTable(block.columns, block.rows, world, open)
@@ -234,17 +234,22 @@ private fun pageInline(
 /** A row of figures that wraps. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun PageStats(block: PageBlock.Stats) {
+private fun PageStats(block: PageBlock.Stats, world: PageWorld, open: (PageDestination) -> Unit) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        for (stat in block.items) {
-            Column(Modifier.semantics(mergeDescendants = true) {}) {
+        block.items.forEachIndexed { index, stat ->
+            // A figure drawn live (ov-306) opens what it reads when the app
+            // can: a CI run's page.
+            val shown = world.statText(stat)
+            val destination = stat.ref?.let { world.resolve(it).destination }
+            val tap = if (destination != null) Modifier.clickable(role = Role.Button) { open(destination) } else Modifier
+            Column(tap.testTag("page-stat-$index").semantics(mergeDescendants = true) {}) {
                 Text(stat.label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
-                    stat.value,
+                    shown.value,
                     style = MaterialTheme.typography.headlineSmall.copy(fontFeatureSettings = "tnum"),
-                    color = if (stat.tone == PageTone.ATTENTION) amber() else MaterialTheme.colorScheme.onSurface,
+                    color = if (shown.tone == PageTone.ATTENTION) amber() else MaterialTheme.colorScheme.onSurface,
                 )
-                stat.detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                shown.detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
         }
     }
