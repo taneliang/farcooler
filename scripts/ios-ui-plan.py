@@ -5,18 +5,28 @@ ci.yml's `ios-ui-plan` job runs this. The shards hold two `xcode-27` runners
 for about half an hour each, so they run only when something the iOS app is
 built from changed:
 
-    EVENT=push BEFORE=<sha> AFTER=<sha> scripts/ios-ui-plan.py
+    EVENT=push AFTER=<sha> CANDIDATES=<file> scripts/ios-ui-plan.py
     EVENT=pull_request BASE=<sha> HEAD=<sha> scripts/ios-ui-plan.py
     scripts/ios-ui-plan.py --self-test
 
 It writes `run=true|false` to $GITHUB_OUTPUT and says why.
 
-A pull request compares merge-base..head (`BASE...HEAD`). A push to main
-compares `BEFORE..AFTER`, the commits the push added. Anything that stops that
-range from being computed runs everything, because a skipped test is the one
-failure nobody sees: a force push (BEFORE is no longer in the history), a new
-branch (BEFORE is all zeros), an empty or unknown BEFORE, a missing object, or
-any event but the two above.
+A pull request compares merge-base..head (`BASE...HEAD`).
+
+A push to main compares the nearest ancestor of `AFTER` whose CI run on main
+was GREEN, with `AFTER`: not the push's own `before`. CI cancels a run when
+the next push lands (ci.yml's concurrency group), and a run can end red, so
+the previous push may never have had its UI tests pass. Diffing from `before`
+let an iOS change whose CI was cancelled by a daemon-only push go unrun, and
+Canary, which measures from the last green run, then shipped it. By induction
+the rule is sound: a green run that skipped its shards had no iOS change since
+its own green base. CANDIDATES is a file with one successful CI run per line,
+as JSON with a `head_sha`; scripts/canary-plan.py reads the same list and owns
+the nearest-ancestor choice (`base_commit`), shared here rather than copied.
+
+With no green ancestor in the history (a first run, a force push, a list that
+could not be read), or a range that cannot be computed, or an unknown event,
+everything runs, because a skipped test is the one failure nobody sees.
 
 The owner chose this on Oct 5 (ov-301): main used to run the shards on every
 push as a deliberate backstop, and that, with Canary, kept GitHub's five macOS
@@ -29,35 +39,109 @@ import re
 import subprocess
 import sys
 import tempfile
+import importlib.util
+import json
+try:
+    import tomllib
+except ImportError:  # Python before 3.11
+    tomllib = None
 
-# What the iOS app is built from: the app, AgentKit under apps/shared, the
-# crates the xcframeworks link (farcooler-client and its path dependencies
-# core, fence, protocol, tailcat, transport, plus farcooler-vt, per `cargo
-# metadata`), the .proto protocol compiles, the shared fixtures, and this
-# job's own scripts and workflow.
-RELEVANT = re.compile(
-    r"^(apps/ios/|apps/shared/|crates/(client|core|fence|protocol|tailcat|transport|vt)/|proto/|"
-    r"test/fixtures/|Cargo\.(toml|lock)$|"
-    r"scripts/(ios-ui-tests\.sh|ios-ui-shards\.py|ios-ui-plan\.py|build-ios-frameworks\.sh)$|"
-    r"\.github/workflows/ci\.yml$)"
-)
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+# What the iOS app is built from, one alternative per entry; the self-test
+# holds a sample path for each, matched by that entry alone. The app,
+# AgentKit under apps/shared, the crates the two xcframeworks link (the path
+# dependencies of farcooler-client and farcooler-vt, which the self-test reads
+# from their Cargo.toml files, so a new one cannot open a silent hole), the
+# .proto protocol compiles, the shared fixtures, the workspace manifest and
+# lockfile, and this job's own scripts and workflow.
+PATTERNS = [
+    r"apps/ios/",
+    r"apps/shared/",
+    r"crates/client/",
+    r"crates/core/",
+    r"crates/fence/",
+    r"crates/ffi-guard/",
+    r"crates/protocol/",
+    r"crates/tailcat/",
+    r"crates/transport/",
+    r"crates/vt/",
+    r"proto/",
+    r"test/fixtures/",
+    r"Cargo\.toml$",
+    r"Cargo\.lock$",
+    r"scripts/ios-ui-tests\.sh$",
+    r"scripts/ios-ui-shards\.py$",
+    r"scripts/ios-ui-plan\.py$",
+    r"scripts/build-ios-frameworks\.sh$",
+    r"\.github/workflows/ci\.yml$",
+]
+
+
+def pattern(names):
+    return re.compile("^(" + "|".join(names) + ")")
+
+
+RELEVANT = pattern(PATTERNS)
 ZEROS = re.compile(r"^0+$")
+
+
+def canary_plan():
+    spec = importlib.util.spec_from_file_location("canary_plan", ROOT / "scripts" / "canary-plan.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.dont_write_bytecode = True
+    spec.loader.exec_module(module)
+    return module
+
+
+def linked_crates(root=ROOT):
+    """The crate directories farcooler-client and farcooler-vt depend on, with themselves.
+
+    Read from Cargo.toml (path dependencies, and workspace ones resolved
+    through the root manifest), so it needs no cargo and no registry.
+    """
+    def load(path):
+        return tomllib.loads(path.read_text())
+
+    workspace = load(root / "Cargo.toml").get("workspace", {}).get("dependencies", {})
+
+    def dep_dirs(manifest, directory):
+        tables = [manifest.get("dependencies", {}), manifest.get("build-dependencies", {})]
+        for target in manifest.get("target", {}).values():
+            tables += [target.get("dependencies", {}), target.get("build-dependencies", {})]
+        for table in tables:
+            for name, spec in table.items():
+                if not isinstance(spec, dict):
+                    continue
+                if "path" in spec:
+                    yield os.path.normpath(os.path.join(directory, spec["path"]))
+                elif spec.get("workspace") and isinstance(workspace.get(name), dict) and "path" in workspace[name]:
+                    yield os.path.normpath(workspace[name]["path"])  # relative to the root
+
+    seen, todo = set(), ["crates/client", "crates/vt"]
+    while todo:
+        directory = todo.pop()
+        if directory in seen:
+            continue
+        seen.add(directory)
+        manifest = load(root / directory / "Cargo.toml")
+        todo.extend(dep_dirs(manifest, directory))
+    return sorted(seen)
 
 
 def git(repo, *args):
     return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
 
 
-def decide(repo, event, before="", after="", base="", head=""):
+def decide(repo, event, after="", base="", head="", candidates=()):
     """(run, why)."""
     if event == "pull_request":
         spec = f"{base}...{head}"
     elif event == "push":
-        if not before or ZEROS.match(before):
-            return True, "a new branch or no earlier commit: the UI tests run."
-        if git(repo, "cat-file", "-e", f"{before}^{{commit}}").returncode != 0:
-            return True, "the push's earlier commit is not in this history (a force push): the UI tests run."
-        spec = f"{before}..{after}"
+        green = canary_plan().base_commit(repo, after, list(candidates))
+        if green is None:
+            return True, "no earlier green CI run in this history to compare with: the UI tests run."
+        spec = f"{green}..{after}"
     else:
         return True, f"{event or 'no event'}: the UI tests run."
     out = git(repo, "diff", "--name-only", spec)
@@ -67,14 +151,14 @@ def decide(repo, event, before="", after="", base="", head=""):
     for f in files:
         if RELEVANT.match(f):
             return True, f"{f} is what the iOS app is built from: the UI tests run."
-    return False, f"{len(files)} changed file(s), none of what the iOS app is built from: the UI tests are skipped."
+    return False, f"{len(files)} changed file(s) since {spec.split('..')[0][:8]}, none of what the iOS app is built from: the UI tests are skipped."
 
 
 def main():
     run, why = decide(
-        pathlib.Path.cwd(), os.environ.get("EVENT", ""),
-        os.environ.get("BEFORE", ""), os.environ.get("AFTER", ""),
+        pathlib.Path.cwd(), os.environ.get("EVENT", ""), os.environ.get("AFTER", ""),
         os.environ.get("BASE", ""), os.environ.get("HEAD", ""),
+        canary_plan().read_candidates(os.environ.get("CANDIDATES")),
     )
     print(why)
     out = os.environ.get("GITHUB_OUTPUT")
@@ -91,15 +175,50 @@ def self_test():
         if got != want:
             failures.append(f"{what}: got {got!r}, want {want!r}")
 
-    for path, want in [
-        ("apps/ios/FarCooler/App.swift", True), ("apps/shared/AgentKit/x.swift", True),
-        ("crates/client/src/lib.rs", True), ("crates/transport/a.rs", True), ("proto/farcooler.proto", True),
-        ("Cargo.lock", True), ("scripts/ios-ui-shards.py", True), (".github/workflows/ci.yml", True),
-        ("crates/daemon/src/lib.rs", False), ("apps/macos/Sources/x.swift", False),
-        ("apps/android/a.kt", False), ("services/relay/x.rs", False), ("docs/a.md", False),
-        ("crates/clientele/a.rs", False), (".github/workflows/canary.yml", False),
-    ]:
-        expect(f"relevant {path}", bool(RELEVANT.match(path)), want)
+    # Every alternative is pinned by a sample only it matches, so deleting
+    # any one from PATTERNS goes red here.
+    SAMPLES = [
+        "apps/ios/FarCooler/App.swift",
+        "apps/shared/AgentKit/Sources/x.swift",
+        "crates/client/src/lib.rs",
+        "crates/core/src/lib.rs",
+        "crates/fence/src/lib.rs",
+        "crates/ffi-guard/src/lib.rs",
+        "crates/protocol/src/lib.rs",
+        "crates/tailcat/go/go.mod",
+        "crates/transport/src/lib.rs",
+        "crates/vt/src/lib.rs",
+        "proto/farcooler.proto",
+        "test/fixtures/a.json",
+        "Cargo.toml",
+        "Cargo.lock",
+        "scripts/ios-ui-tests.sh",
+        "scripts/ios-ui-shards.py",
+        "scripts/ios-ui-plan.py",
+        "scripts/build-ios-frameworks.sh",
+        ".github/workflows/ci.yml",
+    ]
+    for sample in SAMPLES:
+        expect(f"{sample} is in the path set", bool(RELEVANT.match(sample)), True)
+    for name in PATTERNS:
+        rest = pattern([n for n in PATTERNS if n != name])
+        alone = [x for x in SAMPLES if re.match(f"^({name})", x) and not rest.match(x)]
+        expect(f"{name} has a sample only it matches", bool(alone), True)
+    for path in ["crates/daemon/src/lib.rs", "crates/review/src/lib.rs", "apps/macos/Sources/x.swift",
+                 "apps/android/a.kt", "services/relay/x.rs", "docs/a.md", "crates/clientele/a.rs",
+                 ".github/workflows/canary.yml", "scripts/canary-plan.py"]:
+        expect(f"{path} is not iOS", bool(RELEVANT.match(path)), False)
+
+    # The crates the xcframeworks link are all in the set, read from the
+    # manifests as they are now.
+    if tomllib is None:
+        failures.append("Python 3.11 or later is needed for tomllib")
+    else:
+        linked = linked_crates()
+        expect("the linked crates include the client and vt", {"crates/client", "crates/vt"} <= set(linked), True)
+        expect("the linked crates include ffi-guard", "crates/ffi-guard" in linked, True)
+        for directory in linked:
+            expect(f"{directory} is in the path set", bool(RELEVANT.match(f"{directory}/src/lib.rs")), True)
 
     with tempfile.TemporaryDirectory() as tmp:
         repo = pathlib.Path(tmp)
@@ -120,33 +239,37 @@ def self_test():
             return run("rev-parse", "HEAD")
 
         run("init", "-q", "-b", "main")
-        a = commit("a", "apps/ios/a.swift")
-        b = commit("b", "crates/daemon/b.rs")
+        a = commit("a", "apps/ios/a.swift")      # green
+        b = commit("b", "crates/daemon/b.rs")    # green, shards skipped
         c = commit("c", "apps/macos/c.swift", "docs/c.md")
-        d = commit("d", "crates/client/d.rs")
-        e = commit("e", "crates/daemon/e.rs")
+        d = commit("d", "crates/client/d.rs")    # iOS change, CI cancelled by e
+        e = commit("e", "crates/daemon/e.rs")    # daemon only
+        f = commit("f", "crates/daemon/f.rs")
 
-        expect("an unrelated push is skipped", decide(repo, "push", a, c)[0], False)
-        expect("one relevant commit in a multi-commit push runs", decide(repo, "push", c, e)[0], True)
-        expect("only the range counts: an earlier relevant commit does not", decide(repo, "push", d, e)[0], False)
-        expect("an iOS commit runs", decide(repo, "push", e, commit("f", "apps/ios/f.swift"))[0], True)
-        expect("a new branch runs everything", decide(repo, "push", "0" * 40, e)[0], True)
-        expect("an empty before runs everything", decide(repo, "push", "", e)[0], True)
-        expect("a force push (before not in history) runs everything", decide(repo, "push", "1" * 40, e)[0], True)
-        expect("an unknown event runs everything", decide(repo, "schedule", "", "")[0], True)
+        expect("an unrelated push is skipped", decide(repo, "push", c, candidates=[a, b])[0], False)
+        # The hole: d's own CI was cancelled, so e must not be judged by d..e.
+        expect("an iOS push whose CI was cancelled, then a daemon-only push: the shards run",
+               decide(repo, "push", e, candidates=[c])[0], True)
+        expect("... also when the nearest green run is older still", decide(repo, "push", f, candidates=[a])[0], True)
+        # And once a push after d went green with the shards run, later ones skip.
+        expect("after a green run past the iOS change the next daemon push skips",
+               decide(repo, "push", f, candidates=[e])[0], False)
+        # A red run is no green base: only successes are listed, so a red d is
+        # simply absent, and e is measured from before it.
+        expect("a red iOS push, then a daemon-only one: the shards run", decide(repo, "push", e, candidates=[b])[0], True)
+        expect("no green ancestor runs everything", decide(repo, "push", f, candidates=[])[0], True)
+        expect("a green run outside the history (force push) runs everything",
+               decide(repo, "push", f, candidates=["1" * 40])[0], True)
+        expect("the commit's own run is no base", decide(repo, "push", f, candidates=[f])[0], True)
+        expect("an unknown event runs everything", decide(repo, "schedule")[0], True)
         expect("a pull request compares against the merge base", decide(repo, "pull_request", base=a, head=c)[0], False)
         expect("... and runs for an iOS change", decide(repo, "pull_request", base=a, head=d)[0], True)
         expect("a pull request with a bad base runs", decide(repo, "pull_request", base="1" * 40, head=d)[0], True)
 
-        # A push is the tree change from `before` to `after`, so a before that
-        # sits on another line of history still counts what it had: two dots.
-        run("checkout", "-q", "-b", "side", c)
-        side = commit("side", "apps/ios/side.swift")
-        run("checkout", "-q", "main")
-        expect("a before off main's line compares trees, not the merge base", decide(repo, "push", side, c)[0], True)
-
         outputs = repo / "out"
-        env = {**os.environ, "EVENT": "push", "BEFORE": a, "AFTER": c, "GITHUB_OUTPUT": str(outputs)}
+        cands = repo / "cands"
+        cands.write_text(json.dumps({"head_sha": e}) + "\n")
+        env = {**os.environ, "EVENT": "push", "AFTER": f, "CANDIDATES": str(cands), "GITHUB_OUTPUT": str(outputs)}
         done = subprocess.run([sys.executable, __file__], cwd=repo, env=env, capture_output=True, text=True)
         expect("the script exits 0", done.returncode, 0)
         expect("and writes the output", outputs.read_text() if outputs.exists() else None, "run=false\n")
