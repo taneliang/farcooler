@@ -376,6 +376,9 @@ extension ContentView {
                     .inspectorColumnWidth(min: 420, ideal: 760, max: 1400)
             }
             .environment(\.openInFiles, OpenInFiles { ws, path, line in showInFiles(path, line: line, in: ws) })
+            .captureFiles { id in
+                if let ws = store.fleet.worktrees.first(where: { $0.id == id }) { showInFiles("README.md", line: nil, in: ws) }
+            }
             // Going somewhere else closes it: Files is beside the worktree
             // on screen, never a leftover from the last one.
             .onChange(of: selection) { _, now in

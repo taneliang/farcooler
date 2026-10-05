@@ -114,7 +114,11 @@ struct RealWindowCaptures {
             // no window record, no newer destination.
             defaults.removeObject(forKey: "window.sessions.v1")
             defaults.removeObject(forKey: SelectionMemory.destinationKey)
-            if let selection = place.selection {
+            if let selection = place.selection, selection.hasPrefix("{") {
+                // A whole `Destination`, for a task's tab (ov-297).
+                defaults.set(selection, forKey: SelectionMemory.destinationKey)
+                defaults.removeObject(forKey: SelectionMemory.key)
+            } else if let selection = place.selection {
                 defaults.set(selection, forKey: SelectionMemory.key)
             } else {
                 defaults.removeObject(forKey: SelectionMemory.key)
@@ -132,6 +136,11 @@ struct RealWindowCaptures {
             if env["FARCOOLER_CAPTURE_PEEK"] != nil {
                 NotificationCenter.default.post(name: .captureOpen, object: "peek")
                 try await Task.sleep(for: .seconds(1))
+            }
+            // Files beside the worktree, opened as a clicked path opens them.
+            if place.name.hasPrefix("files-inspector"), let worktree = seed["worktree"] {
+                NotificationCenter.default.post(name: .captureFiles, object: worktree)
+                try await Task.sleep(for: .seconds(wait))
             }
             try await TitleBarHarness.settle(window)
             for variant in Self.variants {

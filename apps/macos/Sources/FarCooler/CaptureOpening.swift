@@ -11,6 +11,19 @@ import SwiftUI
     extension Notification.Name {
         /// `object` is a selection as `SelectionMemory.encode` writes it.
         static let captureOpen = Notification.Name("com.farcooler.capture.open")
+        /// `object` is a worktree's id: its Files open in the inspector beside
+        /// it, as a path clicked in a terminal opens them (ov-297).
+        static let captureFiles = Notification.Name("com.farcooler.capture.files")
+    }
+
+    private struct CaptureFiles: ViewModifier {
+        let open: (String) -> Void
+
+        func body(content: Content) -> some View {
+            content.onReceive(NotificationCenter.default.publisher(for: .captureFiles)) { note in
+                if let id = note.object as? String { open(id) }
+            }
+        }
     }
 
     private struct CaptureOpening: ViewModifier {
@@ -27,6 +40,15 @@ import SwiftUI
 #endif
 
 extension View {
+    /// Open the Files a capture posts, in a debug build; nothing otherwise.
+    func captureFiles(_ open: @escaping (String) -> Void) -> some View {
+        #if DEBUG
+            modifier(CaptureFiles(open: open))
+        #else
+            self
+        #endif
+    }
+
     /// Open the place a capture posts, in a debug build; nothing otherwise.
     func captureOpening(_ selection: Binding<ContentView.Selection?>, peeking: Binding<Bool>) -> some View {
         #if DEBUG
