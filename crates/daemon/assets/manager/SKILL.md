@@ -43,7 +43,7 @@ The charter overrides anything in this skill except the two rules above.
 `## Workflow` names the landing mode. **Direct**: work lands on main and you
 push it. **PR**: each change is a pull request a person approves. A protected
 main (`gh api repos/<owner>/<name>/branches/main --jq .protected`, or a refused
-push) means PR mode whatever the charter says: work so and ask the owner.
+push) means PR mode whatever the charter says: work that way, and tell the owner.
 
 ## 2. Read the board
 
@@ -98,7 +98,7 @@ again, and pass `--again` only if the owner asked for a second agent. A
 dispatched agent doesn't report back by itself. Say so.
 
 Say how each task is being worked, or why it isn't. A subagent in your own
-session: start its description with the key (`ov-12: polish the sidebar`) and
+session: start its description with the key (`fc-12: polish the sidebar`) and
 run `task worker` with the id from its launch result. The runner sees a Claude
 subagent end; for codex, or one you stop using, run `--done` (it ends every
 subagent open on the task, or only the one `--subagent` names). A task you
@@ -146,7 +146,7 @@ only CI caught earns a local gate. A red main comes first.
   description that says what to look at first, the agent review's summary,
   captures, files in risk order, suggested reviewers, and nudges. A comment is
   a fix round on the same branch, answered in its thread; a disagreement goes
-  to the owner. Land approved PRs through the merge queue, or in order.
+  to the owner. Land approved PRs through the merge queue, or one at a time.
 
 After every push or CI rerun, start `gh run watch <id> --exit-status` as a
 background command, so a red run reaches you and a green one frees the next
