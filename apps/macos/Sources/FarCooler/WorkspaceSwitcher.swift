@@ -194,17 +194,18 @@ enum NeedsYouToolbar {
     }
     /// The count beside the tray, as text; nil at zero, "99+" past 99.
     static func countText(count: Int) -> String? { count <= 0 ? nil : count > 99 ? "99+" : "\(count)" }
-    /// Whether the count wears the accent: the only color in the toolbar,
-    /// and only while something waits. The tray itself never does.
-    static func countIsAccent(count: Int) -> Bool { count > 0 }
+    /// The count's ink (ov-291): the toolbar's own label color, as the system
+    /// draws toolbar text. The accent was unreadable on the glass, and the tray
+    /// says something waits by its count's being there.
+    static let countInk = Color.primary
     static func accessibilityLabel(count: Int) -> String {
         count > 0 ? "Needs You, \(count) waiting" : "Needs You, nothing waiting"
     }
 }
 
 /// Needs You in the title bar (ov-86, quieted in ov-105): a monochrome
-/// tray with the count beside it as text, in the accent while anything
-/// waits; just the tray, in secondary, when nothing does. No system badge.
+/// tray with the count beside it as text, in the toolbar's label color
+/// (ov-291); just the tray, in secondary, when nothing waits. No system badge.
 /// The sidebar's Needs You row, for a window without the sidebar.
 struct NeedsYouToolbarButton: View {
     let count: Int
@@ -220,7 +221,7 @@ struct NeedsYouToolbarButton: View {
                 if let text = NeedsYouToolbar.countText(count: count) {
                     Text(text)
                         .monospacedDigit()
-                        .foregroundStyle(NeedsYouToolbar.countIsAccent(count: count) ? Color.accentColor : Color.primary)
+                        .foregroundStyle(NeedsYouToolbar.countInk)
                 }
             }
         }
@@ -295,21 +296,27 @@ enum TitleBar {
     }
 }
 
-/// The toolbar's leading group (ov-105): the sidebar button, then the
-/// workspace switcher, after the traffic lights, as Mail and Notes keep
-/// theirs. One sidebar button (ov-177), and since the old Fleet sidebar
-/// went (ov-178) it's this one, for the navigator: the window has no
-/// `NavigationSplitView` for the system's to toggle. Then the flexible
-/// space, so this goes outermost of the window's toolbars.
+/// The toolbar's leading group (ov-105, regrouped in ov-291 to the HIG): the
+/// sidebar button and Back and Forward, adjacent, so the system draws them on
+/// one glass platter (symbols together), then the workspace switcher as the
+/// window's title: bare text with its menu, on no platter, as Finder's title
+/// is (H-T: "followed by the view title … a document menu"; a text button
+/// never shares glass with symbols). One sidebar button (ov-177), and since
+/// the old Fleet sidebar went (ov-178) it's this one, for the navigator: the
+/// window has no `NavigationSplitView` for the system's to toggle. Then the
+/// flexible space, so this goes outermost of the window's toolbars.
 struct LeadingToolbar: ToolbarContent {
     let switcher: WorkspaceSwitcherButton
     let navigator: NavigatorToggle
-    /// Back and Forward, in a capsule of their own after the switcher, where
-    /// the window has room for them (ov-214).
+    /// Back and Forward, in the sidebar button's platter, where the window has
+    /// room for them (ov-214).
     var backForward: BackForwardControl? = nil
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .navigation) { navigator }
+        if let backForward {
+            ToolbarItem(placement: .navigation) { backForward }
+        }
         // A new label is a new view, so the toolbar measures it again
         // (ov-177, round 2). The toolbar sizes an item when the window's
         // content is installed, and a label changed after that but before
@@ -321,10 +328,7 @@ struct LeadingToolbar: ToolbarContent {
         // A change once it's on screen was always measured
         // (`SwitcherWidthTests`).
         ToolbarItem(placement: .navigation) { switcher.id(switcher.measuredIdentity) }
-        if let backForward {
-            ToolbarSpacer(.fixed, placement: .navigation)
-            ToolbarItem(placement: .navigation) { backForward }
-        }
+            .sharedBackgroundVisibility(.hidden)
         // The room the title held, which pushes what follows to the
         // trailing end. `.primaryAction` items stay before it whatever
         // their order, so the window's other items are `.automatic`, and
@@ -377,6 +381,9 @@ struct TrailingToolbar: ToolbarContent {
                     entries: RunnerStatusItem.entries(troubles: troubles, stale: stale, ahead: ahead),
                     updates: updates, perform: perform)
             }
+            // Its words are text: a platter of their own, never the tray's
+            // (ov-291; H-T "keep actions with text labels separate").
+            ToolbarSpacer(.fixed)
         }
         ToolbarItem {
             NeedsYouToolbarButton(count: needsYou, selected: needsYouSelected, onSelect: onNeedsYou)

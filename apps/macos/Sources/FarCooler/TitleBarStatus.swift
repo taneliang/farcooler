@@ -4,7 +4,7 @@ import SwiftUI
 
 // The title bar's status area (ov-214): the toolbar's empty middle, put to
 // work the way Xcode's activity view is. One standard toolbar item in the
-// principal (center) place, with no glass of its own, holding the
+// principal (center) place, on no glass (`sharedBackgroundVisibility(.hidden)`), holding the
 // orchestrator's state and what it's doing, then how many of this
 // workspace's tasks need you, are running and are in review.
 //
@@ -25,9 +25,9 @@ enum TitleStatus {
     /// The area's height: the regular toolbar's control height (ov-214).
     static let height: CGFloat = 36
 
-    /// How far the area's parts sit in from its capsule's ends (ov-263):
-    /// the ring keeps its few points for the mark and the count.
-    static func capsuleInset(_ form: Form) -> CGFloat { form == .ring ? Spacing.group : Spacing.inset }
+    /// How far the area's parts sit in from its ends: none, now that no
+    /// capsule is drawn around them (ov-291).
+    static func capsuleInset(_ form: Form) -> CGFloat { 0 }
 
     /// What the area says, built from what the navigator and the board
     /// already work out.
@@ -106,9 +106,11 @@ enum TitleStatus {
         window - leading - trailing - 2 * gap
     }
 
-    /// What the leading items take: the traffic lights, then one capsule
-    /// holding the navigator's button and the switcher, whose label is
-    /// `title · repository ⌄` at the toolbar's font.
+    /// What the leading items take: the traffic lights, then the navigator's
+    /// button (with Back and Forward's platter, when there's room) and the
+    /// switcher as the title, whose label is `title · repository ⌄` at the
+    /// toolbar's font (ov-291: no platter around the switcher; the sum is kept
+    /// as it was, which only over-counts).
     ///
     /// Measured in the regular toolbar on macOS 27 (the lane's probe): the
     /// traffic lights end at 96 pt, the navigator's button is 39 and sits
@@ -294,7 +296,6 @@ struct TitleStatusView: View {
             }
         }
         .font(.system(size: NSFont.systemFontSize))
-        // Clear of the capsule's rounded ends.
         .padding(.horizontal, TitleStatus.capsuleInset(form))
         // The regular bar's 36 pt control height, to hit; the field inside
         // is the 28 pt of Xcode's activity view.
@@ -574,7 +575,7 @@ enum TitleStatusAnchor {
     }
 }
 
-/// The status area in the toolbar: in the center, with no glass, and
+/// The status area in the toolbar: in the center, on no glass, and
 /// measured again whenever its form changes (and only then).
 struct TitleStatusItem: ToolbarContent {
     let source: TitleStatusSource
@@ -593,10 +594,11 @@ struct TitleStatusItem: ToolbarContent {
                 .environment(\.statusGlyphStill, true)
                 .id(form)
         }
-        // In the bar's own glass capsule, as Xcode's activity area and
-        // Safari's address field sit in theirs (ov-263): bare text between
-        // the leading and trailing capsules read as floating, unanchored.
-        // The capsule is the toolbar's, not one drawn here.
+        // On no glass (ov-291, reversing ov-263): Apple's own example of a
+        // principal status item hides the shared background, and HIG asks for
+        // fewer toolbar backgrounds, not a slab around buttons that already sit
+        // on the window's plane. The field a ⌘K opens draws its own bezel.
+        .sharedBackgroundVisibility(.hidden)
     }
 }
 

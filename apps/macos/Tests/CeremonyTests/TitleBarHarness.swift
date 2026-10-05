@@ -168,6 +168,11 @@ enum TitleBarHarness {
         return anchor.convert(anchor.bounds, to: nil)
     }
 
+    /// The toolbar item holding the workspace switcher.
+    static func switcherItem(in window: NSWindow) -> NSView? {
+        first(named: "Anchor", in: window.contentView?.superview).flatMap(hostingItem(of:))
+    }
+
     /// How many toolbar items are laid out in the window, the overflow
     /// menu's not counted: one moved into the overflow leaves the window.
     static func itemsShown(in window: NSWindow) -> Int {

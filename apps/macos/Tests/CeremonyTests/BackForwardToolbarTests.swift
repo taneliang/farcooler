@@ -91,7 +91,7 @@ struct BackForwardToolbarTests {
         }
     }
 
-    @Test("In a real window, Back and Forward sit after the switcher and push nothing into the overflow menu", arguments: cases)
+    @Test("In a real window, Back and Forward sit before the switcher and push nothing into the overflow menu", arguments: cases)
     func inTheWindow(width: CGFloat, form: TitleStatus.Form, shown: Bool) async throws {
         let all = try await Harness.window(Self.root(backForward: true), width: 1790)
         let withThem = Harness.itemsShown(in: all)
@@ -111,7 +111,8 @@ struct BackForwardToolbarTests {
         if let control { try Self.expectAfterTheSwitcher(control, status: status, in: window, at: width) }
     }
 
-    /// Back and Forward in the leading group: just after the switcher, and
+    /// Back and Forward in the leading group (ov-291: with the sidebar button,
+    /// then the switcher as the title): just before the switcher, which is
     /// before the status area, never at the trailing end (integ-8: a
     /// ControlGroup inserted on screen landed past the center item). Frames,
     /// with a gap allowance far smaller than the error it catches (the
@@ -120,9 +121,9 @@ struct BackForwardToolbarTests {
         _ control: CGRect, status: TitleBarHarness.Status, in window: NSWindow, at width: CGFloat
     ) throws {
         let switcher = try #require(Harness.switcher(in: window))
-        #expect(control.minX >= switcher.maxX, "at \(width): before the switcher")
-        #expect(control.minX - switcher.maxX < 48, "at \(width): \(control.minX - switcher.maxX) pt past the switcher")
-        #expect(control.maxX <= status.frame.minX, "at \(width): past the status area")
+        #expect(switcher.minX >= control.maxX, "at \(width): the switcher is before Back and Forward")
+        #expect(switcher.minX - control.maxX < 48, "at \(width): \(switcher.minX - control.maxX) pt before the switcher")
+        #expect(switcher.maxX <= status.frame.minX, "at \(width): the switcher is past the status area")
         #expect(control.maxX < width / 2, "at \(width): in the trailing half")
     }
 
