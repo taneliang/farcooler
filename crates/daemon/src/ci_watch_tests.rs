@@ -113,3 +113,21 @@ fn a_canceled_run_reads_superseded() {
     assert_eq!(read.status, CiStatus::Superseded);
     assert_eq!(read.jobs.iter().find(|j| j.name == "CI").map(|j| j.state.as_str()), Some("canceled"));
 }
+
+/// A subject GitHub can't answer for, or with no runs, never holds the watch
+/// at a minute: it backs off from a minute, doubling, to ten (review
+/// train-1005c M2). Only a run that's going or waiting keeps it busy.
+#[test]
+fn a_read_that_fails_backs_off() {
+    assert!(keeps_busy(CiStatus::Running) && keeps_busy(CiStatus::Queued));
+    for quiet in [CiStatus::Unknown, CiStatus::None, CiStatus::Passed, CiStatus::Failed, CiStatus::Superseded] {
+        assert!(!keeps_busy(quiet), "{quiet:?}");
+    }
+    let secs: Vec<u64> = (1..=7).map(|n| backoff_after(n).as_secs()).collect();
+    assert_eq!(secs, [60, 120, 240, 480, 600, 600, 600]);
+    assert_eq!(backoff_after(u32::MAX), QUIET);
+    assert_eq!(next_wait(true, Some(0), 0), BUSY);
+    assert_eq!(next_wait(false, None, 0), QUIET);
+    assert_eq!(next_wait(false, Some(240_000), 0), Duration::from_secs(240));
+    assert_eq!(next_wait(false, Some(1_000), 0), BUSY, "never sooner than a minute");
+}

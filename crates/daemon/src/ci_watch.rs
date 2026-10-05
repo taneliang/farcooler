@@ -60,8 +60,7 @@ pub fn kick() {
 pub async fn run(svc: Arc<Service>, watcher: Arc<Watcher>) {
     let mut memo = Memo::default();
     loop {
-        let busy = read_all(&svc, &watcher, &mut memo).await;
-        let wait = if busy { BUSY } else { QUIET };
+        let wait = read_all(&svc, &watcher, &mut memo).await;
         tokio::select! {
             _ = tokio::time::sleep(wait) => {}
             _ = kicked().notified() => {}
@@ -76,6 +75,37 @@ pub struct Memo {
     shas: HashMap<String, String>,
     jobs: HashMap<u64, (String, Option<String>, Vec<GhJob>)>,
     default_branch: HashMap<Uuid, String>,
+    /// Subjects GitHub didn't answer for, or had no run for: how many reads
+    /// in a row, and when to ask again (review train-1005c M2).
+    misses: HashMap<(Uuid, String), (u32, i64)>,
+}
+
+/// How long after `misses` reads in a row that GitHub couldn't or didn't
+/// answer to ask again: a minute, doubling, at most `QUIET`. A runner whose gh
+/// is logged out, or a page naming a SHA nobody pushed, settles at one read
+/// every ten minutes instead of one a minute forever.
+pub fn backoff_after(misses: u32) -> Duration {
+    let doubled = BUSY.saturating_mul(1u32 << misses.saturating_sub(1).min(16));
+    doubled.min(QUIET)
+}
+
+/// Whether a read keeps the watch at its busy pace: only a run that's going
+/// or waiting. A subject GitHub can't answer for, or one with no runs, backs
+/// off on its own instead (`backoff_after`).
+pub fn keeps_busy(status: CiStatus) -> bool {
+    matches!(status, CiStatus::Running | CiStatus::Queued)
+}
+
+/// How long the watch sleeps: a minute while anything runs, else until the
+/// first backed-off subject is due, between a minute and `QUIET`.
+pub fn next_wait(busy: bool, first_due_ms: Option<i64>, now_ms: i64) -> Duration {
+    if busy {
+        return BUSY;
+    }
+    match first_due_ms {
+        Some(due) => Duration::from_millis(due.saturating_sub(now_ms).max(0) as u64).clamp(BUSY, QUIET),
+        None => QUIET,
+    }
 }
 
 /// One run, as `RUNS_JQ` and `RUN_JQ` print it.
@@ -320,9 +350,8 @@ pub fn wanted(svc: &Service) -> BTreeMap<Uuid, BTreeSet<String>> {
 }
 
 /// One turn: read every subject that's due, forget those nothing names, and
-/// announce each board whose reads changed. Whether anything watched is still
-/// going.
-pub async fn read_all(svc: &Service, watcher: &Watcher, memo: &mut Memo) -> bool {
+/// announce each board whose reads changed. How long to wait before the next.
+pub async fn read_all(svc: &Service, watcher: &Watcher, memo: &mut Memo) -> Duration {
     let wanted = wanted(svc);
     for ws in svc.store.list_workspaces(None).unwrap_or_default() {
         let named: Vec<String> = wanted.get(&ws.id).map(|s| s.iter().cloned().collect()).unwrap_or_default();
@@ -340,8 +369,18 @@ pub async fn read_all(svc: &Service, watcher: &Watcher, memo: &mut Memo) -> bool
             if last.as_ref().is_some_and(|l| l.status.is_finished() && now - l.fetched_at < QUIET.as_millis() as i64) {
                 continue;
             }
+            let key = (workspace, subject.clone());
+            if memo.misses.get(&key).is_some_and(|(_, due)| now < *due) {
+                continue;
+            }
             let read = read_subject(svc, repository, &tree, &subject, memo).await;
-            busy |= !read.status.is_finished();
+            busy |= keeps_busy(read.status);
+            if matches!(read.status, CiStatus::Unknown | CiStatus::None) {
+                let misses = memo.misses.get(&key).map_or(0, |(n, _)| *n) + 1;
+                memo.misses.insert(key, (misses, now + backoff_after(misses).as_millis() as i64));
+            } else {
+                memo.misses.remove(&key);
+            }
             match svc.store.record_ci(workspace, &read) {
                 Ok(w) => changed |= w.changed,
                 Err(e) => tracing::warn!(error = %e, subject, "could not keep a CI read"),
@@ -351,7 +390,7 @@ pub async fn read_all(svc: &Service, watcher: &Watcher, memo: &mut Memo) -> bool
             watcher.announce_plan_changed(workspace, Actor::Runner);
         }
     }
-    busy
+    next_wait(busy, memo.misses.values().map(|(_, due)| *due).min(), now)
 }
 
 #[cfg(test)]
