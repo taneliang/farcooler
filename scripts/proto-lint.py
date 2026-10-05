@@ -475,9 +475,35 @@ def canary_trigger_problems(text):
             problems.append(f"`plan`'s `if` lacks `{want}`")
     if not re.search(r"^run: \./scripts/canary-plan\.py$", plan.get("steps", ""), re.M):
         problems.append("`plan` does not run scripts/canary-plan.py")
+    # The gate, exactly. A substring test let `true || ` open it.
+    expected = ("github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && "
+                "github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && "
+                "github.event.workflow_run.head_repository.full_name == github.repository)")
+    got_if = re.sub(r"\s+", " ", re.sub(r"^>-?|^\|-?", "", gate_if)).strip()
+    if got_if != expected:
+        problems.append(f"`plan`'s `if` is not the expected gate; got: {got_if}")
+    if listed(trigger, "branches") != ["main"]:
+        problems.append("its workflow_run must name `branches: [main]`")
+    sha = "${{ needs.plan.outputs.sha }}"
     for job, keys in jobs.items():
-        if job != "plan" and "needs.plan.outputs.sha" not in str(keys) and ("checkout" in keys.get("steps", "")):
-            problems.append(f"`{job}` checks out without `needs.plan.outputs.sha`, so it builds main's moving head")
+        if job == "plan":
+            continue
+        if "uses" in keys:
+            if not re.search(rf"^ref: {re.escape(sha)}$", keys.get("with", ""), re.M):
+                problems.append(f"`{job}` calls a reusable workflow without `ref: {sha}`, so it builds main's moving head")
+        steps = re.split(r"(?m)^(?=- )", keys.get("steps", ""))
+        for step in steps:
+            if step.startswith("- uses: actions/checkout") and not re.search(rf"^ref: {re.escape(sha)}$", step, re.M):
+                problems.append(f"`{job}` has a checkout without `ref: {sha}`, so it builds main's moving head")
+    plan_steps = re.split(r"(?m)^(?=- )", plan.get("steps", ""))
+    for step in plan_steps:
+        if step.startswith("- uses: actions/checkout") and not re.search(r"^ref: main$", step, re.M):
+            problems.append("`plan`'s checkout must be `ref: main`")
+    # A run that does not build must not cancel one that does.
+    for job in ("linux", "ios", "macos"):
+        conc = jobs.get(job, {}).get("concurrency", "")
+        if "cancel-in-progress: ${{ needs.plan.outputs.build == 'true' }}" not in conc:
+            problems.append(f"`{job}`'s concurrency must cancel only when `needs.plan.outputs.build == 'true'`, so a skipped job cannot cancel a build")
     body = re.sub(r"(?m)^\s*#.*$", "", text)
     for var in ("github.sha", "github.ref"):
         # Only `plan` may read it, as the dispatch fallback, and the run-name.
@@ -870,6 +896,18 @@ def self_test():
         ("a checkout of main's head", "          ref: ${{ needs.plan.outputs.sha }}\n          fetch-depth: 0\n      - run: ./scripts/proto-lint.py --self-test",
          "          fetch-depth: 0\n      - run: ./scripts/proto-lint.py --self-test", 1),
         ("github.sha in the release notes", "commit/${{ needs.plan.outputs.sha }}", "commit/${{ github.sha }}", 1),
+        ("the macOS checkout's ref deleted", "          ref: ${{ needs.plan.outputs.sha }}\n          fetch-depth: 0\n      - uses: dtolnay/rust-toolchain@stable\n      - uses: Swatinem/rust-cache@v2\n\n      # Go, for the tunnel",
+         "          fetch-depth: 0\n      - uses: dtolnay/rust-toolchain@stable\n      - uses: Swatinem/rust-cache@v2\n\n      # Go, for the tunnel", 1),
+        ("the iOS checkout's ref deleted", "          ref: ${{ needs.plan.outputs.sha }}\n          # `git rev-list", "          # `git rev-list", 1),
+        ("the wire checkout's ref deleted", "          # The commit CI passed, not main's head.\n          ref: ${{ needs.plan.outputs.sha }}\n", "", 1),
+        ("the linux call's ref deleted", "      channel: canary\n      ref: ${{ needs.plan.outputs.sha }}\n", "      channel: canary\n", 1),
+        ("plan's checkout off main", "          ref: main\n          fetch-depth: 0\n      # Main's successful", "          fetch-depth: 0\n      # Main's successful", 1),
+        ("the gate prefixed with true ||", "    if: >-\n      github.event_name", "    if: >-\n      true || github.event_name", 1),
+        ("head_branch dropped from the gate", "      github.event.workflow_run.head_branch == 'main' &&\n", "", 1),
+        ("branches: [main] dropped", "    branches: [main]\n", "", 1),
+        ("linux cancels unconditionally", "      group: canary-linux\n      cancel-in-progress: ${{ needs.plan.outputs.build == 'true' }}\n", "      group: canary-linux\n      cancel-in-progress: true\n", 1),
+        ("ios cancels unconditionally", "      group: canary-ios\n      cancel-in-progress: ${{ needs.plan.outputs.build == 'true' }}\n", "      group: canary-ios\n      cancel-in-progress: true\n", 1),
+        ("macos cancels unconditionally", "      group: canary-macos\n      cancel-in-progress: ${{ needs.plan.outputs.build == 'true' }}\n", "      group: canary-macos\n      cancel-in-progress: true\n", 1),
         ("the plan script dropped", "run: ./scripts/canary-plan.py\n", "run: echo\n", 1),
     ]
     for what, old, new, want in trigger_cases:
