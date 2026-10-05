@@ -95,7 +95,8 @@ async fn a_ruling_round_trips_through_the_plan_and_announces() {
     let read = plan(&mut a, repo.workspace, false).await;
     let numbers: Vec<u32> = read.rulings.iter().map(|r| r.number).collect();
     assert_eq!(numbers, [second.number, first.number], "standing first");
-    assert!(read.cards.iter().any(|c| c.key == task.key), "the ruling's card is named");
+    assert_eq!(read.rulings[1].task_keys, vec![task.key.clone()], "the ruling names its card by key");
+    assert!(read.cards.is_empty(), "and leaves the plan's cards alone (review 1005a F2)");
 
     let (plans, tasks) = events(&mut listener, Duration::from_millis(400)).await;
     assert_eq!((plans, tasks), (3, 0));

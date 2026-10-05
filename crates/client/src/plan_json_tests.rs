@@ -111,6 +111,7 @@ fn the_plan() -> pb::Plan {
                 why: "It's the one attention color, so the inbox reads as needing you.".into(),
                 reversal: "One token; every surface follows.".into(),
                 task_ids: vec![id(0x1001)],
+                task_keys: vec!["ov-1".into()],
                 theme_id: Some(id(0x3001)),
                 state: pb::BoardRulingState::Standing as i32,
                 actor: "manager".into(),

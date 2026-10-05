@@ -145,7 +145,9 @@ fn ruling_json(plan: &pb::Plan, r: &pb::BoardRuling) -> Value {
         "decision": r.decision,
         "why": r.why,
         "reversal": r.reversal,
-        "cards": r.task_ids.iter().map(|id| json!({ "task": id_text(id), "key": key_of(plan, id) })).collect::<Vec<_>>(),
+        "cards": r.task_ids.iter().enumerate().map(|(i, id)| json!({
+            "task": id_text(id), "key": r.task_keys.get(i).cloned().unwrap_or_else(|| key_of(plan, id)),
+        })).collect::<Vec<_>>(),
         "theme_id": r.theme_id.as_deref().map(id_text),
         "theme": theme.unwrap_or_default(),
         "state": ruling_state_word(r.state),

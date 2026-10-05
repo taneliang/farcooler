@@ -195,7 +195,7 @@ pub(super) fn ruling_json(plan: &pb::Plan, r: &pb::BoardRuling, keys: &Keys) -> 
         "decision": r.decision,
         "why": r.why,
         "reversal": r.reversal,
-        "cards": r.task_ids.iter().map(|id| json!({ "task": id_text(id), "key": keys.of(id) })).collect::<Vec<_>>(),
+        "cards": r.task_ids.iter().enumerate().map(|(i, id)| json!({ "task": id_text(id), "key": key_of(r, i, keys) })).collect::<Vec<_>>(),
         "theme_id": r.theme_id.as_deref().map(id_text),
         "theme": theme_name(plan, r).unwrap_or_default(),
         "state": state_word(r.state),
@@ -207,12 +207,17 @@ pub(super) fn ruling_json(plan: &pb::Plan, r: &pb::BoardRuling, keys: &Keys) -> 
     })
 }
 
+/// The key of a ruling's `i`th card: its own, else what the command read.
+fn key_of(r: &pb::BoardRuling, i: usize, keys: &Keys) -> String {
+    r.task_keys.get(i).cloned().unwrap_or_else(|| keys.of(&r.task_ids[i]))
+}
+
 /// "ov-1, ov-2 · Visual language · by manager 2 h ago": what a ruling touches,
 /// and who made it when.
 fn touches(plan: &pb::Plan, r: &pb::BoardRuling, keys: &Keys, now: i64) -> String {
     let mut parts: Vec<String> = Vec::new();
     if !r.task_ids.is_empty() {
-        parts.push(r.task_ids.iter().map(|id| keys.of(id)).collect::<Vec<_>>().join(", "));
+        parts.push((0..r.task_ids.len()).map(|i| key_of(r, i, keys)).collect::<Vec<_>>().join(", "));
     }
     if let Some(theme) = theme_name(plan, r) {
         parts.push(theme);

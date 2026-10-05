@@ -4224,6 +4224,9 @@ message BoardRuling {
   optional string settled_by = 13;
   optional int64 settled_at = 14;
   uint64 resource_version = 15;
+  // `task_ids`' keys, in the same order. Carried here rather than in
+  // `Plan.cards`, whose cards the reconciliation checks for a lane.
+  repeated string task_keys = 16;
 }
 
 // `ruling.add`, at `control`: a standing ruling with the board's next number.

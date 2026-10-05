@@ -136,11 +136,22 @@ fn the_plan_reads_standing_first_newest_first() {
     assert_eq!(shorts(&store, main, 0), ["R-4", "R-2", "R-3", "R-1"]);
     assert_eq!(shorts(&store, main, i64::MAX), ["R-4", "R-2"], "a settled ruling ages out; a standing one never does");
 
-    // A ruling's cards are named in the plan's cards, so a client has keys.
-    store.add_ruling(main, &new("R5"), &[t[1].id], Actor::Manager).unwrap();
+}
+
+/// A ruling's cards come with their keys, and stay out of the plan's own
+/// cards: a card a ruling names but no theme or lane does is in no lane by
+/// design, and must not read as "in progress with no lane" (review 1005a F2).
+#[test]
+fn a_ruling_s_cards_carry_keys_and_stay_out_of_the_plan_s_cards() {
+    let (store, main, t) = board(2);
+    store.set_task_status(t[1].id, crate::models::TaskStatus::InProgress, Actor::Manager).unwrap();
+    store.add_ruling(main, &new("R1"), &[t[1].id, t[0].id], Actor::Manager).unwrap();
     let plan = store.plan(main, 0).unwrap();
-    assert_eq!(plan.rulings[0].short(), "R-5");
-    assert!(plan.cards.iter().any(|c| c.task_id == t[1].id), "{:?}", plan.cards);
+    assert!(plan.cards.is_empty(), "{:?}", plan.cards);
+    assert!(plan.coverage.is_empty());
+    assert_eq!(plan.rulings[0].task_keys, vec![t[1].key.clone(), t[0].key.clone()]);
+    let added = store.ruling(plan.rulings[0].id).unwrap();
+    assert_eq!(added.task_keys, vec![t[1].key.clone(), t[0].key.clone()]);
 }
 
 /// A card moved to another board leaves its rulings' cards in the read, as it

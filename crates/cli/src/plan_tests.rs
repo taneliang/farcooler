@@ -70,6 +70,7 @@ fn rulings() -> Vec<pb::BoardRuling> {
             why: "It's the one attention color, so the inbox reads as needing you.".into(),
             reversal: "One token; every surface follows.".into(),
             task_ids: vec![id_bytes(Uuid::from_u128(0x1001))],
+            task_keys: vec!["ov-1".into()],
             theme_id: Some(id_bytes(Uuid::from_u128(0x3001))),
             state: pb::BoardRulingState::Standing as i32,
             actor: "manager".into(),
@@ -794,6 +795,24 @@ async fn ruling_set_takes_the_short_id_as_said() {
     let err = rule(&mut link, &["set", "R-9", "--state", "confirmed"], false).await.unwrap_err();
     assert_eq!(err.to_string(), "There's no ruling R-9 on this board. `plan ruling list` shows them.");
     assert!(link.sent.iter().all(|r| r.method == "plan.get"), "nothing written");
+}
+
+/// A card a ruling names, in progress with no lane, isn't flagged: a ruling
+/// isn't a lane, and the runner leaves its cards out of the plan's cards
+/// (review 1005a F2). Its key still reads, from the ruling.
+#[tokio::test]
+async fn a_ruling_s_card_is_not_flagged_as_having_no_lane() {
+    let mut plan = the_plan();
+    plan.themes.clear();
+    plan.lanes.clear();
+    plan.order.clear();
+    plan.coverage.clear();
+    plan.cards.clear();
+    plan.rulings[0].task_keys = vec!["ov-1".into()];
+    assert!(checks(&plan, &Keys::of_plan(&plan)).is_empty());
+    let json = plan_json(&plan, &Keys::of_plan(&plan));
+    assert!(json["no_lane"].as_array().unwrap().is_empty());
+    assert_eq!(json["rulings"][0]["cards"][0]["key"], "ov-1", "the key is the ruling's own");
 }
 
 /// A refused move reads as this module's sentence, not the runner's word.

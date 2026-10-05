@@ -128,6 +128,9 @@ pub struct Ruling {
     pub reversal: String,
     /// The cards it touches, in the order given, on this board only.
     pub tasks: Vec<Uuid>,
+    /// Their keys, in the same order. Carried on the ruling rather than in the
+    /// plan's cards, which the reconciliation checks (review 1005a F2).
+    pub task_keys: Vec<String>,
     pub theme_id: Option<Uuid>,
     pub state: RulingState,
     pub note: String,
@@ -183,6 +186,7 @@ fn row_to_ruling(r: &rusqlite::Row) -> rusqlite::Result<Ruling> {
         why: r.get(4)?,
         reversal: r.get(5)?,
         tasks: Vec::new(),
+        task_keys: Vec::new(),
         theme_id: theme.and_then(|b| Uuid::from_slice(&b).ok()),
         state: RulingState::parse(&state).unwrap_or(RulingState::Standing),
         note: r.get(8)?,
@@ -194,12 +198,16 @@ fn row_to_ruling(r: &rusqlite::Row) -> rusqlite::Result<Ruling> {
     })
 }
 
-fn tasks_of(conn: &Connection, ruling: Uuid) -> Result<Vec<Uuid>> {
+/// A ruling's cards and their keys, in the order given.
+fn tasks_of(conn: &Connection, ruling: Uuid) -> Result<Vec<(Uuid, String)>> {
     let mut stmt = conn
-        .prepare("SELECT task_id FROM board_ruling_tasks WHERE ruling_id = ?1 ORDER BY rowid")
+        .prepare(
+            "SELECT r.task_id, t.key FROM board_ruling_tasks r JOIN tasks t ON t.id = r.task_id
+              WHERE r.ruling_id = ?1 ORDER BY r.rowid",
+        )
         .map_err(map_err)?;
     let rows = stmt
-        .query_map(params![uuid_blob(ruling)], |r| get_uuid(r, 0))
+        .query_map(params![uuid_blob(ruling)], |r| Ok((get_uuid(r, 0)?, r.get(1)?)))
         .map_err(map_err)?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(map_err)?;
@@ -212,7 +220,7 @@ fn ruling_in(conn: &Connection, id: Uuid) -> Result<Ruling> {
         .optional()
         .map_err(map_err)?
         .ok_or(DomainError::NotFound)?;
-    ruling.tasks = tasks_of(conn, id)?;
+    (ruling.tasks, ruling.task_keys) = tasks_of(conn, id)?.into_iter().unzip();
     Ok(ruling)
 }
 
@@ -333,7 +341,8 @@ pub(crate) fn rulings_of(
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(map_err)?;
     for ruling in &mut rulings {
-        ruling.tasks = tasks_of(conn, ruling.id)?.into_iter().filter(|t| on_board.contains_key(t)).collect();
+        (ruling.tasks, ruling.task_keys) =
+            tasks_of(conn, ruling.id)?.into_iter().filter(|(t, _)| on_board.contains_key(t)).unzip();
     }
     Ok(rulings)
 }

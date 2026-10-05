@@ -64,6 +64,7 @@ pub(crate) fn pb_ruling(r: &Ruling) -> pb::BoardRuling {
         why: r.why.clone(),
         reversal: r.reversal.clone(),
         task_ids: r.tasks.iter().map(|id| id_bytes(*id)).collect(),
+        task_keys: r.task_keys.clone(),
         theme_id: r.theme_id.map(id_bytes),
         state: (match r.state {
             RulingState::Standing => pb::BoardRulingState::Standing,

@@ -261,12 +261,10 @@ impl Store {
         }
         order.sort();
 
+        // A ruling's cards carry their own keys and stay out of `cards`, which
+        // the reconciliation reads: a card a ruling names is in no lane by
+        // design (review 1005a F2).
         let rulings = rulings_of(&conn, workspace, closed_since_ms, &statuses)?;
-        for ruling in &rulings {
-            for task in &ruling.tasks {
-                named.insert(*task, ());
-            }
-        }
 
         let cards = named.keys().filter_map(|id| statuses.get(id).cloned()).collect();
         let mut coverage: Vec<Coverage> = live
