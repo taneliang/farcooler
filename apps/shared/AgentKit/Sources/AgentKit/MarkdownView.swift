@@ -360,7 +360,7 @@ public struct MarkdownText: View {
     private func view(for run: Markdown.Run) -> some View {
         switch run {
         case let .prose(paragraphs):
-            Text(linker.linked(Self.merged(paragraphs)))
+            TaskKeyText(linker.linked(Self.merged(paragraphs)))
                 .fixedSize(horizontal: false, vertical: true)
                 .lineSpacing(3)
         case let .block(block):
@@ -406,12 +406,12 @@ public struct MarkdownText: View {
     private func view(for block: Markdown.Block) -> some View {
         switch block {
         case let .paragraph(text):
-            Text(linker.linked(Markdown.inline(text)))
+            TaskKeyText(linker.linked(Markdown.inline(text)))
                 .fixedSize(horizontal: false, vertical: true)
                 .lineSpacing(3)
 
         case let .heading(level, text):
-            Text(linker.linked(Markdown.inline(text)))
+            TaskKeyText(linker.linked(Markdown.inline(text)))
                 .font(headingFont(level))
                 .fixedSize(horizontal: false, vertical: true)
                 .lineSpacing(2)
@@ -430,7 +430,7 @@ public struct MarkdownText: View {
         case let .quote(text):
             HStack(spacing: 8) {
                 Rectangle().fill(.quaternary).frame(width: 2)
-                Text(linker.linked(Markdown.inline(text)))
+                TaskKeyText(linker.linked(Markdown.inline(text)))
                     .fixedSize(horizontal: false, vertical: true)
                     .lineSpacing(3)
             }
@@ -450,7 +450,7 @@ public struct MarkdownText: View {
             Text(symbol)
                 .foregroundStyle(.secondary)
                 .frame(minWidth: 14, alignment: .trailing)
-            Text(linker.linked(Markdown.inline(text)))
+            TaskKeyText(linker.linked(Markdown.inline(text)))
                 .fixedSize(horizontal: false, vertical: true)
                 .lineSpacing(3)
             Spacer(minLength: 0)
@@ -677,7 +677,7 @@ private struct MarkdownTable: View {
             let cells = allRows[row]
             return column < cells.count ? cells[column] : ""
         }()
-        return Text(linker.linked(Markdown.inline(text)))
+        return TaskKeyText(linker.linked(Markdown.inline(text)))
             .font(.callout)
             .lineSpacing(1)
             .fixedSize(horizontal: false, vertical: true)

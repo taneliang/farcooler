@@ -154,11 +154,11 @@ struct PageTextView: View {
             ForEach(Array(PageMarkdown.pieces(md).enumerated()), id: \.offset) { _, piece in
                 switch piece {
                 case .prose(let text):
-                    Text(linker.linked(PageMarkdown.inline(text)))
+                    TaskKeyText(linker.linked(PageMarkdown.inline(text)))
                 case .item(let marker, let text, let depth):
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
                         Text(marker).foregroundStyle(.secondary)
-                        Text(linker.linked(PageMarkdown.inline(text)))
+                        TaskKeyText(linker.linked(PageMarkdown.inline(text)))
                     }
                     .padding(.leading, CGFloat(depth) * Spacing.section)
                 case .plain(let text):

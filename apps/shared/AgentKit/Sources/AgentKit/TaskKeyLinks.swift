@@ -142,6 +142,12 @@ public enum TaskKeyLinks {
         matches(in: text, prefixes: index.prefixes, known: Set(index.targets.keys))
     }
 
+    /// An accessibility action's name for opening `key`: "Open ov-190",
+    /// with the card's title after it when the card is known.
+    public static func openLabel(_ key: String, card: TaskKeyCard?) -> String {
+        "Open \(card?.accessibilityLabel ?? key)"
+    }
+
     /// The scheme and host of a task link. Fixed, not the channel's own
     /// scheme: the link is opened in the app that drew it and never handed
     /// to the system (`Markdown.openGuard(_:)`).
@@ -251,17 +257,44 @@ public enum TaskKeyLinks {
 /// the runner is known, read by `MarkdownText` and a task's own lines.
 public struct TaskKeyLinker: Equatable, Sendable {
     public var index: TaskKeyIndex
+    /// What each key's hovercard or preview shows (ov-299), from the same
+    /// reads as `index`. Empty where no screen built them: the keys still
+    /// link, and show no card.
+    public var cards: TaskKeyCards
     public var open: @MainActor (TaskKeyTarget) -> Void
 
-    public init(index: TaskKeyIndex, open: @escaping @MainActor (TaskKeyTarget) -> Void) {
+    public init(
+        index: TaskKeyIndex, cards: TaskKeyCards = .empty, open: @escaping @MainActor (TaskKeyTarget) -> Void
+    ) {
         self.index = index
+        self.cards = cards
         self.open = open
     }
 
-    /// Equal when they link the same keys to the same tasks. The opener is
-    /// left out, as a closure can't be compared: a screen makes a new one
-    /// on every pass, and a transcript's text shouldn't redraw for that.
-    public static func == (a: TaskKeyLinker, b: TaskKeyLinker) -> Bool { a.index == b.index }
+    /// Equal when they link the same keys to the same tasks, and show the
+    /// same cards. The opener is left out, as a closure can't be compared: a
+    /// screen makes a new one on every pass, and a transcript's text
+    /// shouldn't redraw for that.
+    public static func == (a: TaskKeyLinker, b: TaskKeyLinker) -> Bool { a.index == b.index && a.cards == b.cards }
+
+    /// The card for a key this linker links, or nil: a key it doesn't link,
+    /// or cards built for another runner.
+    public func card(forKey key: String) -> TaskKeyCard? {
+        guard index.targets[key] != nil, cards.runner == index.runner else { return nil }
+        return cards.card(for: key)
+    }
+
+    /// The card a task link names, when it's this linker's runner's.
+    public func card(for url: URL) -> TaskKeyCard? {
+        guard let (runner, key) = TaskKeyLinks.parse(url), runner == index.runner else { return nil }
+        return card(forKey: key)
+    }
+
+    /// Open the task under `key`, when this linker links it.
+    @MainActor
+    public func open(key: String) {
+        if let target = index.targets[key] { open(target) }
+    }
 
     /// No keys, nothing to open: what a view gets when no one set it.
     public static let none = TaskKeyLinker(index: .empty, open: { _ in })
@@ -317,22 +350,25 @@ extension TaskKeyLinker {
     /// `swift test` holds the wiring: the iOS target has no unit tests.
     static func phone(
         runner: String?, workspaces: [WorkspaceSummary], boards: [String: TaskBoardModel],
-        open: (@MainActor (PhoneRoute) -> Void)?
+        cards: TaskKeyCards = .empty, open: (@MainActor (PhoneRoute) -> Void)?
     ) -> TaskKeyLinker {
         guard let runner, let open else { return .none }
         let index = TaskKeyIndex(runner: runner, workspaces: workspaces, boards: boards)
-        return TaskKeyLinker(index: index) { open($0.phoneRoute) }
+        return TaskKeyLinker(index: index, cards: cards) { open($0.phoneRoute) }
     }
 }
 
 extension View {
-    /// One accessibility action per task `linked` links, "Open ov-190",
-    /// for a row that speaks as one element: VoiceOver can't reach a link
-    /// inside such a row's text, and these open the same task a tap would.
+    /// One accessibility action per task `linked` links, "Open ov-190,
+    /// Fix the login" (its title, when its card is known: ov-299), for a row
+    /// that speaks as one element: VoiceOver can't reach a link inside such
+    /// a row's text, and these open the same task a tap would.
     public func taskKeyActions(_ linked: AttributedString, linker: TaskKeyLinker) -> some View {
         accessibilityActions {
             ForEach(linker.targets(in: linked), id: \.key) { target in
-                Button("Open \(target.key)") { linker.open(target) }
+                Button(TaskKeyLinks.openLabel(target.key, card: linker.card(forKey: target.key))) {
+                    linker.open(target)
+                }
             }
         }
     }
