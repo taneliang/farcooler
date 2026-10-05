@@ -206,6 +206,13 @@ enum TitleStatus {
         state == .none ? OrchestratorRow.word(.none) : "Orchestrator · \(OrchestratorRow.word(state))"
     }
 
+    /// Whether the orchestrator's symbol stands before "Orchestrator · …":
+    /// where those words show and the mark is a status dot, not the symbol
+    /// already (ov-320).
+    static func showsGlyph(_ state: OrchestratorRow.State, form: Form) -> Bool {
+        form >= .medium && OrchestratorMark.marksStatus(state)
+    }
+
     /// The tooltip over the orchestrator's part: what it shows (ov-320).
     static let orchestratorHelp = "The orchestrator’s state and its current session"
 
@@ -324,6 +331,11 @@ struct TitleStatusView: View {
     private var orchestrator: some View {
         let label = HStack(spacing: 6) {
             OrchestratorMark(state: model.orchestrator ?? .none, status: model.status)
+            if let state = model.orchestrator, TitleStatus.showsGlyph(state, form: form) {
+                // The sidebar's orchestrator symbol before its name, where the
+                // mark is a status dot rather than that symbol itself (ov-320).
+                OrchestratorMark.glyph.foregroundStyle(.secondary)
+            }
             if form >= .short, let state = model.orchestrator {
                 Text(form >= .medium ? TitleStatus.orchestratorWords(state) : OrchestratorRow.word(state))
                     .foregroundStyle(.primary)
@@ -560,11 +572,23 @@ struct OrchestratorMark: View {
         }
     }
 
-    /// The glyph shown when nothing runs; its frame is the one every other
-    /// state's mark occupies.
-    private var restingIcon: some View {
+    /// Whether the mark is a status dot in place of the orchestrator's
+    /// symbol, rather than the symbol itself.
+    nonisolated static func marksStatus(_ state: OrchestratorRow.State) -> Bool {
+        switch state {
+        case .working, .starting, .needsYou, .unread, .failed: true
+        case .idle, .none, .stopped: false
+        }
+    }
+
+    /// The orchestrator's symbol, as the navigator's row draws it at rest.
+    static var glyph: some View {
         Image(systemName: "person.wave.2").font(.system(size: 10))
     }
+
+    /// The glyph shown when nothing runs; its frame is the one every other
+    /// state's mark occupies.
+    private var restingIcon: some View { Self.glyph }
 }
 
 /// The view behind the status area, so a test can find the toolbar item

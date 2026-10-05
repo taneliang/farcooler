@@ -25,3 +25,20 @@ struct TitleOrchestratorWordsTests {
         #expect(TitleStatus.orchestratorLabel(model) == "Orchestrator, Working, User test issues")
     }
 }
+
+/// The orchestrator's symbol stands before its name where the mark is a
+/// status dot, and not twice where the mark is that symbol (ov-320).
+@MainActor
+@Suite struct TitleOrchestratorGlyphTests {
+    @Test func glyphBeforeTheNameWhileTheMarkIsADot() {
+        #expect(TitleStatus.showsGlyph(.working, form: .medium))
+        #expect(TitleStatus.showsGlyph(.needsYou, form: .wide))
+        #expect(TitleStatus.showsGlyph(.failed(.failed), form: .wide))
+    }
+
+    @Test func noGlyphWhereTheMarkIsTheSymbolOrNoNameShows() {
+        #expect(!TitleStatus.showsGlyph(.idle, form: .wide))
+        #expect(!TitleStatus.showsGlyph(OrchestratorRow.State.none, form: .wide))
+        #expect(!TitleStatus.showsGlyph(.working, form: .short))
+    }
+}
