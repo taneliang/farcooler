@@ -25,6 +25,8 @@ pub mod plan;
 pub mod plan_read;
 pub mod review;
 pub mod rulings;
+pub mod trains;
+pub mod board_ci;
 pub mod models;
 mod store;
 mod tasks;

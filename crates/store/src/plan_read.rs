@@ -23,6 +23,8 @@ use crate::plan::{
     AgentRole, BoardTheme, LANE_COLS, THEME_COLS, Lane, LaneAgent, LaneCard, LaneState, PlanEvent, Subject, row_to_lane, row_to_theme,
 };
 use crate::rulings::{Ruling, rulings_of};
+use crate::board_ci::{CiRead, ci_of};
+use crate::trains::{Train, trains_of};
 use crate::store::Store;
 use crate::tasks::now_millis;
 
@@ -129,6 +131,15 @@ pub struct Coverage {
     pub landed: u32,
 }
 
+/// A train (ov-309), with the lanes on it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrainView {
+    pub train: Train,
+    /// The lanes whose `train` names it, oldest first, finished ones included:
+    /// a train that landed still says what it carried.
+    pub lanes: Vec<Uuid>,
+}
+
 /// The plan layer's whole read for one board.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Plan {
@@ -146,6 +157,12 @@ pub struct Plan {
     /// Decided for you (ov-304): every standing ruling, newest first, then
     /// those settled since `closed_since_ms`, most recently settled first.
     pub rulings: Vec<Ruling>,
+    /// Trains (ov-309): every one not landed or dropped, oldest first, then
+    /// those settled since `closed_since_ms`, most recent first.
+    pub trains: Vec<TrainView>,
+    /// What the runner last read of CI for the subjects the board names: its
+    /// trains' pushed SHAs, and its pages' CI references (ov-306).
+    pub ci: Vec<CiRead>,
 }
 
 impl Store {
@@ -266,6 +283,20 @@ impl Store {
         // design (review 1005a F2).
         let rulings = rulings_of(&conn, workspace, closed_since_ms, &statuses)?;
 
+        let mut trains = Vec::new();
+        for train in trains_of(&conn, workspace, closed_since_ms)? {
+            let mut stmt = conn
+                .prepare("SELECT id FROM lanes WHERE workspace_id = ?1 AND train = ?2 COLLATE NOCASE ORDER BY created_at, id")
+                .map_err(map_err)?;
+            let lanes = stmt
+                .query_map(params![ws, train.name], |r| get_uuid(r, 0))
+                .map_err(map_err)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(map_err)?;
+            trains.push(TrainView { train, lanes });
+        }
+        let ci = ci_of(&conn, workspace)?;
+
         let cards = named.keys().filter_map(|id| statuses.get(id).cloned()).collect();
         let mut coverage: Vec<Coverage> = live
             .keys()
@@ -279,7 +310,8 @@ impl Store {
             })
             .collect();
         coverage.sort_by_key(|c| c.task_id);
-        Ok(Plan { now_ms, themes, lanes, order: order.into_iter().map(|(_, id)| id).collect(), cards, coverage, rulings })
+        let order = order.into_iter().map(|(_, id)| id).collect();
+        Ok(Plan { now_ms, themes, lanes, order, cards, coverage, rulings, trains, ci })
     }
 
     /// A theme's or lane's timeline, oldest first, from `since_ms` on.
