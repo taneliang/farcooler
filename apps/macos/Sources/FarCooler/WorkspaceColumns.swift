@@ -213,7 +213,8 @@ enum WorkspaceColumns {
         var mainX: CGFloat
         var main: CGFloat
         /// The chat column's leading edge and width, with a canvas; zero
-        /// without one. With a canvas, `main` is the canvas.
+        /// without one. With a canvas, `main` is the canvas, overlapping the
+        /// chat's leading gutter by `Pane.inset` while the chat is beside it.
         var chatX: CGFloat = 0
         var chat: CGFloat = 0
     }
@@ -235,7 +236,10 @@ enum WorkspaceColumns {
             return Frames(navigator: navigator, mainX: mainX, main: max(0, width - mainX), chatX: width, chat: chat)
         }
         let chatX = width - chat
-        return Frames(navigator: navigator, mainX: mainX, main: max(0, chatX - divider - mainX), chatX: chatX, chat: chat)
+        // The canvas runs under the chat's leading gutter, so its card ends
+        // where the chat's frame starts and the two cards are one gutter
+        // apart, as tiled panes' are, not two gutters and the divider.
+        return Frames(navigator: navigator, mainX: mainX, main: max(0, chatX + Pane.inset - mainX), chatX: chatX, chat: chat)
     }
 }
 
