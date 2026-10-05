@@ -22,6 +22,13 @@ struct PlanCostViewTests {
         return try JSONSerialization.data(withJSONObject: object)
     }
 
+    /// The fixture with `edit` applied to the whole plan.
+    static func edit(_ edit: (inout [String: Any]) throws -> Void) throws -> Data {
+        var object = try #require(try JSONSerialization.jsonObject(with: PlanViewTests.fixture()) as? [String: Any])
+        try edit(&object)
+        return try JSONSerialization.data(withJSONObject: object)
+    }
+
     /// The views drawn once the overview has settled over `plan`.
     static func drawn(_ plan: Data) async throws -> [String: CGRect] {
         let calls = PlanViewTests.Calls()
@@ -51,6 +58,21 @@ struct PlanCostViewTests {
 
         let none = try await Self.drawn(Self.plan { _, theme in theme["budget_tokens"] = NSNull() })
         #expect(none["plan-theme-Visual language-over-budget"] == nil, "no budget, nothing to flag")
+    }
+
+    @Test("A lane that waits on you and is over its budget says both")
+    func aLaneSaysBothWarnings() async throws {
+        // mac-ux's card ov-1 needs a decision, so it waits on the owner; give it a budget it is past.
+        let both = try await Self.drawn(
+            try Self.edit { object in
+                var lanes = try #require(object["lanes"] as? [[String: Any]])
+                for index in lanes.indices where lanes[index]["name"] as? String == "mac-ux" { lanes[index]["budget_tokens"] = 100_000 }
+                object["lanes"] = lanes
+            })
+        #expect(both["plan-lane-mac-ux-warning"] != nil, "Needs you is still said: \(both.keys.sorted())")
+        #expect(both["plan-lane-mac-ux-over-budget"] != nil, "and so is the budget")
+        let within = try await Self.drawn(PlanViewTests.fixture())
+        #expect(within["plan-lane-mac-ux-warning"] != nil && within["plan-lane-mac-ux-over-budget"] == nil, "within 500K: only Needs you")
     }
 
     @Test("The Cost section is there when the runner sent cost, and not when it didn't")

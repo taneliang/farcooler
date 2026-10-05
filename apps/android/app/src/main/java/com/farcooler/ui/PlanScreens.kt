@@ -282,18 +282,19 @@ fun planGlyph(state: LaneState): ImageVector = when (state) {
  */
 @Composable
 fun PlanLaneRow(lane: PlanLane, theme: PlanTheme?, rank: Int?, now: Long, waitsOnOwner: Boolean, onClick: () -> Unit) {
-    val warning = if (waitsOnOwner) "Needs you" else PlanWords.stale(lane, now) ?: PlanCostWords.overBudget(lane)
+    val warning = if (waitsOnOwner) "Needs you" else PlanWords.stale(lane, now)
+    val overBudget = PlanCostWords.overBudget(lane)
     val amber = glanceColor(GlancePalette.amber)
     val second = if (rank != null) lane.reason.ifEmpty { PlanWords.cards(lane.cards.size) }
     else "${PlanWords.status(lane)} · ${PlanWords.cards(lane.cards.size)}"
-    val spoken = listOfNotNull(rank?.let { "${PlanWords.ordinal(it)} up" }, lane.name, theme?.name, second, warning).joinToString(", ")
+    val spoken = listOfNotNull(rank?.let { "${PlanWords.ordinal(it)} up" }, lane.name, theme?.name, second, warning, PlanCostWords.overBudgetSpoken(lane)).joinToString(", ")
     ListItem(
         leadingContent = {
             Box(Modifier.width(24.dp), contentAlignment = Alignment.CenterStart) {
                 if (rank != null) {
                     Text("$rank", style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
-                    Icon(planGlyph(lane.state), contentDescription = null, modifier = Modifier.size(20.dp), tint = if (warning == null) MaterialTheme.colorScheme.onSurfaceVariant else amber)
+                    Icon(planGlyph(lane.state), contentDescription = null, modifier = Modifier.size(20.dp), tint = if (warning == null && overBudget == null) MaterialTheme.colorScheme.onSurfaceVariant else amber)
                 }
             }
         },
@@ -318,6 +319,7 @@ fun PlanLaneRow(lane: PlanLane, theme: PlanTheme?, rank: Int?, now: Long, waitsO
             Column {
                 Text(second, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 if (warning != null) Text(warning, style = MaterialTheme.typography.labelMedium, color = amber)
+                if (overBudget != null) Text(overBudget, style = MaterialTheme.typography.labelMedium, color = amber)
             }
         },
         trailingContent = {

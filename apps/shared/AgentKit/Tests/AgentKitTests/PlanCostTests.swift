@@ -57,6 +57,9 @@ struct PlanCostTests {
         #expect(PlanWords.overBudget(lane) == nil)
         lane.budgetTokens = 100_000
         #expect(PlanWords.overBudget(lane, locale: Locale(identifier: "en_US")) == "Over budget: 470K of 100K tokens")
+        #expect(
+            PlanWords.overBudgetSpoken(lane, locale: Locale(identifier: "en_US"))
+                == "Over budget. 470 thousand of 100 thousand tokens used.", "VoiceOver hears words, not a suffix letter")
     }
 
     @Test("a screen reader hears the counts as words, never a suffix letter")

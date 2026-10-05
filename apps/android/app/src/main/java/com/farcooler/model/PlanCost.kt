@@ -153,6 +153,10 @@ object PlanCostWords {
     fun overBudget(lane: PlanLane, locale: Locale = Locale.getDefault()): String? =
         (budget(lane.spend, lane.budgetTokens) as? PlanBudget.Over)?.let { budgetLine(it, locale) }
 
+    /** The same, said for TalkBack with the counts as words. */
+    fun overBudgetSpoken(lane: PlanLane, locale: Locale = Locale.getDefault()): String? =
+        (budget(lane.spend, lane.budgetTokens) as? PlanBudget.Over)?.let { budgetSpoken(it, locale) }
+
     /** The same for a theme. */
     fun overBudget(theme: PlanTheme): PlanBudget.Over? = budget(theme.spend, theme.budgetTokens) as? PlanBudget.Over
 

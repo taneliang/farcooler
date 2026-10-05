@@ -153,6 +153,12 @@ extension PlanWords {
         return budgetLine(b, locale: locale)
     }
 
+    /// The same, said for VoiceOver with the counts as words.
+    public static func overBudgetSpoken(_ lane: PlanLane, locale: Locale = .current) -> String? {
+        guard let b = budget(lane.spend, against: lane.budgetTokens), b.isOver else { return nil }
+        return budgetSpoken(b, locale: locale)
+    }
+
     /// The same for a theme.
     public static func overBudget(_ theme: PlanTheme, locale: Locale = .current) -> PlanBudget? {
         guard let b = budget(theme.spend, against: theme.budgetTokens), b.isOver else { return nil }

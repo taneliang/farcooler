@@ -240,10 +240,14 @@ struct PlanLaneRow: View {
     @Environment(\.colorScheme) private var scheme
     @State private var hovering = false
 
-    /// Stale, waiting on the owner, or over its token budget (ov-307): the
-    /// only lanes drawn in color.
+    /// Over its token budget (ov-307), drawn beside whatever else it is: a lane
+    /// that waits on the owner and is over budget says both.
+    private var overBudget: String? { PlanWords.overBudget(lane) }
+
+    /// Stale, waiting on the owner or over its token budget: the only lanes
+    /// drawn in color.
     private var warning: String? {
-        waitsOnOwner ? "Needs you" : PlanWords.stale(lane, now: now) ?? PlanWords.overBudget(lane)
+        waitsOnOwner ? "Needs you" : PlanWords.stale(lane, now: now)
     }
 
     var body: some View {
@@ -273,10 +277,11 @@ struct PlanLaneRow: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
-                    if let warning {
-                        Text(warning)
+                    ForEach([warning, overBudget].compactMap { $0 }, id: \.self) { line in
+                        Text(line)
                             .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
                             .foregroundStyle(Tint.attention(scheme))
+                            .probed(line == overBudget ? "plan-lane-\(lane.name)-over-budget" : "plan-lane-\(lane.name)-warning")
                     }
                 }
             }
@@ -309,13 +314,13 @@ struct PlanLaneRow: View {
         } else {
             Image(systemName: PlanGlyph.name(lane.state))
                 .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                .foregroundStyle(warning == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(Tint.attention(scheme)))
+                .foregroundStyle(warning == nil && overBudget == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(Tint.attention(scheme)))
                 .accessibilityHidden(true)
         }
     }
 
     private var accessibility: String {
-        var parts = [rank.map { "\(PlanWords.ordinal($0)) up" }, lane.name, theme?.name, second, warning]
+        var parts = [rank.map { "\(PlanWords.ordinal($0)) up" }, lane.name, theme?.name, second, warning, PlanWords.overBudgetSpoken(lane)]
         parts.removeAll { $0 == nil }
         return parts.compactMap { $0 }.joined(separator: ", ")
     }
