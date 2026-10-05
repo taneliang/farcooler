@@ -214,3 +214,50 @@ async fn version_of_a_build_without_updates_says_why_latest_is_unknown() {
     assert!(report.said(&canary()).ends_with("doesn't check for updates: it was built from a working tree."));
     assert_eq!(report.json()["latestUnknown"], "updates-off");
 }
+
+async fn run_update_waiting(app: &FakeApp, wait: Duration) -> Result<UpdateReport, String> {
+    let conn = Conn::open(&app.socket).await.unwrap();
+    update_waiting(conn, &app.socket, &canary(), true, wait).await.map_err(|e| e.to_string())
+}
+
+/// Review 1004q F4: the app still quitting may answer `about` first, as
+/// itself. That's not the relaunch, and not a failed one either.
+#[tokio::test]
+async fn the_old_app_answering_while_it_quits_is_not_the_relaunch() {
+    let app = FakeApp::start(vec![
+        vec![serde_json::json!({ "event": "installing", "from": about("2328", "1a2b3c4", 10), "to": latest("2329") })],
+        vec![serde_json::json!({ "event": "about", "app": about("2328", "1a2b3c4", 10) })],
+        vec![serde_json::json!({ "event": "about", "app": about("2329", "8476e3b", 11) })],
+    ]);
+    let report = run_update(&app, true).await.unwrap();
+    assert_eq!(app.requests().len(), 3);
+    assert!(matches!(report, UpdateReport::Updated { ref to, .. } if to.build == "2329"));
+}
+
+/// Review 1004q F2: Sparkle failing after `installing` is said, not
+/// mistaken for an app that quit and didn't reopen.
+#[tokio::test]
+async fn a_failure_after_installing_is_said_as_itself() {
+    let app = FakeApp::start(vec![vec![
+        serde_json::json!({ "event": "installing", "from": about("2328", "1a2b3c4", 10), "to": latest("2329") }),
+        serde_json::json!({ "event": "refused", "code": "install-failed" }),
+    ]]);
+    let said = run_update(&app, true).await.unwrap_err();
+    assert_eq!(
+        said,
+        "Far Cooler Canary couldn't install the update. Far Cooler Canary is still on build 2328, and an alert in \
+         Far Cooler Canary says why"
+    );
+}
+
+/// An app that said `installing` and then never quit is told apart from
+/// one that quit and didn't come back.
+#[tokio::test]
+async fn an_app_that_never_quit_is_not_said_to_have_quit() {
+    let mut scripts =
+        vec![vec![serde_json::json!({ "event": "installing", "from": about("2328", "1a2b3c4", 10), "to": latest("2329") })]];
+    scripts.extend((0..20).map(|_| vec![serde_json::json!({ "event": "about", "app": about("2328", "1a2b3c4", 10) })]));
+    let app = FakeApp::start(scripts);
+    let said = run_update_waiting(&app, Duration::from_secs(2)).await.unwrap_err();
+    assert_eq!(said, "Far Cooler Canary didn't quit to install the update. Open Far Cooler Canary to see why");
+}

@@ -389,27 +389,53 @@ impl UpdateReport {
 /// Ask for an update and see it through: to the relaunched app, when it
 /// relaunches.
 pub(crate) async fn update(
-    mut conn: Conn,
+    conn: Conn,
     socket: &Path,
     names: &Names,
     relaunch: bool,
 ) -> Result<UpdateReport, Box<dyn std::error::Error>> {
+    update_waiting(conn, socket, names, relaunch, RELAUNCH_WAIT).await
+}
+
+/// `update`, with how long the relaunch may take named, for tests.
+pub(crate) async fn update_waiting(
+    mut conn: Conn,
+    socket: &Path,
+    names: &Names,
+    relaunch: bool,
+    relaunch_wait: Duration,
+) -> Result<UpdateReport, Box<dyn std::error::Error>> {
     let stopped = || format!("{} stopped answering before the update finished", names.app);
     conn.send(serde_json::json!({ "op": "update", "relaunch": relaunch })).await.map_err(|_| stopped())?;
     let answered = tokio::time::timeout(UPDATE_WAIT, async {
+        // `installing` doesn't end the conversation: Sparkle can still fail
+        // before the app quits, and says so on the same line (ov-302 F2).
+        // The app quitting to install is what hangs up.
+        let mut installing = None;
         loop {
-            let Some(event) = conn.next().await.map_err(|_| stopped())? else { return Err(stopped()) };
+            let Some(event) = conn.next().await.map_err(|_| stopped())? else {
+                return match installing {
+                    Some((from, to)) => Ok(Answered::Relaunching { from, to }),
+                    None => Err(stopped()),
+                };
+            };
             match (event.event.clone().as_str(), event) {
                 ("upToDate", Event { app: Some(app), .. }) => return Ok(Answered::Done(UpdateReport::UpToDate(app))),
                 ("pending", Event { from: Some(from), to: Some(to), .. }) => {
                     return Ok(Answered::Done(UpdateReport::Pending { from, to }));
                 }
-                ("installing", Event { from: Some(from), to: Some(to), .. }) => {
-                    return Ok(Answered::Relaunching { from, to });
-                }
+                ("installing", Event { from: Some(from), to: Some(to), .. }) => installing = Some((from, to)),
                 ("refused", Event { code, detail, .. }) => {
                     tracing::info!(?code, ?detail, "the app refused to update");
-                    return Err(refused_said(code.as_deref().unwrap_or(""), names));
+                    let said = refused_said(code.as_deref().unwrap_or(""), names);
+                    return Err(match &installing {
+                        Some((from, _)) => format!(
+                            "{said}. {app} is still on build {}, and an alert in {app} says why",
+                            from.build,
+                            app = names.app
+                        ),
+                        None => said,
+                    });
                 }
                 _ => {}
             }
@@ -422,7 +448,7 @@ pub(crate) async fn update(
         Answered::Relaunching { from, to } => (from, to),
     };
     drop(conn);
-    let now = relaunched(socket, names, &from).await?;
+    let now = relaunched(socket, names, &from, relaunch_wait).await?;
     if now.build == from.build {
         return Err(format!("{} reopened still at build {}: the update didn't install", names.app, now.build).into());
     }
@@ -432,28 +458,47 @@ pub(crate) async fn update(
 /// How the app answered an update before any relaunch.
 enum Answered {
     Done(UpdateReport),
-    /// It's about to quit, install `to`, and relaunch.
+    /// It's quitting to install `to`, and relaunching.
     Relaunching { from: About, to: Latest },
 }
 
 /// The app that came back after quitting to install: a different process
-/// from `from`.
-async fn relaunched(socket: &Path, names: &Names, from: &About) -> Result<About, Box<dyn std::error::Error>> {
-    let deadline = tokio::time::Instant::now() + RELAUNCH_WAIT;
+/// from `from`. The old one still answering, or a quitting one answering
+/// late, is not the relaunch.
+async fn relaunched(
+    socket: &Path,
+    names: &Names,
+    from: &About,
+    wait: Duration,
+) -> Result<About, Box<dyn std::error::Error>> {
+    let deadline = tokio::time::Instant::now() + wait;
+    // Whether the last look found the old app still answering.
+    let mut old_answered = false;
     while tokio::time::Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(500)).await;
-        let Ok(mut conn) = Conn::open(socket).await else { continue };
+        let Ok(mut conn) = Conn::open(socket).await else {
+            old_answered = false;
+            continue;
+        };
         if conn.send(serde_json::json!({ "op": "about" })).await.is_err() {
             continue;
         }
         if let Ok(Ok(Some(Event { app: Some(app), .. }))) =
             tokio::time::timeout(Duration::from_secs(5), conn.next()).await
-            && app.pid != from.pid
         {
-            return Ok(app);
+            if app.pid != from.pid {
+                return Ok(app);
+            }
+            old_answered = true;
         }
     }
-    Err(format!("{app} quit to install the update and hasn't reopened. Open {app} to finish", app = names.app).into())
+    let app = &names.app;
+    Err(if old_answered {
+        format!("{app} didn't quit to install the update. Open {app} to see why")
+    } else {
+        format!("{app} quit to install the update and hasn't reopened. Open {app} to finish")
+    }
+    .into())
 }
 
 /// What `app version` found.
