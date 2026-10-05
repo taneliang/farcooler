@@ -304,15 +304,18 @@ private fun PageCellText(cell: PageCell, world: PageWorld, open: (PageDestinatio
         fontWeight = if (strong || cell.tone == PageTone.ATTENTION) FontWeight.Medium else null,
     )
     val destination = parts.destination
-    Text(
-        buildAnnotatedString {
-            append(parts.text)
-            parts.domain?.let { withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant)) { append(" $it") } }
-        },
-        style = style,
-        color = color,
-        modifier = if (destination != null) modifier.clickable(role = Role.Button) { open(destination) } else modifier,
-    )
+    val words = buildAnnotatedString {
+        append(parts.text)
+        parts.domain?.let { withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant)) { append(" $it") } }
+    }
+    if (destination == null) {
+        Text(words, style = style, color = color, modifier = modifier)
+    } else {
+        // A link a finger can hit: the line's whole width, and at least 48 dp tall.
+        Box(modifier.heightIn(min = 48.dp).clickable(role = Role.Button) { open(destination) }, contentAlignment = Alignment.CenterStart) {
+            Text(words, style = style, color = color)
+        }
+    }
 }
 
 /** What a row's links are, as TalkBack actions: one "Open …" per link, every column. */
@@ -378,7 +381,7 @@ private fun PageStackedTable(columns: List<PageColumn>, rows: List<List<PageCell
                 row.firstOrNull()?.let { PageCellText(it, world, open, strong = true) }
                 columns.zip(row).drop(1).forEach { (column, cell) ->
                     if (world.cellText(cell).isNotEmpty()) {
-                        Row(Modifier.padding(start = 12.dp), verticalAlignment = Alignment.Top) {
+                        Row(Modifier.padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 column.title,
                                 style = MaterialTheme.typography.bodyMedium,
@@ -450,7 +453,7 @@ private fun RefTrailer(resolved: PageResolved) {
 private fun PageRow(destination: PageDestination?, shaded: Boolean, spoken: String, tag: String, open: (PageDestination) -> Unit, content: @Composable () -> Unit) {
     Box(
         Modifier.fillMaxWidth()
-            .heightIn(min = 40.dp)
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(Radius.small))
             .background(if (shaded) MaterialTheme.colorScheme.surfaceContainer else Color.Transparent)
             .then(if (destination != null) Modifier.clickable(role = Role.Button) { open(destination) } else Modifier)
@@ -501,7 +504,8 @@ private fun PageTimeline(entries: List<PageEntry>, world: PageWorld, open: (Page
                         time,
                         style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.width(88.dp),
+                        // At least the width a time takes; wider at large font scales.
+                        modifier = Modifier.widthIn(min = 88.dp),
                     )
                     Text(entry.text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                     resolved?.let {
@@ -577,7 +581,7 @@ private fun PageLinksRow(refs: List<PageRef>, world: PageWorld, open: (PageDesti
                     onClick = { open(destination) },
                     shape = RoundedCornerShape(Radius.small),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier.heightIn(min = 40.dp).testTag("page-link-$index").semantics { contentDescription = resolved.spoken },
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("page-link-$index").semantics { contentDescription = resolved.spoken },
                 ) {
                     Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(resolved.name, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
