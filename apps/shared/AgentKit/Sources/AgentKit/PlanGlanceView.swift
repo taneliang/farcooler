@@ -31,7 +31,10 @@ public struct PlanGlanceView: View {
             heading
             switch style {
             case .lines:
-                if let now = glance.nowLine { line(now) }
+                // Two lines at most: two lanes and their states are wider
+                // than a watch's Smart Stack slot, and a state cut off is
+                // the half of Now this exists to say.
+                if let now = glance.nowLine { line(now, lines: 2) }
             case .rows:
                 ForEach(Array(glance.now.enumerated()), id: \.offset) { _, lane in
                     HStack(spacing: 6) {
@@ -69,10 +72,11 @@ public struct PlanGlanceView: View {
         }
     }
 
-    private func line(_ text: String) -> some View {
+    private func line(_ text: String, lines: Int = 1) -> some View {
         Text(text)
             .font(.caption)
             .foregroundStyle(.secondary)
-            .lineLimit(1)
+            .lineLimit(lines)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
