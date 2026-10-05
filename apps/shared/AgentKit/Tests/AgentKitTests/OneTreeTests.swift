@@ -95,6 +95,13 @@ struct OneTreeTests {
 
     static func node(_ tree: OneTree, _ id: String) -> OneTreeNode? { tree.allNodes.first { $0.id == id } }
 
+    /// The board with every lane landed: no work moving, so no theme opens by default.
+    static func quietBoard(asks: OneTreeAsks = OneTreeAsks()) throws -> OneTreeInput {
+        var input = try board(asks: asks)
+        for index in input.plan.lanes.indices { input.plan.lanes[index].state = .landed }
+        return input
+    }
+
     // MARK: The shape
 
     @Test("Top to bottom: three places, the themes in plan order, No Theme, then Main Checkout and Loose Worktrees")
@@ -250,39 +257,50 @@ struct OneTreeTests {
 
     // MARK: Expansion
 
-    @Test("The theme with the newest activity opens by default, and in it the cards being worked")
-    func newestThemeOpens() throws {
-        // Mac's story is newest.
+    @Test("A theme with a live lane opens by default, and in it the cards being worked; the rest show name and progress")
+    func liveThemesOpen() throws {
+        // Plan's t1 and t2 and Mac's t3 are all in live lanes.
         var tree = OneTree.build(try Self.board())
-        #expect(tree.tree.map(\.expandedByDefault) == [false, true, false])
-        // A card moved later than that: Plan is newest.
-        var input = try Self.board()
-        input.tasks[0].activityMs = P.now + 1
+        #expect(tree.tree.map(\.expandedByDefault) == [true, true, false])
+        // t1 has live lanes, t2's lane is live too; the fold stays shut.
+        #expect(tree.tree[0].children.map(\.expandedByDefault) == [true, true, false])
+        // Only the primary lane (t1) live: Plan opens, Mac stays closed.
+        var input = try Self.quietBoard()
+        input.plan.lanes[0].state = .building
         tree = OneTree.build(input)
         #expect(tree.tree.map(\.expandedByDefault) == [true, false, false])
-        let plan = tree.tree[0]
-        // t1 has live lanes, t2's lane is live too; the fold stays shut.
-        #expect(plan.children.map(\.expandedByDefault) == [true, true, false])
-        // A lane being worked moving makes its theme newest too.
-        input = try Self.board()
-        input.plan.lanes[0].stateSince = P.now + 5
-        #expect(OneTree.build(input).tree.map(\.expandedByDefault) == [true, false, false])
+        // Nothing moving: every theme closed.
+        #expect(OneTree.build(try Self.quietBoard()).tree.map(\.expandedByDefault) == [false, false, false])
+        // A queued lane isn't moving yet: it opens neither its theme nor its card.
+        input = try Self.quietBoard()
+        input.plan.lanes[1].state = .queued
+        tree = OneTree.build(input)
+        #expect(tree.tree.map(\.expandedByDefault) == [false, false, false])
     }
 
-    @Test("A paused theme isn't picked to open while an active one could be")
-    func pausedNotPicked() throws {
-        var input = try Self.board()
+    @Test("A theme that asks for you, or has a card that does, opens by default with no work moving")
+    func askingThemesOpen() throws {
+        var tree = OneTree.build(try Self.quietBoard(asks: OneTreeAsks(themes: ["theme-Mac"])))
+        #expect(tree.tree.map(\.expandedByDefault) == [false, true, false])
+        tree = OneTree.build(try Self.quietBoard(asks: OneTreeAsks(tasks: ["t2"])))
+        #expect(tree.tree.map(\.expandedByDefault) == [true, false, false])
+    }
+
+    @Test("A paused theme opens only for the same reasons: live work or an ask")
+    func pausedFollowsTheSameRule() throws {
+        var input = try Self.quietBoard()
         input.plan.themes[1].state = "paused"
-        #expect(OneTree.build(input).tree.map(\.expandedByDefault) == [true, false, false])
+        #expect(OneTree.build(input).tree.map(\.expandedByDefault) == [false, false, false])
+        input.plan.lanes[1].state = .building
+        #expect(OneTree.build(input).tree.map(\.expandedByDefault) == [true, true, false])
     }
 
     @Test("Choices override defaults, and survive being kept as text")
     func expansionChoices() throws {
-        let tree = OneTree.build(try Self.board())
+        let tree = OneTree.build(try Self.quietBoard())
         var expansion = OneTreeExpansion()
-        #expect(OneTree.rows(tree.tree, expansion: expansion).map(\.node.title).prefix(2) == ["Plan", "Mac"])
+        #expect(OneTree.rows(tree.tree, expansion: expansion).map(\.node.title) == ["Plan", "Mac", "No Theme"])
         expansion.toggle(tree.tree[0])
-        expansion.toggle(tree.tree[1])
         let rows = OneTree.rows(tree.tree, expansion: expansion)
         #expect(rows.map(\.node.title) == ["Plan", "Title t1", "Title t2", "1 done", "Mac", "No Theme"])
         #expect(rows.map(\.depth) == [0, 1, 1, 1, 0, 0])
@@ -298,7 +316,7 @@ struct OneTreeTests {
         let input = try Self.board(asks: OneTreeAsks(tasks: ["t2"]))
         let tree = OneTree.build(input)
         // Everything closed: the theme carries the dot.
-        var expansion = OneTreeExpansion(choices: ["theme:theme-Mac": false])
+        var expansion = OneTreeExpansion(choices: ["theme:theme-Mac": false, "theme:theme-Plan": false])
         var rows = OneTree.rows(tree.tree, expansion: expansion)
         #expect(rows.filter(\.dot).map(\.node.title) == ["Plan"])
         // Open the theme: the dot moves to the card, and leaves the theme.
@@ -315,10 +333,10 @@ struct OneTreeTests {
     func paneAsk() throws {
         let tree = OneTree.build(try Self.board(asks: OneTreeAsks(terminals: ["c1"])))
         // Both copies of the lane hold it: each of their themes rolls it up.
-        let closed = OneTreeExpansion(choices: ["theme:theme-Mac": false])
+        let closed = OneTreeExpansion(choices: ["theme:theme-Mac": false, "theme:theme-Plan": false])
         #expect(OneTree.rows(tree.tree, expansion: closed).filter(\.dot).map(\.node.title) == ["Plan", "Mac"])
         // Open Plan: its card ov-2 carries it now, its closed lane under it.
-        let open = OneTreeExpansion(choices: ["theme:theme-Mac": false, "theme:theme-Plan": true])
+        let open = OneTreeExpansion(choices: ["theme:theme-Mac": false, "theme:theme-Plan": true, "theme:theme-Plan/task:t2": false])
         #expect(OneTree.rows(tree.tree, expansion: open).filter(\.dot).map(\.node.title) == ["Title t2", "Mac"])
         // Down to the pane: only the pane.
         let all = OneTreeExpansion(choices: [

@@ -23,6 +23,10 @@ enum AppCommand: String {
     /// View ▸ Tasks by Status: the navigator draws the task list by status, the
     /// Board view, in place of the one tree, or the tree again (ov-321).
     case boardView
+    /// View ▸ Collapse All, Expand All: the navigator's tree, every node
+    /// closed or open (ov-334).
+    case collapseTree
+    case expandTree
     /// ⌘↑: up the one tree, to the node over the selection's (ov-321).
     case goUp
     case openInEditor
@@ -167,6 +171,14 @@ struct FarCoolerCommands: Commands {
             // A checkmark while the navigator draws the Board view: a state,
             // and the same item puts the tree back (ov-321).
             Toggle("Tasks by Status", isOn: Binding(get: { mainWindow?.boardView == true }, set: { _ in AppCommand.boardView.post() }))
+                .disabled(!MainWindowFocus.goes(\.inWorkspace, mainWindow))
+            // The whole tree closed or open, as Xcode's navigator offers; ⌥⌘←
+            // and ⌥⌘→, which nothing else here holds (ov-334).
+            Button("Collapse All") { AppCommand.collapseTree.post() }
+                .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+                .disabled(!MainWindowFocus.goes(\.inWorkspace, mainWindow))
+            Button("Expand All") { AppCommand.expandTree.post() }
+                .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
                 .disabled(!MainWindowFocus.goes(\.inWorkspace, mainWindow))
         }
 

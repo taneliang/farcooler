@@ -24,3 +24,60 @@ struct OneTreePlacesTests {
         #expect(page?.kind == .page)
     }
 }
+
+/// Collapse All, Expand All and ⌥-click (ov-334).
+struct OneTreeFoldTests {
+    private static func tree() throws -> OneTree {
+        OneTree.build(try OneTreeTests.board())
+    }
+
+    @Test("Collapse All closes every node with children, and the defaults don't come back")
+    func collapseAll() throws {
+        let tree = try Self.tree()
+        var expansion = OneTreeExpansion()
+        #expect(expansion.anyExpanded(in: tree.roots))
+        expansion.setAll(false, in: tree.roots)
+        #expect(!expansion.anyExpanded(in: tree.roots))
+        #expect(OneTree.rows(tree.roots, expansion: expansion).allSatisfy { !$0.expanded })
+        #expect(expansion.isSeeded)
+        // Activity can't open one again: the choice is kept as text.
+        #expect(!OneTreeExpansion(encoded: expansion.encoded).anyExpanded(in: tree.roots))
+    }
+
+    @Test("Expand All opens every node with children, to the terminals")
+    func expandAll() throws {
+        let tree = try Self.tree()
+        var expansion = OneTreeExpansion()
+        expansion.setAll(true, in: tree.roots)
+        let rows = OneTree.rows(tree.roots, expansion: expansion)
+        #expect(rows.filter { $0.node.hasChildren }.allSatisfy { $0.expanded })
+        #expect(rows.contains { $0.node.kind == .terminal })
+    }
+
+    @Test("⌥-click on a disclosure takes its siblings the same way")
+    func optionClick() throws {
+        let tree = try Self.tree()
+        let plan = try #require(tree.tree.first { $0.id == "theme:theme-Plan" })
+        var expansion = OneTreeExpansion()
+        expansion.setAll(false, in: tree.roots)
+        expansion.toggle(plan, withSiblings: tree.siblings(of: plan.id))
+        // Every theme with children is open now; the groups below are not its siblings.
+        for sibling in tree.tree where sibling.hasChildren { #expect(expansion.isExpanded(sibling), "\(sibling.id)") }
+        let checkout = try #require(tree.below.first)
+        #expect(!expansion.isExpanded(checkout))
+        // Again: all of them close.
+        expansion.toggle(plan, withSiblings: tree.siblings(of: plan.id))
+        for sibling in tree.tree where sibling.hasChildren { #expect(!expansion.isExpanded(sibling), "\(sibling.id)") }
+    }
+
+    @Test("Siblings are the parent's children, or the group at the top")
+    func siblings() throws {
+        let tree = try Self.tree()
+        #expect(tree.siblings(of: "theme:theme-Plan").map(\.id) == tree.tree.map(\.id))
+        #expect(tree.siblings(of: "place:plan").map(\.id) == tree.places.map(\.id))
+        let task = try #require(tree.allNodes.first { $0.id.hasPrefix("theme:theme-Plan/task:") && $0.kind == .task })
+        let parent = try #require(tree.tree.first { $0.id == "theme:theme-Plan" })
+        #expect(tree.siblings(of: task.id).map(\.id) == parent.children.map(\.id))
+        #expect(tree.siblings(of: "nowhere").isEmpty)
+    }
+}

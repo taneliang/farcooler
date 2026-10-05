@@ -579,7 +579,11 @@ struct OneTreeBuilder {
             default: break
             }
             let id = "theme:\(theme.id)"
-            var children = shown.map { taskNode($0, under: id, theme: theme.id) }
+            // A theme with work moving starts open: a lane being worked under
+            // one of its cards (not one still queued). The rest show their name
+            // and progress (ov-334).
+            let live = ids.contains { lanes(of: $0).contains { $0.state.isLive && $0.state != .queued } }
+            var children = shown.map { taskNode($0, under: id, themeLive: live) }
             if input.filter == .open {
                 // A finished card keeps its id under the theme whichever
                 // filter built the tree, so a row chosen in the fold is the
@@ -591,7 +595,7 @@ struct OneTreeBuilder {
                         finish(
                             OneTreeNode(
                                 id: fold, kind: .doneFold, title: OneTreeWords.done(done.count), glyph: OneTreeGlyph.doneFold,
-                                children: done.map { taskNode($0, under: id, theme: theme.id) }, quiet: true)))
+                                children: done.map { taskNode($0, under: id, themeLive: live) }, quiet: true)))
                 }
             }
             children += input.pages.filter { $0.themeID == theme.id }.map { pageNode($0, under: id) }
@@ -600,8 +604,10 @@ struct OneTreeBuilder {
                 glyph: OneTreeGlyph.theme(state: theme.state),
                 target: .theme(theme.id), children: children)
             node.asks = input.asks.themes.contains(theme.id)
-            node.expandedByDefault = theme.id == newestTheme
-            return finish(node)
+            node = finish(node)
+            // Open while it has live work, or anything under it asks for you.
+            node.expandedByDefault = live || node.holdsAsk
+            return node
         }
     }
 
@@ -622,13 +628,13 @@ struct OneTreeBuilder {
             ? input.tasks.filter { !themed.contains($0.id) && $0.status == .done } : []
         guard !mine.isEmpty || !done.isEmpty else { return nil }
         let id = "group:no-theme"
-        var children = mine.map { taskNode($0, under: id, theme: nil) }
+        var children = mine.map { taskNode($0, under: id, themeLive: false) }
         if !done.isEmpty {
             children.append(
                 finish(
                     OneTreeNode(
                         id: "\(id)/done", kind: .doneFold, title: OneTreeWords.done(done.count), glyph: OneTreeGlyph.doneFold,
-                        children: done.map { taskNode($0, under: id, theme: nil) }, quiet: true)))
+                        children: done.map { taskNode($0, under: id, themeLive: false) }, quiet: true)))
         }
         var node = OneTreeNode(
             id: id, kind: .group, title: OneTreeWords.noTheme, detail: "\(mine.count)", glyph: OneTreeGlyph.noTheme,
@@ -639,7 +645,7 @@ struct OneTreeBuilder {
 
     // MARK: Tasks and lanes
 
-    func taskNode(_ task: OneTreeTask, under parent: String, theme: String?) -> OneTreeNode {
+    func taskNode(_ task: OneTreeTask, under parent: String, themeLive: Bool) -> OneTreeNode {
         let id = "\(parent)/task:\(task.id)"
         let mine = lanes(of: task.id)
         var children = mine.map { laneNode($0, for: task, under: id) }
@@ -654,7 +660,7 @@ struct OneTreeBuilder {
         node.asks = input.asks.tasks.contains(task.id)
         // A card being worked opens on its lanes inside the theme that's
         // open by default; the rest stay closed.
-        node.expandedByDefault = theme != nil && theme == newestTheme
+        node.expandedByDefault = themeLive
             && mine.contains { $0.state.isLive && $0.state != .queued }
         return finish(node)
     }
@@ -898,6 +904,34 @@ public struct OneTreeExpansion: Equatable, Sendable, Codable {
 
     public mutating func toggle(_ node: OneTreeNode) { choices[node.id] = !isExpanded(node) }
 
+    /// ⌥-click on a disclosure (ov-334), as Finder's and Xcode's: `node` and
+    /// every sibling that has children go the way `node` goes.
+    public mutating func toggle(_ node: OneTreeNode, withSiblings siblings: [OneTreeNode]) {
+        let open = !isExpanded(node)
+        choices[node.id] = open
+        for sibling in siblings where sibling.hasChildren { choices[sibling.id] = open }
+    }
+
+    /// Expand All and Collapse All (ov-334): every node with children in
+    /// `nodes` open or closed, and the defaults taken, so a node the choice
+    /// didn't name isn't opened again by activity.
+    public mutating func setAll(_ expanded: Bool, in nodes: [OneTreeNode]) {
+        func walk(_ nodes: [OneTreeNode]) {
+            for node in nodes where node.hasChildren {
+                choices[node.id] = expanded
+                walk(node.children)
+            }
+        }
+        walk(nodes)
+        choices[Self.seededKey] = true
+    }
+
+    /// Whether any node with children in `nodes` is open: what the one
+    /// button offers, Collapse All while any is, else Expand All.
+    public func anyExpanded(in nodes: [OneTreeNode]) -> Bool {
+        nodes.contains { $0.hasChildren && (isExpanded($0) || anyExpanded(in: $0.children)) }
+    }
+
     /// Open every node in `ids` (a path's ancestors): what revealing a
     /// selection does.
     public mutating func open(_ ids: [String]) {
@@ -997,6 +1031,17 @@ extension OneTree {
     public func ancestors(of target: OneTreeTarget, hint: String? = nil) -> [String] {
         guard let path = path(to: target, hint: hint) else { return [] }
         return path.dropLast().map(\.id)
+    }
+
+    /// The nodes beside the one with `id`, itself included: its parent's
+    /// children, or its group at the top.
+    public func siblings(of id: String) -> [OneTreeNode] {
+        func find(_ nodes: [OneTreeNode]) -> [OneTreeNode]? {
+            if nodes.contains(where: { $0.id == id }) { return nodes }
+            for node in nodes { if let found = find(node.children) { return found } }
+            return nil
+        }
+        return [places, tree, below].lazy.compactMap(find).first ?? []
     }
 
     /// Every node, depth first.

@@ -136,6 +136,7 @@ enum Shortcut {
                 Item(keys: "⌥⌘N", action: "New workspace"),
                 Item(keys: "⇧⌘B", action: "Show this workspace’s board"),
                 Item(keys: "⌥⌘P", action: "Show the plan beside the orchestrator, or peek at it in a narrow window"),
+                Item(keys: "⌥⌘←  ⌥⌘→", action: "Collapse or expand every theme, card and lane in the navigator’s tree"),
                 Item(keys: "⇧⌘K", action: "Mark everything in the board’s Unread as read"),
                 Item(keys: "⇧⌘R", action: "Add Repository"),
                 Item(keys: "⇧⌘E", action: "Open this worktree in your editor"),

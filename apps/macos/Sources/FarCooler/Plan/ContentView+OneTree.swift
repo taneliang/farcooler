@@ -24,7 +24,8 @@ extension ContentView {
                 if let target = node.target { goInTree(target, host: host, workspace: workspace) }
             },
             settled: { board.hasRead && (board.plan.hasRead || !board.plan.available) },
-            menu: { node in AnyView(treeMenu(node, host: host, workspace: workspace, client: client)) })
+            menu: { node in AnyView(treeMenu(node, host: host, workspace: workspace, client: client)) },
+            fold: treeFold)
     }
 
     /// The workspace's Needs You count: the title bar's and the sidebar's

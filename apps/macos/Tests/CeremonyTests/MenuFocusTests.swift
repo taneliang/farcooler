@@ -203,6 +203,8 @@ struct MenuWiringTests {
         "Show Board": "MainWindowFocus.isKey(",
         "Show Plan": "MainWindowFocus.goes(\\.inWorkspace",
         "Tasks by Status": "MainWindowFocus.goes(\\.inWorkspace",
+        "Collapse All": "MainWindowFocus.goes(\\.inWorkspace",
+        "Expand All": "MainWindowFocus.goes(\\.inWorkspace",
         "Enclosing Item": "\\.goesUp",
         "close.title": "CloseCommand.closes(",
         "Close Window": "MainWindowFocus.isKey(",

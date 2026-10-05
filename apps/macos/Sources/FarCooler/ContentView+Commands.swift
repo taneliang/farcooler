@@ -333,6 +333,8 @@ extension ContentView {
             }
         case .focusConversation, .focusBoard, .focusTask:
             focusWorkspaceColumn(command)
+        case .collapseTree: treeFold.collapse()
+        case .expandTree: treeFold.expand()
         case .switchWorkspace: switcherRequest += 1
         case .goToLine: focusedFiles?.goingToLine = true
         case .nextTaskTab: stepTaskTab(by: 1)

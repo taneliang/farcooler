@@ -100,6 +100,8 @@ struct ContentView: View {
     /// Bumped by ⌘F in a workspace: its navigator's filter takes the
     /// keyboard (ov-103).
     @State var boardFilterRequest = 0
+    /// View ▸ Collapse All, Expand All, asked of the navigator's tree (ov-334).
+    @State var treeFold = TreeFoldRequest()
     @State var removeWorktree: Worktree?
     @State var removeRepository: RepositoryToRemove?
     @State private var showResumeBranch = false
@@ -438,7 +440,7 @@ struct ContentView: View {
         // on each one — so this hears a runner leaving, coming back as a new
         // client, and listing its projects without one.
         .onReceive(store.$fleet) { _ in pruneBoardStores() }
-        .captureOpening($selection, peeking: $planPeeking)
+        .captureOpening($selection, peeking: $planPeeking, fold: $treeFold)
         .onChange(of: store.fleet) { old, _ in
             // One rule for every way a terminal can disappear: exiting on its
             // own, being closed here, being closed from a phone, or its

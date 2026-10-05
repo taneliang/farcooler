@@ -29,10 +29,15 @@ import SwiftUI
     private struct CaptureOpening: ViewModifier {
         @Binding var selection: ContentView.Selection?
         @Binding var peeking: Bool
+        @Binding var fold: TreeFoldRequest
 
         func body(content: Content) -> some View {
             content.onReceive(NotificationCenter.default.publisher(for: .captureOpen)) { note in
                 if note.object as? String == "peek" { return peeking = true }
+                // View ▸ Collapse All, Expand All, as the menu asks (ov-334): a
+                // capture window isn't key, so the command itself would be ignored.
+                if note.object as? String == "fold:collapse" { return fold.collapse() }
+                if note.object as? String == "fold:expand" { return fold.expand() }
                 if let saved = note.object as? String, let next = SelectionMemory.decode(saved) { selection = next }
             }
         }
@@ -50,9 +55,11 @@ extension View {
     }
 
     /// Open the place a capture posts, in a debug build; nothing otherwise.
-    func captureOpening(_ selection: Binding<ContentView.Selection?>, peeking: Binding<Bool>) -> some View {
+    func captureOpening(
+        _ selection: Binding<ContentView.Selection?>, peeking: Binding<Bool>, fold: Binding<TreeFoldRequest>
+    ) -> some View {
         #if DEBUG
-            modifier(CaptureOpening(selection: selection, peeking: peeking))
+            modifier(CaptureOpening(selection: selection, peeking: peeking, fold: fold))
         #else
             self
         #endif

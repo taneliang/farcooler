@@ -32,6 +32,8 @@ struct OneTreeSidebar {
     /// A row's context menu: a card's, a lane's or worktree's, a
     /// terminal's, the checkout's (review M2).
     var menu: (OneTreeNode) -> AnyView = { _ in AnyView(EmptyView()) }
+    /// View ▸ Collapse All or Expand All, asked of the tree (ov-334).
+    var fold = TreeFoldRequest()
 }
 
 /// The tree, drawn: the navigator's content in place of its sections.
@@ -103,13 +105,13 @@ struct OneTreeNavigator: View {
             ScrollView {
                 // Lazy: a long board draws the rows in sight (review H2).
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    section(groups[0])
+                    section(groups[0], in: tree)
                     rule
-                    filterPicker
-                    section(groups[1])
+                    filterRow(tree)
+                    section(groups[1], in: tree)
                     if !groups[2].isEmpty {
                         rule
-                        section(groups[2])
+                        section(groups[2], in: tree)
                     }
                 }
                 .padding(.horizontal, NavigatorGrid.edge)
@@ -134,6 +136,10 @@ struct OneTreeNavigator: View {
         .focusEffectDisabled()
         .onChange(of: focused) { _, now in if now { onKeyboard() } }
         .onChange(of: focusRequest) { _, _ in focused = true }
+        // View ▸ Collapse All, Expand All.
+        .onChange(of: sidebar.fold) { _, request in
+            if request.serial > 0 { setAll(request.expands, in: tree) }
+        }
         // The window's choice moved: the keyboard follows it.
         .onChange(of: sidebar.selected) { _, _ in cursor = nil }
         // The default open theme, taken once the board and plan are read,
@@ -168,11 +174,11 @@ struct OneTreeNavigator: View {
             id: node.id, signature: [node.title, node.detail, node.also, "\(node.holdsAsk)"].joined(separator: "\u{1}"))
     }
 
-    private func section(_ rows: [OneTreeRow]) -> some View {
+    private func section(_ rows: [OneTreeRow], in tree: OneTree) -> some View {
         ForEach(rows) { row in
             OneTreeRowView(
                 row: row, selected: isSelected(row.node) || (cursor == row.id && focused), keyed: keyed,
-                onToggle: { toggle(row.node) },
+                onToggle: { toggle(row.node, in: tree) },
                 onChoose: {
                     cursor = row.node.target == nil ? row.id : nil
                     choose(row.node)
@@ -190,18 +196,36 @@ struct OneTreeNavigator: View {
             .padding(.vertical, NavigatorRhythm.rule)
     }
 
-    /// Status, as a filter on the tree: Not Done, In Review, All.
-    private var filterPicker: some View {
-        Picker("Show", selection: Binding(get: { filter }, set: { filterRaw = $0.rawValue })) {
-            ForEach(OneTreeFilter.allCases, id: \.self) { Text($0.title).tag($0).help($0.help) }
+    /// Status, as a filter on the tree: Not Done, In Review, All; and beside
+    /// it the one button that folds the whole tree (ov-334).
+    private func filterRow(_ tree: OneTree) -> some View {
+        let anyOpen = expansion.anyExpanded(in: tree.roots)
+        return HStack(spacing: SidebarGrid.gap) {
+            Picker("Show", selection: Binding(get: { filter }, set: { filterRaw = $0.rawValue })) {
+                ForEach(OneTreeFilter.allCases, id: \.self) { Text($0.title).tag($0).help($0.help) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            .accessibilityLabel("Show")
+            .help(OneTreeFilter.allHelp)
+            .identified("one-tree-filter")
+            Button {
+                setAll(!anyOpen, in: tree)
+            } label: {
+                Image(systemName: TreeFold.symbol(anyExpanded: anyOpen))
+                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                    .foregroundStyle(SidebarInk.secondary)
+                    .frame(width: SidebarGrid.control, height: SidebarGrid.control)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .disabled(narrowing)
+            .help(TreeFold.help(anyExpanded: anyOpen))
+            .accessibilityLabel(TreeFold.title(anyExpanded: anyOpen))
+            .identified("one-tree-fold")
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .controlSize(.small)
         .padding(.bottom, NavigatorRhythm.air)
-        .accessibilityLabel("Show")
-        .help(OneTreeFilter.allHelp)
-        .identified("one-tree-filter")
     }
 
     // MARK: Selection
@@ -225,10 +249,24 @@ struct OneTreeNavigator: View {
         }
     }
 
-    private func toggle(_ node: OneTreeNode) {
+    private func toggle(_ node: OneTreeNode, in tree: OneTree? = nil) {
         guard !narrowing else { return }
         var next = expansion
-        next.toggle(node)
+        // ⌥ on the disclosure: its siblings go the same way, as Finder's and
+        // Xcode's do (ov-334).
+        if NSEvent.modifierFlags.contains(.option), let tree {
+            next.toggle(node, withSiblings: tree.siblings(of: node.id))
+        } else {
+            next.toggle(node)
+        }
+        withAnimation(BoardMotion.list(reduceMotion: reduceMotion)) { expansionText = next.encoded }
+    }
+
+    /// Every node open or closed (ov-334): the toggle's, and the menu's.
+    private func setAll(_ expanded: Bool, in tree: OneTree) {
+        guard !narrowing else { return }
+        var next = expansion
+        next.setAll(expanded, in: tree.roots)
         withAnimation(BoardMotion.list(reduceMotion: reduceMotion)) { expansionText = next.encoded }
     }
 

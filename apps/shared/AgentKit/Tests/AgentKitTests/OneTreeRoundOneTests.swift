@@ -113,18 +113,20 @@ struct OneTreeRoundOneTests {
 
     // MARK: M1, the default taken once
 
-    @Test("The open theme is taken once and stays as activity moves")
+    @Test("The defaults are taken once and stay as the work moves")
     func defaultIsSticky() throws {
         var input = try T.board()
         var expansion = OneTreeExpansion()
         expansion.seed(from: OneTree.build(input).roots)
         #expect(expansion.isSeeded)
-        // Mac was newest; now Plan's card moves, and Plan would be the default.
-        input.tasks[0].activityMs = P.now + 1
+        let before = OneTree.rows(OneTree.build(input).tree, expansion: expansion).filter(\.expanded).map(\.id)
+        #expect(before.contains("theme:theme-Mac"))
+        // Every lane lands: the defaults would now be closed, and aren't.
+        for index in input.plan.lanes.indices { input.plan.lanes[index].state = .landed }
         let moved = OneTree.build(input)
-        #expect(moved.tree[0].expandedByDefault)
+        #expect(moved.tree.allSatisfy { !$0.expandedByDefault })
         let open = OneTree.rows(moved.tree, expansion: expansion).filter(\.expanded).map(\.id)
-        #expect(open == ["theme:theme-Mac", "theme:theme-Mac/task:t3"])
+        #expect(open == before)
         // Seeding again does nothing; a choice made stays.
         expansion.toggle(moved.tree[1])
         let kept = expansion

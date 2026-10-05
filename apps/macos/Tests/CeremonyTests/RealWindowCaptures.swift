@@ -137,6 +137,12 @@ struct RealWindowCaptures {
                 NotificationCenter.default.post(name: .captureOpen, object: "peek")
                 try await Task.sleep(for: .seconds(1))
             }
+            // `FARCOOLER_CAPTURE_FOLD=collapse|expand`: View ▸ Collapse All or
+            // Expand All, as the menu asks, with no input (ov-334).
+            if let fold = env["FARCOOLER_CAPTURE_FOLD"] {
+                NotificationCenter.default.post(name: .captureOpen, object: "fold:\(fold)")
+                try await Task.sleep(for: .seconds(1))
+            }
             // Files beside the worktree, opened as a clicked path opens them.
             if place.name.hasPrefix("files-inspector"), let worktree = seed["worktree"] {
                 NotificationCenter.default.post(name: .captureFiles, object: worktree)
