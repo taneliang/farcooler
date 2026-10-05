@@ -15,8 +15,11 @@ public struct PageCellParts: Equatable, Sendable {
     public var domain: String?
     /// Where it opens, or nil for words.
     public var destination: PageDestination?
+    /// What VoiceOver hears for it: its words, and for a link whose words
+    /// aren't its domain, where it goes (review L2).
+    public var spoken: String { domain.map { "\(text), link to \($0)" } ?? text }
     /// What VoiceOver's action for it is called: "Open ov-274".
-    public var action: String? { destination == nil ? nil : "Open \(text)" }
+    public var action: String? { destination == nil ? nil : "Open \(spoken)" }
 }
 
 extension PageWorld {

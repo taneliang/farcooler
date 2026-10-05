@@ -47,8 +47,11 @@ data class PageResolved(
 
 /** A cell as it's drawn: its words, a link's domain after them, and where it opens. */
 data class PageCellParts(val text: String, val domain: String? = null, val destination: PageDestination? = null) {
+    /** What TalkBack hears for it: its words, and for a link whose words aren't its domain, where it goes. */
+    val spoken: String get() = domain?.let { "$text, link to $it" } ?: text
+
     /** What TalkBack's action for it is called: "Open ov-274". */
-    val action: String? get() = destination?.let { "Open $text" }
+    val action: String? get() = destination?.let { "Open $spoken" }
 }
 
 /** The words pages draw that aren't the orchestrator's, in Material's sentence case. */
@@ -213,7 +216,7 @@ object PageLayout {
     /** A table row as TalkBack reads it: "Lane, ov-274-phones. Cards, ov-274. State, In review." Empty cells left out. */
     fun spokenRow(columns: List<PageColumn>, cells: List<PageCell>, world: PageWorld): String =
         columns.zip(cells).mapNotNull { (column, cell) ->
-            val text = world.cellText(cell)
+            val text = world.parts(cell).spoken
             when {
                 text.isEmpty() -> null
                 column.title.isEmpty() -> "$text."

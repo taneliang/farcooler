@@ -34,7 +34,7 @@ public enum PageLayout {
     /// Empty cells are left out.
     public static func spokenRow(columns: [PageColumn], cells: [PageCell], world: PageWorld) -> String {
         zip(columns, cells).compactMap { column, cell -> String? in
-            let text = world.cellText(cell)
+            let text = world.parts(cell).spoken
             guard !text.isEmpty else { return nil }
             return column.title.isEmpty ? "\(text)." : "\(column.title), \(text)."
         }.joined(separator: " ")

@@ -165,6 +165,15 @@ class PageTest {
     }
 
     @Test
+    fun `a table cell's link says its domain to TalkBack, in the row and in its action`() {
+        val cell = PageCell(text = "Click here", ref = PageRef(PageTarget.Url("https://evil.example/x")))
+        val columns = listOf(PageColumn("Lane"), PageColumn("Run"))
+        assertEquals("Lane, mac-ux. Run, Click here, link to evil.example.", PageLayout.spokenRow(columns, listOf(PageCell("mac-ux"), cell), PageWorld()))
+        assertEquals(listOf("Open Click here, link to evil.example"), PageWorld().actions(listOf(cell)).map { it.first })
+        assertEquals(listOf("Open github.com"), PageWorld().actions(listOf(PageCell(ref = PageRef(PageTarget.Url("https://github.com/x"))))).map { it.first })
+    }
+
+    @Test
     fun `TalkBack says each state's word, never the glyph alone`() {
         val risks = (page("risks").doc!!.blocks[1] as PageBlock.ListBlock).items
         assertEquals(
