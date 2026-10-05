@@ -124,12 +124,28 @@ final class PhoneNavigator: ObservableObject {
         let waiting = PendingCover(cover: cover, under: under)
         pending = waiting
         worktree = nil
+        push(under, for: waiting)
+        // The backstop, for a top screen that never says it appeared: the
+        // place still opens, late rather than never. It trades correctness
+        // for liveness: a top screen slower than this to appear gets its
+        // cover while its push may still be landing, which is the race
+        // above, back for that one case.
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            self?.land(waiting)
+        }
+    }
+
+    /// Push the screens a held worktree waits on: at once, or under
+    /// `-phone-stack-lags` 0.3 s late, as a loaded simulator's stack took
+    /// them on CI. Only the push lags; everything around it is what ships,
+    /// so a cover put up in the same pass as the pushes gets them while
+    /// it's still going up.
+    private func push(_ under: [PhoneRoute], for waiting: PendingCover) {
         #if DEBUG
         if PhoneHarness.stackLags {
-            // The stack taking its pushes a beat late, as a loaded
-            // simulator's did, so the order above is what lands the bar's
-            // title and not the timing.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(300), tolerance: .zero)
                 guard self?.pending?.id == waiting.id else { return }
                 self?.path = under
             }
@@ -137,12 +153,6 @@ final class PhoneNavigator: ObservableObject {
         }
         #endif
         path = under
-        // The backstop, for a top screen that never says it appeared: the
-        // place still opens, late rather than never.
-        Task { [weak self] in
-            try? await Task.sleep(for: .seconds(2))
-            self?.land(waiting)
-        }
     }
 
     /// The screen on top of the stack appeared: `route`, or Needs You for
@@ -157,7 +167,12 @@ final class PhoneNavigator: ObservableObject {
         // before it landed has moved past it.
         guard pending?.id == waiting.id else { return }
         pending = nil
-        guard path == waiting.under else { return }
+        guard path == waiting.under else {
+            // Kept again without it, so a relaunch doesn't reopen a
+            // worktree nobody saw: `stack` counted it while it was held.
+            keep()
+            return
+        }
         worktree = waiting.cover
     }
 }

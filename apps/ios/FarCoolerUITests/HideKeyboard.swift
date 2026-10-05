@@ -35,9 +35,9 @@ extension XCTestCase {
         file: StaticString = #filePath, line: UInt = #line
     ) -> XCUIElement {
         let hide = app.buttons[identifier]
-        if !hide.waitForExistence(timeout: 10), let raising { raising.tap() }
+        if !Self.holds(within: 10, { hide.exists }), let raising { raising.tap() }
         XCTAssertTrue(
-            hide.waitForExistence(timeout: 10),
+            Self.holds(within: 10) { hide.exists },
             "\(identifier) never appeared, so there was no keyboard to hide",
             file: file, line: line)
         XCTAssertTrue(

@@ -91,8 +91,17 @@ final class TaskScreenTests: XCTestCase {
     /// covers them only once they're on, so Back to the workspace reads
     /// "Billing" on its bar at once. Covered first, the workspace came back
     /// with an unnamed bar for good, as CI read it under load.
+    ///
+    /// Four landings, the launch's and three taps from Needs You, because
+    /// a cover put up in the same pass as late pushes cost the title in
+    /// about half of them here, not in all.
     func testALinkLandsOverItsStackWhenTheStackLags() throws {
-        try landsWithTheWorkspaceUnderIt(launch(["-deep-link", Self.agent, "-phone-stack-lags"]))
+        let app = launch(["-deep-link", Self.agent, "-phone-stack-lags"])
+        try landsWithTheWorkspaceUnderIt(app)
+        for _ in 0..<3 {
+            Self.notify("agent")
+            try landsWithTheWorkspaceUnderIt(app)
+        }
     }
 
     private func landsWithTheWorkspaceUnderIt(_ app: XCUIApplication) throws {
@@ -112,6 +121,33 @@ final class TaskScreenTests: XCTestCase {
         back(app)
         XCTAssertTrue(
             app.navigationBars["Needs You"].waitForExistence(timeout: 10), "Needs You is not the root")
+    }
+
+    /// **A notification for another worktree replaces the one open**
+    /// (ov-337): the checkout is open over Needs You, and the blocked agent's
+    /// notification lands its pane over bil-9 over Billing. The checkout's
+    /// cover goes, the stack is pushed, then the agent's cover comes, each
+    /// after the last, so Back from the task reads "Billing" at once.
+    func testANotificationForAnotherWorktreeReplacesTheOneOpen() throws {
+        let app = launch(["-phone-reopen-worktree"])
+        XCTAssertTrue(
+            app.buttons["worktree-back"].firstMatch.waitForExistence(timeout: 30),
+            "the checkout did not reopen: \(app.debugDescription)")
+        Self.notify("agent")
+        let probe = app.descendants(matching: .any).matching(identifier: "phone-probe").firstMatch
+        let watching = NSPredicate(format: "value CONTAINS %@", "watch=\(Self.agent)")
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [expectation(for: watching, evaluatedWith: probe)], timeout: 30),
+            .completed, "the agent's pane did not come up: \(probe.value ?? "")")
+        try landsWithTheWorkspaceUnderIt(app)
+    }
+
+    /// A notification tapped while the app is open, as the harness takes
+    /// one: a Darwin notification, `com.farcooler.harness.<which>`.
+    private static func notify(_ which: String) {
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName("com.farcooler.harness.\(which)" as CFString), nil, nil, true)
     }
 
     /// **Answering a decision from Needs You takes it off Needs You**, and

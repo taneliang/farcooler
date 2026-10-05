@@ -67,7 +67,7 @@ import SwiftUI
 
 struct PhoneHarness: View {
     static var isRequested: Bool { CommandLine.arguments.contains("-phone-harness") }
-    /// `-phone-stack-lags`: see `PhoneNavigator.place`.
+    /// `-phone-stack-lags`: see `PhoneNavigator.push`.
     static var stackLags: Bool { isRequested && CommandLine.arguments.contains("-phone-stack-lags") }
     private static var onboarding: Bool { CommandLine.arguments.contains("-phone-onboarding") }
 
