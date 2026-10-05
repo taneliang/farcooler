@@ -174,8 +174,11 @@ impl Latest {
         commit_of_notes(&self.notes)
     }
 
+    /// The whole commit, under `--json`: the feed names all of it, and a
+    /// script matches it against CI's.
     fn json(&self) -> serde_json::Value {
-        serde_json::json!({ "version": self.version, "build": self.build, "commit": self.commit() })
+        let commit = full_commit_of_notes(&self.notes);
+        serde_json::json!({ "version": self.version, "build": self.build, "commit": commit })
     }
 
     fn said(&self) -> String {
@@ -202,8 +205,12 @@ pub(crate) fn commit_of_display(display: &str) -> Option<String> {
 /// The commit a release notes link names:
 /// `https://github.com/o/r/commit/8476e3bd…` → `8476e3b`, shortened as git does.
 pub(crate) fn commit_of_notes(notes: &str) -> Option<String> {
+    Some(full_commit_of_notes(notes)?.chars().take(7).collect())
+}
+
+fn full_commit_of_notes(notes: &str) -> Option<String> {
     let full = notes.split("/commit/").nth(1)?.split(['/', '?', '#']).next()?;
-    is_commit(full).then(|| full.chars().take(7).collect())
+    is_commit(full).then(|| full.to_string())
 }
 
 fn is_commit(word: &str) -> bool {
@@ -227,6 +234,9 @@ struct Event {
     unknown: Option<String>,
     #[serde(default)]
     code: Option<String>,
+    /// Sparkle's own account of a refusal, for `FARCOOLER_LOG=info`.
+    #[serde(default)]
+    detail: Option<String>,
 }
 
 /// A conversation with the app.
@@ -397,7 +407,10 @@ pub(crate) async fn update(
                 ("installing", Event { from: Some(from), to: Some(to), .. }) => {
                     return Ok(Answered::Relaunching { from, to });
                 }
-                ("refused", Event { code, .. }) => return Err(refused_said(code.as_deref().unwrap_or(""), names)),
+                ("refused", Event { code, detail, .. }) => {
+                    tracing::info!(?code, ?detail, "the app refused to update");
+                    return Err(refused_said(code.as_deref().unwrap_or(""), names));
+                }
                 _ => {}
             }
         }

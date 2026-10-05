@@ -89,6 +89,14 @@ struct UpdateErrandTests {
         #expect(code(.appcastError) == "check-failed")
         #expect(code(.installationError) == "install-failed")
         #expect(UpdateErrand.code(NSError(domain: NSURLErrorDomain, code: -1009)) == "install-failed")
+        // How Sparkle reported a bad signature against a scratch appcast: an
+        // installation error with the validation failure underneath.
+        let wrapped = NSError(
+            domain: SUSparkleErrorDomain, code: Int(SUError.installationError.rawValue),
+            userInfo: [
+                NSUnderlyingErrorKey: NSError(domain: SUSparkleErrorDomain, code: Int(SUError.validationError.rawValue))
+            ])
+        #expect(UpdateErrand.code(wrapped) == "signature")
     }
 
     @Test func theCLIHearsOneEndingOnly() {

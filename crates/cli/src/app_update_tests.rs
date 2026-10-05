@@ -190,7 +190,7 @@ async fn version_says_when_an_update_is_waiting() {
     );
     let json = report.json();
     assert_eq!(json["updateWaiting"], true);
-    assert_eq!(json["latest"]["commit"], "8476e3b");
+    assert_eq!(json["latest"]["commit"], "8476e3bd5d9cb12ee68a7ad68ba4ff626950137a");
     assert_eq!(json["installed"]["commit"], "1a2b3c4");
 }
 

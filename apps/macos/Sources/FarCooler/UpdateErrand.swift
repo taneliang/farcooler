@@ -83,7 +83,7 @@ final class UpdateErrand {
 
     /// Sparkle stopped with `error`.
     func failed(_ error: NSError) {
-        refuse(Self.code(error))
+        refuse(Self.code(error), detail: Self.chain(error).map { "\($0.domain) \($0.code)" }.joined(separator: " < "))
     }
 
     /// The session ended. Anything still unsaid is a failure to install.
@@ -92,7 +92,26 @@ final class UpdateErrand {
     }
 
     /// The CLI's word for a Sparkle error. The sentence is the CLI's.
+    ///
+    /// A signature that doesn't check out arrives wrapped: Sparkle reports
+    /// "The update is improperly signed" as an installation error, with the
+    /// validation failure underneath (seen against a scratch appcast). So the
+    /// whole chain is read, and a signature failure anywhere in it wins.
     static func code(_ error: NSError) -> String {
+        let words = chain(error).map(word)
+        return words.first { $0 == "signature" } ?? words[0]
+    }
+
+    /// `error`, then what it wraps, outermost first.
+    private static func chain(_ error: NSError) -> [NSError] {
+        var chain: [NSError] = [error]
+        while let under = chain.last?.userInfo[NSUnderlyingErrorKey] as? NSError, chain.count < 8 {
+            chain.append(under)
+        }
+        return chain
+    }
+
+    private static func word(_ error: NSError) -> String {
         guard error.domain == SUSparkleErrorDomain else { return "install-failed" }
         switch Int(error.code) {
         case Int(SUError.appcastParseError.rawValue), Int(SUError.appcastError.rawValue),
@@ -114,8 +133,12 @@ final class UpdateErrand {
     }
 
     /// Refused before or during the session, with the CLI's word for why.
-    func refuse(_ code: String) {
-        finish(["event": "refused", "code": code])
+    /// `detail` is Sparkle's error chain, for a log: the CLI says its own
+    /// sentence.
+    func refuse(_ code: String, detail: String? = nil) {
+        var event: [String: Any] = ["event": "refused", "code": code]
+        if let detail { event["detail"] = detail }
+        finish(event)
     }
 
     private func finish(_ event: [String: Any]) {
