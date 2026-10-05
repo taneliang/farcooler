@@ -83,7 +83,7 @@ struct WorkspaceMotionTests {
                                     .task { tally.fetches[item, default: 0] += 1 }
                             }
                         }
-                    }, motion: motion)
+                    }, motion: motion, swap: motion)
                 .frame(width: width, height: 400)
             }
         }
@@ -217,10 +217,11 @@ struct WorkspaceMotionTests {
     }
 
     /// Ten quick steps through the list, as a held arrow takes them: every
-    /// one is drawn at once, but only the last settles, so one terminal is
-    /// mounted and one record read for the whole walk. (Fails with
-    /// `settle` setting `settled` at once on a switch.)
-    @Test("Ten quick steps mount one terminal and read one record")
+    /// one is drawn at once, the first settles at once as a click does
+    /// (ov-293), and of the rest only the last, so two terminals are
+    /// mounted and two records read for the whole walk. (Fails with
+    /// `settle` setting `settled` at once on every switch.)
+    @Test("Ten quick steps mount two terminals and read two records")
     func tenQuickStepsSettleOnce() async {
         let harness = Harness(motion: Self.quick)
         await harness.settle()
@@ -239,8 +240,8 @@ struct WorkspaceMotionTests {
         let fetched = harness.tally.fetches.values.reduce(0, +) - start
         harness.close()
         #expect(drawnAtOnce)
-        #expect(mounted == Array(repeating: 0, count: 9) + [1], "mounted \(mounted)")
-        #expect(fetched == 1, "read \(fetched) records")
+        #expect(mounted == [1] + Array(repeating: 0, count: 8) + [1], "mounted \(mounted)")
+        #expect(fetched == 2, "read \(fetched) records")
     }
 
     /// The orchestrator is the main area's one width with nothing open, and

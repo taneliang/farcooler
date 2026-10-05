@@ -11,10 +11,12 @@ import SwiftUI
 /// values for its own measured width, never the window's, which the detail
 /// shares with the sidebar.
 ///
-/// Every structural change moves on one spring (`WorkspaceMotion.spring`):
-/// the orchestrator and what's opened cross-fading as the selection moves
-/// between them, one task switched for another cross-fading in place, and
-/// the navigator leaving for Focus. Every part stays mounted while it moves,
+/// A selection change is drawn on the next frame, with no fade
+/// (`WorkspaceMotion.swap`, ov-293): the orchestrator and what's opened
+/// swapping as the selection moves between them, one task switched for
+/// another in place. Only the navigator leaving for Focus moves, on one
+/// spring (`WorkspaceMotion.spring`), and not under Reduce Motion. Every
+/// part stays mounted while it moves,
 /// the orchestrator's terminal included: it's mounted once, at the main
 /// area's width, and kept, hidden while something else is selected, so
 /// coming back to it is instant and nothing in it re-wraps. Nothing waits on
@@ -25,8 +27,8 @@ struct WorkspaceView<
     Item: Hashable, Conversation: View, Navigator: View, Crumbs: View, Opened: View
 >: View {
     /// What's open in the main area: a task or a worktree, or nil for the
-    /// orchestrator. Its identity is what's switched: a new one cross-fades
-    /// in, the same one with another pane named stays.
+    /// orchestrator. Its identity is what's switched: a new one replaces
+    /// it, the same one with another pane named stays.
     let opened: Item?
     /// Whether this workspace has a conversation at all: not a repository's
     /// implicit workspace on a runner without `workstreams`.
@@ -51,11 +53,17 @@ struct WorkspaceView<
     /// one leaving, which takes no keyboard and isn't seen. The flag says
     /// whether it has settled (`WorkspaceMotion.settle`): until it has, only
     /// what's cheap is drawn, its header and its text, and nothing that
-    /// mounts a terminal or reads the runner.
+    /// mounts a terminal or reads the runner. A click settles at once; only
+    /// a quick walk through the list waits.
     @ViewBuilder let detail: (Item, Bool) -> Opened
-    /// How everything moves: `WorkspaceMotion.spring`, slowed only by a test
-    /// that reads it mid-flight.
+    /// How the navigator moves for Focus: `WorkspaceMotion.spring`, slowed
+    /// only by a test that reads it mid-flight.
     var motion: Animation = WorkspaceMotion.spring
+    /// How a selection change is drawn: `WorkspaceMotion.swap`, no motion at
+    /// all, given one only by a test that reads it mid-flight.
+    var swap: Animation? = WorkspaceMotion.swap
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// What the motion is drawing, a step behind the window's state. See
     /// `WorkspaceStage`.
@@ -65,6 +73,9 @@ struct WorkspaceView<
     /// arrow passes the rest without mounting or reading them.
     @State private var settled: Item?
     @State private var settling: Task<Void, Never>?
+    /// When the last switch from one opened item to another came: one
+    /// sooner than `WorkspaceMotion.settle` after it is a step in a walk.
+    @State private var lastSwitch: ContinuousClock.Instant?
     /// The navigator's width while its trailing edge is dragged.
     @State private var dragging: CGFloat?
     /// The navigator's width when the drag began.
@@ -75,7 +86,8 @@ struct WorkspaceView<
         navigatorWidth: Binding<Double>,
         @ViewBuilder conversation: @escaping () -> Conversation, @ViewBuilder navigator: @escaping () -> Navigator,
         @ViewBuilder breadcrumb: @escaping (Item) -> Crumbs,
-        @ViewBuilder detail: @escaping (Item, Bool) -> Opened, motion: Animation = WorkspaceMotion.spring
+        @ViewBuilder detail: @escaping (Item, Bool) -> Opened, motion: Animation = WorkspaceMotion.spring,
+        swap: Animation? = WorkspaceMotion.swap
     ) {
         self.opened = opened
         self.hasConversation = hasConversation
@@ -88,6 +100,7 @@ struct WorkspaceView<
         self.breadcrumb = breadcrumb
         self.detail = detail
         self.motion = motion
+        self.swap = swap
         // Drawn as it is from the first frame: a window reopening on a task
         // doesn't fade the orchestrator out.
         _stage = State(initialValue: WorkspaceStage(open: opened, focused: focused))
@@ -137,7 +150,9 @@ struct WorkspaceView<
                     live: now.navigator, width: width)
             }
             .frame(width: width, height: height, alignment: .topLeading)
-            .animation(motion, value: drawn)
+            // Only the navigator springs, for Focus; a selection change is
+            // in the transaction `onChange(of: opened)` gives it.
+            .animation(reduceMotion ? nil : motion, value: drawn.navigator)
             .clipShape(Rectangle())
             .contentShape(Rectangle())
             // One frosted plane behind the navigator, the gutters and the
@@ -149,20 +164,29 @@ struct WorkspaceView<
         .onChange(of: opened) { _, next in
             settle(next, switching: stage.open != nil && next != nil)
             let generation = stage.generation + 1
-            withAnimation(motion) {
-                stage.show(next)
-            } completion: {
-                stage.settle(generation)
+            if let swap {
+                // Let go of what a close was drawing once its motion ends.
+                withAnimation(swap) {
+                    stage.show(next)
+                } completion: {
+                    stage.settle(generation)
+                }
+            } else {
+                var still = Transaction(animation: nil)
+                still.disablesAnimations = true
+                withTransaction(still) {
+                    stage.show(next)
+                    stage.settle(generation)
+                }
             }
         }
         .onChange(of: focused) { _, focused in
-            withAnimation(motion) { stage.focused = focused }
+            withAnimation(reduceMotion ? nil : motion) { stage.focused = focused }
         }
     }
 
-    /// The main area: the orchestrator, mounted and kept, faded out of
-    /// sight while something else is selected; and what's opened, faded in
-    /// over it. Both the main area's one width, so neither resizes as the
+    /// The main area: the orchestrator, mounted and kept, hidden while
+    /// something else is selected; and what's opened, drawn over it. Both the main area's one width, so neither resizes as the
     /// selection moves between them.
     private func main(
         now: WorkspaceColumns.Arrangement, drawn: WorkspaceColumns.Arrangement, height: CGFloat, kept: CGFloat
@@ -196,12 +220,16 @@ struct WorkspaceView<
         }
     }
 
-    /// `next` settles: at once when it opens from the orchestrator or goes
-    /// back to it, and when it switches, only once it has stayed put for
-    /// `WorkspaceMotion.settle`.
+    /// `next` settles: at once when it opens from the orchestrator, goes
+    /// back to it, or is a click on another; and when it's a step in a quick
+    /// walk through the list, one sooner than `WorkspaceMotion.settle` after
+    /// the last, only once it has stayed put that long.
     private func settle(_ next: Item?, switching: Bool) {
         settling?.cancel()
-        guard switching else {
+        let now = ContinuousClock.now
+        let walking = switching && lastSwitch.map { $0.duration(to: now) < WorkspaceMotion.settle } == true
+        lastSwitch = switching ? now : nil
+        guard walking else {
             settled = next
             return
         }
@@ -213,9 +241,8 @@ struct WorkspaceView<
     }
 
     /// What's opened, under its jump bar: the window's, or the one leaving.
-    /// Another one switched in fades in over it on the spring, while the
-    /// one leaving goes in a blink, so two records are never overprinted
-    /// for long.
+    /// Another one switched in replaces it on the next frame, with no fade:
+    /// a content swap, as Apple's apps make one.
     private func openedPane(height: CGFloat) -> some View {
         ZStack {
             if let shown = stage.drawn {
@@ -225,7 +252,7 @@ struct WorkspaceView<
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .id(shown)
-                .transition(.asymmetric(insertion: .opacity, removal: .opacity.animation(WorkspaceMotion.leave)))
+                .transition(.identity)
                 // Leaving, nothing in it takes the keyboard or a click.
                 .environment(\.outOfSight, opened != shown)
                 .allowsHitTesting(opened == shown)
@@ -291,22 +318,25 @@ enum WorkspaceMain {
     }
 }
 
-/// The one spring a workspace's structure moves on (ov-85), and what the
+/// How a workspace's structure moves (ov-85, ov-293), and what the
 /// view needs to keep its parts in reach while they move.
 enum WorkspaceMotion {
-    /// One spring for the selection moving between the orchestrator, a
-    /// task and a worktree, and the navigator leaving for Focus (ov-84's,
-    /// which every one of them shares).
+    /// The navigator leaving for Focus, and the board's lists (ov-84's).
     static let spring = Animation.spring(response: 0.32, dampingFraction: 0.86)
+    /// A selection change, between the orchestrator, a task and a worktree:
+    /// none (ov-293). It's drawn on the next frame. The spring this was
+    /// took about 200 ms to be 95% drawn and barely moved in its first
+    /// 30 ms, which read as navigation lagging. Any motion put here must
+    /// start at once and end within 150 ms (`SelectionSwapTimingTests`).
+    static let swap: Animation? = nil
     /// Past the leading edge when put away, so its divider is out of
     /// sight too.
     static let overhang: CGFloat = 24
     /// Each side of the navigator's trailing edge that takes a drag.
     static let grip: CGFloat = 3
-    /// How long the one leaving takes to fade when another is switched in.
-    static let leave = Animation.easeOut(duration: 0.08)
-    /// How long a task switched to stays put before it's settled, and its
-    /// terminal is mounted and its record read.
+    /// How soon after the last a switch is a step in a walk, and how long
+    /// such a step stays put before it's settled, and its terminal is
+    /// mounted and its record read. A lone click settles at once.
     static let settle: Duration = .milliseconds(150)
 }
 
