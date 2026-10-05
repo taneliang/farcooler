@@ -444,8 +444,6 @@ struct OneTreeBuilder {
     let lanes: [PlanLane]
     /// Each lane's worktree, by lane id.
     let laneWorktrees: [String: OneTreeWorktree]
-    /// The theme expanded by default.
-    let newestTheme: String?
     /// The joins, indexed once (ov-321 review H2): a lane's cards, a card's
     /// lanes, the worktrees by id and by the cards they hold, and the
     /// lane-reached worktrees. Every node then reads them in constant time,
@@ -486,8 +484,6 @@ struct OneTreeBuilder {
         }
         laneWorktrees = joined
         laneWorktreeIDs = Set(joined.values.map(\.id))
-        let active = themes.filter { $0.state == "active" }
-        newestTheme = OneTreeBuilder.newestTheme(active.isEmpty ? themes : active, tasks: byID, lanesByTask: byTask)
     }
 
     func build() -> OneTree {
@@ -502,23 +498,6 @@ struct OneTreeBuilder {
     /// it, else the one on its branch. Nil for a lane with no worktree yet.
     static func worktree(of lane: PlanLane, in worktrees: [OneTreeWorktree]) -> OneTreeWorktree? {
         OneTreeJoin(worktrees).worktree(of: lane)
-    }
-
-    /// The theme with the newest activity: its story, its cards' moves and
-    /// its lanes' state changes. The earlier on the board when two tie.
-    static func newestTheme(_ themes: [PlanTheme], tasks: [String: OneTreeTask], lanesByTask: [String: [PlanLane]])
-        -> String?
-    {
-        var best: (id: String, at: Int64)?
-        for theme in themes {
-            var at = theme.storyAt
-            for card in theme.cards {
-                at = max(at, tasks[card.task]?.activityMs ?? 0)
-                for lane in lanesByTask[card.task] ?? [] { at = max(at, lane.stateSince) }
-            }
-            if best == nil || at > best!.at { best = (theme.id, at) }
-        }
-        return best?.id
     }
 
     /// The lanes working `task`, in the plan's order: a fix round's lane
@@ -868,38 +847,25 @@ public enum TaskStatusGlyph {
 
 // MARK: - Expansion, rows and paths
 
-/// Which nodes are open: the person's choices, by node id, over each
-/// node's default. Kept per window.
+/// Which nodes are open: the person's own choices, by node id, over each
+/// node's default, which is worked out from the board as it is now (a theme
+/// with a lane being worked, or an ask, is open). Only what the person did is
+/// kept, so a node they never touched follows the work, and a theme that
+/// gains a live lane opens unless they closed it. Kept per window.
 public struct OneTreeExpansion: Equatable, Sendable, Codable {
     public var choices: [String: Bool]
 
     public init(choices: [String: Bool] = [:]) { self.choices = choices }
 
-    /// The key that says the defaults were taken (`seed(from:)`).
-    static let seededKey = "#seeded"
-
-    /// Whether this window has taken its defaults: after that, a node no
-    /// one chose stays closed, however activity moves.
-    public var isSeeded: Bool { choices[Self.seededKey] == true }
+    /// The format's mark. The first format froze every node's default into
+    /// `choices` the first time the tree drew (`#seeded`), so each of those
+    /// reads as the person's own choice. Read back, it's dropped once, and
+    /// this mark is written in its place.
+    static let versionKey = "#v2"
+    static let frozenKey = "#seeded"
 
     public func isExpanded(_ node: OneTreeNode) -> Bool {
-        choices[node.id] ?? (isSeeded ? false : node.expandedByDefault)
-    }
-
-    /// Take each node's default once, per window and workspace, and keep
-    /// it (review M1): the theme with the newest activity opens when the
-    /// window first draws the tree, and doesn't move as activity does.
-    /// Choices already made stay. Nothing after the first call.
-    public mutating func seed(from nodes: [OneTreeNode]) {
-        guard !isSeeded else { return }
-        func walk(_ nodes: [OneTreeNode]) {
-            for node in nodes where node.hasChildren {
-                if choices[node.id] == nil, node.expandedByDefault { choices[node.id] = true }
-                walk(node.children)
-            }
-        }
-        walk(nodes)
-        choices[Self.seededKey] = true
+        choices[node.id] ?? node.expandedByDefault
     }
 
     public mutating func toggle(_ node: OneTreeNode) { choices[node.id] = !isExpanded(node) }
@@ -912,18 +878,18 @@ public struct OneTreeExpansion: Equatable, Sendable, Codable {
         for sibling in siblings where sibling.hasChildren { choices[sibling.id] = open }
     }
 
-    /// Expand All and Collapse All (ov-334): every node with children in
-    /// `nodes` open or closed, and the defaults taken, so a node the choice
-    /// didn't name isn't opened again by activity.
+    /// Expand All and Collapse All (ov-334). Collapse closes every node with
+    /// children. Expand opens the themes, cards and lanes (and No Theme), which are the
+    /// work: not a theme's finished-cards fold, nor Hidden, nor the
+    /// checkout and loose worktrees, which stay as they were.
     public mutating func setAll(_ expanded: Bool, in nodes: [OneTreeNode]) {
         func walk(_ nodes: [OneTreeNode]) {
             for node in nodes where node.hasChildren {
-                choices[node.id] = expanded
+                if !expanded || node.opensWithExpandAll { choices[node.id] = expanded }
                 walk(node.children)
             }
         }
         walk(nodes)
-        choices[Self.seededKey] = true
     }
 
     /// Whether any node with children in `nodes` is open: what the one
@@ -940,12 +906,26 @@ public struct OneTreeExpansion: Equatable, Sendable, Codable {
 
     /// Kept as text, for a window's own storage.
     public var encoded: String {
-        (try? String(decoding: JSONEncoder().encode(choices), as: UTF8.self)) ?? ""
+        var kept = choices
+        kept[Self.versionKey] = true
+        return (try? String(decoding: JSONEncoder().encode(kept), as: UTF8.self)) ?? ""
     }
 
     public init(encoded: String) {
-        choices = (try? JSONDecoder().decode([String: Bool].self, from: Data(encoded.utf8))) ?? [:]
+        var read = (try? JSONDecoder().decode([String: Bool].self, from: Data(encoded.utf8))) ?? [:]
+        // The first format's frozen defaults are dropped once, so a window
+        // that ran it follows the work from here.
+        if read[Self.frozenKey] != nil, read[Self.versionKey] == nil { read = [:] }
+        read[Self.versionKey] = nil
+        read[Self.frozenKey] = nil
+        choices = read
     }
+}
+
+extension OneTreeNode {
+    /// Whether Expand All opens it: a theme, a card or a lane, and No Theme,
+    /// which holds the cards of none.
+    var opensWithExpandAll: Bool { kind == .theme || kind == .task || kind == .lane || id == "group:no-theme" }
 }
 
 /// One row of the outline as drawn.

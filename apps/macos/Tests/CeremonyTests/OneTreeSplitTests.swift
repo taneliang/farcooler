@@ -35,6 +35,25 @@ struct OneTreeSplitRuleTests {
         #expect((heights["tree"] ?? 0) > (heights["shells"] ?? 0))
     }
 
+    @Test("A short tree leaves the shells whole: they grow to their rows before they scroll")
+    func shortTreeLongShells() {
+        let room: CGFloat = 800
+        let heights = NavigatorSplit.viewports(Self.panes(places: 56, tree: 60, shells: 900), room: room)
+        #expect(heights["tree"] == 60)
+        #expect(heights["places"] == 56)
+        // Everything else is the shells': 800 - 60 - 56, well past a third.
+        #expect(abs((heights["shells"] ?? 0) - 684) < 0.5, "\(heights)")
+        // With no room to spare, the shells never scroll beside blank space.
+        #expect(abs(heights.values.reduce(0, +) - room) < 0.5, "\(heights)")
+    }
+
+    @Test("A middling tree takes its rows, and the shells the rest, between a third and everything")
+    func middlingTree() {
+        let heights = NavigatorSplit.viewports(Self.panes(places: 56, tree: 400, shells: 900), room: 800)
+        #expect(heights["tree"] == 400)
+        #expect(abs((heights["shells"] ?? 0) - 344) < 0.5, "\(heights)")
+    }
+
     @Test("The places never take more than half the room, and the short shells keep all their rows")
     func tallPlaces() {
         let room: CGFloat = 600
@@ -125,5 +144,118 @@ struct OneTreeSplitWindowTests {
         #expect(abs(first.height - tree.height) < 0.5, "first \(first.height), settled \(tree.height)")
         let shells = try #require(seen.frames["navigator-pane-shells"])
         #expect(abs(shells.minY - tree.maxY) < 2, "the shells meet the tree's rule: no gap (\(tree.maxY) to \(shells.minY))")
+    }
+
+    // MARK: Scrolling stays where the person put it (review 1)
+
+    final class Count: ObservableObject {
+        @Published var tasks = 40
+    }
+
+    struct Scrolling: View {
+        @ObservedObject var count: Count
+        let key: String
+
+        var body: some View {
+            let input = OneTreeInput(
+                tasks: Array(OneTreeSplitWindowTests.tasks.prefix(count.tasks)) + (count.tasks > 40 ? [OneTreeTask(id: "t99", key: "ov-99", title: "New", status: .inProgress)] : []),
+                worktrees: [OneTreeWorktree(id: "w", name: "spike")],
+                mainCheckout: OneTreeWorktree(id: "m", name: "repo", isMainCheckout: true))
+            // The first card is selected, at the top of the tree.
+            let sidebar = OneTreeSidebar(
+                tree: { _ in OneTree.build(input) }, selected: .task("t1"), hint: nil, key: key, onChoose: { _ in })
+            OneTreeNavigator(sidebar: sidebar, filterText: "", keyed: false).frame(width: 300, height: 360)
+        }
+    }
+
+    /// The scroll view with the most to scroll: the tree's pane.
+    static func treeScrollView(in view: NSView) -> NSScrollView? {
+        var found: [NSScrollView] = []
+        func walk(_ view: NSView) {
+            if let scroll = view as? NSScrollView { found.append(scroll) }
+            view.subviews.forEach(walk)
+        }
+        walk(view)
+        return found.max { ($0.documentView?.frame.height ?? 0) < ($1.documentView?.frame.height ?? 0) }
+    }
+
+    @Test("Rows arriving don't scroll the tree back to the selected row, wherever the person has scrolled it")
+    func contentChangesNeverScroll() async throws {
+        let count = Count()
+        let host = NSHostingView(rootView: Scrolling(count: count, key: UUID().uuidString))
+        let window = NSWindow(
+            contentRect: NSRect(x: -4000, y: -4000, width: 300, height: 360), styleMask: [.borderless],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.close() }
+        func settle() async {
+            for _ in 0..<12 {
+                host.layoutSubtreeIfNeeded()
+                try? await Task.sleep(for: .milliseconds(30))
+            }
+        }
+        await settle()
+        let scroll = try #require(Self.treeScrollView(in: host))
+        let clip = scroll.contentView
+        let room = (scroll.documentView?.frame.height ?? 0) - clip.bounds.height
+        #expect(room > 300, "the tree has something to scroll: \(room)")
+        // The person scrolls down to a theme near the foot.
+        clip.scroll(to: NSPoint(x: 0, y: 300))
+        scroll.reflectScrolledClipView(clip)
+        let before = clip.bounds.origin.y
+        #expect(before > 100)
+        // A card arrives, and the tree's rows grow.
+        count.tasks = 41
+        await settle()
+        #expect(abs(clip.bounds.origin.y - before) < 1, "scrolled from \(before) to \(clip.bounds.origin.y)")
+    }
+
+    // MARK: Rows are the height they're said to be, so the lazy tree needs no estimate
+
+    @Test("Every row is drawn at exactly the height the tree sums for it: a plain row, a keyed card, a count, a caption")
+    func rowsAreTheirKnownHeight() async throws {
+        let seen = FirstLayoutHeightTests.Seen()
+        let size = CGSize(width: 340, height: 1600)
+        let input = OneTreeInput(
+            tasks: [OneTreeTask(id: "t", key: "ov-1", title: "A card", status: .inProgress, worktreeID: "w")],
+            worktrees: [OneTreeWorktree(id: "w", name: "lane", terminals: [OneTreeTerminal(id: "a", title: "claude", isAgent: true)])],
+            mainCheckout: OneTreeWorktree(id: "m", name: "repo", isMainCheckout: true, terminals: [OneTreeTerminal(id: "s", title: "zsh", isAgent: false)]),
+            unreadable: [OneTreeUnreadable(id: "u", key: "ov-9", title: "Odd", status: "someday")], needsYouCount: 2)
+        let tree = OneTree.build(input)
+        let key = UUID().uuidString
+        let host = FirstLayoutHeightTests.host(
+            OneTreeNavigator(
+                sidebar: OneTreeSidebar(
+                    tree: { _ in tree }, selected: nil, hint: nil, key: key, onChoose: { _ in },
+                    fold: TreeFoldRequest()),
+                filterText: "", keyed: false), seen: seen, size: size)
+        let window = NSWindow(
+            contentRect: NSRect(origin: NSPoint(x: -4000, y: -4000), size: size), styleMask: [.borderless],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.close() }
+        for _ in 0..<12 {
+            host.layoutSubtreeIfNeeded()
+            try? await Task.sleep(for: .milliseconds(30))
+        }
+        var checked = 0
+        var sawCaption = false
+        for node in tree.allNodes {
+            guard let frame = seen.frames["tree-\(node.id)"] else { continue }
+            checked += 1
+            sawCaption = sawCaption || !node.caption.isEmpty
+            #expect(abs(frame.height - OneTreeRowView.height(for: node)) < 0.5, "\(node.id): \(frame.height)")
+        }
+        #expect(checked >= 6 && sawCaption, "rows drawn: \(checked), a caption among them: \(sawCaption)")
+        // And the tree's pane is their sum, on the first pass: no estimate, no gap.
+        let pane = try #require(seen.frames["navigator-pane-tree"])
+        let sum = OneTree.rows(tree.tree, expansion: OneTreeExpansion()).reduce(CGFloat(0)) { $0 + OneTreeRowView.height(for: $1.node) }
+        #expect(abs(pane.height - (sum + NavigatorSplit.paneInset)) < 1, "pane \(pane.height), rows \(sum)")
+        let history = try #require(seen.history["navigator-pane-tree"])
+        #expect(abs((history.first?.height ?? 0) - pane.height) < 1, "first pass \(history.first?.height ?? 0), settled \(pane.height)")
     }
 }

@@ -30,11 +30,19 @@ enum NavigatorSplit {
         var maxShare: CGFloat? = nil
     }
 
-    /// The tallest `pane`'s rows are drawn in `room`: all of them, or, for a
-    /// capped pane, its share of the room, never under its floor.
-    static func ceiling(_ pane: Pane, room: CGFloat) -> CGFloat {
+    /// The tallest `pane`'s rows are drawn in `room`, among `panes`: all of
+    /// them, or, for a capped pane, its share of the room, never under its
+    /// floor, and only while the rest need the room. What the others want is
+    /// their rows, a capped one's up to its own share; room they don't want
+    /// is the capped pane's, so it grows to its rows before it scrolls, and a
+    /// short tree leaves a long list of shells whole (the owner's "grow
+    /// before scroll", ov-292).
+    static func ceiling(_ pane: Pane, room: CGFloat, among panes: [Pane]) -> CGFloat {
         guard let share = pane.maxShare else { return pane.content }
-        return min(pane.content, max(floor(pane), room * share))
+        let others = panes.filter { $0.expanded && $0.id != pane.id }.reduce(CGFloat(0)) { total, other in
+            total + (other.maxShare.map { min(other.content, max(floor(other), room * $0)) } ?? other.content)
+        }
+        return min(pane.content, max(floor(pane), room * share, room - others))
     }
 
     /// One row of a pane, near enough: a one-line row's slot, its line and
@@ -95,12 +103,12 @@ enum NavigatorSplit {
         // share what it leaves.
         let left = room - heights.filter { id, _ in !free.contains { $0.id == id } }.values.reduce(0, +)
         func drawn(_ pane: Pane, at level: CGFloat) -> CGFloat {
-            min(ceiling(pane, room: room), max(floor(pane, fill: pane.fills), level))
+            min(ceiling(pane, room: room, among: panes), max(floor(pane, fill: pane.fills), level))
         }
         // The level is found exactly: the total rises linearly between any two
         // of the floors and row heights, so it is read off the segment where
         // it reaches `left`.
-        let marks = Set(free.flatMap { [floor($0, fill: $0.fills), ceiling($0, room: room)] }).sorted()
+        let marks = Set(free.flatMap { [floor($0, fill: $0.fills), ceiling($0, room: room, among: panes)] }).sorted()
         var level = marks.last ?? 0
         for (from, to) in zip(marks, marks.dropFirst()) {
             let at = free.reduce(0) { $0 + drawn($1, at: from) }
@@ -270,6 +278,13 @@ struct NavigatorSplitView: View {
     /// sight, scrolled by as little as that takes, whenever the selection
     /// moves or the panes' heights do (ov-295). Nothing moves while it shows.
     var reveal: AnyHashable?
+    /// Whether the selected row is shown again whenever a pane's height or
+    /// its rows' height changes. The board's panes do. The One tree does not:
+    /// it shows the selection when the selection moves, and once on the first
+    /// layout, and opening a node or a row arriving must never scroll it away
+    /// from where the person is (review 1).
+    var revealsOnLayout = true
+    @State private var revealedFirstLayout = false
 
     @State private var headers: [String: CGFloat] = [:]
     @State private var contents: [String: CGFloat] = [:]
@@ -342,10 +357,19 @@ struct NavigatorSplitView: View {
                 guard let row else { return }
                 withAnimation(WorkspaceMotion.spring) { scroller.scrollTo(row) }
             }
-            .onChange(of: heights, initial: true) { _, _ in show(reveal, with: scroller) }
+            .onChange(of: heights, initial: true) { _, _ in
+                if revealsOnLayout {
+                    show(reveal, with: scroller)
+                } else if !revealedFirstLayout, heights.values.contains(where: { $0 > 0 }) {
+                    revealedFirstLayout = true
+                    show(reveal, with: scroller)
+                }
+            }
             // Rows arriving or leaving above it move it without a pane's
             // height changing: the Unread lines settling after a launch.
-            .onChange(of: contents) { _, _ in show(reveal, with: scroller) }
+            .onChange(of: contents) { _, _ in
+                if revealsOnLayout { show(reveal, with: scroller) }
+            }
           }
         }
     }
@@ -398,7 +422,7 @@ struct NavigatorSplitView: View {
     /// The names the rules read for VoiceOver, by pane.
     static let titles = [
         "themes": "Themes", "pages": "Pages", "tasks": "Tasks", "terminals": "Terminals", "worktrees": "Worktrees",
-        "places": "Places", "tree": "Plan", "shells": "Shells",
+        "places": "Places", "tree": "Plan", "shells": "Worktrees",
     ]
 }
 

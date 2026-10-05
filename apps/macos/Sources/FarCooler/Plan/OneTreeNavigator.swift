@@ -111,7 +111,8 @@ struct OneTreeNavigator: View {
         // the places and the shells stop at a share of it and scroll; the tree
         // takes what's left. The outer container never scrolls.
         NavigatorSplitView(
-            panes: panes(groups, tree: tree), kept: splitBinding, reveal: selectedRow(rows)?.id
+            panes: panes(groups, tree: tree), kept: splitBinding, reveal: selectedRow(rows)?.id,
+            revealsOnLayout: false
         )
         .padding(.top, NavigatorRhythm.band)
         // Again when the path to it appears: the window can open on a
@@ -130,14 +131,6 @@ struct OneTreeNavigator: View {
         }
         // The window's choice moved: the keyboard follows it.
         .onChange(of: sidebar.selected) { _, _ in cursor = nil }
-        // The default open theme, taken once the board and plan are read,
-        // and kept for this window (review M1).
-        .onChange(of: sidebar.settled(), initial: true) { _, settled in
-            guard settled, !narrowing, !expansion.isSeeded else { return }
-            var next = expansion
-            next.seed(from: tree.roots)
-            expansionText = next.encoded
-        }
         .onKeyPress(.downArrow) { apply(OneTreeKeys.step(rows, from: cursorRow(rows), by: 1), rows, arriving: true) }
         .onKeyPress(.upArrow) { apply(OneTreeKeys.step(rows, from: cursorRow(rows), by: -1), rows, arriving: true) }
         .onKeyPress(.rightArrow) { apply(OneTreeKeys.right(rows, cursor: cursorRow(rows)), rows) }
@@ -162,15 +155,19 @@ struct OneTreeNavigator: View {
             id: node.id, signature: [node.title, node.detail, node.also, "\(node.holdsAsk)"].joined(separator: "\u{1}"))
     }
 
-    /// The rows of one area: not lazy, because the split sizes each area from
-    /// its rows' real height in the pass that places it, and a lazy stack's
-    /// estimate left a gap under the last row until it settled (ov-298).
+    /// The rows of one area, lazy so a long board draws the rows in sight
+    /// (review H2, and measured: 380 rows eager cost about five times a lazy
+    /// stack's per update), and still as tall as its rows on the first pass:
+    /// every row's height is known (`OneTreeRowView.height`), so the stack is
+    /// given their sum rather than a lazy stack's estimate, which left a gap
+    /// under the last row until it settled (ov-298).
     private func section(_ rows: [OneTreeRow], in tree: OneTree) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        LazyVStack(alignment: .leading, spacing: 0) {
             ForEach(rows) { row in
                 OneTreeRowView(
                     row: row, selected: isSelected(row.node) || (cursor == row.id && focused), keyed: keyed,
-                    onToggle: { toggle(row.node, in: tree) },
+                    onToggle: { toggle(row.node, in: tree, event: NSApp.currentEvent) },
+                    onToggleAccessibly: { toggle(row.node) },
                     onChoose: {
                         cursor = row.node.target == nil ? row.id : nil
                         choose(row.node)
@@ -184,6 +181,7 @@ struct OneTreeNavigator: View {
         // change washes. What arrives by opening a node is told apart from
         // what's new by the whole tree's signature.
         .listChanges(rows.map { Self.change($0.node) }, arrivals: tree.allNodes.map(Self.change))
+        .frame(height: rows.reduce(0) { $0 + OneTreeRowView.height(for: $1.node) })
         .padding(.horizontal, NavigatorGrid.edge)
     }
 
@@ -231,7 +229,7 @@ struct OneTreeNavigator: View {
         let anyOpen = expansion.anyExpanded(in: tree.roots)
         return HStack(spacing: SidebarGrid.gap) {
             Picker("Show", selection: Binding(get: { filter }, set: { filterRaw = $0.rawValue })) {
-                ForEach(OneTreeFilter.allCases, id: \.self) { Text($0.title).tag($0).help($0.help) }
+                ForEach(OneTreeFilter.allCases, id: \.self) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -278,16 +276,12 @@ struct OneTreeNavigator: View {
         }
     }
 
-    private func toggle(_ node: OneTreeNode, in tree: OneTree? = nil) {
+    /// A disclosure used. `event` is the click that did it, where one did: an
+    /// ⌥-click takes the siblings the same way, as Finder's and Xcode's do
+    /// (ov-334). The keys and VoiceOver pass none.
+    private func toggle(_ node: OneTreeNode, in tree: OneTree? = nil, event: NSEvent? = nil) {
         guard !narrowing else { return }
-        var next = expansion
-        // ⌥ on the disclosure: its siblings go the same way, as Finder's and
-        // Xcode's do (ov-334).
-        if NSEvent.modifierFlags.contains(.option), let tree {
-            next.toggle(node, withSiblings: tree.siblings(of: node.id))
-        } else {
-            next.toggle(node)
-        }
+        let next = TreeFold.toggled(expansion, node, siblings: tree?.siblings(of: node.id) ?? [], event: event)
         withAnimation(BoardMotion.list(reduceMotion: reduceMotion)) { expansionText = next.encoded }
     }
 
@@ -355,6 +349,8 @@ struct OneTreeRowView: View {
     let selected: Bool
     let keyed: Bool
     let onToggle: () -> Void
+    /// What VoiceOver's Expand and Collapse do: the row alone, never its siblings.
+    var onToggleAccessibly: (() -> Void)? = nil
     let onChoose: () -> Void
     var menu: () -> AnyView = { AnyView(EmptyView()) }
     @Environment(\.colorScheme) private var scheme
@@ -366,6 +362,21 @@ struct OneTreeRowView: View {
     static let disclosure: CGFloat = 12
 
     private var node: OneTreeNode { row.node }
+
+    /// A row's slot, known without drawing it: one line is `ColumnGrid.rowHeight`
+    /// (a key's monospaced text and a count's digits are the tallest thing in
+    /// a row, and set it), and a caption adds its line. Each row is drawn at
+    /// exactly this, so the tree's height is the sum of these and a lazy stack
+    /// needn't estimate it.
+    static func height(for node: OneTreeNode) -> CGFloat {
+        node.caption.isEmpty ? ColumnGrid.rowHeight : ColumnGrid.rowHeight + captionLine
+    }
+
+    /// A caption's one line and the gap above it.
+    static let captionLine: CGFloat = {
+        let font = NSFont.systemFont(ofSize: WorkspaceStyle.PaneText.secondary)
+        return ceil(font.ascender - font.descender + font.leading) + NavigatorRhythm.lineGap
+    }()
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 0) {
@@ -379,29 +390,32 @@ struct OneTreeRowView: View {
             VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
                 words
                 if !node.caption.isEmpty {
+                    // One line, so the row's height is known; the full words are
+                    // in its tooltip and its accessibility label.
                     Text(node.caption)
                         .font(.system(size: WorkspaceStyle.PaneText.secondary))
                         .foregroundStyle(SidebarInk.secondary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
             }
             Spacer(minLength: SidebarGrid.gap)
             trailing
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .navigatorRow(selected: selected, keyed: keyed, leading: 0)
+        .navigatorRow(selected: selected, keyed: keyed, minHeight: Self.height(for: node), leading: 0)
+        .frame(height: Self.height(for: node))
         .background {
             if hovering && !selected { RoundedRectangle.control.fill(Fill.hover).boxOutset() }
         }
         .contentShape(Rectangle())
         .onTapGesture(perform: onChoose)
         .onHover { hovering = $0 }
-        .help(ifAny: node.kind == .page ? OneTreeWords.pageHelp : nil)
+        .help(ifAny: node.kind == .page ? OneTreeWords.pageHelp : (node.caption.isEmpty ? nil : node.caption))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibility)
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
-        .accessibilityAction(named: row.expanded ? "Collapse" : "Expand", onToggle)
+        .accessibilityAction(named: row.expanded ? "Collapse" : "Expand", onToggleAccessibly ?? onToggle)
         // Its open state and its level, which the drawing says (review M6).
         .accessibilityValue(node.hasChildren ? (row.expanded ? "Expanded" : "Collapsed") : "")
         .accessibilityHint("Level \(row.depth + 1)")

@@ -39,19 +39,30 @@ struct OneTreeFoldTests {
         expansion.setAll(false, in: tree.roots)
         #expect(!expansion.anyExpanded(in: tree.roots))
         #expect(OneTree.rows(tree.roots, expansion: expansion).allSatisfy { !$0.expanded })
-        #expect(expansion.isSeeded)
         // Activity can't open one again: the choice is kept as text.
         #expect(!OneTreeExpansion(encoded: expansion.encoded).anyExpanded(in: tree.roots))
     }
 
-    @Test("Expand All opens every node with children, to the terminals")
+    @Test("Expand All opens the themes, cards and lanes to the terminals, and leaves done folds and Hidden shut")
     func expandAll() throws {
         let tree = try Self.tree()
         var expansion = OneTreeExpansion()
+        expansion.setAll(false, in: tree.roots)
         expansion.setAll(true, in: tree.roots)
         let rows = OneTree.rows(tree.roots, expansion: expansion)
-        #expect(rows.filter { $0.node.hasChildren }.allSatisfy { $0.expanded })
+        for row in rows where row.node.hasChildren {
+            switch row.node.kind {
+            case .theme, .task, .lane: #expect(row.expanded, "\(row.node.kind) \(row.node.id)")
+            case .doneFold: #expect(!row.expanded, "a done fold stays shut: \(row.node.id)")
+            default: break
+            }
+        }
         #expect(rows.contains { $0.node.kind == .terminal })
+        #expect(!rows.contains { $0.node.kind == .task && $0.node.quiet && $0.node.id.contains("/done") })
+        let hidden = tree.allNodes.filter { $0.title == OneTreeWords.hidden }
+        for node in hidden { #expect(!expansion.isExpanded(node)) }
+        let loose = try #require(tree.below.first { $0.title == OneTreeWords.looseWorktrees })
+        #expect(!expansion.isExpanded(loose))
     }
 
     @Test("⌥-click on a disclosure takes its siblings the same way")

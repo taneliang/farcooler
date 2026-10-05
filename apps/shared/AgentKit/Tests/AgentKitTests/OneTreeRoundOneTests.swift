@@ -111,28 +111,56 @@ struct OneTreeRoundOneTests {
         #expect(OneTreeKeys.choosesOnArrival(try #require(T.node(tree, "theme:theme-Plan/task:t1"))))
     }
 
-    // MARK: M1, the default taken once
+    // MARK: Defaults follow the work; only the person's own choices are kept
 
-    @Test("The defaults are taken once and stay as the work moves")
-    func defaultIsSticky() throws {
+    @Test("A node nobody touched follows the work: a theme that gains a live lane opens, one that loses its lanes closes")
+    func defaultFollowsTheWork() throws {
         var input = try T.board()
-        var expansion = OneTreeExpansion()
-        expansion.seed(from: OneTree.build(input).roots)
-        #expect(expansion.isSeeded)
-        let before = OneTree.rows(OneTree.build(input).tree, expansion: expansion).filter(\.expanded).map(\.id)
-        #expect(before.contains("theme:theme-Mac"))
-        // Every lane lands: the defaults would now be closed, and aren't.
         for index in input.plan.lanes.indices { input.plan.lanes[index].state = .landed }
-        let moved = OneTree.build(input)
-        #expect(moved.tree.allSatisfy { !$0.expandedByDefault })
-        let open = OneTree.rows(moved.tree, expansion: expansion).filter(\.expanded).map(\.id)
-        #expect(open == before)
-        // Seeding again does nothing; a choice made stays.
-        expansion.toggle(moved.tree[1])
-        let kept = expansion
-        expansion.seed(from: moved.roots)
-        #expect(expansion == kept)
-        #expect(OneTreeExpansion(encoded: expansion.encoded).isSeeded)
+        let expansion = OneTreeExpansion()
+        let quiet = OneTree.build(input)
+        #expect(OneTree.rows(quiet.tree, expansion: expansion).filter(\.expanded).isEmpty)
+        // A lane starts building under Mac's card: Mac opens, with no one asking.
+        input.plan.lanes[1].state = .building
+        let busy = OneTree.build(input)
+        let open = OneTree.rows(busy.tree, expansion: expansion).filter(\.expanded).map(\.id)
+        #expect(open.contains("theme:theme-Mac"))
+        // It lands again: closed again.
+        input.plan.lanes[1].state = .landed
+        #expect(OneTree.rows(OneTree.build(input).tree, expansion: expansion).filter(\.expanded).isEmpty)
+    }
+
+    @Test("The person's own choice wins over the work, and is kept")
+    func choiceBeatsDefault() throws {
+        var input = try T.board()
+        for index in input.plan.lanes.indices { input.plan.lanes[index].state = .landed }
+        input.plan.lanes[1].state = .building
+        var expansion = OneTreeExpansion()
+        let busy = OneTree.build(input)
+        let mac = try #require(busy.tree.first { $0.id == "theme:theme-Mac" })
+        expansion.toggle(mac)  // closes it: it was open by default
+        #expect(!expansion.isExpanded(mac))
+        // More work arrives; they closed it, so it stays closed.
+        input.plan.lanes[0].state = .building
+        let more = OneTree.build(input)
+        #expect(!OneTreeExpansion(encoded: expansion.encoded).isExpanded(try #require(more.tree.first { $0.id == "theme:theme-Mac" })))
+        // What's kept is the choice alone: nothing for a node nobody touched.
+        #expect(expansion.choices == ["theme:theme-Mac": false])
+    }
+
+    @Test("A window that ran the first format has its frozen defaults dropped once, and follows the work after")
+    func frozenStateIsMigrated() throws {
+        // The first format wrote every default as a choice, and #seeded.
+        let old = ##"{"theme:theme-Mac":true,"theme:theme-Mac/task:t3":true,"theme:theme-Plan":false,"#seeded":true}"##
+        let migrated = OneTreeExpansion(encoded: old)
+        #expect(migrated.choices.isEmpty)
+        // Written back, it carries the new mark, so a choice made now is kept on the next read.
+        var next = migrated
+        next.choices["theme:theme-Plan"] = true
+        let kept = OneTreeExpansion(encoded: next.encoded)
+        #expect(kept.choices == ["theme:theme-Plan": true])
+        // Without the old marks, text reads as it is.
+        #expect(OneTreeExpansion(encoded: #"{"theme:x":true}"#).choices == ["theme:x": true])
     }
 
     // MARK: H3, one count
