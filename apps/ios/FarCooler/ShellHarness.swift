@@ -300,4 +300,32 @@ struct ShellPanePlaceholder: View {
     }
 }
 
+/// `-shell-slow-frame`: one slow frame in the middle of every drag.
+///
+/// CI's simulator drops a frame now and then, and a frame that is slow
+/// enough at the end of a drag delivers the finger's last movement and its
+/// release together — which is how a lift held still for half a second
+/// escaped on CI and a held sixty-point drag turned the page (see
+/// `ShellTouchClock`). Waiting for the runner to be slow is a coin toss, so
+/// this makes the slow frame happen on purpose: the first frame of a gesture
+/// to have travelled 30 points blocks the main thread for 1.2 seconds, which
+/// is longer than the rest of any drag in the shell suites plus its hold, so
+/// everything after it arrives in one burst.
+@MainActor
+enum ShellSlowFrame {
+    static let isRequested = CommandLine.arguments.contains("-shell-slow-frame")
+    private static var spent = false
+
+    /// A new finger is down; it gets its own slow frame.
+    static func rearm() { spent = false }
+
+    static func stall(after travelled: CGSize) {
+        guard isRequested, !spent,
+            max(abs(travelled.width), abs(travelled.height)) >= 30
+        else { return }
+        spent = true
+        Thread.sleep(forTimeInterval: 1.2)
+    }
+}
+
 #endif

@@ -104,6 +104,8 @@ SOURCES = [
     # layering.
     "ShellPageLayer.swift",
     "ShellDrag.swift",
+    # The touches' own clock, which a slow frame cannot compress. See its header.
+    "ShellTouchClock.swift",
     # The retained pane set, which is the invariant rather than a detail: a
     # pane is mounted once, keyed by tab id, and MOVED. See its header.
     "ShellPaneTrack.swift",

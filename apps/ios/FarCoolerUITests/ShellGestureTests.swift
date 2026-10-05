@@ -196,7 +196,27 @@ final class ShellGestureTests: XCTestCase {
     /// 60 it needs 297 and the test would be a coin toss on the machine rather
     /// than a statement about the app.
     func testAFlickUpFromOverAMenuRowChoosesNoRow() throws {
-        let app = launch()
+        try flickUpChoosesNoRow(launch())
+    }
+
+    /// **The same, with a slow frame in the middle of every drag.**
+    ///
+    /// The way the test above failed on CI, made to happen on purpose.
+    /// `-shell-slow-frame` blocks the main thread for 1.2 seconds once each
+    /// drag has travelled 30 points, so the rest of the drag, the half-second
+    /// hold and the release all reach the shell in one burst. Read off
+    /// `DragGesture.Value.time` that burst has no hold in it at all, and the
+    /// held 140-point lift escaped with the column's last row under the
+    /// finger — the CI failure, every time. Read off the touches' own
+    /// timestamps (`ShellTouchClock`) the hold is still half a second long.
+    ///
+    /// The flick still has to escape after its own slow frame, so this cannot
+    /// pass by zeroing every release.
+    func testAFlickUpChoosesNoRowEvenAfterASlowFrame() throws {
+        try flickUpChoosesNoRow(launch(["-shell-slow-frame"]))
+    }
+
+    private func flickUpChoosesNoRow(_ app: XCUIApplication) throws {
         XCTAssertEqual(try state(app)["tabs"], 3, "the canned worktree has three tabs")
         XCTAssertEqual(try state(app)["tab"], 0)
 

@@ -464,6 +464,9 @@ extension ShellRootView {
         // that ends here without ever moving is a tap, and a tap throws
         // nothing.
         lastMoved = nil
+        #if DEBUG
+        ShellSlowFrame.rearm()
+        #endif
         track = which
         wasOpen = columnPinned
         liftOrigin = originX
@@ -530,6 +533,9 @@ extension ShellRootView {
     /// `ShellRootView.lastMoved`, which is where the measurements that make
     /// this necessary are written down.
     private func noteMovement(_ value: DragGesture.Value) {
+        #if DEBUG
+        ShellSlowFrame.stall(after: value.translation)
+        #endif
         guard let last = lastMoved else {
             lastMoved = (at: value.translation, time: value.time)
             return
@@ -548,7 +554,20 @@ extension ShellRootView {
     /// there is nothing to decay: a finger that has been parked for four
     /// frames is not going anywhere, and a projection is a claim about where
     /// it was going.
+    ///
+    /// **Whether it had stopped is read off the touches' own timestamps
+    /// first.** `value.time` is when SwiftUI delivered a value, so after a
+    /// slow frame a held finger's last movement and its release arrive
+    /// together and the hold measures zero. That is how a held lift escaped
+    /// and a held drag turned the page on CI; `ShellTouchClock` has the
+    /// measurement. The `lastMoved` reading stays as the fallback for a
+    /// release whose touch the clock has not seen end, which in practice
+    /// never happens: UIKit hands the window's recognizers a touch's end
+    /// before SwiftUI's gesture reports it.
     private func releaseVelocity(_ value: DragGesture.Value) -> CGSize {
+        if let still = touchClock.stillBeforeLift {
+            return still > Self.stillFor ? .zero : value.velocity
+        }
         guard let last = lastMoved,
             value.time.timeIntervalSince(last.time) <= Self.stillFor
         else { return .zero }

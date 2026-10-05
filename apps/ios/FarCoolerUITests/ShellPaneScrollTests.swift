@@ -286,7 +286,24 @@ final class ShellPaneScrollTests: XCTestCase {
     /// terminal face at the reader's terminal size, which is the same reason
     /// `HunkView` measures its widest row instead of assuming it.
     func testACodeLineAtItsEndHandsThePageTurnBack() throws {
-        let app = launch(["-shell-harness", "-shell-changes"])
+        try codeLineAtItsEndHandsThePageTurnBack(launch(["-shell-harness", "-shell-changes"]))
+    }
+
+    /// **The same, with a slow frame in the middle of every drag.**
+    ///
+    /// The way the test above failed on CI, made to happen on purpose:
+    /// `-shell-slow-frame` blocks the main thread for 1.2 seconds once each
+    /// drag has travelled 30 points, so the end of the drag and its hold
+    /// reach the shell in one burst. The last sixty-point drag of the loop is
+    /// the shell's whole — the line is already at its end — and read off
+    /// `DragGesture.Value.time` its hold vanished, it projected past seventy
+    /// and turned the page. See `ShellTouchClock`.
+    func testACodeLineAtItsEndHandsThePageTurnBackEvenAfterASlowFrame() throws {
+        try codeLineAtItsEndHandsThePageTurnBack(
+            launch(["-shell-harness", "-shell-changes", "-shell-slow-frame"]))
+    }
+
+    private func codeLineAtItsEndHandsThePageTurnBack(_ app: XCUIApplication) throws {
         _ = try state(app)
         let line = app.staticTexts.matching(
             NSPredicate(format: "label CONTAINS %@", "retry_after")).firstMatch

@@ -331,6 +331,15 @@ struct ShellRootView<Pane: View>: View {
     /// recent and carries no momentum at all.
     @State var lastMoved: (at: CGSize, time: Date)?
 
+    /// The same question as `lastMoved`, answered by the touches' own
+    /// timestamps — and the one a release asks first.
+    ///
+    /// `lastMoved` is stamped with `DragGesture.Value.time`, which is when a
+    /// value was delivered; after a slow frame, a held finger's last movement
+    /// and its release are delivered together and read as a throw. See
+    /// `ShellTouchClock`, where that is measured.
+    @State var touchClock = ShellTouchClock()
+
     /// The bar surface's bottom edge, in global coordinates.
     ///
     /// What a TAP on an open column is measured against — see
@@ -588,6 +597,9 @@ struct ShellRootView<Pane: View>: View {
         // the worktree.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .background { screenFrameReader }
+        // Listens to the window's touches for their real timestamps and
+        // touches nothing. See `ShellTouchClock`.
+        .background { ShellTouchClockInstaller(clock: touchClock) }
         .overlay(alignment: .topLeading) { probe }
         // One announcement per arrival. `onAppear` as well as `onChange`,
         // because the first pane the shell opens on is one nobody moved to and
