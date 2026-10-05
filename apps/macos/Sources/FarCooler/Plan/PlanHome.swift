@@ -106,6 +106,17 @@ struct PlanStrip: View {
     }
 
     var body: some View {
+        content
+            // Folded with the navigator put away, nothing else asks for the
+            // plan: the strip reads it, and follows it as it moves.
+            .task(id: [plan.available ? 1 : 0, plan.generation]) {
+                guard plan.available else { return }
+                await plan.reloadIfMoved()
+                await plan.readIfNeverRead()
+            }
+    }
+
+    @ViewBuilder private var content: some View {
         if plan.planned || needsYou > 0, let words = Self.words(plan.plan, needsYou: needsYou) {
             Button(action: onPeek) {
                 HStack(spacing: Spacing.tight + 2) {
