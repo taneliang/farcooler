@@ -1066,7 +1066,8 @@ mod tests {
         let lines = skill_body(Harness::Claude).lines().count();
         // 241 until trains moved onto the plan (ov-309): two commands and the
         // live page references (ov-306), for the hand-kept page they replace.
-        assert!(lines <= 249, "{lines} lines");
+        // 249 until the watch step said to ask `gh` rather than guess (ov-323).
+        assert!(lines <= 250, "{lines} lines");
     }
 
     #[test]

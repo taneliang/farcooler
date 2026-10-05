@@ -160,9 +160,10 @@ that SHA's CI and turns the train green or red; Now shows it above its lanes.
   a fix round on the same branch, answered in its thread; a disagreement goes
   to the owner. Land approved PRs through the merge queue, or one at a time.
 
-After every push or CI rerun, start `gh run watch <id> --exit-status` (id: `gh
-run list`) as a background command, so a red run reaches you and a green one
-frees the next train. Without one, check the run before you stop.
+After every push or CI rerun, take its run from `gh run list` (never decide
+there is no CI from the remote's URL; if none is listed, say so) and start `gh
+run watch <id> --exit-status` as a background command, so a red run reaches you
+and a green one frees the next train. Without one, check it before you stop.
 
 On landing, tick each verified `--met` line, close the card (`task set --status
 done`), set the lane landed (`plan lane set <name> --state landed --sha <sha>`)
