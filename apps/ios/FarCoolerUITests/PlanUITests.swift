@@ -220,11 +220,18 @@ final class PlanUITests: XCTestCase {
     func testAnOutcomeWrapsToThreeLines() {
         let app = openBoard(["-phone-plan", "-phone-plan-outcomes"])
         showPlan(app)
-        let rows = ["Visual language", "Mac navigation", "Reliability"].map { element(app, "plan-theme-\($0)") }
         XCTAssertTrue(element(app, "plan-next-up").waitForExistence(timeout: 10))
-        for _ in 0..<8 where !rows.allSatisfy({ $0.exists && $0.isHittable }) { app.swipeUp() }
-        XCTAssertTrue(rows.allSatisfy(\.exists), "the three themes aren't on screen together: \(app.debugDescription)")
-        let heights = rows.map(\.frame.height)
+        // Each row carries a track line and a three-line story now, so three rows no longer fit
+        // on one screen (ov-331). Measure them one at a time, scrolling each into view: a row's
+        // height is its own, and the stories clamp at the same three lines, so what differs
+        // between rows is the outcome.
+        var heights: [CGFloat] = []
+        for name in ["Visual language", "Mac navigation", "Reliability"] {
+            let row = element(app, "plan-theme-\(name)")
+            for _ in 0..<10 where !(row.exists && row.isHittable) { app.swipeUp() }
+            XCTAssertTrue(row.exists && row.isHittable, "\(name) isn't on screen: \(app.debugDescription)")
+            heights.append(row.frame.height)
+        }
         let line = heights[1] - heights[0]
         XCTAssertGreaterThan(line, 8, "one line and two lines are the same height: \(heights)")
         // Far too many words show three lines: two more than the short one.
