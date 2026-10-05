@@ -209,7 +209,10 @@ extension PageWorld {
 
     /// A card-count reference's status, as the board says it.
     static func statusName(_ word: String) -> String {
-        if word == "open" { return OneTreeFilter.open.title }
+        // The tree's filter word, spelled out: the phones compile this file
+        // without OneTree.swift (apps/ios/generate-project.py), so it can't
+        // name OneTreeFilter. `OneTreeFilterTests.pageCountWord` keeps the two equal.
+        if word == "open" { return "Not Done" }
         return TaskStatus(rawValue: word)?.title ?? word
     }
 
