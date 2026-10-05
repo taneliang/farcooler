@@ -65,9 +65,6 @@ extension ContentView {
         else { return nil }
         let host = scene.host
         let orchestrator = scene.hasConversation ? navigatorOrchestrator(host: host, workspace: summary) : nil
-        // The workspace's Needs You items, the one tree's Needs You count:
-        // one number for one word (ov-321).
-        let needs = WorkspaceCounts.count(for: summary, host: host, in: store.needsYou)
         let read = scene.board == nil ? nil : boardStore(for: summary, client: client, host: host)
         let tasks = Set(read?.board.rows.map(\.id) ?? [])
         // The workspace's panes: its own, and any working one of its tasks.
@@ -79,7 +76,9 @@ extension ContentView {
         return TitleStatusSource(
             orchestrator: orchestrator?.state, status: orchestrator?.status, nowDoing: orchestrator?.nowDoing,
             board: read,
-            waiting: { column in client.boardWaiting(columnCount: column, decisions: needs) },
+            // The sidebar's Needs You count, by the one function both say it
+            // with (ov-321 review H3).
+            waiting: { column in needsYouCount(host: host, workspace: summary, client: client, columnCount: column) },
             seat: WorkspaceScreen.orchestrator(of: summary, host: host, in: store.fleet)?.terminal, panes: panes)
     }
 
@@ -252,7 +251,7 @@ extension ContentView {
 
     /// A worktree's menu (`WorktreeMenu.items`), on navigator rows, task rows
     /// and the breadcrumb.
-    private func worktreeMenu(for ws: Worktree) -> [WorktreeMenu.Item] {
+    func worktreeMenu(for ws: Worktree) -> [WorktreeMenu.Item] {
         let host = ws.host ?? ""
         let listed = worktree(host: host, id: ws.id) ?? ws
         let usable = store.refusal(for: host) == nil

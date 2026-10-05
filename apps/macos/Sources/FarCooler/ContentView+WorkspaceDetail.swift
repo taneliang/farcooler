@@ -336,8 +336,12 @@ extension ContentView {
                     .contentCard()
             }
         case .workspace(let host, let id, .plan(.needsYou)?):
-            if let workspace = board(host: host, id: id) {
-                PlanNeedsYouPage(needsYou: planNeedsYou(host: host, workspace: workspace))
+            if let client = store.clients[host], let workspace = board(host: host, id: id) {
+                PlanNeedsYouPage(
+                    needsYou: planNeedsYou(host: host, workspace: workspace),
+                    board: boardStore(for: workspace, client: client, host: host),
+                    onOpenTheme: { openPlan(.theme($0), host: host, workspace: id) },
+                    onOpenTask: { chooseTask($0, host: host, workspace: id, glance: false) })
             } else {
                 ContentUnavailableView("Board Not Found", systemImage: "flag").contentCard()
             }

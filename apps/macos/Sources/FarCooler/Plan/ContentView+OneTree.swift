@@ -1,4 +1,5 @@
 import AgentKit
+import AppKit
 import SwiftUI
 
 // The window's side of the one tree (ov-321): what the tree is built from,
@@ -7,15 +8,16 @@ import SwiftUI
 
 extension ContentView {
     /// The navigator's tree for `workspace`, or nil while the navigator
-    /// draws the Board view (View ▸ Board).
+    /// draws the Board view (View ▸ Tasks by Status).
     func oneTreeSidebar(
         host: String, workspace: WorkspaceSummary, client: DaemonClient, orchestrator: NavigatorOrchestrator?
     ) -> OneTreeSidebar? {
         guard !showsBoardList else { return nil }
         let board = boardStore(for: workspace, client: client, host: host)
         return OneTreeSidebar(
-            input: { filter in
-                oneTreeInput(host: host, workspace: workspace, client: client, orchestrator: orchestrator, filter: filter)
+            tree: { filter in
+                board.plan.oneTree(
+                    oneTreeInput(host: host, workspace: workspace, client: client, orchestrator: orchestrator, filter: filter))
             },
             selected: treeTarget(selection, workspace: workspace.id),
             hint: treeHint, key: "\(host)|\(workspace.id)",
@@ -23,7 +25,51 @@ extension ContentView {
                 treeHint = node.id
                 if let target = node.target { goInTree(target, host: host, workspace: workspace) }
             },
-            settled: { board.hasRead && (board.plan.hasRead || !board.plan.available) })
+            settled: { board.hasRead && (board.plan.hasRead || !board.plan.available) },
+            menu: { node in AnyView(treeMenu(node, host: host, workspace: workspace, client: client)) })
+    }
+
+    /// The workspace's Needs You count: the title bar's and the sidebar's
+    /// one number (review H3), from `WorkspaceNeedsYou.count`. `columnCount`
+    /// is the board's Needs Decision column as the caller read it.
+    func needsYouCount(host: String, workspace: WorkspaceSummary, client: DaemonClient, columnCount: Int) -> Int {
+        let board = boardStore(for: workspace, client: client, host: host)
+        return WorkspaceNeedsYou.count(
+            items: WorkspaceCounts.count(for: workspace, host: host, in: store.needsYou), columnCount: columnCount,
+            listRead: client.needsYouLoaded, listServed: client.servesNeedsYou,
+            themeAsks: board.plan.plan.shownThemes.filter { !$0.ownerAsk.isEmpty }.count)
+    }
+
+    /// A row's context menu (review M2): a card's, as the Board view's row
+    /// has it; a lane's or worktree's, the sidebar row's (New Terminal and
+    /// Unhide among them); a terminal's; New Terminal in the checkout.
+    @ViewBuilder
+    func treeMenu(_ node: OneTreeNode, host: String, workspace: WorkspaceSummary, client: DaemonClient) -> some View {
+        switch node.target {
+        case .task(let id)?:
+            if let row = boardStore(for: workspace, client: client, host: host).board.rows.first(where: { $0.id == id }) {
+                let agents = boardAgents(host: host, client: client)
+                TaskRowMenu(
+                    row: row, live: agents.live(for: row), orchestrator: agents.orchestrator(for: row),
+                    onGoTo: { go(to: $0) }, ask: askOrchestrator(host: host, workspace: workspace))
+            }
+        case .terminal(let wt, let id)?:
+            if let found = worktree(host: host, id: wt), let pane = found.terminals.first(where: { $0.id == id }) {
+                Button("Open") { goInTree(.terminal(worktree: wt, terminal: id), host: host, workspace: workspace) }
+                if client.daemonBuild?.can(.terminalNames) == true {
+                    Button("Rename…") { Task { await run(.rename, on: pane, in: found) } }
+                }
+                Button("Close") { Task { await run(.close, on: pane, in: found) } }
+            }
+        default:
+            if node.id == "group:main", let checkout = ProjectTerminals.checkout(for: workspace, host: host, in: store.fleet),
+                store.refusal(for: host) == nil
+            {
+                Button("New Terminal") { Task { await openShell(besideOrchestratorIn: checkout, workspace: workspace.id) } }
+            } else if let id = node.worktreeID, let found = worktree(host: host, id: id) {
+                WorktreeMenuItems(items: worktreeMenu(for: found), perform: { perform($0, on: found) })
+            }
+        }
     }
 
     /// What `workspace`'s tree is built from: its board's cards, its plan
@@ -53,12 +99,16 @@ extension ContentView {
                     terminals: ProjectTerminals.terminals(in: checkout, fleet: store.fleet).map(Self.treeTerminal))
             },
             pages: board.plan.listedPages.map(OneTreePage.init),
+            unreadable: board.board.unreadable.map {
+                OneTreeUnreadable(id: $0.id, key: $0.key, title: $0.title, status: $0.status)
+            },
             asks: OneTreeAsks(items: needs.items, plan: plan),
             filter: filter,
             // No word beside "Orchestrator" when there's none: the row
             // saying "No Orchestrator" twice over reads as noise.
             orchestratorWord: orchestrator.flatMap { $0.state == .none ? nil : OrchestratorRow.word($0.state) },
-            needsYouCount: needs.items.count,
+            needsYouCount: needsYouCount(
+                host: host, workspace: workspace, client: client, columnCount: board.board.waitingOnYou),
             hasOrchestrator: orchestrator != nil)
     }
 
@@ -164,7 +214,9 @@ extension ContentView {
     func pathTree(host: String, workspace: WorkspaceSummary) -> OneTree? {
         guard !showsBoardList, let client = store.clients[host] else { return nil }
         let orchestrator = navigatorOrchestrator(host: host, workspace: workspace)
-        return OneTree.build(
+        // From the board's cache: the jump bar and ⌘↑'s menu state each ask
+        // on every draw, and build only when what the tree reads changed.
+        return boardStore(for: workspace, client: client, host: host).plan.oneTree(
             oneTreeInput(host: host, workspace: workspace, client: client, orchestrator: orchestrator, filter: .all))
     }
 
@@ -199,6 +251,12 @@ extension ContentView {
 
     /// ⌘↑: up the tree to the node over the selection's.
     func goUpTree() {
+        // ⌘↑ in text being typed is the text's "to the beginning", which
+        // the menu's key took first (review L1): handed back to it.
+        if let text = NSApp.keyWindow?.firstResponder as? NSTextView {
+            text.moveToBeginningOfDocument(nil)
+            return
+        }
         guard let next = treeParent, next != selection else { return }
         // The parent's own row, so a lane under two cards goes back up the
         // card it was reached through.
@@ -215,13 +273,31 @@ extension ContentView {
 /// tree's Needs You row opens (ov-321).
 struct PlanNeedsYouPage: View {
     let needsYou: PlanNeedsYou
+    /// The board: its plan's themes that ask for the owner, which the
+    /// runner's list doesn't carry (review M3), and its Unread, which the
+    /// tree has no place for (review M2: Unread lives here now).
+    @ObservedObject var board: TaskBoardStore
+    var onOpenTheme: (String) -> Void = { _ in }
+    var onOpenTask: (String) -> Void = { _ in }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.group) {
                 Text(OneTreeWords.needsYou)
                     .font(.system(size: WorkspaceStyle.PaneText.title, weight: .semibold))
-                if needsYou.items.isEmpty {
+                ForEach(board.plan.plan.shownThemes.filter { !$0.ownerAsk.isEmpty }) { theme in
+                    Button { onOpenTheme(theme.id) } label: {
+                        VStack(alignment: .leading, spacing: Spacing.tight) {
+                            Text(theme.name).font(.system(size: WorkspaceStyle.PaneText.secondary)).foregroundStyle(.secondary)
+                            PlanAsk(text: theme.ownerAsk)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .identified("plan-needs-you-theme-\(theme.name)")
+                }
+                if needsYou.items.isEmpty && !board.plan.plan.shownThemes.contains(where: { !$0.ownerAsk.isEmpty }) {
                     Text("Nothing in this workspace needs you.")
                         .foregroundStyle(.secondary)
                         .identified("plan-needs-you-empty")
@@ -232,6 +308,13 @@ struct PlanNeedsYouPage: View {
                         onAnswerAsk: { await needsYou.onAnswerAsk(item, $0) },
                         onDecide: { await needsYou.onDecide(item, $0) })
                     .changeWashed(item.key)
+                }
+                if board.hasRead {
+                    // What changed on cards since they were last read: Unread
+                    // lives here now the tree has taken the list's place.
+                    BoardSummaryStrip(store: board, onChooseLine: { onOpenTask(BoardSummaryStrip.task(ofLine: $0)) })
+                        .padding(.top, Spacing.group)
+                        .identified("plan-needs-you-unread")
                 }
             }
             .listChanges(needsYou.items.map { ListChangeRow(id: $0.key, signature: "\($0.kind)\u{1}\($0.question)") })
