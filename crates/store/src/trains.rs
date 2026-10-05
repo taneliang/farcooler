@@ -21,6 +21,15 @@
 //! (`scripts/plan-layer-lint.py` checks). The plan read carries them
 //! (`plan_read.rs`), so the removal drill in `plan_tests.rs` drops them with
 //! the rest of the layer.
+//!
+//! # What removing trains would touch beyond these files
+//!
+//! Pages' CI references (ov-306) read `board_ci` through `Plan.ci`, so they
+//! share this migration. Withdrawing `board_trains` degrades cleanly: such a
+//! reference draws as its name. Deleting the code also means editing
+//! `rpc_pages.rs` (its `ci_watch::kick` and `ci_subjects`) and keeping
+//! `page_doc`'s `ci` target, or pages that name CI stop parsing (review
+//! train-1005c L6).
 
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use uuid::Uuid;
