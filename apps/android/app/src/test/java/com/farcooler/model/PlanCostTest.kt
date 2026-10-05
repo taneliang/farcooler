@@ -29,7 +29,9 @@ class PlanCostTest {
         val cost = plan.cost!!
         assertEquals(34_200_000L, cost.weekTokens)
         assertEquals(2, cost.compareHeldBack)
-        assertEquals(listOf(5, 3), cost.compare.map { it.cards })
+        assertEquals(listOf(5000, 3400), cost.compare.map { it.cardShareMilli })
+        assertEquals(1_200_000L, cost.inFlightTokens)
+        assertNull(cost.inFlightCostMicros)
         assertNull("an unpriced pair has no dollars, never zero", cost.compare[1].costMicros)
     }
 
@@ -69,7 +71,7 @@ class PlanCostTest {
         )
         val trend = PlanCostWords.trend(listOf(0L, 0, 0, 40_000, 120_000, 0, 160_000))!!
         assertEquals(
-            "Last 7 days, oldest first: none, none, none, 40 thousand, 120 thousand, none, 160 thousand today. 320 thousand tokens in all.",
+            "Last 7 days by UTC day, oldest first: none, none, none, 40 thousand, 120 thousand, none, 160 thousand today. 320 thousand tokens in all.",
             PlanCostWords.trendSpoken(trend, us),
         )
     }
@@ -89,7 +91,7 @@ class PlanCostTest {
 
     @Test
     fun `the week is a count with no percentage and says why`() {
-        assertEquals("34M tokens in the last 7 days", PlanCostWords.week(34_200_000, us))
+        assertEquals("34M tokens in the last 7 days on this runner", PlanCostWords.week(34_200_000, us))
         assertFalse(PlanCostWords.week(34_200_000, us).contains("%"))
         assertFalse(PlanCostWords.WEEK_NOTE.contains("%"))
         assertTrue(PlanCostWords.WEEK_NOTE.contains("weekly limit"))
@@ -100,16 +102,29 @@ class PlanCostTest {
         val cost = Plan.decode(fixture).cost!!
         val claude = PlanCostWords.compareRow(cost.compare[0], us)
         assertEquals("Claude Code · opus", claude.title)
-        assertEquals("5 finished cards · 1.5M tokens a card · about $2.50 a card", claude.detail)
+        assertEquals("5 finished cards · 1.5M tokens a card · about $2.50 a card API-equivalent", claude.detail)
         assertTrue(claude.spoken.contains("1.5 million tokens a card") && claude.spoken.contains("API-equivalent"))
         val codex = PlanCostWords.compareRow(cost.compare[1], us)
         assertEquals("Codex · gpt-5.6", codex.title)
-        assertEquals("unpriced: no dollars, not \$0", "3 finished cards · 300K tokens a card", codex.detail)
-        assertEquals("Cursor · no model named", PlanCostWords.compareRow(PlanHarnessCost("cursor", "", 3, 30), us).title)
-        assertEquals("2 other harness and model pairs held back until three cards have finished", PlanCostWords.heldBack(2))
-        assertEquals("1 other harness and model pair held back until three cards have finished", PlanCostWords.heldBack(1))
+        assertEquals("unpriced reads Not reported, never nothing", "3.4 finished cards · 300K tokens a card · API-equivalent dollars: Not reported", codex.detail)
+        assertEquals("Cursor · no model named", PlanCostWords.compareRow(PlanHarnessCost("cursor", "", 3000, 30), us).title)
+        assertEquals("2 other harness and model pairs held back until three cards have landed", PlanCostWords.heldBack(2))
+        assertEquals("1 other harness and model pair held back until three cards have landed", PlanCostWords.heldBack(1))
         assertNull(PlanCostWords.heldBack(0))
         assertEquals(3, PlanCostWords.COMPARE_MINIMUM_CARDS)
+    }
+
+    @Test
+    fun `spend on cards that haven't landed is said apart, with its dollars API-equivalent or Not reported`() {
+        val cost = Plan.decode(fixture).cost!!
+        assertEquals("1.2M tokens on cards that haven’t landed · API-equivalent dollars: Not reported", PlanCostWords.inFlight(cost, us))
+        assertEquals(
+            "1.2M tokens on cards that haven’t landed · about \$9.00 API-equivalent",
+            PlanCostWords.inFlight(cost.copy(inFlightCostMicros = 9_000_000), us),
+        )
+        assertNull(PlanCostWords.inFlight(PlanCostRead(), us))
+        assertEquals("5 finished cards", PlanCostWords.cardShare(5000))
+        assertEquals("3.6 finished cards", PlanCostWords.cardShare(3600))
     }
 
     @Test

@@ -78,10 +78,12 @@ fn cost_json(c: &pb::PlanCost) -> Value {
     json!({
         "week_tokens": c.week_tokens,
         "compare": c.compare.iter().map(|p| json!({
-            "harness": p.harness, "model": p.model, "cards": p.cards, "tokens": p.tokens,
+            "harness": p.harness, "model": p.model, "card_share_milli": p.card_share_milli, "tokens": p.tokens,
             "cost_micros": p.cost_micros,
         })).collect::<Vec<_>>(),
         "compare_held_back": c.compare_held_back,
+        "in_flight_tokens": c.in_flight_tokens,
+        "in_flight_cost_micros": c.in_flight_cost_micros,
     })
 }
 

@@ -339,12 +339,14 @@ fn pb_cost(c: &PlanCost) -> pb::PlanCost {
             .map(|p| pb::HarnessModelCost {
                 harness: p.harness.clone(),
                 model: p.model.clone(),
-                cards: p.cards,
+                card_share_milli: p.card_share_milli,
                 tokens: p.tokens,
                 cost_micros: p.cost_micros,
             })
             .collect(),
         compare_held_back: c.compare_held_back,
+        in_flight_tokens: c.in_flight_tokens,
+        in_flight_cost_micros: c.in_flight_cost_micros,
     }
 }
 

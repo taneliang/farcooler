@@ -62,7 +62,7 @@ fun PlanTrendBars(trend: PlanTrend, modifier: Modifier = Modifier, height: Int =
                 if (share > 0) {
                     // Today, the last bar, is the darkest: the one that's still moving.
                     Box(
-                        Modifier.fillMaxWidth().height(maxOf(2.0, height * share).dp).clip(CircleShape)
+                        Modifier.fillMaxWidth().height(maxOf(2.0, height * share).dp)
                             .background(if (index == heights.lastIndex) scheme.onSurfaceVariant else scheme.outline),
                     )
                 }
@@ -102,6 +102,9 @@ fun PlanThemeSpend(theme: PlanTheme, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth().testTag("plan-theme-spend"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         theme.spend?.takeIf { it.totalTokens > 0 }?.let {
             Text(com.farcooler.model.PlanWords.spend(it), style = MaterialTheme.typography.bodyLarge)
+            if ((it.costMicros ?: 0) > 0) {
+                Text(com.farcooler.model.TaskUsageFormat.API_EQUIVALENT, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
         PlanCostWords.budget(theme.spend, theme.budgetTokens)?.let { PlanBudgetLine(it) }
         PlanCostWords.trend(theme.trendTokens)?.let { trend ->
@@ -110,7 +113,7 @@ fun PlanThemeSpend(theme: PlanTheme, modifier: Modifier = Modifier) {
                 modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = PlanCostWords.trendSpoken(trend) },
             ) {
                 PlanTrendBars(trend)
-                Text("Last 7 days, today on the right", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Last 7 days by UTC day, today on the right", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -133,10 +136,10 @@ fun PlanCostBlock(cost: PlanCostRead, modifier: Modifier = Modifier) {
                 Text(PlanCostWords.WEEK_NOTE, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        if (cost.compare.isNotEmpty() || cost.compareHeldBack > 0) {
+        if (cost.compare.isNotEmpty() || cost.compareHeldBack > 0 || cost.inFlightTokens > 0) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "Cost per finished card",
+                    "Cost per landed card",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.semantics { heading() },
@@ -152,6 +155,15 @@ fun PlanCostBlock(cost: PlanCostRead, modifier: Modifier = Modifier) {
                 }
                 PlanCostWords.heldBack(cost.compareHeldBack)?.let {
                     Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("plan-compare-held-back"))
+                }
+                PlanCostWords.inFlight(cost)?.let {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                        modifier = Modifier.semantics(mergeDescendants = true) {}.testTag("plan-cost-in-flight"),
+                    ) {
+                        Text("In flight", style = MaterialTheme.typography.titleSmall)
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
                 if (cost.compare.isNotEmpty()) {
                     Text(PlanCostWords.COMPARE_NOTE, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)

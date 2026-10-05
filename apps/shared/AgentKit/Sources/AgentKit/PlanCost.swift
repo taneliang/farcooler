@@ -28,18 +28,22 @@ public struct PlanHarnessCost: Decodable, Equatable, Identifiable, Sendable {
     public var harness: String
     /// Empty when the harness named no model.
     public var model: String
-    /// How many finished cards it worked: the n behind every figure here.
-    public var cards: Int
+    /// Its share of the landed cards, in thousandths of a card: the n behind
+    /// every figure here. A card two pairs worked is one card in total, shared
+    /// out by each pair's fraction of its tokens.
+    public var cardShareMilli: Int
+    /// Tokens it spent on landed cards.
     public var tokens: UInt64
-    /// Millionths of a dollar; nil unless every one of its turns was priced.
+    /// Millionths of a dollar it spent on landed cards; nil unless every one
+    /// of its turns was priced.
     public var costMicros: Int64?
 
     public var id: String { "\(harness)/\(model)" }
 
-    public init(harness: String, model: String, cards: Int, tokens: UInt64, costMicros: Int64? = nil) {
+    public init(harness: String, model: String, cardShareMilli: Int, tokens: UInt64, costMicros: Int64? = nil) {
         self.harness = harness
         self.model = model
-        self.cards = cards
+        self.cardShareMilli = cardShareMilli
         self.tokens = tokens
         self.costMicros = costMicros
     }
@@ -54,11 +58,21 @@ public struct PlanCostRead: Decodable, Equatable, Sendable {
     public var compare: [PlanHarnessCost]
     /// How many pairs had finished cards but too few to compare.
     public var compareHeldBack: Int
+    /// Spend on the board's cards that haven't landed (open or cancelled),
+    /// apart from the comparison: never charged to a landed card, never dropped.
+    public var inFlightTokens: UInt64
+    /// Millionths of a dollar of it; nil unless every turn was priced.
+    public var inFlightCostMicros: Int64?
 
-    public init(weekTokens: UInt64 = 0, compare: [PlanHarnessCost] = [], compareHeldBack: Int = 0) {
+    public init(
+        weekTokens: UInt64 = 0, compare: [PlanHarnessCost] = [], compareHeldBack: Int = 0, inFlightTokens: UInt64 = 0,
+        inFlightCostMicros: Int64? = nil
+    ) {
         self.weekTokens = weekTokens
         self.compare = compare
         self.compareHeldBack = compareHeldBack
+        self.inFlightTokens = inFlightTokens
+        self.inFlightCostMicros = inFlightCostMicros
     }
 
     public init(from decoder: Decoder) throws {
@@ -66,12 +80,14 @@ public struct PlanCostRead: Decodable, Equatable, Sendable {
         weekTokens = try c.decodeIfPresent(UInt64.self, forKey: .weekTokens) ?? 0
         compare = try c.decodeIfPresent([PlanHarnessCost].self, forKey: .compare) ?? []
         compareHeldBack = try c.decodeIfPresent(Int.self, forKey: .compareHeldBack) ?? 0
+        inFlightTokens = try c.decodeIfPresent(UInt64.self, forKey: .inFlightTokens) ?? 0
+        inFlightCostMicros = try c.decodeIfPresent(Int64.self, forKey: .inFlightCostMicros)
     }
 
-    private enum CodingKeys: String, CodingKey { case weekTokens, compare, compareHeldBack }
+    private enum CodingKeys: String, CodingKey { case weekTokens, compare, compareHeldBack, inFlightTokens, inFlightCostMicros }
 
     /// Something to draw: tokens this week, or a comparison, or pairs held back.
-    public var isWorthShowing: Bool { weekTokens > 0 || !compare.isEmpty || compareHeldBack > 0 }
+    public var isWorthShowing: Bool { weekTokens > 0 || !compare.isEmpty || compareHeldBack > 0 || inFlightTokens > 0 }
 }
 
 /// Where spend stands against a budget. Equal is within it.
@@ -104,7 +120,7 @@ public struct PlanCompareRow: Equatable, Identifiable, Sendable {
     public var id: String
     /// "Claude Code · opus".
     public var title: String
-    /// "5 finished cards · 1.5M tokens a card · about $2.50 a card".
+    /// "5 finished cards · 1.5M tokens a card · about $2.50 a card API-equivalent".
     public var detail: String
     /// For VoiceOver and TalkBack: the same, with the numbers said in words.
     public var spoken: String
@@ -182,34 +198,55 @@ extension PlanWords {
     }
 
     /// "Last 7 days, oldest first: none, none, 40 thousand, 120 thousand, none,
-    /// none, 160 thousand today. 320 thousand tokens in all."
+    /// none, 160 thousand today. 320 thousand tokens in all." The days are UTC.
     public static func trendSpoken(_ t: PlanTrend, locale: Locale = .current) -> String {
         let each = t.days.map { $0 == 0 ? "none" : spokenTokens($0, locale: locale) }
         var said = each.dropLast().joined(separator: ", ")
         said += ", \(each.last ?? "none") today"
-        return "Last 7 days, oldest first: \(said). \(spokenTokens(t.total, locale: locale)) tokens in all."
+        return "Last 7 days by UTC day, oldest first: \(said). \(spokenTokens(t.total, locale: locale)) tokens in all."
     }
 
-    /// "34M tokens in the last 7 days".
+    /// "34M tokens in the last 7 days on this runner": the same seven UTC days
+    /// as the trend, today so far.
     public static func week(_ tokens: UInt64, locale: Locale = .current) -> String {
-        "\(TaskUsageFormat.tokens(tokens, locale: locale)) tokens in the last 7 days"
+        "\(TaskUsageFormat.tokens(tokens, locale: locale)) tokens in the last 7 days on this runner"
     }
 
-    /// Said once under the week: why there is no percentage.
+    /// Said once under the week: why there is no percentage, and which days.
     public static let weekNote =
-        "Your plan’s weekly limit isn’t something your runner can read, so this counts tokens and shows no percentage."
+        "Counted by UTC day. Your plan’s weekly limit isn’t something your runner can read, so this counts tokens and shows no percentage."
 
-    /// One comparison row. A token or dollar figure is per finished card.
+    /// What is said where a dollar figure can't be: API-equivalent dollars the
+    /// runner has no price for.
+    public static let dollarsNotReported = "API-equivalent dollars: Not reported"
+
+    /// "4.2 finished cards", or "4 finished cards": a pair's share of the
+    /// landed cards, with its decimal when it isn't whole.
+    public static func cardShare(_ milli: Int, locale: Locale = .current) -> String {
+        if milli % 1000 == 0 { return "\(milli / 1000) finished cards" }
+        let formatter = NumberFormatter()
+        formatter.locale = locale
+        formatter.minimumFractionDigits = 1
+        formatter.maximumFractionDigits = 1
+        return "\(formatter.string(from: NSNumber(value: Double(milli) / 1000)) ?? "\(milli / 1000)") finished cards"
+    }
+
+    /// One comparison row: cost per landed card is the pair's spend on landed
+    /// cards over its share of them. Dollars are API-equivalent, or Not reported.
     public static func compareRow(_ p: PlanHarnessCost, locale: Locale = .current) -> PlanCompareRow {
         let model = p.model.isEmpty ? "no model named" : p.model
-        let cards = p.cards == 1 ? "1 finished card" : "\(p.cards) finished cards"
-        let each = p.tokens / UInt64(max(p.cards, 1))
+        let share = max(p.cardShareMilli, 1)
+        let cards = cardShare(p.cardShareMilli, locale: locale)
+        let each = p.tokens * 1000 / UInt64(share)
         var detail = [cards, "\(TaskUsageFormat.tokens(each, locale: locale)) tokens a card"]
         var spoken = [cards, "\(spokenTokens(each, locale: locale)) tokens a card"]
-        if let micros = p.costMicros, micros > 0 {
-            let dollars = TaskUsageFormat.dollars(micros / Int64(max(p.cards, 1)), locale: locale)
-            detail.append("about \(dollars) a card")
+        if let micros = p.costMicros {
+            let dollars = TaskUsageFormat.dollars(micros * 1000 / Int64(share), locale: locale)
+            detail.append("about \(dollars) a card API-equivalent")
             spoken.append("about \(dollars) a card, API-equivalent")
+        } else {
+            detail.append(dollarsNotReported)
+            spoken.append(dollarsNotReported)
         }
         let title = "\(harnessName(p.harness)) · \(model)"
         return PlanCompareRow(
@@ -217,15 +254,23 @@ extension PlanWords {
             spoken: "\(harnessName(p.harness)), \(model). \(spoken.joined(separator: ", "))")
     }
 
-    /// "2 other pairs held back until three cards have finished", or nil.
+    /// "1.2M tokens on cards that haven't landed · about $9 API-equivalent", or
+    /// Not reported for the dollars; nil with nothing in flight.
+    public static func inFlight(_ cost: PlanCostRead, locale: Locale = .current) -> String? {
+        guard cost.inFlightTokens > 0 else { return nil }
+        let tokens = TaskUsageFormat.tokens(cost.inFlightTokens, locale: locale)
+        let dollars = cost.inFlightCostMicros.map { "about \(TaskUsageFormat.dollars($0, locale: locale)) API-equivalent" }
+        return "\(tokens) tokens on cards that haven’t landed · \(dollars ?? dollarsNotReported)"
+    }
+
+    /// "2 other harness and model pairs held back until three cards have landed", or nil.
     public static func heldBack(_ n: Int) -> String? {
         guard n > 0 else { return nil }
         let pairs = n == 1 ? "1 other harness and model pair" : "\(n) other harness and model pairs"
-        return "\(pairs) held back until three cards have finished"
+        return "\(pairs) held back until three cards have landed"
     }
 
-    /// Said under the comparison: what the numbers are, and that dollars are
-    /// API-equivalent.
+    /// Said under the comparison: what the numbers are.
     public static let compareNote =
-        "Finished cards only, by the harness and model that worked them. A card two models worked counts once for each."
+        "Cost per landed card: what a harness and model spent on cards that landed, over its share of them. A card two models worked is one card, shared by their tokens. Dollars are API-equivalent."
 }

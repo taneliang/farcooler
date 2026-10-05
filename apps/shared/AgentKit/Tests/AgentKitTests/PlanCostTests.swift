@@ -18,7 +18,8 @@ struct PlanCostTests {
         #expect(plan.lanes[0].budgetTokens == nil)
         let cost = try #require(plan.cost)
         #expect(cost.weekTokens == 34_200_000 && cost.compareHeldBack == 2)
-        #expect(cost.compare.map(\.cards) == [5, 3])
+        #expect(cost.compare.map(\.cardShareMilli) == [5000, 3400])
+        #expect(cost.inFlightTokens == 1_200_000 && cost.inFlightCostMicros == nil)
         #expect(cost.compare[1].costMicros == nil, "an unpriced pair has no dollars, never zero")
     }
 
@@ -69,7 +70,7 @@ struct PlanCostTests {
         let trend = try #require(PlanWords.trend([0, 0, 0, 40_000, 120_000, 0, 160_000]))
         #expect(
             PlanWords.trendSpoken(trend, locale: us)
-                == "Last 7 days, oldest first: none, none, none, 40 thousand, 120 thousand, none, 160 thousand today. 320 thousand tokens in all."
+                == "Last 7 days by UTC day, oldest first: none, none, none, 40 thousand, 120 thousand, none, 160 thousand today. 320 thousand tokens in all."
         )
     }
 
@@ -88,7 +89,7 @@ struct PlanCostTests {
     @Test("the week is a count with no percentage, and says why")
     func theWeek() {
         let us = Locale(identifier: "en_US")
-        #expect(PlanWords.week(34_200_000, locale: us) == "34M tokens in the last 7 days")
+        #expect(PlanWords.week(34_200_000, locale: us) == "34M tokens in the last 7 days on this runner")
         #expect(!PlanWords.week(34_200_000, locale: us).contains("%"))
         #expect(!PlanWords.weekNote.contains("%"))
         #expect(PlanWords.weekNote.contains("weekly limit"))
@@ -100,17 +101,40 @@ struct PlanCostTests {
         let cost = try #require(try PlanModelTests.fixture().cost)
         let claude = PlanWords.compareRow(cost.compare[0], locale: us)
         #expect(claude.title == "Claude Code · opus")
-        #expect(claude.detail == "5 finished cards · 1.5M tokens a card · about $2.50 a card")
+        #expect(claude.detail == "5 finished cards · 1.5M tokens a card · about $2.50 a card API-equivalent")
         #expect(claude.spoken.contains("1.5 million tokens a card") && claude.spoken.contains("API-equivalent"))
         let codex = PlanWords.compareRow(cost.compare[1], locale: us)
         #expect(codex.title == "Codex · gpt-5.6")
-        #expect(codex.detail == "3 finished cards · 300K tokens a card", "unpriced: no dollars, not $0")
-        let unnamed = PlanWords.compareRow(PlanHarnessCost(harness: "cursor", model: "", cards: 3, tokens: 30), locale: us)
+        #expect(
+            codex.detail == "3.4 finished cards · 300K tokens a card · API-equivalent dollars: Not reported",
+            "unpriced reads Not reported, never nothing and never $0")
+        let unnamed = PlanWords.compareRow(PlanHarnessCost(harness: "cursor", model: "", cardShareMilli: 3000, tokens: 30), locale: us)
         #expect(unnamed.title == "Cursor · no model named")
-        #expect(PlanWords.heldBack(2) == "2 other harness and model pairs held back until three cards have finished")
-        #expect(PlanWords.heldBack(1) == "1 other harness and model pair held back until three cards have finished")
+        #expect(PlanWords.heldBack(2) == "2 other harness and model pairs held back until three cards have landed")
+        #expect(PlanWords.heldBack(1) == "1 other harness and model pair held back until three cards have landed")
         #expect(PlanWords.heldBack(0) == nil)
         #expect(planCompareMinimumCards == 3)
+    }
+
+    @Test("spend on cards that haven't landed is said apart, with its dollars API-equivalent or Not reported")
+    func inFlight() throws {
+        let us = Locale(identifier: "en_US")
+        let cost = try #require(try PlanModelTests.fixture().cost)
+        #expect(
+            PlanWords.inFlight(cost, locale: us)
+                == "1.2M tokens on cards that haven’t landed · API-equivalent dollars: Not reported")
+        var priced = cost
+        priced.inFlightCostMicros = 9_000_000
+        #expect(PlanWords.inFlight(priced, locale: us) == "1.2M tokens on cards that haven’t landed · about $9.00 API-equivalent")
+        #expect(PlanWords.inFlight(PlanCostRead(), locale: us) == nil)
+        #expect(PlanCostRead(inFlightTokens: 1).isWorthShowing)
+    }
+
+    @Test("a share of the landed cards reads with its decimal only when it isn't whole")
+    func cardShares() {
+        let us = Locale(identifier: "en_US")
+        #expect(PlanWords.cardShare(5000, locale: us) == "5 finished cards")
+        #expect(PlanWords.cardShare(3600, locale: us) == "3.6 finished cards")
     }
 
     @Test("a harness is named as a person names it")

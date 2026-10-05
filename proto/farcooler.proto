@@ -4093,11 +4093,17 @@ message PlanCost {
   // There is no limit and no share: neither harness reports a plan's weekly
   // limit to the runner, so a client shows the count and no percentage.
   uint64 week_tokens = 1;
-  // Finished cards' cost by harness and model, only the pairs with at least
-  // three finished cards behind them, most cards first.
+  // Cost per landed card by harness and model, only the pairs with at least
+  // three landed cards' share behind them, most share first.
   repeated HarnessModelCost compare = 2;
-  // How many pairs had finished cards but too few to compare.
+  // How many pairs had landed cards but too few to compare.
   uint32 compare_held_back = 3;
+  // Spend on the board's cards that haven't landed (open or cancelled), by
+  // every pair: shown apart from the comparison, never charged to a landed
+  // card and never dropped.
+  uint64 in_flight_tokens = 4;
+  // Millionths of a US dollar of it; absent unless every turn was priced.
+  optional int64 in_flight_cost_micros = 5;
 }
 
 // What the finished cards a harness and model worked cost.
@@ -4106,12 +4112,15 @@ message HarnessModelCost {
   string harness = 1;
   // Empty when the harness named no model.
   string model = 2;
-  // How many finished cards it worked.
-  uint32 cards = 3;
-  // Tokens on those cards by this pair, all four counts.
+  // Its share of the landed cards, in thousandths of a card: the sum, over the
+  // landed cards it worked, of its fraction of each card's tokens. A card two
+  // pairs worked is one card in total. Cost per landed card is `tokens` over
+  // this.
+  uint32 card_share_milli = 3;
+  // Tokens it spent on landed cards, all four counts.
   uint64 tokens = 4;
-  // Millionths of a US dollar on those cards; absent unless every turn of the
-  // pair was priced.
+  // Millionths of a US dollar it spent on landed cards; absent unless every
+  // turn of the pair was priced.
   optional int64 cost_micros = 5;
 }
 

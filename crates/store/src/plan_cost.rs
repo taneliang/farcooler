@@ -80,9 +80,16 @@ pub struct PlanCost {
     /// The runner's tokens over the last seven days, every harness and every
     /// board. No limit and no share: see the module doc.
     pub week_tokens: u64,
-    /// Finished cards' cost by harness and model, those with at least
-    /// `MIN_CARDS_TO_COMPARE` cards behind them, most cards first.
+    /// Cost per landed card by harness and model, those with at least
+    /// `MIN_CARDS_TO_COMPARE` landed cards' worth of share behind them, most
+    /// share first.
     pub compare: Vec<HarnessModelCost>,
+    /// Spend on the board's cards that haven't landed (open or cancelled), by
+    /// every pair, shown apart from the comparison so it is neither dropped
+    /// nor charged to a landed card.
+    pub in_flight_tokens: u64,
+    /// Millionths of a US dollar of it; `None` unless every turn was priced.
+    pub in_flight_cost_micros: Option<i64>,
     /// How many harness-and-model pairs had finished cards but too few to
     /// compare, so a client can say some are held back.
     pub compare_held_back: u32,
@@ -94,12 +101,13 @@ pub struct HarnessModelCost {
     pub harness: String,
     /// Empty when the harness named no model.
     pub model: String,
-    /// How many finished cards it worked.
-    pub cards: u32,
-    /// Tokens on those cards by this pair, all four counts.
+    /// Its share of the landed cards, in thousandths of a card: the sum, over
+    /// the landed cards it worked, of its fraction of each card's tokens.
+    pub card_share_milli: u32,
+    /// Tokens it spent on landed cards, all four counts.
     pub tokens: u64,
-    /// Millionths of a US dollar on those cards by this pair; `None` unless
-    /// every one of its turns was priced.
+    /// Millionths of a US dollar it spent on landed cards; `None` unless every
+    /// one of its turns was priced.
     pub cost_micros: Option<i64>,
 }
 
@@ -203,8 +211,9 @@ pub(crate) fn cost_of(conn: &Connection, cards: &HashMap<Uuid, CardRef>, now_ms:
         .map_err(map_err)?;
     let week_tokens: f64 = week_rows.iter().map(|(s, e, t)| spread(*t, *s, *e, window).iter().sum::<f64>()).sum();
 
-    // Per card first, so a finished card counts once for each pair that
-    // worked it, and the filter to finished cards is the board's own status.
+    // Every pair's spend on every card on the board, so spend on cards that
+    // didn't land is counted (as in flight) rather than left out, and a card's
+    // tokens can be shared out between the pairs that worked it.
     let mut stmt = conn
         .prepare(
             "SELECT t.task_id, t.harness, m.model,
@@ -221,7 +230,7 @@ pub(crate) fn cost_of(conn: &Connection, cards: &HashMap<Uuid, CardRef>, now_ms:
                 get_uuid(r, 0)?,
                 r.get::<_, String>(1)?,
                 r.get::<_, String>(2)?,
-                r.get::<_, i64>(3)?,
+                r.get::<_, i64>(3)?.max(0) as u64,
                 r.get::<_, i64>(4)?,
                 r.get::<_, i64>(5)?,
             ))
@@ -229,28 +238,59 @@ pub(crate) fn cost_of(conn: &Connection, cards: &HashMap<Uuid, CardRef>, now_ms:
         .map_err(map_err)?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(map_err)?;
-    let mut pairs: HashMap<(String, String), (u32, u64, i64, bool)> = HashMap::new();
+    let rows: Vec<_> = rows.into_iter().filter(|(task, ..)| cards.contains_key(task)).collect();
+    let mut card_tokens: HashMap<Uuid, u64> = HashMap::new();
+    for (task, _, _, tokens, ..) in &rows {
+        *card_tokens.entry(*task).or_default() += tokens;
+    }
+    #[derive(Default)]
+    struct Pair {
+        share: f64,
+        tokens: u64,
+        micros: i64,
+        unpriced: bool,
+    }
+    let mut pairs: HashMap<(String, String), Pair> = HashMap::new();
+    let (mut flying, mut flying_micros, mut flying_unpriced) = (0u64, 0i64, false);
     for (task, harness, model, tokens, micros, unpriced) in rows {
-        if cards.get(&task).is_none_or(|c| c.status != TaskStatus::Done) {
+        if cards[&task].status != TaskStatus::Done {
+            flying += tokens;
+            flying_micros += micros;
+            flying_unpriced |= unpriced > 0;
             continue;
         }
-        let pair = pairs.entry((harness, model)).or_insert((0, 0, 0, true));
-        pair.0 += 1;
-        pair.1 += tokens.max(0) as u64;
-        pair.2 += micros;
-        pair.3 &= unpriced == 0;
+        let pair = pairs.entry((harness, model)).or_default();
+        let whole = card_tokens[&task].max(1) as f64;
+        pair.share += tokens as f64 / whole;
+        pair.tokens += tokens;
+        pair.micros += micros;
+        pair.unpriced |= unpriced > 0;
     }
     let mut compare: Vec<HarnessModelCost> = Vec::new();
     let mut compare_held_back = 0;
-    for ((harness, model), (n, tokens, micros, priced)) in pairs {
-        if n < MIN_CARDS_TO_COMPARE {
+    for ((harness, model), pair) in pairs {
+        if pair.share < MIN_CARDS_TO_COMPARE as f64 - 1e-9 {
             compare_held_back += 1;
             continue;
         }
-        compare.push(HarnessModelCost { harness, model, cards: n, tokens, cost_micros: priced.then_some(micros) });
+        compare.push(HarnessModelCost {
+            harness,
+            model,
+            card_share_milli: (pair.share * 1000.0).round() as u32,
+            tokens: pair.tokens,
+            cost_micros: (!pair.unpriced).then_some(pair.micros),
+        });
     }
-    compare.sort_by(|a, b| b.cards.cmp(&a.cards).then_with(|| (&a.harness, &a.model).cmp(&(&b.harness, &b.model))));
-    Ok(PlanCost { week_tokens: week_tokens.round().max(0.0) as u64, compare, compare_held_back })
+    compare.sort_by(|a, b| {
+        b.card_share_milli.cmp(&a.card_share_milli).then_with(|| (&a.harness, &a.model).cmp(&(&b.harness, &b.model)))
+    });
+    Ok(PlanCost {
+        week_tokens: week_tokens.round().max(0.0) as u64,
+        compare,
+        compare_held_back,
+        in_flight_tokens: flying,
+        in_flight_cost_micros: (flying > 0 && !flying_unpriced).then_some(flying_micros),
+    })
 }
 
 impl Store {

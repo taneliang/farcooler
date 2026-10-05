@@ -92,6 +92,12 @@ public struct PlanThemeSpend: View {
         VStack(alignment: .leading, spacing: Spacing.group) {
             if let spend = theme.spend, spend.totalTokens > 0 {
                 Text(PlanWords.spend(spend)).font(bodyFont).fixedSize(horizontal: false, vertical: true)
+                if (spend.costMicros ?? 0) > 0 {
+                    Text(TaskUsageFormat.apiEquivalent)
+                        .font(secondaryFont)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             if let budget = PlanWords.budget(theme.spend, against: theme.budgetTokens) {
                 PlanBudgetLine(budget: budget, font: secondaryFont)
@@ -99,7 +105,7 @@ public struct PlanThemeSpend: View {
             if let trend = PlanWords.trend(theme.trendTokens) {
                 VStack(alignment: .leading, spacing: Spacing.tight) {
                     PlanTrendBars(trend: trend)
-                    Text("Last 7 days, today on the right")
+                    Text("Last 7 days by UTC day, today on the right")
                         .font(secondaryFont)
                         .foregroundStyle(.secondary)
                 }
@@ -138,9 +144,9 @@ public struct PlanCostBlock: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("plan-cost-week")
             }
-            if !cost.compare.isEmpty || cost.compareHeldBack > 0 {
+            if !cost.compare.isEmpty || cost.compareHeldBack > 0 || cost.inFlightTokens > 0 {
                 VStack(alignment: .leading, spacing: Spacing.group) {
-                    Text("Cost per finished card")
+                    Text("Cost per landed card")
                         .font(secondaryFont.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .accessibilityAddTraits(.isHeader)
@@ -158,6 +164,14 @@ public struct PlanCostBlock: View {
                             .font(secondaryFont)
                             .foregroundStyle(.secondary)
                             .accessibilityIdentifier("plan-compare-held-back")
+                    }
+                    if let flying = PlanWords.inFlight(cost) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("In flight").font(bodyFont.weight(.medium))
+                            Text(flying).font(secondaryFont).foregroundStyle(.secondary)
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("plan-cost-in-flight")
                     }
                     if !cost.compare.isEmpty {
                         Text(PlanWords.compareNote)

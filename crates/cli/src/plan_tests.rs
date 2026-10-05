@@ -188,11 +188,13 @@ fn plan_cost() -> pb::PlanCost {
         week_tokens: 34_200_000,
         compare: vec![
             pb::HarnessModelCost {
-                harness: "claude".into(), model: "opus".into(), cards: 5, tokens: 7_500_000, cost_micros: Some(12_500_000),
+                harness: "claude".into(), model: "opus".into(), card_share_milli: 5_000, tokens: 7_500_000, cost_micros: Some(12_500_000),
             },
-            pb::HarnessModelCost { harness: "codex".into(), model: "gpt-5.6".into(), cards: 3, tokens: 900_000, cost_micros: None },
+            pb::HarnessModelCost { harness: "codex".into(), model: "gpt-5.6".into(), card_share_milli: 3_400, tokens: 1_020_000, cost_micros: None },
         ],
         compare_held_back: 2,
+        in_flight_tokens: 1_200_000,
+        in_flight_cost_micros: None,
     }
 }
 
@@ -415,10 +417,11 @@ async fn the_overview_reads_next_up_now_themes_and_landed() {
         "Decided for you",
         "  R-2    The inbox is amber.",
         "Cost",
-        "  Last 7 days  34M tokens on this runner (its weekly limit isn't known)",
-        "  Claude Code opus · 5 finished cards · 1.5M tokens a card · $2.50 a card API-equivalent",
-        "  Codex gpt-5.6 · 3 finished cards · 300K tokens a card",
-        "  2 other harness and model pairs held back until three cards have finished",
+        "  Last 7 days  34M tokens on this runner, by UTC day (its weekly limit isn't known)",
+        "  Claude Code opus · 5 finished cards · 1.5M tokens a card · about $2.50 a card API-equivalent",
+        "  Codex gpt-5.6 · 3.4 finished cards · 300K tokens a card · API-equivalent dollars: Not reported",
+        "  2 other harness and model pairs held back until three cards have landed",
+        "  In flight  1.2M tokens on cards that haven't landed · API-equivalent dollars: Not reported",
         "Landed today",
         "  fix-ac84",
     ];
@@ -1102,13 +1105,14 @@ async fn the_plan_flags_what_is_over_budget_and_never_invents_a_limit() {
     let text = say(&mut link, "").await.unwrap();
     assert!(text.contains("Visual language  1 of 3 done · active · Over budget: 320K of 250K tokens"), "{text}");
     assert!(text.contains("470K of 500K tokens budgeted"), "{text}");
-    assert!(text.contains("Last 7 days  34M tokens on this runner (its weekly limit isn't known)"), "{text}");
+    assert!(text.contains("Last 7 days  34M tokens on this runner, by UTC day (its weekly limit isn't known)"), "{text}");
     assert!(!text.contains('%'), "no share of a limit nobody can read: {text}");
-    assert!(text.contains("Claude Code opus · 5 finished cards · 1.5M tokens a card · $2.50 a card API-equivalent"), "{text}");
-    assert!(text.contains("Codex gpt-5.6 · 3 finished cards · 300K tokens a card\n"), "{text}");
-    assert!(text.contains("2 other harness and model pairs held back until three cards have finished"), "{text}");
+    assert!(text.contains("Claude Code opus · 5 finished cards · 1.5M tokens a card · about $2.50 a card API-equivalent"), "{text}");
+    assert!(text.contains("Codex gpt-5.6 · 3.4 finished cards · 300K tokens a card · API-equivalent dollars: Not reported"), "{text}");
+    assert!(text.contains("2 other harness and model pairs held back until three cards have landed"), "{text}");
+    assert!(text.contains("In flight  1.2M tokens on cards that haven't landed"), "{text}");
     let theme = say(&mut link, "theme show Visual").await.unwrap();
-    assert!(theme.contains("Last 7 days  0, 0, 0, 40K, 120K, 0, 160K tokens a day, oldest first, today last"), "{theme}");
+    assert!(theme.contains("Last 7 days  0, 0, 0, 40K, 120K, 0, 160K tokens a day (UTC days), oldest first, today last"), "{theme}");
 }
 
 /// Without cost from the runner, nothing about cost is drawn.

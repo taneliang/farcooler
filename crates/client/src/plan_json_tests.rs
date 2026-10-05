@@ -155,19 +155,21 @@ fn the_plan() -> pb::Plan {
                 pb::HarnessModelCost {
                     harness: "claude".into(),
                     model: "opus".into(),
-                    cards: 5,
+                    card_share_milli: 5_000,
                     tokens: 7_500_000,
                     cost_micros: Some(12_500_000),
                 },
                 pb::HarnessModelCost {
                     harness: "codex".into(),
                     model: "gpt-5.6".into(),
-                    cards: 3,
-                    tokens: 900_000,
+                    card_share_milli: 3_400,
+                    tokens: 1_020_000,
                     cost_micros: None,
                 },
             ],
             compare_held_back: 2,
+            in_flight_tokens: 1_200_000,
+            in_flight_cost_micros: None,
         }),
     }
 }

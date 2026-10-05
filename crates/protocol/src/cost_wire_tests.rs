@@ -56,8 +56,10 @@ fn a_plan_with_cost_reads_the_same_to_an_older_app() {
         now_ms: 42,
         cost: Some(v1::PlanCost {
             week_tokens: 9,
-            compare: vec![v1::HarnessModelCost { harness: "claude".into(), cards: 3, ..Default::default() }],
+            compare: vec![v1::HarnessModelCost { harness: "claude".into(), card_share_milli: 3_000, ..Default::default() }],
             compare_held_back: 1,
+            in_flight_tokens: 4,
+            in_flight_cost_micros: None,
         }),
         themes: vec![v1::BoardThemeView { budget_tokens: Some(5), trend_tokens: vec![1; 7], ..Default::default() }],
         ..Default::default()
@@ -65,5 +67,5 @@ fn a_plan_with_cost_reads_the_same_to_an_older_app() {
     let old = OldPlan::decode(plan.encode_to_vec().as_slice()).expect("an older app decodes it");
     assert_eq!(old, OldPlan { now_ms: 42 });
     let back = v1::Plan::decode(plan.encode_to_vec().as_slice()).unwrap();
-    assert_eq!((back.cost.unwrap().compare[0].cards, back.themes[0].trend_tokens.len()), (3, 7));
+    assert_eq!((back.cost.unwrap().compare[0].card_share_milli, back.themes[0].trend_tokens.len()), (3_000, 7));
 }

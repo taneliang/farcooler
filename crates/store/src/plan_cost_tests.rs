@@ -251,7 +251,7 @@ fn a_comparison_needs_three_finished_cards_and_says_how_many_it_held_back() {
     assert_eq!(cost.compare_held_back, 1, "codex has two");
     assert_eq!(cost.compare.len(), 1);
     let c = &cost.compare[0];
-    assert_eq!((c.harness.as_str(), c.model.as_str(), c.cards, c.tokens), ("claude", "claude-opus-5", 3, 300));
+    assert_eq!((c.harness.as_str(), c.model.as_str(), c.card_share_milli, c.tokens), ("claude", "claude-opus-5", 3000, 300));
     assert_eq!(c.cost_micros, Some(6_000));
 
     // A third codex card brings it over the line, and its unpriced turns leave
@@ -262,7 +262,37 @@ fn a_comparison_needs_three_finished_cards_and_says_how_many_it_held_back() {
     let cost = store.plan(main, 0).unwrap().cost;
     assert_eq!(cost.compare_held_back, 0);
     let codex = cost.compare.iter().find(|c| c.harness == "codex").unwrap();
-    assert_eq!((codex.cards, codex.cost_micros), (3, None));
+    assert_eq!((codex.card_share_milli, codex.cost_micros), (3000, None));
+}
+
+/// Cost per landed card is all the spend on landed cards over the landed
+/// cards: spend on a cancelled or open card is in flight, not dropped and not
+/// charged to a landed one, and a card two pairs worked is one card in total.
+#[test]
+fn spend_on_cards_that_did_not_land_is_in_flight_and_a_shared_card_is_one_card() {
+    let (store, main, t) = board(6);
+    let now = now_millis();
+    // Four landed cards, each built by opus (900 tokens) and reviewed by sonnet (100).
+    for (i, task) in t[..4].iter().enumerate() {
+        finish(&store, task);
+        turn(&store, &format!("b{i}"), Some(task.id), "claude", "claude-opus-5", 900, Some(9_000), now);
+        turn(&store, &format!("r{i}"), Some(task.id), "claude", "claude-sonnet-5", 100, Some(1_000), now);
+    }
+    // Opus also burned 5,000 tokens on a cancelled card and 700 on an open one:
+    // none of it is a landed card's.
+    store.set_task_status(t[4].id, crate::models::TaskStatus::Cancelled, Actor::Manager).unwrap();
+    turn(&store, "x", Some(t[4].id), "claude", "claude-opus-5", 5_000, Some(50_000), now);
+    turn(&store, "y", Some(t[5].id), "claude", "claude-opus-5", 700, Some(7_000), now);
+
+    let cost = store.plan(main, 0).unwrap().cost;
+    assert_eq!((cost.in_flight_tokens, cost.in_flight_cost_micros), (5_700, Some(57_000)));
+    // Opus holds 4 x 0.9 = 3.6 cards' share, so it is compared; sonnet's 0.4 is
+    // held back, not drawn as a card of its own.
+    assert_eq!((cost.compare.len(), cost.compare_held_back), (1, 1));
+    let opus = &cost.compare[0];
+    assert_eq!((opus.model.as_str(), opus.card_share_milli, opus.tokens), ("claude-opus-5", 3_600, 3_600));
+    assert_eq!(opus.tokens * 1000 / opus.card_share_milli as u64, 1_000, "a landed card cost 1,000 tokens, in total");
+    assert_eq!(opus.cost_micros, Some(36_000), "only its spend on landed cards");
 }
 
 /// A lane that landed still counts in the trend, and a dropped one too.

@@ -31,10 +31,14 @@ data class PlanHarnessCost(
     val harness: String,
     /** Empty when the harness named no model. */
     val model: String,
-    /** How many finished cards it worked: the n behind every figure here. */
-    val cards: Int,
+    /**
+     * Its share of the landed cards, in thousandths of a card: the n behind every figure here. A card two pairs
+     * worked is one card in total, shared out by each pair's fraction of its tokens.
+     */
+    val cardShareMilli: Int,
+    /** Tokens it spent on landed cards. */
     val tokens: Long,
-    /** Millionths of a dollar; null unless every one of its turns was priced. */
+    /** Millionths of a dollar it spent on landed cards; null unless every one of its turns was priced. */
     val costMicros: Long? = null,
 ) {
     val id: String get() = "$harness/$model"
@@ -48,9 +52,13 @@ data class PlanCostRead(
     val compare: List<PlanHarnessCost> = emptyList(),
     /** How many pairs had finished cards but too few to compare; the runner holds them back. */
     val compareHeldBack: Int = 0,
+    /** Spend on the board's cards that haven't landed (open or cancelled), apart from the comparison. */
+    val inFlightTokens: Long = 0,
+    /** Millionths of a dollar of it; null unless every turn was priced. */
+    val inFlightCostMicros: Long? = null,
 ) {
-    /** Something to draw: tokens this week, or a comparison, or pairs held back. */
-    val isWorthShowing: Boolean get() = weekTokens > 0 || compare.isNotEmpty() || compareHeldBack > 0
+    /** Something to draw: tokens this week, a comparison, pairs held back, or spend in flight. */
+    val isWorthShowing: Boolean get() = weekTokens > 0 || compare.isNotEmpty() || compareHeldBack > 0 || inFlightTokens > 0
 
     companion object {
         /** Null when the runner sent no `cost` (no `board_cost`). */
@@ -62,12 +70,14 @@ data class PlanCostRead(
                     PlanHarnessCost(
                         harness = c["harness"]?.jsonPrimitive?.content.orEmpty(),
                         model = c["model"]?.jsonPrimitive?.content.orEmpty(),
-                        cards = c["cards"]?.jsonPrimitive?.intOrNull ?: 0,
+                        cardShareMilli = c["card_share_milli"]?.jsonPrimitive?.intOrNull ?: 0,
                         tokens = c["tokens"]?.jsonPrimitive?.longOrNull ?: 0L,
                         costMicros = c["cost_micros"]?.jsonPrimitive?.longOrNull,
                     )
                 },
                 compareHeldBack = it["compare_held_back"]?.jsonPrimitive?.intOrNull ?: 0,
+                inFlightTokens = it["in_flight_tokens"]?.jsonPrimitive?.longOrNull ?: 0L,
+                inFlightCostMicros = it["in_flight_cost_micros"]?.jsonPrimitive?.longOrNull,
             )
         }
 
@@ -111,13 +121,16 @@ object PlanCostWords {
     /** The fewest finished cards a harness and model need before the runner will compare them. */
     const val COMPARE_MINIMUM_CARDS = 3
 
-    /** Said once under the week: why there is no percentage. */
+    /** Said once under the week: which days, and why there is no percentage. */
     const val WEEK_NOTE =
-        "Your plan’s weekly limit isn’t something your runner can read, so this counts tokens and shows no percentage."
+        "Counted by UTC day. Your plan’s weekly limit isn’t something your runner can read, so this counts tokens and shows no percentage."
 
     /** Said under the comparison: what the numbers are. */
     const val COMPARE_NOTE =
-        "Finished cards only, by the harness and model that worked them. A card two models worked counts once for each."
+        "Cost per landed card: what a harness and model spent on cards that landed, over its share of them. A card two models worked is one card, shared by their tokens. Dollars are API-equivalent."
+
+    /** What is said where a dollar figure can't be: API-equivalent dollars the runner has no price for. */
+    const val DOLLARS_NOT_REPORTED = "API-equivalent dollars: Not reported"
 
     /** A harness as a person names it. */
     fun harnessName(harness: String): String = when (harness) {
@@ -173,34 +186,51 @@ object PlanCostWords {
     /** "Last 7 days, oldest first: none, none, 40 thousand, ..., 160 thousand today. 320 thousand tokens in all." */
     fun trendSpoken(t: PlanTrend, locale: Locale = Locale.getDefault()): String {
         val each = t.days.map { if (it == 0L) "none" else spokenTokens(it, locale) }
-        return "Last 7 days, oldest first: ${each.dropLast(1).joinToString(", ")}, ${each.last()} today. " +
+        return "Last 7 days by UTC day, oldest first: ${each.dropLast(1).joinToString(", ")}, ${each.last()} today. " +
             "${spokenTokens(t.total, locale)} tokens in all."
     }
 
-    /** "34M tokens in the last 7 days". */
+    /** "34M tokens in the last 7 days on this runner": the same seven UTC days as the trend, today so far. */
     fun week(tokens: Long, locale: Locale = Locale.getDefault()): String =
-        "${TaskUsageFormat.tokens(tokens, locale)} tokens in the last 7 days"
+        "${TaskUsageFormat.tokens(tokens, locale)} tokens in the last 7 days on this runner"
 
-    /** One comparison row. A token or dollar figure is per finished card. */
+    /** "4.2 finished cards", or "4 finished cards": a pair's share of the landed cards, with its decimal when it isn't whole. */
+    fun cardShare(milli: Int): String =
+        if (milli % 1000 == 0) "${milli / 1000} finished cards" else "${String.format(Locale.US, "%.1f", milli / 1000.0)} finished cards"
+
+    /** One comparison row: cost per landed card is the pair's spend on landed cards over its share of them. */
     fun compareRow(p: PlanHarnessCost, locale: Locale = Locale.getDefault()): PlanCompareRow {
         val model = p.model.ifEmpty { "no model named" }
-        val cards = if (p.cards == 1) "1 finished card" else "${p.cards} finished cards"
-        val each = p.tokens / maxOf(p.cards, 1)
+        val share = maxOf(p.cardShareMilli, 1)
+        val cards = cardShare(p.cardShareMilli)
+        val each = p.tokens * 1000 / share
         val detail = mutableListOf(cards, "${TaskUsageFormat.tokens(each, locale)} tokens a card")
         val spoken = mutableListOf(cards, "${spokenTokens(each, locale)} tokens a card")
-        p.costMicros?.takeIf { it > 0 }?.let {
-            val dollars = TaskUsageFormat.dollars(it / maxOf(p.cards, 1), locale)
-            detail += "about $dollars a card"
+        val micros = p.costMicros
+        if (micros != null) {
+            val dollars = TaskUsageFormat.dollars(micros * 1000 / share, locale)
+            detail += "about $dollars a card API-equivalent"
             spoken += "about $dollars a card, API-equivalent"
+        } else {
+            detail += DOLLARS_NOT_REPORTED
+            spoken += DOLLARS_NOT_REPORTED
         }
         val name = harnessName(p.harness)
         return PlanCompareRow(p.id, "$name · $model", detail.joinToString(" · "), "$name, $model. ${spoken.joinToString(", ")}")
     }
 
-    /** "2 other harness and model pairs held back until three cards have finished", or null. */
+    /** "1.2M tokens on cards that haven't landed · about $9 API-equivalent", Not reported for the dollars; null with nothing in flight. */
+    fun inFlight(cost: PlanCostRead, locale: Locale = Locale.getDefault()): String? {
+        if (cost.inFlightTokens <= 0) return null
+        val tokens = TaskUsageFormat.tokens(cost.inFlightTokens, locale)
+        val dollars = cost.inFlightCostMicros?.let { "about ${TaskUsageFormat.dollars(it, locale)} API-equivalent" }
+        return "$tokens tokens on cards that haven’t landed · ${dollars ?: DOLLARS_NOT_REPORTED}"
+    }
+
+    /** "2 other harness and model pairs held back until three cards have landed", or null. */
     fun heldBack(n: Int): String? {
         if (n <= 0) return null
         val pairs = if (n == 1) "1 other harness and model pair" else "$n other harness and model pairs"
-        return "$pairs held back until three cards have finished"
+        return "$pairs held back until three cards have landed"
     }
 }

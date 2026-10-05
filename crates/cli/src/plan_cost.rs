@@ -90,47 +90,71 @@ pub(super) fn budget_words(spend: &pb::LaneSpend, budget: Option<u64>) -> Option
     })
 }
 
-/// The last seven days, oldest first: "0, 0, 340K, 0, 1.2M, 0, 500K tokens,
-/// oldest first". Nothing when the runner sent none.
+/// The last seven UTC days, oldest first: "0, 0, 340K, 0, 1.2M, 0, 500K
+/// tokens a day (UTC days), oldest first". Nothing when the runner sent none.
 pub(super) fn trend_words(trend: &[u64]) -> Option<String> {
     if trend.is_empty() {
         return None;
     }
     let days: Vec<String> = trend.iter().map(|n| tokens(*n)).collect();
-    Some(format!("{} tokens a day, oldest first, today last", days.join(", ")))
+    Some(format!("{} tokens a day (UTC days), oldest first, today last", days.join(", ")))
 }
 
-/// The overview's cost section: the week's tokens, and the comparison. Empty
-/// from a runner that sent no cost.
+/// The overview's cost section: the week's tokens, the comparison and what's
+/// in flight. Empty from a runner that sent no cost.
 pub(super) fn overview_lines(plan: &pb::Plan) -> Vec<String> {
     let Some(cost) = &plan.cost else { return Vec::new() };
     let mut out = vec!["Cost".to_string()];
     // No percentage: no harness reports the weekly limit to the runner.
-    out.push(format!("  Last 7 days  {} tokens on this runner (its weekly limit isn't known)", tokens(cost.week_tokens)));
+    out.push(format!(
+        "  Last 7 days  {} tokens on this runner, by UTC day (its weekly limit isn't known)",
+        tokens(cost.week_tokens)
+    ));
     out.extend(compare_lines(cost));
     out
 }
 
-/// "Claude Code opus-5 · 3 finished cards · 120K tokens a card · $2.10 a card".
+/// "4.2 finished cards": a card two pairs worked is shared out, so a pair's
+/// number is a share and reads with its decimal when it isn't whole.
+pub(super) fn cards_words(milli: u32) -> String {
+    if milli % 1000 == 0 { format!("{} finished cards", milli / 1000) } else { format!("{:.1} finished cards", milli as f64 / 1000.0) }
+}
+
+/// " · about $2.50 a card API-equivalent" or " · API-equivalent dollars: Not reported".
+fn dollars_words(micros: Option<i64>, a_card: bool) -> String {
+    match micros {
+        Some(m) => format!(" · about {}{} API-equivalent", dollars(m), if a_card { " a card" } else { "" }),
+        None => " · API-equivalent dollars: Not reported".to_string(),
+    }
+}
+
+/// "Claude Code opus · 3 finished cards · 120K tokens a card · about $2.10 a card API-equivalent".
 pub(super) fn compare_lines(cost: &pb::PlanCost) -> Vec<String> {
     let mut out = Vec::new();
     for p in &cost.compare {
         let model = if p.model.is_empty() { "no model named" } else { p.model.as_str() };
-        let mut line = format!(
-            "  {} {} · {} · {} tokens a card",
+        // Cost per landed card: its spend on landed cards over its share of them.
+        let each = p.tokens * 1000 / p.card_share_milli.max(1) as u64;
+        let per_card = p.cost_micros.map(|m| m * 1000 / p.card_share_milli.max(1) as i64);
+        out.push(format!(
+            "  {} {} · {} · {} tokens a card{}",
             harness_name(&p.harness),
             model,
-            count(p.cards as usize, "finished card"),
-            tokens(p.tokens / p.cards.max(1) as u64)
-        );
-        if let Some(micros) = p.cost_micros {
-            line.push_str(&format!(" · {} a card API-equivalent", dollars(micros / p.cards.max(1) as i64)));
-        }
-        out.push(line);
+            cards_words(p.card_share_milli),
+            tokens(each),
+            dollars_words(per_card, true)
+        ));
     }
     if cost.compare_held_back > 0 {
         let pairs = count(cost.compare_held_back as usize, "other harness and model pair");
-        out.push(format!("  {pairs} held back until three cards have finished"));
+        out.push(format!("  {pairs} held back until three cards have landed"));
+    }
+    if cost.in_flight_tokens > 0 {
+        out.push(format!(
+            "  In flight  {} tokens on cards that haven't landed{}",
+            tokens(cost.in_flight_tokens),
+            dollars_words(cost.in_flight_cost_micros, false)
+        ));
     }
     out
 }

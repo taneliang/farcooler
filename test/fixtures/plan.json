@@ -59,21 +59,23 @@
   "cost": {
     "compare": [
       {
-        "cards": 5,
+        "card_share_milli": 5000,
         "cost_micros": 12500000,
         "harness": "claude",
         "model": "opus",
         "tokens": 7500000
       },
       {
-        "cards": 3,
+        "card_share_milli": 3400,
         "cost_micros": null,
         "harness": "codex",
         "model": "gpt-5.6",
-        "tokens": 900000
+        "tokens": 1020000
       }
     ],
     "compare_held_back": 2,
+    "in_flight_cost_micros": null,
+    "in_flight_tokens": 1200000,
     "week_tokens": 34200000
   },
   "landed_not_closed": [],
