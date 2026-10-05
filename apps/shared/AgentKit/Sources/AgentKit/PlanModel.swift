@@ -70,6 +70,12 @@ public struct PlanTheme: Decodable, Equatable, Identifiable, Sendable {
     /// What its lanes spent on its cards, each lane's spend shared over its
     /// cards (ov-306). Nil from a runner before it.
     public var spend: PlanSpend?
+    /// Its token budget (ov-307), counted as `spend` is; nil when it has none
+    /// or from a runner without `board_cost`.
+    public var budgetTokens: UInt64?
+    /// Its tokens on each of the last seven UTC days, oldest first and today
+    /// last (ov-307); nil from a runner without `board_cost`.
+    public var trendTokens: [UInt64]?
 }
 
 /// Where a lane is. Moves go forward, with two loops back to fixing.
@@ -155,6 +161,8 @@ public struct PlanLane: Decodable, Equatable, Identifiable, Sendable {
     public var cards: [PlanCardRef]
     public var agents: [PlanAgent]
     public var spend: PlanSpend
+    /// Its token budget (ov-307); nil when it has none.
+    public var budgetTokens: UInt64?
 }
 
 /// A card's row, as the plan read it: what a theme page lists for a card
@@ -189,11 +197,14 @@ public struct PlanModel: Decodable, Equatable, Sendable {
     /// How many of the board's cards are in each status (ov-306), what a
     /// page's card counts draw; nil from a runner before it.
     public var boardCounts: PlanCounts?
+    /// The week's tokens and the harness and model comparison (ov-307); nil
+    /// from a runner without `board_cost`.
+    public var cost: PlanCostRead?
 
     public init(
         nowMs: Int64 = 0, themes: [PlanTheme] = [], lanes: [PlanLane] = [], order: [String] = [],
         cards: [PlanCard] = [], rulings: [PlanRuling] = [], trains: [PlanTrain] = [], ci: [PlanCIRead] = [],
-        boardCounts: PlanCounts? = nil
+        boardCounts: PlanCounts? = nil, cost: PlanCostRead? = nil
     ) {
         self.nowMs = nowMs
         self.themes = themes
@@ -204,6 +215,7 @@ public struct PlanModel: Decodable, Equatable, Sendable {
         self.trains = trains
         self.ci = ci
         self.boardCounts = boardCounts
+        self.cost = cost
     }
 
     public init(from decoder: Decoder) throws {
@@ -217,9 +229,10 @@ public struct PlanModel: Decodable, Equatable, Sendable {
         trains = try c.decodeIfPresent([PlanTrain].self, forKey: .trains) ?? []
         ci = try c.decodeIfPresent([PlanCIRead].self, forKey: .ci) ?? []
         boardCounts = try c.decodeIfPresent(PlanCounts.self, forKey: .boardCounts)
+        cost = try c.decodeIfPresent(PlanCostRead.self, forKey: .cost)
     }
 
-    private enum CodingKeys: String, CodingKey { case nowMs, themes, lanes, order, cards, rulings, trains, ci, boardCounts }
+    private enum CodingKeys: String, CodingKey { case nowMs, themes, lanes, order, cards, rulings, trains, ci, boardCounts, cost }
 
     public static let empty = PlanModel()
 
