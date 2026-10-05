@@ -916,13 +916,16 @@ jobs:
   # farcooler-vt, per `cargo metadata`), the .proto protocol compiles, the
   # shared fixtures, and this job's own scripts and workflow.
   #
-  # PUSHES TO MAIN FILTER TOO, comparing the push's before..after. This used to
+  # PUSHES TO MAIN FILTER TOO, comparing the push with the nearest ancestor whose
+  # CI run on main was green, not with its own `before`: this workflow cancels a
+  # run when the next push lands, so an iOS change whose run was cancelled (or
+  # went red) must still be tested by the next green-bound run. This used to
   # say "every push to main runs it regardless", on purpose, as a backstop.
   # The owner chose otherwise on Oct 5 (ov-301): GitHub gives this repository
   # five macOS runners, CI asked for seven per push and Canary two, so pushes
   # queued, and four shards are about 60 macOS minutes that a daemon-only or
-  # Mac-only push does not need. A force push, a new branch and a range that
-  # cannot be computed still run everything (scripts/ios-ui-plan.py). A skipped
+  # Mac-only push does not need. With no green ancestor in the history, or a range
+  # that cannot be computed, everything still runs (scripts/ios-ui-plan.py). A skipped
   # shard is ignored by the shard budget (scripts/ios-ui-shard-budget.py).
   # What is lost: an iOS UI break caused by a change outside the paths above
   # goes unreported until the next push that touches them.
@@ -934,6 +937,9 @@ jobs:
     name: iOS UI plan
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
     outputs:
       run: ${{ steps.paths.outputs.run }}
     steps:
@@ -942,14 +948,26 @@ jobs:
           fetch-depth: 0
       - name: Every UI test class is placed
         run: ./scripts/ios-ui-shards.py --check
+      # Main's successful CI runs, for a push: the base is the nearest one in
+      # this commit's history (scripts/ios-ui-plan.py). Without the list, or
+      # with an empty one, everything runs.
+      - name: List the green CI runs
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=100" \
+            --jq '.workflow_runs[] | {head_sha, created_at}' > "$RUNNER_TEMP/green.ndjson"
+          echo "$(wc -l < "$RUNNER_TEMP/green.ndjson") green CI runs listed"
       - name: Decide whether the UI tests run
         id: paths
         env:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
-          BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.event.after }}
+          CANDIDATES: ${{ runner.temp }}/green.ndjson
         run: ./scripts/ios-ui-plan.py
       - run: ./scripts/ios-ui-plan.py --self-test
 
