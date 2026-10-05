@@ -16,6 +16,7 @@ extension ContentView {
         let summary = scene.summary
         let layouts = shown
         let title = sceneTitle(scene, front: layouts.last)
+        let plan = scene.board == nil ? nil : planViews(scene)
         return WorkspaceView(
             opened: scene.opened,
             hasConversation: scene.hasConversation,
@@ -56,8 +57,19 @@ extension ContentView {
                     onJump: { jump($0) }, focusRequest: jumpBar.request, onLeave: { keyOpened() },
                     onActive: { jumpBar.active = $0 })
             },
-            detail: { place, settled in openedView(place, layouts: layouts, settled: settled) }
+            detail: { place, settled in openedView(place, layouts: layouts, settled: settled) },
+            // The canvas beside the orchestrator's chat column (ov-298).
+            split: plan != nil,
+            home: { plan?.home ?? AnyView(EmptyView()) },
+            chatColumns: $chatColumns,
+            boardExists: scene.board != nil,
+            navigatorFloating: $navigatorFloating,
+            strip: { plan?.strip ?? AnyView(EmptyView()) },
+            peek: { plan?.peek ?? AnyView(EmptyView()) },
+            peeking: $planPeeking
         )
+        // Going somewhere puts a peek away.
+        .onChange(of: selection) { _, _ in planPeeking = false }
         .onPreferenceChange(WorkspaceWidthPreference.self) { width in
             MainActor.assumeIsolated {
                 if let width, width != detailWidth { detailWidth = width }

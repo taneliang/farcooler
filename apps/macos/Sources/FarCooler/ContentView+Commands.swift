@@ -368,6 +368,8 @@ extension ContentView {
                 console.console.open(recents: true)
             }
 
+        case .showPlan: showPlan()
+
         case .markAllRead:
             if let scene = selection.flatMap(workspaceScene), let board = scene.board {
                 boardStores["\(scene.host)/\(board)"]?.askToMarkAllRead(markReadConfirmation)

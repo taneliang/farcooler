@@ -165,6 +165,14 @@ struct ContentView: View {
     /// The navigator's width, as its trailing edge was last dropped, on
     /// this Mac (ov-92).
     @AppStorage("workspace.navigatorWidth") var navigatorWidth = Double(WorkspaceColumns.navigatorDefault)
+    /// The orchestrator's chat column's width beside the canvas, in
+    /// terminal columns, as its edge was last dropped, on this Mac (ov-298).
+    @AppStorage("workspace.chatColumns") var chatColumns = Double(WorkspaceColumns.chatColumnsDefault)
+    /// The navigator floated over the canvas by ⌘B, in a window too narrow
+    /// for it beside the canvas (ov-298).
+    @State var navigatorFloating = false
+    /// The plan peeked over the chat, with the canvas folded away (ov-298).
+    @State var planPeeking = false
     /// The navigator's pane heights a drag chose, this window's (ov-244).
     /// Kept in this window's record, not `@SceneStorage`: that comes back only
     /// when the system restores windows, which it doesn't by default (ov-248).
@@ -408,7 +416,7 @@ struct ContentView: View {
         // on each one — so this hears a runner leaving, coming back as a new
         // client, and listing its projects without one.
         .onReceive(store.$fleet) { _ in pruneBoardStores() }
-        .captureOpening($selection)
+        .captureOpening($selection, peeking: $planPeeking)
         .onChange(of: store.fleet) { old, _ in
             // One rule for every way a terminal can disappear: exiting on its
             // own, being closed here, being closed from a phone, or its

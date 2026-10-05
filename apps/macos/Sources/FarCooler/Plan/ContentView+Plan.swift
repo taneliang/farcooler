@@ -14,6 +14,58 @@ extension ContentView {
         selection = next
     }
 
+    /// The canvas's home, the strip and the peek for `scene` (ov-298):
+    /// nil where the scene has no board to plan.
+    func planViews(_ scene: WorkspaceScene) -> (home: AnyView, strip: AnyView, peek: AnyView)? {
+        guard let summary = scene.summary, let client = store.clients[scene.host] else { return nil }
+        let host = scene.host
+        let board = boardStore(for: summary, client: client, host: host)
+        let needs = planNeedsYou(host: host, workspace: summary)
+        let open = { (page: PlanPage) in openPlan(page, host: host, workspace: summary.id) }
+        return (
+            AnyView(PlanHome(board: board, needsYou: needs, onOpen: open)),
+            AnyView(PlanStrip(plan: board.plan, needsYou: needs.items.count) { planPeeking = true }),
+            AnyView(PlanPeek(board: board, needsYou: needs, onOpen: open) { planPeeking = false })
+        )
+    }
+
+    /// `workspace`'s own Needs You, answered in place as the Needs You page
+    /// answers (the toolbar's tray stays every workspace's).
+    func planNeedsYou(host: String, workspace: WorkspaceSummary) -> PlanNeedsYou {
+        PlanNeedsYou(
+            items: store.needsYou.filter { WorkspaceCounts.count(for: workspace, host: host, in: [$0]) > 0 },
+            canAct: { item in
+                store.refusal(for: item.runner) == nil
+                    && TaskBoardWrites.offered(by: store.clients[item.runner]?.daemonBuild)
+            },
+            onOpen: { open($0) },
+            onAnswerAsk: { item, option in
+                guard let client = store.clients[item.runner], let terminal = item.terminal, let ask = item.askID
+                else { return .failed }
+                return await client.answerAsk(terminal: terminal.id, request: ask, option: option)
+            },
+            onDecide: { item, body in
+                guard let client = store.clients[item.runner], let task = item.task, let repository = item.repositoryID
+                else { return false }
+                return await client.answerDecision(key: task.key, body: body, repository: repository) == nil
+            })
+    }
+
+    /// ⌥⌘P: the plan. Beside the chat, the canvas goes back to it; with the
+    /// canvas folded away, it's peeked over the chat, or put away.
+    func showPlan() {
+        guard let scene = selection.flatMap(workspaceScene), scene.hasConversation, let board = scene.board else { return }
+        if WorkspaceColumns.hasCanvas(width: detailWidth ?? 0) {
+            planPeeking = false
+            if selection?.focus != nil {
+                trail = nil
+                selection = .workspace(host: scene.host, workspace: board, focus: nil)
+            }
+        } else {
+            planPeeking.toggle()
+        }
+    }
+
     /// The page open in `workspace`'s main area, if it's a plan page.
     func planPage(host: String, workspace: String) -> PlanPage? {
         if case .workspace(host, workspace, .plan(let page)?)? = selection { return page }

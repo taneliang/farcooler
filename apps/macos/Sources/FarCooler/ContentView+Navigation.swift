@@ -65,6 +65,11 @@ extension ContentView {
     /// put away or brought back (ov-178). Put away with the keyboard in
     /// it, the keyboard goes to what the main area shows.
     func toggleNavigator() {
+        // Too narrow for it beside the canvas, ⌘B floats it over (ov-298).
+        if selection.flatMap(workspaceScene)?.board != nil, WorkspaceColumns.navigatorFloats(width: detailWidth ?? 0) {
+            navigatorFloating.toggle()
+            return
+        }
         navigatorHidden = NavigatorVisibility.toggled(
             navigatorHidden, hasNavigator: selection.flatMap(workspaceScene)?.board != nil)
         guard navigatorHidden, keyboardOnBoard else { return }

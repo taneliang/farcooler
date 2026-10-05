@@ -353,7 +353,9 @@ enum WorkspaceScreen {
         guard let arrangement else { return [] }
         return shown.filter { layout in
             switch layout.column {
-            case .conversation: return arrangement.conversation == .main
+            // Beside the canvas too (ov-298): the chat column is on screen
+            // whatever is opened in it.
+            case .conversation: return arrangement.showsConversation
             // A task's agent only while its Agent tab is in front
             // (ov-98): behind Overview or Changes it's kept, not seen.
             case .task: return arrangement.opened && taskTab == .agent

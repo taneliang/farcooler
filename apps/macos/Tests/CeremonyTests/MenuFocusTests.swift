@@ -201,6 +201,7 @@ struct MenuWiringTests {
         "New Workspace…": "makesWorkspaces",
         "Add Repository…": "MainWindowFocus.isKey(",
         "Show Board": "MainWindowFocus.isKey(",
+        "Show Plan": "MainWindowFocus.goes(\\.inWorkspace",
         "close.title": "CloseCommand.closes(",
         "Close Window": "MainWindowFocus.isKey(",
         "Close All": "CloseCommand.closes(",

@@ -17,6 +17,9 @@ enum AppCommand: String {
     case addRepository
     case newWorkspace
     case showBoard
+    /// View ▸ Show Plan (⌥⌘P): the canvas back to the plan, or, with the
+    /// canvas folded away, the plan peeked over the chat (ov-298).
+    case showPlan
     case openInEditor
     case reload
     case showShortcuts
@@ -153,6 +156,9 @@ struct FarCoolerCommands: Commands {
             Button("Show Board") { AppCommand.showBoard.post() }
                 .keyboardShortcut("b", modifiers: [.command, .shift])
                 .disabled(!MainWindowFocus.isKey(mainWindow))
+            Button("Show Plan") { AppCommand.showPlan.post() }
+                .keyboardShortcut("p", modifiers: [.command, .option])
+                .disabled(!MainWindowFocus.goes(\.inWorkspace, mainWindow))
         }
 
         // File's close items, in place of SwiftUI's (ov-265). ⌘W closes the

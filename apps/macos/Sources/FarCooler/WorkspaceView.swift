@@ -23,6 +23,15 @@ import SwiftUI
 /// the motion: a click mid-flight retargets it, and what takes clicks and
 /// the keyboard follows the window's state at once, not the motion's
 /// (`WorkspaceStage`).
+///
+/// With `split` (ov-298, Concept A), a window wide enough has a canvas and a
+/// chat column: the plan is the canvas's home, what's opened replaces it
+/// there, and the orchestrator sits beside it at the trailing edge, a fixed
+/// whole number of terminal columns wide, on screen whatever is opened.
+/// Widening the window grows the canvas only, so the orchestrator never
+/// re-wraps but for a drag of its edge. Narrower, the navigator floats when
+/// shown; narrower still, the canvas folds away and the chat carries the
+/// plan's strip, with the plan peeked over it (`WorkspaceColumns`).
 struct WorkspaceView<
     Item: Hashable, Conversation: View, Navigator: View, Crumbs: View, Opened: View
 >: View {
@@ -62,6 +71,21 @@ struct WorkspaceView<
     /// How a selection change is drawn: `WorkspaceMotion.swap`, no motion at
     /// all, given one only by a test that reads it mid-flight.
     var swap: Animation? = WorkspaceMotion.swap
+    /// The canvas and the chat column, where the window is wide enough.
+    var split = false
+    /// The canvas's home, with nothing opened: the plan.
+    var home: () -> AnyView = { AnyView(EmptyView()) }
+    /// The chat's width in terminal columns, as its edge was last dropped.
+    var chatColumns: Binding<Double> = .constant(Double(WorkspaceColumns.chatColumnsDefault))
+    /// Whether a board exists to float the navigator for, and whether ⌘B
+    /// has floated it, in a window too narrow for it beside the canvas.
+    var boardExists = true
+    var navigatorFloating: Binding<Bool> = .constant(false)
+    /// With the canvas folded away: the plan's strip over the chat, and
+    /// the plan peeked over it while `peeking`.
+    var strip: () -> AnyView = { AnyView(EmptyView()) }
+    var peek: () -> AnyView = { AnyView(EmptyView()) }
+    var peeking: Binding<Bool> = .constant(false)
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -80,6 +104,10 @@ struct WorkspaceView<
     @State private var dragging: CGFloat?
     /// The navigator's width when the drag began.
     @State private var dragStart: CGFloat?
+    /// The chat's width in columns while its edge is dragged, and at the
+    /// drag's start.
+    @State private var chatDragging: Int?
+    @State private var chatDragStart: Int?
 
     init(
         opened: Item?, hasConversation: Bool, hasBoard: Bool = true, cell: CGFloat, focused: Bool,
@@ -87,7 +115,12 @@ struct WorkspaceView<
         @ViewBuilder conversation: @escaping () -> Conversation, @ViewBuilder navigator: @escaping () -> Navigator,
         @ViewBuilder breadcrumb: @escaping (Item) -> Crumbs,
         @ViewBuilder detail: @escaping (Item, Bool) -> Opened, motion: Animation = WorkspaceMotion.spring,
-        swap: Animation? = WorkspaceMotion.swap
+        swap: Animation? = WorkspaceMotion.swap, split: Bool = false,
+        home: @escaping () -> AnyView = { AnyView(EmptyView()) },
+        chatColumns: Binding<Double> = .constant(Double(WorkspaceColumns.chatColumnsDefault)),
+        boardExists: Bool = true, navigatorFloating: Binding<Bool> = .constant(false),
+        strip: @escaping () -> AnyView = { AnyView(EmptyView()) },
+        peek: @escaping () -> AnyView = { AnyView(EmptyView()) }, peeking: Binding<Bool> = .constant(false)
     ) {
         self.opened = opened
         self.hasConversation = hasConversation
@@ -101,15 +134,37 @@ struct WorkspaceView<
         self.detail = detail
         self.motion = motion
         self.swap = swap
+        self.split = split
+        self.home = home
+        self.chatColumns = chatColumns
+        self.boardExists = boardExists
+        self.navigatorFloating = navigatorFloating
+        self.strip = strip
+        self.peek = peek
+        self.peeking = peeking
         // Drawn as it is from the first frame: a window reopening on a task
         // doesn't fade the orchestrator out.
         _stage = State(initialValue: WorkspaceStage(open: opened, focused: focused))
         _settled = State(initialValue: opened)
     }
 
-    private func arrangement(open: Bool, focused: Bool) -> WorkspaceColumns.Arrangement {
-        WorkspaceColumns.layout(opened: open, hasConversation: hasConversation, hasBoard: hasBoard, focused: focused)
+    private func arrangement(open: Bool, focused: Bool, width: CGFloat) -> WorkspaceColumns.Arrangement {
+        guard canvas(width) else {
+            return WorkspaceColumns.layout(opened: open, hasConversation: hasConversation, hasBoard: hasBoard, focused: focused)
+        }
+        let floats = WorkspaceColumns.navigatorFloats(width: width)
+        return WorkspaceColumns.canvasLayout(
+            opened: open, hasBoard: floats ? boardExists && navigatorFloating.wrappedValue : hasBoard, focused: focused,
+            floats: floats)
     }
+
+    /// Whether `width` draws the canvas beside the chat.
+    private func canvas(_ width: CGFloat) -> Bool {
+        split && hasConversation && WorkspaceColumns.hasCanvas(width: width)
+    }
+
+    /// The chat's columns: as dragged, else as kept.
+    private var columns: Int { chatDragging ?? WorkspaceColumns.chatColumns(chatColumns.wrappedValue) }
 
     var body: some View {
         GeometryReader { proxy in
@@ -117,25 +172,42 @@ struct WorkspaceView<
             let height = proxy.size.height
             // The window's state: what takes clicks, the keyboard and the
             // accessibility tree's notice, and what's on screen.
-            let now = arrangement(open: opened != nil, focused: focused)
+            let now = arrangement(open: opened != nil, focused: focused, width: width)
             // The motion's: where things are drawn.
-            let drawn = arrangement(open: stage.open != nil, focused: stage.focused)
+            let drawn = arrangement(open: stage.open != nil, focused: stage.focused, width: width)
             let remembered = dragging ?? CGFloat(navigatorWidth)
-            let frames = WorkspaceColumns.frames(width: width, arrangement: drawn, navigator: remembered, cell: cell)
+            let frames = WorkspaceColumns.frames(
+                width: width, arrangement: drawn, navigator: remembered, cell: cell, chatColumns: columns)
             // The orchestrator's one width: the main area's beside the
             // navigator, in Focus too, where it's hidden, so going into Focus
-            // and out never resizes its tmux window (ov-92 review).
+            // and out never resizes its tmux window (ov-92 review). Beside
+            // the canvas, the chat column's, whatever is opened.
             let kept = WorkspaceColumns.frames(
-                width: width, arrangement: arrangement(open: false, focused: false), navigator: remembered, cell: cell)
+                width: width, arrangement: arrangement(open: false, focused: false, width: width), navigator: remembered,
+                cell: cell, chatColumns: columns)
+            let canvas = drawn.canvas
             ZStack(alignment: .topLeading) {
-                main(now: now, drawn: drawn, height: height, kept: kept.main)
+                main(drawn: drawn, height: height)
                     .frame(width: frames.main, height: height)
                     .clipShape(Rectangle())
                     .offset(x: frames.mainX)
+                // The orchestrator: in the main area, or its own column
+                // beside the canvas. One view in one place in the tree either
+                // way, so crossing the width that folds the canvas moves it
+                // and never mounts it again.
+                conversationLayer(now: now, drawn: drawn, kept: canvas ? kept.chat : kept.main)
+                    .frame(width: canvas ? frames.chat : frames.main, height: height, alignment: .topLeading)
+                    .clipShape(Rectangle())
+                    .offset(x: canvas ? frames.chatX : frames.mainX)
+                if canvas, drawn.conversation == .column {
+                    chatEdge(height: height, at: frames.chatX, width: width, beside: frames.mainX)
+                }
                 HStack(spacing: 0) {
                     navigator()
                         .frame(width: frames.navigator)
                         .frame(maxHeight: .infinity)
+                        // Floating over the canvas, on the window's own plane.
+                        .background { if drawn.floats { WindowPlane() } }
                     // The plane shows between the navigator and the paper
                     // beside it: the paper's edge is the boundary, not a rule.
                     Color.clear.frame(width: WorkspaceColumns.divider)
@@ -183,29 +255,24 @@ struct WorkspaceView<
         .onChange(of: focused) { _, focused in
             withAnimation(reduceMotion ? nil : motion) { stage.focused = focused }
         }
+        // A floated navigator goes once a row in it opens something.
+        .onChange(of: opened) { _, _ in navigatorFloating.wrappedValue = false }
     }
 
-    /// The main area: the orchestrator, mounted and kept, hidden while
-    /// something else is selected; and what's opened, drawn over it. Both the main area's one width, so neither resizes as the
-    /// selection moves between them.
-    private func main(
-        now: WorkspaceColumns.Arrangement, drawn: WorkspaceColumns.Arrangement, height: CGFloat, kept: CGFloat
-    ) -> some View {
-        let shown = now.conversation == .main
-        return ZStack(alignment: .topLeading) {
-            if hasConversation {
-                conversation()
-                    .frame(width: kept)
-                    .frame(maxHeight: .infinity)
-                    .opacity(drawn.conversation == .main ? 1 : 0)
-                    .allowsHitTesting(shown)
-                    .accessibilityHidden(!shown)
-                    // Nothing in it takes the keyboard while it's hidden:
-                    // not the terminal, not a chat composer, not a control.
-                    .environment(\.outOfSight, !shown)
-                    .disabled(!shown)
-                    .accessibilityIdentifier("workspace-conversation")
-            } else {
+    /// The main area, or the canvas beside the chat: what's opened, over
+    /// the canvas's home (the plan) when there's a canvas. The orchestrator
+    /// is `conversationLayer`'s, drawn beside or under this.
+    private func main(drawn: WorkspaceColumns.Arrangement, height: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            if drawn.canvas {
+                // The canvas's home, the plan, while nothing is opened.
+                home()
+                    .opacity(stage.open == nil ? 1 : 0)
+                    .allowsHitTesting(opened == nil)
+                    .accessibilityHidden(opened != nil)
+                    .environment(\.outOfSight, opened != nil)
+                    .accessibilityIdentifier("workspace-home")
+            } else if !hasConversation {
                 WorkspaceMain.nothingOpen
                     .opacity(stage.open == nil ? 1 : 0)
                     .accessibilityHidden(opened != nil)
@@ -218,6 +285,64 @@ struct WorkspaceView<
                 .allowsHitTesting(opened != nil)
                 .accessibilityHidden(opened == nil)
         }
+    }
+
+    /// The orchestrator, mounted and kept at its one width `kept`: in the
+    /// main area while it's selected, or in its column beside the canvas
+    /// (ov-298), and hidden otherwise. With the canvas folded away, it
+    /// carries the plan's strip, and the plan peeked over it.
+    @ViewBuilder
+    private func conversationLayer(
+        now: WorkspaceColumns.Arrangement, drawn: WorkspaceColumns.Arrangement, kept: CGFloat
+    ) -> some View {
+        let shown = now.showsConversation
+        if hasConversation {
+            conversation()
+                .frame(width: kept)
+                .frame(maxHeight: .infinity)
+                .overlay(alignment: .bottom) {
+                    // Folded, with a plan: its one line, over the chat's foot.
+                    if split, !drawn.canvas { strip() }
+                }
+                .overlay {
+                    if split, !drawn.canvas, peeking.wrappedValue { peek() }
+                }
+                .opacity(drawn.showsConversation ? 1 : 0)
+                .allowsHitTesting(shown)
+                .accessibilityHidden(!shown)
+                // Nothing in it takes the keyboard while it's hidden:
+                // not the terminal, not a chat composer, not a control.
+                .environment(\.outOfSight, !shown)
+                .disabled(!shown)
+                .accessibilityIdentifier("workspace-conversation")
+        }
+    }
+
+    /// The chat column's leading edge, dragged to set its width in whole
+    /// terminal columns, kept once dropped; double-clicked, back to 88.
+    /// Dragged left, the chat widens.
+    private func chatEdge(height: CGFloat, at x: CGFloat, width: CGFloat, beside: CGFloat) -> some View {
+        Color.clear
+            .frame(width: WorkspaceColumns.divider + 2 * WorkspaceMotion.grip, height: height)
+            .contentShape(Rectangle())
+            .pointerStyle(.columnResize)
+            .gesture(
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                    .onChanged { value in
+                        let start = chatDragStart ?? columns
+                        chatDragStart = start
+                        chatDragging = WorkspaceColumns.chatColumns(
+                            Double(start) - Double(value.translation.width / max(cell, 1)))
+                    }
+                    .onEnded { _ in
+                        if let chatDragging { chatColumns.wrappedValue = Double(chatDragging) }
+                        chatDragging = nil
+                        chatDragStart = nil
+                    })
+            .onTapGesture(count: 2) { chatColumns.wrappedValue = Double(WorkspaceColumns.chatColumnsDefault) }
+            .offset(x: x - WorkspaceColumns.divider - WorkspaceMotion.grip)
+            .accessibilityHidden(true)
+            .probed("workspace-chat-edge")
     }
 
     /// `next` settles: at once when it opens from the orchestrator, goes

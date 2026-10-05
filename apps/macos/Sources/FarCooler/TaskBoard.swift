@@ -711,7 +711,10 @@ struct TaskBoardView: View {
         // The plan, read wherever the runner keeps one: it decides how the
         // navigator is drawn (ov-298), and moves as the runner says it did.
         .task(id: [planStore.available ? 1 : 0, planStore.generation]) {
-            if planStore.available { await planStore.reloadIfMoved() }
+            guard planStore.available else { return }
+            await planStore.reloadIfMoved()
+            // A first read that didn't come back is asked again here.
+            await planStore.readIfNeverRead()
         }
         // This board's choices, read again whenever the view is handed
         // another board.

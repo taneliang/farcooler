@@ -127,6 +127,12 @@ struct RealWindowCaptures {
                 NotificationCenter.default.post(name: .captureOpen, object: selection)
                 try await Task.sleep(for: .seconds(wait))
             }
+            // `FARCOOLER_CAPTURE_PEEK`: the plan peeked over the chat, as
+            // ⌥⌘P does in a window too narrow for the canvas (ov-298).
+            if env["FARCOOLER_CAPTURE_PEEK"] != nil {
+                NotificationCenter.default.post(name: .captureOpen, object: "peek")
+                try await Task.sleep(for: .seconds(1))
+            }
             try await TitleBarHarness.settle(window)
             for variant in Self.variants {
                 window.appearance = NSAppearance(named: variant.appearance)
