@@ -55,7 +55,7 @@ pub fn reference_text() -> String {
     out += &format!("The blocks are {}. Each has \"type\" and these fields (? is optional):\n\n", crate::page_doc::BLOCK_TYPES.join(", "));
     let fields = [
         ("heading", "text"),
-        ("text", "md (a Markdown subset: paragraphs, bullets, bold, italic, code, https links), tone?"),
+        ("text", "md (a Markdown subset: paragraphs, bullets, bold, italic, code, https links whose words don't name another domain), tone?"),
         ("stats", "items[1..6] of {label, value, detail?, tone?}"),
         ("progress", "label, done, total, detail?, parts?[..6] of {label, count}"),
         ("table", "columns[1..8] of {title, align?, grow?}, rows[..50] of one cell per column; a cell is a string or {text?, ref?, show?, tone?, mono?}"),

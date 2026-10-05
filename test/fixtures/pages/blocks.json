@@ -5,7 +5,7 @@
   "glance": "nine blocks",
   "blocks": [
     { "type": "heading", "text": "Heading" },
-    { "type": "text", "md": "A paragraph with **bold**, *italic* and `code`.\n\n- one\n- two", "tone": "attention" },
+    { "type": "text", "md": "A paragraph with **bold**, *italic* and `code`, a [GitHub](https://github.com/example/overnight) link, [github.com](https://github.com/x) naming its own domain, and a <https://example.com/a> autolink.\n\n- one\n- two", "tone": "attention" },
     { "type": "stats", "items": [ { "label": "A", "value": "1" }, { "label": "B", "value": "2", "detail": "two", "tone": "attention" } ] },
     { "type": "progress", "label": "Parts", "done": 3, "total": 10, "detail": "since Monday",
       "parts": [ { "label": "Done", "count": 3 }, { "label": "Active", "count": 2 }, { "label": "Waiting", "count": 1 } ] },

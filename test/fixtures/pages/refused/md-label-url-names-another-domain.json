@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "title": "Refused",
+ "blocks": [
+  {
+   "type": "text",
+   "md": "See [https://github.com/x](https://evil.example/x)."
+  }
+ ]
+}

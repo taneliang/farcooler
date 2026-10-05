@@ -33,6 +33,7 @@
 use serde::Serialize;
 use serde::ser::{SerializeMap, Serializer};
 
+mod md_links;
 mod parse;
 
 pub use parse::{PageError, check_value, parse};

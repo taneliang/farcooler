@@ -132,10 +132,9 @@ fn block(v: &Value, path: &str, ctx: &mut Ctx) -> R<Block> {
         }
         "text" => {
             let m = object(v, path, &["type", "md", "tone"], false)?;
-            Block::Text {
-                md: text(required(m, "md", path)?, &join(path, "md"), caps.md_chars, true, false)?,
-                tone: tone(m, path)?,
-            }
+            let md = text(required(m, "md", path)?, &join(path, "md"), caps.md_chars, true, false)?;
+            super::md_links::check(&md).or_else(|said| err(&join(path, "md"), said))?;
+            Block::Text { md, tone: tone(m, path)? }
         }
         "stats" => {
             let m = object(v, path, &["type", "items"], false)?;

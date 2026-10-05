@@ -5,7 +5,7 @@
       "type": "heading"
     },
     {
-      "md": "A paragraph with **bold**, *italic* and `code`.\n\n- one\n- two",
+      "md": "A paragraph with **bold**, *italic* and `code`, a [GitHub](https://github.com/example/overnight) link, [github.com](https://github.com/x) naming its own domain, and a <https://example.com/a> autolink.\n\n- one\n- two",
       "tone": "attention",
       "type": "text"
     },

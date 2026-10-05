@@ -454,5 +454,126 @@
     }
    }
   ]
+ },
+ {
+  "file": "refused/md-javascript-link.json",
+  "path": "blocks[0].md",
+  "says": "a link in text has to be https, and this one is javascript",
+  "fix": [
+   {
+    "pointer": "/blocks/0/md",
+    "value": "See [the run](https://github.com/example/overnight/actions/runs/812)."
+   }
+  ]
+ },
+ {
+  "file": "refused/md-http-link.json",
+  "path": "blocks[0].md",
+  "says": "a link in text has to be https, and this one is http",
+  "fix": [
+   {
+    "pointer": "/blocks/0/md",
+    "value": "See [the run](https://github.com/example/overnight/actions/runs/812)."
+   }
+  ]
+ },
+ {
+  "file": "refused/md-file-link.json",
+  "path": "blocks[0].md",
+  "says": "a link in text has to be https, and this one is file",
+  "fix": [
+   {
+    "pointer": "/blocks/0/md",
+    "value": "See [the run](https://github.com/example/overnight/actions/runs/812)."
+   }
+  ]
+ },
+ {
+  "file": "refused/md-mailto-link.json",
+  "path": "blocks[0].md",
+  "says": "a link in text has to be https, and this one is mailto",
+  "fix": [
+   {
+    "pointer": "/blocks/0/md",
+    "value": "See [the run](https://github.com/example/overnight/actions/runs/812)."
+   }
+  ]
+ },
+ {
+  "file": "refused/md-relative-link.json",
+  "path": "blocks[0].md",
+  "says": "a link in text has to start with https://",
+  "fix": [
+   {
+    "pointer": "/blocks/0/md",
+    "value": "See [the run](https://github.com/example/overnight/actions/runs/812)."
+   }
+  ]
+ },
+ {
+  "file": "refused/md-label-names-another-domain.json",
+  "path": "blocks[0].md",
+  "says": "this link's words name github.com but it goes to evil.example",
+  "fix": [
+   {
+    "pointer": "/blocks/0/md",
+    "value": "See [the run](https://github.com/example/overnight/actions/runs/812)."
+   }
+  ]
+ },
+ {
+  "file": "refused/md-label-url-names-another-domain.json",
+  "path": "blocks[0].md",
+  "says": "this link's words name github.com but it goes to evil.example",
+  "fix": [
+   {
+    "pointer": "/blocks/0/md",
+    "value": "See [the run](https://github.com/example/overnight/actions/runs/812)."
+   }
+  ]
+ },
+ {
+  "file": "refused/md-autolink-javascript.json",
+  "path": "blocks[0].md",
+  "says": "a link in text has to be https, and this one is javascript",
+  "fix": [
+   {
+    "pointer": "/blocks/0/md",
+    "value": "See [the run](https://github.com/example/overnight/actions/runs/812)."
+   }
+  ]
+ },
+ {
+  "file": "refused/md-reference-javascript.json",
+  "path": "blocks[0].md",
+  "says": "a link in text has to be https, and this one is javascript",
+  "fix": [
+   {
+    "pointer": "/blocks/0/md",
+    "value": "See [the run](https://github.com/example/overnight/actions/runs/812)."
+   }
+  ]
+ },
+ {
+  "file": "refused/md-image-http.json",
+  "path": "blocks[0].md",
+  "says": "a link in text has to be https, and this one is http",
+  "fix": [
+   {
+    "pointer": "/blocks/0/md",
+    "value": "See [the run](https://github.com/example/overnight/actions/runs/812)."
+   }
+  ]
+ },
+ {
+  "file": "refused/md-userinfo-link.json",
+  "path": "blocks[0].md",
+  "says": "has a domain a page can't show",
+  "fix": [
+   {
+    "pointer": "/blocks/0/md",
+    "value": "See [the run](https://github.com/example/overnight/actions/runs/812)."
+   }
+  ]
  }
 ]

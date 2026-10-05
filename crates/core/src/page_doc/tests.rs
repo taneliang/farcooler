@@ -299,3 +299,47 @@ fn the_json_schema_carries_every_block_and_this_builds_limits() {
     }
     assert_eq!(schema["properties"]["v"]["const"], VERSION);
 }
+
+// ---- links in text ----
+
+/// Each way Markdown writes a link is read, and only a plain `https` link that
+/// says where it goes is drawn.
+#[test]
+fn a_link_in_text_is_https_and_says_where_it_goes() {
+    let ok = |md: &str| {
+        let doc = serde_json::json!({"v": 1, "title": "T", "blocks": [{"type": "text", "md": md}]});
+        check_value(&doc, &Caps::default()).map(|_| ()).map_err(|e| e.message)
+    };
+    for good in [
+        "no links at all, and a (parenthesis) and a [bracket]",
+        "[words](https://github.com/x)",
+        "[github.com](https://github.com/x) and [www.github.com](https://github.com/y)",
+        "[GitHub.com](https://github.com/x), [see github.com/x](https://github.com/x)",
+        "[x](https://example.com/a_(b) \"a title\")",
+        "<https://example.com/a>",
+        "[ref][1]\n\n[1]: https://example.com/",
+        "a bare http://example.com is plain text, and so is mailto:a@b.example",
+    ] {
+        ok(good).unwrap_or_else(|e| panic!("{good}: {e}"));
+    }
+    for (bad, says) in [
+        ("[x](javascript:alert(1))", "javascript"),
+        ("[x](JavaScript:alert(1))", "JavaScript"),
+        ("[x](  http://a.example/)", "http"),
+        ("[x](data:text/html,hi)", "data"),
+        ("[x](//evil.example/)", "has to start with https://"),
+        ("[x](<javascript:alert(1)>)", "javascript"),
+        ("![i](https://a.example/p.png)[x](ftp://a.example/)", "ftp"),
+        ("<mailto:a@b.example>", "mailto"),
+        ("[a.example and github.com](https://github.com/x)", "a.example"),
+        ("[github.com.evil.example](https://github.com/x)", "github.com.evil.example"),
+        ("[x](https://a.example@evil.example/)", "domain a page can't show"),
+        // A file name reads as a domain, so a label that is one is refused: the
+        // price of a rule that can't be talked round.
+        ("[Cargo.toml notes](https://example.com/n)", "Cargo.toml"),
+    ] {
+        let said = ok(bad).expect_err(bad);
+        assert!(said.contains(says), "{bad}: {said}");
+        assert!(!said.contains('\u{1b}'), "{bad}: a control character reached the sentence");
+    }
+}
