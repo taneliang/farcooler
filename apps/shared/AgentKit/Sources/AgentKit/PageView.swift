@@ -307,7 +307,10 @@ struct PageRefTrailer: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.tight) {
-            if let status = resolved.status {
+            // A web link with no label of its own has its domain as its name:
+            // the row's words are the orchestrator's, so the domain is said
+            // here (design 7: a link always shows where it goes).
+            if let status = resolved.status ?? (resolved.destination?.isExternal == true ? resolved.name : nil) {
                 Text(status)
                     .fontWeight(resolved.statusTone == .attention ? .medium : .regular)
                     .foregroundStyle(resolved.statusTone == .attention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.secondary))

@@ -103,7 +103,9 @@ struct PageConformanceTests {
     @Test("no link the runner refuses opens: each is plain text, in a reference or in Markdown")
     func refusedLinksDontOpen() throws {
         let world = PageWorld()
-        for name in try Self.fixtures() where name.hasPrefix("refused/") && name.contains("link") {
+        let linky = try Self.fixtures().filter { $0.hasPrefix("refused/") && ($0.contains("link") || $0.hasPrefix("refused/md-")) }
+        #expect(linky.count == 16)
+        for name in linky {
             let doc = try Self.read(name)
             for block in doc.blocks {
                 switch block {
@@ -123,6 +125,17 @@ struct PageConformanceTests {
                 default: break
                 }
             }
+        }
+    }
+
+    @Test("a link whose words name another domain is followed by the domain it goes to")
+    func aLabelCantHideItsDomain() throws {
+        for name in ["refused/md-label-names-another-domain.json", "refused/md-label-url-names-another-domain.json"] {
+            guard case .text(let md, _)? = try Self.read(name).blocks.first, case .prose(let line)? = PageMarkdown.pieces(md).first else {
+                Issue.record("\(name) isn't one paragraph")
+                continue
+            }
+            #expect(String(PageMarkdown.inline(line).characters).contains("evil.example"), "\(name) hides where it goes")
         }
     }
 
