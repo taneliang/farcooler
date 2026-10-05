@@ -104,8 +104,8 @@ struct RealWindowCaptures {
                 window.appearance = NSAppearance(named: variant.appearance)
                 try await TitleBarHarness.settle(window)
                 let view = try #require(window.contentView?.superview)
-                let rep = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
-                view.cacheDisplay(in: view.bounds, to: rep)
+                // One way to render (LookBitmap.swift), at the window's own scale.
+                let rep = try #require(view.lookBitmap(scale: max(1, Int(window.backingScaleFactor))))
                 let png = try #require(rep.representation(using: .png, properties: [:]))
                 try png.write(to: out.appendingPathComponent("\(stage)-\(place.name)-\(variant.name).png"))
             }
