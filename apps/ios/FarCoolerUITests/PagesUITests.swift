@@ -102,7 +102,7 @@ final class PagesUITests: XCTestCase {
         XCTAssertTrue(ask.label.hasSuffix("Needs you"), "the question isn't live: \(ask.label)")
         // The web link says where it goes.
         let ci = element(app, "page-item-1")
-        XCTAssertTrue(ci.label.contains("link to github.com"), "the link hides its domain: \(ci.label)")
+        XCTAssertTrue(ci.label.hasSuffix("Link to github.com"), "the link hides its domain: \(ci.label)")
         // A four-column table on a phone stacks: each lane a row, each value
         // under its column's title, the lane's state live.
         let lane = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Lane, ov-274-phones.'")).firstMatch
@@ -234,7 +234,6 @@ final class PagesUITests: XCTestCase {
             XCTAssertTrue(element(app, "plan-theme-page").waitForExistence(timeout: 10))
             let risks = element(app, "plan-anchored-open-risks")
             reach(app, risks)
-            app.swipeUp()
             keep(app, "capture-risks-\(name)")
             app.terminate()
         }
