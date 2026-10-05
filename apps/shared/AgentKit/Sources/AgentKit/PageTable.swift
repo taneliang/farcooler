@@ -5,8 +5,49 @@ import SwiftUI
 // its column titles, either way: "Lane, ov-274-phones. Cards, ov-274. State,
 // In review."
 
-/// One cell's words: a reference's live name as a link, a lane's live state
-/// or tokens as words, or the orchestrator's text.
+/// What a cell draws and where it goes: a pure reading of the cell, so the
+/// rules can be held by a test.
+public struct PageCellParts: Equatable, Sendable {
+    /// Its words: its own text, or the target's live name, state or tokens.
+    public var text: String
+    /// A link's domain, drawn after the words when they aren't it already:
+    /// a label never hides where a link goes (design 7).
+    public var domain: String?
+    /// Where it opens, or nil for words.
+    public var destination: PageDestination?
+    /// What VoiceOver's action for it is called: "Open ov-274".
+    public var action: String? { destination == nil ? nil : "Open \(text)" }
+}
+
+extension PageWorld {
+    /// `cell` as it's drawn: a reference drawn by name, or text the
+    /// orchestrator wrote over one, is a link (design 3.4: "with `text`, the
+    /// reference is only the link"); a lane's live state or tokens are words.
+    public func parts(_ cell: PageCell) -> PageCellParts {
+        let text = cellText(cell)
+        guard let ref = cell.ref, cell.text != nil || cell.show == .name else {
+            return PageCellParts(text: text)
+        }
+        let resolved = resolve(ref)
+        guard let destination = resolved.destination else { return PageCellParts(text: text) }
+        var domain: String?
+        if case .url(let url) = destination, let host = url.host(), text.lowercased() != host.lowercased() { domain = host }
+        return PageCellParts(text: text, domain: domain, destination: destination)
+    }
+
+    /// One "Open …" action per link in a row, so VoiceOver reaches every
+    /// link a row speaks for, not only the first.
+    public func actions(_ cells: [PageCell]) -> [(name: String, destination: PageDestination)] {
+        cells.compactMap { cell in
+            let parts = parts(cell)
+            guard let name = parts.action, let destination = parts.destination else { return nil }
+            return (name, destination)
+        }
+    }
+}
+
+/// One cell's words: a link in the tint with its domain after it when it
+/// leaves the app, or the orchestrator's words.
 struct PageCellView: View {
     let cell: PageCell
     let world: PageWorld
@@ -15,21 +56,18 @@ struct PageCellView: View {
     @Environment(\.openURL) private var openURL
 
     var body: some View {
-        let text = world.cellText(cell)
-        let resolved = cell.ref.map(world.resolve)
-        // A reference drawn by name is a link; text the orchestrator wrote
-        // over one, and live state words, are words.
-        if cell.text == nil, cell.show == .name, let destination = resolved?.destination {
+        let parts = world.parts(cell)
+        if let destination = parts.destination {
             Button { PageOpen.open(destination, onOpen: onOpen, openURL: openURL) } label: {
-                Text(text)
-                    .foregroundStyle(.tint)
+                (Text(parts.text).foregroundStyle(.tint)
+                    + Text(parts.domain.map { " \($0)" } ?? "").foregroundStyle(.secondary))
                     .fixedSize(horizontal: false, vertical: true)
             }
-                .buttonStyle(.plain)
-                .font(cell.mono ? Font.body.monospaced() : nil)
-                .help(resolved?.spoken ?? text)
+            .buttonStyle(.plain)
+            .font(cell.mono ? Font.body.monospaced() : nil)
+            .help(parts.domain.map { "\(parts.text), \($0)" } ?? parts.text)
         } else {
-            Text(text)
+            Text(parts.text)
                 .font(cell.mono ? Font.body.monospaced() : nil)
                 .fontWeight(cell.tone == .attention ? .medium : nil)
                 .foregroundStyle(cell.tone == .attention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.primary))
@@ -103,7 +141,10 @@ struct PageGridTable: View {
                                     }
                                 }
                             }
-                            .modifier(PageRowSpeech(first: c == 0, spoken: PageLayout.spokenRow(columns: columns, cells: row, world: world)))
+                            .modifier(
+                                PageRowSpeech(
+                                    first: c == 0, spoken: PageLayout.spokenRow(columns: columns, cells: row, world: world),
+                                    actions: world.actions(row), onOpen: onOpen))
                             .accessibilityIdentifier(c == 0 ? "page-row-\(index)" : "")
                     }
                 }
@@ -140,14 +181,32 @@ struct PageGridTable: View {
 private struct PageRowSpeech: ViewModifier {
     let first: Bool
     let spoken: String
+    let actions: [(name: String, destination: PageDestination)]
+    let onOpen: (PageDestination) -> Void
 
     func body(content: Content) -> some View {
         if first {
             content
-                .accessibilityElement(children: .combine)
+                .accessibilityElement(children: .ignore)
                 .accessibilityLabel(spoken)
+                .modifier(PageRowActions(actions: actions, onOpen: onOpen))
         } else {
             content.accessibilityHidden(true)
+        }
+    }
+}
+
+/// A row's links as named actions on its one accessibility element.
+struct PageRowActions: ViewModifier {
+    let actions: [(name: String, destination: PageDestination)]
+    let onOpen: (PageDestination) -> Void
+    @Environment(\.openURL) private var openURL
+
+    func body(content: Content) -> some View {
+        content.accessibilityActions {
+            ForEach(Array(actions.enumerated()), id: \.offset) { _, action in
+                Button(action.name) { PageOpen.open(action.destination, onOpen: onOpen, openURL: openURL) }
+            }
         }
     }
 }
@@ -189,8 +248,9 @@ struct PageStackedTable: View {
                 .background {
                     if index % 2 == 1 { RoundedRectangle.control.fill(Fill.inset(contrast)) }
                 }
-                .accessibilityElement(children: .combine)
+                .accessibilityElement(children: .ignore)
                 .accessibilityLabel(PageLayout.spokenRow(columns: columns, cells: row, world: world))
+                .modifier(PageRowActions(actions: world.actions(row), onOpen: onOpen))
                 .accessibilityIdentifier("page-stacked-row-\(index)")
             }
         }

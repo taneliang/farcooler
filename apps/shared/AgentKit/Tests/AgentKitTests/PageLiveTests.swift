@@ -118,4 +118,35 @@ struct PageLiveTests {
         #expect(PageWords.updated(page, now: Self.now) == "Not updated for 3 hours")
         #expect(PageWords.isStale(page, now: Self.now))
     }
+
+    @Test("a table cell with a web link shows its domain after its label; one that is its domain doesn't repeat it")
+    func cellLinksShowTheirDomain() throws {
+        let world = try Self.world()
+        let labeled = world.parts(PageCell(ref: PageRef(.url("https://evil.example/x"), label: "Docs")))
+        #expect(labeled.text == "Docs" && labeled.domain == "evil.example")
+        #expect(labeled.destination == .url(URL(string: "https://evil.example/x")!))
+        let bare = world.parts(PageCell(ref: PageRef(.url("https://example.com/a"))))
+        #expect(bare.text == "example.com" && bare.domain == nil)
+        let overText = world.parts(PageCell(text: "the run", ref: PageRef(.url("https://ci.example/812"))))
+        #expect(overText.text == "the run" && overText.domain == "ci.example")
+        #expect(world.parts(PageCell(ref: PageRef(.url("http://evil.example/x"), label: "Docs"))).destination == nil)
+    }
+
+    @Test("text over a reference links it; live state and tokens are words")
+    func textOverAReferenceIsALink() throws {
+        let world = try Self.world()
+        #expect(world.parts(PageCell(text: "the card", ref: PageRef(.task("ov-113")))).destination == .task("id-ov-113"))
+        #expect(world.parts(PageCell(ref: PageRef(.lane("ov-181-review")), show: .state)).destination == nil)
+        #expect(world.parts(PageCell(text: "plain")).destination == nil)
+    }
+
+    @Test("a row offers one Open action per link, every column")
+    func rowActions() throws {
+        let world = try Self.world()
+        let row = [
+            PageCell(ref: PageRef(.lane("ov-274-phones"))), PageCell(ref: PageRef(.task("ov-274"))), PageCell(text: "gate"),
+            PageCell(ref: PageRef(.lane("ov-274-phones")), show: .state), PageCell(ref: PageRef(.lane("gone"))),
+        ]
+        #expect(world.actions(row).map(\.name) == ["Open ov-274-phones", "Open ov-274"])
+    }
 }
