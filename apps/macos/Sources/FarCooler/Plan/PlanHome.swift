@@ -1,4 +1,5 @@
 import AgentKit
+import AppKit
 import SwiftUI
 
 // The plan as the canvas's home (ov-298, Concept A of
@@ -87,7 +88,7 @@ struct PlanHomeContent: View {
     }
 }
 
-/// The plan in one line, over the chat's foot while the canvas is folded:
+/// The plan in one line, on a row under the chat while the canvas is folded:
 /// "2 need you · mac-ux In review · next: close-cards". A click peeks the
 /// plan; a change washes it, as a changed row does.
 struct PlanStrip: View {
@@ -123,9 +124,23 @@ struct PlanStrip: View {
             .help("Peek at the Plan (⌥⌘P)")
             .accessibilityLabel("Plan: \(words)")
             .accessibilityHint("Peeks at the plan")
-            .padding(.bottom, 2 * Spacing.inset)
+            .padding(.vertical, Spacing.tight + 2)
             .identified("plan-strip")
         }
+    }
+}
+
+/// What a bare Esc puts away before anything else in the window hears it
+/// (ov-298): the plan peeked over the chat, else a navigator floated over
+/// the canvas. Nil when there's neither, or for any other key.
+enum OverlayEscape: Equatable {
+    case peek
+    case navigator
+
+    static func puts(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, peeking: Bool, floating: Bool) -> OverlayEscape? {
+        guard keyCode == 53, modifiers.intersection(.deviceIndependentFlagsMask).isEmpty else { return nil }
+        if peeking { return .peek }
+        return floating ? .navigator : nil
     }
 }
 

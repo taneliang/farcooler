@@ -371,6 +371,20 @@ struct ContentView: View {
             }
             guard escapeMonitor == nil else { return }
             escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                // A peek, or a floated navigator, is put away first, and the
+                // Esc goes no further: never to the terminal under it, where
+                // it would interrupt the orchestrator (train 1004r, P3).
+                if event.window === windowBox.window,
+                    let away = OverlayEscape.puts(
+                        keyCode: event.keyCode, modifiers: event.modifierFlags, peeking: planPeeking,
+                        floating: navigatorFloating)
+                {
+                    switch away {
+                    case .peek: planPeeking = false
+                    case .navigator: navigatorFloating = false
+                    }
+                    return nil
+                }
                 guard event.keyCode == 53, event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
                     let window = event.window, window === windowBox.window, window.attachedSheet == nil,
                     !console.console.isOpen, !showQuickCreate, !jumpBar.active,
