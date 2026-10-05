@@ -117,9 +117,49 @@ fn theme_json(plan: &pb::Plan, view: &pb::BoardThemeView) -> Value {
     })
 }
 
+/// A pull request stage as the JSON carries it (ov-312): the words the runner
+/// chose, and the facts behind them. Left out of the record when the runner
+/// said nothing (`with_stage`), as every additive field on this wire is.
+pub fn stage_json(s: &pb::PrStage) -> Value {
+    let kind = match pb::PrStageKind::try_from(s.kind) {
+        Ok(pb::PrStageKind::Building) => "building",
+        Ok(pb::PrStageKind::AgentReview) => "agent_review",
+        Ok(pb::PrStageKind::Fixing) => "fixing",
+        Ok(pb::PrStageKind::WaitingOnReviewer) => "waiting_on_reviewer",
+        Ok(pb::PrStageKind::ChangesRequested) => "changes_requested",
+        Ok(pb::PrStageKind::ApprovedChecksRunning) => "approved_checks_running",
+        Ok(pb::PrStageKind::ApprovedChecksFailing) => "approved_checks_failing",
+        Ok(pb::PrStageKind::Approved) => "approved",
+        Ok(pb::PrStageKind::ApprovedConflicts) => "approved_conflicts",
+        Ok(pb::PrStageKind::Queued) => "queued",
+        Ok(pb::PrStageKind::Merged) => "merged",
+        Ok(pb::PrStageKind::Closed) => "closed",
+        Ok(pb::PrStageKind::Unknown) => "unknown",
+        _ => "unspecified",
+    };
+    json!({
+        "kind": kind, "label": s.label, "reviewers": s.reviewers, "queue_position": s.queue_position,
+        "checks": match pb::CheckState::try_from(s.checks) {
+            Ok(pb::CheckState::Passing) => "passing",
+            Ok(pb::CheckState::Failing) => "failing",
+            Ok(pb::CheckState::Pending) => "pending",
+            _ => "unknown",
+        },
+        "pr_number": s.pr_number, "pr_url": s.pr_url, "unresolved_threads": s.unresolved_threads,
+        "read_at": s.read_at,
+    })
+}
+
+pub fn with_stage(mut record: Value, stage: &Option<pb::PrStage>) -> Value {
+    if let (Some(stage), Some(map)) = (stage, record.as_object_mut()) {
+        map.insert("stage".into(), stage_json(stage));
+    }
+    record
+}
+
 fn lane_json(plan: &pb::Plan, l: &pb::Lane) -> Value {
     let spend = l.spend.unwrap_or_default();
-    json!({
+    with_stage(json!({
         "id": id_text(&l.id),
         "short": short(&l.id),
         "name": l.name,
@@ -136,9 +176,9 @@ fn lane_json(plan: &pb::Plan, l: &pb::Lane) -> Value {
         "stale": l.stale,
         "budget_tokens": l.budget_tokens,
         "fix_rounds": l.fix_rounds,
-        "cards": l.cards.iter().map(|c| json!({
+        "cards": l.cards.iter().map(|c| with_stage(json!({
             "task": id_text(&c.task_id), "key": key_of(plan, &c.task_id), "slice": c.slice,
-        })).collect::<Vec<_>>(),
+        }), &c.stage)).collect::<Vec<_>>(),
         "agents": l.agents.iter().map(|a| json!({
             "harness": a.harness, "agent_id": a.agent_id,
             "role": match pb::LaneAgentRole::try_from(a.role) {
@@ -154,7 +194,7 @@ fn lane_json(plan: &pb::Plan, l: &pb::Lane) -> Value {
             "cost_micros": spend.cost_micros, "runs": spend.runs, "unmeasured_agents": spend.unmeasured_agents,
             "shared_agents": spend.shared_agents,
         },
-    })
+    }), &l.stage)
 }
 
 fn ruling_state_word(state: i32) -> &'static str {

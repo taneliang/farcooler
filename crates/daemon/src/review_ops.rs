@@ -526,6 +526,10 @@ async fn build_stack(
         // this is one subprocess the first time and nothing afterwards.
         let _ = svc.default_branch(repository_id, worktree).await;
     }
+    // What the cache holds now, not what this read said: a refresh `gh` could
+    // not answer keeps the last answer (`stack::merge_read`), and a read keeps
+    // the PR watch's thread counts and queue place.
+    let prs = if refresh_prs { svc.pr_cache_get(repository_id) } else { prs };
     // Whether `gh` ANSWERED, which is not whether there are any PRs.
     //
     // Read back from the cache rather than from `prs` above, because `prs` has

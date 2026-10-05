@@ -2498,8 +2498,13 @@ impl Service {
             .flatten()
     }
 
+    /// Record a read of GitHub, over what was known (`stack::merge_read`): a
+    /// failed read keeps the last answer, and a successful one keeps the PR
+    /// watch's thread counts.
     pub fn pr_cache_put(&self, repository_id: Uuid, prs: Option<Vec<crate::stack::PrInfo>>) {
-        self.pr_cache.lock().unwrap_or_else(|e| e.into_inner()).insert(repository_id, prs);
+        let mut cache = self.pr_cache.lock().unwrap_or_else(|e| e.into_inner());
+        let previous = cache.get(&repository_id).cloned().flatten();
+        cache.insert(repository_id, crate::stack::merge_read(previous, prs));
     }
 
     /// Whether `gh` has ever ANSWERED about this repository since this process

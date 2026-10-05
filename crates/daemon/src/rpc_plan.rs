@@ -46,7 +46,7 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, scope: Scope, req
             let Some(request::Payload::PlanGet(p)) = req.payload else { return Err(payload_missing()) };
             let workspace = required_id(&p.workspace_id)?;
             let closed_since = if p.include_closed { i64::MIN } else { now() - CLOSED_LANES_FOR_MS };
-            Ok(result::Value::Plan(pb_plan(&svc.store.plan(workspace, closed_since)?, admin)))
+            Ok(result::Value::Plan(pb_plan_staged(svc, &svc.store.plan(workspace, closed_since)?, admin)))
         }
         "plan.events" => {
             let Some(request::Payload::PlanEvents(p)) = req.payload else { return Err(payload_missing()) };
@@ -73,7 +73,7 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, scope: Scope, req
             let lanes = p.lane_ids.iter().map(|id| required_id(id)).collect::<Result<Vec<_>>>()?;
             svc.store.set_plan(workspace, &lanes, actor)?;
             watcher.announce_plan_changed(workspace, actor);
-            Ok(result::Value::Plan(pb_plan(&svc.store.plan(workspace, now() - CLOSED_LANES_FOR_MS)?, admin)))
+            Ok(result::Value::Plan(pb_plan_staged(svc, &svc.store.plan(workspace, now() - CLOSED_LANES_FOR_MS)?, admin)))
         }
         "board_theme.create" => {
             let Some(request::Payload::BoardThemeCreate(p)) = req.payload else { return Err(payload_missing()) };
@@ -156,6 +156,11 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, scope: Scope, req
                 svc.store.set_budget(Subject::Lane(lane.id), (tokens > 0).then_some(tokens), actor)?;
             }
             watcher.announce_plan_changed(lane.workspace_id, actor);
+            // A lane that moved into review, fixing or landing wants its pull
+            // requests read now; any other update does not.
+            if update.state.is_some_and(|s| crate::plan_stage::phase_of(s).is_active()) {
+                crate::pr_watch::kick_lane(lane.id);
+            }
             if let Some(agent) = &agent {
                 record_worker(svc, watcher, &lane, agent, &p.actor);
             }
@@ -280,8 +285,18 @@ fn theme_view(svc: &Service, theme: BoardTheme) -> Result<pb::BoardThemeView> {
 
 fn lane_view(svc: &Service, lane: &Lane, admin: bool) -> Result<pb::Lane> {
     let plan = svc.store.plan(lane.workspace_id, i64::MIN)?;
-    let view = plan.lanes.into_iter().find(|v| v.lane.id == lane.id).ok_or(DomainError::NotFound)?;
-    Ok(pb_lane(&view, admin))
+    let mut wire = pb_plan_staged(svc, &plan, admin);
+    let at = plan.lanes.iter().position(|v| v.lane.id == lane.id).ok_or(DomainError::NotFound)?;
+    Ok(wire.lanes.swap_remove(at))
+}
+
+/// The plan as the wire carries it, with each lane's pull request stage laid
+/// on from what the runner last read of GitHub (ov-312). Cache only: nothing
+/// here waits on `gh`.
+fn pb_plan_staged(svc: &Service, p: &Plan, admin: bool) -> pb::Plan {
+    let mut wire = pb_plan(p, admin);
+    crate::plan_stage::annotate(svc, p, &mut wire);
+    wire
 }
 
 fn pb_theme(t: &BoardTheme) -> pb::BoardTheme {
@@ -395,7 +410,7 @@ fn pb_lane(v: &LaneView, admin: bool) -> pb::Lane {
         cards: v
             .cards
             .iter()
-            .map(|c| pb::LaneCard { task_id: id_bytes(c.task_id), slice: c.slice.clone() })
+            .map(|c| pb::LaneCard { task_id: id_bytes(c.task_id), slice: c.slice.clone(), stage: None })
             .collect(),
         agents: v
             .agents
@@ -417,6 +432,7 @@ fn pb_lane(v: &LaneView, admin: bool) -> pb::Lane {
         spend: Some(pb_spend(&v.spend)),
         stale: v.stale,
         budget_tokens: v.budget_tokens,
+        stage: None,
     }
 }
 

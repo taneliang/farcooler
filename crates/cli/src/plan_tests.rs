@@ -38,7 +38,7 @@ fn lane(n: u128, name: &str, state: pb::LaneState, cards: &[u128]) -> pb::Lane {
         name: name.into(),
         state: state as i32,
         state_since: NOW - 10 * 60_000,
-        cards: cards.iter().map(|c| pb::LaneCard { task_id: id_bytes(Uuid::from_u128(0x1000 + c)), slice: String::new() }).collect(),
+        cards: cards.iter().map(|c| pb::LaneCard { task_id: id_bytes(Uuid::from_u128(0x1000 + c)), slice: String::new(), stage: None }).collect(),
         spend: Some(Default::default()),
         ..Default::default()
     }
@@ -1146,4 +1146,41 @@ async fn a_runner_that_sends_no_cost_draws_none() {
     let text = super::overview(&bare, NOW);
     assert!(!text.contains("Cost") && !text.contains("budget"), "{text}");
     let _ = &mut link;
+}
+
+/// A lane's pull request stage (ov-312) reaches `farcooler plan`, `plan lane
+/// show` and `--json`; a lane the runner said nothing of prints as it always
+/// did, with no `stage` key to break a reader of the old shape.
+#[test]
+fn a_lane_s_pr_stage_is_printed_and_left_out_when_unsaid() {
+    let stage = |kind: pb::PrStageKind, label: &str, n: u32| pb::PrStage {
+        kind: kind as i32,
+        label: label.into(),
+        pr_number: n,
+        unresolved_threads: Some(2),
+        ..Default::default()
+    };
+    let mut plan = the_plan();
+    let at = plan.lanes.iter().position(|l| l.name == "mac-ux").unwrap();
+    plan.lanes[at].stage = Some(stage(pb::PrStageKind::WaitingOnReviewer, "Waiting on alice", 31));
+    plan.lanes[at].cards[0].stage = Some(stage(pb::PrStageKind::WaitingOnReviewer, "Waiting on alice", 31));
+    let keys = Keys::of_plan(&plan);
+
+    let text = overview(&plan, NOW);
+    assert!(text.contains("In review \u{b7} in integ-9 \u{b7} Waiting on alice \u{b7} 1 card"), "{text}");
+
+    let lane = lane_text(&plan.lanes[at], &keys, &[], NOW);
+    assert!(lane.contains("ov-1  whole card \u{b7} Waiting on alice \u{b7} PR 31 \u{b7} 2 threads open"), "{lane}");
+
+    let json = plan_json(&plan, &keys);
+    assert_eq!(json["lanes"][at]["stage"]["label"], "Waiting on alice");
+    assert_eq!(json["lanes"][at]["stage"]["kind"], "waiting_on_reviewer");
+    assert_eq!(json["lanes"][at]["cards"][0]["stage"]["unresolved_threads"], 2);
+    let other = (at + 1) % plan.lanes.len();
+    assert!(json["lanes"][other].get("stage").is_none(), "no stage said, no key");
+
+    // Building says itself once.
+    plan.lanes[at].stage = Some(stage(pb::PrStageKind::Building, "Building", 0));
+    plan.lanes[at].state = pb::LaneState::Building as i32;
+    assert!(!overview(&plan, NOW).contains("Building \u{b7} Building"));
 }

@@ -197,10 +197,12 @@ pub fn walk_chain(
 /// One call listing every open PR rather than one per branch: a stack of six is
 /// six network round trips otherwise, and a fleet refresh multiplies that by the
 /// number of repositories.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct GhPr {
     number: u32,
     url: String,
+    #[serde(default)]
+    title: String,
     state: String,
     #[serde(rename = "headRefName")]
     head_ref_name: String,
@@ -216,14 +218,56 @@ struct GhPr {
     review_decision: Option<String>,
     #[serde(rename = "statusCheckRollup", default)]
     status_check_rollup: Option<Vec<GhCheck>>,
+    #[serde(rename = "reviewRequests", default)]
+    review_requests: Vec<GhReviewer>,
+    #[serde(rename = "latestReviews", default)]
+    latest_reviews: Vec<GhReview>,
+    #[serde(rename = "mergeStateStatus", default)]
+    merge_state_status: Option<String>,
+    /// A pull request from a fork.
+    #[serde(rename = "isCrossRepository", default)]
+    is_cross_repository: bool,
 }
 
-#[derive(Debug, Deserialize)]
+/// A review standing on a PR, as gh exports `latestReviews`.
+#[derive(Debug, Default, Deserialize)]
+struct GhReview {
+    #[serde(default)]
+    author: Option<GhAuthor>,
+    #[serde(default)]
+    state: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct GhAuthor {
+    #[serde(default)]
+    login: String,
+}
+
+/// A review request: a user (`login`), or a team, whose `slug` gh exports as
+/// `org/team` (`export_pr.go`'s `LoginOrSlug`).
+#[derive(Debug, Default, Deserialize)]
+struct GhReviewer {
+    #[serde(default)]
+    login: Option<String>,
+    #[serde(default)]
+    slug: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+}
+
+/// One entry of `statusCheckRollup`: a `CheckRun` (`status`, `conclusion`) or a
+/// commit `StatusContext` (`state`, and neither of those).
+#[derive(Debug, Default, Deserialize)]
 struct GhCheck {
+    #[serde(rename = "__typename", default)]
+    typename: String,
     #[serde(default)]
     conclusion: Option<String>,
     #[serde(default)]
     status: Option<String>,
+    #[serde(default)]
+    state: Option<String>,
 }
 
 /// `gh`, carrying the pins the daemon's own git runs under in `worktree`.
@@ -250,9 +294,26 @@ pub(crate) async fn gh(worktree: &Path) -> Result<tokio::process::Command> {
 /// that is a normal condition, not an error, and it must degrade to `Unknown`
 /// rather than failing a review the user is in the middle of.
 pub async fn fetch_prs(worktree: &Path) -> Result<Option<Vec<PrInfo>>> {
+    // Open PRs on their own, so a long-lived one never falls out of a window
+    // of the newest hundred of every state; then the recent closed and merged
+    // ones, which a lane that has just landed still wants.
+    let Some(mut prs) = list_prs(worktree, "open", OPEN_LIMIT).await else { return Ok(None) };
+    let Some(finished) = list_prs(worktree, "closed", FINISHED_LIMIT).await else { return Ok(None) };
+    let known: std::collections::HashSet<u32> = prs.iter().map(|p| p.status.number).collect();
+    prs.extend(finished.into_iter().filter(|p| !known.contains(&p.status.number)));
+    Ok(Some(prs))
+}
+
+/// How many open PRs, and how many recently closed or merged ones, one read
+/// of a repository looks at.
+const OPEN_LIMIT: &str = "100";
+const FINISHED_LIMIT: &str = "50";
+
+/// One `gh pr list --state <state>`, parsed; `None` for every way it can fail.
+async fn list_prs(worktree: &Path, state: &str, limit: &str) -> Option<Vec<PrInfo>> {
     // gh runs git in the worktree to find the repository, so it carries the
     // same pins as the daemon's own git (`crate::git_guard`).
-    let Ok(mut gh) = gh(worktree).await else { return Ok(None) };
+    let mut gh = gh(worktree).await.ok()?;
     let out = tokio::time::timeout(
         GH_TIMEOUT,
         gh
@@ -261,12 +322,13 @@ pub async fn fetch_prs(worktree: &Path) -> Result<Option<Vec<PrInfo>>> {
                 "pr",
                 "list",
                 "--state",
-                "all",
+                state,
                 "--limit",
-                "100",
+                limit,
                 "--json",
-                "number,url,state,headRefName,headRefOid,baseRefName,isDraft,mergedAt,\
-                 reviewDecision,statusCheckRollup",
+                "number,url,title,state,headRefName,headRefOid,baseRefName,isDraft,mergedAt,\
+                 reviewDecision,statusCheckRollup,reviewRequests,latestReviews,mergeStateStatus,\
+                 isCrossRepository",
             ])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
@@ -276,23 +338,25 @@ pub async fn fetch_prs(worktree: &Path) -> Result<Option<Vec<PrInfo>>> {
     )
     .await;
 
-    let out = match out {
-        Ok(Ok(o)) if o.status.success() => o,
+    match out {
+        Ok(Ok(o)) if o.status.success() => parse_prs(&o.stdout),
         // Every failure mode lands here and means the same thing to a user:
         // Far Cooler cannot say. `gh` missing, logged out, rate limited, offline,
         // or slower than the timeout are not separately actionable.
-        _ => return Ok(None),
-    };
+        _ => None,
+    }
+}
 
-    let prs: Vec<GhPr> = match serde_json::from_slice(&out.stdout) {
-        Ok(v) => v,
+/// What `gh pr list --json ...` printed, as the PRs it listed. `None` for
+/// anything that is not that JSON, which must never read as "no PRs".
+pub(crate) fn parse_prs(stdout: &[u8]) -> Option<Vec<PrInfo>> {
+    match serde_json::from_slice::<Vec<GhPr>>(stdout) {
+        Ok(prs) => Some(prs.into_iter().map(parse_pr).collect()),
         Err(e) => {
             tracing::warn!(error = %e, "could not read gh output");
-            return Ok(None);
+            None
         }
-    };
-
-    Ok(Some(prs.into_iter().map(parse_pr).collect()))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -300,6 +364,30 @@ pub struct PrInfo {
     pub head_ref: String,
     pub base_ref: String,
     pub status: PrStatus,
+    pub title: String,
+    /// From a fork, which no lane of this repository opened.
+    pub is_fork: bool,
+    /// What the PR's reviewers have done and been asked for (ov-312).
+    pub review: PrReview,
+}
+
+/// The review facts a lane's stage is read from (ov-312). Everything here is
+/// what GitHub said on the last read; none of it is written anywhere.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PrReview {
+    /// Who a review is requested from, by login or team slug, in GitHub's order.
+    pub requested: Vec<String>,
+    /// `mergeStateStatus`, as GitHub spells it (`CLEAN`, `DIRTY`, ...); empty
+    /// when it said nothing. `DIRTY` is a merge conflict.
+    pub merge_state: String,
+    /// From 1 as GitHub counts it, when the PR is in the merge queue. Not in `gh pr list`'s fields
+    /// (gh 2.101 refuses `mergeQueueEntry` there, and with it the whole call), so
+    /// it is read with the thread count (`pr_watch::extras`), for the PRs of live
+    /// lanes only.
+    pub queue_position: Option<u32>,
+    /// Review threads still open. Counted separately (`pr_threads`), and only
+    /// for a PR of a lane in review or landing, so `None` is "not counted".
+    pub unresolved_threads: Option<u32>,
 }
 
 fn parse_pr(p: GhPr) -> PrInfo {
@@ -318,16 +406,10 @@ fn parse_pr(p: GhPr) -> PrInfo {
             let mut failing = false;
             let mut pending = false;
             for c in rollup {
-                match c.conclusion.as_deref() {
-                    Some("FAILURE") | Some("TIMED_OUT") | Some("CANCELLED")
-                    | Some("ACTION_REQUIRED") => failing = true,
-                    Some("SUCCESS") | Some("NEUTRAL") | Some("SKIPPED") => {}
-                    // No conclusion yet: still running.
-                    _ => {
-                        if c.status.as_deref() != Some("COMPLETED") {
-                            pending = true;
-                        }
-                    }
+                match check_outcome(c) {
+                    Outcome::Failing => failing = true,
+                    Outcome::Pending => pending = true,
+                    Outcome::Passing => {}
                 }
             }
             if failing {
@@ -344,12 +426,28 @@ fn parse_pr(p: GhPr) -> PrInfo {
         Some("APPROVED") => ReviewDecision::Approved,
         Some("CHANGES_REQUESTED") => ReviewDecision::ChangesRequested,
         Some("REVIEW_REQUIRED") => ReviewDecision::ReviewRequired,
-        _ => ReviewDecision::Unknown,
+        // GitHub decides only where a rule requires reviews, and prints an
+        // empty decision everywhere else. The reviews themselves still say.
+        _ => decision_from_reviews(&p.latest_reviews),
     };
 
     let merged_at = p.merged_at.as_deref().and_then(parse_iso8601_millis);
 
+    let review = PrReview {
+        requested: p
+            .review_requests
+            .into_iter()
+            .filter_map(|r| r.login.or(r.slug).or(r.name).filter(|n| !n.is_empty()))
+            .collect(),
+        merge_state: p.merge_state_status.unwrap_or_default(),
+        queue_position: None,
+        unresolved_threads: None,
+    };
+
     PrInfo {
+        title: p.title,
+        is_fork: p.is_cross_repository,
+        review,
         head_ref: p.head_ref_name,
         base_ref: p.base_ref_name,
         status: PrStatus {
@@ -363,6 +461,74 @@ fn parse_pr(p: GhPr) -> PrInfo {
             fetched_at: crate::review::now_millis(),
         },
     }
+}
+
+enum Outcome {
+    Passing,
+    Pending,
+    Failing,
+}
+
+/// How one entry of the rollup counts. A commit status carries a `state` and
+/// no `status` or `conclusion`, so read as a check run it would be pending
+/// forever.
+fn check_outcome(c: &GhCheck) -> Outcome {
+    if c.typename == "StatusContext" || (c.state.is_some() && c.status.is_none()) {
+        return match c.state.as_deref() {
+            Some("SUCCESS") => Outcome::Passing,
+            Some("FAILURE") | Some("ERROR") => Outcome::Failing,
+            // PENDING, EXPECTED, or a state this was written before.
+            _ => Outcome::Pending,
+        };
+    }
+    match c.conclusion.as_deref() {
+        Some("FAILURE") | Some("TIMED_OUT") | Some("CANCELLED") | Some("ACTION_REQUIRED") | Some("STARTUP_FAILURE") => {
+            Outcome::Failing
+        }
+        Some("SUCCESS") | Some("NEUTRAL") | Some("SKIPPED") => Outcome::Passing,
+        // No conclusion yet: still running.
+        _ if c.status.as_deref() != Some("COMPLETED") => Outcome::Pending,
+        _ => Outcome::Passing,
+    }
+}
+
+/// The decision the reviews add up to when GitHub gave none: the latest of each
+/// reviewer's, any request for changes winning, else any approval.
+fn decision_from_reviews(reviews: &[GhReview]) -> ReviewDecision {
+    let mut latest: Vec<(&str, &str)> = Vec::new();
+    for r in reviews {
+        let who = r.author.as_ref().map_or("", |a| a.login.as_str());
+        match latest.iter_mut().find(|(l, _)| *l == who) {
+            Some(slot) => slot.1 = r.state.as_str(),
+            None => latest.push((who, r.state.as_str())),
+        }
+    }
+    if latest.iter().any(|(_, s)| *s == "CHANGES_REQUESTED") {
+        ReviewDecision::ChangesRequested
+    } else if latest.iter().any(|(_, s)| *s == "APPROVED") {
+        ReviewDecision::Approved
+    } else {
+        ReviewDecision::Unknown
+    }
+}
+
+/// What the cache holds once `fresh` is read over `previous`.
+///
+/// A read that failed (`None`) keeps what was known, so a network blip or a
+/// manual refresh that could not reach GitHub never turns every stage into
+/// "unknown". A read that succeeded keeps the thread count and queue place the
+/// PR watch had for a pull request it did not count this time: `gh pr list`
+/// has neither, and a refresh would otherwise erase them until the next turn.
+pub fn merge_read(previous: Option<Vec<PrInfo>>, fresh: Option<Vec<PrInfo>>) -> Option<Vec<PrInfo>> {
+    let Some(mut fresh) = fresh else { return previous };
+    for pr in fresh.iter_mut().filter(|p| p.review.unresolved_threads.is_none()) {
+        let was = previous.iter().flatten().find(|o| o.status.number == pr.status.number);
+        if let Some(was) = was.filter(|_| matches!(pr.status.state, PrState::Open | PrState::Draft)) {
+            pr.review.unresolved_threads = was.review.unresolved_threads;
+            pr.review.queue_position = was.review.queue_position;
+        }
+    }
+    Some(fresh)
 }
 
 /// `2026-08-05T10:29:37Z` to unix millis.
@@ -733,9 +899,10 @@ mod tests {
             merged_at: None,
             review_decision: None,
             status_check_rollup: Some(vec![
-                GhCheck { conclusion: Some("FAILURE".into()), status: Some("COMPLETED".into()) },
-                GhCheck { conclusion: None, status: Some("IN_PROGRESS".into()) },
+                GhCheck { conclusion: Some("FAILURE".into()), status: Some("COMPLETED".into()), ..Default::default() },
+                GhCheck { conclusion: None, status: Some("IN_PROGRESS".into()), ..Default::default() },
             ]),
+            ..Default::default()
         };
         assert_eq!(parse_pr(p).status.checks, CheckState::Failing);
     }
@@ -755,6 +922,7 @@ mod tests {
             merged_at: None,
             review_decision: None,
             status_check_rollup: Some(vec![]),
+            ..Default::default()
         };
         assert_eq!(parse_pr(p).status.checks, CheckState::Unknown);
     }
@@ -772,6 +940,7 @@ mod tests {
             merged_at: None,
             review_decision: None,
             status_check_rollup: None,
+            ..Default::default()
         };
         assert_eq!(parse_pr(mk(true)).status.state, PrState::Draft);
         assert_eq!(parse_pr(mk(false)).status.state, PrState::Open);

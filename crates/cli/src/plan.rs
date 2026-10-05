@@ -44,6 +44,8 @@ mod ruling;
 mod train;
 #[path = "plan_cost.rs"]
 mod cost;
+#[path = "plan_stage.rs"]
+mod stage;
 
 /// What a runner without the layer is told.
 const NEEDS_UPDATE: &str = "This runner needs an update to keep a plan.";
@@ -519,7 +521,7 @@ async fn cards_of<L: DispatchLink>(
     for text in given {
         let (key, slice) = split_card(text);
         let task = card(link, board, items, key).await?;
-        out.push(pb::LaneCard { task_id: task.id, slice });
+        out.push(pb::LaneCard { task_id: task.id, slice, stage: None });
     }
     Ok(out)
 }
@@ -1083,6 +1085,11 @@ fn lane_status(l: &pb::Lane, now: i64) -> String {
     if let Some(train) = &l.train {
         parts.push(format!("in {train}"));
     }
+    // Where its pull requests stand (ov-312). Building is the state word
+    // already, so it isn't said twice.
+    if let Some(stage) = l.stage.as_ref().filter(|s| s.kind != pb::PrStageKind::Building as i32) {
+        parts.push(stage.label.clone());
+    }
     parts.push(count(l.cards.len(), "card"));
     let spend = l.spend.unwrap_or_default();
     if spend.runs > 0 {
@@ -1279,7 +1286,7 @@ fn lane_text(l: &pb::Lane, keys: &Keys, events: &[pb::PlanEvent], now: i64) -> S
     out.push("Cards".into());
     for c in &l.cards {
         let slice = if c.slice.is_empty() { "whole card".to_string() } else { c.slice.clone() };
-        out.push(format!("  {}  {}", keys.of(&c.task_id), slice));
+        out.push(format!("  {}  {}{}", keys.of(&c.task_id), slice, stage::card_words(c)));
     }
     let spend = l.spend.unwrap_or_default();
     out.push(format!("Spend  {}", spend_words(&spend)));
@@ -1389,7 +1396,7 @@ fn lane_state_word(state: i32) -> &'static str {
 
 fn lane_json(l: &pb::Lane, keys: &Keys) -> Value {
     let spend = l.spend.unwrap_or_default();
-    json!({
+    stage::with_stage(json!({
         "id": id_text(&l.id),
         "short": short_bytes(&l.id),
         "name": l.name,
@@ -1406,9 +1413,9 @@ fn lane_json(l: &pb::Lane, keys: &Keys) -> Value {
         "stale": l.stale,
         "budget_tokens": l.budget_tokens,
         "fix_rounds": l.fix_rounds,
-        "cards": l.cards.iter().map(|c| json!({
+        "cards": l.cards.iter().map(|c| stage::with_stage(json!({
             "task": id_text(&c.task_id), "key": keys.of(&c.task_id), "slice": c.slice,
-        })).collect::<Vec<_>>(),
+        }), &c.stage)).collect::<Vec<_>>(),
         "agents": l.agents.iter().map(|a| json!({
             "harness": a.harness, "agent_id": a.agent_id,
             "role": match pb::LaneAgentRole::try_from(a.role) {
@@ -1424,7 +1431,7 @@ fn lane_json(l: &pb::Lane, keys: &Keys) -> Value {
             "cost_micros": spend.cost_micros, "runs": spend.runs, "unmeasured_agents": spend.unmeasured_agents,
             "shared_agents": spend.shared_agents,
         },
-    })
+    }), &l.stage)
 }
 
 fn event_json(e: &pb::PlanEvent) -> Value {

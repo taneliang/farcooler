@@ -1,0 +1,820 @@
+[
+ {
+  "baseRefName": "main",
+  "headRefName": "@1@/pr-stage",
+  "headRefOid": "0000000000000000000000000000000000000065",
+  "isCrossRepository": false,
+  "isDraft": true,
+  "latestReviews": [],
+  "mergeStateStatus": "DRAFT",
+  "mergedAt": null,
+  "number": 101,
+  "reviewDecision": "",
+  "reviewRequests": [],
+  "state": "OPEN",
+  "statusCheckRollup": [],
+  "title": "@1@: A draft the agent review has open",
+  "url": "https://github.example/o/r/pull/101"
+ },
+ {
+  "baseRefName": "main",
+  "headRefName": "@2@/pr-stage",
+  "headRefOid": "0000000000000000000000000000000000000066",
+  "isCrossRepository": false,
+  "isDraft": true,
+  "latestReviews": [],
+  "mergeStateStatus": "DRAFT",
+  "mergedAt": null,
+  "number": 102,
+  "reviewDecision": "",
+  "reviewRequests": [],
+  "state": "OPEN",
+  "statusCheckRollup": [],
+  "title": "@2@: A draft with fixes since the review",
+  "url": "https://github.example/o/r/pull/102"
+ },
+ {
+  "baseRefName": "main",
+  "headRefName": "@3@/pr-stage",
+  "headRefOid": "0000000000000000000000000000000000000067",
+  "isCrossRepository": false,
+  "isDraft": false,
+  "latestReviews": [],
+  "mergeStateStatus": "BLOCKED",
+  "mergedAt": null,
+  "number": 103,
+  "reviewDecision": "",
+  "reviewRequests": [
+   {
+    "__typename": "User",
+    "login": "alice"
+   }
+  ],
+  "state": "OPEN",
+  "statusCheckRollup": [],
+  "title": "@3@: Ready, alice asked",
+  "url": "https://github.example/o/r/pull/103"
+ },
+ {
+  "baseRefName": "main",
+  "headRefName": "@4@/pr-stage",
+  "headRefOid": "0000000000000000000000000000000000000068",
+  "isCrossRepository": false,
+  "isDraft": false,
+  "latestReviews": [],
+  "mergeStateStatus": "BLOCKED",
+  "mergedAt": null,
+  "number": 104,
+  "reviewDecision": "",
+  "reviewRequests": [],
+  "state": "OPEN",
+  "statusCheckRollup": [],
+  "title": "@4@: Ready, nobody asked",
+  "url": "https://github.example/o/r/pull/104"
+ },
+ {
+  "baseRefName": "main",
+  "headRefName": "@5@/pr-stage",
+  "headRefOid": "0000000000000000000000000000000000000069",
+  "isCrossRepository": false,
+  "isDraft": false,
+  "latestReviews": [
+   {
+    "author": {
+     "login": "alice"
+    },
+    "authorAssociation": "MEMBER",
+    "body": "",
+    "commit": {
+     "oid": "0000000000000000000000000000000000000000"
+    },
+    "id": "PRR_aliceCHANGES_REQUESTED",
+    "includesCreatedEdit": false,
+    "reactionGroups": [],
+    "state": "CHANGES_REQUESTED",
+    "submittedAt": "2026-10-04T08:00:00Z"
+   }
+  ],
+  "mergeStateStatus": "BLOCKED",
+  "mergedAt": null,
+  "number": 105,
+  "reviewDecision": "CHANGES_REQUESTED",
+  "reviewRequests": [],
+  "state": "OPEN",
+  "statusCheckRollup": [],
+  "title": "@5@: Changes requested",
+  "url": "https://github.example/o/r/pull/105"
+ },
+ {
+  "baseRefName": "main",
+  "headRefName": "@6@/pr-stage",
+  "headRefOid": "000000000000000000000000000000000000006a",
+  "isCrossRepository": false,
+  "isDraft": false,
+  "latestReviews": [
+   {
+    "author": {
+     "login": "bob"
+    },
+    "authorAssociation": "MEMBER",
+    "body": "",
+    "commit": {
+     "oid": "0000000000000000000000000000000000000000"
+    },
+    "id": "PRR_bobAPPROVED",
+    "includesCreatedEdit": false,
+    "reactionGroups": [],
+    "state": "APPROVED",
+    "submittedAt": "2026-10-04T08:00:00Z"
+   }
+  ],
+  "mergeStateStatus": "BLOCKED",
+  "mergedAt": null,
+  "number": 106,
+  "reviewDecision": "APPROVED",
+  "reviewRequests": [],
+  "state": "OPEN",
+  "statusCheckRollup": [
+   {
+    "__typename": "CheckRun",
+    "completedAt": "2026-10-04T08:00:00Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.example/o/r/actions/runs/1",
+    "name": "CI / Rust",
+    "startedAt": "2026-10-04T08:00:00Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+   },
+   {
+    "__typename": "CheckRun",
+    "completedAt": "0001-01-01T00:00:00Z",
+    "conclusion": "",
+    "detailsUrl": "https://github.example/o/r/actions/runs/1",
+    "name": "CI / Swift",
+    "startedAt": "2026-10-04T08:00:00Z",
+    "status": "IN_PROGRESS",
+    "workflowName": "CI"
+   }
+  ],
+  "title": "@6@: Approved, checks running",
+  "url": "https://github.example/o/r/pull/106"
+ },
+ {
+  "baseRefName": "main",
+  "headRefName": "@7@/pr-stage",
+  "headRefOid": "000000000000000000000000000000000000006b",
+  "isCrossRepository": false,
+  "isDraft": false,
+  "latestReviews": [
+   {
+    "author": {
+     "login": "bob"
+    },
+    "authorAssociation": "MEMBER",
+    "body": "",
+    "commit": {
+     "oid": "0000000000000000000000000000000000000000"
+    },
+    "id": "PRR_bobAPPROVED",
+    "includesCreatedEdit": false,
+    "reactionGroups": [],
+    "state": "APPROVED",
+    "submittedAt": "2026-10-04T08:00:00Z"
+   }
+  ],
+  "mergeStateStatus": "BLOCKED",
+  "mergedAt": null,
+  "number": 107,
+  "reviewDecision": "APPROVED",
+  "reviewRequests": [],
+  "state": "OPEN",
+  "statusCheckRollup": [
+   {
+    "__typename": "CheckRun",
+    "completedAt": "2026-10-04T08:00:00Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.example/o/r/actions/runs/1",
+    "name": "CI / Rust",
+    "startedAt": "2026-10-04T08:00:00Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+   },
+   {
+    "__typename": "CheckRun",
+    "completedAt": "2026-10-04T08:00:00Z",
+    "conclusion": "FAILURE",
+    "detailsUrl": "https://github.example/o/r/actions/runs/1",
+    "name": "CI / Swift",
+    "startedAt": "2026-10-04T08:00:00Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+   }
+  ],
+  "title": "@7@: Approved, checks failing",
+  "url": "https://github.example/o/r/pull/107"
+ },
+ {
+  "baseRefName": "main",
+  "headRefName": "@8@/pr-stage",
+  "headRefOid": "000000000000000000000000000000000000006c",
+  "isCrossRepository": false,
+  "isDraft": false,
+  "latestReviews": [
+   {
+    "author": {
+     "login": "bob"
+    },
+    "authorAssociation": "MEMBER",
+    "body": "",
+    "commit": {
+     "oid": "0000000000000000000000000000000000000000"
+    },
+    "id": "PRR_bobAPPROVED",
+    "includesCreatedEdit": false,
+    "reactionGroups": [],
+    "state": "APPROVED",
+    "submittedAt": "2026-10-04T08:00:00Z"
+   }
+  ],
+  "mergeStateStatus": "CLEAN",
+  "mergedAt": null,
+  "number": 108,
+  "reviewDecision": "APPROVED",
+  "reviewRequests": [],
+  "state": "OPEN",
+  "statusCheckRollup": [
+   {
+    "__typename": "CheckRun",
+    "completedAt": "2026-10-04T08:00:00Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.example/o/r/actions/runs/1",
+    "name": "CI / Rust",
+    "startedAt": "2026-10-04T08:00:00Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+   },
+   {
+    "__typename": "CheckRun",
+    "completedAt": "2026-10-04T08:00:00Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.example/o/r/actions/runs/1",
+    "name": "CI / Swift",
+    "startedAt": "2026-10-04T08:00:00Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+   }
+  ],
+  "title": "@8@: Approved, checks passing",
+  "url": "https://github.example/o/r/pull/108"
+ },
+ {
+  "baseRefName": "main",
+  "headRefName": "@9@/pr-stage",
+  "headRefOid": "000000000000000000000000000000000000006d",
+  "isCrossRepository": false,
+  "isDraft": false,
+  "latestReviews": [
+   {
+    "author": {
+     "login": "bob"
+    },
+    "authorAssociation": "MEMBER",
+    "body": "",
+    "commit": {
+     "oid": "0000000000000000000000000000000000000000"
+    },
+    "id": "PRR_bobAPPROVED",
+    "includesCreatedEdit": false,
+    "reactionGroups": [],
+    "state": "APPROVED",
+    "submittedAt": "2026-10-04T08:00:00Z"
+   }
+  ],
+  "mergeStateStatus": "CLEAN",
+  "mergedAt": null,
+  "number": 109,
+  "reviewDecision": "APPROVED",
+  "reviewRequests": [],
+  "state": "OPEN",
+  "statusCheckRollup": [
+   {
+    "__typename": "CheckRun",
+    "completedAt": "2026-10-04T08:00:00Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.example/o/r/actions/runs/1",
+    "name": "CI / Rust",
+    "startedAt": "2026-10-04T08:00:00Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+   },
+   {
+    "__typename": "CheckRun",
+    "completedAt": "2026-10-04T08:00:00Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.example/o/r/actions/runs/1",
+    "name": "CI / Swift",
+    "startedAt": "2026-10-04T08:00:00Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+   }
+  ],
+  "title": "@9@: Approved and queued",
+  "url": "https://github.example/o/r/pull/109"
+ },
+ {
+  "baseRefName": "main",
+  "headRefName": "@10@/pr-stage",
+  "headRefOid": "000000000000000000000000000000000000006e",
+  "isCrossRepository": false,
+  "isDraft": false,
+  "latestReviews": [
+   {
+    "author": {
+     "login": "bob"
+    },
+    "authorAssociation": "MEMBER",
+    "body": "",
+    "commit": {
+     "oid": "0000000000000000000000000000000000000000"
+    },
+    "id": "PRR_bobAPPROVED",
+    "includesCreatedEdit": false,
+    "reactionGroups": [],
+    "state": "APPROVED",
+    "submittedAt": "2026-10-04T08:00:00Z"
+   }
+  ],
+  "mergeStateStatus": "CLEAN",
+  "mergedAt": "2026-10-04T09:00:00Z",
+  "number": 110,
+  "reviewDecision": "APPROVED",
+  "reviewRequests": [],
+  "state": "MERGED",
+  "statusCheckRollup": [
+   {
+    "__typename": "CheckRun",
+    "completedAt": "2026-10-04T08:00:00Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.example/o/r/actions/runs/1",
+    "name": "CI / Rust",
+    "startedAt": "2026-10-04T08:00:00Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+   },
+   {
+    "__typename": "CheckRun",
+    "completedAt": "2026-10-04T08:00:00Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.example/o/r/actions/runs/1",
+    "name": "CI / Swift",
+    "startedAt": "2026-10-04T08:00:00Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+   }
+  ],
+  "title": "@10@: Merged",
+  "url": "https://github.example/o/r/pull/110"
+ },
+ {
+  "baseRefName": "main",
+  "headRefName": "@11@/pr-stage",
+  "headRefOid": "000000000000000000000000000000000000006f",
+  "isCrossRepository": false,
+  "isDraft": false,
+  "latestReviews": [],
+  "mergeStateStatus": "UNKNOWN",
+  "mergedAt": null,
+  "number": 111,
+  "reviewDecision": "",
+  "reviewRequests": [],
+  "state": "CLOSED",
+  "statusCheckRollup": [],
+  "title": "@11@: Closed without merging",
+  "url": "https://github.example/o/r/pull/111"
+ },
+ {
+  "baseRefName": "main",
+  "headRefName": "@12@/pr-stage",
+  "headRefOid": "0000000000000000000000000000000000000070",
+  "isCrossRepository": false,
+  "isDraft": false,
+  "latestReviews": [],
+  "mergeStateStatus": "BLOCKED",
+  "mergedAt": null,
+  "number": 112,
+  "reviewDecision": "",
+  "reviewRequests": [
+   {
+    "__typename": "User",
+    "login": "alice"
+   },
+   {
+    "__typename": "Team",
+    "name": "Core",
+    "slug": "myorg/core"
+   }
+  ],
+  "state": "OPEN",
+  "statusCheckRollup": [],
+  "title": "@12@: alice and a team asked",
+  "url": "https://github.example/o/r/pull/112"
+ },
+ {
+  "baseRefName": "main",
+  "headRefName": "@14@/pr-stage",
+  "headRefOid": "0000000000000000000000000000000000000072",
+  "isCrossRepository": false,
+  "isDraft": false,
+  "latestReviews": [
+   {
+    "author": {
+     "login": "bob"
+    },
+    "authorAssociation": "MEMBER",
+    "body": "",
+    "commit": {
+     "oid": "0000000000000000000000000000000000000000"
+    },
+    "id": "PRR_bobAPPROVED",
+    "includesCreatedEdit": false,
+    "reactionGroups": [],
+    "state": "APPROVED",
+    "submittedAt": "2026-10-04T08:00:00Z"
+   }
+  ],
+  "mergeStateStatus": "CLEAN",
+  "mergedAt": null,
+  "number": 114,
+  "reviewDecision": "",
+  "reviewRequests": [],
+  "state": "OPEN",
+  "statusCheckRollup": [
+   {
+    "__typename": "CheckRun",
+    "completedAt": "2026-10-04T08:00:00Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.example/o/r/actions/runs/1",
+    "name": "CI / Rust",
+    "startedAt": "2026-10-04T08:00:00Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+   },
+   {
+    "__typename": "CheckRun",
+    "completedAt": "2026-10-04T08:00:00Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.example/o/r/actions/runs/1",
+    "name": "CI / Swift",
+    "startedAt": "2026-10-04T08:00:00Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+   }
+  ],
+  "title": "@14@: No required review, one approval",
+  "url": "https://github.example/o/r/pull/114"
+ },
+ {
+  "baseRefName": "main",
+  "headRefName": "@15@/pr-stage",
+  "headRefOid": "0000000000000000000000000000000000000073",
+  "isCrossRepository": false,
+  "isDraft": false,
+  "latestReviews": [
+   {
+    "author": {
+     "login": "alice"
+    },
+    "authorAssociation": "MEMBER",
+    "body": "",
+    "commit": {
+     "oid": "0000000000000000000000000000000000000000"
+    },
+    "id": "PRR_aliceCHANGES_REQUESTED",
+    "includesCreatedEdit": false,
+    "reactionGroups": [],
+    "state": "CHANGES_REQUESTED",
+    "submittedAt": "2026-10-04T08:00:00Z"
+   },
+   {
+    "author": {
+     "login": "bob"
+    },
+    "authorAssociation": "MEMBER",
+    "body": "",
+    "commit": {
+     "oid": "0000000000000000000000000000000000000000"
+    },
+    "id": "PRR_bobAPPROVED",
+    "includesCreatedEdit": false,
+    "reactionGroups": [],
+    "state": "APPROVED",
+    "submittedAt": "2026-10-04T08:00:00Z"
+   }
+  ],
+  "mergeStateStatus": "BLOCKED",
+  "mergedAt": null,
+  "number": 115,
+  "reviewDecision": "",
+  "reviewRequests": [],
+  "state": "OPEN",
+  "statusCheckRollup": [],
+  "title": "@15@: No required review, a change requested and an approval",
+  "url": "https://github.example/o/r/pull/115"
+ },
+ {
+  "baseRefName": "main",
+  "headRefName": "@16@/pr-stage",
+  "headRefOid": "0000000000000000000000000000000000000074",
+  "isCrossRepository": false,
+  "isDraft": false,
+  "latestReviews": [
+   {
+    "author": {
+     "login": "bob"
+    },
+    "authorAssociation": "MEMBER",
+    "body": "",
+    "commit": {
+     "oid": "0000000000000000000000000000000000000000"
+    },
+    "id": "PRR_bobAPPROVED",
+    "includesCreatedEdit": false,
+    "reactionGroups": [],
+    "state": "APPROVED",
+    "submittedAt": "2026-10-04T08:00:00Z"
+   }
+  ],
+  "mergeStateStatus": "CLEAN",
+  "mergedAt": null,
+  "number": 116,
+  "reviewDecision": "APPROVED",
+  "reviewRequests": [],
+  "state": "OPEN",
+  "statusCheckRollup": [
+   {
+    "__typename": "CheckRun",
+    "completedAt": "2026-10-04T08:00:00Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.example/o/r/actions/runs/1",
+    "name": "CI / Rust",
+    "startedAt": "2026-10-04T08:00:00Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+   },
+   {
+    "__typename": "StatusContext",
+    "context": "buildkite/ci",
+    "startedAt": "2026-10-04T08:00:00Z",
+    "state": "SUCCESS",
+    "targetUrl": "https://ci.example/build/1"
+   }
+  ],
+  "title": "@16@: Approved, a commit status and a check run both green",
+  "url": "https://github.example/o/r/pull/116"
+ },
+ {
+  "baseRefName": "main",
+  "headRefName": "@17@/pr-stage",
+  "headRefOid": "0000000000000000000000000000000000000075",
+  "isCrossRepository": false,
+  "isDraft": false,
+  "latestReviews": [
+   {
+    "author": {
+     "login": "bob"
+    },
+    "authorAssociation": "MEMBER",
+    "body": "",
+    "commit": {
+     "oid": "0000000000000000000000000000000000000000"
+    },
+    "id": "PRR_bobAPPROVED",
+    "includesCreatedEdit": false,
+    "reactionGroups": [],
+    "state": "APPROVED",
+    "submittedAt": "2026-10-04T08:00:00Z"
+   }
+  ],
+  "mergeStateStatus": "BLOCKED",
+  "mergedAt": null,
+  "number": 117,
+  "reviewDecision": "APPROVED",
+  "reviewRequests": [],
+  "state": "OPEN",
+  "statusCheckRollup": [
+   {
+    "__typename": "CheckRun",
+    "completedAt": "2026-10-04T08:00:00Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.example/o/r/actions/runs/1",
+    "name": "CI / Rust",
+    "startedAt": "2026-10-04T08:00:00Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+   },
+   {
+    "__typename": "StatusContext",
+    "context": "buildkite/ci",
+    "startedAt": "2026-10-04T08:00:00Z",
+    "state": "PENDING",
+    "targetUrl": "https://ci.example/build/1"
+   }
+  ],
+  "title": "@17@: Approved, a commit status pending",
+  "url": "https://github.example/o/r/pull/117"
+ },
+ {
+  "baseRefName": "main",
+  "headRefName": "@18@/pr-stage",
+  "headRefOid": "0000000000000000000000000000000000000076",
+  "isCrossRepository": false,
+  "isDraft": false,
+  "latestReviews": [
+   {
+    "author": {
+     "login": "bob"
+    },
+    "authorAssociation": "MEMBER",
+    "body": "",
+    "commit": {
+     "oid": "0000000000000000000000000000000000000000"
+    },
+    "id": "PRR_bobAPPROVED",
+    "includesCreatedEdit": false,
+    "reactionGroups": [],
+    "state": "APPROVED",
+    "submittedAt": "2026-10-04T08:00:00Z"
+   }
+  ],
+  "mergeStateStatus": "BLOCKED",
+  "mergedAt": null,
+  "number": 118,
+  "reviewDecision": "APPROVED",
+  "reviewRequests": [],
+  "state": "OPEN",
+  "statusCheckRollup": [
+   {
+    "__typename": "CheckRun",
+    "completedAt": "2026-10-04T08:00:00Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.example/o/r/actions/runs/1",
+    "name": "CI / Rust",
+    "startedAt": "2026-10-04T08:00:00Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+   },
+   {
+    "__typename": "StatusContext",
+    "context": "buildkite/ci",
+    "startedAt": "2026-10-04T08:00:00Z",
+    "state": "FAILURE",
+    "targetUrl": "https://ci.example/build/1"
+   }
+  ],
+  "title": "@18@: Approved, a commit status failing",
+  "url": "https://github.example/o/r/pull/118"
+ },
+ {
+  "baseRefName": "main",
+  "headRefName": "@19@/pr-stage",
+  "headRefOid": "0000000000000000000000000000000000000077",
+  "isCrossRepository": false,
+  "isDraft": false,
+  "latestReviews": [
+   {
+    "author": {
+     "login": "bob"
+    },
+    "authorAssociation": "MEMBER",
+    "body": "",
+    "commit": {
+     "oid": "0000000000000000000000000000000000000000"
+    },
+    "id": "PRR_bobAPPROVED",
+    "includesCreatedEdit": false,
+    "reactionGroups": [],
+    "state": "APPROVED",
+    "submittedAt": "2026-10-04T08:00:00Z"
+   }
+  ],
+  "mergeStateStatus": "DIRTY",
+  "mergedAt": null,
+  "number": 119,
+  "reviewDecision": "APPROVED",
+  "reviewRequests": [],
+  "state": "OPEN",
+  "statusCheckRollup": [
+   {
+    "__typename": "CheckRun",
+    "completedAt": "2026-10-04T08:00:00Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.example/o/r/actions/runs/1",
+    "name": "CI / Rust",
+    "startedAt": "2026-10-04T08:00:00Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+   },
+   {
+    "__typename": "CheckRun",
+    "completedAt": "2026-10-04T08:00:00Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.example/o/r/actions/runs/1",
+    "name": "CI / Swift",
+    "startedAt": "2026-10-04T08:00:00Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+   }
+  ],
+  "title": "@19@: Approved, merge conflicts",
+  "url": "https://github.example/o/r/pull/119"
+ },
+ {
+  "baseRefName": "main",
+  "headRefName": "revert-108-@8@-pr-stage",
+  "headRefOid": "0000000000000000000000000000000000000079",
+  "isCrossRepository": false,
+  "isDraft": false,
+  "latestReviews": [],
+  "mergeStateStatus": "CLEAN",
+  "mergedAt": null,
+  "number": 121,
+  "reviewDecision": "",
+  "reviewRequests": [],
+  "state": "OPEN",
+  "statusCheckRollup": [],
+  "title": "Revert \"@8@: Approved, checks passing\"",
+  "url": "https://github.example/o/r/pull/121"
+ },
+ {
+  "baseRefName": "main",
+  "headRefName": "@9@/pr-stage",
+  "headRefOid": "000000000000000000000000000000000000007a",
+  "isCrossRepository": true,
+  "isDraft": false,
+  "latestReviews": [
+   {
+    "author": {
+     "login": "mallory"
+    },
+    "authorAssociation": "MEMBER",
+    "body": "",
+    "commit": {
+     "oid": "0000000000000000000000000000000000000000"
+    },
+    "id": "PRR_malloryCHANGES_REQUESTED",
+    "includesCreatedEdit": false,
+    "reactionGroups": [],
+    "state": "CHANGES_REQUESTED",
+    "submittedAt": "2026-10-04T08:00:00Z"
+   }
+  ],
+  "mergeStateStatus": "CLEAN",
+  "mergedAt": null,
+  "number": 122,
+  "reviewDecision": "CHANGES_REQUESTED",
+  "reviewRequests": [],
+  "state": "OPEN",
+  "statusCheckRollup": [],
+  "title": "@9@: From a fork",
+  "url": "https://github.example/o/r/pull/122"
+ },
+ {
+  "baseRefName": "main",
+  "headRefName": "@20@/follow-up",
+  "headRefOid": "000000000000000000000000000000000000007b",
+  "isCrossRepository": false,
+  "isDraft": false,
+  "latestReviews": [],
+  "mergeStateStatus": "BLOCKED",
+  "mergedAt": null,
+  "number": 123,
+  "reviewDecision": "",
+  "reviewRequests": [
+   {
+    "__typename": "User",
+    "login": "alice"
+   }
+  ],
+  "state": "OPEN",
+  "statusCheckRollup": [],
+  "title": "@20@: A follow-up that cites @10@ and @3@",
+  "url": "https://github.example/o/r/pull/123"
+ },
+ {
+  "baseRefName": "main",
+  "headRefName": "@4@/second-try",
+  "headRefOid": "000000000000000000000000000000000000007d",
+  "isCrossRepository": false,
+  "isDraft": false,
+  "latestReviews": [],
+  "mergeStateStatus": "BLOCKED",
+  "mergedAt": null,
+  "number": 125,
+  "reviewDecision": "",
+  "reviewRequests": [],
+  "state": "OPEN",
+  "statusCheckRollup": [],
+  "title": "@4@: Ready, nobody asked, second try",
+  "url": "https://github.example/o/r/pull/125"
+ }
+]

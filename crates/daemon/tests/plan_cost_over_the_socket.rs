@@ -70,7 +70,7 @@ async fn a_budget_is_set_over_the_wire_and_read_back_with_the_trend_and_the_week
         payload::Payload::LaneCreate(pb::LaneCreate {
             workspace_id: id(repo.workspace),
             name: "cost-lane".into(),
-            cards: vec![pb::LaneCard { task_id: id(task.id), slice: String::new() }],
+            cards: vec![pb::LaneCard { task_id: id(task.id), slice: String::new(), stage: None }],
             agent: Some(pb::LaneAgentRecord {
                 harness: "claude".into(),
                 agent_id: "a1".into(),

@@ -15,7 +15,7 @@ fn lane(n: u128, name: &str, state: pb::LaneState, cards: &[u128]) -> pb::Lane {
         name: name.into(),
         state: state as i32,
         state_since: NOW - 10 * 60_000,
-        cards: cards.iter().map(|c| pb::LaneCard { task_id: id(0x1000 + c), slice: String::new() }).collect(),
+        cards: cards.iter().map(|c| pb::LaneCard { task_id: id(0x1000 + c), slice: String::new(), stage: None }).collect(),
         spend: Some(Default::default()),
         ..Default::default()
     }
@@ -256,4 +256,26 @@ fn an_unlisted_card_is_named_by_its_short_id() {
     plan.cards.clear();
     let json = plan_json(&plan);
     assert_eq!(json["themes"][0]["cards"][0]["key"], "00001001");
+}
+
+/// A lane's pull request stage (ov-312) reaches the phones' JSON, and a lane the
+/// runner said nothing of keeps the shape the fixture holds, with no `stage`.
+#[test]
+fn a_lane_s_pr_stage_reaches_the_json_and_is_left_out_when_unsaid() {
+    let mut plan = the_plan();
+    let at = plan.lanes.iter().position(|l| l.name == "mac-ux").unwrap();
+    let stage = pb::PrStage {
+        kind: pb::PrStageKind::Queued as i32,
+        label: "Queued, Position 2".into(),
+        queue_position: 2,
+        pr_number: 31,
+        ..Default::default()
+    };
+    plan.lanes[at].stage = Some(stage.clone());
+    plan.lanes[at].cards[0].stage = Some(stage);
+    let json = plan_json(&plan);
+    assert_eq!(json["lanes"][at]["stage"]["label"], "Queued, Position 2");
+    assert_eq!(json["lanes"][at]["stage"]["kind"], "queued");
+    assert_eq!(json["lanes"][at]["cards"][0]["stage"]["queue_position"], 2);
+    assert!(json["lanes"][(at + 1) % plan.lanes.len()].get("stage").is_none());
 }

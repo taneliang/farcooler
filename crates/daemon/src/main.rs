@@ -277,6 +277,10 @@ async fn run() -> Result<(), i32> {
     // and pages that name a commit, only here, never in a `--stdio` session.
     tokio::spawn(farcooler_daemon::ci_watch::run(service.clone(), watcher.clone()));
 
+    // The PR watch (ov-312): re-reads the pull requests of lanes in review or
+    // landing every minute, and reads nothing while none is.
+    tokio::spawn(farcooler_daemon::pr_watch::run(service.clone(), watcher.clone()));
+
     // Expire pasted images. Once at startup and daily after that, because the
     // host this runs on is a laptop that is asleep more often than it is
     // up — an interval alone would let a directory grow for weeks between two
