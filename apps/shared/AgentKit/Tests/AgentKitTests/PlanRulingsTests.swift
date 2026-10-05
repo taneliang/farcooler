@@ -44,14 +44,17 @@ struct PlanRulingsTests {
     }
 
     /// An answer without `rulings`, as an older CLI prints, still reads, with
-    /// none; a board with only rulings isn't "nothing planned".
+    /// none. Rulings alone don't make a board planned: they never switch its
+    /// layout (review 1005a F1), and `showsNothing` is what hides the notice.
     @Test func aPlanWithoutRulingsStillReads() throws {
         let json = #"{"now_ms": 1, "themes": [], "lanes": [], "order": [], "cards": []}"#
         let plan = try PlanModel.decode(Data(json.utf8))
         #expect(plan.rulings.isEmpty)
         #expect(plan.isEmpty)
         let ruled = PlanModel(rulings: [PlanRuling(id: "x", number: 1, decision: "A", why: "B", reversal: "C")])
-        #expect(!ruled.isEmpty)
+        #expect(ruled.isEmpty, "nothing planned")
+        #expect(!ruled.showsNothing, "but something to show")
+        #expect(plan.showsNothing)
     }
 
     /// A state this build has no word for reads as unknown, not as a plan

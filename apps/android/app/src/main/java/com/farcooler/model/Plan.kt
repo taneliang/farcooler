@@ -144,8 +144,11 @@ data class Plan(
     /** Decided for you (ov-304): standing rulings newest first, then the settled ones, in the runner's order. */
     val rulings: List<PlanRuling> = emptyList(),
 ) {
-    /** Nothing planned: no theme, no lane and no ruling. */
-    val isEmpty: Boolean get() = themes.isEmpty() && lanes.isEmpty() && rulings.isEmpty()
+    /** Nothing planned: no theme and no lane. Rulings don't count: they never switch a board's layout (review 1005a F1). */
+    val isEmpty: Boolean get() = themes.isEmpty() && lanes.isEmpty()
+
+    /** Nothing at all to show: nothing planned and no ruling. */
+    val showsNothing: Boolean get() = isEmpty && rulings.isEmpty()
 
     /** Next up: the plan's queued lanes, first is next. */
     val nextUp: List<PlanLane>

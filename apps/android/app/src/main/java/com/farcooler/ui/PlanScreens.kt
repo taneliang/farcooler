@@ -116,7 +116,7 @@ fun LazyListScope.planItems(
             }
         }
         is PlanReadState.Loaded -> {
-            loaded(state.plan, statuses, onOpen, landedOpen, onToggleLanded, pages)
+            loaded(state.plan, statuses, onOpen, landedOpen, onToggleLanded, pages, rulingsShown = rulings != null && state.plan.rulings.isNotEmpty())
             // Last, as on the Mac and the iPhone: rulings ask nothing, and stand until the owner says otherwise.
             rulingItems(state.plan, rulings)
         }
@@ -130,9 +130,11 @@ private fun LazyListScope.loaded(
     landedOpen: Boolean,
     onToggleLanded: () -> Unit,
     pages: PagesHook?,
+    rulingsShown: Boolean = false,
 ) {
     if (plan.isEmpty) {
-        item(key = "plan/empty") {
+        // Rulings alone plan nothing (review 1005a F1), but they're something to show.
+        if (!rulingsShown) item(key = "plan/empty") {
             PlanNotice(PlanWords.NOTHING_PLANNED, PlanWords.NOTHING_PLANNED_DETAIL, Modifier.testTag("plan-empty"))
         }
         pages?.let { pageItems(it, plan, onOpen) }

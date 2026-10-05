@@ -208,8 +208,13 @@ public struct PlanModel: Decodable, Equatable, Sendable {
         try PlanJSON.decoder.decode(PlanModel.self, from: data)
     }
 
-    /// Nothing planned: no theme, no lane and no ruling.
-    public var isEmpty: Bool { themes.isEmpty && lanes.isEmpty && rulings.isEmpty }
+    /// Nothing planned: no theme and no lane. Rulings don't count: they
+    /// never switch a board into its plan layout (review 1005a F1).
+    public var isEmpty: Bool { themes.isEmpty && lanes.isEmpty }
+
+    /// Nothing at all to show: nothing planned and no ruling, so the Plan
+    /// view's "Nothing is planned" notice stands alone.
+    public var showsNothing: Bool { isEmpty && rulings.isEmpty }
 }
 
 /// One entry in a theme's or lane's record, oldest first.

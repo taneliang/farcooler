@@ -87,6 +87,24 @@ struct PlanRulingsViewTests {
         #expect(!drawn.seen.views.keys.contains { $0.hasPrefix("plan-ruling") }, "\(drawn.seen.views.keys.sorted())")
     }
 
+    @Test("A board with only rulings keeps the board as it was: Unread, the rows, no plan layout (review 1005a F1)")
+    func rulingsAloneDontPlanTheBoard() async throws {
+        let defaults = PlanViewTests.defaults()
+        let calls = PlanViewTests.Calls()
+        var object = try #require(try JSONSerialization.jsonObject(with: PlanViewTests.fixture()) as? [String: Any])
+        for key in ["themes", "lanes", "order", "cards"] { object[key] = [] }
+        calls.plan = try JSONSerialization.data(withJSONObject: object)
+        let store = try await PlanViewTests.store(plan: true, defaults: defaults, calls: calls)
+        let drawn = await PlanViewTests.draw(store, defaults: defaults)
+        defer { drawn.window.close() }
+        for _ in 0..<20 where !store.plan.hasRead { await drawn.settle() }
+        await drawn.settle()
+        #expect(!store.plan.plan.rulings.isEmpty, "the rulings were read")
+        #expect(!store.plan.planned, "rulings alone don't switch the layout")
+        #expect(drawn.ids.contains("section-header-summary"), "Unread stays: \(drawn.ids)")
+        #expect(drawn.ids.contains("board-row-ov-1"))
+    }
+
     @Test("Copy Reference copies what the owner tells the orchestrator, and edits nothing")
     func copyReference() async throws {
         let drawn = try await Self.draw(rulings: true)

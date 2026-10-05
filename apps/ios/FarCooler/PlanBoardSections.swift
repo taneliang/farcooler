@@ -89,11 +89,16 @@ struct PlanBoardSections: View {
     @ViewBuilder
     private func sections(_ plan: PlanModel) -> some View {
         if plan.isEmpty {
-            Section {
-                PlanNotice(title: PlanWords.nothingPlanned, detail: PlanWords.nothingPlannedDetail)
-                    .accessibilityIdentifier("plan-empty")
+            // Rulings alone plan nothing (review 1005a F1), but they're
+            // something to show, so the notice stands down for them.
+            if !(hook.keepsRulings && !plan.rulings.isEmpty) {
+                Section {
+                    PlanNotice(title: PlanWords.nothingPlanned, detail: PlanWords.nothingPlannedDetail)
+                        .accessibilityIdentifier("plan-empty")
+                }
             }
             pagesSection(plan)
+            PlanRulingsSection(plan: plan, keeps: hook.keepsRulings)
         } else {
             if !plan.nextUp.isEmpty {
                 Section {

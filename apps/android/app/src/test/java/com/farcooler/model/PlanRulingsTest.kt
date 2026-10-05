@@ -51,12 +51,14 @@ class PlanRulingsTest {
     }
 
     @Test
-    fun `a plan without rulings reads with none, and a board with only rulings isn't empty`() {
+    fun `a plan without rulings reads with none, and rulings alone plan nothing but still show`() {
         val bare = Json.parseToJsonElement(fixture).jsonObject.filterKeys { it != "rulings" }
         val plan = Plan.decode(JsonObject(bare))
         assertTrue(plan.rulings.isEmpty())
         val only = Plan(rulings = listOf(PlanRuling("x", "R-1", 1, "A", "B", "C")))
-        assertFalse(only.isEmpty)
+        assertTrue("rulings alone don't make a board planned (review 1005a F1)", only.isEmpty)
+        assertFalse(only.showsNothing)
+        assertTrue(plan.showsNothing)
     }
 
     @Test

@@ -46,7 +46,7 @@ struct PlanOverviewView: View {
                 ProgressView().controlSize(.small)
                     .frame(maxWidth: .infinity, minHeight: NavigatorRhythm.placeholder)
             }
-        } else if model.isEmpty && plan.pages.isEmpty {
+        } else if model.isEmpty && plan.pages.isEmpty && !(plan.keepsRulings && !model.rulings.isEmpty) {
             PlanNotice(title: PlanWords.nothingPlanned, detail: PlanWords.nothingPlannedDetail)
                 .identified("plan-empty")
         } else {
