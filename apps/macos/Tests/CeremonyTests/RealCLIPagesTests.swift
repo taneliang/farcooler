@@ -8,7 +8,9 @@ import Testing
 /// daemon, a board with a card and a theme, two pages published with
 /// `page set`, then exactly the arguments `PlanStore.readPages` sends, decoded
 /// by the parser the app uses. A fixture alone would let the two drift
-/// (ov-160). Skipped where there is no CLI build or no tmux.
+/// (ov-160). Skipped on a Mac with no CLI build or no tmux; never on CI,
+/// where the swift job builds both binaries (`build-app.sh`) and installs
+/// tmux, so a missing one fails here rather than the test going quiet.
 @MainActor
 struct RealCLIPagesTests {
     nonisolated private static var cli: String? {
@@ -19,10 +21,21 @@ struct RealCLIPagesTests {
             .first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
+    nonisolated static var tmux: Bool {
+        ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"]
+            .contains { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    /// The daemon the CLI starts: the one beside it, or it starts whichever
+    /// is installed, which is a different build.
+    nonisolated static var daemon: Bool {
+        cli.map { FileManager.default.isExecutableFile(atPath: URL(fileURLWithPath: $0).deletingLastPathComponent().appendingPathComponent("farcoolerd").path) } ?? false
+    }
+
+    nonisolated static var onCI: Bool { ProcessInfo.processInfo.environment["CI"] != nil }
+
     nonisolated static var runnable: Bool {
-        cli != nil
-            && ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"]
-                .contains { FileManager.default.isExecutableFile(atPath: $0) }
+        (cli.map { FileManager.default.isExecutableFile(atPath: $0) } == true && tmux && daemon) || onCI
     }
 
     private func farcooler(_ args: [String], home: String) async -> (ok: Bool, out: Data, err: String) {
@@ -35,6 +48,9 @@ struct RealCLIPagesTests {
 
     @Test("page list --json from the real CLI decodes into the pages the Plan view lists and anchors", .enabled(if: RealCLIPagesTests.runnable))
     func theRealCLIsPagesDecode() async throws {
+        try #require(Self.cli.map { FileManager.default.isExecutableFile(atPath: $0) } == true, "no farcooler CLI in target/: build it first (CI's swift job does, in build-app.sh)")
+        try #require(Self.daemon, "no farcoolerd beside the CLI")
+        try #require(Self.tmux, "no tmux: CI's swift job installs it before the Mac tests")
         let home = "/tmp/fcp-\(UUID().uuidString.prefix(6))"
         do {
             try await scenario(home: home)
