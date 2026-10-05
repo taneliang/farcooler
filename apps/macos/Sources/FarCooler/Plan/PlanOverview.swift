@@ -65,13 +65,15 @@ struct PlanOverviewView: View {
                 ProgressView().controlSize(.small)
                     .frame(maxWidth: .infinity, minHeight: NavigatorRhythm.placeholder)
             }
-        } else if model.isEmpty {
+        } else if model.isEmpty && plan.pages.isEmpty {
             PlanNotice(title: PlanWords.nothingPlanned, detail: PlanWords.nothingPlannedDetail)
                 .identified("plan-empty")
         } else {
             if !model.nextUp.isEmpty { nextUp(model) }
             if !model.working.isEmpty || !model.unranked.isEmpty { now(model) }
             if !model.shownThemes.isEmpty { themes(model) }
+            // After Themes (ov-269 design 6.1): only on a runner with pages.
+            if !plan.listedPages.isEmpty || plan.hiddenCount > 0 { pages() }
             let landed = model.landedToday()
             if !landed.isEmpty { landedToday(landed, model) }
         }
@@ -132,6 +134,35 @@ struct PlanOverviewView: View {
         }
         .identified("plan-themes")
     }
+
+    private func pages() -> some View {
+        let listed = plan.listedPages
+        return CollapsibleSection("Pages", id: "plan.pages", style: .navigator, key: key("pages"), defaults: defaults,
+            count: listed.count
+        ) {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(listed) { page in
+                    PlanPageRow(
+                        page: page, now: Self.nowMs(), selected: selected == .page(page.slot), keyed: keyed,
+                        onHide: { plan.hide(page.slot) }
+                    ) { onOpen(.page(page.slot)) }
+                }
+                if plan.hiddenCount > 0 {
+                    Button("Show Hidden Pages") { plan.showHiddenPages() }
+                        .buttonStyle(.link)
+                        .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                        .padding(.leading, NavigatorGrid.textInset)
+                        .padding(.top, NavigatorRhythm.air)
+                        .identified("plan-show-hidden-pages")
+                }
+            }
+        }
+        .identified("plan-pages")
+    }
+
+    /// Now, for "Updated 12 min ago": a page's own clock is the runner's
+    /// stamp, and the Mac's is close enough for minutes.
+    static func nowMs() -> Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
 
     private func landedToday(_ landed: [PlanLane], _ model: PlanModel) -> some View {
         CollapsibleSection("Landed Today", id: "plan.landed", style: .navigator, key: key("landed"), defaults: defaults,

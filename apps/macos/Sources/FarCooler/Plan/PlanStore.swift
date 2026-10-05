@@ -20,12 +20,15 @@ enum PlanPage: Hashable {
     case theme(String)
     /// A lane, by id.
     case lane(String)
+    /// An orchestrator's page, by slot (ov-284).
+    case page(String)
 
     /// What it is, for a menu with no name to give it.
     var word: String {
         switch self {
         case .theme: "Theme"
         case .lane: "Lane"
+        case .page: "Page"
         }
     }
 
@@ -34,6 +37,7 @@ enum PlanPage: Hashable {
         switch self {
         case .theme: "map"
         case .lane: "arrow.triangle.branch"
+        case .page: "doc.text"
         }
     }
 }
@@ -54,6 +58,19 @@ final class PlanStore: ObservableObject {
     @Published private(set) var trouble: String?
     /// Each theme's and lane's record, by page, once read.
     @Published private(set) var records: [PlanPage: PlanRecord] = [:]
+    /// The board's orchestrator pages, with their documents, once read
+    /// (ov-284). Empty on a runner without `board_pages`.
+    @Published var pages: [BoardPage] = []
+    /// Whether the pages have been read at least once.
+    @Published var pagesRead = false
+    /// The slots hidden on this Mac with Hide Page: the owner's own filter,
+    /// never sent to the runner. Kept per board, as `shown` is.
+    @Published var hiddenPages: Set<String> {
+        didSet {
+            guard hiddenPages != oldValue else { return }
+            defaults.set(hiddenPages.sorted(), forKey: Self.hiddenKey(host: host, workspace: workspace.id))
+        }
+    }
     /// Whether the board shows the plan rather than its tasks. Kept per
     /// board on this Mac, as the Unread strip's collapsed state is.
     @Published var shown: Bool {
@@ -76,6 +93,7 @@ final class PlanStore: ObservableObject {
         self.host = host
         self.defaults = defaults
         shown = defaults.bool(forKey: Self.shownKey(host: host, workspace: workspace.id))
+        hiddenPages = Set(defaults.stringArray(forKey: Self.hiddenKey(host: host, workspace: workspace.id)) ?? [])
     }
 
     static func shownKey(host: String, workspace: String) -> String { "board.plan.shown.\(host).\(workspace)" }
@@ -88,7 +106,7 @@ final class PlanStore: ObservableObject {
     /// someone chose it.
     var showing: Bool { available && shown }
 
-    private var repositoryID: String { workspace.repository ?? workspace.id }
+    var repositoryID: String { workspace.repository ?? workspace.id }
 
     /// A number that moves whenever this plan may have: a plan event about
     /// this board, or anything that moves the board's tasks, whose statuses
@@ -133,6 +151,7 @@ final class PlanStore: ObservableObject {
         }
         trouble = nil
         if read != plan { plan = read }
+        await readPages()
         hasRead = true
     }
 
@@ -141,6 +160,9 @@ final class PlanStore: ObservableObject {
     func readRecord(_ page: PlanPage) async {
         let data: Data?
         switch page {
+        case .page:
+            // A page has no record: it's replaced whole.
+            return
         case .theme(let id):
             guard let theme = plan.themes.first(where: { $0.id == id }) else { return }
             data = await client.planRecord(of: ["theme", "show", theme.short], repository: repositoryID, workspace: workspace.boardWorkspace).data
@@ -160,6 +182,7 @@ final class PlanStore: ObservableObject {
         switch page {
         case .theme(let id): theme(id)?.name
         case .lane(let id): lane(id)?.name
+        case .page(let slot): self.page(slot)?.title
         }
     }
 }

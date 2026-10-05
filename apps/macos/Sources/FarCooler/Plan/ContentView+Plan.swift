@@ -23,9 +23,55 @@ extension ContentView {
     /// What a plan page reads from the board: its rows, and where a task,
     /// a lane or a theme opens.
     func planContext(_ board: TaskBoardStore, host: String, workspace: String) -> PlanPageContext {
-        PlanPageContext(
+        let worktrees = store.fleet.worktrees.filter { ($0.host ?? "") == host && $0.workspace == workspace }
+        return PlanPageContext(
             rows: Dictionary(board.board.rows.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
             onTask: { row in openTask(row.id, host: host, workspace: workspace) },
-            onOpen: { page in openPlan(page, host: host, workspace: workspace) })
+            onOpen: { page in openPlan(page, host: host, workspace: workspace) },
+            worktrees: worktrees,
+            onDestination: { destination in
+                if let next = Self.pageSelection(destination, host: host, workspace: workspace, worktrees: worktrees) {
+                    openFromPage(next, host: host, workspace: workspace)
+                }
+            })
+    }
+
+    /// Where a reference on an orchestrator's page goes (ov-284): a card or
+    /// its question to the task, a lane, a theme or a page to its page, a
+    /// worktree whole, a terminal to its pane. A link to the web never
+    /// reaches here: `PageView` hands it to the system.
+    static func pageSelection(
+        _ destination: PageDestination, host: String, workspace: String, worktrees: [Worktree]
+    ) -> Selection? {
+        switch destination {
+        case .task(let id), .ask(let id):
+            return .workspace(host: host, workspace: workspace, focus: .task(id))
+        case .lane(let id):
+            return .workspace(host: host, workspace: workspace, focus: .plan(.lane(id)))
+        case .theme(let id):
+            return .workspace(host: host, workspace: workspace, focus: .plan(.theme(id)))
+        case .page(let slot):
+            return .workspace(host: host, workspace: workspace, focus: .plan(.page(slot)))
+        case .worktree(let id):
+            return .workspace(host: host, workspace: workspace, focus: .worktree(id, terminal: nil))
+        case .terminal(let id, let name):
+            let pane = worktrees.first { $0.id == id }?.terminals.first { $0.title == name }?.id
+            return .workspace(host: host, workspace: workspace, focus: .worktree(id, terminal: pane))
+        case .url:
+            return nil
+        }
+    }
+
+    /// Open what a page named: a task as the palette opens one, the rest
+    /// in the main area with the navigator keeping the keyboard.
+    private func openFromPage(_ next: Selection, host: String, workspace: String) {
+        if case .workspace(_, _, .task(let id)?) = next {
+            openTask(id, host: host, workspace: workspace)
+            return
+        }
+        guard next != selection else { return }
+        trail = nil
+        focusColumn = false
+        selection = next
     }
 }

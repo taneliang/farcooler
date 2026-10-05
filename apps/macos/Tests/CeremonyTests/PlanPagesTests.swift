@@ -1,0 +1,222 @@
+import AgentKit
+import AppKit
+import SwiftUI
+import Testing
+
+@testable import Far_Cooler
+
+/// Orchestrator pages on the Mac (ov-269 design 6.1, ov-284): a Pages section
+/// in the Plan view, a page in the main area, anchored pages inside their
+/// theme, Hide Page on this Mac only, and with Plan off a board that draws
+/// exactly as it did.
+@MainActor
+@Suite(.serialized)
+struct PlanPagesTests {
+    static let themeID = "00000000-0000-0000-0000-000000003001"
+
+    /// Three pages: `train` as `test/fixtures/page.json` has it (anchored to a
+    /// theme this plan doesn't have, so it's listed), `risks` anchored to the
+    /// plan's Visual language, and `spend` of its own.
+    static func pagesJSON() throws -> Data {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let train = try String(contentsOf: root.appendingPathComponent("test/fixtures/page.json"), encoding: .utf8)
+        let risks = try String(contentsOf: root.appendingPathComponent("test/fixtures/pages/normalized/risks.json"), encoding: .utf8)
+        let spend = try String(contentsOf: root.appendingPathComponent("test/fixtures/pages/normalized/spend.json"), encoding: .utf8)
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        func row(_ slot: String, _ title: String, anchor: String, doc: String) -> String {
+            #"{"id":"p-\#(slot)","short":"\#(slot)","slot":"\#(slot)","title":"\#(title)","summary":"About \#(slot)","anchor_kind":"\#(anchor.isEmpty ? "" : "theme")","anchor":"\#(anchor)","revision":1,"ordinal":0,"actor":"manager","updated_at_ms":\#(now - 600_000),"doc":\#(doc)}"#
+        }
+        return Data(
+            #"{"pages":[\#(train),\#(row("risks", "Risks", anchor: themeID, doc: risks)),\#(row("spend", "Spend", anchor: "", doc: spend))]}"#
+                .utf8)
+    }
+
+    /// A board on a runner with the plan and, unless `pages` is false, pages.
+    static func store(
+        pages: Bool = true, defaults: UserDefaults, calls: PlanViewTests.Calls = PlanViewTests.Calls()
+    ) async throws -> TaskBoardStore {
+        let store = try await PlanViewTests.store(plan: true, defaults: defaults, calls: calls)
+        let answer = store.client.commandRunnerForTesting
+        let pagesData = try pagesJSON()
+        store.client.commandRunnerForTesting = { args in
+            if args.starts(with: ["page", "list"]) {
+                calls.args.append(args)
+                return (pagesData, nil)
+            }
+            return await answer!(args)
+        }
+        store.client.daemonBuild = DaemonBuild(
+            version: "test", matches: true, platform: "macos",
+            capabilities: Set(Capability.allCases.map(\.rawValue).filter { pages || $0 != "board_pages" }))
+        return store
+    }
+
+    @Test("Pages lists pages of their own and those whose theme is gone; an anchored page draws in its theme")
+    func listedAndAnchored() async throws {
+        let store = try await Self.store(defaults: PlanViewTests.defaults())
+        await store.plan.reload()
+        #expect(store.plan.pages.map(\.slot) == ["train", "risks", "spend"])
+        #expect(store.plan.listedPages.map(\.slot) == ["train", "spend"])
+        #expect(store.plan.anchoredPages(to: Self.themeID).map(\.slot) == ["risks"])
+        #expect(store.plan.title(.page("spend")) == "Spend")
+    }
+
+    @Test("A dropped theme's pages fall into the Pages section")
+    func droppedThemeFallsBack() throws {
+        let page = BoardPage(id: "p", slot: "risks", title: "Risks", anchorKind: "theme", anchor: Self.themeID)
+        var plan = try PlanModel.decode(PlanViewTests.fixture())
+        #expect(PlanStore.listed([page], plan: plan, hidden: []).isEmpty)
+        plan.themes[0].state = "dropped"
+        #expect(PlanStore.listed([page], plan: plan, hidden: []).map(\.slot) == ["risks"])
+        #expect(PlanStore.anchored([page], to: Self.themeID, plan: plan, hidden: []).isEmpty)
+        #expect(PlanStore.listed([page], plan: .empty, hidden: []).map(\.slot) == ["risks"], "the plan layer gone")
+    }
+
+    @Test("Hide Page is kept on this Mac, per board, and never reaches the runner")
+    func hidePageIsLocal() async throws {
+        let defaults = PlanViewTests.defaults()
+        let calls = PlanViewTests.Calls()
+        let store = try await Self.store(defaults: defaults, calls: calls)
+        await store.plan.reload()
+        let before = calls.args.count
+        store.plan.hide("spend")
+        store.plan.hide("risks")
+        #expect(store.plan.listedPages.map(\.slot) == ["train"])
+        #expect(store.plan.anchoredPages(to: Self.themeID).isEmpty)
+        #expect(store.plan.hiddenCount == 2)
+        #expect(calls.args.count == before, "hiding asked the runner: \(calls.args.suffix(2))")
+        let again = PlanStore(client: store.client, workspace: store.workspace, host: store.plan.host, defaults: defaults)
+        #expect(again.hiddenPages == ["spend", "risks"])
+        let other = PlanStore(client: store.client, workspace: .implicit(repository: "other"), host: store.plan.host, defaults: defaults)
+        #expect(other.hiddenPages.isEmpty)
+        store.plan.showHiddenPages()
+        #expect(PlanStore(client: store.client, workspace: store.workspace, host: store.plan.host, defaults: defaults).hiddenPages.isEmpty)
+    }
+
+    @Test("The Plan view draws a Pages section after Themes; a row opens its page")
+    func pagesSection() async throws {
+        let defaults = PlanViewTests.defaults()
+        let store = try await Self.store(defaults: defaults)
+        store.plan.shown = true
+        let drawn = await PlanViewTests.draw(store, defaults: defaults)
+        defer { drawn.window.close() }
+        for _ in 0..<20 where !drawn.ids.contains("plan-pages") { await drawn.settle() }
+        #expect(drawn.ids.isSuperset(of: ["plan-pages", "plan-page-train", "plan-page-spend"]), "\(drawn.ids)")
+        #expect(!drawn.ids.contains("plan-page-risks"), "an anchored page is drawn in its theme, not listed")
+        let themes = try #require(drawn.seen.views["plan-themes"])
+        let pages = try #require(drawn.seen.views["plan-pages"])
+        #expect(pages.minY >= themes.maxY - 0.5, "Pages comes after Themes")
+        #expect(drawn.press("plan-page-spend"))
+        await drawn.settle()
+        #expect(drawn.opened.last == .page("spend"))
+    }
+
+    @Test("A runner without board_pages draws no Pages section and is never asked for pages")
+    func noPagesOnAnOldRunner() async throws {
+        let defaults = PlanViewTests.defaults()
+        let calls = PlanViewTests.Calls()
+        let store = try await Self.store(pages: false, defaults: defaults, calls: calls)
+        store.plan.shown = true
+        let drawn = await PlanViewTests.draw(store, defaults: defaults)
+        defer { drawn.window.close() }
+        await drawn.settle()
+        #expect(drawn.ids.contains("plan-themes"))
+        #expect(!drawn.ids.contains("plan-pages"))
+        #expect(!calls.args.contains { $0.first == "page" })
+    }
+
+    /// The owner's rule for the experiment (ov-268 Q2, ov-269 4.3 point 4):
+    /// with Plan off, pages change nothing. The same views at the same
+    /// frames as a runner without pages, and no page is read.
+    @Test("With Plan off, a board on a runner with pages is the board as it was, and no page is read")
+    func planOffIsUnchanged() async throws {
+        let old = PlanViewTests.defaults()
+        let oldCalls = PlanViewTests.Calls()
+        let without = await PlanViewTests.draw(try await Self.store(pages: false, defaults: old, calls: oldCalls), defaults: old)
+        defer { without.window.close() }
+        let fresh = PlanViewTests.defaults()
+        let calls = PlanViewTests.Calls()
+        let with = await PlanViewTests.draw(try await Self.store(defaults: fresh, calls: calls), defaults: fresh, full: false)
+        defer { with.window.close() }
+        #expect(with.ids == without.ids)
+        for id in without.ids {
+            #expect(with.seen.views[id] == without.seen.views[id], "\(id) moved")
+        }
+        #expect(!calls.args.contains { $0.first == "page" }, "pages were read with Plan off")
+    }
+
+    /// What `PlanPageView` draws for `page`, by identifier.
+    static func drawnPage(_ store: TaskBoardStore, _ page: PlanPage) async -> Set<String> {
+        let seen = NavigatorFilterTests.Seen()
+        let context = PlanPageContext(rows: [:], onTask: { _ in }, onOpen: { _ in })
+        let host = NSHostingView(
+            rootView: PlanPageView(plan: store.plan, page: page, context: context)
+                .frame(width: 800, height: 2400)
+                .environment(\.gridProbing, true)
+                .overlayPreferenceValue(ProbedViewsKey.self) { probed in
+                    let _ = seen.views = Dictionary(probed.map { ($0.id, .zero) }, uniquingKeysWith: { a, _ in a })
+                    Color.clear
+                })
+        host.frame = CGRect(x: 0, y: 0, width: 800, height: 2400)
+        for _ in 0..<10 {
+            host.layoutSubtreeIfNeeded()
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return Set(seen.views.keys)
+    }
+
+    @Test("A theme's page draws its anchored pages; a page opens in the main area; one gone says Page Not Found")
+    func pagesInTheMainArea() async throws {
+        let store = try await Self.store(defaults: PlanViewTests.defaults())
+        await store.plan.reload()
+        let theme = await Self.drawnPage(store, .theme(Self.themeID))
+        #expect(theme.isSuperset(of: ["plan-theme-page", "plan-anchored-risks", "plan-anchored-open-risks"]), "\(theme)")
+        #expect(!theme.contains("plan-anchored-spend"))
+        let page = await Self.drawnPage(store, .page("spend"))
+        #expect(page.contains("plan-orchestrator-page") && !page.contains("plan-page-not-found"), "\(page)")
+        let gone = await Self.drawnPage(store, .page("retired"))
+        #expect(gone.contains("plan-page-not-found") && !gone.contains("plan-page-reading"), "\(gone)")
+    }
+
+    @Test("A page is kept across a relaunch, and its crumb is its title")
+    func pageKept() {
+        let page = ContentView.Selection.workspace(host: "h", workspace: "w", focus: .plan(.page("train")))
+        #expect(SelectionMemory.encode(page) == "h|w|plan:page:train")
+        #expect(SelectionMemory.decode("h|w|plan:page:train") == page)
+        #expect(SelectionMemory.decode("h|w|plan:page:") == nil)
+    }
+
+    @Test("A page line from the runner moves that board's plan, as a plan line does")
+    func pageLineRereads() {
+        var heard: [String] = []
+        EventStream.dispatch(
+            Data(#"{"kind":"pages","workspace":"ws-1","slot":"train","revision":3,"actor":"manager","removed":false}"#.utf8),
+            decoder: JSONDecoder(), onPlan: { heard.append($0) })
+        #expect(heard == ["ws-1"])
+    }
+
+    @Test("A reference opens what the app opens: a card or its question, a page, a terminal by its name")
+    func destinations() {
+        let worktree = Worktree(
+            id: "wt-1", short: "wt1", task: "integ-10", branch: "integ-10", repository: "r", host: "", path: "/tmp/integ-10",
+            state: "active",
+            terminals: [Terminal(id: "t-build", short: "tb", title: "build", preset: "zsh", state: "running", epoch: 0)],
+            repositoryID: "r", workspace: "w")
+        func go(_ d: PageDestination) -> ContentView.Selection? {
+            ContentView.pageSelection(d, host: "h", workspace: "w", worktrees: [worktree])
+        }
+        #expect(go(.ask("t-1")) == .workspace(host: "h", workspace: "w", focus: .task("t-1")))
+        #expect(go(.page("spend")) == .workspace(host: "h", workspace: "w", focus: .plan(.page("spend"))))
+        #expect(go(.lane("l-1")) == .workspace(host: "h", workspace: "w", focus: .plan(.lane("l-1"))))
+        #expect(go(.terminal(worktree: "wt-1", name: "build")) == .workspace(host: "h", workspace: "w", focus: .worktree("wt-1", terminal: "t-build")))
+        #expect(go(.url(URL(string: "https://github.com")!)) == nil, "the system opens the web, not the window")
+
+        let context = PlanPageContext(rows: [:], onTask: { _ in }, onOpen: { _ in }, worktrees: [worktree])
+        let plan = PlanStore(client: DaemonClient(target: "", notifications: NotificationCenter()), workspace: .implicit(repository: "r"), host: "h")
+        let world = context.world(plan)
+        #expect(world.resolve(PageRef(.terminal(worktree: "integ-10", name: "build"))).destination == .terminal(worktree: "wt-1", name: "build"))
+        #expect(world.resolve(PageRef(.worktree("integ-10"))).destination == .worktree("wt-1"))
+        #expect(world.plan == nil, "a plan never read draws lanes and themes as plain text")
+    }
+}
