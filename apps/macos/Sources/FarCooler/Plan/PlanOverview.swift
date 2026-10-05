@@ -134,8 +134,7 @@ struct PlanOverviewView: View {
 
     /// The runner's week and cost per finished card by harness and model.
     private func costSection(_ cost: PlanCostRead) -> some View {
-        CollapsibleSection("Cost", id: "plan.cost", style: .navigator, key: key("cost"), defaults: defaults,
-            expandedByDefault: false
+        CollapsibleSection("Cost", id: "plan.cost", style: .navigator, key: key("cost"), defaults: defaults
         ) {
             PlanCostBlock(
                 cost: cost, bodyFont: .system(size: WorkspaceStyle.PaneText.body),
