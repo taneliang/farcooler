@@ -51,6 +51,7 @@ pub(crate) mod rpc_pages;
 pub(crate) mod rpc_plan;
 pub(crate) mod rpc_rulings;
 pub(crate) mod rpc_trains;
+pub mod ci_canary;
 pub mod ci_watch;
 pub(crate) mod board_reads_ops;
 pub(crate) mod lfs_ops;
