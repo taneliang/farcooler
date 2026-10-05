@@ -211,11 +211,15 @@ extension PageWorld {
 /// The one rule for links leaving the app.
 public enum PageLinks {
     /// `raw` as a URL the browser may open: `https`, with a host, and no
-    /// user name or password to dress one domain up as another. Anything
-    /// else is nil, and draws as plain text.
+    /// user name or password to dress one domain up as another. The host is
+    /// plain ASCII (letters, digits, dots and hyphens; punycode shows as
+    /// `xn--`), so the domain drawn beside a link is the one it goes to, never
+    /// a look-alike in another script. Anything else is nil, and draws as
+    /// plain text.
     public static func https(_ raw: String) -> URL? {
         guard let url = URL(string: raw), url.scheme?.lowercased() == "https", let host = url.host(), !host.isEmpty,
-            url.user() == nil, url.password() == nil
+            url.user() == nil, url.password() == nil,
+            host.unicodeScalars.allSatisfy({ $0.isASCII && (CharacterSet.alphanumerics.contains($0) || $0 == "." || $0 == "-") })
         else { return nil }
         return url
     }

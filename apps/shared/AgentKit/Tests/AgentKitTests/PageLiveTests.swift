@@ -103,7 +103,8 @@ struct PageLiveTests {
         #expect(labeled.spoken == "Pull request, link to github.com")
         #expect(labeled.destination == .url(URL(string: "https://github.com/example/overnight/pull/12")!))
         #expect(world.resolve(PageRef(.url("https://example.com/path?q=1#top"))).name == "example.com")
-        for raw in ["http://github.com/x", "javascript:alert(1)", "file:///etc/passwd", "https://user:pw@github.com/x", "mailto:a@b.c"] {
+        #expect(world.resolve(PageRef(.url("https://xn--pple-43d.com/x"))).name == "xn--pple-43d.com", "punycode shows as itself")
+        for raw in ["https://\u{0430}pple.com/x", "http://github.com/x", "javascript:alert(1)", "file:///etc/passwd", "https://user:pw@github.com/x", "mailto:a@b.c"] {
             #expect(world.resolve(PageRef(.url(raw), label: "L")).destination == nil, "\(raw)")
         }
     }
