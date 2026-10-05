@@ -21,6 +21,7 @@ use farcooler_store::plan::{
     AgentRecord, AgentRole, BoardTheme, Lane, LaneCard, LaneState, LaneUpdate, NewLane, NewTheme, PlanEvent, Subject,
     ThemeState, ThemeUpdate,
 };
+use farcooler_store::plan_cost::PlanCost;
 use farcooler_store::plan_read::{LaneSpend, LaneView, Plan, StatusCounts, ThemeView};
 use uuid::Uuid;
 
@@ -99,6 +100,9 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, scope: Scope, req
                 ordinal: p.ordinal,
             };
             let theme = svc.store.update_theme(theme, &update, actor)?;
+            if let Some(tokens) = p.budget_tokens {
+                svc.store.set_budget(Subject::Theme(theme.id), (tokens > 0).then_some(tokens), actor)?;
+            }
             watcher.announce_plan_changed(theme.workspace_id, actor);
             Ok(result::Value::BoardThemeView(theme_view(svc, theme)?))
         }
@@ -148,6 +152,9 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, scope: Scope, req
                 agent: agent.clone(),
             };
             let lane = svc.store.update_lane(lane, &update, actor)?;
+            if let Some(tokens) = p.budget_tokens {
+                svc.store.set_budget(Subject::Lane(lane.id), (tokens > 0).then_some(tokens), actor)?;
+            }
             watcher.announce_plan_changed(lane.workspace_id, actor);
             if let Some(agent) = &agent {
                 record_worker(svc, watcher, &lane, agent, &p.actor);
@@ -317,6 +324,27 @@ fn pb_theme_view(v: &ThemeView) -> pb::BoardThemeView {
         task_ids: v.tasks.iter().map(|id| id_bytes(*id)).collect(),
         counts: Some(pb_counts(&v.counts)),
         spend: Some(pb_spend(&v.spend)),
+        budget_tokens: v.budget_tokens,
+        trend_tokens: v.trend.to_vec(),
+    }
+}
+
+/// The week's tokens and the harness and model comparison (ov-307).
+fn pb_cost(c: &PlanCost) -> pb::PlanCost {
+    pb::PlanCost {
+        week_tokens: c.week_tokens,
+        compare: c
+            .compare
+            .iter()
+            .map(|p| pb::HarnessModelCost {
+                harness: p.harness.clone(),
+                model: p.model.clone(),
+                cards: p.cards,
+                tokens: p.tokens,
+                cost_micros: p.cost_micros,
+            })
+            .collect(),
+        compare_held_back: c.compare_held_back,
     }
 }
 
@@ -386,6 +414,7 @@ fn pb_lane(v: &LaneView, admin: bool) -> pb::Lane {
         fix_rounds: v.fix_rounds,
         spend: Some(pb_spend(&v.spend)),
         stale: v.stale,
+        budget_tokens: v.budget_tokens,
     }
 }
 
@@ -426,6 +455,7 @@ fn pb_plan(p: &Plan, admin: bool) -> pb::Plan {
         trains: p.trains.iter().map(crate::rpc_trains::pb_train_view).collect(),
         ci: p.ci.iter().map(crate::rpc_trains::pb_ci).collect(),
         board_counts: Some(pb_counts(&p.board_counts)),
+        cost: Some(pb_cost(&p.cost)),
     }
 }
 

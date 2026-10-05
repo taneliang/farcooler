@@ -42,6 +42,8 @@ use crate::{Fallible, connect_to, expect_value, req_for, short_bytes, uuid_of, w
 mod ruling;
 #[path = "plan_train.rs"]
 mod train;
+#[path = "plan_cost.rs"]
+mod cost;
 
 /// What a runner without the layer is told.
 const NEEDS_UPDATE: &str = "This runner needs an update to keep a plan.";
@@ -171,6 +173,12 @@ enum ThemeCmd {
         /// A new name.
         #[arg(long)]
         rename: Option<String>,
+        /// A token budget: 5000000, 800k or 5M. The plan flags the theme when it goes over.
+        #[arg(long, value_parser = cost::parse_budget, conflicts_with = "no_budget")]
+        budget: Option<u64>,
+        /// Take the budget away.
+        #[arg(long)]
+        no_budget: bool,
     },
     /// Add cards to a theme and take others out.
     Cards {
@@ -274,6 +282,12 @@ enum LaneCmd {
         /// Its branch.
         #[arg(long)]
         branch: Option<String>,
+        /// A token budget: 5000000, 800k or 5M. The plan flags the lane when it goes over.
+        #[arg(long, value_parser = cost::parse_budget, conflicts_with = "no_budget")]
+        budget: Option<u64>,
+        /// Take the budget away.
+        #[arg(long)]
+        no_budget: bool,
     },
     /// Add cards to a lane and take others off it.
     Cards {
@@ -641,7 +655,8 @@ async fn theme<L: DispatchLink>(
                 format!("Made theme {:?} with {}.", theme_name(&view), count(view.task_ids.len(), "card"))
             })
         }
-        ThemeCmd::Set { name, story, next, ask, no_ask, outcome, state, rename } => {
+        ThemeCmd::Set { name, story, next, ask, no_ask, outcome, state, rename, budget, no_budget } => {
+            let budget = cost::asked(budget, no_budget);
             if story.is_none()
                 && next.is_none()
                 && ask.is_none()
@@ -649,8 +664,12 @@ async fn theme<L: DispatchLink>(
                 && outcome.is_none()
                 && state.is_none()
                 && rename.is_none()
+                && budget.is_none()
             {
-                return Err("Say what to change: --story, --next, --ask, --no-ask, --outcome, --state or --rename.".into());
+                return Err("Say what to change: --story, --next, --ask, --no-ask, --outcome, --state, --rename or --budget.".into());
+            }
+            if budget.is_some() {
+                cost::needs_cost(link)?;
             }
             let id = find_theme(&plan, &name)?.theme.as_ref().map(|t| t.id.clone()).unwrap_or_default();
             let p = request::Payload::BoardThemeUpdate(pb::BoardThemeUpdate {
@@ -663,6 +682,7 @@ async fn theme<L: DispatchLink>(
                 state: state.map(|s| theme_state(s) as i32),
                 ordinal: None,
                 actor: actor.into(),
+                budget_tokens: budget,
             });
             let result::Value::BoardThemeView(view) = send(link, board, "board_theme.update", p).await? else {
                 return Err(unreadable());
@@ -783,7 +803,8 @@ async fn lane<L: DispatchLink>(
                 format!("Started lane {} ({}, {}).", made.name, state_word(made.state).to_lowercase(), count(made.cards.len(), "card"))
             })
         }
-        LaneCmd::Set { name, state, reason, train, no_train, sha, agent, role, model, harness, ended, path, branch } => {
+        LaneCmd::Set { name, state, reason, train, no_train, sha, agent, role, model, harness, ended, path, branch, budget, no_budget } => {
+            let budget = cost::asked(budget, no_budget);
             let found = find_lane(&plan, &name)?;
             let asked_state = state.map(lane_state);
             // A reviewer or a fix round means the lane is in review or fixing,
@@ -813,8 +834,12 @@ async fn lane<L: DispatchLink>(
                 && record.is_none()
                 && path.is_none()
                 && branch.is_none()
+                && budget.is_none()
             {
-                return Err("Say what to change: --state, --reason, --train, --no-train, --sha, --agent, --path or --branch.".into());
+                return Err("Say what to change: --state, --reason, --train, --no-train, --sha, --agent, --path, --branch or --budget.".into());
+            }
+            if budget.is_some() {
+                cost::needs_cost(link)?;
             }
             if let Some(to) = state {
                 refuse_a_move(found, to)?;
@@ -830,6 +855,7 @@ async fn lane<L: DispatchLink>(
                 worktree_id: None,
                 agent: record,
                 actor: actor.into(),
+                budget_tokens: budget,
             });
             let result::Value::Lane(moved) = send(link, board, "lane.update", p).await? else {
                 return Err(unreadable());
@@ -1020,6 +1046,9 @@ fn theme_row(view: &pb::BoardThemeView) -> String {
     if !t.owner_ask.is_empty() {
         row.push_str(&format!(" · Needs you: {}", t.owner_ask));
     }
+    if let Some(budget) = cost::budget_words(&view.spend.unwrap_or_default(), view.budget_tokens) {
+        row.push_str(&format!(" · {budget}"));
+    }
     row
 }
 
@@ -1059,6 +1088,7 @@ fn lane_status(l: &pb::Lane, now: i64) -> String {
     if spend.runs > 0 {
         parts.push(spend_words(&spend));
     }
+    parts.extend(cost::budget_words(&spend, l.budget_tokens));
     if l.stale {
         parts.push(format!("stuck for {}", age(now - l.state_since)));
     }
@@ -1133,6 +1163,7 @@ fn overview(plan: &pb::Plan, now: i64) -> String {
         }
     }
     out.extend(ruling::overview_lines(plan));
+    out.extend(cost::overview_lines(plan));
     let day = 24 * 60 * 60 * 1000;
     let landed: Vec<&str> = plan
         .lanes
@@ -1209,6 +1240,13 @@ fn theme_text(
         out.push(String::new());
         out.push("Lanes".into());
         out.extend(lanes.iter().map(|l| format!("  {:<16} {}", l.name, lane_status(l, now))));
+    }
+    let spend = view.spend.unwrap_or_default();
+    if spend.runs > 0 || view.budget_tokens.is_some() {
+        out.push(String::new());
+        out.push(format!("Spend  {}", spend_words(&spend)));
+        out.extend(cost::budget_words(&spend, view.budget_tokens).map(|b| format!("Budget  {b}")));
+        out.extend(cost::trend_words(&view.trend_tokens).map(|t| format!("Last 7 days  {t}")));
     }
     out.push(String::new());
     out.push(format!("Cards · {}", done_of(view)));
@@ -1291,6 +1329,19 @@ fn spend_json(s: &pb::LaneSpend) -> Value {
     })
 }
 
+/// The week's tokens and the harness and model comparison as the JSON carries
+/// them (ov-307). `null` from a runner without `board_cost`.
+fn cost_json(c: &pb::PlanCost) -> Value {
+    json!({
+        "week_tokens": c.week_tokens,
+        "compare": c.compare.iter().map(|p| json!({
+            "harness": p.harness, "model": p.model, "cards": p.cards, "tokens": p.tokens,
+            "cost_micros": p.cost_micros,
+        })).collect::<Vec<_>>(),
+        "compare_held_back": c.compare_held_back,
+    })
+}
+
 /// Status counts as the JSON carries them: a theme's, or the board's (ov-306).
 fn counts_json(c: &pb::PlanStatusCounts) -> Value {
     json!({
@@ -1316,6 +1367,8 @@ fn theme_json(view: &pb::BoardThemeView, keys: &Keys) -> Value {
         "cards": view.task_ids.iter().map(|id| json!({ "task": id_text(id), "key": keys.of(id) })).collect::<Vec<_>>(),
         "counts": counts_json(&c),
         "spend": spend_json(&view.spend.unwrap_or_default()),
+        "budget_tokens": view.budget_tokens,
+        "trend_tokens": view.trend_tokens,
     })
 }
 
@@ -1349,6 +1402,7 @@ fn lane_json(l: &pb::Lane, keys: &Keys) -> Value {
         "landed_sha": l.landed_sha,
         "state_since": l.state_since,
         "stale": l.stale,
+        "budget_tokens": l.budget_tokens,
         "fix_rounds": l.fix_rounds,
         "cards": l.cards.iter().map(|c| json!({
             "task": id_text(&c.task_id), "key": keys.of(&c.task_id), "slice": c.slice,
@@ -1412,6 +1466,7 @@ fn plan_json(plan: &pb::Plan, keys: &Keys) -> Value {
         "trains": plan.trains.iter().map(|t| train::train_json(plan, t, keys)).collect::<Vec<_>>(),
         "ci": plan.ci.iter().map(train::ci_json).collect::<Vec<_>>(),
         "board_counts": counts_json(&plan.board_counts.unwrap_or_default()),
+        "cost": plan.cost.as_ref().map(cost_json),
     })
 }
 

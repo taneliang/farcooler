@@ -1,6 +1,7 @@
 {
   "agents": [],
   "branch": "",
+  "budget_tokens": 500000,
   "cards": [
     {
       "key": "ov-1",

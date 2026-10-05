@@ -45,6 +45,7 @@ fn the_plan() -> pb::Plan {
         shared_agents: 1,
         ..Default::default()
     });
+    review.budget_tokens = Some(500_000);
     review.agents = vec![
         pb::LaneAgent {
             harness: "claude".into(),
@@ -95,6 +96,8 @@ fn the_plan() -> pb::Plan {
                 runs: 2,
                 ..Default::default()
             }),
+            budget_tokens: Some(250_000),
+            trend_tokens: vec![0, 0, 0, 40_000, 120_000, 0, 160_000],
         }],
         order: vec![queued.id.clone()],
         lanes: vec![queued, review, landed],
@@ -146,6 +149,26 @@ fn the_plan() -> pb::Plan {
         trains: trains().0,
         ci: trains().1,
         board_counts: Some(pb::PlanStatusCounts { backlog: 4, in_progress: 2, in_review: 3, done: 11, ..Default::default() }),
+        cost: Some(pb::PlanCost {
+            week_tokens: 34_200_000,
+            compare: vec![
+                pb::HarnessModelCost {
+                    harness: "claude".into(),
+                    model: "opus".into(),
+                    cards: 5,
+                    tokens: 7_500_000,
+                    cost_micros: Some(12_500_000),
+                },
+                pb::HarnessModelCost {
+                    harness: "codex".into(),
+                    model: "gpt-5.6".into(),
+                    cards: 3,
+                    tokens: 900_000,
+                    cost_micros: None,
+                },
+            ],
+            compare_held_back: 2,
+        }),
     }
 }
 

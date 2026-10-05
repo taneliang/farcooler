@@ -1,4 +1,5 @@
 {
+  "budget_tokens": 250000,
   "cards": [
     {
       "key": "ov-1",
@@ -91,5 +92,14 @@
   },
   "state": "active",
   "story": "",
-  "story_at": 0
+  "story_at": 0,
+  "trend_tokens": [
+    0,
+    0,
+    0,
+    40000,
+    120000,
+    0,
+    160000
+  ]
 }

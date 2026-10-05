@@ -72,6 +72,19 @@ fn spend_json(s: &pb::LaneSpend) -> Value {
     })
 }
 
+/// The week's tokens and the harness and model comparison as the JSON carries
+/// them (ov-307). `null` from a runner without `board_cost`.
+fn cost_json(c: &pb::PlanCost) -> Value {
+    json!({
+        "week_tokens": c.week_tokens,
+        "compare": c.compare.iter().map(|p| json!({
+            "harness": p.harness, "model": p.model, "cards": p.cards, "tokens": p.tokens,
+            "cost_micros": p.cost_micros,
+        })).collect::<Vec<_>>(),
+        "compare_held_back": c.compare_held_back,
+    })
+}
+
 /// Status counts as the JSON carries them: a theme's, or the board's (ov-306).
 fn counts_json(c: &pb::PlanStatusCounts) -> Value {
     json!({
@@ -97,6 +110,8 @@ fn theme_json(plan: &pb::Plan, view: &pb::BoardThemeView) -> Value {
         "cards": view.task_ids.iter().map(|id| json!({ "task": id_text(id), "key": key_of(plan, id) })).collect::<Vec<_>>(),
         "counts": counts_json(&c),
         "spend": spend_json(&view.spend.unwrap_or_default()),
+        "budget_tokens": view.budget_tokens,
+        "trend_tokens": view.trend_tokens,
     })
 }
 
@@ -117,6 +132,7 @@ fn lane_json(plan: &pb::Plan, l: &pb::Lane) -> Value {
         "landed_sha": l.landed_sha,
         "state_since": l.state_since,
         "stale": l.stale,
+        "budget_tokens": l.budget_tokens,
         "fix_rounds": l.fix_rounds,
         "cards": l.cards.iter().map(|c| json!({
             "task": id_text(&c.task_id), "key": key_of(plan, &c.task_id), "slice": c.slice,
@@ -272,6 +288,7 @@ pub fn plan_json(plan: &pb::Plan) -> Value {
         "trains": plan.trains.iter().map(|t| train_json(plan, t)).collect::<Vec<_>>(),
         "ci": plan.ci.iter().map(ci_json).collect::<Vec<_>>(),
         "board_counts": counts_json(&plan.board_counts.unwrap_or_default()),
+        "cost": plan.cost.as_ref().map(cost_json),
     })
 }
 

@@ -56,6 +56,8 @@ fn theme(n: u128, name: &str, cards: &[u128], done: u32) -> pb::BoardThemeView {
         task_ids: cards.iter().map(|c| id_bytes(Uuid::from_u128(0x1000 + c))).collect(),
         counts: Some(pb::PlanStatusCounts { done, backlog: cards.len() as u32 - done, ..Default::default() }),
         spend: None,
+        budget_tokens: None,
+        trend_tokens: vec![],
     }
 }
 
@@ -143,11 +145,17 @@ fn the_plan() -> pb::Plan {
     let mut review = lane(2, "mac-ux", pb::LaneState::Review, &[1]);
     review.train = Some("integ-9".into());
     review.spend = Some(pb::LaneSpend { input_tokens: 300_000, output_tokens: 170_000, runs: 2, ..Default::default() });
+    review.budget_tokens = Some(500_000);
     let mut landed = lane(3, "fix-ac84", pb::LaneState::Landed, &[3]);
     landed.state_since = NOW - HOUR;
     pb::Plan {
         now_ms: NOW,
-        themes: vec![pb::BoardThemeView { spend: Some(theme_spend()), ..theme(1, "Visual language", &[1, 2, 3], 1) }],
+        themes: vec![pb::BoardThemeView {
+            spend: Some(theme_spend()),
+            budget_tokens: Some(250_000),
+            trend_tokens: TREND.to_vec(),
+            ..theme(1, "Visual language", &[1, 2, 3], 1)
+        }],
         order: vec![queued.id.clone()],
         lanes: vec![queued, review, landed],
         cards: items()
@@ -163,6 +171,7 @@ fn the_plan() -> pb::Plan {
         trains: trains().0,
         ci: trains().1,
         board_counts: Some(board_counts()),
+        cost: Some(plan_cost()),
     }
 }
 
@@ -171,6 +180,25 @@ fn the_plan() -> pb::Plan {
 fn theme_spend() -> pb::LaneSpend {
     pb::LaneSpend { input_tokens: 235_000, output_tokens: 85_000, cost_micros: Some(15_500_000), runs: 2, ..Default::default() }
 }
+
+/// The week's tokens and the harness and model comparison (ov-307). The
+/// client's `plan_json` test builds the same, so one fixture holds both.
+fn plan_cost() -> pb::PlanCost {
+    pb::PlanCost {
+        week_tokens: 34_200_000,
+        compare: vec![
+            pb::HarnessModelCost {
+                harness: "claude".into(), model: "opus".into(), cards: 5, tokens: 7_500_000, cost_micros: Some(12_500_000),
+            },
+            pb::HarnessModelCost { harness: "codex".into(), model: "gpt-5.6".into(), cards: 3, tokens: 900_000, cost_micros: None },
+        ],
+        compare_held_back: 2,
+    }
+}
+
+/// The theme's seven days, oldest first: 320,000 tokens in all, which is past
+/// its budget.
+const TREND: [u64; 7] = [0, 0, 0, 40_000, 120_000, 0, 160_000];
 
 fn board_counts() -> pb::PlanStatusCounts {
     pb::PlanStatusCounts { backlog: 4, in_progress: 2, in_review: 3, done: 11, ..Default::default() }
@@ -188,7 +216,7 @@ struct Runner {
 
 fn runner() -> Runner {
     Runner {
-        capabilities: ["workstreams", "tasks", capability::BOARD_PLAN, capability::BOARD_RULINGS, capability::BOARD_TRAINS]
+        capabilities: ["workstreams", "tasks", capability::BOARD_PLAN, capability::BOARD_RULINGS, capability::BOARD_TRAINS, capability::BOARD_COST]
             .map(String::from)
             .to_vec(),
         sent: vec![],
@@ -381,11 +409,16 @@ async fn the_overview_reads_next_up_now_themes_and_landed() {
         "     Frees the Mac slot",
         "Now",
         "  integ-9 · Red · c85bf83d · CI Failed · 1 of 3 jobs failed",
-        "    mac-ux           In review · in integ-9 · 1 card · 470K tokens",
+        "    mac-ux           In review · in integ-9 · 1 card · 470K tokens · 470K of 500K tokens budgeted",
         "Themes",
-        "  Visual language  1 of 3 done · active",
+        "  Visual language  1 of 3 done · active · Over budget: 320K of 250K tokens",
         "Decided for you",
         "  R-2    The inbox is amber.",
+        "Cost",
+        "  Last 7 days  34M tokens on this runner (its weekly limit isn't known)",
+        "  Claude Code opus · 5 finished cards · 1.5M tokens a card · $2.50 a card API-equivalent",
+        "  Codex gpt-5.6 · 3 finished cards · 300K tokens a card",
+        "  2 other harness and model pairs held back until three cards have finished",
         "Landed today",
         "  fix-ac84",
     ];
@@ -1020,4 +1053,74 @@ fn a_stale_ci_read_says_how_old_it_is() {
     assert_eq!(line, "integ-9 · Red · c85bf83d · CI Failed · 1 of 3 jobs failed · as of 3h ago");
     plan.ci[0].fetched_at = NOW - 60_000;
     assert!(!train::train_line(&plan, &plan.trains[0]).contains("as of"));
+}
+
+// ---- cost (ov-307) ----
+
+/// `--budget` takes tokens as a number or with K, M or B, and refuses what
+/// isn't a whole number of tokens.
+#[test]
+fn a_budget_reads_as_tokens() {
+    use super::cost::parse_budget;
+    assert_eq!(parse_budget("5000000"), Ok(5_000_000));
+    assert_eq!(parse_budget("800k"), Ok(800_000));
+    assert_eq!(parse_budget("5M"), Ok(5_000_000));
+    assert_eq!(parse_budget("1.5m"), Ok(1_500_000));
+    assert_eq!(parse_budget("1,200,000"), Ok(1_200_000));
+    for bad in ["", "0", "-5", "lots", "1.0000001k", "5T"] {
+        assert!(parse_budget(bad).is_err(), "{bad:?} is not a budget");
+    }
+}
+
+/// A budget goes to the theme and the lane as tokens, `--no-budget` as zero,
+/// and a runner without `board_cost` is told before anything is changed.
+#[tokio::test]
+async fn a_budget_is_sent_and_a_runner_without_budgets_is_told() {
+    let mut link = runner();
+    say(&mut link, "theme set Visual --budget 5M").await.unwrap();
+    let Some(request::Payload::BoardThemeUpdate(p)) = &last(&link).payload else { panic!() };
+    assert_eq!(p.budget_tokens, Some(5_000_000));
+    say(&mut link, "lane set mac-ux --no-budget").await.unwrap();
+    let Some(request::Payload::LaneUpdate(p)) = &last(&link).payload else { panic!() };
+    assert_eq!(p.budget_tokens, Some(0));
+    say(&mut link, "theme set Visual --next Ship").await.unwrap();
+    let Some(request::Payload::BoardThemeUpdate(p)) = &last(&link).payload else { panic!() };
+    assert_eq!(p.budget_tokens, None, "a set that says nothing of budgets leaves it");
+
+    let mut old = runner();
+    old.capabilities.retain(|c| c != capability::BOARD_COST);
+    let err = say(&mut old, "lane set mac-ux --budget 1M").await.unwrap_err();
+    assert_eq!(err.to_string(), "This runner needs an update to keep budgets.");
+    assert!(old.sent.iter().all(|r| r.method != "lane.update"), "nothing was changed");
+}
+
+/// The overview flags a theme over its budget, shows a lane inside its own,
+/// and says the week's tokens with no limit, and what is held back.
+#[tokio::test]
+async fn the_plan_flags_what_is_over_budget_and_never_invents_a_limit() {
+    let mut link = runner();
+    let text = say(&mut link, "").await.unwrap();
+    assert!(text.contains("Visual language  1 of 3 done · active · Over budget: 320K of 250K tokens"), "{text}");
+    assert!(text.contains("470K of 500K tokens budgeted"), "{text}");
+    assert!(text.contains("Last 7 days  34M tokens on this runner (its weekly limit isn't known)"), "{text}");
+    assert!(!text.contains('%'), "no share of a limit nobody can read: {text}");
+    assert!(text.contains("Claude Code opus · 5 finished cards · 1.5M tokens a card · $2.50 a card API-equivalent"), "{text}");
+    assert!(text.contains("Codex gpt-5.6 · 3 finished cards · 300K tokens a card\n"), "{text}");
+    assert!(text.contains("2 other harness and model pairs held back until three cards have finished"), "{text}");
+    let theme = say(&mut link, "theme show Visual").await.unwrap();
+    assert!(theme.contains("Last 7 days  0, 0, 0, 40K, 120K, 0, 160K tokens a day, oldest first, today last"), "{theme}");
+}
+
+/// Without cost from the runner, nothing about cost is drawn.
+#[tokio::test]
+async fn a_runner_that_sends_no_cost_draws_none() {
+    let mut link = runner();
+    let plan = the_plan();
+    let mut bare = pb::Plan { cost: None, ..plan };
+    bare.themes[0].budget_tokens = None;
+    bare.themes[0].trend_tokens.clear();
+    bare.lanes[1].budget_tokens = None;
+    let text = super::overview(&bare, NOW);
+    assert!(!text.contains("Cost") && !text.contains("budget"), "{text}");
+    let _ = &mut link;
 }

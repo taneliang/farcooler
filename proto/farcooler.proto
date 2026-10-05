@@ -3956,6 +3956,13 @@ message BoardThemeView {
   // over the lane's cards, and this theme's cards' shares summed, finished
   // lanes included. Unset from a runner before it; a client says nothing then.
   LaneSpend spend = 4;
+  // Its token budget (ov-307), counting input, output and both cache counts
+  // as `spend` does; absent when it has none. Behind `board_cost`.
+  optional uint64 budget_tokens = 5;
+  // Its tokens on each of the last seven UTC days, oldest first and today
+  // last, each lane's days shared out over its cards as `spend` is. Seven
+  // values behind `board_cost`, empty without it.
+  repeated uint64 trend_tokens = 6;
 }
 
 // A card a lane works, or one slice of it.
@@ -4024,6 +4031,9 @@ message Lane {
   LaneSpend spend = 20;
   // Sat in one live state for over an hour.
   bool stale = 21;
+  // Its token budget (ov-307), counted as `spend` is; absent when it has
+  // none. Behind `board_cost`.
+  optional uint64 budget_tokens = 22;
 }
 
 // A card a theme or lane names, enough to draw its row.
@@ -4072,6 +4082,37 @@ message Plan {
   // (ov-306): what a page's card-count references draw. Unset from a runner
   // before it, and such a reference then draws as text.
   PlanStatusCounts board_counts = 10;
+  // The week's tokens and the harness and model comparison (ov-307). Behind
+  // `board_cost`; unset without it.
+  PlanCost cost = 11;
+}
+
+// Cost read for a board's plan (ov-307), all derived on read.
+message PlanCost {
+  // The runner's tokens over the last seven days, every harness and board.
+  // There is no limit and no share: neither harness reports a plan's weekly
+  // limit to the runner, so a client shows the count and no percentage.
+  uint64 week_tokens = 1;
+  // Finished cards' cost by harness and model, only the pairs with at least
+  // three finished cards behind them, most cards first.
+  repeated HarnessModelCost compare = 2;
+  // How many pairs had finished cards but too few to compare.
+  uint32 compare_held_back = 3;
+}
+
+// What the finished cards a harness and model worked cost.
+message HarnessModelCost {
+  // `claude`, `codex`, or an adapter's preset.
+  string harness = 1;
+  // Empty when the harness named no model.
+  string model = 2;
+  // How many finished cards it worked.
+  uint32 cards = 3;
+  // Tokens on those cards by this pair, all four counts.
+  uint64 tokens = 4;
+  // Millionths of a US dollar on those cards; absent unless every turn of the
+  // pair was priced.
+  optional int64 cost_micros = 5;
 }
 
 // `plan.get`, at `read`.
@@ -4103,6 +4144,8 @@ message BoardThemeUpdate {
   optional BoardThemeState state = 7;
   optional int64 ordinal = 8;
   string actor = 9;
+  // A token budget (ov-307), or 0 to take it away. Needs `board_cost`.
+  optional uint64 budget_tokens = 10;
 }
 
 // `board_theme.cards`, at `control`.
@@ -4156,6 +4199,8 @@ message LaneUpdate {
   // Recorded in the same write as the move, like `lane.agent`.
   optional LaneAgentRecord agent = 9;
   string actor = 10;
+  // A token budget (ov-307), or 0 to take it away. Needs `board_cost`.
+  optional uint64 budget_tokens = 11;
 }
 
 // `lane.cards`, at `control`.
