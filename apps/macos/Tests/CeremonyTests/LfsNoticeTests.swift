@@ -94,19 +94,30 @@ struct LfsNoticeTests {
         init(_ description: String) { self.description = description }
     }
 
-    @Test func theRealCLIsCountReachesTheMacAndTryAgainClearsIt() throws {
+    @Test func theRealCLIsCountReachesTheMacAndTryAgainClearsIt() async throws {
         let cli = try #require(
             Self.cli, "No farcooler CLI to read. Build it first: cargo build --bin farcooler, or set FARCOOLER_BIN.")
         // A short home: a unix socket path has a length limit.
         let base = "/tmp/fc-t/lfs-\(UUID().uuidString.prefix(8))"
+        // Stopped, with the tmux server `daemon stop` leaves running, and
+        // removed on every way out, a failed expectation included: `defer`
+        // can't await.
+        do {
+            try scenario(cli: cli, base: base)
+        } catch {
+            await ScratchDaemon.stop(cli: cli, farcoolerHome: "\(base)/h")
+            try? FileManager.default.removeItem(atPath: base)
+            throw error
+        }
+        await ScratchDaemon.stop(cli: cli, farcoolerHome: "\(base)/h")
+        try? FileManager.default.removeItem(atPath: base)
+    }
+
+    private func scenario(cli: String, base: String) throws {
         let home = "\(base)/h"
         let work = "\(base)/work"
         let repo = "\(work)/proj"
         try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
-        defer {
-            _ = try? Self.run(cli, ["daemon", "stop"], home: home)
-            try? FileManager.default.removeItem(atPath: base)
-        }
 
         // A repository whose `big.bin` is committed as a pointer.
         let content = Data((0..<4096).map { UInt8(($0 * 7 + 3) % 256) })
