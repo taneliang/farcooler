@@ -236,3 +236,40 @@ fn the_wire_carries_the_words_and_the_facts() {
     assert_eq!((wire.label.as_str(), wire.reviewers.as_slice(), wire.pr_number), ("Waiting on alice", &["alice".to_string()][..], 103));
     assert_eq!(wire.pr_url, "https://github.example/o/r/pull/103");
 }
+
+/// Only GitHub's own revert form is noise: `Revert "..."` or a `revert-<n>-`
+/// branch. A card's own PR titled "Revert the inbox color" is the card's.
+#[test]
+fn only_githubs_revert_form_is_a_revert() {
+    let mut prs = fixture_prs();
+    let at = prs.iter().position(|p| p.status.number == 108).unwrap();
+    prs[at].title = "ov-8: Revert the inbox color".into();
+    assert_eq!(pr_of(&prs, "ov-8", "", false).unwrap().status.number, 108);
+    prs[at].title = "Revert the inbox color".into();
+    prs[at].head_ref = "ov-8/inbox".into();
+    assert_eq!(pr_of(&prs, "ov-8", "", false).unwrap().status.number, 108, "head names the card");
+    // And the real forms are noise.
+    let mut revert = prs[0].clone();
+    revert.title = "Revert \"ov-8: x\"".into();
+    revert.head_ref = "someone/ov-8".into();
+    assert!(is_noise(&revert));
+    revert.title = "ov-8: undo".into();
+    revert.head_ref = "revert-108-ov-8-x".into();
+    assert!(is_noise(&revert));
+    revert.head_ref = "revert-the-color-ov-8".into();
+    assert!(!is_noise(&revert), "a branch that only starts with the word");
+}
+
+/// An update that leaves a lane's state alone, or moves it out of the live
+/// states, does not enter one.
+#[test]
+fn only_a_move_into_review_fixing_or_landing_enters() {
+    use LaneState::*;
+    assert!(enters_active(Building, Some(Review)));
+    assert!(enters_active(Fixing, Some(Review)));
+    assert!(enters_active(Review, Some(Landing)));
+    assert!(!enters_active(Review, Some(Review)), "the state it already had");
+    assert!(!enters_active(Review, None), "no state at all");
+    assert!(!enters_active(Review, Some(Landed)));
+    assert!(!enters_active(Queued, Some(Building)));
+}

@@ -38,24 +38,24 @@ async fn a_turn_waits_a_minute_while_a_lane_is_in_review_and_the_idle_pace_other
     let cards = [LaneCard { task_id: task.id, slice: String::new() }];
 
     // Nothing planned.
-    assert_eq!(tick(&h.service, &h.watcher, &mut memo, false).await, IDLE);
+    assert_eq!(tick(&h.service, &h.watcher, &mut memo, &Default::default()).await, IDLE);
 
     // A lane still building waits on no pull request.
     let agent = AgentRecord { harness: "claude".into(), agent_id: "a1".into(), role: AgentRole::Build, model: None, ended: false };
     let lane = store.create_lane(repo.workspace, &new_lane("work"), &cards, Some(&agent), Actor::Manager).unwrap();
     assert_eq!(lane.state, LaneState::Building);
-    assert_eq!(tick(&h.service, &h.watcher, &mut memo, false).await, IDLE);
+    assert_eq!(tick(&h.service, &h.watcher, &mut memo, &Default::default()).await, IDLE);
 
     // In review, fixing, landing: each is waiting on one.
     // Along the arrows: review, fixing, back to review, landing.
     for state in [LaneState::Review, LaneState::Fixing, LaneState::Review, LaneState::Landing] {
         store.update_lane(lane.id, &LaneUpdate { state: Some(state), ..Default::default() }, Actor::Manager).unwrap();
-        assert_eq!(tick(&h.service, &h.watcher, &mut memo, false).await, ACTIVE, "{state:?}");
+        assert_eq!(tick(&h.service, &h.watcher, &mut memo, &Default::default()).await, ACTIVE, "{state:?}");
     }
 
     // Landed: done waiting.
     let landed = LaneUpdate { state: Some(LaneState::Landed), landed_sha: Some("abc".into()), ..Default::default() };
     store.update_lane(lane.id, &landed, Actor::Manager).unwrap();
-    assert_eq!(tick(&h.service, &h.watcher, &mut memo, false).await, IDLE);
+    assert_eq!(tick(&h.service, &h.watcher, &mut memo, &Default::default()).await, IDLE);
     assert_eq!(ACTIVE, Duration::from_secs(60));
 }

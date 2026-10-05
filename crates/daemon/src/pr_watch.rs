@@ -34,9 +34,8 @@
 //! Part of the plan layer and as removable: only the real daemon runs it
 //! (`main.rs`), never a `--stdio` session.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -65,7 +64,14 @@ fn kicked() -> &'static tokio::sync::Notify {
     KICK.get_or_init(tokio::sync::Notify::new)
 }
 
-static FORCED: AtomicBool = AtomicBool::new(false);
+/// The repositories a lane has kicked since the last turn, which that turn
+/// reads past their backoff. Only theirs: another repository's backoff stands.
+static FORCED: Mutex<Option<HashSet<Uuid>>> = Mutex::new(None);
+
+/// The repositories kicked since the last call, and forget them.
+pub fn take_forced() -> HashSet<Uuid> {
+    FORCED.lock().unwrap_or_else(PoisonError::into_inner).take().unwrap_or_default()
+}
 
 /// The least time between two kicks for one lane.
 pub const KICK_FLOOR: Duration = Duration::from_secs(15);
@@ -96,9 +102,9 @@ impl KickFloor {
     }
 }
 
-/// A lane moved into review, fixing or landing: read now, past any backoff,
-/// unless this lane kicked within `KICK_FLOOR`.
-pub fn kick_lane(lane: Uuid) {
+/// A lane moved into review, fixing or landing: read its repository now, past
+/// that repository's backoff, unless this lane kicked within `KICK_FLOOR`.
+pub fn kick_lane(lane: Uuid, repository: Uuid) {
     static FLOOR: Mutex<Option<KickFloor>> = Mutex::new(None);
     let allowed = FLOOR
         .lock()
@@ -106,7 +112,7 @@ pub fn kick_lane(lane: Uuid) {
         .get_or_insert_with(KickFloor::default)
         .allows(lane, Instant::now());
     if allowed {
-        FORCED.store(true, Ordering::SeqCst);
+        FORCED.lock().unwrap_or_else(PoisonError::into_inner).get_or_insert_with(HashSet::new).insert(repository);
         kicked().notify_one();
     }
 }
@@ -120,9 +126,9 @@ pub struct Memo {
 
 impl Memo {
     /// Whether `repository` may be read at `now`: not while it backs off,
-    /// unless `forced`.
-    pub fn due(&self, repository: Uuid, now: Instant, forced: bool) -> bool {
-        forced || self.misses.get(&repository).is_none_or(|(_, until)| now >= *until)
+    /// unless a lane of its own kicked (`forced`).
+    pub fn due(&self, repository: Uuid, now: Instant, forced: &HashSet<Uuid>) -> bool {
+        forced.contains(&repository) || self.misses.get(&repository).is_none_or(|(_, until)| now >= *until)
     }
 
     /// A read that `gh` could not answer.
@@ -141,7 +147,7 @@ impl Memo {
 pub async fn run(svc: Arc<Service>, watcher: Arc<Watcher>) {
     let mut memo = Memo::default();
     loop {
-        let wait = tick(&svc, &watcher, &mut memo, FORCED.swap(false, Ordering::SeqCst)).await;
+        let wait = tick(&svc, &watcher, &mut memo, &take_forced()).await;
         tokio::select! {
             _ = tokio::time::sleep(wait) => {}
             _ = kicked().notified() => {}
@@ -238,7 +244,7 @@ fn stages_of(svc: &Service, workspace: Uuid, reads: &Reads) -> HashMap<Uuid, Lan
 
 /// One turn: re-read each repository that has a lane waiting on its pull
 /// requests, and say so when a stage moved. Returns how long to wait.
-pub async fn tick(svc: &Service, watcher: &Watcher, memo: &mut Memo, forced: bool) -> Duration {
+pub async fn tick(svc: &Service, watcher: &Watcher, memo: &mut Memo, forced: &HashSet<Uuid>) -> Duration {
     let live = live_lanes(svc);
     for (repository, boards) in &live.boards {
         if !memo.due(*repository, Instant::now(), forced) {

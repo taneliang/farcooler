@@ -258,3 +258,21 @@ async fn the_watch_reads_nothing_until_a_lane_enters_review_and_a_lane_kicks_onc
     tokio::time::sleep(Duration::from_secs(3)).await;
     assert_eq!(lists(dir.path()), after_one_turn, "one kick per lane in fifteen seconds");
 }
+
+/// An update that names the state a lane is already in is not a lane entering
+/// review, even once its fifteen seconds are up.
+#[tokio::test]
+async fn an_update_that_leaves_the_state_alone_does_not_wake_the_watch() {
+    let (dir, _daemon, mut client, workspace) = a_runner().await;
+    std::fs::write(dir.path().join("pr-list-open.json"), "[]").unwrap();
+    std::fs::write(dir.path().join("pr-list-closed.json"), "[]").unwrap();
+    let card = a_card(&mut client, &workspace, "Card").await;
+    let lane = a_lane(&mut client, &workspace, "work", &[&card], &[L::Review]).await;
+    a_read_after(dir.path(), 0).await;
+    let reads = lists(dir.path());
+
+    tokio::time::sleep(farcooler_daemon::pr_watch::KICK_FLOOR + Duration::from_secs(2)).await;
+    move_lane(&mut client, &lane, L::Review).await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(lists(dir.path()), reads, "Review to Review is not an entry");
+}

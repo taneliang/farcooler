@@ -64,18 +64,19 @@ fn a_gh_that_fails_is_left_alone_for_five_minutes_doubling_to_thirty() {
     assert_eq!([mins(1), mins(2), mins(3), mins(4), mins(5), mins(40)], [5, 10, 20, 30, 30, 30]);
 
     let (repo, other, t0) = (Uuid::from_u128(1), Uuid::from_u128(2), Instant::now());
+    let none = HashSet::new();
     let mut memo = Memo::default();
-    assert!(memo.due(repo, t0, false), "never missed");
+    assert!(memo.due(repo, t0, &none), "never missed");
     memo.missed(repo, t0);
-    assert!(!memo.due(repo, t0 + Duration::from_secs(60), false), "a minute on, still backing off");
-    assert!(!memo.due(repo, t0 + Duration::from_secs(299), false));
-    assert!(memo.due(repo, t0 + Duration::from_secs(300), false), "five minutes on");
-    assert!(memo.due(other, t0, false), "another repository is its own");
-    assert!(memo.due(repo, t0 + Duration::from_secs(60), true), "a lane entering review tries once");
+    assert!(!memo.due(repo, t0 + Duration::from_secs(60), &none), "a minute on, still backing off");
+    assert!(!memo.due(repo, t0 + Duration::from_secs(299), &none));
+    assert!(memo.due(repo, t0 + Duration::from_secs(300), &none), "five minutes on");
+    assert!(memo.due(other, t0, &none), "another repository is its own");
+    assert!(memo.due(repo, t0 + Duration::from_secs(60), &HashSet::from([repo])), "a lane entering review tries once");
     memo.missed(repo, t0 + Duration::from_secs(300));
-    assert!(!memo.due(repo, t0 + Duration::from_secs(300 + 599), false), "the second miss waits ten");
+    assert!(!memo.due(repo, t0 + Duration::from_secs(300 + 599), &none), "the second miss waits ten");
     memo.answered(repo);
-    assert!(memo.due(repo, t0 + Duration::from_secs(301), false), "an answer clears it");
+    assert!(memo.due(repo, t0 + Duration::from_secs(301), &none), "an answer clears it");
 }
 
 /// A lane's kicks are at least 15 s apart; another lane's are its own.
@@ -142,4 +143,21 @@ async fn the_cache_keeps_the_last_answer_and_the_counts_through_a_refresh() {
     svc.pr_cache_put(repo, None);
     assert!(svc.pr_answer_is_known(repo), "a refresh gh could not answer");
     assert_eq!(svc.pr_cache_get(repo).unwrap()[0].review.unresolved_threads, Some(2));
+}
+
+/// A kick reads past the backoff of the kicked lane's repository, and no
+/// other's.
+#[test]
+fn a_kick_bypasses_the_backoff_of_its_own_repository_only() {
+    let (kicked, other, lane, t0) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7(), Instant::now());
+    let mut memo = Memo::default();
+    memo.missed(kicked, t0);
+    memo.missed(other, t0);
+    kick_lane(lane, kicked);
+    let forced = take_forced();
+    assert!(forced.contains(&kicked) && !forced.contains(&other));
+    let soon = t0 + Duration::from_secs(30);
+    assert!(memo.due(kicked, soon, &forced), "the kicked repository is tried");
+    assert!(!memo.due(other, soon, &forced), "another repository's backoff stands");
+    assert!(take_forced().is_empty(), "and a kick is spent once");
 }

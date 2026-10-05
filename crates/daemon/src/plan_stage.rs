@@ -44,6 +44,12 @@ pub struct LaneStages {
     pub cards: HashMap<Uuid, Stage>,
 }
 
+/// Whether a lane's update moves it into review, fixing or landing: its new
+/// state is one of those and is not the state it was already in.
+pub fn enters_active(was: LaneState, to: Option<LaneState>) -> bool {
+    to.is_some_and(|to| to != was && phase_of(to).is_active())
+}
+
 pub fn phase_of(state: LaneState) -> Phase {
     match state {
         LaneState::Queued => Phase::Queued,
@@ -82,9 +88,12 @@ fn title_starts_with(title: &str, key: &str) -> bool {
 }
 
 /// A pull request nobody here opened for a card: a fork's, or a revert of one
-/// that was.
+/// that was. A revert is GitHub's own form, a title that starts `Revert "` or a
+/// head branch `revert-<number>-...`; a card's own PR that happens to be titled
+/// "Revert the inbox color" is that card's.
 fn is_noise(p: &PrInfo) -> bool {
-    p.is_fork || p.title.trim_start().to_ascii_lowercase().starts_with("revert")
+    let revert_branch = p.head_ref.strip_prefix("revert-").is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit()));
+    p.is_fork || p.title.trim_start().starts_with("Revert \"") || revert_branch
 }
 
 /// The best of several PRs that all claim a card: one still open over one

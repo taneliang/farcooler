@@ -151,15 +151,19 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, scope: Scope, req
                 branch: p.branch,
                 agent: agent.clone(),
             };
+            let was = svc.store.lane(lane)?.state;
             let lane = svc.store.update_lane(lane, &update, actor)?;
             if let Some(tokens) = p.budget_tokens {
                 svc.store.set_budget(Subject::Lane(lane.id), (tokens > 0).then_some(tokens), actor)?;
             }
             watcher.announce_plan_changed(lane.workspace_id, actor);
             // A lane that moved into review, fixing or landing wants its pull
-            // requests read now; any other update does not.
-            if update.state.is_some_and(|s| crate::plan_stage::phase_of(s).is_active()) {
-                crate::pr_watch::kick_lane(lane.id);
+            // requests read now; any other update, one that leaves its state
+            // alone included, does not.
+            if crate::plan_stage::enters_active(was, update.state) {
+                if let Ok(ws) = svc.store.get_workspace(lane.workspace_id) {
+                    crate::pr_watch::kick_lane(lane.id, ws.repository_id);
+                }
             }
             if let Some(agent) = &agent {
                 record_worker(svc, watcher, &lane, agent, &p.actor);
