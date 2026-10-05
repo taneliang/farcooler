@@ -677,10 +677,10 @@ final class ShellGestureTests: XCTestCase {
         // the call until the press returns, and the threshold is untouched.
         //
         // A shot counts only if it finished a margin before the press
-        // returned: a release commits the tab under the thumb, and that row
-        // then stays lit with no finger on it, which would pass this test on
-        // the release alone. The deadline is the press itself (`pressHold`
-        // after the touch lands) and nothing else is waited on.
+        // returned, because the release comes some time before that: it
+        // commits the tab under the thumb, and that row then stays lit with
+        // no finger on it, which would pass this test on the release alone.
+        // The deadline is the press itself and nothing else is waited on.
         let samples = SampleBox()
         let done = DispatchSemaphore(value: 0)
         DispatchQueue.global(qos: .userInitiated).async {
@@ -696,9 +696,12 @@ final class ShellGestureTests: XCTestCase {
         let released = Date()
         samples.finish()
         XCTAssertEqual(done.wait(timeout: .now() + 30), .success, "the screenshots never stopped")
-        // The release lands a moment before `press` returns, and the commit
-        // it makes takes a few frames to draw; 0.6 s clears both with room.
-        let held = samples.all.filter { $0.at <= released.addingTimeInterval(-0.6) }
+        // The release lands BEFORE `press` returns, by XCTest's wait for the
+        // app to idle: measured here at 0.7 s, with the committed row lit in
+        // the shot taken 0.68 s before the return and not in the one at 0.79.
+        // So 1.0 s, which leaves the touch-down end of the window untouched
+        // (the finger is down for `pressHold`, 2 s) and keeps the release out.
+        let held = samples.all.filter { $0.at <= released.addingTimeInterval(-1.0) }
         XCTAssertFalse(held.isEmpty, "no screenshot finished while the finger was down")
 
         var apart = -Double.infinity
