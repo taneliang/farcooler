@@ -326,8 +326,9 @@ enum WorkspaceMotion {
     /// A selection change, between the orchestrator, a task and a worktree:
     /// none (ov-293). It's drawn on the next frame. The spring this was
     /// took about 200 ms to be 95% drawn and barely moved in its first
-    /// 30 ms, which read as navigation lagging. Any motion put here must
-    /// start at once and end within 150 ms (`SelectionSwapTimingTests`).
+    /// 30 ms, which read as navigation lagging. It stays nil: a fade of
+    /// any length goes red in `SelectionSwapTimingTests`, which allows no
+    /// frame part of the way.
     static let swap: Animation? = nil
     /// Past the leading edge when put away, so its divider is out of
     /// sight too.

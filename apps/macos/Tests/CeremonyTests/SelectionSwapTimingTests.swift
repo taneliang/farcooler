@@ -141,15 +141,24 @@ struct SelectionSwapTimingTests {
             + "terminal \(ms(reached(samples, 0.95, \.bottom))); first reading at \(ms(samples.first?.ms))"
     }
 
-    /// The cap (ov-293): a selection change starts on the next frame and is
-    /// drawn within 150 ms, its terminal included on a click. Judged only on
-    /// readings past the cap and its slack, each of which must show it
-    /// drawn: a loaded runner whose first reading comes late (472 ms once,
-    /// under the full suite) then has fewer to judge, never a false red.
+    /// The cap (ov-293): a selection change has no transition at all. Every
+    /// reading shows it either not yet taken in or wholly drawn, never part
+    /// of the way, and every reading past 150 ms shows it drawn, its
+    /// terminal included on a click. A loaded runner whose first reading
+    /// comes late (472 ms once, under the full suite) then has fewer to
+    /// judge, never a false red: with no motion, any reading after the
+    /// change is taken in is the whole of it. Review 1004o #16: the old cap
+    /// judged only readings past 210 ms, so a 200 ms fade passed.
     static let cap = 150.0
-    static let slack = 60.0
+    /// Part of the way: a fade's frames, or a terminal shown blank.
+    static func between(_ v: Double) -> Bool { v > 0.05 && v < 0.95 }
 
-    @Test("A selection change starts at once and is drawn within the cap")
+    @Test("A selection change has no transition")
+    func swapHasNoMotion() {
+        #expect(WorkspaceMotion.swap == nil, "a selection change animates: \(String(describing: WorkspaceMotion.swap))")
+    }
+
+    @Test("A selection change is drawn whole, with no frame part of the way, within the cap")
     func swapsAreInstant() async {
         let harness = Harness()
         await harness.rest()
@@ -175,10 +184,16 @@ struct SelectionSwapTimingTests {
             // pass that takes the change in.
             let early = samples.first { $0.ms >= 34 }!
             #expect(early.top > 0.02, "\(name) hadn't started \(Int(early.ms)) ms in")
+            // No transition: no reading part of the way, in the content or
+            // its terminal.
+            let partway = samples.first { Self.between($0.top) || Self.between($0.bottom) }
+            #expect(
+                partway == nil,
+                "\(name) was drawn part of the way at \(Int(partway?.ms ?? 0)) ms: \(partway?.top ?? 0), terminal \(partway?.bottom ?? 0)")
             // No longer than the cap: drawn by then.
-            let undrawn = samples.first { $0.ms > Self.cap + Self.slack && $0.top < 0.95 }
+            let undrawn = samples.first { $0.ms > Self.cap && $0.top < 0.95 }
             #expect(undrawn == nil, "\(name) wasn't drawn \(Int(undrawn?.ms ?? 0)) ms in")
-            let blank = samples.first { $0.ms > Self.cap + Self.slack && $0.bottom < 0.95 }
+            let blank = samples.first { $0.ms > Self.cap && $0.bottom < 0.95 }
             #expect(blank == nil, "\(name)'s terminal wasn't drawn \(Int(blank?.ms ?? 0)) ms in")
             // A click mounts the terminal with the rest, not a settle later.
             let drawn = Self.reached(samples, 0.95, \.top) ?? .infinity
