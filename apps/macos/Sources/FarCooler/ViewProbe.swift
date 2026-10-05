@@ -60,3 +60,28 @@ extension View {
         modifier(IdentifiedModifier(id: id, labels: false))
     }
 }
+
+/// Under `gridProbing`, a zero-height probe hung on the view's first text
+/// baseline, reported as `identified(_:)` is, so a test can read where a
+/// label's or a symbol's baseline was drawn (ov-290). Nothing otherwise.
+private struct BaselineProbe: ViewModifier {
+    let id: String?
+    @Environment(\.gridProbing) private var probing
+
+    func body(content: Content) -> some View {
+        if probing, let id {
+            content.background(alignment: Alignment(horizontal: .leading, vertical: .firstTextBaseline)) {
+                Color.clear.frame(width: 1, height: 0).probed(id)
+            }
+        } else {
+            content
+        }
+    }
+}
+
+extension View {
+    /// Reported to a test at its first text baseline (`BaselineProbe`).
+    func baselineProbed(_ id: String?) -> some View {
+        modifier(BaselineProbe(id: id))
+    }
+}

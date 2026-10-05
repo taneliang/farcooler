@@ -535,8 +535,9 @@ struct DrillBreadcrumb: View {
         let pieces = Self.pieces(crumbs, worktrees: worktrees, menus: menus.count)
         let segments = built ?? []
         HStack(spacing: JumpBar.spacing) {
-            // The segments on one center: every piece is one `JumpBar.cell`
-            // tall, so labels, carets and separators share a line (ov-290).
+            // The segments on one center and one baseline: every piece is one
+            // `JumpBar.cell` tall, its baseline at `JumpBar.baseline` in it, so
+            // labels, carets and separators share a line (ov-290).
             HStack(alignment: .center, spacing: JumpBar.spacing) {
             ForEach(Array(pieces.enumerated()), id: \.offset) { offset, piece in
                 switch piece.kind {
@@ -544,7 +545,9 @@ struct DrillBreadcrumb: View {
                     Image(systemName: JumpBar.separatorGlyph)
                         .font(piece.style.font)
                         .foregroundStyle(piece.style.color)
-                        .frame(width: JumpBar.separatorWidth, height: JumpBar.cell)
+                        .baselineProbed("jump-separator-\(offset)-baseline")
+                        .jumpCell()
+                        .frame(width: JumpBar.separatorWidth)
                         .accessibilityHidden(true)
                         .identified("jump-separator-\(offset)")
                 case .crumb(let index):
@@ -565,8 +568,9 @@ struct DrillBreadcrumb: View {
                             Text(terminal.title).font(piece.style.font).lineLimit(1)
                         }
                         .foregroundStyle(piece.style.color)
+                        .baselineProbed("breadcrumb-terminal-baseline")
                         .padding(.horizontal, JumpBar.labelInset)
-                        .frame(minHeight: JumpBar.cell)
+                        .jumpCell()
                         .background(ring(crumbs.count + 1))
                         .accessibilityElement(children: .combine)
                         .identified("breadcrumb-terminal")
@@ -706,6 +710,7 @@ struct DrillBreadcrumb: View {
     @ViewBuilder
     private func crumb(_ crumb: WorkspaceNavigation.Crumb, index: Int, style: JumpBar.Style) -> some View {
         let text = Text(crumb.title).font(style.font).foregroundStyle(style.color).lineLimit(1)
+            .baselineProbed("jump-label-\(index)-baseline")
         if crumb.target != nil {
             JumpLabelButton(name: Self.labelName(crumb.title)) {
                 perform(Self.click(.crumb(index), crumbs: crumbs, worktrees: worktrees))
@@ -719,7 +724,7 @@ struct DrillBreadcrumb: View {
             text
                 .truncationMode(.middle)
                 .padding(.horizontal, JumpBar.labelInset)
-                .frame(minHeight: JumpBar.cell)
+                .jumpCell()
                 .layoutPriority(-1)
                 .background(ring(index))
                 .accessibilityIdentifier("jump-segment-\(index)")
@@ -728,7 +733,10 @@ struct DrillBreadcrumb: View {
 
     /// A segment's ⌄: its menu, in a popover hung from it.
     private func caret(_ kind: Piece.Kind, segment index: Int, style: JumpBar.Style, segments: [JumpMenu]) -> some View {
-        JumpCaretButton(name: Self.caretName(index, crumbs: crumbs.count, title: crumbs.indices.contains(index) ? crumbs[index].title : nil), style: style) {
+        JumpCaretButton(
+            name: Self.caretName(index, crumbs: crumbs.count, title: crumbs.indices.contains(index) ? crumbs[index].title : nil),
+            style: style, probe: "jump-caret-\(index)-baseline"
+        ) {
             perform(Self.click(kind, crumbs: crumbs, worktrees: worktrees))
         }
         .popover(isPresented: presented(index), arrowEdge: .bottom) { menu(index, segments: segments) }
@@ -753,9 +761,11 @@ struct DrillBreadcrumb: View {
                 .foregroundStyle(title.color)
                 .lineLimit(1)
         }
+        .baselineProbed("breadcrumb-worktrees-baseline")
         let click = Self.click(.menuIcon, crumbs: crumbs, worktrees: worktrees)
         if click == .none {
             label
+                .jumpCell()
                 .fixedSize()
                 .background(ring(crumbs.count))
                 .accessibilityElement(children: .combine)

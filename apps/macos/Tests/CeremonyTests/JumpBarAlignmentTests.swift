@@ -14,14 +14,20 @@ struct JumpBarAlignmentTests {
     /// A bar with every kind of piece: a linked crumb and its caret, the
     /// worktree label and its caret, the terminal and its caret, with a
     /// separator between each two.
-    private func bar() async throws -> (NSWindow, [String: CGRect]) {
+    private func bar(scale: CGFloat? = nil) async throws -> (NSWindow, [String: CGRect]) {
         let terminal = TerminalCrumb(title: "server", siblings: [])
         let bar = DrillBreadcrumb(
             crumbs: [Nav.workspaceCrumb],
             worktrees: WorktreeCrumb(
                 title: "invoice pdf", isHere: true, tasks: [], loose: [], target: .go(Nav.at(nil)), terminal: terminal),
             onGo: { _ in }, onClose: nil, menus: JumpMenuSource(count: 1, build: { [JumpMenu([])] }))
-        let (window, seen) = try await Nav.show(bar, size: CGSize(width: 700, height: 60))
+        let size = CGSize(width: 700, height: 60)
+        let (window, seen) = try await {
+            // SwiftUI rounds each view onto the pixel grid of its
+            // `displayScale`, which a test sets for 1x (CI) or 2x.
+            if let scale { return try await Nav.show(bar.environment(\.displayScale, scale), size: size) }
+            return try await Nav.show(bar, size: size)
+        }()
         return (window, seen.views)
     }
 
@@ -59,5 +65,31 @@ struct JumpBarAlignmentTests {
         #expect(abs(first.minX - carets[0].maxX) <= tolerance, "\(first.minX - carets[0].maxX) pt between a caret and its separator")
         #expect(abs(second.minX - carets[1].maxX) <= tolerance)
         #expect(abs(first.width - JumpBar.separatorWidth) <= tolerance)
+    }
+
+    /// The pieces' baselines: a 13 pt label and a 10 pt chevron, each
+    /// centered in its cell, put the chevron's baseline above the label's,
+    /// which no frame's center shows (review 1004o #6).
+    static let baselineIDs = [
+        "jump-label-0", "jump-caret-0", "jump-separator-2", "breadcrumb-worktrees", "jump-caret-1",
+        "jump-separator-6", "breadcrumb-terminal", "jump-caret-2",
+    ]
+
+    @Test("Labels, carets and separators share one baseline, at 1x and 2x", arguments: [CGFloat(1), 2])
+    func oneBaseline(scale: CGFloat) async throws {
+        let (window, views) = try await bar(scale: scale)
+        defer { window.close() }
+        // Every piece aims at one whole-point baseline, so each rounds onto
+        // the same pixel at 1x and 2x alike, and they are measured equal.
+        // 0.5 pt is half a pixel at 1x: under the 1 pt the old centered
+        // carets sat above the labels at 1x (2 pt for a separator), and the
+        // 1.5 pt at 2x (`tolerance`).
+        let baselines = try Self.baselineIDs.map { id in
+            (id, try #require(views["\(id)-baseline"], "no baseline drawn for \(id): \(views.keys.sorted())").minY)
+        }
+        let first = baselines[0].1
+        for (id, y) in baselines {
+            #expect(abs(y - first) <= tolerance, "\(id)'s baseline is at \(y), the label's at \(first)")
+        }
     }
 }

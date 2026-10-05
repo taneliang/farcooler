@@ -1,4 +1,5 @@
 import AgentKit
+import AppKit
 import SwiftUI
 
 // A jump bar segment is two controls (ov-267): its label, which goes to what
@@ -102,7 +103,7 @@ struct JumpLabelButton<Label: View>: View {
         Button(action: action) {
             label()
                 .padding(.horizontal, JumpBar.labelInset)
-                .frame(minHeight: JumpBar.cell)
+                .jumpCell()
                 .background(RoundedRectangle.control.fill(hovering ? Fill.hover : Color.clear))
                 .contentShape(Rectangle())
         }
@@ -119,6 +120,8 @@ struct JumpLabelButton<Label: View>: View {
 struct JumpCaretButton: View {
     let name: String
     let style: JumpBar.Style
+    /// Where a test reads its glyph's baseline (`baselineProbed`).
+    var probe: String? = nil
     let action: () -> Void
 
     /// The narrowest a caret's hit area is (ov-267).
@@ -135,6 +138,8 @@ struct JumpCaretButton: View {
             Image(systemName: JumpBar.menuGlyph)
                 .font(style.font)
                 .foregroundStyle(style.color)
+                .baselineProbed(probe)
+                .jumpCell()
                 .frame(minWidth: Self.minWidth, minHeight: Self.minHeight)
                 .background(RoundedRectangle.control.fill(hovering ? Fill.hover : Color.clear))
                 .contentShape(Rectangle())
@@ -143,5 +148,37 @@ struct JumpCaretButton: View {
         .onHover { hovering = $0 }
         .help(name)
         .accessibilityLabel(name)
+    }
+}
+
+/// Where every piece's baseline sits in its cell (ov-290, review 1004o #6):
+/// a label's, as it falls when the text is centered in the cell, so a
+/// smaller chevron rides the label's baseline rather than centering itself
+/// above it. Every cell is still `JumpBar.cell` tall, on one center. A
+/// whole point, so each piece rounds onto the same pixel at 1x as at 2x.
+extension JumpBar {
+    static let baseline: CGFloat = {
+        let font = NSFont.systemFont(ofSize: ColumnHeader.textSize)
+        return (cell / 2 + (font.ascender + font.descender) / 2).rounded()
+    }()
+}
+
+extension VerticalAlignment {
+    private enum JumpBaseline: AlignmentID {
+        static func defaultValue(in d: ViewDimensions) -> CGFloat { JumpBar.baseline }
+    }
+
+    /// A jump bar cell's baseline (`JumpBar.baseline`), from its top.
+    static let jumpBaseline = VerticalAlignment(JumpBaseline.self)
+}
+
+extension View {
+    /// This piece in a jump bar cell: `JumpBar.cell` tall, its first text
+    /// baseline at `JumpBar.baseline`, centered across.
+    func jumpCell() -> some View {
+        ZStack(alignment: Alignment(horizontal: .center, vertical: .jumpBaseline)) {
+            Color.clear.frame(width: 0, height: JumpBar.cell)
+            alignmentGuide(.jumpBaseline) { $0[.firstTextBaseline] }
+        }
     }
 }
