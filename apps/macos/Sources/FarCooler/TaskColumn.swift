@@ -63,22 +63,29 @@ enum TaskColumnModel {
     enum AgentView: Equatable {
         /// No agent: why not, and Ask the Orchestrator.
         case start
-        /// A task passed on the way, glancing: nothing mounted until it
-        /// settles.
+        /// A task passed on the way, glancing, or one whose agent's
+        /// worktree hasn't had its layouts read yet: nothing mounted until
+        /// it settles and the read lands.
         case waiting
         /// The layout holding the agent.
         case tiled
-        /// The agent's terminal alone, in no layout read yet.
+        /// The agent's terminal alone: its worktree's layouts are read and
+        /// none holds it.
         case bare
     }
 
     /// The Agent tab's view, from the agent, the glance and the layout, and
     /// never from which tab is in front, so a tab switch can't swap one
-    /// view for another and re-wrap the terminal.
-    static func agentView(hasAgent: Bool, settled: Bool, hasLayout: Bool) -> AgentView {
+    /// view for another and re-wrap the terminal. Nor does it mount the
+    /// terminal bare before the worktree's layouts are read (`layoutsRead`):
+    /// a task opened then (a relaunch, or an agent started a moment ago)
+    /// would mount bare, then again tiled when the read lands, a blank frame
+    /// between (review 1004o #18). It waits, and mounts once, in its layout.
+    static func agentView(hasAgent: Bool, settled: Bool, hasLayout: Bool, layoutsRead: Bool) -> AgentView {
         guard hasAgent else { return .start }
         guard settled else { return .waiting }
-        return hasLayout ? .tiled : .bare
+        if hasLayout { return .tiled }
+        return layoutsRead ? .bare : .waiting
     }
 
     /// Whether the task's diff has the Diff menu's keys: it was clicked

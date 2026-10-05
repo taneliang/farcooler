@@ -207,11 +207,28 @@ struct TaskTabsTests {
     @Test("The Agent tab's view doesn't depend on which tab is in front")
     func theAgentTabsView() {
         typealias Model = TaskColumnModel
-        #expect(Model.agentView(hasAgent: false, settled: true, hasLayout: false) == .start)
-        #expect(Model.agentView(hasAgent: false, settled: false, hasLayout: true) == .start)
-        #expect(Model.agentView(hasAgent: true, settled: false, hasLayout: true) == .waiting)
-        #expect(Model.agentView(hasAgent: true, settled: true, hasLayout: true) == .tiled)
-        #expect(Model.agentView(hasAgent: true, settled: true, hasLayout: false) == .bare)
+        #expect(Model.agentView(hasAgent: false, settled: true, hasLayout: false, layoutsRead: true) == .start)
+        #expect(Model.agentView(hasAgent: false, settled: false, hasLayout: true, layoutsRead: true) == .start)
+        #expect(Model.agentView(hasAgent: true, settled: false, hasLayout: true, layoutsRead: true) == .waiting)
+        #expect(Model.agentView(hasAgent: true, settled: true, hasLayout: true, layoutsRead: true) == .tiled)
+        #expect(Model.agentView(hasAgent: true, settled: true, hasLayout: false, layoutsRead: true) == .bare)
+    }
+
+    /// A task opened before its agent's worktree has had its layouts read
+    /// (a relaunch, or an agent started a moment ago) mounts nothing until
+    /// the read lands, then its terminal once, in its layout: never bare
+    /// first and tiled after, which mounts the terminal twice (review 1004o
+    /// #18). Walked as the read lands: the views drawn, in order.
+    @Test("An agent whose layouts aren't read yet mounts once, in its layout")
+    func anUnreadLayoutMountsOnce() {
+        typealias Model = TaskColumnModel
+        // Before the read, and after it with the layout holding the agent.
+        let drawn = [false, true].map { read in
+            Model.agentView(hasAgent: true, settled: true, hasLayout: read, layoutsRead: read)
+        }
+        #expect(drawn == [.waiting, .tiled])
+        // No terminal mounted before the tiled one.
+        #expect(!drawn.contains(.bare))
     }
 
     /// The diff's keys (⌥⌘↓, ⌥⌘], ⌃⌥⌘], Mark as Reviewed) are for a diff

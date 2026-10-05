@@ -566,7 +566,10 @@ extension ContentView {
                 // until it settles. Mounted once, then kept behind the other
                 // tabs (`TaskTabs`); on screen and given the keyboard only
                 // in front.
-                switch TaskColumnModel.agentView(hasAgent: chosen != nil, settled: settled, hasLayout: shown != nil) {
+                switch TaskColumnModel.agentView(
+                    hasAgent: chosen != nil, settled: settled, hasLayout: shown != nil,
+                    layoutsRead: chosen.map { client.layouts[$0.worktree.id] != nil } ?? false)
+                {
                 case .start: start
                 case .waiting: Color.clear
                 case .tiled: if let shown { tiled(shown, titled: false, keyboard: keyboard && tab == .agent) }
