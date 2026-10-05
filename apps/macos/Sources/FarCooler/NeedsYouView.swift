@@ -150,8 +150,9 @@ struct NeedsYouView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // The page's ground is the window's frosted plane, with the items on it
-        // as opaque cards (ov-225).
+        // One card on the window's frosted plane like every destination, with the
+        // items on it as inset groups (ov-225, ov-297).
+        .contentCard()
         .background { WindowPlane().ignoresSafeArea() }
         .navigationTitle("Needs You")
         .navigationSubtitle(items.isEmpty ? "" : (items.count == 1 ? "1 item" : "\(items.count) items"))
@@ -244,9 +245,8 @@ struct NeedsYouItemRow: View {
             }
         }
         .padding(Spacing.inset)
-        // A card: `Radius.medium` paper, with no stroke. The card against the
-        // plane is its edge; Increase Contrast draws a separator back.
-        .surface(.content, in: .card, fill: WorkspaceStyle.paper)
+        // A group on the page's card: the inset fill is its edge, with no stroke.
+        .surface(.inset, in: .card)
         .contentShape(Rectangle())
         .onTapGesture(perform: onOpen)
         .accessibilityElement(children: .contain)

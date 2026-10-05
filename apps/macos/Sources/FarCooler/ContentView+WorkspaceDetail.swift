@@ -190,6 +190,7 @@ extension ContentView {
             } description: {
                 Text(missingBoardSentence(host: host))
             }
+            .contentCard()
         }
     }
 
@@ -198,16 +199,18 @@ extension ContentView {
         state: ConversationColumn.State, offers: [ConversationColumn.Offer], shown: ShownLayout?,
         seat: BoardPane?, workspace: WorkspaceSummary, host: String, onScreen: Bool
     ) -> some View {
-        let placeholder = ConversationPlaceholder(
-            state: state, offers: offers,
-            onStart: { harness in startOrchestrator(workspace, host: host, harness: harness, replace: false) },
-            onRestart: { if let seat { Task { await run(.restart, on: seat.terminal, in: seat.worktree) } } },
-            onReplace: {
-                let harness = seat.flatMap { OrchestratorHarness(rawValue: Terminal.name(of: $0.terminal.preset)) } ?? .claude
-                orchestratorReplacement = OrchestratorReplacement(host: host, workspace: workspace, harness: harness)
-            },
-            candidates: OrchestratorAdoption.candidates(for: workspace, host: host, in: store.fleet),
-            onUse: { useAsOrchestrator($0) })
+        let placeholder = { (card: Bool) in
+            ConversationPlaceholder(
+                state: state, offers: offers,
+                onStart: { harness in startOrchestrator(workspace, host: host, harness: harness, replace: false) },
+                onRestart: { if let seat { Task { await run(.restart, on: seat.terminal, in: seat.worktree) } } },
+                onReplace: {
+                    let harness = seat.flatMap { OrchestratorHarness(rawValue: Terminal.name(of: $0.terminal.preset)) } ?? .claude
+                    orchestratorReplacement = OrchestratorReplacement(host: host, workspace: workspace, harness: harness)
+                },
+                candidates: OrchestratorAdoption.candidates(for: workspace, host: host, in: store.fleet),
+                onUse: { useAsOrchestrator($0) }, carded: card)
+        }
         switch state {
         case .live:
             if let shown {
@@ -217,13 +220,17 @@ extension ContentView {
             }
         case .lost:
             // Its last screen, dimmed, under what can be done about it.
-            ZStack {
-                if let shown { tiled(shown, titled: false).opacity(0.35).allowsHitTesting(false) }
-                // style-exempt: a scrim over the lost terminal's dimmed last screen
-                placeholder.background(.regularMaterial.opacity(shown == nil ? 0 : 1))
+            if let shown {
+                ZStack {
+                    tiled(shown, titled: false).opacity(0.35).allowsHitTesting(false)
+                    // style-exempt: a scrim over the lost terminal's dimmed last screen
+                    placeholder(false).background(.regularMaterial, in: .card).paneCanvas()
+                }
+            } else {
+                placeholder(true)
             }
         case .none, .starting:
-            placeholder
+            placeholder(true)
         }
     }
 
@@ -308,19 +315,16 @@ extension ContentView {
             )
             // The task is one card on the plane (ov-223): its header, tabs and
             // body together, in the paper's color, inset by the window's gutter.
-            .clipShape(.card)
-            .surface(.content, in: .card, fill: WorkspaceStyle.paper)
-            .padding(Gutter.window)
+            .contentCard()
         case .workspace(let host, let id, .history(let status)?):
             if let client = store.clients[host], let workspace = board(host: host, id: id) {
                 BoardHistoryView(
                     store: boardStore(for: workspace, client: client, host: host), status: status,
                     onOpen: { row in chooseTask(row.id, host: host, workspace: id, glance: false) }
                 )
-                .background(WorkspaceStyle.paper)
             } else {
                 ContentUnavailableView("Board Not Found", systemImage: "checklist")
-                    .background(WorkspaceStyle.paper)
+                    .contentCard()
             }
         case .workspace(let host, let id, .plan(let page)?):
             if let client = store.clients[host], let workspace = board(host: host, id: id) {
@@ -328,7 +332,7 @@ extension ContentView {
                 PlanPageView(plan: board.plan, page: page, context: planContext(board, host: host, workspace: id))
             } else {
                 ContentUnavailableView("Board Not Found", systemImage: "map")
-                    .background(WorkspaceStyle.paper)
+                    .contentCard()
             }
         case .workspace(let host, _, .worktree(let wt, _)?), .looseWorktree(let host, let wt, _):
             if !settled {
@@ -345,10 +349,9 @@ extension ContentView {
                 tiled(shown, titled: false, keyboard: current)
             } else if let ws = worktree(host: host, id: wt) {
                 worktreeDetail(ws)
-                    .background(WorkspaceStyle.paper)
             } else {
                 ContentUnavailableView("Worktree Not Found", systemImage: "folder")
-                    .background(WorkspaceStyle.paper)
+                    .contentCard()
             }
         default:
             EmptyView()

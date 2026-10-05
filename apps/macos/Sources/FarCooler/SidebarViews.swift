@@ -141,6 +141,7 @@ struct WorktreeDetail: View {
             .frame(maxWidth: 720, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .contentCard()
         // Same title as the tiled and solo views, so switching between them does
         // not change what the window claims you are looking at.
         .navigationTitle(worktree.windowTitle)

@@ -223,6 +223,9 @@ struct ConversationPlaceholder: View {
     /// wherever Start Orchestrator is.
     var candidates: [BoardPane] = []
     var onUse: (BoardPane) -> Void = { _ in }
+    /// Drawn on its own card, as every destination is (ov-297). Off only over
+    /// a lost orchestrator's dimmed last screen, which is cards already.
+    var carded = true
 
     var body: some View {
         VStack(spacing: 10) {
@@ -277,5 +280,15 @@ struct ConversationPlaceholder: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .modifier(CardIf(on: carded))
+    }
+}
+
+/// `contentCard()` when `on`.
+struct CardIf: ViewModifier {
+    let on: Bool
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if on { content.contentCard() } else { content }
     }
 }

@@ -119,6 +119,12 @@ struct FilesInspector: View {
     let folderClient: (String) -> DaemonClient?
 
     var body: some View {
+        // On the window's plane like every column's gutter: the inspector's own
+        // ground would otherwise match the card's paper.
+        content.contentCard().background { WindowPlane().ignoresSafeArea() }
+    }
+
+    @ViewBuilder private var content: some View {
         if let ref = routing.inspectorFolder {
             if let client = folderClient(ref.host) {
                 FilesPane(

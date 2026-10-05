@@ -74,4 +74,17 @@ extension View {
     func paneCard() -> some View {
         clipShape(.card).surface(.content, in: .card, fill: WorkspaceStyle.paper)
     }
+
+    /// A whole destination as one card on the plane (ov-297), filling the area.
+    ///
+    /// The card a terminal or a task is drawn on, with the gutter the window's
+    /// corner needs (`Pane.inset`): every view that fills the main area wears
+    /// this, so nothing in it is full-bleed. The view scrolls inside the card
+    /// and the card's corners clip it; a header that keeps its place (the jump
+    /// bar) sits above the card, on the plane. A destination made of several
+    /// cards, tiled panes, draws each with `paneCard()` on `paneCanvas()`
+    /// instead, which is this at a count.
+    func contentCard() -> some View {
+        frame(maxWidth: .infinity, maxHeight: .infinity).paneCard().paneCanvas()
+    }
 }

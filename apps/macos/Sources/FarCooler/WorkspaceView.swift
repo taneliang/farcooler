@@ -441,6 +441,7 @@ enum WorkspaceMain {
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentCard()
     }
 }
 

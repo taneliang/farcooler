@@ -52,18 +52,18 @@ struct PlanPageView: View {
                     } actions: {
                         Button("Try Again") { Task { await plan.reload() } }
                     }
-                    .background(WorkspaceStyle.paper)
                     .identified("plan-pages-unavailable")
                 } else if plan.pagesRead || !plan.pagesAvailable {
                     // Removed, or never published: said once, never a spinner.
                     ContentUnavailableView("Page Not Found", systemImage: "doc.text")
-                        .background(WorkspaceStyle.paper)
                         .identified("plan-page-not-found")
                 } else {
                     missing("Page Not Found")
                 }
             }
         }
+        // One card for every page and every state it can be in (ov-297).
+        .contentCard()
         .task(id: page) {
             await plan.readIfNeverRead()
             await plan.readRecord(page)
@@ -91,12 +91,11 @@ struct PlanPageView: View {
                     .identified("plan-page-reading")
             }
         }
-        .background(WorkspaceStyle.paper)
     }
 }
 
-/// The page's column: a document, flat on the paper as the History page is
-/// (ov-220), not a card.
+/// The page's column: a document, flat on the page's card as the History page
+/// is (ov-220), not a card of its own.
 struct PlanDocument<Content: View>: View {
     let id: String
     @ViewBuilder let content: () -> Content
@@ -111,7 +110,6 @@ struct PlanDocument<Content: View>: View {
             .padding(.vertical, 2 * ColumnGrid.rhythm)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(WorkspaceStyle.paper)
         .identified(id)
     }
 }

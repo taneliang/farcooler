@@ -157,7 +157,13 @@ struct FleetPlaceholder: View {
     let onNewWorktree: () -> Void
     let onTryAgain: () -> Void
 
+    /// On a card like every destination (ov-297): loading, trouble and the
+    /// empty states are the same surface as the pages they stand in for.
     var body: some View {
+        content.contentCard()
+    }
+
+    @ViewBuilder private var content: some View {
         switch phase {
         case .settling:
             Color.clear
