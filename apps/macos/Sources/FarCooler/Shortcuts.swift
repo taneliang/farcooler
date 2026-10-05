@@ -121,6 +121,7 @@ enum Shortcut {
                 Item(keys: "⌥⌘1 ⌥⌘2 ⌥⌘3", action: "Select the orchestrator; go to the navigator; go to what’s selected"),
                 Item(keys: "↑ ↓", action: "In the navigator: the orchestrator, Unread, the tasks and the worktrees, in turn"),
                 Item(keys: "⌃⌘↓ ⌃⌘↑", action: "Next / previous worktree, in the navigator’s order"),
+                Item(keys: "⌘↑", action: "Up the navigator’s tree: a terminal to its lane, a lane to its card"),
                 Item(keys: "⌃⌘] ⌃⌘[", action: "A task’s next / previous tab: Overview, Agent, Changes"),
                 Item(keys: "⌘1 … ⌘9", action: "Go to a workspace, in the title bar’s order"),
                 Item(keys: "⌘0", action: "Switch workspace: open the title bar’s switcher"),

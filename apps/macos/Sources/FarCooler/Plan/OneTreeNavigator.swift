@@ -292,15 +292,9 @@ struct OneTreeRowView: View {
 
     @ViewBuilder private var disclosure: some View {
         if node.hasChildren {
-            Button(action: onToggle) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: WorkspaceStyle.PaneText.minimum, weight: .semibold))
-                    .foregroundStyle(SidebarInk.secondary)
-                    .rotationEffect(.degrees(row.expanded ? 90 : 0))
-                    .frame(width: Self.disclosure)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+            // The app's one disclosure (ov-101), on the shared motion.
+            DisclosureButton(
+                expanded: row.expanded, accessibilityLabel: node.title, width: Self.disclosure, action: onToggle)
             .accessibilityHidden(true)
         } else {
             Color.clear.frame(width: Self.disclosure, height: 1)
