@@ -586,6 +586,10 @@ AGENTKIT_SOURCES = [
     # Budgets, a theme's trend, the week and the comparison (ov-307).
     "PlanCost.swift",
     "PlanCostViews.swift",
+    # A theme's track line, what its entry says and how a row draws it (ov-331).
+    "PlanThemeTrack.swift",
+    "PlanThemeBrief.swift",
+    "PlanTrackViews.swift",
     # Orchestrator pages (ov-269): the document, its live references, the
     # layout rules and the renderer, one SwiftUI implementation the Mac and
     # the phone share (ov-284, ov-285). Experimental, and removable with pages.
