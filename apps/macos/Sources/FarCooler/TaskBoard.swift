@@ -567,6 +567,8 @@ struct TaskBoardView: View {
     /// The plan page open in the main area, and where one opens (ov-273).
     let planPage: PlanPage?
     let onPlan: (PlanPage) -> Void
+    /// The one tree (ov-321), drawn in place of the sections; nil draws them.
+    let tree: OneTreeSidebar?
     /// The pane heights a drag chose (`NavigatorSplit.encode`): the
     /// window's, kept with it; else this view's own.
     private let splitBinding: Binding<String>?
@@ -666,8 +668,9 @@ struct TaskBoardView: View {
         orchestrator: NavigatorOrchestrator? = nil, current: NavigatorItem? = nil,
         onStep: ((NavigatorItem) -> Void)? = nil, onHistory: @escaping (TaskStatus) -> Void = { _ in },
         filterRequest: Int = 0, ask: AskOrchestrator.Action = .unavailable, split: Binding<String>? = nil,
-        planPage: PlanPage? = nil, onPlan: @escaping (PlanPage) -> Void = { _ in }
+        planPage: PlanPage? = nil, onPlan: @escaping (PlanPage) -> Void = { _ in }, tree: OneTreeSidebar? = nil
     ) {
+        self.tree = tree
         self.store = store
         self.client = client
         self.planStore = store.plan
@@ -701,7 +704,9 @@ struct TaskBoardView: View {
     var body: some View {
         VStack(spacing: 0) {
             topBand
-            list
+            if let tree {
+                OneTreeNavigator(sidebar: tree, filterText: filter, keyed: hasKeyboard, onKeyboard: onKeyboard).id(tree.key)
+            } else { list }
         }
         // One key column for the whole board, so every title starts at one x.
         .environment(\.taskKeyWidth, TaskKeyColumn.width(for: store.board.rows.map(\.key)))
@@ -1274,50 +1279,6 @@ private struct GoToAgentItems: View {
                 }
             }
         }
-    }
-}
-
-/// Rows this build has no column for.
-///
-/// A runner ahead of this app can name a status it has never heard of. Showing
-/// it under a heading that says so is the only honest answer: dropping the row
-/// makes work vanish from a board whose whole claim is that it shows the work.
-private struct UnreadableColumnView: View {
-    let rows: [UnreadableTaskRow]
-
-    /// A section like the statuses above it: its heading at column B, and
-    /// its rows as cards with their edges at A and their text at B.
-    var body: some View {
-        VStack(alignment: .leading, spacing: NavigatorRhythm.group) {
-            VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
-                Text("Not On This Version").font(WorkspaceStyle.sectionTitle)
-                    .gridMark("unreadable", .text)
-                Text("This runner uses states this Far Cooler doesn’t have yet.")
-                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .foregroundStyle(SidebarInk.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.leading, NavigatorGrid.textInset)
-            ForEach(rows) { row in
-                VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
-                    Text(row.key)
-                        .font(
-                            .system(
-                                size: WorkspaceStyle.PaneText.secondary, design: .monospaced)
-                        )
-                        .foregroundStyle(SidebarInk.secondary)
-                    Text(row.title).font(.system(size: WorkspaceStyle.PaneText.body))
-                    Text(row.status)
-                        .font(.system(size: WorkspaceStyle.PaneText.minimum, design: .monospaced))
-                        .foregroundStyle(SidebarInk.secondary)
-                }
-                .padding(.horizontal, NavigatorGrid.textInset)
-                .padding(.vertical, NavigatorRhythm.card)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .surface(.inset, in: .card)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

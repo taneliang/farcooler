@@ -494,4 +494,21 @@ struct OneTreeTests {
         // Each theme's progress, as its counts say.
         #expect(tree.tree.prefix(5).map(\.detail) == plan.shownThemes.map { OneTreeWords.progress($0.counts) })
     }
+
+    // MARK: Narrowing
+
+    @Test("⌘F narrows to the matches and the path to each, all open; no text cuts nothing")
+    func narrowing() throws {
+        let tree = OneTree.build(try Self.board())
+        #expect(OneTree.narrowed(tree.tree, to: "  ") == tree.tree)
+        let kept = OneTree.narrowed(tree.tree, to: "ZSH")
+        let rows = OneTree.rows(kept, expansion: OneTree.allOpen(kept))
+        #expect(rows.map(\.node.title) == ["Plan", "Title t2", "copy", "zsh", "Mac", "Title t3", "copy", "zsh"])
+        // A key matches too, and a match keeps its own children.
+        let byKey = OneTree.narrowed(tree.tree, to: "ov-1")
+        #expect(byKey.map(\.title) == ["Plan"])
+        #expect(byKey[0].children.map(\.key) == ["ov-1"])
+        #expect(byKey[0].children[0].children.map(\.title) == ["primary", "fix"])
+        #expect(OneTree.narrowed(tree.tree, to: "nothing like it").isEmpty)
+    }
 }

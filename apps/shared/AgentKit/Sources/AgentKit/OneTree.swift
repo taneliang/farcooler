@@ -819,3 +819,38 @@ extension OneTree {
         return out
     }
 }
+
+// MARK: - Narrowing
+
+extension OneTree {
+    /// `nodes` narrowed to those whose key or title holds `text`, with the
+    /// ancestors that lead to them: what the navigator's filter (⌘F) shows.
+    /// Nothing is cut with no text.
+    public static func narrowed(_ nodes: [OneTreeNode], to text: String) -> [OneTreeNode] {
+        guard !BoardFilter.isEmpty(text) else { return nodes }
+        return nodes.compactMap { node in
+            // The board's own rule, every word somewhere in the key or title.
+            if BoardFilter.matches(key: node.key, title: node.title, text) { return node }
+            let kept = narrowed(node.children, to: text)
+            guard !kept.isEmpty else { return nil }
+            var trimmed = node
+            trimmed.children = kept
+            trimmed.holdsAsk = trimmed.asks || kept.contains(where: \.holdsAsk)
+            return trimmed
+        }
+    }
+
+    /// Every node in `nodes` open: how a narrowed tree is drawn, so each
+    /// match is in sight.
+    public static func allOpen(_ nodes: [OneTreeNode]) -> OneTreeExpansion {
+        var choices: [String: Bool] = [:]
+        func walk(_ nodes: [OneTreeNode]) {
+            for node in nodes where node.hasChildren {
+                choices[node.id] = true
+                walk(node.children)
+            }
+        }
+        walk(nodes)
+        return OneTreeExpansion(choices: choices)
+    }
+}
