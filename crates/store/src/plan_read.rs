@@ -92,6 +92,10 @@ pub struct ThemeView {
     /// Its tokens on each of the last seven UTC days, oldest first, today
     /// last: each lane's days shared out over its cards as `spend` is.
     pub trend: [u64; TREND_DAYS],
+    /// When it last moved (ov-331): its story, the lanes on its cards, its
+    /// rulings and its cards' status moves, whichever is newest. 0 for a
+    /// theme nothing has touched.
+    pub last_moved_at: i64,
 }
 
 /// What a lane's agents have spent, from the runner's own record of their
@@ -271,6 +275,7 @@ impl Store {
                     spend: LaneSpend::default(),
                     budget_tokens: None,
                     trend: [0; TREND_DAYS],
+                    last_moved_at: 0,
                 });
             }
         }
@@ -363,6 +368,10 @@ impl Store {
         // the reconciliation reads: a card a ruling names is in no lane by
         // design (review 1005a F2).
         let rulings = rulings_of(&conn, workspace, closed_since_ms, &statuses)?;
+        let moved = card_moves(&conn, &ws)?;
+        for view in &mut themes {
+            view.last_moved_at = theme_last_moved(view, &lanes, &rulings, &moved);
+        }
 
         let mut trains = Vec::new();
         for train in trains_of(&conn, workspace, closed_since_ms)? {
@@ -436,6 +445,36 @@ impl Store {
             .map_err(map_err)?;
         Ok(rows)
     }
+}
+
+/// When each card's status last moved, by task id (`tasks.status_since`).
+fn card_moves(conn: &Connection, workspace: &[u8]) -> Result<HashMap<Uuid, i64>> {
+    let mut stmt = conn.prepare("SELECT id, status_since FROM tasks WHERE workspace_id = ?1").map_err(map_err)?;
+    let rows = stmt.query_map(params![workspace], |r| Ok((get_uuid(r, 0)?, r.get::<_, i64>(1)?))).map_err(map_err)?;
+    rows.collect::<rusqlite::Result<HashMap<_, _>>>().map_err(map_err)
+}
+
+/// The newest of a theme's story, the lanes on its cards (a dropped lane is
+/// gone, and doesn't count), its rulings made or settled, and its cards'
+/// status moves (ov-331). The same rule the apps use (`PlanModel.lastMoved`),
+/// less the notes on a card that only the board's own read has.
+fn theme_last_moved(view: &ThemeView, lanes: &[LaneView], rulings: &[Ruling], moved: &HashMap<Uuid, i64>) -> i64 {
+    let tasks: HashSet<Uuid> = view.tasks.iter().copied().collect();
+    let mut at = view.theme.story_at;
+    for task in &view.tasks {
+        at = at.max(moved.get(task).copied().unwrap_or(0));
+    }
+    for lane in lanes {
+        if lane.lane.state != LaneState::Dropped && lane.cards.iter().any(|c| tasks.contains(&c.task_id)) {
+            at = at.max(lane.lane.state_since);
+        }
+    }
+    for ruling in rulings {
+        if ruling.theme_id == Some(view.theme.id) {
+            at = at.max(ruling.created_at).max(ruling.settled_at.unwrap_or(0));
+        }
+    }
+    at
 }
 
 /// A theme's share of its lanes' spend, summed before rounding.

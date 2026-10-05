@@ -210,6 +210,9 @@ struct PlanThemeTrackTests {
         let with = try Self.plan { $0["last_moved_at"] = 42 }
         #expect(with.themes[0].lastMovedAt == 42)
         #expect(try Self.plan().themes[0].lastMovedAt == nil)
+        // The runner's own bytes (`test/fixtures/plan.json`, which the CLI's test writes).
+        let fixture = try PlanModelTests.fixture()
+        #expect(fixture.themes[0].lastMovedAt == Self.now - Self.hour)
     }
 
     @Test("The One tree opens the theme that moved last, by the same rule")

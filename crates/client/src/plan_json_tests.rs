@@ -98,6 +98,7 @@ fn the_plan() -> pb::Plan {
             }),
             budget_tokens: Some(250_000),
             trend_tokens: vec![0, 0, 0, 40_000, 120_000, 0, 160_000],
+            last_moved_at: Some(NOW - HOUR),
         }],
         order: vec![queued.id.clone()],
         lanes: vec![queued, review, landed],

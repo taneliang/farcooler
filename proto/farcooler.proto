@@ -3963,6 +3963,12 @@ message BoardThemeView {
   // last, each lane's days shared out over its cards as `spend` is. Seven
   // values behind `board_cost`, empty without it.
   repeated uint64 trend_tokens = 6;
+  // When it last moved, in ms, by the runner's reckoning (ov-331): the newest
+  // of its story, the lanes on its cards (not dropped ones), its rulings made
+  // or settled, and its cards' status moves. Lets every client agree on when a
+  // theme reads as quiet. Absent from a runner before it; a client then works
+  // it out from what it has.
+  optional int64 last_moved_at = 7;
 }
 
 // A card a lane works, or one slice of it.

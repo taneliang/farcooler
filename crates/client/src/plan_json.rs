@@ -114,6 +114,7 @@ fn theme_json(plan: &pb::Plan, view: &pb::BoardThemeView) -> Value {
         "spend": spend_json(&view.spend.unwrap_or_default()),
         "budget_tokens": view.budget_tokens,
         "trend_tokens": view.trend_tokens,
+        "last_moved_at": view.last_moved_at,
     })
 }
 

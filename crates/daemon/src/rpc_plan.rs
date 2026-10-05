@@ -284,7 +284,7 @@ fn theme_view(svc: &Service, theme: BoardTheme) -> Result<pb::BoardThemeView> {
     let plan = svc.store.plan(theme.workspace_id, i64::MIN)?;
     let view = plan.themes.into_iter().find(|v| v.theme.id == theme.id);
     // A dropped theme leaves the read; answer with it, empty.
-    Ok(pb_theme_view(&view.unwrap_or(ThemeView { theme, tasks: Vec::new(), counts: StatusCounts::default(), spend: LaneSpend::default(), budget_tokens: None, trend: [0; 7] })))
+    Ok(pb_theme_view(&view.unwrap_or(ThemeView { theme, tasks: Vec::new(), counts: StatusCounts::default(), spend: LaneSpend::default(), budget_tokens: None, trend: [0; 7], last_moved_at: 0 })))
 }
 
 fn lane_view(svc: &Service, lane: &Lane, admin: bool) -> Result<pb::Lane> {
@@ -345,6 +345,7 @@ fn pb_theme_view(v: &ThemeView) -> pb::BoardThemeView {
         spend: Some(pb_spend(&v.spend)),
         budget_tokens: v.budget_tokens,
         trend_tokens: v.trend.to_vec(),
+        last_moved_at: (v.last_moved_at > 0).then_some(v.last_moved_at),
     }
 }
 

@@ -58,6 +58,7 @@ fn theme(n: u128, name: &str, cards: &[u128], done: u32) -> pb::BoardThemeView {
         spend: None,
         budget_tokens: None,
         trend_tokens: vec![],
+        last_moved_at: None,
     }
 }
 
@@ -154,6 +155,7 @@ fn the_plan() -> pb::Plan {
             spend: Some(theme_spend()),
             budget_tokens: Some(250_000),
             trend_tokens: TREND.to_vec(),
+            last_moved_at: Some(NOW - HOUR),
             ..theme(1, "Visual language", &[1, 2, 3], 1)
         }],
         order: vec![queued.id.clone()],
