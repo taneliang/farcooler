@@ -348,3 +348,23 @@ fn a_dropped_train_lets_its_lanes_go() {
     assert_eq!(store.lane(a.id).unwrap().train, None);
     assert_eq!(store.lane(b.id).unwrap().train.as_deref(), Some("integ-31"));
 }
+
+/// A lane with two of a theme's cards gives it half its tokens twice but its
+/// runs once (review train-1005c L3).
+#[test]
+fn a_theme_counts_a_lane_s_runs_once() {
+    use crate::plan::{AgentRecord, AgentRole, LaneCard, NewTheme};
+    let (store, main, t) = board(3);
+    let theme = store
+        .create_theme(main, &NewTheme { name: "Two".into(), outcome: String::new() }, &[t[0].id, t[1].id], Actor::Manager)
+        .unwrap();
+    let agent = AgentRecord { harness: "claude".into(), agent_id: "a9".into(), role: AgentRole::Build, model: None, ended: false };
+    let card = |task: &Task| LaneCard { task_id: task.id, slice: String::new() };
+    store
+        .create_lane(main, &NewLane { name: "both".into(), ..Default::default() }, &[card(&t[0]), card(&t[1])], Some(&agent), Actor::Manager)
+        .unwrap();
+    turn(&store, "a9", 1000);
+    let plan = store.plan(main, 0).unwrap();
+    let view = plan.themes.iter().find(|v| v.theme.id == theme.id).unwrap();
+    assert_eq!((view.spend.input_tokens, view.spend.runs), (1000, 1));
+}

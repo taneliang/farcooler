@@ -277,8 +277,15 @@ impl Store {
                     None
                 };
                 if let Some(spend) = &lane_spend {
+                    // Each theme once per lane, with the share its cards make
+                    // up, so a lane's runs and agents count once in it (review
+                    // train-1005c L3).
+                    let mut per_theme: BTreeMap<usize, usize> = BTreeMap::new();
                     for theme in &in_themes {
-                        shares[*theme].add(spend, 1.0 / linked.len() as f64);
+                        *per_theme.entry(*theme).or_default() += 1;
+                    }
+                    for (theme, cards) in per_theme {
+                        shares[theme].add(spend, cards as f64 / linked.len() as f64);
                     }
                 }
                 if !in_window {
