@@ -10,12 +10,13 @@ import SwiftUI
 //
 // It takes the place of the sections a planned board drew (Themes, Pages,
 // Tasks by status, Terminals, Worktrees). The task list by status is still
-// there, as the Board view (View ▸ Board, or ⌘K).
+// there, as the Board view (View ▸ Tasks by Status, or ⌘K).
 
 /// What the window hands the navigator to draw the tree.
 struct OneTreeSidebar {
-    /// What the tree is built from, under the filter chosen.
-    var input: (OneTreeFilter) -> OneTreeInput
+    /// The tree under the filter chosen: built once per change of what
+    /// it's built from, not once per draw (review H2).
+    var tree: (OneTreeFilter) -> OneTree
     /// What the window shows, as the node it is.
     var selected: OneTreeTarget?
     /// The row chosen last, by id: which copy of a lane under two cards.
@@ -28,6 +29,9 @@ struct OneTreeSidebar {
     /// looks loose, and revealing it would open the wrong group.
     /// Asked as the navigator draws, which watches the board and its plan.
     var settled: () -> Bool = { true }
+    /// A row's context menu: a card's, a lane's or worktree's, a
+    /// terminal's, the checkout's (review M2).
+    var menu: (OneTreeNode) -> AnyView = { _ in AnyView(EmptyView()) }
 }
 
 /// The tree, drawn: the navigator's content in place of its sections.
@@ -38,6 +42,11 @@ struct OneTreeNavigator: View {
     /// The navigator has the keyboard: a selected row reads in the accent.
     let keyed: Bool
     let onKeyboard: () -> Void
+    /// Bumped when the window gives the navigator the keyboard: ⌥⌘2, or Esc
+    /// in the filter field (review H1).
+    var focusRequest = 0
+    /// Return on the row already chosen: into it, as ⌥⌘3.
+    var onEnter: () -> Void = {}
 
     /// Which nodes this window opened and closed, as text, and the filter:
     /// kept with the window's scene, and held here too, since a window
@@ -47,13 +56,21 @@ struct OneTreeNavigator: View {
     @State private var heldExpansion: String?
     @State private var heldFilter: String?
     @FocusState private var focused: Bool
+    /// The keyboard's row, while it's on one the window doesn't show (a
+    /// group, the orchestrator's row): nil follows the selection.
+    @State private var cursor: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    init(sidebar: OneTreeSidebar, filterText: String, keyed: Bool, onKeyboard: @escaping () -> Void = {}) {
+    init(
+        sidebar: OneTreeSidebar, filterText: String, keyed: Bool, onKeyboard: @escaping () -> Void = {},
+        focusRequest: Int = 0, onEnter: @escaping () -> Void = {}
+    ) {
         self.sidebar = sidebar
         self.filterText = filterText
         self.keyed = keyed
         self.onKeyboard = onKeyboard
+        self.focusRequest = focusRequest
+        self.onEnter = onEnter
         _keptExpansion = SceneStorage(wrappedValue: "", "oneTree.expansion.\(sidebar.key)")
         _keptFilter = SceneStorage(wrappedValue: OneTreeFilter.open.rawValue, "oneTree.filter.\(sidebar.key)")
     }
@@ -79,12 +96,13 @@ struct OneTreeNavigator: View {
     private var narrowing: Bool { !BoardFilter.isEmpty(filterText) }
 
     var body: some View {
-        let tree = OneTree.build(sidebar.input(filter))
+        let tree = sidebar.tree(filter)
         let groups = shown(tree)
         let rows = groups.flatMap { $0 }
         ScrollViewReader { scroller in
             ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
+                // Lazy: a long board draws the rows in sight (review H2).
+                LazyVStack(alignment: .leading, spacing: 0) {
                     section(groups[0])
                     rule
                     filterPicker
@@ -115,10 +133,22 @@ struct OneTreeNavigator: View {
         .focused($focused)
         .focusEffectDisabled()
         .onChange(of: focused) { _, now in if now { onKeyboard() } }
-        .onKeyPress(.downArrow) { step(1, rows) }
-        .onKeyPress(.upArrow) { step(-1, rows) }
-        .onKeyPress(.rightArrow) { open(true, rows) }
-        .onKeyPress(.leftArrow) { open(false, rows) }
+        .onChange(of: focusRequest) { _, _ in focused = true }
+        // The window's choice moved: the keyboard follows it.
+        .onChange(of: sidebar.selected) { _, _ in cursor = nil }
+        // The default open theme, taken once the board and plan are read,
+        // and kept for this window (review M1).
+        .onChange(of: sidebar.settled(), initial: true) { _, settled in
+            guard settled, !narrowing, !expansion.isSeeded else { return }
+            var next = expansion
+            next.seed(from: tree.roots)
+            expansionText = next.encoded
+        }
+        .onKeyPress(.downArrow) { apply(OneTreeKeys.step(rows, from: cursorRow(rows), by: 1), rows, arriving: true) }
+        .onKeyPress(.upArrow) { apply(OneTreeKeys.step(rows, from: cursorRow(rows), by: -1), rows, arriving: true) }
+        .onKeyPress(.rightArrow) { apply(OneTreeKeys.right(rows, cursor: cursorRow(rows)), rows) }
+        .onKeyPress(.leftArrow) { apply(OneTreeKeys.left(rows, cursor: cursorRow(rows)), rows) }
+        .onKeyPress(.return) { apply(OneTreeKeys.enter(rows, cursor: cursorRow(rows)), rows) }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("one-tree")
     }
@@ -141,9 +171,13 @@ struct OneTreeNavigator: View {
     private func section(_ rows: [OneTreeRow]) -> some View {
         ForEach(rows) { row in
             OneTreeRowView(
-                row: row, selected: isSelected(row.node), keyed: keyed,
+                row: row, selected: isSelected(row.node) || (cursor == row.id && focused), keyed: keyed,
                 onToggle: { toggle(row.node) },
-                onChoose: { choose(row.node) })
+                onChoose: {
+                    cursor = row.node.target == nil ? row.id : nil
+                    choose(row.node)
+                },
+                menu: { sidebar.menu(row.node) })
             .changeWashed(row.id)
             .id(row.id)
         }
@@ -212,20 +246,31 @@ struct OneTreeNavigator: View {
 
     // MARK: Keys
 
-    /// ↑ or ↓: the row above or below the one selected, chosen.
-    private func step(_ by: Int, _ rows: [OneTreeRow]) -> KeyPress.Result {
-        let walkable = rows.filter { $0.node.target != nil }
-        guard !walkable.isEmpty else { return .ignored }
-        let at = selectedRow(walkable).flatMap { row in walkable.firstIndex { $0.id == row.id } }
-        let next = at.map { min(max($0 + by, 0), walkable.count - 1) } ?? (by > 0 ? 0 : walkable.count - 1)
-        if next != at { sidebar.onChoose(walkable[next].node) }
-        return .handled
+    /// The keyboard's row: the cursor, else the row the window shows.
+    private func cursorRow(_ rows: [OneTreeRow]) -> String? {
+        if let cursor, rows.contains(where: { $0.id == cursor }) { return cursor }
+        return selectedRow(rows)?.id
     }
 
-    /// → opens the selected row, ← closes it, as an outline's do.
-    private func open(_ opening: Bool, _ rows: [OneTreeRow]) -> KeyPress.Result {
-        guard let row = selectedRow(rows), row.node.hasChildren, row.expanded != opening else { return .ignored }
-        toggle(row.node)
+    /// Carry out what a key does (`OneTreeKeys`). Arriving on a row by ↑
+    /// or ↓ goes where it points, as a list's selection does, unless that
+    /// would take the keyboard away (the orchestrator) or there's nowhere.
+    private func apply(_ move: OneTreeKeys.Move, _ rows: [OneTreeRow], arriving: Bool = false) -> KeyPress.Result {
+        let node = { (id: String) in rows.first { $0.id == id }?.node }
+        switch move {
+        case .none:
+            return .ignored
+        case .cursor(let id):
+            cursor = id
+            if arriving, let found = node(id), OneTreeKeys.choosesOnArrival(found) {
+                sidebar.onChoose(found)
+            }
+        case .toggle(let id):
+            if let found = node(id) { toggle(found) }
+        case .choose(let id):
+            guard let found = node(id) else { return .ignored }
+            if isSelected(found) && found.target != .orchestrator { onEnter() } else { sidebar.onChoose(found) }
+        }
         return .handled
     }
 }
@@ -243,6 +288,7 @@ struct OneTreeRowView: View {
     let keyed: Bool
     let onToggle: () -> Void
     let onChoose: () -> Void
+    var menu: () -> AnyView = { AnyView(EmptyView()) }
     @Environment(\.colorScheme) private var scheme
     @State private var hovering = false
 
@@ -287,6 +333,10 @@ struct OneTreeRowView: View {
         .accessibilityLabel(accessibility)
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction(named: row.expanded ? "Collapse" : "Expand", onToggle)
+        // Its open state and its level, which the drawing says (review M6).
+        .accessibilityValue(node.hasChildren ? (row.expanded ? "Expanded" : "Collapsed") : "")
+        .accessibilityHint("Level \(row.depth + 1)")
+        .contextMenu { menu() }
         .identified("tree-\(node.id)")
     }
 

@@ -61,6 +61,18 @@ final class PlanStore: ObservableObject {
     @Published private(set) var trouble: String?
     /// Each theme's and lane's record, by page, once read.
     @Published private(set) var records: [PlanPage: PlanRecord] = [:]
+    /// The one tree last built for each filter, and what from (ov-321
+    /// review H2): the sidebar, the jump bar and ⌘↑ share it, and it's
+    /// built again only when its input changes.
+    private var trees: [OneTreeFilter: (input: OneTreeInput, tree: OneTree)] = [:]
+
+    /// The tree for `input`, from the cache when nothing it reads moved.
+    func oneTree(_ input: OneTreeInput) -> OneTree {
+        if let kept = trees[input.filter], kept.input == input { return kept.tree }
+        let tree = OneTree.build(input)
+        trees[input.filter] = (input, tree)
+        return tree
+    }
     /// The board's orchestrator pages, with their documents, once read
     /// (ov-284). Empty on a runner without `board_pages`.
     @Published var pages: [BoardPage] = []

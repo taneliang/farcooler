@@ -590,6 +590,8 @@ struct TaskBoardView: View {
     /// tasks whose key or title carries what's typed.
     @State private var filter = ""
     @FocusState private var filterFocused: Bool
+    /// Esc in the filter, with the one tree drawn: the tree takes the keyboard.
+    @State private var treeFocus = 0
     /// The Unread line the selection was chosen at, while its task is the
     /// one selected: lit there, in place, and where ↑ and ↓ go on from
     /// (ov-177).
@@ -705,7 +707,10 @@ struct TaskBoardView: View {
         VStack(spacing: 0) {
             topBand
             if let tree {
-                OneTreeNavigator(sidebar: tree, filterText: filter, keyed: hasKeyboard, onKeyboard: onKeyboard).id(tree.key)
+                OneTreeNavigator(
+                    sidebar: tree, filterText: filter, keyed: hasKeyboard, onKeyboard: onKeyboard,
+                    focusRequest: focusRequest + treeFocus, onEnter: onEnter
+                ).id(tree.key)
             } else { list }
         }
         // One key column for the whole board, so every title starts at one x.
@@ -800,6 +805,7 @@ struct TaskBoardView: View {
         NavigatorFilterField(text: $filter, focused: $filterFocused) {
             filterFocused = false
             listFocused = true
+            treeFocus += 1
         }
     }
 
@@ -1214,7 +1220,8 @@ struct TaskListRow: View {
 }
 
 /// A card's context menu: the way to its agent, and Ask the Orchestrator.
-private struct TaskRowMenu: View {
+/// Internal for the one tree's card rows (ov-321).
+struct TaskRowMenu: View {
     let row: TaskRow
     let live: [BoardPane]
     var orchestrator: BoardPane?

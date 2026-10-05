@@ -233,7 +233,8 @@ public struct OneTreeInput: Equatable, Sendable {
 
     public init(
         tasks: [OneTreeTask], plan: PlanModel = .empty, worktrees: [OneTreeWorktree] = [],
-        mainCheckout: OneTreeWorktree? = nil, pages: [OneTreePage] = [], asks: OneTreeAsks = OneTreeAsks(),
+        mainCheckout: OneTreeWorktree? = nil, pages: [OneTreePage] = [], unreadable: [OneTreeUnreadable] = [],
+        asks: OneTreeAsks = OneTreeAsks(),
         filter: OneTreeFilter = .open, orchestratorWord: String? = nil, needsYouCount: Int = 0,
         hasOrchestrator: Bool = true
     ) {
@@ -242,6 +243,7 @@ public struct OneTreeInput: Equatable, Sendable {
         self.worktrees = worktrees
         self.mainCheckout = mainCheckout
         self.pages = pages
+        self.unreadable = unreadable
         self.asks = asks
         self.filter = filter
         self.orchestratorWord = orchestratorWord
