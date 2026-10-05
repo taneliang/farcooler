@@ -66,6 +66,20 @@ final class PlanStore: ObservableObject {
     /// built again only when its input changes.
     private var trees: [OneTreeFilter: (input: OneTreeInput, tree: OneTree)] = [:]
 
+    /// Show `ids` kept now (ov-333), before the runner's answer: Keep is the
+    /// owner's own mark and should land like read state does. The read that
+    /// follows makes it the runner's word again, or puts it back if the
+    /// runner refused.
+    func showKept(_ ids: Set<String>) {
+        var next = plan
+        for index in next.rulings.indices where ids.contains(next.rulings[index].id) && next.rulings[index].isStanding {
+            next.rulings[index].state = .confirmed
+            next.rulings[index].settledBy = "user"
+            next.rulings[index].settledAt = next.nowMs
+        }
+        if next != plan { plan = next }
+    }
+
     /// The tree for `input`, from the cache when nothing it reads moved.
     func oneTree(_ input: OneTreeInput) -> OneTree {
         if let kept = trees[input.filter], kept.input == input { return kept.tree }

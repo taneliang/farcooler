@@ -349,6 +349,7 @@ extension ContentView {
             if let client = store.clients[host], let workspace = board(host: host, id: id) {
                 let board = boardStore(for: workspace, client: client, host: host)
                 PlanPageView(plan: board.plan, page: page, context: planContext(board, host: host, workspace: id))
+                    .environment(\.planRulingActions, planRulingActions(host: host, workspace: workspace, plan: board.plan))
             } else {
                 ContentUnavailableView("Board Not Found", systemImage: "map")
                     .contentCard()

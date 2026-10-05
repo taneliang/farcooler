@@ -581,6 +581,7 @@ AGENTKIT_SOURCES = [
     "PlanModel.swift",
     "PlanReading.swift",
     "PlanRulings.swift",
+    "PlanRulingActions.swift",
     # Trains and the CI the runner reads for them and for pages (ov-309).
     "PlanTrains.swift",
     # Budgets, a theme's trend, the week and the comparison (ov-307).

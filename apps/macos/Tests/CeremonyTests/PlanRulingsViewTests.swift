@@ -7,8 +7,9 @@ import Testing
 
 /// Decided For You on the Mac (ov-304): the canvas's section, read from the
 /// CLI's real `plan --json` shape (`test/fixtures/plan.json`) through the
-/// store's own read. Standing first, then settled; Copy Reference is the only
-/// action; a runner without `board_rulings` shows nothing.
+/// store's own read. Only the open rulings show; the kept and reversed ones
+/// fold into Past Decisions (ov-333). Keep, Reverse and Discuss act on an open
+/// one; a runner without `board_rulings` shows nothing.
 @MainActor
 @Suite(.serialized)
 struct PlanRulingsViewTests {
@@ -16,9 +17,12 @@ struct PlanRulingsViewTests {
         @ObservedObject var plan: PlanStore
         let seen: NavigatorFilterTests.Seen
         let copy: @MainActor (String) -> Void
+        var actions = PlanRulingActions.none
+        var defaults = PlanViewTests.defaults()
 
         var body: some View {
-            PlanRulingsSection(plan: plan, defaults: PlanViewTests.defaults(), copy: copy)
+            PlanRulingsSection(plan: plan, defaults: defaults, copy: copy)
+            .environment(\.planRulingActions, actions)
             .frame(width: 520, height: 600, alignment: .topLeading)
             .environment(\.gridProbing, true)
             .overlayPreferenceValue(ProbedViewsKey.self) { probed in
@@ -47,8 +51,28 @@ struct PlanRulingsViewTests {
 
     /// The section as the canvas draws it, from a store that read the
     /// fixture through its stubbed CLI, on a runner that keeps rulings or not.
-    static func draw(rulings: Bool) async throws -> Drawn {
-        let store = try await PlanViewTests.store(plan: true, defaults: PlanViewTests.defaults())
+    static func draw(
+        rulings: Bool, actions: PlanRulingActions = .none, pastOpen: Bool = false, extraOpen: Bool = false
+    ) async throws -> Drawn {
+        let defaults = PlanViewTests.defaults()
+        let calls = PlanViewTests.Calls()
+        if extraOpen {
+            // A second open ruling, so the section offers Keep All.
+            var object = try #require(try JSONSerialization.jsonObject(with: PlanViewTests.fixture()) as? [String: Any])
+            var list = try #require(object["rulings"] as? [[String: Any]])
+            var more = list[0]
+            more["id"] = "00000000-0000-0000-0000-000000005003"
+            more["number"] = 3
+            more["short"] = "R-3"
+            more["decision"] = "The gutter is 12 points."
+            list.insert(more, at: 0)
+            object["rulings"] = list
+            calls.plan = try JSONSerialization.data(withJSONObject: object)
+        }
+        let store = try await PlanViewTests.store(plan: true, defaults: defaults, calls: calls)
+        if pastOpen {
+            defaults.set(true, forKey: "board.plan.section.rulings.\(store.plan.host).\(store.plan.workspace.id).past")
+        }
         if !rulings {
             store.client.daemonBuild = DaemonBuild(
                 version: "test", matches: true, platform: "macos",
@@ -56,7 +80,8 @@ struct PlanRulingsViewTests {
         }
         await store.plan.reload()
         let drawn = Drawn()
-        drawn.host = NSHostingView(rootView: Hosted(plan: store.plan, seen: drawn.seen) { drawn.copied.append($0) })
+        drawn.host = NSHostingView(
+            rootView: Hosted(plan: store.plan, seen: drawn.seen, copy: { drawn.copied.append($0) }, actions: actions, defaults: defaults))
         drawn.window = NavigatorFilterTests.KeyWindow(
             contentRect: NSRect(x: -4000, y: -4000, width: 520, height: 600), styleMask: [.borderless],
             backing: .buffered, defer: false)
@@ -67,17 +92,93 @@ struct PlanRulingsViewTests {
         return drawn
     }
 
-    @Test("Standing rulings come first, each with its id and copy control; settled ones follow")
-    func standingFirst() async throws {
+    @Test("Only the open ruling shows, with its id and copy control; the settled one is folded away")
+    func openOnly() async throws {
         let drawn = try await Self.draw(rulings: true)
         defer { drawn.window.close() }
         let views = drawn.seen.views
-        let standing = try #require(views["plan-ruling-R-2"], "\(views.keys.sorted())")
-        let settled = try #require(views["plan-ruling-R-1"])
         #expect(views["plan-rulings"] != nil)
-        #expect(standing.minY < settled.minY, "standing above settled")
-        #expect(views["plan-ruling-R-2-copy"] != nil, "a standing ruling offers Copy Reference")
-        #expect(standing.height > settled.height, "the standing one shows why and what reversing costs")
+        #expect(views["plan-ruling-R-2"] != nil, "\(views.keys.sorted())")
+        #expect(views["plan-ruling-R-2-copy"] != nil, "an open ruling offers Copy Reference")
+        #expect(views["plan-ruling-R-1"] == nil, "a kept ruling isn't in Decided For You")
+        #expect(views["plan-rulings-past"] != nil, "it's in Past Decisions")
+    }
+
+    @Test("Past Decisions is closed until opened, and opens onto the kept and reversed ones with their state")
+    func theFoldHoldsTheRest() async throws {
+        let closed = try await Self.draw(rulings: true)
+        defer { closed.window.close() }
+        #expect(closed.seen.views["plan-ruling-R-1"] == nil, "closed by default")
+        let open = try await Self.draw(rulings: true, pastOpen: true)
+        defer { open.window.close() }
+        let views = open.seen.views
+        let current = try #require(views["plan-ruling-R-2"])
+        let past = try #require(views["plan-ruling-R-1"], "\(views.keys.sorted())")
+        #expect(current.minY < past.minY, "open above past")
+        #expect(past.height < current.height, "a past decision is one quiet line")
+    }
+
+    @Test("The owner's actions show on an open ruling when the runner takes them, and Keep calls Keep with that ruling")
+    func keepActsOnItsRuling() async throws {
+        var kept: [String] = []
+        var asked: [String] = []
+        var actions = PlanRulingActions(canKeep: true, canAsk: true, alwaysShown: true)
+        actions.keep = { kept.append($0.short) }
+        actions.reverse = { asked.append("reverse " + $0.short) }
+        actions.discuss = { asked.append("discuss " + $0.short) }
+        let drawn = try await Self.draw(rulings: true, actions: actions)
+        defer { drawn.window.close() }
+        for button in ["keep", "reverse", "discuss"] {
+            #expect(drawn.seen.views["plan-ruling-R-2-\(button)"] != nil, "\(button): \(drawn.seen.views.keys.sorted())")
+        }
+        try Self.click(drawn, "plan-ruling-R-2-keep")
+        await drawn.settle()
+        #expect(kept == ["R-2"])
+        #expect(asked.isEmpty, "Keep never reaches the orchestrator")
+        try Self.click(drawn, "plan-ruling-R-2-reverse")
+        try Self.click(drawn, "plan-ruling-R-2-discuss")
+        #expect(asked == ["reverse R-2", "discuss R-2"])
+    }
+
+    @Test("Without an orchestrator, Reverse and Discuss are off, never hidden; without the capability there are no actions")
+    func offNotHidden() async throws {
+        var asked = 0
+        var actions = PlanRulingActions(canKeep: true, canAsk: false, alwaysShown: true)
+        actions.reverse = { _ in asked += 1 }
+        let drawn = try await Self.draw(rulings: true, actions: actions)
+        defer { drawn.window.close() }
+        #expect(drawn.seen.views["plan-ruling-R-2-reverse"] != nil)
+        try Self.click(drawn, "plan-ruling-R-2-reverse")
+        #expect(asked == 0, "a disabled Reverse sends nothing")
+        let old = try await Self.draw(rulings: true, actions: PlanRulingActions(canKeep: false, canAsk: true, alwaysShown: true))
+        defer { old.window.close() }
+        #expect(old.seen.views["plan-ruling-R-2-keep"] == nil)
+        #expect(old.seen.views["plan-ruling-R-2-copy"] != nil, "Copy Reference stays")
+    }
+
+    @Test("Keep All is on the section only when there's more than one to keep, and keeps them all")
+    func keepAllNeedsMoreThanOne() async throws {
+        var keptAll = 0
+        var actions = PlanRulingActions(canKeep: true, canAsk: true)
+        actions.keepAll = { keptAll += 1 }
+        let one = try await Self.draw(rulings: true, actions: actions)
+        defer { one.window.close() }
+        #expect(one.seen.views["plan-rulings-keep-all"] == nil, "one open ruling has its own Keep")
+        let two = try await Self.draw(rulings: true, actions: actions, extraOpen: true)
+        defer { two.window.close() }
+        try Self.click(two, "plan-rulings-keep-all")
+        #expect(keptAll == 1)
+    }
+
+    static func click(_ drawn: Drawn, _ id: String) throws {
+        let frame = try #require(drawn.seen.views[id], "\(id): \(drawn.seen.views.keys.sorted())")
+        let at = NSPoint(x: frame.midX, y: 600 - frame.midY)
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            drawn.window.sendEvent(
+                NSEvent.mouseEvent(
+                    with: type, location: at, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: drawn.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!)
+        }
     }
 
     @Test("A runner without board_rulings shows no Decided For You, whatever the plan carries")

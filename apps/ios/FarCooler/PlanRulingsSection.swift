@@ -21,14 +21,14 @@ struct PlanRulingsSection: View {
     var body: some View {
         if keeps, !plan.rulings.isEmpty {
             Section {
-                ForEach(plan.standingRulings) { ruling in
+                ForEach(plan.openRulings) { ruling in
                     PlanRulingRow(ruling: ruling, copy: copy)
                 }
-                ForEach(plan.settledRulings) { ruling in
+                ForEach(plan.pastRulings) { ruling in
                     PlanSettledRulingRow(ruling: ruling, copy: copy)
                 }
             } header: {
-                PlanHeader(title: PlanWords.decidedForYou, count: plan.standingRulings.count)
+                PlanHeader(title: PlanWords.decidedForYou, count: plan.openRulings.count)
                     .accessibilityIdentifier("plan-rulings")
             }
             // A ruling recorded, confirmed or reversed moves on the list's own

@@ -12,7 +12,7 @@ struct PlanRulingsTests {
     @Test func theFixtureReadsStandingFirst() throws {
         let plan = try PlanModelTests.fixture()
         #expect(plan.rulings.map(\.short) == ["R-2", "R-1"])
-        let standing = try #require(plan.standingRulings.first)
+        let standing = try #require(plan.openRulings.first)
         #expect(standing.decision == "The inbox is amber.")
         #expect(standing.why == "It's the one attention color, so the inbox reads as needing you.")
         #expect(standing.reversal == "One token; every surface follows.")
@@ -20,10 +20,10 @@ struct PlanRulingsTests {
         #expect(standing.theme == "Visual language")
         #expect(standing.state == .standing)
         #expect(standing.settledAt == nil)
-        let settled = try #require(plan.settledRulings.first)
+        let settled = try #require(plan.pastRulings.first)
         #expect((settled.short, settled.state, settled.note) == ("R-1", .confirmed, "Keep it."))
         #expect(settled.settledBy == "manager")
-        #expect(plan.settledRulings.count == 1)
+        #expect(plan.pastRulings.count == 1)
     }
 
     /// Copy Reference copies what the owner says to the orchestrator.
@@ -40,7 +40,7 @@ struct PlanRulingsTests {
         let plan = try PlanModelTests.fixture()
         #expect(PlanWords.rulingTouches(plan.rulings[0]) == "ov-1 · Visual language")
         #expect(PlanWords.rulingTouches(plan.rulings[1]) == nil)
-        #expect(PlanWords.rulingAccessibility(plan.rulings[1]).hasSuffix("Confirmed"))
+        #expect(PlanWords.rulingAccessibility(plan.rulings[1]).hasSuffix("Kept"))
     }
 
     /// An answer without `rulings`, as an older CLI prints, still reads, with

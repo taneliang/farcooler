@@ -37,14 +37,17 @@ extension ContentView {
         let board = boardStore(for: summary, client: client, host: host)
         let needs = planNeedsYou(host: host, workspace: summary)
         let open = { (page: PlanPage) in openPlan(page, host: host, workspace: summary.id) }
+        let rulings = planRulingActions(host: host, workspace: summary, plan: board.plan)
         return (
-            AnyView(PlanHome(board: board, needsYou: needs, onOpen: open)),
+            AnyView(PlanHome(board: board, needsYou: needs, onOpen: open).environment(\.planRulingActions, rulings)),
             AnyView(
                 PlanStrip(
                     plan: board.plan,
                     needsYou: needs.items.count + board.plan.plan.shownThemes.filter { !$0.ownerAsk.isEmpty }.count
                 ) { planPeeking = true }),
-            AnyView(PlanPeek(board: board, needsYou: needs, onOpen: open) { planPeeking = false })
+            AnyView(
+                PlanPeek(board: board, needsYou: needs, onOpen: open) { planPeeking = false }
+                    .environment(\.planRulingActions, rulings))
         )
     }
 

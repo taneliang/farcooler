@@ -120,7 +120,19 @@ public enum AskAboutTask {
         paste: (String) async -> DraftResult,
         copy: (String) -> Void
     ) async -> Delivery {
-        let text = draft(key: key, title: title)
+        await deliver(
+            text: draft(key: key, title: title), isAgentPane: isAgentPane, offer: offer, paste: paste, copy: copy)
+    }
+
+    /// `deliver` for any draft: the rulings' Discuss leaves its own words the
+    /// same way (ov-333).
+    @MainActor
+    public static func deliver(
+        text: String, isAgentPane: Bool,
+        offer: (String) -> Void,
+        paste: (String) async -> DraftResult,
+        copy: (String) -> Void
+    ) async -> Delivery {
         if isAgentPane {
             offer(text)
             return .composer
