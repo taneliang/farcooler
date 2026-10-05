@@ -22,6 +22,8 @@ struct WindowRestore: ViewModifier {
     /// The clock the restore's ten seconds are read on. Replaced in tests,
     /// whose wall clock runs on while other tests hold the main actor.
     var now: () -> Date = { Date() }
+    /// The wait between passes: until the runners change (`ChangeWake`).
+    var pause: () async -> Void = { try? await Task.sleep(for: .milliseconds(250)) }
 
     func body(content: Content) -> some View {
         content.task(id: restoring?.id) { await run() }
@@ -31,7 +33,7 @@ struct WindowRestore: ViewModifier {
         guard let open = restoring else { return }
         let outcome = await DestinationOpener.run(
             open, isCurrent: { restoring?.id == open.id }, interrupted: interrupted, world: world, read: read,
-            land: land, now: now)
+            land: land, now: now, pause: pause)
         if Self.finished(outcome, cancelled: Task.isCancelled), restoring?.id == open.id {
             restoring = nil
             landed()

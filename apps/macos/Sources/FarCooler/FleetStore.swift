@@ -86,12 +86,20 @@ final class FleetStore: ObservableObject {
     /// A window opened on this store: the first one brings every runner up,
     /// and any window brings back an event stream the last one to close
     /// stopped.
+    ///
+    /// The first window leaves each stream to its runner's bring-up, which
+    /// starts it after `daemon ensure` and the first read, as each window
+    /// did before the store was shared (ov-296). Resuming here too started
+    /// every stream ahead of `ensure`: on a launch that starts the daemon,
+    /// the local stream failed against a socket not yet there and waited
+    /// out a retry.
     func open(window: UUID) {
         windows.open(window)
         guard dials else { return }
-        if !started {
+        guard started else {
             started = true
             for target in clients.keys where bringUpTasks[target] == nil { bringUp(target) }
+            return
         }
         resume()
     }

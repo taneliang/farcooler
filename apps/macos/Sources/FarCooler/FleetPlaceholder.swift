@@ -32,7 +32,17 @@ struct FleetPlaceholder: View {
         /// the runner, and its own words when it has any. The window still
         /// goes back to its place when the runner comes (review H2).
         case unreachable(String, reason: String?)
+        /// The window is going back to where it was and hasn't waited
+        /// `connectingDelay` yet: nothing is drawn, so a runner that answers
+        /// at once never flashes "Connecting…" or "No Workspace Selected"
+        /// on its way back (ov-296).
+        case settling
     }
+
+    /// How long a restore waits before it says it's connecting: a runner
+    /// that answers sooner, as this Mac's does, goes straight back to its
+    /// place. Half a second, as a progress indicator waits before it shows.
+    nonisolated static let connectingDelay: TimeInterval = 0.5
 
     /// How long "Connecting…" is said before a runner that hasn't answered
     /// reads as unreachable: ssh's own `ConnectTimeout`, which the CLI sets
@@ -51,14 +61,20 @@ struct FleetPlaceholder: View {
     /// whatever else the fleet holds: that place is the one it opens. Until
     /// the runner says what's wrong (`trouble`), or has been waited for past
     /// `connectingLimit`: then it's unreachable, with Try Again.
+    ///
+    /// Any restore (`restoring`, or a runner to wait for) draws nothing
+    /// for its first `connectingDelay`, unless its runner has already said
+    /// what's wrong: most come back within it (ov-296).
     nonisolated static func phase(
         hasWorktrees: Bool, localLoaded: Bool, localError: String?, hasRepositories: Bool,
-        restoringOn runner: String? = nil, trouble: String? = nil, waited: TimeInterval = 0
+        restoringOn runner: String? = nil, trouble: String? = nil, waited: TimeInterval = 0,
+        restoring: Bool = false
     ) -> Phase {
         if let runner {
             if trouble != nil || waited >= connectingLimit { return .unreachable(runner, reason: trouble) }
-            return .connecting(runner)
+            return waited < connectingDelay ? .settling : .connecting(runner)
         }
+        if restoring, waited < connectingDelay { return .settling }
         if hasWorktrees { return .chooseWorkspace }
         if localLoaded { return hasRepositories ? .noWorktrees : .noRepositories }
         if let localError { return .failed(localError) }
@@ -108,6 +124,13 @@ struct FleetPlaceholder: View {
         return (only.host, main)
     }
 
+    /// When a restore's placeholder reads its phase again, for a restore
+    /// begun at `since`: at once, then at those of the two moments it can
+    /// change that are still to come, in order.
+    nonisolated static func wakes(since: Date, now: Date = Date()) -> [Date] {
+        [now] + [connectingDelay, connectingLimit].map { since.addingTimeInterval($0) }.filter { $0 > now }
+    }
+
     /// The connecting state's title: "Connecting to studio…", by the
     /// runner's name, not its ssh target.
     nonisolated static func connectingTitle(_ runner: String) -> String {
@@ -136,6 +159,9 @@ struct FleetPlaceholder: View {
 
     var body: some View {
         switch phase {
+        case .settling:
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .loading:
             ProgressView()
                 .controlSize(.small)

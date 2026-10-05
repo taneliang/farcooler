@@ -174,16 +174,18 @@ extension ContentView {
 
     /// The detail with no workspace to show: the fleet's own state first,
     /// before it has anything in it (`FleetPlaceholder`), then "choose one".
-    /// While a restore waits for its runner, read again once more at
-    /// `FleetPlaceholder.connectingLimit`, when "Connecting…" turns to
-    /// unreachable: one wake, not a clock (`IdleCostTests`).
+    /// While a restore is pending, read again at the moments its phase can
+    /// change: `FleetPlaceholder.connectingDelay`, when a runner still not up
+    /// is said to be connecting, and `connectingLimit`, when that turns to
+    /// unreachable. Wakes at those times, not a clock (`IdleCostTests`).
     @ViewBuilder var placeholder: some View {
-        if let runner = restoringRunner, let since = restoring?.since {
-            TimelineView(.explicit([Date(), since.addingTimeInterval(FleetPlaceholder.connectingLimit)])) { context in
-                placeholder(restoringOn: runner, waited: context.date.timeIntervalSince(since))
+        if let since = restoring?.since {
+            let runner = restoringRunner
+            TimelineView(.explicit(FleetPlaceholder.wakes(since: since))) { context in
+                placeholder(restoringOn: runner, waited: context.date.timeIntervalSince(since), restoring: true)
             }
         } else {
-            placeholder(restoringOn: nil, waited: 0)
+            placeholder(restoringOn: nil, waited: 0, restoring: false)
         }
     }
 
@@ -194,13 +196,13 @@ extension ContentView {
         return (runner.isEmpty ? client?.fleetError : nil) ?? client?.state.refusal
     }
 
-    private func placeholder(restoringOn runner: String?, waited: TimeInterval) -> some View {
+    private func placeholder(restoringOn runner: String?, waited: TimeInterval, restoring: Bool) -> some View {
         let local = store.clients[""]
         return FleetPlaceholder(
             phase: FleetPlaceholder.phase(
                 hasWorktrees: !store.fleet.worktrees.isEmpty, localLoaded: local?.hasLoaded == true,
                 localError: local?.fleetError, hasRepositories: !store.repositories.isEmpty,
-                restoringOn: runner, trouble: runner.flatMap(trouble(on:)), waited: waited),
+                restoringOn: runner, trouble: runner.flatMap(trouble(on:)), waited: waited, restoring: restoring),
             onShowNeedsYou: { selection = .needsYou },
             onOpenMain: FleetPlaceholder.mainToOpen(in: store.repositories, fleet: store.fleet).map { target in
                 { selection = .workspace(host: target.host, workspace: target.workspace.id, focus: nil) }

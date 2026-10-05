@@ -14,7 +14,14 @@ extension ContentView {
         WindowRestore(
             restoring: $restoring, interrupted: { selection != nil }, world: { MacDestination.world(of: store) },
             read: { await DestinationReads.read($1, from: store.clients[$0], fleet: store.fleet) },
-            land: { land($0, arrival: .restore) }, landed: { restoreFocus() })
+            land: { land($0, arrival: .restore) }, landed: { restoreFocus() },
+            // The next pass when a runner changes, not on the next quarter
+            // second: a ready runner's window goes back at once (ov-296).
+            pause: {
+                await ChangeWake.next(
+                    of: [store.objectWillChange] + store.clients.values.map(\.objectWillChange),
+                    orAfter: .milliseconds(250))
+            })
     }
 
     /// Open a resolved destination here: a relaunch sets the selection and leaves

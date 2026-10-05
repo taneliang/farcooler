@@ -25,7 +25,8 @@ struct RestoreConnectingTests {
 
     @Test func theWindowSaysItsConnectingWhateverTheFleetHolds() {
         let phase = FleetPlaceholder.phase(
-            hasWorktrees: true, localLoaded: true, localError: nil, hasRepositories: true, restoringOn: "studio")
+            hasWorktrees: true, localLoaded: true, localError: nil, hasRepositories: true, restoringOn: "studio",
+            waited: FleetPlaceholder.connectingDelay)
         #expect(phase == .connecting("studio"))
         #expect(
             FleetPlaceholder.phase(hasWorktrees: true, localLoaded: true, localError: nil, hasRepositories: true)
