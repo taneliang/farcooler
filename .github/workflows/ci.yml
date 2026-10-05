@@ -136,6 +136,12 @@ jobs:
       # at 2x, so a hard-coded 2 in a bitmap sample is red only on CI.
       - run: ./scripts/pixel-scale-lint.py --self-test
       - run: ./scripts/pixel-scale-lint.py
+      # The iOS targets compile a hand-kept subset of AgentKit
+      # (apps/ios/generate-project.py). A shared file that names a type from a
+      # file the phone or watch doesn't compile builds on the Mac and breaks only
+      # there (ov-339; PageLive and OneTreeFilter, Oct 5).
+      - run: ./scripts/ios-agentkit-subset-lint.py --self-test
+      - run: ./scripts/ios-agentkit-subset-lint.py
 
   # The tunnel itself, which is Go, and which nothing in this workflow ran until
   # now.
