@@ -1,4 +1,5 @@
-// Shipped by Canary at 9c3dd848e52e6bca01aa06a26b184f06841c4638. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 6612821b94ef5211031c5417d1b87612e29c583b.
+// Moved by hand past 6612821b (owner-authorized, ov-307): HarnessModelCost tag 3 was renamed after 9c3dd848 shipped and before any Canary shipped it. The proto below is still 9c3dd848's.
 syntax = "proto3";
 
 package farcooler.v1;
