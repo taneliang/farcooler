@@ -950,6 +950,29 @@ jobs:
             echo "Touches nothing the iOS app is built from: the UI tests are skipped."
           fi
 
+  # Whether any UI shard is running close to the `ios-ui` timeout (ov-322).
+  # `phone` was cancelled at 40 minutes twice in one day as classes landed
+  # in it, and a cancelled shard reports no verdict at all. This reads what
+  # each shard took in main's last runs and goes red past 75%, so the lane
+  # that lands the next class rebalances first. Its own job, so a red here
+  # never stops the shards from running. See the script for the rules.
+  ios-ui-budget:
+    name: iOS UI shard budget
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Each run's shard lists come from its own commit.
+          fetch-depth: 0
+      - run: ./scripts/ios-ui-shard-budget.py --self-test
+      - run: ./scripts/ios-ui-shard-budget.py
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   # The iOS app's own code, executed (ov-127). Until this job the app target
   # was compiled by CI and run by nothing, so a rule that lived only there was
   # untested on iOS even where Android tested its port.
