@@ -432,6 +432,20 @@ struct OneTreeTests {
         ])
     }
 
+    @Test("A lane's worktree opened whole is found as its lane; a worktree with no lane, as itself")
+    func worktreeAsLane() throws {
+        let tree = OneTree.build(try Self.board())
+        #expect(tree.crumbs(to: .worktree("wt-copy")).map(\.title) == ["Plan", "ov-2 Title t2", "copy"])
+        #expect(tree.parent(of: .worktree("wt-copy")) == .task("t2"))
+        #expect(tree.crumbs(to: .worktree("wt-spike")).map(\.title) == ["Loose Worktrees", "spike"])
+        #expect(tree.path(to: .worktree("wt-nowhere")) == nil)
+        let copy = try #require(Self.node(tree, "theme:theme-Plan/task:t2/lane:lane-copy"))
+        #expect(copy.stands(for: .worktree("wt-copy")))
+        #expect(copy.stands(for: .lane("lane-copy")))
+        #expect(!copy.stands(for: .worktree("wt-primary")))
+        #expect(!copy.stands(for: nil))
+    }
+
     @Test("⌘↑: the parent that goes somewhere; a theme's is the plan; the plan has none")
     func parent() throws {
         let tree = OneTree.build(try Self.board())

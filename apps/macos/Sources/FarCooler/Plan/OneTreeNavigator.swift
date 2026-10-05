@@ -24,6 +24,10 @@ struct OneTreeSidebar {
     var key: String
     /// A row chosen: the window goes where it points.
     var onChoose: (OneTreeNode) -> Void
+    /// The board and its plan are read: before that a lane's worktree
+    /// looks loose, and revealing it would open the wrong group.
+    /// Asked as the navigator draws, which watches the board and its plan.
+    var settled: () -> Bool = { true }
 }
 
 /// The tree, drawn: the navigator's content in place of its sections.
@@ -35,9 +39,13 @@ struct OneTreeNavigator: View {
     let keyed: Bool
     let onKeyboard: () -> Void
 
-    /// Which nodes this window opened and closed, as text.
-    @SceneStorage private var expansionText: String
-    @SceneStorage private var filterRaw: String
+    /// Which nodes this window opened and closed, as text, and the filter:
+    /// kept with the window's scene, and held here too, since a window
+    /// hosted outside a scene (the capture harness's) keeps no scene storage.
+    @SceneStorage private var keptExpansion: String
+    @SceneStorage private var keptFilter: String
+    @State private var heldExpansion: String?
+    @State private var heldFilter: String?
     @FocusState private var focused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -46,8 +54,24 @@ struct OneTreeNavigator: View {
         self.filterText = filterText
         self.keyed = keyed
         self.onKeyboard = onKeyboard
-        _expansionText = SceneStorage(wrappedValue: "", "oneTree.expansion.\(sidebar.key)")
-        _filterRaw = SceneStorage(wrappedValue: OneTreeFilter.open.rawValue, "oneTree.filter.\(sidebar.key)")
+        _keptExpansion = SceneStorage(wrappedValue: "", "oneTree.expansion.\(sidebar.key)")
+        _keptFilter = SceneStorage(wrappedValue: OneTreeFilter.open.rawValue, "oneTree.filter.\(sidebar.key)")
+    }
+
+    private var expansionText: String {
+        get { heldExpansion ?? keptExpansion }
+        nonmutating set {
+            heldExpansion = newValue
+            keptExpansion = newValue
+        }
+    }
+
+    private var filterRaw: String {
+        get { heldFilter ?? keptFilter }
+        nonmutating set {
+            heldFilter = newValue
+            keptFilter = newValue
+        }
     }
 
     private var filter: OneTreeFilter { OneTreeFilter(rawValue: filterRaw) ?? .open }
@@ -80,8 +104,10 @@ struct OneTreeNavigator: View {
                     rows.map { Self.change($0.node) }, arrivals: tree.allNodes.map(Self.change))
             }
             .scrollBounceBehavior(.basedOnSize)
-            .onChange(of: sidebar.selected, initial: true) { _, target in
-                reveal(target, in: tree)
+            // Again when the path to it appears: the window can open on a
+            // terminal before the plan that puts its lane under a card is read.
+            .onChange(of: RevealKey(target: sidebar.settled() ? sidebar.selected : nil, path: sidebar.selected.map { tree.ancestors(of: $0, hint: sidebar.hint) } ?? []), initial: true) { _, key in
+                reveal(key.target, in: tree)
                 if let id = selectedRow(rows)?.id { withAnimation(nil) { scroller.scrollTo(id) } }
             }
         }
@@ -148,8 +174,7 @@ struct OneTreeNavigator: View {
     /// Whether `node` is what the window shows. Every copy of a lane under
     /// two cards is lit, so the two read as one lane.
     private func isSelected(_ node: OneTreeNode) -> Bool {
-        guard let target = node.target, target == sidebar.selected else { return false }
-        return true
+        node.stands(for: sidebar.selected)
     }
 
     private func selectedRow(_ rows: [OneTreeRow]) -> OneTreeRow? {
@@ -177,7 +202,7 @@ struct OneTreeNavigator: View {
     private func reveal(_ target: OneTreeTarget?, in tree: OneTree) {
         guard let target, !narrowing else { return }
         let rows = OneTree.rows(tree.roots, expansion: expansion)
-        if rows.contains(where: { $0.node.target == target }) { return }
+        if rows.contains(where: { $0.node.stands(for: target) }) { return }
         let ancestors = tree.ancestors(of: target, hint: sidebar.hint)
         guard !ancestors.isEmpty else { return }
         var next = expansion
@@ -203,6 +228,12 @@ struct OneTreeNavigator: View {
         toggle(row.node)
         return .handled
     }
+}
+
+/// What a reveal waits on: the selection, and the path the tree has to it.
+private struct RevealKey: Equatable {
+    var target: OneTreeTarget?
+    var path: [String]
 }
 
 /// One row of the tree: its disclosure, its glyph, its words, and its dot.

@@ -301,6 +301,18 @@ public struct OneTreeNode: Equatable, Sendable, Identifiable {
 
     public var hasChildren: Bool { !children.isEmpty }
 
+    /// Whether choosing `target` lands on this node: its own target, or,
+    /// for a lane, its worktree opened whole.
+    public func stands(for target: OneTreeTarget?) -> Bool {
+        guard let target else { return false }
+        if self.target == target { return true }
+        guard kind == .lane, case .worktree(let id) = target else { return false }
+        return children.contains {
+            if case .terminal(id, _)? = $0.target { return true }
+            return false
+        }
+    }
+
     /// Whether the row draws the amber dot: it asks, or it's closed over
     /// something that does (the roll-up, as Xcode's issue badges do).
     public func showsDot(expanded: Bool) -> Bool { asks || (!expanded && holdsAsk) }
@@ -780,7 +792,23 @@ extension OneTree {
             }
         }
         walk(roots, [])
-        return hinted ?? first
+        if let found = hinted ?? first { return found }
+        // A lane's worktree opened whole is its lane: the node whose panes
+        // are that worktree's.
+        guard case .worktree(let id) = target else { return nil }
+        var lane: [OneTreeNode]?
+        func find(_ nodes: [OneTreeNode], _ trail: [OneTreeNode]) {
+            for node in nodes where lane == nil {
+                let here = trail + [node]
+                let holds = node.kind == .lane && node.children.contains {
+                    if case .terminal(id, _)? = $0.target { return true }
+                    return false
+                }
+                if holds { lane = here } else { find(node.children, here) }
+            }
+        }
+        find(roots, [])
+        return lane
     }
 
     /// The breadcrumb for `target`: the targets on its path, each named,

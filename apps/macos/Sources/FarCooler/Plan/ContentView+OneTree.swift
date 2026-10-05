@@ -12,16 +12,18 @@ extension ContentView {
         host: String, workspace: WorkspaceSummary, client: DaemonClient, orchestrator: NavigatorOrchestrator?
     ) -> OneTreeSidebar? {
         guard !showsBoardList else { return nil }
+        let board = boardStore(for: workspace, client: client, host: host)
         return OneTreeSidebar(
             input: { filter in
                 oneTreeInput(host: host, workspace: workspace, client: client, orchestrator: orchestrator, filter: filter)
             },
-            selected: Self.treeTarget(selection, workspace: workspace.id),
+            selected: treeTarget(selection, workspace: workspace.id),
             hint: treeHint, key: "\(host)|\(workspace.id)",
             onChoose: { node in
                 treeHint = node.id
                 if let target = node.target { goInTree(target, host: host, workspace: workspace) }
-            })
+            },
+            settled: { board.hasRead && (board.plan.hasRead || !board.plan.available) })
     }
 
     /// What `workspace`'s tree is built from: its board's cards, its plan
@@ -53,7 +55,9 @@ extension ContentView {
             pages: board.plan.listedPages.map(OneTreePage.init),
             asks: OneTreeAsks(items: needs.items, plan: plan),
             filter: filter,
-            orchestratorWord: orchestrator.map { OrchestratorRow.word($0.state) },
+            // No word beside "Orchestrator" when there's none: the row
+            // saying "No Orchestrator" twice over reads as noise.
+            orchestratorWord: orchestrator.flatMap { $0.state == .none ? nil : OrchestratorRow.word($0.state) },
             needsYouCount: needs.items.count,
             hasOrchestrator: orchestrator != nil)
     }
@@ -96,6 +100,16 @@ extension ContentView {
         default:
             return nil
         }
+    }
+
+    /// The node `place` is, with a worktree opened whole read as the pane
+    /// selected in it: the terminal row, not the lane's worktree.
+    func treeTarget(_ place: Selection?, workspace: String) -> OneTreeTarget? {
+        let target = Self.treeTarget(place, workspace: workspace)
+        if case .worktree(let id)? = target, let pane = selectedPane, pane.worktree == id {
+            return .terminal(worktree: id, terminal: pane.terminal)
+        }
+        return target
     }
 
     /// Where `target` is, as a selection in `workspace`. Nil for the
@@ -160,7 +174,7 @@ extension ContentView {
     func treeCrumbs(for place: Selection, host: String, workspace: WorkspaceSummary?, name: String)
         -> [WorkspaceNavigation.Crumb]?
     {
-        guard let workspace, let target = Self.treeTarget(place, workspace: workspace.id),
+        guard let workspace, let target = treeTarget(place, workspace: workspace.id),
             let tree = pathTree(host: host, workspace: workspace)
         else { return nil }
         let path = tree.crumbs(to: target, hint: treeHint)
@@ -177,7 +191,7 @@ extension ContentView {
     /// ⌘↑'s destination: the node over the selection's in the tree.
     var treeParent: Selection? {
         guard let scene = selection.flatMap(workspaceScene), let summary = scene.summary,
-            let target = Self.treeTarget(selection, workspace: summary.id),
+            let target = treeTarget(selection, workspace: summary.id),
             let parent = pathTree(host: scene.host, workspace: summary)?.parent(of: target, hint: treeHint)
         else { return nil }
         return treeSelection(parent, host: scene.host, workspace: summary.id)
