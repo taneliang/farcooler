@@ -138,6 +138,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: crates/tailcat/go/go.mod
+          # setup-go looks for go.sum at the root unless told; without this
+          # it restored nothing and built the tunnel cold every run (ov-301).
+          cache-dependency-path: crates/tailcat/go/go.sum
 
       # `--device`, because this job ARCHIVES. The default is simulator-only —
       # fast, and right for the CI job that merely compiles — but an archive
@@ -391,6 +394,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: crates/tailcat/go/go.mod
+          # setup-go looks for go.sum at the root unless told; without this
+          # it restored nothing and built the tunnel cold every run (ov-301).
+          cache-dependency-path: crates/tailcat/go/go.sum
 
       # The Linux binaries this app will carry, from the job that just built
       # them. `build-app.sh` reads `dist/<arch>-linux/` at the repo root, which
