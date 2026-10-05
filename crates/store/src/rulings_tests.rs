@@ -32,14 +32,17 @@ fn shorts(store: &Store, main: Uuid, since: i64) -> Vec<String> {
 }
 
 /// The migration is the 26th and `Welcome`, so the build before it can still
-/// open the file.
+/// open the file; ov-333's reversal column follows it as 0029, also `Welcome`.
 #[test]
 fn the_migration_is_welcome() {
     use crate::compat::Older;
     let last = &crate::migrate::MIGRATIONS[25];
     assert!(std::ptr::fn_addr_eq(last.0, migration_0026_rulings as fn(&Transaction) -> rusqlite::Result<()>));
     assert_eq!(last.1, Older::Welcome);
-    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 29);
+    let col = &crate::migrate::MIGRATIONS[29];
+    assert!(std::ptr::fn_addr_eq(col.0, migration_0030_ruling_reversals as fn(&Transaction) -> rusqlite::Result<()>));
+    assert_eq!(col.1, Older::Welcome);
+    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 30);
 }
 
 /// A ruling starts standing, keeps what it was given trimmed, and takes the
@@ -125,8 +128,8 @@ fn another_board_s_cards_and_theme_are_refused() {
 }
 
 /// The plan read lists standing rulings first, newest first, then settled
-/// ones by when they were settled, and leaves out the ones settled before
-/// the window.
+/// ones by when they were settled. A settled ruling doesn't age out (it is
+/// Past Decisions' history), only the cap trims the oldest.
 #[test]
 fn the_plan_reads_standing_first_newest_first() {
     let (store, main, _) = board(0);
@@ -135,8 +138,74 @@ fn the_plan_reads_standing_first_newest_first() {
     store.set_ruling(ids[0], RulingState::Confirmed, None, Actor::User).unwrap();
     store.set_ruling(ids[2], RulingState::Reversed, None, Actor::User).unwrap();
     assert_eq!(shorts(&store, main, 0), ["R-4", "R-2", "R-3", "R-1"]);
-    assert_eq!(shorts(&store, main, i64::MAX), ["R-4", "R-2"], "a settled ruling ages out; a standing one never does");
+    assert_eq!(shorts(&store, main, i64::MAX), ["R-4", "R-2", "R-3", "R-1"], "a settled ruling is history, not aged out");
+}
 
+/// A read that didn't ask for everything carries the last `SETTLED_READ_CAP`
+/// settled rulings, newest settled first; the read for everything carries all.
+#[test]
+fn the_settled_history_is_capped_unless_all_is_asked_for() {
+    let (store, main, _) = board(0);
+    let total = SETTLED_READ_CAP + 3;
+    for i in 1..=total {
+        let r = store.add_ruling(main, &new(&format!("R{i}")), &[], Actor::Manager).unwrap();
+        store.set_ruling(r.id, RulingState::Confirmed, None, Actor::User).unwrap();
+        // Settled in order, a millisecond apart, whatever the clock's grain.
+        store.conn().execute("UPDATE board_rulings SET settled_at = ?1 WHERE id = ?2", params![i as i64, uuid_blob(r.id)]).unwrap();
+    }
+    let open = store.add_ruling(main, &new("open"), &[], Actor::Manager).unwrap();
+    let capped = shorts(&store, main, 1);
+    assert_eq!(capped.len(), SETTLED_READ_CAP + 1, "every open one plus the cap");
+    assert_eq!(capped[0], open.short());
+    assert_eq!(capped[1], format!("R-{total}"), "the newest settled first");
+    assert!(!capped.contains(&"R-1".to_string()), "the oldest fell off the end");
+    assert_eq!(shorts(&store, main, 0).len(), total + 1, "all, when asked for");
+}
+
+/// Keep is the owner's mark: it settles the ruling as confirmed, records who
+/// and when, and never touches `reversed_sha`.
+#[test]
+fn keeping_records_who_and_when() {
+    let (store, main, _) = board(0);
+    let a = store.add_ruling(main, &new("A"), &[], Actor::Manager).unwrap();
+    let kept = store.set_ruling(a.id, RulingState::Confirmed, None, Actor::User).unwrap();
+    assert_eq!((kept.state, kept.settled_by.as_deref(), kept.reversed_sha.as_deref()), (RulingState::Confirmed, Some("user"), None));
+    assert!(kept.settled_at.unwrap() >= kept.created_at);
+}
+
+/// Reverse-marking takes the commit, refuses one that isn't a hex SHA, and
+/// stores it lowercase; a kept ruling can still be marked reversed.
+#[test]
+fn a_reversal_is_marked_with_its_commit() {
+    let (store, main, _) = board(0);
+    let a = store.add_ruling(main, &new("A"), &[], Actor::Manager).unwrap();
+    for bad in ["", "abc", "xyz1234", "not a sha", &"a".repeat(65)] {
+        assert_eq!(refused(store.reverse_ruling(a.id, bad, None, Actor::Manager)), "reversed_sha", "{bad:?}");
+    }
+    assert_eq!(store.ruling(a.id).unwrap().state, RulingState::Standing, "a refusal wrote nothing");
+    store.set_ruling(a.id, RulingState::Confirmed, None, Actor::User).unwrap();
+    let r = store.reverse_ruling(a.id, " 6E7E5618 ", Some("Done."), Actor::Manager).unwrap();
+    assert_eq!((r.state, r.reversed_sha.as_deref(), r.note.as_str()), (RulingState::Reversed, Some("6e7e5618"), "Done."));
+    assert_eq!(r.settled_by.as_deref(), Some("manager"));
+    assert_eq!(refused(store.reverse_ruling(a.id, "6e7e5618", None, Actor::Manager)), "ruling_state", "reversed is final");
+}
+
+/// Keep All keeps every open ruling on this board, once, and no other
+/// board's, and none already settled.
+#[test]
+fn keep_all_keeps_every_open_ruling_on_this_board_only() {
+    let (store, main, _) = board(0);
+    let repo = store.get_workspace(main).unwrap().repository_id;
+    let other = store.create_workspace(repo, "Other", "ot").unwrap();
+    let ids: Vec<Uuid> = (1..=3).map(|i| store.add_ruling(main, &new(&format!("R{i}")), &[], Actor::Manager).unwrap().id).collect();
+    let theirs = store.add_ruling(other.id, &new("Elsewhere"), &[], Actor::Manager).unwrap();
+    store.reverse_ruling(ids[0], "abcd1234", None, Actor::Manager).unwrap();
+    let kept = store.keep_all_rulings(main, Actor::User).unwrap();
+    assert_eq!(kept.iter().map(Ruling::short).collect::<Vec<_>>(), ["R-3", "R-2"]);
+    assert!(kept.iter().all(|r| r.state == RulingState::Confirmed && r.settled_by.as_deref() == Some("user")));
+    assert_eq!(store.ruling(ids[0]).unwrap().state, RulingState::Reversed, "a reversed one stays reversed");
+    assert_eq!(store.ruling(theirs.id).unwrap().state, RulingState::Standing, "another board's stays open");
+    assert!(store.keep_all_rulings(main, Actor::User).unwrap().is_empty(), "nothing left to keep");
 }
 
 /// A ruling's cards come with their keys, and stay out of the plan's own

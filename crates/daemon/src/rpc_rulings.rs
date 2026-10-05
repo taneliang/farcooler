@@ -1,4 +1,5 @@
-//! Decided for you (ov-304): `ruling.add` and `ruling.set`, behind
+//! Decided for you (ov-304): `ruling.add` and `ruling.set`, and (ov-333)
+//! `ruling.keep_all`, behind
 //! `board_rulings`. Read through `plan.get`, whose `Plan.rulings` this file
 //! also converts.
 //!
@@ -8,6 +9,7 @@
 
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1::{self as pb, Request, request, result};
+use farcooler_store::models::Actor;
 use farcooler_store::rulings::{NewRuling, Ruling, RulingState};
 
 use crate::service::Service;
@@ -42,11 +44,31 @@ pub(crate) fn dispatch(svc: &Service, watcher: &Watcher, req: Request) -> Result
                 Ok(pb::BoardRulingState::Reversed) => RulingState::Reversed,
                 _ => return Err(DomainError::InvalidArgument { what: "state" }),
             };
-            let ruling = svc.store.set_ruling(id, state, p.note.as_deref(), actor)?;
+            // A marked reversal is the orchestrator's note that the work is
+            // done, with the commit that did it (ov-333).
+            let ruling = match (state, p.sha.as_deref()) {
+                (RulingState::Reversed, Some(sha)) => svc.store.reverse_ruling(id, sha, p.note.as_deref(), actor)?,
+                (_, Some(_)) => return Err(DomainError::InvalidArgument { what: "reversed_sha" }),
+                (_, None) => svc.store.set_ruling(id, state, p.note.as_deref(), actor)?,
+            };
             watcher.announce_plan_changed(ruling.workspace_id, actor);
             Ok(result::Value::BoardRuling(pb_ruling(&ruling)))
         }
-        ("ruling.add" | "ruling.set", _) => Err(missing()),
+        ("ruling.keep_all", Some(request::Payload::RulingKeepAll(p))) => {
+            let workspace = required_id(&p.workspace_id)?;
+            // Keep All is the owner's own mark: the orchestrator doesn't
+            // settle a ruling on the owner's behalf in bulk.
+            let actor = match actor_from_wire(&p.actor)? {
+                Actor::User => Actor::User,
+                _ => return Err(DomainError::InvalidArgument { what: "actor" }),
+            };
+            let kept = svc.store.keep_all_rulings(workspace, actor)?;
+            if !kept.is_empty() {
+                watcher.announce_plan_changed(workspace, actor);
+            }
+            Ok(result::Value::RulingsKept(pb::RulingsKept { rulings: kept.iter().map(pb_ruling).collect() }))
+        }
+        ("ruling.add" | "ruling.set" | "ruling.keep_all", _) => Err(missing()),
         (other, _) => {
             tracing::error!(method = %other, "a ruling route with no handler");
             Err(DomainError::NotFound)
@@ -76,6 +98,7 @@ pub(crate) fn pb_ruling(r: &Ruling) -> pb::BoardRuling {
         created_at: r.created_at,
         settled_by: r.settled_by.clone(),
         settled_at: r.settled_at,
+        reversed_sha: r.reversed_sha.clone(),
         resource_version: r.resource_version,
     }
 }

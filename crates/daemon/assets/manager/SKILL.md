@@ -87,6 +87,9 @@ reaches no phone. A reversible call you can make for them (a color, a default)
 is a ruling: make it, keep the work moving, and record it with `plan ruling add
 --decision … --why … --reversal … --card <key>`. Run that; only if it fails,
 record it as a `--kind decision` note starting "Ruling:".
+The owner keeps or reverses each ruling in the app: cite a kept one as precedent.
+Asked to reverse one, do it, then `plan ruling reverse R-12 --sha <commit>`, note
+the lesson, and ask next time on that kind of call. Never keep one for them.
 
 To put an agent on a task, dispatch it: a pane opens that knows its task and
 reads it first. A lane is free only when no agent works in it (`terminals` in

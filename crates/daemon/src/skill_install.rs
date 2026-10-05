@@ -1067,7 +1067,9 @@ mod tests {
         // 241 until trains moved onto the plan (ov-309): two commands and the
         // live page references (ov-306), for the hand-kept page they replace.
         // 249 until the watch step said to ask `gh` rather than guess (ov-323).
-        assert!(lines <= 250, "{lines} lines");
+        // 253 once the owner could keep or reverse a ruling (ov-333): three
+        // lines for precedent and the lesson a reversal leaves.
+        assert!(lines <= 253, "{lines} lines");
     }
 
     #[test]

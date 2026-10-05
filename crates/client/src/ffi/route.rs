@@ -90,6 +90,12 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // one page. The orchestrator is their one writer.
         | Method::PageList
         | Method::PageGet => Some(method.name()),
+        // The owner's two marks on a ruling (ov-333): Keep, and Keep All.
+        // `ruling.set` is a phone's only as `ruling.keep`: it can't reverse or
+        // settle any other way. Reversing is a request to the orchestrator,
+        // which goes as a prompt (`terminal.agent_prompt`).
+        Method::RulingSet => Some("ruling.keep"),
+        Method::RulingKeepAll => Some(method.name()),
         Method::AdapterList => Some("adapters"),
         Method::ThemeList => Some("themes"),
         Method::RepositoryList => Some("repositories"),
@@ -163,9 +169,8 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         | Method::PageRemove
         | Method::PageStats
         // Rulings (ov-304) are read in `plan.get`'s answer. Only the
-        // orchestrator writes one: the owner asks it, citing the short id.
+        // orchestrator records one: the owner asks it, citing the short id.
         | Method::RulingAdd
-        | Method::RulingSet
         // Trains (ov-309) are read in `plan.get`'s answer too, and only the
         // orchestrator writes them.
         | Method::TrainStart

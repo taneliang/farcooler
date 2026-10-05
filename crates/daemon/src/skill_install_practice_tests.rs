@@ -93,6 +93,19 @@ fn a_reversible_call_is_recorded_as_a_ruling() {
     }
 }
 
+/// The owner keeps or reverses each ruling (ov-333): a kept one is precedent
+/// to cite, a reversed one is marked with its commit and becomes a lesson and
+/// a question next time, and the manager never keeps one for the owner.
+#[test]
+fn a_kept_ruling_is_precedent_and_a_reversed_one_is_a_lesson() {
+    for h in ALL {
+        let third = section(&prose(h), "3. Dispatch, answer, or report");
+        assert!(third.contains("cite a kept one as precedent"), "{h:?}: {third}");
+        assert!(third.contains("`plan ruling reverse R-12 --sha <commit>`, note the lesson, and ask next time"), "{h:?}: {third}");
+        assert!(third.contains("Never keep one for them."), "{h:?}: {third}");
+    }
+}
+
 /// Landing ends with the card closed, the lane landed, the worktree removed
 /// and its build output gone; a push or a rerun is watched, so a run nobody
 /// looks at doesn't sit green and unlanded; and trains are kept on the plan

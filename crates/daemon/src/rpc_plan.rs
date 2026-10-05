@@ -188,7 +188,7 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, scope: Scope, req
             record_worker(svc, watcher, &lane, &agent, &p.actor);
             Ok(result::Value::Lane(lane_view(svc, &lane, admin)?))
         }
-        "ruling.add" | "ruling.set" => crate::rpc_rulings::dispatch(svc, watcher, req),
+        "ruling.add" | "ruling.set" | "ruling.keep_all" => crate::rpc_rulings::dispatch(svc, watcher, req),
         "train.start" | "train.set" => crate::rpc_trains::dispatch(svc, watcher, req),
         other => {
             tracing::error!(method = %other, "a plan route with no handler");

@@ -172,7 +172,7 @@ pub struct Plan {
     pub cards: Vec<CardRef>,
     pub coverage: Vec<Coverage>,
     /// Decided for you (ov-304): every standing ruling, newest first, then
-    /// those settled since `closed_since_ms`, most recently settled first.
+    /// the settled ones, most recently settled first (`rulings_of` says how many).
     pub rulings: Vec<Ruling>,
     /// Trains (ov-309): every one not landed or dropped, oldest first, then
     /// those settled since `closed_since_ms`, most recent first.
@@ -205,9 +205,10 @@ impl Store {
         rows.collect::<rusqlite::Result<HashMap<_, _>>>().map_err(map_err)
     }
 
-    /// A board's plan layer. Finished lanes (landed or dropped) and settled
-    /// rulings appear only if their last move was at or after
-    /// `closed_since_ms`.
+    /// A board's plan layer. Finished lanes (landed or dropped) appear only if
+    /// their last move was at or after `closed_since_ms`. Settled rulings are
+    /// history and don't age out: the last `SETTLED_READ_CAP` of them, or all
+    /// when `closed_since_ms` is 0.
     pub fn plan(&self, workspace: Uuid, closed_since_ms: i64) -> Result<Plan> {
         let conn = self.conn();
         crate::plan::board_exists(&conn, workspace)?;

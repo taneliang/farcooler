@@ -560,6 +560,15 @@ pub mod capability {
     /// verb before sending, saying the runner needs an update to keep rulings.
     /// Needs `board_plan`, since rulings are read through the plan.
     pub const BOARD_RULINGS: &str = "board_rulings";
+    /// The owner keeps or reverses a ruling (ov-333): `ruling.keep_all`,
+    /// `RulingSet.sha` and `BoardRuling.reversed_sha`.
+    ///
+    /// Its own capability because a runner with `board_rulings` alone drops
+    /// the new fields without a word and refuses the method as an unknown
+    /// one. A client that reads it absent offers no Keep, Keep All or
+    /// Reverse, and a CLI refuses the verbs before sending. Needs
+    /// `board_rulings`.
+    pub const BOARD_RULING_ACTIONS: &str = "board_ruling_actions";
     /// Trains (ov-309): `train.start`, `train.set`, and `Plan.trains` and
     /// `Plan.ci` on `plan.get`, with the runner reading each pushed SHA's CI
     /// through `gh`.
@@ -596,7 +605,7 @@ pub mod capability {
             AGENTS_FOUND,
             TASK_WAITS, TASK_WORKERS, NOTICE_TASK, BOARD_READS, WORKTREE_FILES, TERMINAL_NAMES, TERMINAL_PORTS,
             READ_ONLY_FOLDERS, AGENT_QUEUE, BOARD_PLAN, LFS_POINTERS, BOARD_PAGES, BOARD_RULINGS,
-            BOARD_TRAINS, BOARD_COST, LANDING,
+            BOARD_TRAINS, BOARD_COST, LANDING, BOARD_RULING_ACTIONS,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
@@ -790,6 +799,7 @@ pub mod method {
         PageStats = "page.stats" => BOARD_PAGES,
         RulingAdd = "ruling.add" => BOARD_RULINGS,
         RulingSet = "ruling.set" => BOARD_RULINGS,
+        RulingKeepAll = "ruling.keep_all" => BOARD_RULING_ACTIONS,
         TrainStart = "train.start" => BOARD_TRAINS,
         TrainSet = "train.set" => BOARD_TRAINS,
         RepositoryLanding = "repository.landing" => LANDING,

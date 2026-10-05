@@ -501,6 +501,7 @@ fn scope_of(method: Method) -> Scope {
         | Method::LaneAgent
         | Method::RulingAdd
         | Method::RulingSet
+        | Method::RulingKeepAll
         | Method::TrainStart
         | Method::TrainSet => Scope::Control,
         // Orchestrator pages (ov-269): free text the runner can't redact, so
@@ -2059,7 +2060,7 @@ impl Rpc {
             // The plan layer (ov-268); the arms live in `rpc_plan`.
             "plan.get" | "plan.set" | "plan.events" | "board_theme.create" | "board_theme.update"
             | "board_theme.cards" | "lane.create" | "lane.update" | "lane.cards" | "lane.agent"
-            | "ruling.add" | "ruling.set" | "train.start" | "train.set" => {
+            | "ruling.add" | "ruling.set" | "ruling.keep_all" | "train.start" | "train.set" => {
                 crate::rpc_plan::dispatch(svc, &self.watcher, self.peer.scope, req).await
             }
 

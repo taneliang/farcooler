@@ -220,7 +220,8 @@ struct Runner {
 
 fn runner() -> Runner {
     Runner {
-        capabilities: ["workstreams", "tasks", capability::BOARD_PLAN, capability::BOARD_RULINGS, capability::BOARD_TRAINS, capability::BOARD_COST]
+        capabilities: ["workstreams", "tasks", capability::BOARD_PLAN, capability::BOARD_RULINGS, capability::BOARD_TRAINS, capability::BOARD_COST,
+         capability::BOARD_RULING_ACTIONS]
             .map(String::from)
             .to_vec(),
         sent: vec![],
@@ -313,7 +314,14 @@ impl DispatchLink for Runner {
                     let mut set = plan.rulings.into_iter().find(|r| r.id == p.ruling_id).unwrap();
                     set.state = p.state;
                     set.note = p.note.unwrap_or_default();
+                    set.reversed_sha = p.sha;
+                    set.settled_by = Some(p.actor);
                     result::Value::BoardRuling(set)
+                }
+                ("ruling.keep_all", Some(request::Payload::RulingKeepAll(_))) => {
+                    let mut open: Vec<_> = plan.rulings.into_iter().filter(|r| r.state == pb::BoardRulingState::Standing as i32).collect();
+                    open.iter_mut().for_each(|r| r.state = pb::BoardRulingState::Confirmed as i32);
+                    result::Value::RulingsKept(pb::RulingsKept { rulings: open })
                 }
                 ("task.get_by_key", _) => result::Value::TaskList(pb::TaskList {
                     items: vec![task(40, "ov-40", pb::TaskStatus::Backlog, OTHER_BOARD)],
@@ -842,6 +850,16 @@ async fn rule(link: &mut Runner, args: &[&str], json: bool) -> Result<String, Fa
     run_on(link, &the_board(), cmd, "manager", json, NOW).await
 }
 
+/// `plan ruling ...` as the owner (the Mac's `--actor user`).
+async fn rule_as_owner(link: &mut Runner, args: &[&str], json: bool) -> Result<String, Failed> {
+    let argv = ["farcooler", "plan", "ruling"].iter().chain(args).chain(&["--workspace", "main"]).map(|s| s.to_string());
+    let cmd = match crate::Cli::try_parse_from(argv.collect::<Vec<_>>()).unwrap_or_else(|e| panic!("{args:?}: {e}")).command {
+        crate::Command::Plan(a) => a.cmd,
+        _ => panic!("not plan"),
+    };
+    run_on(link, &the_board(), cmd, "user", json, NOW).await
+}
+
 /// A runner with the plan and without rulings is told before anything is
 /// sent; one without the plan at all hears the plan's sentence first.
 #[tokio::test]
@@ -927,6 +945,96 @@ async fn a_ruling_s_card_is_not_flagged_as_having_no_lane() {
     assert_eq!(json["rulings"][0]["cards"][0]["key"], "ov-1", "the key is the ruling's own");
 }
 
+/// Keep is one `ruling.set` to confirmed, as the owner, with no sha; a ruling
+/// already kept is said so and nothing is sent; a typo names no ruling.
+#[tokio::test]
+async fn keep_marks_one_ruling_as_the_owner() {
+    let mut link = runner();
+    assert_eq!(rule_as_owner(&mut link, &["keep", "R-2"], false).await.unwrap(), "Kept R-2.");
+    let Some(request::Payload::RulingSet(p)) = &last(&link).payload else { panic!("{:?}", last(&link)) };
+    assert_eq!(p.ruling_id, id_bytes(Uuid::from_u128(0x5002)));
+    assert_eq!((p.state, p.actor.as_str(), p.sha.as_deref()), (pb::BoardRulingState::Confirmed as i32, "user", None));
+    assert_eq!(last(&link).required_capabilities, [capability::BOARD_RULINGS.to_string()]);
+
+    let mut link = runner();
+    assert_eq!(rule_as_owner(&mut link, &["keep", "R-1"], false).await.unwrap(), "R-1 is already kept.");
+    assert!(link.sent.iter().all(|r| r.method == "plan.get"), "nothing written for a kept ruling");
+    let err = rule_as_owner(&mut link, &["keep", "R-9"], false).await.unwrap_err();
+    assert_eq!(err.to_string(), "There's no ruling R-9 on this board. `plan ruling list` shows them.");
+}
+
+/// Keep All is one `ruling.keep_all` for the board, naming the owner, and says
+/// which it kept; `keep` needs an id or `--all`, not both.
+#[tokio::test]
+async fn keep_all_is_one_request_for_the_board() {
+    let mut link = runner();
+    assert_eq!(rule_as_owner(&mut link, &["keep", "--all"], false).await.unwrap(), "Kept R-2.");
+    let r = last(&link);
+    assert_eq!(r.method, "ruling.keep_all");
+    assert_eq!(r.required_capabilities, [capability::BOARD_RULING_ACTIONS.to_string()]);
+    let Some(request::Payload::RulingKeepAll(p)) = &r.payload else { panic!() };
+    assert_eq!(p.actor, "user");
+    assert_eq!(link.sent.iter().filter(|r| r.method.starts_with("ruling.")).count(), 1);
+    for argv in ["farcooler plan ruling keep", "farcooler plan ruling keep R-2 --all"] {
+        assert!(crate::Cli::try_parse_from(argv.split_whitespace()).is_err(), "{argv}");
+    }
+}
+
+/// The orchestrator never keeps a ruling for the owner, and nothing is sent.
+#[tokio::test]
+async fn the_orchestrator_cannot_keep() {
+    for args in [&["keep", "R-2"][..], &["keep", "--all"]] {
+        let mut link = runner();
+        let err = rule(&mut link, args, false).await.unwrap_err();
+        assert!(err.to_string().starts_with("Keeping a ruling is the owner's call."), "{args:?}: {err}");
+        assert!(link.sent.is_empty(), "{args:?}: {:?}", link.sent.iter().map(|r| &r.method).collect::<Vec<_>>());
+    }
+}
+
+/// Reverse is the orchestrator's mark: it sends the commit and says it.
+#[tokio::test]
+async fn reverse_marks_a_ruling_with_its_commit() {
+    let mut link = runner();
+    let said = rule(&mut link, &["reverse", "R-2", "--sha", "6e7e5618", "--note", "Blue again."], false).await.unwrap();
+    assert_eq!(said, "R-2 is reversed in 6e7e5618.");
+    let Some(request::Payload::RulingSet(p)) = &last(&link).payload else { panic!() };
+    assert_eq!((p.state, p.sha.as_deref(), p.note.as_deref()), (pb::BoardRulingState::Reversed as i32, Some("6e7e5618"), Some("Blue again.")));
+    assert!(crate::Cli::try_parse_from(["farcooler", "plan", "ruling", "reverse", "R-2"]).is_err(), "--sha is required");
+    link.refuse = Some("reversed_sha");
+    let err = rule(&mut link, &["reverse", "R-2", "--sha", "zz"], false).await.unwrap_err();
+    assert!(err.to_string().starts_with("Give the commit that reversed it"), "{err}");
+}
+
+/// A runner with `board_rulings` and none of the owner's actions is told
+/// before anything is sent; the older verbs still work.
+#[tokio::test]
+async fn a_runner_without_the_owner_s_actions_is_told() {
+    let mut link = runner();
+    link.capabilities.retain(|c| c != capability::BOARD_RULING_ACTIONS);
+    for args in [&["keep", "R-2"][..], &["keep", "--all"], &["reverse", "R-2", "--sha", "abcd"]] {
+        let err = rule_as_owner(&mut link, args, false).await.unwrap_err();
+        assert_eq!(err.to_string(), "This runner needs an update to keep or reverse rulings.", "{args:?}");
+    }
+    assert!(link.sent.is_empty());
+    assert!(rule(&mut link, &["set", "R-2", "--state", "confirmed"], false).await.is_ok(), "set still works");
+}
+
+/// `list --state` filters in the owner's words; JSON carries the filter and
+/// `reversed_sha`.
+#[tokio::test]
+async fn list_filters_by_state() {
+    let mut link = runner();
+    let open = rule(&mut link, &["list", "--state", "open"], false).await.unwrap();
+    assert!(open.contains("R-2") && !open.contains("R-1") && !open.contains("Past decisions"), "{open}");
+    let kept = rule(&mut link, &["list", "--state", "kept"], false).await.unwrap();
+    assert!(kept.contains("R-1    Kept") && !kept.contains("R-2"), "{kept}");
+    assert_eq!(rule(&mut link, &["list", "--state", "reversed"], false).await.unwrap(), "No reversed rulings.");
+    let json: Value = serde_json::from_str(&rule(&mut link, &["list", "--state", "kept"], true).await.unwrap()).unwrap();
+    assert_eq!(json["rulings"].as_array().unwrap().len(), 1);
+    assert_eq!(json["rulings"][0]["short"], "R-1");
+    assert!(json["rulings"][0].get("reversed_sha").is_some());
+}
+
 /// A refused move reads as this module's sentence, not the runner's word.
 #[tokio::test]
 async fn a_refused_move_says_how_rulings_move() {
@@ -948,8 +1056,8 @@ async fn ruling_list_reads_standing_first() {
         "         Why: It's the one attention color, so the inbox reads as needing you.",
         "         Reversing: One token; every surface follows.",
         "         ov-1 · Visual language · by manager 1h ago",
-        "Settled",
-        "  R-1    Confirmed · Unread stays on the phones.",
+        "Past decisions",
+        "  R-1    Kept · Unread stays on the phones.",
         "         Note: Keep it.",
     ];
     assert_eq!(text.lines().collect::<Vec<_>>(), expected, "{text}");

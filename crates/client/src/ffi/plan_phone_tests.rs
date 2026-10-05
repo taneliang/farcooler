@@ -113,3 +113,39 @@ fn a_plan_notice_names_its_board() {
     let line = super::event_line(&crate::session::FleetEvent::Plan { workspace: board });
     assert_eq!(line, format!(r#"{{"event":"plan","workspace":"{board}"}}"#));
 }
+
+/// The owner's marks on a ruling, from a phone (ov-333): `ruling.keep` and
+/// `ruling.keep_all` reach the runner, as the owner, and the plan reads them
+/// kept. Neither can reverse or settle any other way: there's no arm for it.
+#[tokio::test]
+async fn a_phone_keeps_rulings_and_cannot_reverse_one() {
+    use farcooler_store::rulings::{NewRuling, RulingState};
+    let runner = a_runner(Scope::Control).await;
+    let (main, _, _) = a_plan(&runner);
+    let store = &runner.service.store;
+    let new = |d: &str| NewRuling { decision: d.into(), why: "Why.".into(), reversal: "Cheap.".into(), theme_id: None };
+    let one = store.add_ruling(main, &new("One"), &[], Actor::Manager).unwrap();
+    let two = store.add_ruling(main, &new("Two"), &[], Actor::Manager).unwrap();
+    let three = store.add_ruling(main, &new("Three"), &[], Actor::Manager).unwrap();
+    let session = Session::connect_local(&runner.socket).await.expect("connect");
+
+    assert_eq!(route(Method::RulingSet), Some("ruling.keep"));
+    assert_eq!(route(Method::RulingKeepAll), Some("ruling.keep_all"));
+    dispatch(&session, "ruling.keep", &json!({ "ruling": one.id.to_string() })).await.expect("keep");
+    let kept = store.ruling(one.id).unwrap();
+    assert_eq!((kept.state, kept.settled_by.as_deref()), (RulingState::Confirmed, Some("user")));
+    assert_eq!(store.ruling(two.id).unwrap().state, RulingState::Standing, "only the one asked for");
+
+    let all = dispatch(&session, "ruling.keep_all", &json!({ "workspace": main.to_string() })).await.expect("keep all");
+    assert_eq!(all["kept"], 2, "the two still open");
+    assert_eq!(store.ruling(three.id).unwrap().state, RulingState::Confirmed);
+
+    let plan = dispatch(&session, "plan.get", &json!({ "workspace": main.to_string() })).await.expect("plan.get");
+    assert!(plan["rulings"].as_array().unwrap().iter().all(|r| r["state"] == "confirmed"), "{plan}");
+    assert!(plan["rulings"][0].get("reversed_sha").is_some());
+
+    // The reverse mark is the orchestrator's: a phone has no arm for it.
+    let answer = dispatch(&session, "ruling.reverse", &json!({ "ruling": two.id.to_string(), "sha": "abcd1234" })).await;
+    assert!(matches!(&answer, Err(SessionError::Protocol(m)) if m == "unknown method: ruling.reverse"), "{answer:?}");
+    assert!(matches!(dispatch(&session, "ruling.keep", &json!({})).await, Err(SessionError::Protocol(_))));
+}

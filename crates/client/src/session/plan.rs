@@ -19,6 +19,40 @@ impl Session {
         }
     }
 
+    /// The owner keeps one ruling (`ruling.set` to confirmed, as `user`,
+    /// ov-333). Refused without a round trip on a runner without
+    /// `board_ruling_actions`. A phone offers no other move: reversing is a
+    /// request to the orchestrator.
+    pub async fn keep_ruling(&self, ruling: Uuid) -> Result<(), SessionError> {
+        use farcooler_protocol::v1::{BoardRulingState, RulingSet};
+        require(self.capabilities(), farcooler_protocol::capability::BOARD_RULING_ACTIONS, "ruling.set")?;
+        let payload = request::Payload::RulingSet(RulingSet {
+            ruling_id: bytes::Bytes::copy_from_slice(ruling.as_bytes()),
+            state: BoardRulingState::Confirmed as i32,
+            note: None,
+            actor: "user".into(),
+            sha: None,
+        });
+        match self.value("ruling.set", None, Some(payload)).await? {
+            result::Value::BoardRuling(_) => Ok(()),
+            other => Err(wrong("board_ruling", &other)),
+        }
+    }
+
+    /// The owner keeps every open ruling on a board (`ruling.keep_all`,
+    /// ov-333). Answers how many it kept.
+    pub async fn keep_all_rulings(&self, workspace: Uuid) -> Result<usize, SessionError> {
+        require(self.capabilities(), farcooler_protocol::capability::BOARD_RULING_ACTIONS, "ruling.keep_all")?;
+        let payload = request::Payload::RulingKeepAll(farcooler_protocol::v1::RulingKeepAll {
+            workspace_id: bytes::Bytes::copy_from_slice(workspace.as_bytes()),
+            actor: "user".into(),
+        });
+        match self.value("ruling.keep_all", None, Some(payload)).await? {
+            result::Value::RulingsKept(k) => Ok(k.rulings.len()),
+            other => Err(wrong("rulings_kept", &other)),
+        }
+    }
+
     /// One theme's or lane's record, oldest first (`plan.events`, ov-274).
     pub async fn plan_events(
         &self,

@@ -90,3 +90,52 @@ fn no_task_message_carries_a_ruling() {
         }
     }
 }
+
+/// The owner's marks (ov-333) take tags from 200, the rulings' own block being
+/// reserved whole, and the fields they add take the next free ones: pinned, so
+/// a drift can't decode as another method.
+#[test]
+fn the_owner_s_marks_hold_their_tags() {
+    assert_eq!(number("Request", "ruling_keep_all"), 200, "the first past the trains' block");
+    assert_eq!(number("Result", "rulings_kept"), 210);
+    assert_eq!(number("BoardRuling", "task_keys"), 16, "the highest tag before it");
+    assert_eq!(number("BoardRuling", "reversed_sha"), 17);
+    assert_eq!(number("RulingSet", "actor"), 4, "the highest tag before it");
+    assert_eq!(number("RulingSet", "sha"), 5);
+    assert_eq!(number("RulingKeepAll", "workspace_id"), 1);
+    assert_eq!(number("RulingKeepAll", "actor"), 2);
+}
+
+/// Keep All and the fields beside it are one more advertised capability, and
+/// a runner without it is told apart from one with only `board_rulings`.
+#[test]
+fn the_owner_s_marks_are_their_own_capability() {
+    assert_eq!(capability::BOARD_RULING_ACTIONS, "board_ruling_actions");
+    assert!(capability::ALL.contains(&capability::BOARD_RULING_ACTIONS), "the daemon would not advertise it");
+    assert_eq!(capability::for_method("ruling.keep_all"), Some(capability::BOARD_RULING_ACTIONS));
+    assert_eq!(capability::for_method("ruling.set"), Some(capability::BOARD_RULINGS), "keeping rides the old method");
+}
+
+/// An older app reads a ruling that carries a reversing commit as the ruling
+/// it always read, and an older daemon drops a `sha` it doesn't know.
+#[test]
+fn the_new_fields_are_skipped_by_older_readers() {
+    /// `BoardRuling` as it was at `task_keys = 16`.
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct OldRuling {
+        #[prost(uint32, tag = "3")]
+        number: u32,
+        #[prost(string, tag = "4")]
+        decision: String,
+    }
+    let ruling = v1::BoardRuling {
+        number: 4,
+        decision: "The inbox is amber.".into(),
+        reversed_sha: Some("6e7e5618".into()),
+        ..Default::default()
+    };
+    let old = OldRuling::decode(ruling.encode_to_vec().as_slice()).expect("an older app decodes it");
+    assert_eq!(old, OldRuling { number: 4, decision: "The inbox is amber.".into() });
+    let back = v1::BoardRuling::decode(ruling.encode_to_vec().as_slice()).unwrap();
+    assert_eq!(back.reversed_sha.as_deref(), Some("6e7e5618"));
+}

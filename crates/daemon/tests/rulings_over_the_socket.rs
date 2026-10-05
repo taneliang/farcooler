@@ -42,6 +42,7 @@ fn set(ruling: &pb::BoardRuling, state: pb::BoardRulingState, note: Option<&str>
         state: state as i32,
         note: note.map(str::to_string),
         actor: "manager".into(),
+        sha: None,
     })
 }
 

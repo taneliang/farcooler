@@ -226,6 +226,7 @@ fn ruling_json(plan: &pb::Plan, r: &pb::BoardRuling) -> Value {
         "theme_id": r.theme_id.as_deref().map(id_text),
         "theme": theme.unwrap_or_default(),
         "state": ruling_state_word(r.state),
+        "reversed_sha": r.reversed_sha,
         "note": r.note,
         "actor": r.actor,
         "created_at": r.created_at,

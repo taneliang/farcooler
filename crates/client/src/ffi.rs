@@ -2030,6 +2030,15 @@ async fn dispatch(
             Ok(crate::page_json::page_json(&page))
         }
 
+        // The owner's marks on a ruling (ov-333): `{ruling}` keeps one and
+        // `{workspace}` keeps every open one on that board, both as `user`.
+        // Reversing is not here: the owner asks the orchestrator in chat.
+        "ruling.keep" => {
+            session.keep_ruling(id("ruling")?).await?;
+            Ok(json!({}))
+        }
+        "ruling.keep_all" => Ok(json!({ "kept": session.keep_all_rulings(id("workspace")?).await? })),
+
         // The only board write a phone makes: answering a decision, as
         // `{task, kind: "answer", body}`, which takes the decision off Needs
         // You and wakes the agent waiting on it. Always as `user`; see

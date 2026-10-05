@@ -4,9 +4,11 @@
 //! A **ruling** is one such call: what was decided in a line, why in one or
 //! two, what reversing it costs, the cards and the theme it touches, and
 //! where it stands. It starts `standing`; the owner confirms it or has it
-//! reversed by telling the orchestrator, which is the only writer. The apps
-//! show rulings and offer to copy a reference ("ruling R-12: ..."), never an
-//! edit.
+//! reversed by telling the orchestrator. The owner's own mark is Keep
+//! (ov-333): `Confirmed` here, said "kept" everywhere the owner reads it, set
+//! by `set_ruling` and, for every open ruling at once, `keep_all_rulings`.
+//! Reversing is the orchestrator's: it does the work, then marks the ruling
+//! with the commit that did it (`reversed_sha`, migration 0030).
 //!
 //! # Additive and removable, as the plan layer is
 //!
@@ -69,6 +71,18 @@ pub(crate) fn migration_0026_rulings(tx: &Transaction) -> rusqlite::Result<()> {
         "#,
     )
 }
+
+/// Migration 0030 (ov-333): the commit that reversed a ruling, so the history
+/// can say what undid it. A column on this layer's own table, which an older
+/// build reads by name and never sees; nothing on the board changes.
+pub(crate) fn migration_0030_ruling_reversals(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch("ALTER TABLE board_rulings ADD COLUMN reversed_sha TEXT;")
+}
+
+/// How many settled rulings a plan read carries when it isn't asked for every
+/// one: the owner reads Past Decisions as history, and a board that settles a
+/// few a day would otherwise send every one it ever made to a phone.
+pub const SETTLED_READ_CAP: usize = 100;
 
 /// A decision is one line, the reason one or two, and the reversal cost one.
 const DECISION_MAX: usize = 300;
@@ -140,6 +154,8 @@ pub struct Ruling {
     /// Who confirmed or reversed it, and when; `None` while standing.
     pub settled_by: Option<String>,
     pub settled_at: Option<i64>,
+    /// The commit that reversed it, when the orchestrator said (ov-333).
+    pub reversed_sha: Option<String>,
     pub resource_version: u64,
 }
 
@@ -173,7 +189,7 @@ fn required(value: &str, max: usize, what: &'static str) -> Result<String> {
 }
 
 const COLS: &str = "id, workspace_id, number, decision, why, reversal, theme_id, state, note, actor, created_at,
-     settled_by, settled_at, resource_version";
+     settled_by, settled_at, resource_version, reversed_sha";
 
 fn row_to_ruling(r: &rusqlite::Row) -> rusqlite::Result<Ruling> {
     let theme: Option<Vec<u8>> = r.get(6)?;
@@ -195,6 +211,7 @@ fn row_to_ruling(r: &rusqlite::Row) -> rusqlite::Result<Ruling> {
         settled_by: r.get(11)?,
         settled_at: r.get(12)?,
         resource_version: r.get::<_, i64>(13)?.max(0) as u64,
+        reversed_sha: r.get(14)?,
     })
 }
 
@@ -294,6 +311,28 @@ impl Store {
 
     /// Confirm or reverse a ruling, with the owner's words if there are any.
     pub fn set_ruling(&self, ruling: Uuid, state: RulingState, note: Option<&str>, actor: Actor) -> Result<Ruling> {
+        self.settle_ruling(ruling, state, note, None, actor)
+    }
+
+    /// Mark a ruling reversed, with the commit that did it (ov-333). The
+    /// orchestrator's verb, once the work is done: it never reverses by
+    /// itself. `sha` is 4 to 64 hex digits.
+    pub fn reverse_ruling(&self, ruling: Uuid, sha: &str, note: Option<&str>, actor: Actor) -> Result<Ruling> {
+        let sha = sha.trim();
+        if !(4..=64).contains(&sha.len()) || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(invalid("reversed_sha"));
+        }
+        self.settle_ruling(ruling, RulingState::Reversed, note, Some(&sha.to_ascii_lowercase()), actor)
+    }
+
+    fn settle_ruling(
+        &self,
+        ruling: Uuid,
+        state: RulingState,
+        note: Option<&str>,
+        sha: Option<&str>,
+        actor: Actor,
+    ) -> Result<Ruling> {
         let note = note.map(str::trim).unwrap_or_default();
         if note.chars().count() > NOTE_MAX {
             return Err(invalid("note"));
@@ -305,15 +344,50 @@ impl Store {
             return Err(invalid("ruling_state"));
         }
         tx.execute(
-            "UPDATE board_rulings SET state = ?2, note = ?3, settled_by = ?4, settled_at = ?5,
+            "UPDATE board_rulings SET state = ?2, note = ?3, settled_by = ?4, settled_at = ?5, reversed_sha = ?6,
                     resource_version = resource_version + 1
               WHERE id = ?1",
-            params![uuid_blob(ruling), state.as_str(), note, actor.to_string(), now_millis()],
+            params![uuid_blob(ruling), state.as_str(), note, actor.to_string(), now_millis(), sha],
         )
         .map_err(map_err)?;
         let after = ruling_in(&tx, ruling)?;
         tx.commit().map_err(map_err)?;
         Ok(after)
+    }
+
+    /// Keep every open ruling on `workspace`'s board (ov-333): the owner's
+    /// Keep All. One transaction, so a read sees all of them kept or none.
+    /// Returns the ones it kept, newest first; none when nothing was open.
+    pub fn keep_all_rulings(&self, workspace: Uuid, actor: Actor) -> Result<Vec<Ruling>> {
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(map_err)?;
+        board_exists(&tx, workspace)?;
+        let open: Vec<Vec<u8>> = {
+            let mut stmt = tx
+                .prepare(
+                    "SELECT id FROM board_rulings WHERE workspace_id = ?1 AND state = 'standing'
+                      ORDER BY created_at DESC, number DESC",
+                )
+                .map_err(map_err)?;
+            stmt.query_map(params![uuid_blob(workspace)], |r| r.get(0))
+                .map_err(map_err)?
+                .collect::<rusqlite::Result<_>>()
+                .map_err(map_err)?
+        };
+        let now = now_millis();
+        let mut kept = Vec::new();
+        for id in open {
+            tx.execute(
+                "UPDATE board_rulings SET state = 'confirmed', settled_by = ?2, settled_at = ?3,
+                        resource_version = resource_version + 1
+                  WHERE id = ?1",
+                params![id, actor.to_string(), now],
+            )
+            .map_err(map_err)?;
+            kept.push(ruling_in(&tx, Uuid::from_slice(&id).map_err(|_| DomainError::NotFound)?)?);
+        }
+        tx.commit().map_err(map_err)?;
+        Ok(kept)
     }
 
     /// A ruling by id.
@@ -323,24 +397,31 @@ impl Store {
 }
 
 /// A board's rulings for the plan read: every standing one, newest first, then
-/// the ones settled at or after `settled_since_ms`, most recently settled
-/// first. A card now on another board is left out of a ruling's cards.
+/// the settled ones, most recently settled first. `settled_since_ms == 0` (the
+/// read that asked for everything) sends every settled one; any other read
+/// sends the last `SETTLED_READ_CAP`, however old (ov-333: Past Decisions is
+/// history, so a ruling no longer ages out after a week). A card now on
+/// another board is left out of a ruling's cards.
 pub(crate) fn rulings_of(
     conn: &Connection,
     workspace: Uuid,
     settled_since_ms: i64,
     on_board: &HashMap<Uuid, CardRef>,
 ) -> Result<Vec<Ruling>> {
+    let cap = if settled_since_ms == 0 { i64::MAX } else { SETTLED_READ_CAP as i64 };
     let mut stmt = conn
         .prepare(&format!(
             "SELECT {COLS} FROM board_rulings
-              WHERE workspace_id = ?1 AND (state = 'standing' OR coalesce(settled_at, 0) >= ?2)
+              WHERE workspace_id = ?1 AND (state = 'standing' OR id IN (
+                      SELECT id FROM board_rulings
+                       WHERE workspace_id = ?1 AND state <> 'standing'
+                       ORDER BY coalesce(settled_at, 0) DESC, number DESC LIMIT ?2))
               ORDER BY state <> 'standing', CASE WHEN state = 'standing' THEN created_at ELSE settled_at END DESC,
                        number DESC"
         ))
         .map_err(map_err)?;
     let mut rulings = stmt
-        .query_map(params![uuid_blob(workspace), settled_since_ms], row_to_ruling)
+        .query_map(params![uuid_blob(workspace), cap], row_to_ruling)
         .map_err(map_err)?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(map_err)?;

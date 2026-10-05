@@ -241,11 +241,18 @@ message Request {
     // `Plan.trains`, so only the writes are here.
     TrainStart train_start = 190;
     TrainSet train_set = 191;
+    // The owner keeps every open ruling at once (ov-333), behind
+    // `board_ruling_actions`. Tags from 200, since the rulings' own block
+    // (180-189) was reserved whole and a reserved tag is never reused. The
+    // rest of this block, 201-209, is held by `reserved` below.
+    RulingKeepAll ruling_keep_all = 200;
   }
   // The rest of rulings' block, kept for them (review 1005a L1).
   reserved 182 to 189;
   // The rest of trains' block.
   reserved 192 to 199;
+  // The rest of the owner's marks' block (ov-333).
+  reserved 201 to 209;
 }
 
 message Response {
@@ -364,6 +371,10 @@ message Result {
     // the repository's base branch, and the mode it suggests. 200-209 are
     // landing's, the rest held by `reserved` below.
     RepositoryLanding repository_landing = 200;
+    // `ruling.keep_all`, behind `board_ruling_actions`: the rulings it kept.
+    // Tag 210, after landing's block (200-209); `Request.ruling_keep_all` keeps
+    // 200, which landing never took on the request side.
+    RulingsKept rulings_kept = 210;
   }
   // The rest of rulings' block, kept for them (review 1005a L1).
   reserved 181 to 189;
@@ -371,6 +382,8 @@ message Result {
   reserved 191 to 199;
   // The rest of landing's block.
   reserved 201 to 209;
+  // The rest of the owner's marks' block (ov-333).
+  reserved 211 to 219;
 }
 
 // ---------------------------------------------------------------------------
@@ -4169,8 +4182,10 @@ message Plan {
   repeated PlanCard cards = 5;
   repeated PlanCoverage coverage = 6;
   // Decided for you (ov-304), behind `board_rulings`: every standing ruling,
-  // newest first, then the ones confirmed or reversed in the last week (all
-  // of them when the request said so), most recently settled first. Empty
+  // newest first, then the confirmed (said "kept" to the owner, ov-333) and
+  // reversed ones, most recently settled first: the last 100, or all of them
+  // when the request said so. Settled rulings no longer age out after a week,
+  // since they are the owner's Past Decisions. Empty
   // from a runner without the capability, and a client shows nothing then.
   repeated BoardRuling rulings = 7;
   // Trains (ov-309), behind `board_trains`: every one not landed or dropped,
@@ -4416,6 +4431,9 @@ message BoardRuling {
   // `task_ids`' keys, in the same order. Carried here rather than in
   // `Plan.cards`, whose cards the reconciliation checks for a lane.
   repeated string task_keys = 16;
+  // The commit that reversed it, when the orchestrator marked it with one
+  // (ov-333). Absent unless the state is reversed.
+  optional string reversed_sha = 17;
 }
 
 // `ruling.add`, at `control`: a standing ruling with the board's next number.
@@ -4436,6 +4454,23 @@ message RulingSet {
   BoardRulingState state = 2;
   optional string note = 3;
   string actor = 4;
+  // The commit that did the reversing (ov-333), 4 to 64 hex digits, with
+  // `state` reversed. Refused (`reversed_sha`) when malformed. Read only by a runner
+  // with `board_ruling_actions`; an older one drops it.
+  optional string sha = 5;
+}
+
+// `ruling.keep_all`, at `control`, behind `board_ruling_actions` (ov-333): the
+// owner keeps every open ruling on the board in one move. Only the owner
+// (`actor` user) may: the orchestrator's own writes are refused with `actor`.
+message RulingKeepAll {
+  bytes workspace_id = 1;
+  string actor = 2;
+}
+
+// The rulings `ruling.keep_all` kept, newest first; empty when none was open.
+message RulingsKept {
+  repeated BoardRuling rulings = 1;
 }
 
 // ---------------------------------------------------------------------------

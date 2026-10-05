@@ -9,8 +9,16 @@
 //! ```text
 //! farcooler plan ruling add "The inbox is amber." --why "..." --reversal "..." [--card ov-1]... [--theme NAME]
 //! farcooler plan ruling set R-12 --state confirmed|reversed [--note "..."]
-//! farcooler plan ruling list
+//! farcooler plan ruling keep R-12 | --all          (the owner's mark, ov-333)
+//! farcooler plan ruling reverse R-12 --sha <sha> [--note "..."]
+//! farcooler plan ruling list [--state open|kept|reversed]
 //! ```
+//!
+//! The owner keeps a ruling, which changes nothing in the plan. Reversing is
+//! the orchestrator's: the owner asks it in chat, it does the work, then marks
+//! the ruling `reverse --sha <the commit>`. The words the owner reads are
+//! open, kept and reversed; the store's `standing` and `confirmed` are the
+//! same states, kept for the wire's sake.
 //!
 //! A child of `plan.rs`, whose naming and refusal helpers it shares, and
 //! whose tests (`plan_tests.rs`) hold it. Behind
@@ -28,6 +36,8 @@ use crate::{req_for, with};
 
 /// What a runner with the plan and no rulings is told.
 const NEEDS_UPDATE: &str = "This runner needs an update to keep rulings.";
+/// What a runner with rulings and none of the owner's actions is told.
+const NEEDS_ACTIONS: &str = "This runner needs an update to keep or reverse rulings.";
 
 #[derive(Debug, Clone, Subcommand)]
 pub(super) enum RulingCmd {
@@ -58,8 +68,52 @@ pub(super) enum RulingCmd {
         #[arg(long)]
         note: Option<String>,
     },
-    /// Every ruling on this board: the standing ones first, newest first.
-    List,
+    /// The owner keeps a ruling, or every open one with `--all`. The
+    /// owner's own mark: the orchestrator doesn't keep rulings for them.
+    Keep {
+        /// The ruling's short id: R-12, or 12.
+        #[arg(required_unless_present = "all", conflicts_with = "all")]
+        id: Option<String>,
+        /// Keep every open ruling on this board.
+        #[arg(long)]
+        all: bool,
+    },
+    /// Mark a ruling reversed once the work is done, with the commit that did
+    /// it. The orchestrator's verb: reversing itself is a request in chat.
+    Reverse {
+        /// The ruling's short id: R-12, or 12.
+        id: String,
+        /// The commit that reversed it.
+        #[arg(long)]
+        sha: String,
+        /// Anything worth knowing about how it went.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Every ruling on this board: the open ones first, newest first.
+    List {
+        /// Only the rulings in this state.
+        #[arg(long, value_enum)]
+        state: Option<RulingListState>,
+    },
+}
+
+/// The states `list --state` filters by, in the words the owner reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(super) enum RulingListState {
+    Open,
+    Kept,
+    Reversed,
+}
+
+impl RulingListState {
+    fn holds(self, r: &pb::BoardRuling) -> bool {
+        match self {
+            RulingListState::Open => is_standing(r),
+            RulingListState::Kept => r.state == pb::BoardRulingState::Confirmed as i32,
+            RulingListState::Reversed => r.state == pb::BoardRulingState::Reversed as i32,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -75,7 +129,8 @@ pub(super) fn said_here(what: &str) -> Option<&'static str> {
         "why" => "Say why with --why, in one or two lines of up to 600 characters.",
         "reversal" => "Say what reversing it costs with --reversal, in one line of up to 300 characters.",
         "note" => "That note is too long for one line. Shorten it.",
-        "ruling_state" => "A ruling can't make that move. A standing ruling is confirmed or reversed, a confirmed one can still be reversed, and a reversed one is final.",
+        "ruling_state" => "A ruling can't make that move. An open ruling is kept or reversed, a kept one can still be reversed, and a reversed one is final.",
+        "reversed_sha" => "Give the commit that reversed it with --sha: 4 to 64 hex digits.",
         _ => return None,
     })
 }
@@ -87,14 +142,33 @@ fn needs_rulings<L: DispatchLink>(link: &L) -> Result<(), Failed> {
     Err(Box::new(Refused::new(NEEDS_UPDATE.to_string(), Some(pb::ErrorCode::CapabilityUnsupported as i32))))
 }
 
-async fn send<L: DispatchLink>(link: &mut L, board: &Board, method: &str, p: request::Payload) -> Result<pb::BoardRuling, Failed> {
+fn needs_actions<L: DispatchLink>(link: &L) -> Result<(), Failed> {
+    if link.capabilities().iter().any(|c| c == capability::BOARD_RULING_ACTIONS) {
+        return Ok(());
+    }
+    Err(Box::new(Refused::new(NEEDS_ACTIONS.to_string(), Some(pb::ErrorCode::CapabilityUnsupported as i32))))
+}
+
+async fn call<L: DispatchLink>(link: &mut L, board: &Board, method: &str, p: request::Payload, needs: &str) -> Result<result::Value, Failed> {
     let mut r = with(req_for(method, board.repository), p);
-    r.required_capabilities.push(capability::BOARD_RULINGS.to_string());
+    r.required_capabilities.push(needs.to_string());
     let answer = link.call(r).await.map_err(|e| refused_here(e, "The runner couldn't record that ruling. Try again."))?;
-    match expect_value(answer.value)? {
+    expect_value(answer.value)
+}
+
+async fn send<L: DispatchLink>(link: &mut L, board: &Board, method: &str, p: request::Payload) -> Result<pb::BoardRuling, Failed> {
+    let needs = if method == "ruling.set" || method == "ruling.add" { capability::BOARD_RULINGS } else { capability::BOARD_RULING_ACTIONS };
+    match call(link, board, method, p, needs).await? {
         result::Value::BoardRuling(r) => Ok(r),
         _ => Err(unreadable()),
     }
+}
+
+/// The ruling `id` names on this board, or the sentence saying there's none.
+fn find_ruling<'a>(plan: &'a pb::Plan, id: &str) -> Result<&'a pb::BoardRuling, Failed> {
+    number_of(id)
+        .and_then(|n| plan.rulings.iter().find(|r| r.number == n))
+        .ok_or_else(|| -> Failed { format!("There's no ruling {id} on this board. `plan ruling list` shows them.").into() })
 }
 
 /// `R-12`, `r-12`, `R12`, `#12` or `12`, as the number.
@@ -115,14 +189,70 @@ pub(super) async fn ruling<L: DispatchLink>(
     now: i64,
 ) -> Result<String, Failed> {
     needs_rulings(link)?;
+    if matches!(cmd, RulingCmd::Keep { .. } | RulingCmd::Reverse { .. }) {
+        needs_actions(link)?;
+    }
+    // Keep is the owner's mark, so the owner's actor: the orchestrator is
+    // asked in chat for what changes the plan, and keeps nothing for them.
+    if matches!(cmd, RulingCmd::Keep { .. }) && actor != "user" {
+        return Err("Keeping a ruling is the owner's call. Ask them to keep it from Decided For You.".into());
+    }
     let plan = get_plan(link, &ws, true).await?;
     let mut keys = Keys::of_plan(&plan);
     match cmd {
-        RulingCmd::List => Ok(if json {
-            json!({ "rulings": plan.rulings.iter().map(|r| ruling_json(&plan, r, &keys)).collect::<Vec<_>>() }).to_string()
-        } else {
-            list_text(&plan, &keys, now)
-        }),
+        RulingCmd::List { state } => {
+            let shown: Vec<&pb::BoardRuling> = plan.rulings.iter().filter(|r| state.is_none_or(|s| s.holds(r))).collect();
+            Ok(if json {
+                json!({ "rulings": shown.iter().map(|r| ruling_json(&plan, r, &keys)).collect::<Vec<_>>() }).to_string()
+            } else {
+                list_text(&plan, &shown, &keys, now, state)
+            })
+        }
+        RulingCmd::Keep { id, all } => {
+            if all {
+                let p = request::Payload::RulingKeepAll(pb::RulingKeepAll { workspace_id: ws, actor: actor.into() });
+                let kept = match call(link, board, "ruling.keep_all", p, capability::BOARD_RULING_ACTIONS).await? {
+                    result::Value::RulingsKept(k) => k.rulings,
+                    _ => return Err(unreadable()),
+                };
+                return Ok(if json {
+                    json!({ "kept": kept.iter().map(|r| ruling_json(&plan, r, &keys)).collect::<Vec<_>>() }).to_string()
+                } else if kept.is_empty() {
+                    "No ruling is open.".to_string()
+                } else {
+                    format!("Kept {}.", kept.iter().map(|r| format!("R-{}", r.number)).collect::<Vec<_>>().join(", "))
+                });
+            }
+            let found = find_ruling(&plan, id.as_deref().unwrap_or_default())?;
+            if found.state == pb::BoardRulingState::Confirmed as i32 {
+                return Ok(format!("R-{} is already kept.", found.number));
+            }
+            let p = request::Payload::RulingSet(pb::RulingSet {
+                ruling_id: found.id.clone(),
+                state: pb::BoardRulingState::Confirmed as i32,
+                note: None,
+                actor: actor.into(),
+                sha: None,
+            });
+            let set = send(link, board, "ruling.set", p).await?;
+            Ok(if json { ruling_json(&plan, &set, &keys).to_string() } else { format!("Kept R-{}.", set.number) })
+        }
+        RulingCmd::Reverse { id, sha, note } => {
+            let found = find_ruling(&plan, &id)?;
+            let p = request::Payload::RulingSet(pb::RulingSet {
+                ruling_id: found.id.clone(),
+                state: pb::BoardRulingState::Reversed as i32,
+                note,
+                actor: actor.into(),
+                sha: Some(sha),
+            });
+            let set = send(link, board, "ruling.set", p).await?;
+            Ok(if json {
+                ruling_json(&plan, &set, &keys).to_string()
+            } else {
+                format!("R-{} is reversed in {}.", set.number, set.reversed_sha.as_deref().unwrap_or("the commit you named"))
+            })
+        }
         RulingCmd::Add { decision, why, reversal, cards, theme } => {
             let items = board_in(link, board, None, None).await?.items;
             keys.extend(&items);
@@ -144,9 +274,7 @@ pub(super) async fn ruling<L: DispatchLink>(
             Ok(if json { ruling_json(&plan, &made, &keys).to_string() } else { format!("Recorded R-{}: {}", made.number, made.decision) })
         }
         RulingCmd::Set { id, state, note } => {
-            let found = number_of(&id)
-                .and_then(|n| plan.rulings.iter().find(|r| r.number == n))
-                .ok_or_else(|| -> Failed { format!("There's no ruling {id} on this board. `plan ruling list` shows them.").into() })?;
+            let found = find_ruling(&plan, &id)?;
             let state = match state {
                 RulingStateArg::Confirmed => pb::BoardRulingState::Confirmed,
                 RulingStateArg::Reversed => pb::BoardRulingState::Reversed,
@@ -156,6 +284,7 @@ pub(super) async fn ruling<L: DispatchLink>(
                 state: state as i32,
                 note,
                 actor: actor.into(),
+                sha: None,
             });
             let set = send(link, board, "ruling.set", p).await?;
             Ok(if json {
@@ -199,6 +328,7 @@ pub(super) fn ruling_json(plan: &pb::Plan, r: &pb::BoardRuling, keys: &Keys) -> 
         "theme_id": r.theme_id.as_deref().map(id_text),
         "theme": theme_name(plan, r).unwrap_or_default(),
         "state": state_word(r.state),
+        "reversed_sha": r.reversed_sha,
         "note": r.note,
         "actor": r.actor,
         "created_at": r.created_at,
@@ -226,28 +356,41 @@ fn touches(plan: &pb::Plan, r: &pb::BoardRuling, keys: &Keys, now: i64) -> Strin
     parts.join(" · ")
 }
 
-/// `plan ruling list`: standing first, with why and what reversing costs;
-/// then the settled ones, a line each.
-fn list_text(plan: &pb::Plan, keys: &Keys, now: i64) -> String {
+/// `plan ruling list`: the open ones first, with why and what reversing costs;
+/// then the past decisions, a line each. `only` is the filter, said when it
+/// leaves nothing.
+fn list_text(plan: &pb::Plan, shown: &[&pb::BoardRuling], keys: &Keys, now: i64, only: Option<RulingListState>) -> String {
     if plan.rulings.is_empty() {
         return "No rulings yet. Record one with `farcooler plan ruling add`.".into();
     }
+    if shown.is_empty() {
+        let word = match only {
+            Some(RulingListState::Kept) => "kept",
+            Some(RulingListState::Reversed) => "reversed",
+            _ => "open",
+        };
+        return format!("No {word} rulings.");
+    }
     let mut out = Vec::new();
-    let standing: Vec<&pb::BoardRuling> = plan.rulings.iter().filter(|r| is_standing(r)).collect();
-    if !standing.is_empty() {
+    let open: Vec<&&pb::BoardRuling> = shown.iter().filter(|r| is_standing(r)).collect();
+    if !open.is_empty() {
         out.push("Decided for you".to_string());
-        for r in standing {
+        for r in open {
             out.push(format!("  R-{:<4} {}", r.number, r.decision));
             out.push(format!("         Why: {}", r.why));
             out.push(format!("         Reversing: {}", r.reversal));
             out.push(format!("         {}", touches(plan, r, keys, now)));
         }
     }
-    let settled: Vec<&pb::BoardRuling> = plan.rulings.iter().filter(|r| !is_standing(r)).collect();
-    if !settled.is_empty() {
-        out.push("Settled".to_string());
-        for r in settled {
-            let word = if r.state == pb::BoardRulingState::Reversed as i32 { "Reversed" } else { "Confirmed" };
+    let past: Vec<&&pb::BoardRuling> = shown.iter().filter(|r| !is_standing(r)).collect();
+    if !past.is_empty() {
+        out.push("Past decisions".to_string());
+        for r in past {
+            let word = match (r.state == pb::BoardRulingState::Reversed as i32, r.reversed_sha.as_deref()) {
+                (true, Some(sha)) => format!("Reversed in {sha}"),
+                (true, None) => "Reversed".to_string(),
+                (false, _) => "Kept".to_string(),
+            };
             out.push(format!("  R-{:<4} {word} · {}", r.number, r.decision));
             if !r.note.is_empty() {
                 out.push(format!("         Note: {}", r.note));
