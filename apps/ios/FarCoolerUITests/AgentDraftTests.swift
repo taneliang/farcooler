@@ -56,13 +56,30 @@ final class AgentDraftTests: XCTestCase {
         return composer
     }
 
+    /// Tap the composer until the keyboard is up, so `typeText` has a focused
+    /// field to type into.
+    ///
+    /// CI's first launch on a cold simulator (ov-294) drew the composer, and the
+    /// single tap landed while the app was still settling, so the field never
+    /// became first responder and `typeText` went nowhere: the read-back saw an
+    /// empty field 70 seconds in. `typeText` does not fail when nothing has
+    /// focus, so the keyboard is what has to be waited for, and the tap is
+    /// retried while it is absent.
+    private func focus(_ field: XCUIElement, in app: XCUIApplication) throws {
+        for _ in 0..<5 {
+            field.tap()
+            if app.keyboards.firstMatch.waitForExistence(timeout: 10) { return }
+        }
+        throw HarnessFailure("The composer took five taps and raised no keyboard")
+    }
+
     /// The whole feature, in one journey: type, be killed, come back to it.
     func testAHalfWrittenMessageComesBackAfterTheAppIsKilled() throws {
         let typed = "the thought I was halfway through"
 
         let first = launch(keepingDrafts: false)
         let field = try composer(in: first)
-        field.tap()
+        try focus(field, in: first)
         first.typeText(typed)
         // Read it back before killing the app, so a failure below is about
         // persistence rather than about the keystrokes never landing — two
@@ -93,7 +110,7 @@ final class AgentDraftTests: XCTestCase {
     func testASentMessageDoesNotComeBackAsADraft() throws {
         let first = launch(keepingDrafts: false)
         let field = try composer(in: first)
-        field.tap()
+        try focus(field, in: first)
         first.typeText("this one goes")
 
         let send = first.buttons["agent-send"]
@@ -125,7 +142,7 @@ final class AgentDraftTests: XCTestCase {
     func testTheHarnessStartsWithAnEmptyComposer() throws {
         let first = launch(keepingDrafts: false)
         let field = try composer(in: first)
-        field.tap()
+        try focus(field, in: first)
         first.typeText("left behind by the previous test")
         first.terminate()
 

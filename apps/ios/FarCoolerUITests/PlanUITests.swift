@@ -248,7 +248,15 @@ final class PlanUITests: XCTestCase {
     }
 
     /// The sheets: the overview, its themes, a lane and a theme, light and dark.
-    func testCaptures() {
+    ///
+    /// Opt-in, like the Android Roborazzi captures: it makes screenshots and
+    /// asserts nothing a behavior test does not, and it flips the whole
+    /// device's appearance, so it stays out of CI and of an ordinary run.
+    /// `TEST_RUNNER_FC_CAPTURES=1 xcodebuild test …` turns it on.
+    func testCaptures() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["FC_CAPTURES"] == "1",
+            "capture-only; set TEST_RUNNER_FC_CAPTURES=1 to take the sheets")
         for (name, appearance) in [("light", XCUIDevice.Appearance.light), ("dark", .dark)] {
             XCUIDevice.shared.appearance = appearance
             let app = openBoard()
