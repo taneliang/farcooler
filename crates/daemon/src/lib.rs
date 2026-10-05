@@ -27,6 +27,7 @@ pub mod orchestrator;
 pub mod paste_mode;
 pub mod pastes;
 pub mod paths;
+pub mod plan_glance;
 pub mod proc_cwd;
 pub mod push;
 pub mod read_only_folders;

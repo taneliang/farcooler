@@ -57,6 +57,18 @@ fn written() -> Vec<(&'static str, serde_json::Value)> {
     )
     .expect("a valid ask");
     let started_at = Some(NOW_MS - 23 * 60 * 1000);
+    // A board with a plan, as the glance says it (ov-310): two lanes in Now,
+    // one next up, and the board's own Needs You count.
+    use crate::plan_glance::{BoardGlance, LaneGlance};
+    let plan = [BoardGlance {
+        workspace: "Main".into(),
+        needs_you: 2,
+        now: vec![
+            LaneGlance { name: "mac-ux".into(), state: "review" },
+            LaneGlance { name: "ov-310".into(), state: "building" },
+        ],
+        next: Some("mac-fu3".into()),
+    }];
 
     let outgoing: Vec<(&'static str, Outgoing)> = vec![
         ("agent-working", Outgoing {
@@ -129,6 +141,13 @@ fn written() -> Vec<(&'static str, serde_json::Value)> {
             ..Outgoing::default()
         }),
         ("count", Outgoing { kind: Some("count"), needs_you: Some(0), install: Some(INSTALL), ..Outgoing::default() }),
+        ("count-plan", Outgoing {
+            kind: Some("count"),
+            needs_you: Some(2),
+            install: Some(INSTALL),
+            plan: Some(&plan),
+            ..Outgoing::default()
+        }),
         // What a runner older than ov-94 sends for a status decision: the
         // task and runner, with no `event` and no notice id. Android reads it
         // as a card that opens the task (`PushMessage.Card.task`), not as a

@@ -1,0 +1,23 @@
+{
+  "install": "0199a8f2-4c1e-7b3a-9d0e-5f6a7b8c9d0e",
+  "kind": "count",
+  "needsYou": 2,
+  "plan": [
+    {
+      "needsYou": 2,
+      "next": "mac-fu3",
+      "now": [
+        {
+          "name": "mac-ux",
+          "state": "review"
+        },
+        {
+          "name": "ov-310",
+          "state": "building"
+        }
+      ],
+      "workspace": "Main"
+    }
+  ],
+  "version": "2026.10.3-canary.412+d35970c9"
+}

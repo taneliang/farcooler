@@ -509,6 +509,8 @@ pub(crate) struct Tapped {
     pub notice_id: Option<String>,
     pub subtitle: String,
     pub options: Vec<String>,
+    /// The plan's glance a count notice carried (ov-310).
+    pub plan: Option<Vec<crate::plan_glance::BoardGlance>>,
 }
 
 /// How often a live card may be refreshed while an agent stays in one tier.
@@ -805,6 +807,8 @@ pub struct Watcher {
     /// The needs-you count the relay was last told, by any notice. A count
     /// notice repeating it is not sent.
     last_count: std::sync::Mutex<Option<(u32, Option<u32>)>>,
+    /// The plan's glance the relay last took (ov-310). See `plan_moved`.
+    last_plan: std::sync::Mutex<Option<Vec<crate::plan_glance::BoardGlance>>>,
     /// Per terminal whose last notice that LANDED was `blocked`, the id of the
     /// ask the relay was last told for it (`None` for "none open"). A
     /// terminal absent here gets no `kind:"ask"` notice at all. See
@@ -2770,6 +2774,7 @@ impl Watcher {
             me: me.clone(),
             count_pending: std::sync::atomic::AtomicBool::new(false),
             last_count: std::sync::Mutex::new(None),
+            last_plan: std::sync::Mutex::new(None),
             asks_told: std::sync::Mutex::new(HashMap::new()),
             ask_sync: tokio::sync::Mutex::new(()),
             wake_pump: tokio::sync::Mutex::new(()),
@@ -3814,7 +3819,7 @@ impl Watcher {
     /// has. So answering a decision or a chat ask, which changes no terminal
     /// and so sends no agent notice, still moves the lock screen's count; and
     /// a burst of changes moves it once.
-    fn schedule_count_notice(&self) {
+    pub(crate) fn schedule_count_notice(&self) {
         use std::sync::atomic::Ordering;
         if self.count_pending.swap(true, Ordering::SeqCst) {
             return;
@@ -3831,7 +3836,8 @@ impl Watcher {
             let Some(pairing) = watcher.audience() else { return };
             let Some(count) = watcher.needs_you_count().await else { return };
             let reviews = crate::review_ops::waiting(&watcher.service).await;
-            if watcher.already_told(count, reviews) {
+            let plan = watcher.plan_glance().await;
+            if watcher.already_told(count, reviews) && !watcher.plan_moved(&plan) {
                 return;
             }
             watcher.tap(Tapped {
@@ -3843,11 +3849,19 @@ impl Watcher {
                 needs_you: Some(count),
                 reviews,
                 ask: None,
+                plan: plan.clone(),
                 ..Tapped::default()
             });
-            let outgoing = crate::push::Outgoing { kind: Some("count"), needs_you: Some(count), reviews, ..Default::default() };
+            let outgoing = crate::push::Outgoing {
+                kind: Some("count"),
+                needs_you: Some(count),
+                reviews,
+                plan: plan.as_deref(),
+                ..Default::default()
+            };
             if watcher.deliver(pairing, outgoing).await {
                 watcher.told(count, reviews);
+                watcher.told_plan(plan);
             }
         });
     }
