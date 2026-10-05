@@ -1,4 +1,4 @@
-// Shipped by Canary at bfdee9901507cb108950ae9e7543f1632d4074a4. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at adc85e94106283eddee345df15ac366a281d0ad4. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -222,6 +222,14 @@ message Request {
     LaneAgentSet lane_agent_set = 167;
     PlanSet plan_set = 168;
     PlanEventsRequest plan_events = 169;
+    // Orchestrator pages (ov-269), behind `board_pages`: a document of typed
+    // blocks per slot. Experimental: it may be withdrawn, and 170-179 are
+    // reserved for it so withdrawing it never frees a tag for another meaning.
+    PageListRequest page_list = 170;
+    PageGetRequest page_get = 171;
+    PageSet page_set = 172;
+    PageRemove page_remove = 173;
+    PageStatsRequest page_stats = 174;
   }
 }
 
@@ -325,6 +333,14 @@ message Result {
     Lane lane = 161;
     Plan plan = 162;
     PlanEventList plan_event_list = 163;
+    // Orchestrator pages (ov-269), behind `board_pages`. `page.list` answers
+    // with the list, `page.get` and `page.remove` with the page, `page.set`
+    // with the page and whether the write changed it, and `page.stats` with
+    // how each slot has been published.
+    BoardPageList board_page_list = 170;
+    BoardPage board_page = 171;
+    PageSetResult page_set_result = 172;
+    PageStatsList page_stats_list = 173;
   }
 }
 
@@ -656,6 +672,10 @@ message Event {
     // open re-reads `plan.get`; one without it ignores this. A runner without
     // the capability never sends it.
     PlanChanged plan_changed = 27;
+    // A page on a board was written or removed (ov-269), behind `board_pages`.
+    // A client with that page open re-reads the slot; one without pages open
+    // ignores it. Not `task_changed`: nothing about a task moved.
+    PagesChanged pages_changed = 28;
   }
 }
 
@@ -1039,6 +1059,12 @@ message Worktree {
   // the CLI's worktree JSON already has `task`, the worktree's own name.
   // Empty from a runner without the `needs_you` capability.
   repeated TaskRef open_tasks = 14;
+  // How many of this worktree's Git LFS files are still pointer files: an
+  // object missing from the runner's LFS store, or a hydrate that ran out of
+  // time, leaves the pointer. A count, not the paths; they stay on the runner.
+  // 0 from a runner without the `lfs_pointers` capability, which says nothing
+  // about its files, so a client shows no notice.
+  uint32 lfs_pointers = 15;
 }
 
 message WorktreeList { repeated Worktree items = 1; }
@@ -3936,6 +3962,10 @@ message LaneSpend {
   optional int64 cost_micros = 5;
   uint32 runs = 6;
   uint32 unmeasured_agents = 7;
+  // How many of the lane's agents also worked in another lane. Each one's
+  // spend is split evenly across its lanes, so the figures above hold only
+  // this lane's part of it and summing lanes counts it once.
+  uint32 shared_agents = 8;
 }
 
 message Lane {
@@ -4135,4 +4165,121 @@ message PlanChanged {
   bytes workspace_id = 1;
   // As `TaskChanged.actor`, so a manager does not answer its own write.
   string actor = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Orchestrator pages (ov-269)
+//
+// A page is a small JSON document of typed blocks that the apps draw natively
+// (`farcooler_core::page_doc` is its one definition, and `test/fixtures/pages/`
+// holds it to Swift and Kotlin). One page per slot per board. Behind the
+// `board_pages` capability, which is EXPERIMENTAL and may be withdrawn: no task
+// and nothing in the plan layer refers to it, and a page names cards, lanes and
+// themes by text.
+//
+// Read at `read`, written at `control`. A page is free text, so the runner
+// can't redact it: everyone who can read the board can read it, as with a task
+// note.
+// ---------------------------------------------------------------------------
+
+message BoardPage {
+  bytes id = 1;
+  string slot = 2;
+  string title = 3;
+  // One line for the page's row in an overview.
+  string summary = 4;
+  // Empty, or `theme`.
+  string anchor_kind = 5;
+  // The theme's id, as text, when anchored. Never a key into the plan layer:
+  // a client that can't find the theme draws the page in the board's list.
+  string anchor = 6;
+  // The validated, normalized document. Empty in a list asked for without
+  // documents.
+  string doc_json = 7;
+  // Counts the writes that changed the page, from 1.
+  uint64 revision = 8;
+  uint32 ordinal = 9;
+  string actor = 10;
+  // When the page last changed, in Unix milliseconds.
+  int64 updated_at_ms = 11;
+}
+
+message BoardPageList { repeated BoardPage pages = 1; }
+
+// `page.list`, at `read`. With documents the answer is at most 12 pages of 32
+// KiB, which fits a control envelope.
+message PageListRequest {
+  bytes workspace_id = 1;
+  bool with_docs = 2;
+}
+
+// `page.get`, at `read`.
+message PageGetRequest {
+  bytes workspace_id = 1;
+  string slot = 2;
+}
+
+// `page.set`, at `control`: validate, normalize and replace the slot whole.
+// Identical bytes are no change, and nothing is announced.
+message PageSet {
+  bytes workspace_id = 1;
+  string slot = 2;
+  string doc_json = 3;
+  // Absent leaves the anchor as it is (none, for a new page); present and
+  // empty takes the page off its theme; otherwise the theme's id.
+  optional bytes anchor_theme_id = 4;
+  // Where it sorts. Absent keeps its place, or puts a new page last.
+  optional uint32 ordinal = 5;
+  // Refuse when the page's revision isn't this (0 for a slot with no page).
+  optional uint64 if_revision = 6;
+  string actor = 7;
+}
+
+message PageSetResult {
+  BoardPage page = 1;
+  // False when the same bytes, anchor and place were already there.
+  bool changed = 2;
+}
+
+// `page.remove`, at `control`. Answers with the page it removed.
+message PageRemove {
+  bytes workspace_id = 1;
+  string slot = 2;
+  string actor = 3;
+}
+
+// `page.stats`, at `read`: how each slot has been published, from the log,
+// which keeps shapes and never content.
+message PageStatsRequest {
+  bytes workspace_id = 1;
+  int64 since_ms = 2;
+}
+
+message PageStatsList { repeated PageSlotStats slots = 1; }
+
+message PageSlotStats {
+  string slot = 1;
+  uint32 sets = 2;
+  uint32 removes = 3;
+  int64 first_at_ms = 4;
+  int64 last_at_ms = 5;
+  // Block and reference counts over its writes, by name: `table`, `list`,
+  // `ref-lane`, `ref-task`.
+  repeated PageShapeCount shape = 6;
+}
+
+message PageShapeCount {
+  string kind = 1;
+  uint32 count = 2;
+}
+
+// A page on a board changed; see `Event.pages_changed`.
+message PagesChanged {
+  bytes workspace_id = 1;
+  string slot = 2;
+  // The page's revision after the write; the last one it had when removed.
+  uint64 revision = 3;
+  // As `TaskChanged.actor`.
+  string actor = 4;
+  bool removed = 5;
 }
