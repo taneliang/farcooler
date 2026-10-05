@@ -84,7 +84,7 @@ extension TaskKeyLinker {
         for run in linked.runs {
             out += String(linked[run.range].characters)
             if let url = run.link, let card = card(for: url) {
-                out += " (\(card.title))"
+                out += " (\(card.title))"  // not a count: the title, for VoiceOver
                 any = true
             }
         }
