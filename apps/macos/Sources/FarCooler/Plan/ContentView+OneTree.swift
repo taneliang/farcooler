@@ -314,6 +314,8 @@ struct PlanNeedsYouPage: View {
                     // lives here now the tree has taken the list's place.
                     BoardSummaryStrip(store: board, onChooseLine: { onOpenTask(BoardSummaryStrip.task(ofLine: $0)) })
                         .padding(.top, Spacing.group)
+                        // One key column for the board, as the navigator sets.
+                        .environment(\.taskKeyWidth, TaskKeyColumn.width(for: board.board.rows.map(\.key)))
                         .identified("plan-needs-you-unread")
                 }
             }
