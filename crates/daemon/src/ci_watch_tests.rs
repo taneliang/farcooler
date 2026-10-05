@@ -132,3 +132,12 @@ fn a_read_that_fails_backs_off() {
     assert_eq!(next_wait(false, Some(240_000), 0), Duration::from_secs(240));
     assert_eq!(next_wait(false, Some(1_000), 0), BUSY, "never sooner than a minute");
 }
+
+/// A run's jobs are read again while it runs, and reused only once it has
+/// finished (review train-1005c L5).
+#[test]
+fn jobs_are_reread_until_their_run_finishes() {
+    assert!(!memo_holds("in_progress"));
+    assert!(!memo_holds("queued"));
+    assert!(memo_holds("completed"));
+}

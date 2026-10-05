@@ -252,16 +252,31 @@ async fn with_jobs(
     run: GhRun,
 ) -> (GhRun, Option<Vec<GhJob>>) {
     if let Some((s, c, jobs)) = memo.get(&run.id) {
-        if (s, c) == (&run.status, &run.conclusion) {
+        if memo_holds(&run.status) && (s, c) == (&run.status, &run.conclusion) {
             return (run, Some(jobs.clone()));
         }
     }
     let path = format!("repos/{{owner}}/{{repo}}/actions/runs/{}/jobs", run.id);
     let jobs = gh_get(svc, tree, &api_args(&path, &["per_page=100".into()], JOBS_JQ)).await.and_then(|b| parse_jobs(&b));
     if let Some(jobs) = &jobs {
+        // A long-lived daemon's memo stays small: forget it all past a few
+        // hundred runs rather than keep every run it ever read.
+        if memo.len() >= MEMO_MAX {
+            memo.clear();
+        }
         memo.insert(run.id, (run.status.clone(), run.conclusion.clone(), jobs.clone()));
     }
     (run, jobs)
+}
+
+/// The most runs, or short SHAs, the watch remembers before it starts over.
+const MEMO_MAX: usize = 512;
+
+/// Whether a run's jobs, once read, can be reused while the run reads the
+/// same: only when it has finished. A run in progress is read again, so "9 of
+/// 15 jobs done" moves and a job failing early shows (review train-1005c L5).
+pub fn memo_holds(run_status: &str) -> bool {
+    run_status == "completed"
 }
 
 /// The full SHA a ref names (a short SHA, or a branch), through gh.
@@ -288,6 +303,9 @@ pub async fn read_subject(svc: &Service, repository: Uuid, tree: &Path, subject:
             None => {
                 let full = commit_of(svc, tree, sha).await;
                 if let Some(full) = &full {
+                    if memo.shas.len() >= MEMO_MAX {
+                        memo.shas.clear();
+                    }
                     memo.shas.insert(sha.to_string(), full.clone());
                 }
                 full
