@@ -417,11 +417,9 @@ struct TitleStatusView: View {
     private var failed: some View {
         let lines = model.failed
         if !lines.isEmpty {
-            Menu {
-                ForEach(lines) { line in
-                    Button([line.title, line.detail].compactMap { $0 }.joined(separator: " — ")) { actions.openLine(line) }
-                }
-            } label: {
+            PullDownMenu(entries: lines.map { line in
+                .item([line.title, line.detail].compactMap { $0 }.joined(separator: " — ")) { actions.openLine(line) }
+            }) {
                 HStack(spacing: 4) {
                     Image(systemName: "xmark.octagon")
                     Text(form == .wide ? TitleStatus.failedWords(lines.count) ?? "" : TitleStatus.number(lines.count))
@@ -429,13 +427,25 @@ struct TitleStatusView: View {
                 }
                 .foregroundStyle(Tint.failure)
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
             .help(TitleStatus.failedLabel(lines.count))
             .accessibilityLabel(TitleStatus.failedLabel(lines.count))
             .accessibilityIdentifier("title-status-failed")
         }
+    }
+
+    /// The running or in-review menu's rows: the tasks, then a Queued section.
+    static func taskEntries(
+        _ rows: [TaskRow], extra: [ActivityLine], open: @escaping (TaskRow) -> Void,
+        openLine: @escaping (ActivityLine) -> Void
+    ) -> [PullDownEntry] {
+        var entries = rows.map { row in PullDownEntry.item("\(row.key) \(row.title)") { open(row) } }
+        if !extra.isEmpty {
+            entries.append(.header("Queued"))
+            entries += extra.map { line in
+                .item([line.title, line.detail].compactMap { $0 }.joined(separator: " — ")) { openLine(line) }
+            }
+        }
+        return entries
     }
 
     /// Running or in review: a count, and a menu of those tasks; a pick
@@ -446,20 +456,7 @@ struct TitleStatusView: View {
         _ rows: [TaskRow], symbol: String, words: String?, label: String, id: String, extra: [ActivityLine] = []
     ) -> some View {
         if !rows.isEmpty || !extra.isEmpty {
-            Menu {
-                ForEach(rows) { row in
-                    Button("\(row.key) \(row.title)") { actions.openTask(row) }
-                }
-                if !extra.isEmpty {
-                    Section("Queued") {
-                        ForEach(extra) { line in
-                            Button([line.title, line.detail].compactMap { $0 }.joined(separator: " — ")) {
-                                actions.openLine(line)
-                            }
-                        }
-                    }
-                }
-            } label: {
+            PullDownMenu(entries: Self.taskEntries(rows, extra: extra, open: actions.openTask, openLine: actions.openLine)) {
                 HStack(spacing: 4) {
                     Image(systemName: symbol)
                     if form == .wide, let words, !words.isEmpty {
@@ -470,9 +467,6 @@ struct TitleStatusView: View {
                 }
                 .foregroundStyle(.secondary)
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
             .help(label)
             .accessibilityLabel(label)
             .accessibilityIdentifier(id)

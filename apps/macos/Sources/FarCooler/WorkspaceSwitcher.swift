@@ -249,25 +249,18 @@ struct RunnerStatusMenu: View {
     @State private var showingUpdate = false
 
     var body: some View {
-        Menu {
-            ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
-                switch entry {
-                case .separator:
-                    Divider()  // style-exempt: menu
-                case .note(let text):
-                    Text(text)
-                case .update:
-                    Button(entry.title) { showingUpdate = true }
-                default:
-                    Button(entry.title) { perform(entry) }
-                }
+        PullDownMenu(entries: entries.map { entry in
+            switch entry {
+            case .separator: PullDownEntry.separator
+            case .note(let text): .note(text)
+            case .update: .item(entry.title) { showingUpdate = true }
+            default: .item(entry.title) { perform(entry) }
             }
-        } label: {
+        }) {
             Label(label, systemImage: symbol)
                 .labelStyle(.titleAndIcon)
                 .foregroundStyle(.secondary)
         }
-        .menuIndicator(.hidden)
         .help(help ?? label)
         .accessibilityIdentifier("toolbar-runner-status")
         .popover(isPresented: $showingUpdate, arrowEdge: .bottom) {
