@@ -39,8 +39,9 @@ impl Watcher {
         if planned.is_empty() {
             return Some(Vec::new());
         }
+        let asks = self.service.store.theme_asks().ok()?;
         let inputs = crate::needs_you::gather(&self.service, self).await.ok()?;
-        Some(crate::plan_glance::boards(planned, &crate::needs_you::assemble(&inputs, now)))
+        Some(crate::plan_glance::boards(planned, &crate::needs_you::assemble(&inputs, now), &asks))
     }
 
     /// Whether `glance` is news to the relay: not the last one it took.

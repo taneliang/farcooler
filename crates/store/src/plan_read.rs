@@ -185,6 +185,22 @@ pub struct Plan {
 }
 
 impl Store {
+    /// Per board, its themes asking the owner something: not dropped, with
+    /// an `owner_ask`. What the Needs You count adds to a board's needs-you
+    /// items (ov-310, ov-321's `WorkspaceNeedsYou.count`); one cheap query,
+    /// since the runner's count is taken on every notice.
+    pub fn theme_asks(&self) -> Result<HashMap<Uuid, u32>> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(
+                "SELECT workspace_id, COUNT(*) FROM board_themes
+                  WHERE state <> 'dropped' AND owner_ask <> '' GROUP BY workspace_id",
+            )
+            .map_err(map_err)?;
+        let rows = stmt.query_map([], |row| Ok((get_uuid(row, 0)?, row.get::<_, u32>(1)?))).map_err(map_err)?;
+        rows.collect::<rusqlite::Result<HashMap<_, _>>>().map_err(map_err)
+    }
+
     /// A board's plan layer. Finished lanes (landed or dropped) and settled
     /// rulings appear only if their last move was at or after
     /// `closed_since_ms`.

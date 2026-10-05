@@ -11,7 +11,8 @@
 //! - its name, the workspace's;
 //! - its Needs You count, the one number the Mac's title bar and sidebar say
 //!   for it (`WorkspaceNeedsYou.count` in AgentKit): the items of
-//!   `needs_you.list` on that workspace, plus its themes asking the owner;
+//!   `needs_you.list` on that workspace, plus its themes asking the owner
+//!   (`needs_you`, the runner's one rule);
 //! - up to two lanes in Now, by name and state word;
 //! - the lane next up, by name.
 //!
@@ -20,7 +21,8 @@
 
 use farcooler_protocol::v1 as pb;
 use farcooler_store::Store;
-use farcooler_store::plan::{LaneState, ThemeState};
+use farcooler_store::plan::LaneState;
+use std::collections::HashMap;
 use farcooler_store::plan_read::Plan;
 use uuid::Uuid;
 
@@ -58,17 +60,34 @@ pub struct LaneGlance {
 /// A board with a plan, read: its id, its name and the plan.
 pub type Planned = (Uuid, String, Plan);
 
-/// Each of `planned`'s glances. `items` is `needs_you::assemble`'s list,
-/// which the watcher reads only when some board has a plan, so a runner
-/// without one pays a workspace list and nothing more
-/// (`Watcher::plan_glance`).
-pub fn boards(planned: Vec<Planned>, items: &[pb::NeedsYouItem]) -> Vec<BoardGlance> {
-    planned.into_iter().map(|(id, name, plan)| glance(id, name, &plan, items)).collect()
+/// The runner's one Needs You rule (review M1): needs-you items plus themes
+/// asking the owner, as the Mac's `WorkspaceNeedsYou.count` says it once its
+/// list is read. The runner's count on every notice and each board's count
+/// on the glance both come from here, so the card's header and the plan line
+/// under it can't disagree about a theme's ask.
+pub fn needs_you(items: usize, asks: u32) -> u32 {
+    items as u32 + asks
 }
 
-/// Every board on this runner with a plan, the busiest first, at most
-/// `BOARDS_SENT`: one with lanes in Now first, then the one whose plan moved
-/// last, then the board's own order.
+/// Each of `planned`'s glances, the board that needs the owner first (review
+/// M4), at most `BOARDS_SENT`. `items` is `needs_you::assemble`'s list and
+/// `asks` is `Store::theme_asks`; the watcher reads the list only when some
+/// board has a plan, so a runner without one pays a workspace list and
+/// nothing more (`Watcher::plan_glance`).
+pub fn boards(planned: Vec<Planned>, items: &[pb::NeedsYouItem], asks: &HashMap<Uuid, u32>) -> Vec<BoardGlance> {
+    let mut sent: Vec<BoardGlance> = planned
+        .into_iter()
+        .map(|(id, name, plan)| glance(id, name, &plan, items, asks.get(&id).copied().unwrap_or(0)))
+        .collect();
+    // Stable: within each half, `planned`'s order holds.
+    sent.sort_by_key(|board| board.needs_you == 0);
+    sent.truncate(BOARDS_SENT);
+    sent
+}
+
+/// Every board on this runner with a plan, the busiest first: one with lanes
+/// in Now first, then the one whose plan moved last, then the board's own
+/// order.
 pub fn planned(store: &Store, now_ms: i64) -> farcooler_core::Result<Vec<Planned>> {
     let mut found = Vec::new();
     for ws in store.list_workspaces(None)? {
@@ -80,16 +99,12 @@ pub fn planned(store: &Store, now_ms: i64) -> farcooler_core::Result<Vec<Planned
         found.push((ws.id, ws.name, plan));
     }
     found.sort_by_key(|(_, _, plan)| (now_lanes(plan).next().is_none(), std::cmp::Reverse(moved_at(plan))));
-    found.truncate(BOARDS_SENT);
     Ok(found)
 }
 
-fn glance(workspace: Uuid, name: String, plan: &Plan, items: &[pb::NeedsYouItem]) -> BoardGlance {
+fn glance(workspace: Uuid, name: String, plan: &Plan, items: &[pb::NeedsYouItem], asks: u32) -> BoardGlance {
     let on_board = crate::wire::id_bytes(workspace);
     let items = items.iter().filter(|item| item.workspace_id == on_board).count();
-    // `shownThemes` with an `ownerAsk`, as the Mac counts them.
-    let asks =
-        plan.themes.iter().filter(|t| t.theme.state != ThemeState::Dropped && !t.theme.owner_ask.is_empty()).count();
     let next = plan
         .order
         .iter()
@@ -97,7 +112,7 @@ fn glance(workspace: Uuid, name: String, plan: &Plan, items: &[pb::NeedsYouItem]
         .map(|l| cut(&l.lane.name));
     BoardGlance {
         workspace: cut(&name),
-        needs_you: (items + asks) as u32,
+        needs_you: needs_you(items, asks),
         now: now_lanes(plan)
             .take(NOW_SENT)
             .map(|l| LaneGlance { name: cut(&l.lane.name), state: l.lane.state.as_str() })

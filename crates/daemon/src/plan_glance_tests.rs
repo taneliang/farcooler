@@ -56,9 +56,18 @@ async fn a_board_with_a_plan_sends_now_next_up_and_its_needs_you_count() {
     let ask = ThemeUpdate { owner_ask: Some("Pick the accent".into()), ..ThemeUpdate::default() };
     store.update_theme(asking.id, &ask, Actor::Manager).unwrap();
     theme("Quiet theme", "Nothing asked");
+    // A dropped theme's ask isn't shown on the Mac (`shownThemes`), so it
+    // isn't counted (review L2).
+    let dropped = theme("Dropped theme", "Given up");
+    let gone = ThemeUpdate {
+        owner_ask: Some("Still asking".into()),
+        state: Some(farcooler_store::plan::ThemeState::Dropped),
+        ..ThemeUpdate::default()
+    };
+    store.update_theme(dropped.id, &gone, Actor::Manager).unwrap();
 
     let items = [item(Some(main.id)), item(Some(main.id)), item(None), item(Some(Uuid::now_v7()))];
-    let sent = boards(planned(store, now_ms()).unwrap(), &items);
+    let sent = boards(planned(store, now_ms()).unwrap(), &items, &store.theme_asks().unwrap());
     assert_eq!(
         sent,
         vec![BoardGlance {
@@ -96,7 +105,7 @@ async fn the_busy_board_leads_and_absent_parts_stay_absent() {
     store.set_plan(main.id, &[queued], Actor::Manager).unwrap();
     to(store, lane(store, ops.id, "ops-1"), LaneState::Building);
 
-    let sent = boards(planned(store, now_ms()).unwrap(), &[]);
+    let sent = boards(planned(store, now_ms()).unwrap(), &[], &store.theme_asks().unwrap());
     assert_eq!(sent.iter().map(|b| b.workspace.as_str()).collect::<Vec<_>>(), ["Ops", "Main"]);
     assert_eq!((sent[0].now.len(), sent[0].next.as_deref()), (1, None));
     assert_eq!((sent[1].now.len(), sent[1].next.as_deref()), (0, Some("mac-fu3")));
@@ -106,6 +115,28 @@ async fn the_busy_board_leads_and_absent_parts_stay_absent() {
 /// The next notice the watcher sends, waiting out any debounce.
 async fn next(taps: &mut tokio::sync::mpsc::UnboundedReceiver<crate::watch::Tapped>) -> Option<crate::watch::Tapped> {
     tokio::time::timeout(std::time::Duration::from_secs(30), taps.recv()).await.ok().flatten()
+}
+
+/// A board that needs the owner leads one that's only busy (review M4), and
+/// the runner's count on the notice is the boards' counts by the same rule,
+/// a theme's ask included (review M1).
+#[tokio::test]
+async fn the_board_that_needs_you_leads_and_the_runner_counts_it_the_same_way() {
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let main = svc.store.ensure_main_workspace(repo).unwrap();
+    let ops = svc.store.create_workspace(repo, "Ops", "ops").unwrap();
+    let store = &svc.store;
+    to(store, lane(store, ops.id, "ops-1"), LaneState::Building);
+    let new = NewTheme { name: "Visual language".into(), outcome: "One look".into() };
+    let asking = store.create_theme(main.id, &new, &[], Actor::Manager).unwrap();
+    let ask = ThemeUpdate { owner_ask: Some("Pick the accent".into()), ..ThemeUpdate::default() };
+    store.update_theme(asking.id, &ask, Actor::Manager).unwrap();
+
+    let sent = boards(planned(store, now_ms()).unwrap(), &[], &store.theme_asks().unwrap());
+    assert_eq!(sent.iter().map(|b| (b.workspace.as_str(), b.needs_you)).collect::<Vec<_>>(), [("Main", 1), ("Ops", 0)]);
+
+    let watcher = crate::watch::Watcher::new(svc.clone());
+    assert_eq!(watcher.needs_you_count().await, Some(1), "the theme's ask, as the board counts it");
 }
 
 /// A lane that moves sends the glance on a count notice, though the count
@@ -132,4 +163,24 @@ async fn a_lane_that_moves_sends_the_glance_on_a_count_notice() {
 
     watcher.announce_plan_changed(main.id, Actor::Manager);
     assert!(next(&mut taps).await.is_none(), "a glance the relay holds is not sent again");
+}
+
+/// Renaming a board with a plan sends the glance under its new name (review
+/// L3): the rename is the only thing that moved.
+#[tokio::test]
+async fn a_renamed_board_sends_its_new_name() {
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let ops = svc.store.create_workspace(repo, "Ops", "ops").unwrap();
+    to(&svc.store, lane(&svc.store, ops.id, "ops-1"), LaneState::Building);
+    let watcher = crate::watch::Watcher::new(svc.clone());
+    let mut taps = watcher.tap_notices();
+    tokio::time::pause();
+    watcher.schedule_count_notice();
+    assert_eq!(next(&mut taps).await.expect("the first count").plan.unwrap()[0].workspace, "Ops");
+
+    let version = svc.store.get_workspace(ops.id).unwrap().resource_version;
+    let rename = farcooler_protocol::v1::WorkspaceRename { name: "Platform".into(), expected_version: Some(version) };
+    crate::workspace_ops::rename(&svc, &watcher, ops.id, &rename, farcooler_protocol::v1::Scope::HostAdmin).unwrap();
+    let renamed = next(&mut taps).await.expect("a rename moves the glance");
+    assert_eq!(renamed.plan.unwrap()[0].workspace, "Platform");
 }

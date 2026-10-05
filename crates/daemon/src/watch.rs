@@ -3739,13 +3739,17 @@ impl Watcher {
     }
 
     /// This runner's needs-you count: the length of the list
-    /// `needs_you.list` answers with, from the same `gather` and `assemble`.
+    /// `needs_you.list` answers with, from the same `gather` and `assemble`,
+    /// plus its boards' themes asking the owner, by the one rule the glance
+    /// counts a board by (`plan_glance::needs_you`, ov-310 review M1).
     /// `None` when the store can't be read.
     pub async fn needs_you_count(&self) -> Option<u32> {
         #[cfg(test)]
         self.counts_gathered.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let asks = self.service.store.theme_asks().ok()?.values().sum();
         let inputs = crate::needs_you::gather(&self.service, self).await.ok()?;
-        Some(crate::needs_you::assemble(&inputs, std::time::SystemTime::now()).len() as u32)
+        let items = crate::needs_you::assemble(&inputs, std::time::SystemTime::now()).len();
+        Some(crate::plan_glance::needs_you(items, asks))
     }
 
     /// Every notice this watcher sends from now on, paired or not. For tests.
