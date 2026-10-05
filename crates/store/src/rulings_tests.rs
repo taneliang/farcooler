@@ -129,7 +129,7 @@ fn another_board_s_cards_and_theme_are_refused() {
 /// the window.
 #[test]
 fn the_plan_reads_standing_first_newest_first() {
-    let (store, main, t) = board(2);
+    let (store, main, _) = board(0);
     let ids: Vec<Uuid> =
         (1..=4).map(|i| store.add_ruling(main, &new(&format!("R{i}")), &[], Actor::Manager).unwrap().id).collect();
     store.set_ruling(ids[0], RulingState::Confirmed, None, Actor::User).unwrap();
