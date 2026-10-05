@@ -49,6 +49,9 @@ struct CompactTaskRow<Second: View>: View {
                     .lineLimit(1)
                     .frame(width: keyWidth, alignment: .leading)
                     .gridMark(keyMark, .text)
+                    // What the task is, on hover (ov-299); its title is
+                    // beside it, so VoiceOver's label stays the key.
+                    .taskKeyCard(key, speaksTitle: false)
                 titleText
                 Spacer(minLength: 0)
             }

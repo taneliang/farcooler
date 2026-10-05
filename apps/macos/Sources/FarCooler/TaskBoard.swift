@@ -51,6 +51,14 @@ final class TaskBoardStore: ObservableObject {
     /// How many cards `recent` keeps.
     static let recentCount = 3
 
+    /// The notes of every card whose record this store holds, by task id:
+    /// what a key's hovercard says as its latest word (ov-299).
+    var readNotes: [String: [TaskNoteRow]] {
+        var out = Dictionary(recent.map { ($0.id, $0.detail.notes) }, uniquingKeysWith: { first, _ in first })
+        if let readID { out[readID] = detail.notes }
+        return out
+    }
+
     /// `id`'s record: the one read for it, or, while it's leaving or until a
     /// read for it lands, the one it last showed. Empty for a task never read.
     func detail(for id: String) -> TaskDetailModel {
@@ -1411,12 +1419,13 @@ struct TaskCard: View {
     @ViewBuilder private var understanding: some View {
         VStack(alignment: .leading, spacing: ColumnGrid.rhythm / 2) {
             if let waiting = row.blockedSummary {
-                Text(waiting)
+                // Its blockers' keys show their cards on hover (ov-299).
+                TaskKeyText(keysIn: waiting)
                     .font(TaskTypography.body.weight(.medium))
                     .foregroundStyle(.orange)
                 ForEach(row.blockedBy, id: \.key) { block in
                     if !block.reason.isEmpty {
-                        Text("\(block.key) — \(block.reason)")
+                        TaskKeyText(keysIn: "\(block.key) — \(block.reason)")
                             .font(TaskTypography.meta)
                             .foregroundStyle(.secondary)
                     }
@@ -1449,7 +1458,7 @@ struct TaskCard: View {
                             Image(systemName: line.met ? "checkmark.square" : "square")
                                 .foregroundStyle(.secondary)
                                 .accessibilityHidden(true)
-                            Text(linked)
+                            TaskKeyText(linked)
                                 .font(TaskTypography.body)
                                 .foregroundStyle(line.met ? Color.secondary : Color.primary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -1470,7 +1479,7 @@ struct TaskCard: View {
                     ForEach(row.constraints, id: \.self) { text in
                         HStack(alignment: .firstTextBaseline, spacing: ColumnGrid.rhythm) {
                             Text("•").foregroundStyle(.secondary)
-                            Text(linker.linked(TaskProse.inline(text)))
+                            TaskKeyText(linker.linked(TaskProse.inline(text)))
                                 .fixedSize(horizontal: false, vertical: true)
                                 .textSelection(.enabled)
                         }
@@ -1558,7 +1567,7 @@ private struct QuestionAnswers: View {
             Text("Question")
                 .font(TaskTypography.label)
                 .foregroundStyle(Color.accentColor)
-            Text(linker.linked(TaskProse.inline(offer.question.body)))
+            TaskKeyText(linker.linked(TaskProse.inline(offer.question.body)))
                 .font(TaskTypography.body.weight(.medium))
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
@@ -1702,7 +1711,7 @@ private struct TaskNoteView: View {
             line
             MarkdownText(text: decision.chosen, spacing: .document)
             if let rejected = decision.rejected {
-                Text(linker.linked(TaskProse.inline("Rejected: \(rejected)")))
+                TaskKeyText(linker.linked(TaskProse.inline("Rejected: \(rejected)")))
                     .font(TaskTypography.meta)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

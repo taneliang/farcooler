@@ -143,12 +143,15 @@ struct RealWindowCaptures {
                 try await Task.sleep(for: .seconds(wait))
             }
             try await TitleBarHarness.settle(window)
+            if let key = env["FARCOOLER_CAPTURE_KEY_HOVER"] { try await Self.hoverKey(key, in: window) }
+            defer { TaskKeyHoverForcing.key = nil }
             for variant in Self.variants {
                 window.appearance = NSAppearance(named: variant.appearance)
                 try await TitleBarHarness.settle(window)
                 let view = try #require(window.contentView?.superview)
                 // One way to render (LookBitmap.swift), at the window's own scale.
-                let rep = try #require(view.lookBitmap(scale: max(1, Int(window.backingScaleFactor))))
+                let scale = max(1, Int(window.backingScaleFactor))
+                let rep = Self.withPopovers(try #require(view.lookBitmap(scale: scale)), of: window, scale: scale)
                 let png = try #require(rep.representation(using: .png, properties: [:]))
                 try png.write(to: out.appendingPathComponent("\(stage)-\(place.name)-\(variant.name).png"))
             }

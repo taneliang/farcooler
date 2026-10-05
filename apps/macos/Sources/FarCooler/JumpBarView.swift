@@ -133,6 +133,8 @@ private struct JumpMenuRow: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .layoutPriority(1)
+                // A task's card on hover (ov-299); the title says the key.
+                .taskKeyCard(item.key, speaksTitle: false)
             if let subtitle = item.subtitle {
                 // Gives way before the title does.
                 Text(subtitle)

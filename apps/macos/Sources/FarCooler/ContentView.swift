@@ -69,6 +69,8 @@ struct ContentView: View {
     /// hand back rows that collide on id alone. Same lifetime rule as
     /// `changesStores` — see `boardStore(for:client:host:)`.
     @State var boardStores: [String: TaskBoardStore] = [:]
+    /// Each task key's hovercard, built once per read (ov-299).
+    @State var taskKeyCards = TaskKeyCardCache()
     @State var showAddRepository = false
     @State var showAdd = false
     @State var showShortcuts = false

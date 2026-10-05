@@ -25,7 +25,7 @@ extension ContentView {
         guard let host = selection?.host else { return .none }
         return .mac(
             host: host, workspaces: store.fleet.runnerWorkspaces[host] ?? [], stores: boardStores.values,
-            openTask: { openTask($0, host: $1, workspace: $2) })
+            cards: taskKeyCards, openTask: { openTask($0, host: $1, workspace: $2) })
     }
 
     /// A finished status's History page, in the main area (ov-103). The

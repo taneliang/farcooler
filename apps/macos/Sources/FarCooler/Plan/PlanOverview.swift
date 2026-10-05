@@ -241,7 +241,8 @@ struct PlanLaneRow: View {
                                 .probed("plan-lane-\(lane.name)-theme")
                         }
                     }
-                    Text(second)
+                    // A key in the reason shows its card on hover (ov-299).
+                    TaskKeyText(keysIn: second)
                         .font(.system(size: WorkspaceStyle.PaneText.secondary))
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
@@ -341,7 +342,7 @@ struct PlanThemeCard: View {
                 if !theme.outcome.isEmpty {
                     // Up to three lines, the owner's ruling (ov-273): an
                     // outcome is one sentence, and two lines cut most of them.
-                    Text(theme.outcome)
+                    TaskKeyText(keysIn: theme.outcome)
                         .font(Self.outcomeFont)
                         .foregroundStyle(.secondary)
                         .lineLimit(Self.outcomeLines)

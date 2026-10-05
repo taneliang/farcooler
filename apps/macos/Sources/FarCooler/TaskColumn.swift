@@ -271,6 +271,7 @@ struct TaskViewHeader: View {
                 .font(TaskTypography.meta.monospaced())
                 .foregroundStyle(.secondary)
                 .fixedSize()
+                .taskKeyCard(row.key, speaksTitle: false)
             Text(row.title)
                 .font(TaskTypography.title)
                 .lineLimit(1)

@@ -305,7 +305,8 @@ private struct PlanPageLaneRow: View {
                     .font(.system(size: WorkspaceStyle.PaneText.body))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: Spacing.group)
-                Text(lane.cards.map(\.key).joined(separator: " "))
+                // Each key shows its card on hover (ov-299).
+                TaskKeyText(keysIn: lane.cards.map(\.key).joined(separator: " "))
                     .font(TaskKeyColumn.font)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)

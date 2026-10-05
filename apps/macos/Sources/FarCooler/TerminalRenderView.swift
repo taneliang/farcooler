@@ -195,6 +195,8 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     private var hoveredLink: (url: String, span: FarCoolerVtUrlSpan)?
     /// What a task key in output links to, set by `TerminalCanvas` (ov-215).
     var taskKeyLinker: TaskKeyLinker = .none
+    /// The hovercard of the task key under the pointer (ov-299).
+    let keyHover = TerminalKeyHover()
     /// The URL under the pointer while ⌘ is held, for a test.
     var hoveredLinkForTesting: String? { hoveredLink?.url }
     /// Recreated on every layout, so the area always covers the current bounds.
@@ -1190,10 +1192,12 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
 
     override func mouseMoved(with event: NSEvent) {
         updateHoveredLink(for: event)
+        keyHover.moved(self, event)
     }
 
     override func mouseExited(with event: NSEvent) {
         setHoveredLink(nil)
+        keyHover.exited()
     }
 
     override func flagsChanged(with event: NSEvent) {
