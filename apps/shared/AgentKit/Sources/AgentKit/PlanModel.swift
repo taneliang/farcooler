@@ -76,6 +76,10 @@ public struct PlanTheme: Decodable, Equatable, Identifiable, Sendable {
     /// Its tokens on each of the last seven UTC days, oldest first and today
     /// last (ov-307); nil from a runner without `board_cost`.
     public var trendTokens: [UInt64]?
+    /// When it last moved, by the runner's reckoning (its story, lanes,
+    /// rulings and cards, ov-331); nil from a runner before it, and a client
+    /// then works it out from what it has.
+    public var lastMovedAt: Int64?
 }
 
 // `LaneState` is in `PlanGlance.swift`, which the watch and the widgets
@@ -165,6 +169,20 @@ public struct PlanCard: Decodable, Equatable, Sendable {
     public var status: String
 }
 
+/// A card `plan --json` flags in `no_lane` or `landed_not_closed`: its key
+/// and status, with no title (the CLI sends none).
+public struct PlanFlaggedCard: Decodable, Equatable, Sendable {
+    public var task: String
+    public var key: String
+    public var status: String
+
+    public init(task: String, key: String, status: String) {
+        self.task = task
+        self.key = key
+        self.status = status
+    }
+}
+
 /// One read of a board's plan: every Plan surface draws from it.
 public struct PlanModel: Decodable, Equatable, Sendable {
     /// The runner's clock when it answered.
@@ -191,11 +209,17 @@ public struct PlanModel: Decodable, Equatable, Sendable {
     /// The week's tokens and the harness and model comparison (ov-307); nil
     /// from a runner without `board_cost`.
     public var cost: PlanCostRead?
+    /// "Worth a look" (ov-331): open cards in review or progress that no
+    /// lane is working, and open cards whose lanes have all landed. Empty
+    /// from an older runner.
+    public var noLane: [PlanFlaggedCard]
+    public var landedNotClosed: [PlanFlaggedCard]
 
     public init(
         nowMs: Int64 = 0, themes: [PlanTheme] = [], lanes: [PlanLane] = [], order: [String] = [],
         cards: [PlanCard] = [], rulings: [PlanRuling] = [], trains: [PlanTrain] = [], ci: [PlanCIRead] = [],
-        boardCounts: PlanCounts? = nil, cost: PlanCostRead? = nil
+        boardCounts: PlanCounts? = nil, cost: PlanCostRead? = nil, noLane: [PlanFlaggedCard] = [],
+        landedNotClosed: [PlanFlaggedCard] = []
     ) {
         self.nowMs = nowMs
         self.themes = themes
@@ -207,6 +231,8 @@ public struct PlanModel: Decodable, Equatable, Sendable {
         self.ci = ci
         self.boardCounts = boardCounts
         self.cost = cost
+        self.noLane = noLane
+        self.landedNotClosed = landedNotClosed
     }
 
     public init(from decoder: Decoder) throws {
@@ -221,9 +247,13 @@ public struct PlanModel: Decodable, Equatable, Sendable {
         ci = try c.decodeIfPresent([PlanCIRead].self, forKey: .ci) ?? []
         boardCounts = try c.decodeIfPresent(PlanCounts.self, forKey: .boardCounts)
         cost = try c.decodeIfPresent(PlanCostRead.self, forKey: .cost)
+        noLane = try c.decodeIfPresent([PlanFlaggedCard].self, forKey: .noLane) ?? []
+        landedNotClosed = try c.decodeIfPresent([PlanFlaggedCard].self, forKey: .landedNotClosed) ?? []
     }
 
-    private enum CodingKeys: String, CodingKey { case nowMs, themes, lanes, order, cards, rulings, trains, ci, boardCounts, cost }
+    private enum CodingKeys: String, CodingKey {
+        case nowMs, themes, lanes, order, cards, rulings, trains, ci, boardCounts, cost, noLane, landedNotClosed
+    }
 
     public static let empty = PlanModel()
 
