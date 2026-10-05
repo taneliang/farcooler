@@ -90,7 +90,7 @@ extension ContentView {
     var titleConsoleActions: TitleConsoleActions {
         let worktrees = store.fleet.worktrees
         return TitleConsoleActions(
-            find: { [paletteWorkspaces, paletteTasks, selectedPane] query in
+            find: { [paletteWorkspaces, paletteTasks, palettePlans, selectedPane] query in
                 query.isEmpty
                     ? PaletteIndex.recent(in: worktrees)
                     : PaletteIndex.matching(
@@ -98,7 +98,7 @@ extension ContentView {
                         currentTerminal: selectedPane.flatMap { pane in
                             worktrees.lazy.flatMap(\.terminals).first { $0.id == pane.terminal }
                         },
-                        workspaces: paletteWorkspaces, tasks: paletteTasks,
+                        workspaces: paletteWorkspaces, tasks: paletteTasks, plans: palettePlans,
                         offersNewWorkspace: !workspaceRepositories.isEmpty)
             },
             run: { perform($0) },

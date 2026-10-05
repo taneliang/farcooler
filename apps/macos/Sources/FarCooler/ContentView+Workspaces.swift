@@ -41,6 +41,25 @@ extension ContentView {
         }
     }
 
+    /// Every theme and lane on the plans this window has read (ov-298).
+    var palettePlans: [PalettePlanItem] {
+        boardStores.values.flatMap { board -> [PalettePlanItem] in
+            let host = board.client.target, id = board.workspace.id, name = board.title
+            let plan = board.plan.plan
+            let themes = plan.shownThemes.map {
+                PalettePlanItem(
+                    host: host, workspace: id, workspaceName: name, page: .theme($0.id), name: $0.name,
+                    detail: PlanWords.progress($0.counts))
+            }
+            let lanes = plan.lanes.filter { $0.state != .dropped }.map {
+                PalettePlanItem(
+                    host: host, workspace: id, workspaceName: name, page: .lane($0.id), name: $0.name,
+                    detail: PlanWords.state($0.state))
+            }
+            return themes + lanes
+        }
+    }
+
     /// A repository the switcher's Remove Repository… named, on its way to
     /// `RemoveRepositorySheet`.
     /// `.sheet(item:)` needs `Identifiable`; a bare tuple is not one.

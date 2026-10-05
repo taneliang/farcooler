@@ -31,6 +31,8 @@ enum PaletteAction: Hashable {
     case togglePaneMode(worktree: String, terminal: String)
     /// A file, by its path in a worktree: ⌘P's `/` (ov-189).
     case openFile(worktree: String, path: String)
+    /// A theme's or lane's page, in its workspace's canvas (ov-298).
+    case openPlan(host: String, workspace: String, page: PlanPage)
 }
 
 /// The worktree ⌘P's `/` searches, and how (ov-189). A function rather than
@@ -160,7 +162,7 @@ enum PaletteIndex {
     static func matching(
         _ query: String, in worktrees: [Worktree], current: String? = nil,
         currentTerminal: Terminal? = nil, workspaces: [PaletteWorkspace] = [], tasks: [PaletteTask] = [],
-        offersNewWorkspace: Bool = false, limit: Int = 20
+        plans: [PalettePlanItem] = [], offersNewWorkspace: Bool = false, limit: Int = 20
     ) -> [PaletteEntry] {
         var scored: [(entry: PaletteEntry, score: Int)] = []
         var bestWorktree: (worktree: Worktree, score: Int)?
@@ -199,6 +201,19 @@ enum PaletteIndex {
                     action: .openTask(host: task.host, workspace: task.workspace, id: task.id),
                     title: "\(task.key) \(task.title)", detail: "\(task.workspaceName) · \(task.status.title)",
                     symbol: "checklist", kind: "task"),
+                score))
+        }
+
+        // Themes and lanes from the plans already read, by name (ov-298).
+        for item in plans {
+            guard let score = Fuzzy.score(item.name, query) else { continue }
+            let theme = item.page.word == "Theme"
+            scored.append((
+                PaletteEntry(
+                    id: "plan:\(item.host)|\(item.workspace)|\(item.page)",
+                    action: .openPlan(host: item.host, workspace: item.workspace, page: item.page),
+                    title: item.name, detail: "\(item.workspaceName) · \(item.detail)",
+                    symbol: item.page.symbol, kind: theme ? "theme" : "lane"),
                 score))
         }
 
@@ -412,6 +427,17 @@ struct PaletteWorkspace: Equatable {
     /// Its repository's display name.
     var repository: String
     var hasOrchestrator: Bool
+}
+
+/// A theme or a lane on a plan this window has read, as the palette finds it.
+struct PalettePlanItem: Equatable {
+    var host: String
+    var workspace: String
+    var workspaceName: String
+    var page: PlanPage
+    var name: String
+    /// "3 of 10 done", or a lane's state.
+    var detail: String
 }
 
 /// A task on a board this window has read, as the palette finds it.

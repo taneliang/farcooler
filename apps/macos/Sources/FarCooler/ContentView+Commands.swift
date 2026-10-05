@@ -433,6 +433,9 @@ extension ContentView {
         case .openTask(let host, let workspace, let id):
             openTask(id, host: host, workspace: workspace)
 
+        case .openPlan(let host, let workspace, let page):
+            openPlan(page, host: host, workspace: workspace)
+
         case .newWorkspace(let name):
             newWorkspaceName = NewWorkspaceName(name: name)
 
