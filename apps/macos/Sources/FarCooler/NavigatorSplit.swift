@@ -9,9 +9,9 @@ import SwiftUI
 // Tasks, Terminals and Worktrees are panes, one under the next, as Xcode's
 // split navigator areas are. Each pane's header stays put at its top, and its
 // rows scroll under it. A rule between two panes is dragged to resize them.
-// A closed section is only its header. Terminals and Worktrees are as tall as
-// their rows, up to a third of the room while Tasks has rows to show; Tasks
-// takes what's left. What a drag chose is kept for the window
+// A closed section is only its header and gives its room back. Each open
+// section is as tall as its rows while the room allows, and otherwise takes an
+// even share of it (ov-292); the navigator itself never scrolls. What a drag chose is kept for the window
 // (`ContentView`'s scene storage), as `NavigatorSplit.encode` writes it.
 
 /// How tall each pane's rows are drawn: worked out here, as values, so
@@ -59,53 +59,65 @@ enum NavigatorSplit {
 
     /// Each open pane's height for its rows, given `room`, the height left
     /// for them once the headers and rules are drawn, and the heights a drag
-    /// `chosen`. Never taller than its rows, never under its `floor`. Tasks
-    /// gets what the others leave, and the others give up room, down to
-    /// their floors, until it has its own. Room nobody needs is left under
-    /// the last pane. A window too short for every floor draws them all at
-    /// their floors, and the navigator scrolls as one (`NavigatorSplitView`).
+    /// `chosen` (ov-292). A pane is as tall as its rows while the room
+    /// allows, and scrolls only when it can't: what's left after the drags is
+    /// shared out evenly, each pane taking no more than its rows, and what a
+    /// short pane doesn't need goes on to the taller ones. A closed pane takes
+    /// none, so its room is the others'. Each open pane keeps at least its
+    /// `floor` while the room lasts; a window too short for every floor
+    /// squeezes them all in proportion, to nothing at the least, so every
+    /// header stays on screen and the navigator itself never scrolls.
     static func viewports(_ panes: [Pane], room: CGFloat, chosen: [String: CGFloat] = [:]) -> [String: CGFloat] {
         let room = max(room, 0)
-        let fill = panes.first { $0.fills && $0.expanded }
-        let others = panes.filter { !$0.fills && $0.expanded }
-        let wantsMore = fillWantsMore(panes, room: room)
-        let fillFloor = fill.map { floor($0, fill: true, wantsMore: wantsMore) } ?? 0
-        let cap = wantsMore ? max(minimum, room * capShare) : .infinity
-
         var heights: [String: CGFloat] = [:]
-        for pane in others {
-            let want = chosen[pane.id] ?? min(pane.content, cap)
-            heights[pane.id] = min(max(want, floor(pane)), pane.content)
+        var free: [Pane] = []
+        for pane in panes where pane.expanded {
+            if !pane.fills, let want = chosen[pane.id] {
+                heights[pane.id] = min(max(want, floor(pane)), pane.content)
+            } else {
+                free.append(pane)
+                heights[pane.id] = floor(pane, fill: pane.fills)
+            }
         }
-        // Room for Tasks' floor, taken from the others in proportion to
-        // what each has over its own.
-        let taken = others.reduce(0) { $0 + heights[$1.id]! }
-        if fill != nil, room - taken < fillFloor {
-            let give = others.reduce(0) { $0 + heights[$1.id]! - floor($1) }
-            let share = give > 0 ? min(1, (fillFloor - (room - taken)) / give) : 0
-            for pane in others { heights[pane.id]! -= (heights[pane.id]! - floor(pane)) * share }
+        // One water level for the panes no drag sized: each is as tall as
+        // the level, held between its floor and its rows, and the level is the
+        // highest that still fits. A short pane takes its rows and the rest
+        // share what it leaves.
+        let left = room - heights.filter { id, _ in !free.contains { $0.id == id } }.values.reduce(0, +)
+        func drawn(_ pane: Pane, at level: CGFloat) -> CGFloat {
+            min(pane.content, max(floor(pane, fill: pane.fills), level))
         }
-        if let fill {
-            let left = room - others.reduce(0) { $0 + heights[$1.id]! }
-            heights[fill.id] = min(fill.content, max(fillFloor, left))
+        // The level is found exactly: the total rises linearly between any two
+        // of the floors and row heights, so it is read off the segment where
+        // it reaches `left`.
+        let marks = Set(free.flatMap { [floor($0, fill: $0.fills), $0.content] }).sorted()
+        var level = marks.last ?? 0
+        for (from, to) in zip(marks, marks.dropFirst()) {
+            let at = free.reduce(0) { $0 + drawn($1, at: from) }
+            let end = free.reduce(0) { $0 + drawn($1, at: to) }
+            if end > left {
+                level = end > at ? from + (to - from) * (left - at) / (end - at) : from
+                break
+            }
         }
-        // Room left over goes to the panes no drag sized, top down, up to
-        // their rows: few tasks, many terminals.
-        var spare = room - heights.values.reduce(0, +)
-        for pane in others where chosen[pane.id] == nil && spare > 0 {
-            let grow = min(spare, pane.content - heights[pane.id]!)
-            heights[pane.id]! += grow
-            spare -= grow
-        }
-        // Still more than the room (Tasks closed, nothing to take it from):
-        // each pane gives up what it has over its floor, in proportion.
-        let total = heights.values.reduce(0, +)
-        let open = panes.filter { $0.expanded && heights[$0.id] != nil }
-        func least(_ pane: Pane) -> CGFloat { floor(pane, fill: pane.fills, wantsMore: wantsMore) }
-        let over = open.reduce(0) { $0 + max(0, heights[$1.id]! - least($1)) }
-        if total > room, over > 0 {
-            let share = min(1, (total - room) / over)
-            for pane in open { heights[pane.id]! -= max(0, heights[pane.id]! - least(pane)) * share }
+        if free.reduce(0, { $0 + drawn($1, at: marks.first ?? 0) }) > left { level = marks.first ?? 0 }
+        for pane in free { heights[pane.id] = drawn(pane, at: level) }
+        // Over the room: first drags' heights give up what's over their
+        // floors, then everything is squeezed in proportion.
+        var total = heights.values.reduce(0, +)
+        if total > room {
+            let open = panes.filter { $0.expanded }
+            func least(_ pane: Pane) -> CGFloat { floor(pane, fill: pane.fills) }
+            let over = open.reduce(0) { $0 + max(0, heights[$1.id]! - least($1)) }
+            if over > 0 {
+                let share = min(1, (total - room) / over)
+                for pane in open { heights[pane.id]! -= max(0, heights[pane.id]! - least(pane)) * share }
+            }
+            total = heights.values.reduce(0, +)
+            if total > room, total > 0 {
+                let scale = room / total
+                for pane in open { heights[pane.id]! *= scale }
+            }
         }
         return heights
     }
@@ -232,8 +244,8 @@ struct NavigatorSplitPane: Identifiable {
 
 /// The navigator's panes, one under the next, each scrolling on its own,
 /// a rule between each two that's dragged to resize them (ov-244). A window
-/// too short for every pane's least height scrolls them as one, each at
-/// its least, rather than drawing one over another.
+/// too short for every pane's least height squeezes them all, so every header
+/// stays in sight and only the panes scroll (ov-292).
 struct NavigatorSplitView: View {
     let panes: [NavigatorSplitPane]
     /// What drags chose, as `NavigatorSplit.encode` writes it: the
@@ -263,9 +275,9 @@ struct NavigatorSplitView: View {
         GeometryReader { proxy in
             let room = room(in: proxy.size.height)
             let heights = NavigatorSplit.viewports(model, room: room, chosen: NavigatorSplit.decode(kept))
-            // Taller than the window only when every pane is at its least.
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
+            // Never taller than the window: the panes squeeze (`viewports`)
+            // rather than the navigator scrolling (ov-292).
+            VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(panes.enumerated()), id: \.element.id) { index, pane in
                         if index > 0 { rule(index, heights: heights, room: room) }
                         let isLast = index == panes.count - 1
@@ -293,10 +305,8 @@ struct NavigatorSplitView: View {
                     }
                     Spacer(minLength: NavigatorRhythm.band)
                 }
-                .frame(width: proxy.size.width)
-                .frame(minHeight: proxy.size.height, alignment: .top)  // rhythm-exempt: the window's height
-            }
-            .scrollBounceBehavior(.basedOnSize)
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)  // rhythm-exempt: the window's height
+            .clipped()
             .probed("navigator-split")
         }
     }

@@ -26,11 +26,39 @@ struct NavigatorSplitTests {
         #expect(heights["tasks"] == 490, "\(heights)")
     }
 
-    @Test("Many terminals stop at a third of the room while Tasks wants more")
-    func manyTerminalsAreCapped() {
+    @Test("Many terminals share the room evenly with Tasks while both want more")
+    func manyTerminalsShareEvenly() {
         let panes = [Pane(id: "tasks", fills: true, content: 5000), Pane(id: "terminals", content: 2000)]
         let heights = NavigatorSplit.viewports(panes, room: 900)
-        #expect(heights["terminals"] == 300 && heights["tasks"] == 600, "\(heights)")
+        #expect(heights["terminals"] == 450 && heights["tasks"] == 450, "\(heights)")
+    }
+
+    /// ov-292, the owner: Terminals scrolled with 3 rows while Worktrees was
+    /// closed and room was free.
+    @Test("Three terminals with Worktrees closed take their rows' height and don't scroll, in any window that holds them")
+    func fewTerminalsDoNotScroll() {
+        let panes = [
+            Pane(id: "tasks", fills: true, content: 5000), Pane(id: "terminals", content: 96),
+            Pane(id: "worktrees", expanded: false, content: 300),
+        ]
+        for room: CGFloat in [300, 500, 900, 2000] {
+            let heights = NavigatorSplit.viewports(panes, room: room)
+            #expect(heights["terminals"] == 96, "\(room): \(heights)")
+            #expect(heights["worktrees"] == nil)
+            #expect(abs((heights["tasks"] ?? 0) + 96 - room) < 0.01, "Tasks takes the rest at \(room): \(heights)")
+        }
+    }
+
+    @Test("Many rows in every section: each is held to an even share, each scrolls, and nothing is over the room")
+    func everySectionScrolls() {
+        let panes = [
+            Pane(id: "tasks", fills: true, content: 5000), Pane(id: "terminals", content: 2000),
+            Pane(id: "worktrees", content: 2000),
+        ]
+        let heights = NavigatorSplit.viewports(panes, room: 600)
+        for pane in panes {
+            #expect(abs((heights[pane.id] ?? 0) - 200) < 0.01 && (heights[pane.id] ?? 0) < pane.content, "\(heights)")
+        }
     }
 
     @Test("Few tasks: the panes under them take the room they leave")
@@ -59,20 +87,28 @@ struct NavigatorSplitTests {
         #expect(greedy["terminals"] == 900 - NavigatorSplit.fillMinimum, "\(greedy)")
     }
 
-    /// Too short for every floor: each open pane at its floor, none under
-    /// it, and the navigator scrolls as one (`NavigatorSplitView`).
-    @Test("A window too short for every floor keeps each pane at its least")
+    /// Too short for every floor: the panes squeeze in proportion, none
+    /// below nothing and none past the room, so the navigator never scrolls
+    /// as one (ov-292) and every header stays on screen.
+    @Test("A window too short for every floor squeezes the panes, never past the room")
     func aShortWindow() {
         let panes = [
             Pane(id: "tasks", fills: true, content: 5000), Pane(id: "terminals", content: 2000),
             Pane(id: "worktrees", content: 2000), Pane(id: "few", content: 30),
         ]
+        let floors = NavigatorSplit.fillMinimum + 2 * NavigatorSplit.minimum + 30
         for room: CGFloat in [200, 50, 0, -40] {
             let heights = NavigatorSplit.viewports(panes, room: room)
-            #expect(heights["tasks"] == NavigatorSplit.fillMinimum, "\(room): \(heights)")
-            #expect(heights["terminals"] == NavigatorSplit.minimum && heights["worktrees"] == NavigatorSplit.minimum)
-            #expect(heights["few"] == 30, "a pane with fewer rows than the floor shows them all")
+            let total = heights.values.reduce(0, +)
+            #expect(total <= max(room, 0) + 0.01, "\(room): \(heights)")
+            #expect(heights.values.allSatisfy { $0 >= 0 })
+            if room > 0, room < floors {
+                #expect(abs(total - room) < 0.01, "the squeezed panes fill the room: \(heights)")
+                #expect(heights["tasks"]! > heights["few"]!, "in proportion to their floors: \(heights)")
+            }
         }
+        let roomy = NavigatorSplit.viewports(panes, room: floors)
+        #expect(roomy["tasks"] == NavigatorSplit.fillMinimum && roomy["few"] == 30, "\(roomy)")
     }
 
     static let three = [
@@ -464,7 +500,11 @@ struct NavigatorSplitTests {
         func height() throws -> CGFloat { try #require(drawn.probe("navigator-pane-terminals")).height }
         let was = try height()
         #expect(try rule().label == "Resize Terminals")
-        #expect(try rule().value == "\(Int(was.rounded())) points")
+        // Points as the value says them, whole: within one of the drawn height
+        // (heights are fractional shares now, and the value is rounded).
+        let value = try rule().value
+        let said = Int(value.split(separator: " ").first ?? "") ?? -1
+        #expect(abs(CGFloat(said) - was) <= 1, "\(value) vs \(was)")
         #expect(try rule().canMove)
         try rule().adjust(.increment)
         await drawn.settle()
@@ -516,31 +556,46 @@ struct NavigatorSplitTests {
         #expect(steps.items == [.task(tasks[4])], "stepped to \(steps.items)")
     }
 
-    /// At the window's least height, 400 pt, each open pane keeps its least
-    /// height, none drawn over another: the navigator scrolls as one.
-    @Test("A short window keeps each pane at its least, and none overlap", arguments: [400, 300] as [CGFloat])
+    /// At the window's least height, 400 pt, and under it, every pane is
+    /// drawn inside the window and none over another: the panes squeeze, and
+    /// nothing around them scrolls (ov-292).
+    @Test("A short window squeezes the panes inside it, none overlapping", arguments: [400, 300, 200] as [CGFloat])
     func aShortWindowIsDrawnWhole(height: CGFloat) async throws {
         let drawn = Drawn(await Self.board(tasks: 120, terminals: 30), height: height)
         await drawn.settle()
         var bottom: CGFloat = -.infinity
-        for (id, least) in [
-            ("tasks", NavigatorSplit.fillMinimum), ("terminals", NavigatorSplit.minimum),
-            ("worktrees", NavigatorSplit.minimum),
-        ] {
+        for id in ["tasks", "terminals", "worktrees"] {
             let pane = try #require(drawn.probe("navigator-pane-\(id)"), "no \(id) pane")
-            #expect(pane.height >= least - 0.5, "\(height): \(id) \(pane.height) tall, under \(least)")
             #expect(pane.minY >= bottom - 0.5, "\(height): \(id) at \(pane.minY) overlaps what's over it, to \(bottom)")
+            #expect(pane.minY < height, "\(height): \(id)'s header is off the window")
             bottom = pane.maxY
         }
-        // 300 pt is past every floor: the split scrolls as one, as far as
-        // the last pane, so every pane can be reached.
-        if height < 400 { #expect(bottom > height, "everything fit in \(height); not short enough to test this") }
-        if bottom > height {
-            let split = try #require(drawn.probe("navigator-split"))
-            let outer = try #require(drawn.outerScrollViews().first, "nothing scrolls the split")
-            let reach = (outer.documentView?.frame.height ?? 0) + split.minY
-            #expect(reach >= bottom - 0.5, "scrolls to \(reach), the last pane ends at \(bottom)")
-        }
+        #expect(bottom <= height + 0.5, "\(height): the panes reach \(bottom)")
+        #expect(drawn.outerScrollViews().isEmpty, "something scrolls the sections as one")
+    }
+
+    /// ov-292: one level of scrolling. Each open section has its one scroll
+    /// view, and nothing scrolls around them.
+    @Test("No scroll view holds the sections, and each section has exactly one", arguments: [800, 300] as [CGFloat])
+    func oneScrollViewPerSection(height: CGFloat) async throws {
+        let drawn = Drawn(await Self.board(tasks: 120, terminals: 30), height: height)
+        await drawn.settle()
+        #expect(drawn.outerScrollViews().isEmpty, "a scroll view holds another")
+        #expect(drawn.scrollViews().count == 3, "\(drawn.scrollViews().count) scroll views for 3 sections")
+    }
+
+    /// The owner's case in a real window: 3 terminals, Worktrees closed.
+    @Test("In a window, three terminals with Worktrees closed show every row with nothing to scroll")
+    func threeTerminalsDoNotScroll() async throws {
+        let drawn = Drawn(await Self.board(tasks: 120, terminals: 3, closed: ["worktrees"]), height: 700)
+        await drawn.settle()
+        let pane = try #require(drawn.probe("navigator-pane-terminals"))
+        let scrolls = drawn.scrollViews()
+        #expect(scrolls.count == 2, "\(scrolls.count) scroll views: Tasks and Terminals")
+        let scroll = try #require(scrolls.last)
+        let content = scroll.documentView?.frame.height ?? 0
+        #expect(abs(pane.height - content) <= 0.5, "the pane is \(pane.height) tall for \(content) of rows")
+        #expect(content <= scroll.contentView.bounds.height + 0.5, "Terminals scrolls")
     }
 
     /// ↓ from the last task: the selection crosses into Terminals' first
