@@ -16,8 +16,9 @@
 //! and the references are accepted and drawn as plain text by every client.
 //!
 //! Not announced in bursts: the store refuses more than thirty changing writes
-//! to one slot an hour, and a page is at most twelve, so the events are bounded
-//! at 360 an hour without a debounce.
+//! to one slot an hour and more than 120 changes and removals to a board's
+//! pages an hour, whatever the slots are called, so the events are bounded at
+//! 120 an hour a board without a debounce.
 
 use std::collections::HashSet;
 

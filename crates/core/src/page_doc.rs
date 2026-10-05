@@ -163,6 +163,16 @@ pub const MAX_PAGES: usize = 12;
 pub const MAX_ANCHORED_PER_THEME: usize = 3;
 /// Changing writes to one slot in an hour, past which the runner refuses.
 pub const MAX_WRITES_PER_HOUR: usize = 30;
+/// Changing writes and removals to all of a workspace's pages in an hour, past
+/// which the runner refuses, beside the per-slot cap so that rotating slot names
+/// can't get round it.
+///
+/// 120 is one change every 30 seconds, all hour. A heartbeat publishes a page
+/// only when its content changed, a dozen pages at most, and an orchestrator
+/// beats every few minutes at its busiest: about 12 pages x 10 an hour, so an
+/// honest orchestrator is under it with room, and a looping one is stopped at
+/// 120 events an hour (a `pages_changed` each) however it names its slots.
+pub const MAX_WRITES_PER_WORKSPACE_HOUR: usize = 120;
 /// The longest a slot name is.
 pub const SLOT_MAX: usize = 40;
 /// The most `stale_after_min` can say: seven days.

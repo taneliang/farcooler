@@ -20,14 +20,15 @@
 //!
 //! The document arrives validated (`farcooler_core::page_doc`). The store holds
 //! the rules that need the board: twelve pages per workspace, three anchored to
-//! a theme, and no more than thirty changing writes to one slot in an hour.
+//! a theme, no more than thirty changing writes to one slot in an hour, and
+//! no more than 120 changes and removals to the board's pages in one.
 
 use std::collections::{BTreeMap, HashSet};
 
 use rusqlite::{OptionalExtension, Transaction, params};
 use uuid::Uuid;
 
-use farcooler_core::page_doc::{MAX_ANCHORED_PER_THEME, MAX_PAGES, MAX_WRITES_PER_HOUR, Page, SLOT_MAX, valid_slot};
+use farcooler_core::page_doc::{MAX_ANCHORED_PER_THEME, MAX_PAGES, MAX_WRITES_PER_HOUR, MAX_WRITES_PER_WORKSPACE_HOUR, Page, SLOT_MAX, valid_slot};
 use farcooler_core::{DomainError, Result};
 
 use crate::error::map_err;
@@ -235,6 +236,18 @@ fn count(tx: &Transaction, sql: &str, args: impl rusqlite::Params) -> Result<usi
     Ok(n as usize)
 }
 
+/// More than `MAX_WRITES_PER_WORKSPACE_HOUR` changes and removals across a
+/// board's pages in an hour are refused, whatever the slots are called.
+fn check_workspace_rate(tx: &Transaction, workspace: Uuid, now: i64) -> Result<()> {
+    let recent = count(tx, "SELECT count(*) FROM page_events WHERE workspace_id = ?1 AND at > ?2", params![uuid_blob(workspace), now - 3_600_000])?;
+    if recent >= MAX_WRITES_PER_WORKSPACE_HOUR {
+        return Err(refused(format!(
+            "This board's pages changed {MAX_WRITES_PER_WORKSPACE_HOUR} times in the last hour. Pages are for checkpoints, not a live log."
+        )));
+    }
+    Ok(())
+}
+
 impl Store {
     /// Every page on a board, in list order.
     pub fn list_pages(&self, workspace: Uuid) -> Result<Vec<StoredPage>> {
@@ -333,6 +346,7 @@ impl Store {
                 "This page changed {MAX_WRITES_PER_HOUR} times in the last hour. Pages are for checkpoints, not a live log."
             )));
         }
+        check_workspace_rate(&tx, workspace, now)?;
         let bytes = doc_json.len() as u32;
         let (id, revision) = match &existing {
             Some(p) => {
@@ -400,14 +414,20 @@ impl Store {
 
     /// Remove a page and log it. `NotFound` when the slot has none.
     pub fn remove_page(&self, workspace: Uuid, slot: &str, actor: Actor) -> Result<StoredPage> {
+        self.remove_page_at(workspace, slot, actor, now_millis())
+    }
+
+    /// `remove_page` against a given clock, so the hourly cap can be tested.
+    pub(crate) fn remove_page_at(&self, workspace: Uuid, slot: &str, actor: Actor, now: i64) -> Result<StoredPage> {
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
         let page = page_in(&tx, workspace, slot)?.ok_or(DomainError::NotFound)?;
+        check_workspace_rate(&tx, workspace, now)?;
         tx.execute("DELETE FROM board_pages WHERE id = ?1", params![uuid_blob(page.id)]).map_err(map_err)?;
         tx.execute(
             "INSERT INTO page_events (at, workspace_id, slot, actor, kind, bytes, revision, shape) \
              VALUES (?1, ?2, ?3, ?4, 'remove', 0, ?5, '')",
-            params![now_millis(), uuid_blob(workspace), slot, actor.to_string(), page.revision as i64],
+            params![now, uuid_blob(workspace), slot, actor.to_string(), page.revision as i64],
         )
         .map_err(map_err)?;
         tx.commit().map_err(map_err)?;

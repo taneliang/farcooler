@@ -501,3 +501,25 @@ fn the_pages_survive_the_plan_layer_being_dropped() {
     store.remove_page(main, "train", Actor::Manager).unwrap();
     assert_eq!(store.list_pages(main).unwrap().len(), 2);
 }
+
+/// Rotating slot names doesn't get round the hourly cap: the board's pages
+/// share one, set and remove alike, and it frees up an hour later.
+#[test]
+fn rotating_slots_cannot_exceed_the_boards_hourly_cap() {
+    let (store, ws, _) = board(1);
+    let hour = 3_600_000;
+    let t0 = 10 * hour;
+    let cap = page_doc::MAX_WRITES_PER_WORKSPACE_HOUR;
+    for i in 0..cap / 2 {
+        let slot = format!("rot-{i}");
+        put_at(&store, ws, &slot, &doc("P"), t0 + i as i64).unwrap();
+        store.remove_page_at(ws, &slot, Actor::Manager, t0 + i as i64).unwrap();
+    }
+    assert_eq!(events(&store) as usize, cap);
+    let said = said(put_at(&store, ws, "one-more", &doc("P"), t0 + 1000));
+    assert_eq!(said, "This board's pages changed 120 times in the last hour. Pages are for checkpoints, not a live log.");
+    assert!(matches!(store.remove_page_at(ws, "rot-0", Actor::Manager, t0 + 1000), Err(DomainError::NotFound)), "nothing there to remove still says so");
+    assert!(put_at(&store, ws, "one-more", &doc("P"), t0 + hour + cap as i64).is_ok(), "an hour later it's allowed");
+    // Identical bytes cost nothing, so a loop that stops changing things isn't stopped.
+    assert!(matches!(put_at(&store, ws, "one-more", &doc("P"), t0 + hour + cap as i64 + 1).unwrap(), SetOutcome::Unchanged(_)));
+}
