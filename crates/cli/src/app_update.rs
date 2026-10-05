@@ -322,6 +322,7 @@ pub(crate) fn refused_said(code: &str, names: &Names) -> String {
         "check-failed" => format!("{app} couldn't read its update feed. Check your connection and try again"),
         "download-failed" => "the update didn't download. Check your connection and try again".into(),
         "signature" => format!("the update's signature didn't check out, so {app} didn't install it"),
+        "system-too-old" => format!("the newest build of {app} needs a newer version of macOS"),
         "information-only" => format!("this update can't be installed from here. Open {app} to read about it"),
         _ => format!("{app} couldn't install the update"),
     }

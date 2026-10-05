@@ -492,6 +492,11 @@ final class PushDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated { Notifier.shared.becomeDelegate() }
     }
 
+    /// `farcooler app` can reach the app from here on (`AppControl`).
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        MainActor.assumeIsolated { AppControlRequests.listen() }
+    }
+
     /// Quitting keeps every window's record: windows closing under it aren't
     /// the person closing them one by one (`WindowSessions.closed`).
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
