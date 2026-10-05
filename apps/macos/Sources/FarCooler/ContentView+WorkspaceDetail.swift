@@ -16,7 +16,7 @@ extension ContentView {
         let summary = scene.summary
         let layouts = shown
         let title = sceneTitle(scene, front: layouts.last)
-        let plan = scene.board == nil ? nil : planViews(scene)
+        let plan = splits(scene) ? planViews(scene) : nil
         return WorkspaceView(
             opened: scene.opened,
             hasConversation: scene.hasConversation,

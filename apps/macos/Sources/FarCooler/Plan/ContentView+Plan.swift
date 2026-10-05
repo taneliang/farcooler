@@ -14,6 +14,21 @@ extension ContentView {
         selection = next
     }
 
+    /// Whether `scene` is drawn as a canvas beside the chat (ov-298): a
+    /// workspace's, with a board on a runner this window reaches. The one
+    /// rule for what's drawn and what's seen and keyed.
+    func splits(_ scene: WorkspaceScene) -> Bool {
+        scene.board != nil && scene.summary != nil && store.clients[scene.host] != nil
+    }
+
+    /// The canvas's tiers as this window keeps them: the navigator's
+    /// width, the chat's columns, the terminal font's cell.
+    var canvasSizing: WorkspaceColumns.Canvas {
+        WorkspaceColumns.Canvas(
+            navigator: CGFloat(navigatorWidth), chatColumns: WorkspaceColumns.chatColumns(chatColumns),
+            cell: TerminalMetrics.cell(preferences.terminalFont()).width)
+    }
+
     /// The canvas's home, the strip and the peek for `scene` (ov-298):
     /// nil where the scene has no board to plan.
     func planViews(_ scene: WorkspaceScene) -> (home: AnyView, strip: AnyView, peek: AnyView)? {
@@ -55,7 +70,7 @@ extension ContentView {
     /// canvas folded away, it's peeked over the chat, or put away.
     func showPlan() {
         guard let scene = selection.flatMap(workspaceScene), scene.hasConversation, let board = scene.board else { return }
-        if WorkspaceColumns.hasCanvas(width: detailWidth ?? 0) {
+        if canvasSizing.hasCanvas(detailWidth ?? 0) {
             planPeeking = false
             if selection?.focus != nil {
                 trail = nil

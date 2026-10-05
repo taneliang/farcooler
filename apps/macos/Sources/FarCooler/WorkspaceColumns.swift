@@ -126,10 +126,12 @@ enum WorkspaceColumns {
     /// The canvas's least: two theme cards side by side.
     static let canvasMinimum: CGFloat = 440
     /// Below this window width the navigator stops taking room and floats
-    /// over the canvas when shown (⌘B).
+    /// over the canvas when shown (⌘B), at the least: wider when the
+    /// navigator or the chat is (`Canvas.navigatorBeside`).
     static let navigatorFloatsBelow: CGFloat = 1500
-    /// Below this the canvas folds away: the chat takes the main area with
-    /// the plan's strip, and what's opened replaces it as before.
+    /// Below this the canvas folds away, at the least: the chat takes the
+    /// main area with the plan's strip, the navigator floats over it when
+    /// shown, and what's opened replaces the chat as before.
     static let canvasFoldsBelow: CGFloat = 1180
 
     /// A remembered chat width, held to whole columns in its range.
@@ -138,11 +140,57 @@ enum WorkspaceColumns {
         return min(max(Int(remembered.rounded()), chatColumnsMinimum), chatColumnsMaximum)
     }
 
-    /// Whether a detail `width` wide has room for the canvas beside the chat.
-    static func hasCanvas(width: CGFloat) -> Bool { width >= canvasFoldsBelow }
+    /// What decides where the canvas, the chat and the navigator go
+    /// (ov-298): the navigator's width and the chat's columns as kept, at
+    /// the terminal's cell. Each tier starts where its parts fit, so the
+    /// chat is its width in whole columns in every tier that has a canvas,
+    /// whatever the navigator's width (train 1004r, P2).
+    struct Canvas: Equatable {
+        var navigator: CGFloat = navigatorDefault
+        var chatColumns: Int = chatColumnsDefault
+        var cell: CGFloat = defaultCell
 
-    /// Whether the navigator floats over the canvas at `width`.
-    static func navigatorFloats(width: CGFloat) -> Bool { hasCanvas(width: width) && width < navigatorFloatsBelow }
+        /// The chat column's width: its columns, whole.
+        var chat: CGFloat { width(columns: chatColumns, cell: cell) }
+        /// The navigator as it would be drawn beside the canvas.
+        var navigatorShown: CGFloat { max(navigatorMinimum, min(navigator, navigatorMaximum)) }
+
+        /// Whether `width` has room for the canvas beside the chat.
+        func hasCanvas(_ width: CGFloat) -> Bool { width >= max(canvasFoldsBelow, chat + divider + canvasMinimum) }
+
+        /// Whether `width` has room for the navigator beside the canvas
+        /// and the chat; else it floats when shown.
+        func navigatorBeside(_ width: CGFloat) -> Bool {
+            width >= max(navigatorFloatsBelow, navigatorShown + divider + canvasMinimum + divider + chat)
+        }
+
+        /// Whether the navigator floats, rather than taking room, at `width`.
+        func navigatorFloats(_ width: CGFloat) -> Bool { !navigatorBeside(width) }
+    }
+
+    /// What's drawn for a scene `width` wide: with `canvas`, a workspace
+    /// with an orchestrator gets the canvas and the chat column where they
+    /// fit, and the chat alone, the canvas folded, where they don't; the
+    /// navigator floats (shown only while `floating`) wherever it doesn't
+    /// fit beside them. Without, `layout`. One rule for the view that draws
+    /// it and the window that decides what's seen and keyed (train 1004r, P1).
+    static func arrangement(
+        width: CGFloat, canvas: Canvas?, opened: Bool, hasConversation: Bool, hasBoard: Bool, boardExists: Bool,
+        floating: Bool, focused: Bool
+    ) -> Arrangement {
+        guard let canvas, hasConversation else {
+            return layout(opened: opened, hasConversation: hasConversation, hasBoard: hasBoard, focused: focused)
+        }
+        guard canvas.hasCanvas(width) else {
+            var folded = layout(
+                opened: opened, hasConversation: true, hasBoard: boardExists && floating, focused: focused)
+            folded.floats = true
+            return folded
+        }
+        let floats = canvas.navigatorFloats(width)
+        return canvasLayout(
+            opened: opened, hasBoard: floats ? boardExists && floating : hasBoard, focused: focused, floats: floats)
+    }
 
     /// What's drawn with a canvas beside the chat column: the chat on
     /// screen whatever is opened, except in Focus, which gives what's
@@ -153,15 +201,6 @@ enum WorkspaceColumns {
         return Arrangement(
             conversation: focused ? .hidden : .column, opened: opened, navigator: hasBoard && !focused, canvas: true,
             floats: floats)
-    }
-
-    /// The chat column's width for `columns` terminal columns, given up to
-    /// keep the canvas its least in a detail `width` wide with the navigator
-    /// taking `beside`, never under the main area's least.
-    static func chatWidth(columns: Int, width: CGFloat, beside: CGFloat, cell: CGFloat = defaultCell) -> CGFloat {
-        let want = self.width(columns: columns, cell: cell)
-        let room = width - beside - divider - canvasMinimum
-        return max(openedMinimum(cell: cell), min(want, room))
     }
 
     /// Where each part sits, in points from the detail's leading edge.
@@ -188,11 +227,10 @@ enum WorkspaceColumns {
         let navigator = navigatorWidth(remembered, width: width, cell: cell)
         let mainX = arrangement.navigator && !arrangement.floats ? navigator + divider : 0
         guard arrangement.canvas else { return Frames(navigator: navigator, mainX: mainX, main: max(0, width - mainX)) }
-        // The chat's width is the same with the navigator floating or put
-        // away as beside it, and in Focus, where it's hidden: only a drag
-        // of its edge, or a window too narrow for it, changes it.
-        let beside = arrangement.floats || width < navigatorFloatsBelow ? 0 : navigator + divider
-        let chat = chatWidth(columns: chatColumns, width: width, beside: beside, cell: cell)
+        // The chat's width is its columns, whole, with the navigator
+        // floating, put away or beside it, and in Focus, where it's hidden:
+        // only a drag of its edge changes it. The tiers leave it room.
+        let chat = self.width(columns: chatColumns, cell: cell)
         guard arrangement.conversation == .column else {
             return Frames(navigator: navigator, mainX: mainX, main: max(0, width - mainX), chatX: width, chat: chat)
         }

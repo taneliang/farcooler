@@ -279,10 +279,14 @@ extension ContentView {
     func shownLayouts(for selection: Selection?) -> [ShownLayout] {
         let all = drawableLayouts(for: selection)
         guard let selection, let scene = workspaceScene(selection) else { return all }
-        let arrangement = detailWidth.map { _ in
-            WorkspaceColumns.layout(
-                opened: scene.opened != nil, hasConversation: scene.hasConversation, hasBoard: scene.board != nil,
-                focused: focusColumn)
+        // The arrangement `WorkspaceView` draws, by the same rule: beside
+        // the canvas the chat is on screen, seen and keyed whatever is
+        // opened (train 1004r, P1).
+        let arrangement = detailWidth.map { width in
+            WorkspaceColumns.arrangement(
+                width: width, canvas: splits(scene) ? canvasSizing : nil, opened: scene.opened != nil,
+                hasConversation: scene.hasConversation, hasBoard: scene.board != nil && !navigatorHidden,
+                boardExists: scene.board != nil, floating: navigatorFloating, focused: focusColumn)
         }
         return WorkspaceScreen.visible(all, arrangement: arrangement, taskTab: taskTab(for: selection))
     }

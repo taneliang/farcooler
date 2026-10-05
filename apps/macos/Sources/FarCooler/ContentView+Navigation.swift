@@ -65,8 +65,11 @@ extension ContentView {
     /// put away or brought back (ov-178). Put away with the keyboard in
     /// it, the keyboard goes to what the main area shows.
     func toggleNavigator() {
-        // Too narrow for it beside the canvas, ⌘B floats it over (ov-298).
-        if selection.flatMap(workspaceScene)?.board != nil, WorkspaceColumns.navigatorFloats(width: detailWidth ?? 0) {
+        // Too narrow for it beside the canvas and the chat, ⌘B floats it
+        // over them (ov-298), the canvas folded or not.
+        if let scene = selection.flatMap(workspaceScene), scene.hasConversation, splits(scene),
+            canvasSizing.navigatorFloats(detailWidth ?? 0)
+        {
             navigatorFloating.toggle()
             return
         }

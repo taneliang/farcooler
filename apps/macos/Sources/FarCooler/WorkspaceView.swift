@@ -149,18 +149,14 @@ struct WorkspaceView<
     }
 
     private func arrangement(open: Bool, focused: Bool, width: CGFloat) -> WorkspaceColumns.Arrangement {
-        guard canvas(width) else {
-            return WorkspaceColumns.layout(opened: open, hasConversation: hasConversation, hasBoard: hasBoard, focused: focused)
-        }
-        let floats = WorkspaceColumns.navigatorFloats(width: width)
-        return WorkspaceColumns.canvasLayout(
-            opened: open, hasBoard: floats ? boardExists && navigatorFloating.wrappedValue : hasBoard, focused: focused,
-            floats: floats)
+        WorkspaceColumns.arrangement(
+            width: width, canvas: split ? sizing : nil, opened: open, hasConversation: hasConversation,
+            hasBoard: hasBoard, boardExists: boardExists, floating: navigatorFloating.wrappedValue, focused: focused)
     }
 
-    /// Whether `width` draws the canvas beside the chat.
-    private func canvas(_ width: CGFloat) -> Bool {
-        split && hasConversation && WorkspaceColumns.hasCanvas(width: width)
+    /// The canvas's tiers, from the widths as kept, or as dragged.
+    private var sizing: WorkspaceColumns.Canvas {
+        WorkspaceColumns.Canvas(navigator: dragging ?? CGFloat(navigatorWidth), chatColumns: columns, cell: cell)
     }
 
     /// The chat's columns: as dragged, else as kept.
@@ -297,13 +293,18 @@ struct WorkspaceView<
     ) -> some View {
         let shown = now.showsConversation
         if hasConversation {
-            conversation()
-                .frame(width: kept)
-                .frame(maxHeight: .infinity)
-                .overlay(alignment: .bottom) {
-                    // Folded, with a plan: its one line, over the chat's foot.
-                    if split, !drawn.canvas { strip() }
-                }
+            // Folded, with a plan: its one line on a row of its own under
+            // the terminal, never over it, so the terminal's last rows (its
+            // input) stay in sight; it costs rows, never columns (train
+            // 1004r, P4). Always a stack, so the terminal is one view in one
+            // place whether the strip shows or not.
+            VStack(spacing: 0) {
+                conversation()
+                    .frame(width: kept)
+                    .frame(maxHeight: .infinity)
+                    .probed("workspace-conversation-body")
+                if split, !drawn.canvas { strip() }
+            }
                 .overlay {
                     if split, !drawn.canvas, peeking.wrappedValue { peek() }
                 }
