@@ -328,7 +328,11 @@ pub(crate) fn refused_said(code: &str, names: &Names) -> String {
     let app = &names.app;
     match code {
         "updates-off" => format!("this build of {app} doesn't check for updates: it was built from a working tree"),
-        "busy" => format!("{app} is already checking for or showing an update. Finish it in the app, then try again"),
+        "updates-broken" => format!(
+            "{app}'s updater didn't start, so it can't update itself. Quit and reopen {app}, and if this keeps \
+             happening, download {app} again"
+        ),
+        "busy" => format!("{app} is already checking for or installing an update. Try again in a minute"),
         "check-failed" => format!("{app} couldn't read its update feed. Check your connection and try again"),
         "download-failed" => "the update didn't download. Check your connection and try again".into(),
         "signature" => format!("the update's signature didn't check out, so {app} didn't install it"),

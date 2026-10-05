@@ -34,6 +34,13 @@ final class Updates: NSObject, SPUUpdaterDelegate {
 
     var isEnabled: Bool { updater != nil }
 
+    /// This build has a feed, but Sparkle wouldn't start: a different
+    /// refusal from a build with no feed at all (ov-302 F7).
+    private var startFailed = false
+
+    /// The CLI's word for why there's no updater.
+    private var off: String { startFailed ? "updates-broken" : "updates-off" }
+
     private override init() {
         super.init()
         let feed = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String ?? ""
@@ -44,6 +51,7 @@ final class Updates: NSObject, SPUUpdaterDelegate {
             try updater.start()
         } catch {
             NSLog("Far Cooler: the updater didn't start: \(error)")
+            startFailed = true
             return
         }
         self.driver = driver
@@ -56,7 +64,7 @@ final class Updates: NSObject, SPUUpdaterDelegate {
 
     /// Run the command line's update: check now, and let `errand` answer.
     func run(_ errand: UpdateErrand) {
-        guard let updater, let driver else { return errand.refuse("updates-off") }
+        guard let updater, let driver else { return errand.refuse(off) }
         // An errand that finished is done with once its session is; Sparkle
         // doesn't promise to say so (`dismissUpdateInstallation`) every time.
         let free = driver.errand.map(\.finished) ?? true
@@ -71,12 +79,14 @@ final class Updates: NSObject, SPUUpdaterDelegate {
     /// The newest build the feed offers, or the refusal code for why it
     /// isn't known. Sparkle reads the feed; nothing is shown.
     func latest(_ answer: @escaping (_ latest: [String: Any]?, _ unknown: String?) -> Void) {
-        guard let updater else { return answer(nil, "updates-off") }
+        guard let updater else { return answer(nil, off) }
         // The alerts are showing a build already: that's the newest.
         if let shown = driver?.offerShown { return answer(shown, nil) }
+        // A read already running answers this caller too. Asked before the
+        // busy check, because that read is itself a session (ov-302 F6).
+        guard probes.isEmpty else { return probes.append(answer) }
         guard !updater.sessionInProgress else { return answer(nil, "busy") }
         probes.append(answer)
-        guard probes.count == 1 else { return }
         probe += 1
         let this = probe
         updater.checkForUpdateInformation()

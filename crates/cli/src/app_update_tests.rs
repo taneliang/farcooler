@@ -261,3 +261,14 @@ async fn an_app_that_never_quit_is_not_said_to_have_quit() {
     let said = run_update_waiting(&app, Duration::from_secs(2)).await.unwrap_err();
     assert_eq!(said, "Far Cooler Canary didn't quit to install the update. Open Far Cooler Canary to see why");
 }
+
+#[test]
+fn an_updater_that_didnt_start_isnt_blamed_on_a_working_tree() {
+    let said = refused_said("updates-broken", &canary());
+    assert!(said.starts_with("Far Cooler Canary's updater didn't start"), "{said}");
+    assert!(!said.contains("working tree"));
+    assert_eq!(
+        refused_said("busy", &canary()),
+        "Far Cooler Canary is already checking for or installing an update. Try again in a minute"
+    );
+}
