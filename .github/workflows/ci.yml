@@ -555,6 +555,7 @@ jobs:
       # Wrapped so a test that leaves its tmux server running fails the job
       # (ov-207): one such server once ran for 15.5 hours at 92% CPU.
       - run: ./scripts/tmux-leak-check.py --self-test
+      - run: ./scripts/tmux-stale-sockets.py --self-test
       - run: ./scripts/tmux-leak-check.py -- cargo test --workspace
 
       # The tests that start a real agent or adapter, which `cargo test
