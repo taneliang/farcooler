@@ -69,12 +69,13 @@ struct PlanThemeTrackTests {
         #expect(Self.words(three) == "skill-323: no move in 3 h")
     }
 
-    @Test("A stale lane among moving ones still reads stuck: the line says what's wrong")
-    func stuckBeatsMoving() throws {
+    @Test("A stale lane among moving ones is named after them, and never hides them")
+    func staleBesideMoving() throws {
         let plan = try Self.plan(lanes: [
             Self.lane("fine", "building"), Self.lane("slow", "review", since: Self.now - 4 * Self.hour, stale: true),
         ])
-        #expect(Self.words(plan) == "slow: no move in 4 h")
+        #expect(Self.words(plan) == "2 lanes moving · slow no move in 4 h")
+        #expect(Self.track(plan).isMoving)
     }
 
     @Test("Queued: the best rank among its queued lanes, or none said")
@@ -167,7 +168,7 @@ struct PlanThemeTrackTests {
     @Test("Every state has its own glyph, so color never carries it alone")
     func glyphs() {
         let tracks: [PlanTrack] = [
-            .overBudget(.over(used: 2, budget: 1)), .stuck(lane: "a", since: 0), .moving(lanes: []), .queued(rank: nil),
+            .overBudget(.over(used: 2, budget: 1)), .stuck(lane: "a", since: 0), .moving(lanes: [], stalled: nil), .queued(rank: nil),
             .quiet(since: 0), .idle, .allDone, .paused,
         ]
         #expect(Set(tracks.map(\.symbol)).count == tracks.count)
@@ -264,10 +265,10 @@ struct PlanThemeTrackTests {
         #expect(outside.lanes == ["out", "newout"])
         #expect(outside.openCards == 2, "z1 and z2: c1 is in a theme, z3 is done, z5 canceled")
         #expect(outside.tidy.map(\.key) == ["ov-9", "ov-10"])
-        #expect(PlanWords.outside(outside) == "Outside any theme this week: 2 lanes · 2 open cards")
+        #expect(PlanWords.outside(outside) == "Outside any theme: 2 lanes this week · 2 open cards")
         #expect(PlanWords.tidy(11) == "11 cards to tidy" && PlanWords.tidy(1) == "1 card to tidy")
         #expect(PlanWords.outside(PlanOutside(lanes: [], openCards: 0, tidy: [])) == nil)
-        #expect(PlanWords.outside(PlanOutside(lanes: ["a"], openCards: 1, tidy: [])) == "Outside any theme this week: 1 lane · 1 open card")
+        #expect(PlanWords.outside(PlanOutside(lanes: ["a"], openCards: 1, tidy: [])) == "Outside any theme: 1 lane this week · 1 open card")
     }
 
     @Test("An older runner sends no flags, and the plan reads with none")
@@ -292,6 +293,8 @@ struct PlanThemeTrackTests {
         }
         let plan = try themes([("A", "active", "?"), ("B", "active", ""), ("C", "active", "?"), ("D", "paused", "")])
         #expect(plan.trackSummary() == "2 waiting on you · 1 moving · 2 quiet")
+        let hidden = try themes([("A", "active", ""), ("B", "done", "?"), ("C", "paused", "?")])
+        #expect(hidden.trackSummary() == "1 moving", "a done or paused theme's ask is in the fold, and not counted")
         let calm = try themes([("A", "active", ""), ("B", "done", "")])
         #expect(calm.trackSummary() == "1 moving")
         #expect(try Self.plan(done: 2, open: 0).trackSummary() == nil)
@@ -325,5 +328,30 @@ struct PlanThemeTrackTests {
         #expect(PlanThemeBrief(within.themes[0], in: within).budget != nil)
         let over = try Self.plan { $0["budget_tokens"] = 100; $0["spend"] = ["input_tokens": 600, "runs": 1, "unmeasured_agents": 0] }
         #expect(PlanThemeBrief(over.themes[0], in: over).budget == nil, "over budget is the track line's, not said twice")
+    }
+
+    // MARK: Shared cases
+
+    /// The cases `PlanTrackTest` (Kotlin) reads too: a plan, the first theme's
+    /// track line and the Themes summary, so a phrase or a threshold can't
+    /// change on one platform alone.
+    @Test("Every case in test/fixtures/plan-track-cases.json reads as written")
+    func sharedCases() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<6 { root.deleteLastPathComponent() }
+        let data = try Data(contentsOf: root.appendingPathComponent("test/fixtures/plan-track-cases.json"))
+        let file = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let cases = try #require(file["cases"] as? [[String: Any]])
+        #expect(cases.count >= 30)
+        for item in cases {
+            let name = item["name"] as? String ?? "?"
+            let plan = try PlanModel.decode(JSONSerialization.data(withJSONObject: try #require(item["plan"])))
+            if let want = item["track"] as? String {
+                #expect(Self.words(plan) == want, "\(name)")
+            }
+            if item.keys.contains("summary") {
+                #expect(plan.trackSummary() == item["summary"] as? String, "\(name): the summary")
+            }
+        }
     }
 }

@@ -21,10 +21,13 @@ public let planQuietAfterMs: Int64 = 24 * 3_600_000
 public enum PlanTrack: Equatable, Sendable {
     /// Past its token budget.
     case overBudget(PlanBudget)
-    /// A live lane has sat in one state for over an hour.
+    /// Every lane working it has sat in one state for over an hour: the one
+    /// that has sat longest is named.
     case stuck(lane: String, since: Int64)
-    /// At least one lane is building, in review, fixing or landing it.
-    case moving(lanes: [PlanTrackLane])
+    /// At least one lane is building, in review, fixing or landing it, and
+    /// is still moving. A lane that has sat over an hour beside them is
+    /// named after: the others are moving, and the line says so first.
+    case moving(lanes: [PlanTrackLane], stalled: PlanTrackStalled?)
     /// No lane is working it and the plan has one queued for it.
     case queued(rank: Int?)
     /// Open cards, no lane, and nothing moved for a day or more.
@@ -72,6 +75,13 @@ public enum PlanTrack: Equatable, Sendable {
     }
 }
 
+/// The working lane that has sat longest in one state, named beside lanes
+/// that are moving.
+public struct PlanTrackStalled: Equatable, Sendable {
+    public var lane: String
+    public var since: Int64
+}
+
 /// A lane moving a theme, as the track line names it.
 public struct PlanTrackLane: Equatable, Sendable {
     public var name: String
@@ -108,9 +118,15 @@ extension PlanModel {
         if theme.state == "done" { return .done }
         if let over = PlanWords.overBudget(theme) { return .overBudget(over) }
         let working = workingLanes(in: theme)
-        if let stale = working.first(where: \.stale) { return .stuck(lane: stale.name, since: stale.stateSince) }
+        // The lane stalled longest, not the first in plan order; and it only
+        // stands alone when nothing else is moving (an hour is routine for a
+        // build, so it never hides the lanes that are).
+        let stalled = working.filter(\.stale).min { $0.stateSince < $1.stateSince }
+        if let stalled, working.allSatisfy(\.stale) { return .stuck(lane: stalled.name, since: stalled.stateSince) }
         if !working.isEmpty {
-            return .moving(lanes: working.map { PlanTrackLane(name: $0.name, state: $0.state, fixRounds: $0.fixRounds) })
+            return .moving(
+                lanes: working.map { PlanTrackLane(name: $0.name, state: $0.state, fixRounds: $0.fixRounds) },
+                stalled: stalled.map { PlanTrackStalled(lane: $0.name, since: $0.stateSince) })
         }
         let queued = lanes(in: theme).filter { $0.state == .queued }
         if !queued.isEmpty {
@@ -155,8 +171,11 @@ extension PlanModel {
     /// line when it's folded, or nil when none of it applies.
     public func trackSummary(activity: [String: Int64] = [:]) -> String? {
         let shown = shownThemes
-        let asking = shown.filter { !$0.ownerAsk.isEmpty && $0.state != "done" }.count
-        let tracks = shown.filter { $0.state == "active" }.map { track(of: $0, activity: activity) }
+        // Only active themes: a paused theme's ask is inside the closed fold,
+        // and Needs You lists it.
+        let active = shown.filter { $0.state == "active" }
+        let asking = active.filter { !$0.ownerAsk.isEmpty }.count
+        let tracks = active.map { track(of: $0, activity: activity) }
         let parts = [
             (asking, "waiting on you"), (tracks.filter(\.isMoving).count, "moving"),
             (tracks.filter(\.isQuiet).count, "quiet"),
@@ -185,10 +204,10 @@ extension PlanWords {
         case .overBudget(let budget):
             return budgetLine(budget)
         case .stuck(let lane, let since):
-            let minutes = max(0, now - since) / 60_000
-            return minutes < 120 ? "\(lane): no move in an hour" : "\(lane): no move in \(minutes / 60) h"
-        case .moving(let lanes):
-            guard lanes.count == 1, let lane = lanes.first else { return "\(lanes.count) lanes moving" }
+            return "\(lane): \(noMove(since: since, now: now))"
+        case .moving(let lanes, let stalled):
+            let tail = stalled.map { " · \($0.lane) \(noMove(since: $0.since, now: now))" } ?? ""
+            guard lanes.count == 1, let lane = lanes.first else { return "\(lanes.count) lanes moving" + tail }
             let verb =
                 switch lane.state {
                 case .building: "building"
@@ -197,7 +216,7 @@ extension PlanWords {
                 case .landing: "landing"
                 default: "moving"
                 }
-            return "\(lane.name) is \(verb)"
+            return "\(lane.name) is \(verb)" + tail
         case .queued(let rank):
             return rank.map { "Queued, \(ordinal($0)) up" } ?? "Queued"
         case .quiet(let since):
@@ -208,6 +227,12 @@ extension PlanWords {
         case .paused: return "Paused"
         case .done: return "Done"
         }
+    }
+
+    /// "no move in an hour", "no move in 3 h".
+    static func noMove(since: Int64, now: Int64) -> String {
+        let minutes = max(0, now - since) / 60_000
+        return minutes < 120 ? "no move in an hour" : "no move in \(minutes / 60) h"
     }
 
     /// The same for VoiceOver and TalkBack: a middle dot isn't read well.
@@ -229,12 +254,15 @@ extension PlanWords {
         return lanes.count > limit ? "\(names), +\(lanes.count - limit) more" : names
     }
 
-    /// "Outside any theme this week: 2 lanes · 11 open cards"; nil when empty.
+    /// "Outside any theme: 2 lanes this week · 11 open cards"; nil when empty.
+    /// The lanes are the week's, and the open cards are every one, however old.
     public static func outside(_ outside: PlanOutside) -> String? {
         var parts: [String] = []
-        if !outside.lanes.isEmpty { parts.append(outside.lanes.count == 1 ? "1 lane" : "\(outside.lanes.count) lanes") }
+        if !outside.lanes.isEmpty {
+            parts.append((outside.lanes.count == 1 ? "1 lane" : "\(outside.lanes.count) lanes") + " this week")
+        }
         if outside.openCards > 0 { parts.append(outside.openCards == 1 ? "1 open card" : "\(outside.openCards) open cards") }
-        return parts.isEmpty ? nil : "Outside any theme this week: " + parts.joined(separator: " · ")
+        return parts.isEmpty ? nil : "Outside any theme: " + parts.joined(separator: " · ")
     }
 
     /// "11 cards to tidy".

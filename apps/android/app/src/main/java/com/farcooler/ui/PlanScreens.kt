@@ -108,6 +108,9 @@ fun LazyListScope.planItems(
     onRetry: () -> Unit,
     landedOpen: Boolean = false,
     onToggleLanded: () -> Unit = {},
+    /** Whether the fold of paused and done themes is open (ov-331). */
+    closedThemesOpen: Boolean = false,
+    onToggleClosedThemes: () -> Unit = {},
     /** The board's orchestrator pages (ov-285); null on a runner without `board_pages`. */
     pages: PagesHook? = null,
     /** Copy reference for rulings (ov-304); null on a runner without `board_rulings`. */
@@ -131,7 +134,7 @@ fun LazyListScope.planItems(
             }
         }
         is PlanReadState.Loaded -> {
-            loaded(state.plan, statuses, onOpen, landedOpen, onToggleLanded, pages, rulingsShown = rulings != null && state.plan.rulings.isNotEmpty())
+            loaded(state.plan, statuses, onOpen, landedOpen, onToggleLanded, closedThemesOpen, onToggleClosedThemes, pages, rulingsShown = rulings != null && state.plan.rulings.isNotEmpty())
             // Last, as on the Mac and the iPhone: rulings ask nothing, and stand until the owner says otherwise.
             rulingItems(state.plan, rulings)
         }
@@ -144,6 +147,8 @@ private fun LazyListScope.loaded(
     onOpen: (PlanPage) -> Unit,
     landedOpen: Boolean,
     onToggleLanded: () -> Unit,
+    closedThemesOpen: Boolean,
+    onToggleClosedThemes: () -> Unit,
     pages: PagesHook?,
     rulingsShown: Boolean = false,
 ) {
@@ -196,9 +201,26 @@ private fun LazyListScope.loaded(
                 )
             }
         }
-        for (theme in themes) {
+        for (theme in themes.filter { it.state == "active" }) {
             item(key = "plan/theme/${theme.id}") {
                 PlanThemeRow(theme, plan.track(theme), plan.nowMs) { onOpen(PlanPage.Theme(theme.id)) }
+            }
+        }
+        // Paused and done themes fold into one closed row, as on the Mac and the iPhone.
+        val closed = themes.filter { it.state != "active" }
+        if (closed.isNotEmpty()) {
+            item(key = "plan/themes/closed") {
+                PlanHeader(
+                    "Paused and done", closed.size, Modifier.testTag("plan-themes-closed"),
+                    open = closedThemesOpen, onClick = onToggleClosedThemes,
+                )
+            }
+            if (closedThemesOpen) {
+                for (theme in closed) {
+                    item(key = "plan/theme/${theme.id}") {
+                        PlanThemeRow(theme, plan.track(theme), plan.nowMs) { onOpen(PlanPage.Theme(theme.id)) }
+                    }
+                }
             }
         }
     }

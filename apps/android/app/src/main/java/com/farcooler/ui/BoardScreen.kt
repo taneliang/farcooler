@@ -198,6 +198,7 @@ fun BoardTab(
     val keepsPlan = daemon?.can(Capability.BOARD_PLAN) == true
     val showsPlan = com.farcooler.model.PlanChoice.showing(keepsPlan, planChosen)
     var landedOpen by rememberSaveable(workspace.id) { mutableStateOf(false) }
+    var closedThemesOpen by rememberSaveable(workspace.id) { mutableStateOf(false) }
     LaunchedEffect(showsPlan, workspace.id) {
         if (showsPlan) {
             connection.plans.read(workspace)
@@ -360,6 +361,8 @@ fun BoardTab(
                             onRetry = { scope.launch { connection.plans.read(workspace) } },
                             landedOpen = landedOpen,
                             onToggleLanded = { landedOpen = !landedOpen },
+                            closedThemesOpen = closedThemesOpen,
+                            onToggleClosedThemes = { closedThemesOpen = !closedThemesOpen },
                             pages = if (keepsPages) {
                                 PagesHook(pageLists[workspace.id], System.currentTimeMillis()) {
                                     scope.launch { connection.pages.read(workspace) }

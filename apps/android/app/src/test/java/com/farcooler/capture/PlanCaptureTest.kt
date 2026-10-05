@@ -2,13 +2,16 @@ package com.farcooler.capture
 
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.ui.Modifier
 import com.farcooler.model.Plan
 import com.farcooler.model.PlanPage
 import com.farcooler.model.PlanReadState
 import com.farcooler.model.PlanRecord
 import com.farcooler.model.TaskStatus
+import com.farcooler.model.track
 import com.farcooler.ui.PlanPageBody
+import com.farcooler.ui.PlanThemeRow
 import com.farcooler.ui.PlanSwitch
 import com.farcooler.ui.planItems
 import java.io.File
@@ -46,7 +49,8 @@ class PlanCaptureTest {
 
     @Test fun themes() = Capture.both("plan-themes") {
         LazyColumn(Modifier.fillMaxSize()) {
-            planItems(PlanReadState.Loaded(plan.copy(order = emptyList(), lanes = emptyList())), statuses, onOpen = {}, onRetry = {})
+            // The themes alone, with the plan's lanes in place so each track line reads what is moving (ov-331).
+            items(plan.shownThemes.size) { PlanThemeRow(plan.shownThemes[it], plan.track(plan.shownThemes[it]), plan.nowMs) {} }
         }
     }
 

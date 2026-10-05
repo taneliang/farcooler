@@ -51,6 +51,8 @@ data class PlanRuling(
     val actor: String = "",
     val createdAt: Long = 0,
     val settledAt: Long? = null,
+    /** The theme it names, by id; null when it names none (ov-331: a theme's last move counts its rulings). */
+    val themeId: String? = null,
 ) {
     /** What Copy reference puts on the clipboard, for telling the orchestrator. */
     val reference: String get() = "ruling $short: $decision"
@@ -83,6 +85,7 @@ data class PlanRuling(
                 actor = o.text("actor"),
                 createdAt = o["created_at"]?.jsonPrimitive?.longOrNull ?: 0L,
                 settledAt = o["settled_at"]?.jsonPrimitive?.longOrNull,
+                themeId = o["theme_id"]?.jsonPrimitive?.contentOrNull,
             )
         }
     }

@@ -4,6 +4,11 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import org.junit.Test
 import java.io.File
 
@@ -49,11 +54,11 @@ class PlanTrackTest {
     }
 
     @Test
-    fun `a stale lane reads stuck, even among moving ones`() {
+    fun `a lone stale lane reads stuck, and among moving ones it is named after them`() {
         assertEquals("s: no move in an hour", words(plan(theme(), lane("s", LaneState.BUILDING, since = now - 70 * 60_000, stale = true))))
         assertEquals("s: no move in 3 h", words(plan(theme(), lane("s", LaneState.BUILDING, since = now - 3 * hour, stale = true))))
         assertEquals(
-            "slow: no move in 4 h",
+            "2 lanes moving · slow no move in 4 h",
             words(plan(theme(), lane("fine", LaneState.BUILDING), lane("slow", LaneState.REVIEW, since = now - 4 * hour, stale = true))),
         )
     }
@@ -134,6 +139,23 @@ class PlanTrackTest {
         assertNull(plan.themes[1].lastMovedAt)
         // The runner's own bytes (test/fixtures/plan.json, which the CLI's test writes).
         assertEquals(now - hour, Plan.decode(repositoryFile("test/fixtures/plan.json")).themes[0].lastMovedAt)
+    }
+
+    /** The cases `PlanThemeTrackTests` (Swift) reads too, so a phrase or a threshold can't change on one platform alone. */
+    @Test
+    fun `every case in plan-track-cases json reads as written`() {
+        val cases = Json.parseToJsonElement(repositoryFile("test/fixtures/plan-track-cases.json")).jsonObject["cases"]!!.jsonArray
+        assertTrue(cases.size >= 30)
+        for (item in cases) {
+            val c = item.jsonObject
+            val name = (c["name"] as JsonPrimitive).content
+            val plan = Plan.decode(c["plan"]!!.jsonObject)
+            (c["track"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.let { assertEquals(name, it.content, words(plan)) }
+            if (c.containsKey("summary")) {
+                val want = (c["summary"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content
+                assertEquals("$name: the summary", want, plan.trackSummary())
+            }
+        }
     }
 
     private fun repositoryFile(relative: String): String {

@@ -14,6 +14,9 @@ package com.farcooler.model
 /** How long a theme sits with no lane and nothing moving before it reads as quiet: a day (the owner's ruling D3). */
 const val PLAN_QUIET_AFTER_MS = 24L * 3_600_000
 
+/** The working lane that has sat longest in one state, named beside lanes that are moving. */
+data class PlanTrackStalled(val lane: String, val since: Long)
+
 /** A lane moving a theme, as the track line names it. */
 data class PlanTrackLane(val name: String, val state: LaneState, val fixRounds: Int)
 
@@ -21,10 +24,13 @@ data class PlanTrackLane(val name: String, val state: LaneState, val fixRounds: 
 sealed interface PlanTrack {
     /** Past its token budget. */
     data class OverBudget(val budget: PlanBudget) : PlanTrack
-    /** A live lane has sat in one state for over an hour. */
+    /** Every lane working it has sat in one state for over an hour: the one that has sat longest is named. */
     data class Stuck(val lane: String, val since: Long) : PlanTrack
-    /** At least one lane is building, in review, fixing or landing it. */
-    data class Moving(val lanes: List<PlanTrackLane>) : PlanTrack
+    /**
+     * At least one lane is building, in review, fixing or landing it, and is still moving. A lane that has sat over an
+     * hour beside them is named after ([stalled]): the others are moving, and the line says so first.
+     */
+    data class Moving(val lanes: List<PlanTrackLane>, val stalled: PlanTrackStalled? = null) : PlanTrack
     /** No lane is working it and one is queued for it. */
     data class Queued(val rank: Int?) : PlanTrack
     /** Open cards, no lane, and nothing moved for a day or more. */
@@ -42,12 +48,18 @@ sealed interface PlanTrack {
     val isQuiet: Boolean get() = this is Quiet
 }
 
-/** When [theme] last moved: the newest of its story, the runner's word and its lanes (a dropped lane is gone). */
+/**
+ * When [theme] last moved: the newest of its story, the runner's word, its lanes (a dropped lane is gone) and its
+ * rulings, made or settled.
+ */
 fun Plan.lastMoved(theme: PlanTheme): Long {
     val tasks = theme.cards.map { it.task }.toSet()
     var at = maxOf(theme.storyAt, theme.lastMovedAt ?: 0L)
     for (lane in lanes) {
         if (lane.state != LaneState.DROPPED && lane.cards.any { it.task in tasks }) at = maxOf(at, lane.stateSince)
+    }
+    for (ruling in rulings) {
+        if (ruling.themeId == theme.id) at = maxOf(at, ruling.createdAt, ruling.settledAt ?: 0L)
     }
     return at
 }
@@ -59,8 +71,16 @@ fun Plan.track(theme: PlanTheme): PlanTrack {
     PlanCostWords.overBudget(theme)?.let { return PlanTrack.OverBudget(it) }
     val mine = lanesIn(theme)
     val working = mine.filter { it.state.isLive && it.state != LaneState.QUEUED }
-    working.firstOrNull { it.stale }?.let { return PlanTrack.Stuck(it.name, it.stateSince) }
-    if (working.isNotEmpty()) return PlanTrack.Moving(working.map { PlanTrackLane(it.name, it.state, it.fixRounds) })
+    // The lane stalled longest, not the first in plan order; it stands alone only when nothing else is moving (an hour
+    // is routine for a build, so it never hides the lanes that are).
+    val stalled = working.filter { it.stale }.minByOrNull { it.stateSince }
+    if (stalled != null && working.all { it.stale }) return PlanTrack.Stuck(stalled.name, stalled.stateSince)
+    if (working.isNotEmpty()) {
+        return PlanTrack.Moving(
+            working.map { PlanTrackLane(it.name, it.state, it.fixRounds) },
+            stalled?.let { PlanTrackStalled(it.name, it.stateSince) },
+        )
+    }
     val queued = mine.filter { it.state == LaneState.QUEUED }
     if (queued.isNotEmpty()) return PlanTrack.Queued(queued.mapNotNull { it.planRank }.minOrNull())
     val total = PlanWords.total(theme.counts)
@@ -73,8 +93,10 @@ fun Plan.track(theme: PlanTheme): PlanTrack {
 /** "3 waiting on you · 4 moving · 1 quiet": the Themes section's one line, or null when none of it applies. */
 fun Plan.trackSummary(): String? {
     val shown = shownThemes
-    val asking = shown.count { it.ownerAsk.isNotEmpty() && it.state != "done" }
-    val tracks = shown.filter { it.state == "active" }.map { track(it) }
+    // Only active themes: a paused theme's ask is inside the closed fold, and Needs You lists it.
+    val active = shown.filter { it.state == "active" }
+    val asking = active.count { it.ownerAsk.isNotEmpty() }
+    val tracks = active.map { track(it) }
     val parts = listOf(asking to "waiting on you", tracks.count { it.isMoving } to "moving", tracks.count { it.isQuiet } to "quiet")
         .filter { it.first > 0 }.map { "${it.first} ${it.second}" }
     return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
@@ -83,14 +105,12 @@ fun Plan.trackSummary(): String? {
 /** "2 lanes moving", or "fix-gestures is fixing, round 1": a lane named when one is the whole story. */
 fun PlanWords.track(track: PlanTrack, now: Long): String = when (track) {
     is PlanTrack.OverBudget -> PlanCostWords.budgetLine(track.budget)
-    is PlanTrack.Stuck -> {
-        val minutes = maxOf(0L, now - track.since) / 60_000
-        if (minutes < 120) "${track.lane}: no move in an hour" else "${track.lane}: no move in ${minutes / 60} h"
-    }
+    is PlanTrack.Stuck -> "${track.lane}: ${noMove(track.since, now)}"
     is PlanTrack.Moving -> {
+        val tail = track.stalled?.let { " · ${it.lane} ${noMove(it.since, now)}" } ?: ""
         val lane = track.lanes.singleOrNull()
         if (lane == null) {
-            "${track.lanes.size} lanes moving"
+            "${track.lanes.size} lanes moving$tail"
         } else {
             val verb = when (lane.state) {
                 LaneState.BUILDING -> "building"
@@ -99,7 +119,7 @@ fun PlanWords.track(track: PlanTrack, now: Long): String = when (track) {
                 LaneState.LANDING -> "landing"
                 else -> "moving"
             }
-            "${lane.name} is $verb"
+            "${lane.name} is $verb$tail"
         }
     }
     is PlanTrack.Queued -> track.rank?.let { "Queued, ${ordinal(it)} up" } ?: "Queued"
@@ -111,6 +131,12 @@ fun PlanWords.track(track: PlanTrack, now: Long): String = when (track) {
     PlanTrack.AllDone -> "Every card is done"
     PlanTrack.Paused -> "Paused"
     PlanTrack.Done -> "Done"
+}
+
+/** "no move in an hour", "no move in 3 h". */
+private fun noMove(since: Long, now: Long): String {
+    val minutes = maxOf(0L, now - since) / 60_000
+    return if (minutes < 120) "no move in an hour" else "no move in ${minutes / 60} h"
 }
 
 /** The same for TalkBack: a middle dot isn't read well. */

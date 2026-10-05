@@ -1,0 +1,2748 @@
+{
+ "about": "Cases both PlanThemeTrackTests (Swift) and PlanTrackTest (Kotlin) read: a plan, the first theme's track line (when 'track' is a string) and the Themes summary (when 'summary' is present; null means none). Edit this file, not the tests.",
+ "cases": [
+  {
+   "name": "one lane building",
+   "plan": {
+    "cards": [],
+    "lanes": [
+     {
+      "agents": [],
+      "branch": "skill-323",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-skill-323",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "skill-323",
+      "plan_rank": null,
+      "reason": "",
+      "short": "skill-323",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "building",
+      "state_since": 1799999400000,
+      "train": null,
+      "worktree_path": ""
+     }
+    ],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 0
+     }
+    ]
+   },
+   "track": "skill-323 is building"
+  },
+  {
+   "name": "one lane in review",
+   "plan": {
+    "cards": [],
+    "lanes": [
+     {
+      "agents": [],
+      "branch": "a",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-a",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "a",
+      "plan_rank": null,
+      "reason": "",
+      "short": "a",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "review",
+      "state_since": 1799999400000,
+      "train": null,
+      "worktree_path": ""
+     }
+    ],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 0
+     }
+    ]
+   },
+   "track": "a is in review"
+  },
+  {
+   "name": "fixing, round 1",
+   "plan": {
+    "cards": [],
+    "lanes": [
+     {
+      "agents": [],
+      "branch": "fix-gestures",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 1,
+      "harness": "claude",
+      "id": "lane-fix-gestures",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "fix-gestures",
+      "plan_rank": null,
+      "reason": "",
+      "short": "fix-gestures",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "fixing",
+      "state_since": 1799999400000,
+      "train": null,
+      "worktree_path": ""
+     }
+    ],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 0
+     }
+    ]
+   },
+   "track": "fix-gestures is fixing, round 1"
+  },
+  {
+   "name": "fixing, no round",
+   "plan": {
+    "cards": [],
+    "lanes": [
+     {
+      "agents": [],
+      "branch": "a",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-a",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "a",
+      "plan_rank": null,
+      "reason": "",
+      "short": "a",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "fixing",
+      "state_since": 1799999400000,
+      "train": null,
+      "worktree_path": ""
+     }
+    ],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 0
+     }
+    ]
+   },
+   "track": "a is fixing"
+  },
+  {
+   "name": "landing",
+   "plan": {
+    "cards": [],
+    "lanes": [
+     {
+      "agents": [],
+      "branch": "a",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-a",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "a",
+      "plan_rank": null,
+      "reason": "",
+      "short": "a",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "landing",
+      "state_since": 1799999400000,
+      "train": null,
+      "worktree_path": ""
+     }
+    ],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 0
+     }
+    ]
+   },
+   "track": "a is landing"
+  },
+  {
+   "name": "two lanes",
+   "plan": {
+    "cards": [],
+    "lanes": [
+     {
+      "agents": [],
+      "branch": "a",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-a",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "a",
+      "plan_rank": null,
+      "reason": "",
+      "short": "a",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "building",
+      "state_since": 1799999400000,
+      "train": null,
+      "worktree_path": ""
+     },
+     {
+      "agents": [],
+      "branch": "b",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-b",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "b",
+      "plan_rank": null,
+      "reason": "",
+      "short": "b",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "review",
+      "state_since": 1799999400000,
+      "train": null,
+      "worktree_path": ""
+     }
+    ],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 0
+     }
+    ]
+   },
+   "track": "2 lanes moving"
+  },
+  {
+   "name": "a lone stale lane stands alone, an hour",
+   "plan": {
+    "cards": [],
+    "lanes": [
+     {
+      "agents": [],
+      "branch": "s",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-s",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "s",
+      "plan_rank": null,
+      "reason": "",
+      "short": "s",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": true,
+      "state": "building",
+      "state_since": 1799995800000,
+      "train": null,
+      "worktree_path": ""
+     }
+    ],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 0
+     }
+    ]
+   },
+   "track": "s: no move in an hour"
+  },
+  {
+   "name": "a lone stale lane stands alone, hours",
+   "plan": {
+    "cards": [],
+    "lanes": [
+     {
+      "agents": [],
+      "branch": "s",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-s",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "s",
+      "plan_rank": null,
+      "reason": "",
+      "short": "s",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": true,
+      "state": "building",
+      "state_since": 1799989200000,
+      "train": null,
+      "worktree_path": ""
+     }
+    ],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 0
+     }
+    ]
+   },
+   "track": "s: no move in 3 h"
+  },
+  {
+   "name": "a stale lane among moving ones is named after them",
+   "plan": {
+    "cards": [],
+    "lanes": [
+     {
+      "agents": [],
+      "branch": "fine",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-fine",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "fine",
+      "plan_rank": null,
+      "reason": "",
+      "short": "fine",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "building",
+      "state_since": 1799999400000,
+      "train": null,
+      "worktree_path": ""
+     },
+     {
+      "agents": [],
+      "branch": "slow",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-slow",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "slow",
+      "plan_rank": null,
+      "reason": "",
+      "short": "slow",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": true,
+      "state": "review",
+      "state_since": 1799985600000,
+      "train": null,
+      "worktree_path": ""
+     },
+     {
+      "agents": [],
+      "branch": "ok",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-ok",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "ok",
+      "plan_rank": null,
+      "reason": "",
+      "short": "ok",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "fixing",
+      "state_since": 1799999400000,
+      "train": null,
+      "worktree_path": ""
+     }
+    ],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 0
+     }
+    ]
+   },
+   "track": "3 lanes moving \u00b7 slow no move in 4 h"
+  },
+  {
+   "name": "the lane stalled longest is the one named",
+   "plan": {
+    "cards": [],
+    "lanes": [
+     {
+      "agents": [],
+      "branch": "fine",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-fine",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "fine",
+      "plan_rank": null,
+      "reason": "",
+      "short": "fine",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "building",
+      "state_since": 1799999400000,
+      "train": null,
+      "worktree_path": ""
+     },
+     {
+      "agents": [],
+      "branch": "a",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-a",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "a",
+      "plan_rank": null,
+      "reason": "",
+      "short": "a",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": true,
+      "state": "review",
+      "state_since": 1799989200000,
+      "train": null,
+      "worktree_path": ""
+     },
+     {
+      "agents": [],
+      "branch": "b",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-b",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "b",
+      "plan_rank": null,
+      "reason": "",
+      "short": "b",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": true,
+      "state": "review",
+      "state_since": 1799982000000,
+      "train": null,
+      "worktree_path": ""
+     }
+    ],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 0
+     }
+    ]
+   },
+   "track": "3 lanes moving \u00b7 b no move in 5 h"
+  },
+  {
+   "name": "every working lane stale: stuck, longest named",
+   "plan": {
+    "cards": [],
+    "lanes": [
+     {
+      "agents": [],
+      "branch": "a",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-a",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "a",
+      "plan_rank": null,
+      "reason": "",
+      "short": "a",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": true,
+      "state": "review",
+      "state_since": 1799989200000,
+      "train": null,
+      "worktree_path": ""
+     },
+     {
+      "agents": [],
+      "branch": "b",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-b",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "b",
+      "plan_rank": null,
+      "reason": "",
+      "short": "b",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": true,
+      "state": "review",
+      "state_since": 1799982000000,
+      "train": null,
+      "worktree_path": ""
+     }
+    ],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 0
+     }
+    ]
+   },
+   "track": "b: no move in 5 h"
+  },
+  {
+   "name": "two lanes, one stale, an hour",
+   "plan": {
+    "cards": [],
+    "lanes": [
+     {
+      "agents": [],
+      "branch": "a",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-a",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "a",
+      "plan_rank": null,
+      "reason": "",
+      "short": "a",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "building",
+      "state_since": 1799999400000,
+      "train": null,
+      "worktree_path": ""
+     },
+     {
+      "agents": [],
+      "branch": "b",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-b",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "b",
+      "plan_rank": null,
+      "reason": "",
+      "short": "b",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": true,
+      "state": "review",
+      "state_since": 1799994600000,
+      "train": null,
+      "worktree_path": ""
+     }
+    ],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 0
+     }
+    ]
+   },
+   "track": "2 lanes moving \u00b7 b no move in an hour"
+  },
+  {
+   "name": "queued first",
+   "plan": {
+    "cards": [],
+    "lanes": [
+     {
+      "agents": [],
+      "branch": "a",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-a",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "a",
+      "plan_rank": 1,
+      "reason": "",
+      "short": "a",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "queued",
+      "state_since": 1799999400000,
+      "train": null,
+      "worktree_path": ""
+     }
+    ],
+    "now_ms": 1800000000000,
+    "order": [
+     "lane-a"
+    ],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 0
+     }
+    ]
+   },
+   "track": "Queued, 1st up"
+  },
+  {
+   "name": "queued best rank",
+   "plan": {
+    "cards": [],
+    "lanes": [
+     {
+      "agents": [],
+      "branch": "a",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-a",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "a",
+      "plan_rank": 3,
+      "reason": "",
+      "short": "a",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "queued",
+      "state_since": 1799999400000,
+      "train": null,
+      "worktree_path": ""
+     },
+     {
+      "agents": [],
+      "branch": "b",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-b",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "b",
+      "plan_rank": 2,
+      "reason": "",
+      "short": "b",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "queued",
+      "state_since": 1799999400000,
+      "train": null,
+      "worktree_path": ""
+     }
+    ],
+    "now_ms": 1800000000000,
+    "order": [
+     "lane-a",
+     "lane-b"
+    ],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 0
+     }
+    ]
+   },
+   "track": "Queued, 2nd up"
+  },
+  {
+   "name": "queued no rank",
+   "plan": {
+    "cards": [],
+    "lanes": [
+     {
+      "agents": [],
+      "branch": "a",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-a",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "a",
+      "plan_rank": null,
+      "reason": "",
+      "short": "a",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "queued",
+      "state_since": 1799999400000,
+      "train": null,
+      "worktree_path": ""
+     }
+    ],
+    "now_ms": 1800000000000,
+    "order": [
+     "lane-a"
+    ],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 0
+     }
+    ]
+   },
+   "track": "Queued"
+  },
+  {
+   "name": "a working lane beats a queued one",
+   "plan": {
+    "cards": [],
+    "lanes": [
+     {
+      "agents": [],
+      "branch": "a",
+      "cards": [
+       {
+        "key": "c2",
+        "slice": "",
+        "task": "c2"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-a",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "a",
+      "plan_rank": 1,
+      "reason": "",
+      "short": "a",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "queued",
+      "state_since": 1799999400000,
+      "train": null,
+      "worktree_path": ""
+     },
+     {
+      "agents": [],
+      "branch": "b",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-b",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "b",
+      "plan_rank": null,
+      "reason": "",
+      "short": "b",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "building",
+      "state_since": 1799999400000,
+      "train": null,
+      "worktree_path": ""
+     }
+    ],
+    "now_ms": 1800000000000,
+    "order": [
+     "lane-a"
+    ],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 0
+     }
+    ]
+   },
+   "track": "b is building"
+  },
+  {
+   "name": "quiet three days",
+   "plan": {
+    "cards": [],
+    "lanes": [],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 1799737200000
+     }
+    ]
+   },
+   "track": "No lane \u00b7 quiet for 3 days"
+  },
+  {
+   "name": "quiet one day",
+   "plan": {
+    "cards": [],
+    "lanes": [],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 1799910000000
+     }
+    ]
+   },
+   "track": "No lane \u00b7 quiet for 1 day"
+  },
+  {
+   "name": "quiet at exactly 24 h",
+   "plan": {
+    "cards": [],
+    "lanes": [],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 1799913600000
+     }
+    ]
+   },
+   "track": "No lane \u00b7 quiet for 1 day"
+  },
+  {
+   "name": "idle inside the day",
+   "plan": {
+    "cards": [],
+    "lanes": [],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 1799917200000
+     }
+    ]
+   },
+   "track": "No lane yet"
+  },
+  {
+   "name": "untouched is idle",
+   "plan": {
+    "cards": [],
+    "lanes": [],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 0
+     }
+    ]
+   },
+   "track": "No lane yet"
+  },
+  {
+   "name": "the runner's last_moved_at keeps it awake",
+   "plan": {
+    "cards": [],
+    "lanes": [],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "last_moved_at": 1799996400000,
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 1799568000000
+     }
+    ]
+   },
+   "track": "No lane yet"
+  },
+  {
+   "name": "a ruling made lately keeps it awake",
+   "plan": {
+    "cards": [],
+    "lanes": [],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [
+     {
+      "actor": "manager",
+      "cards": [],
+      "created_at": 1799996400000,
+      "decision": "d",
+      "id": "r",
+      "note": "",
+      "number": 1,
+      "reversal": "r",
+      "short": "R-1",
+      "state": "standing",
+      "theme": "T",
+      "theme_id": "t",
+      "why": "w"
+     }
+    ],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 1799568000000
+     }
+    ]
+   },
+   "track": "No lane yet"
+  },
+  {
+   "name": "a ruling settled lately keeps it awake",
+   "plan": {
+    "cards": [],
+    "lanes": [],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [
+     {
+      "actor": "manager",
+      "cards": [],
+      "created_at": 1799654400000,
+      "decision": "d",
+      "id": "r",
+      "note": "",
+      "number": 1,
+      "reversal": "r",
+      "settled_at": 1799996400000,
+      "short": "R-1",
+      "state": "confirmed",
+      "theme": "T",
+      "theme_id": "t",
+      "why": "w"
+     }
+    ],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 1799568000000
+     }
+    ]
+   },
+   "track": "No lane yet"
+  },
+  {
+   "name": "another theme's ruling does not",
+   "plan": {
+    "cards": [],
+    "lanes": [],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [
+     {
+      "actor": "manager",
+      "cards": [],
+      "created_at": 1799996400000,
+      "decision": "d",
+      "id": "r",
+      "note": "",
+      "number": 1,
+      "reversal": "r",
+      "short": "R-1",
+      "state": "standing",
+      "theme": "T",
+      "theme_id": "other",
+      "why": "w"
+     }
+    ],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 1799568000000
+     }
+    ]
+   },
+   "track": "No lane \u00b7 quiet for 5 days"
+  },
+  {
+   "name": "a dropped lane does not keep it awake",
+   "plan": {
+    "cards": [],
+    "lanes": [
+     {
+      "agents": [],
+      "branch": "a",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-a",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "a",
+      "plan_rank": null,
+      "reason": "",
+      "short": "a",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "dropped",
+      "state_since": 1799996400000,
+      "train": null,
+      "worktree_path": ""
+     }
+    ],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 1799568000000
+     }
+    ]
+   },
+   "track": "No lane \u00b7 quiet for 5 days"
+  },
+  {
+   "name": "a landed lane does",
+   "plan": {
+    "cards": [],
+    "lanes": [
+     {
+      "agents": [],
+      "branch": "a",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-a",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "a",
+      "plan_rank": null,
+      "reason": "",
+      "short": "a",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "landed",
+      "state_since": 1799996400000,
+      "train": null,
+      "worktree_path": ""
+     }
+    ],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 1799568000000
+     }
+    ]
+   },
+   "track": "No lane yet"
+  },
+  {
+   "name": "every card done",
+   "plan": {
+    "cards": [],
+    "lanes": [],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 2,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 0
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 0
+     }
+    ]
+   },
+   "track": "Every card is done"
+  },
+  {
+   "name": "canceled cards count on neither side",
+   "plan": {
+    "cards": [],
+    "lanes": [],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 3,
+       "done": 2,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 0
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 0
+     }
+    ]
+   },
+   "track": "Every card is done"
+  },
+  {
+   "name": "no cards is not done",
+   "plan": {
+    "cards": [],
+    "lanes": [],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 0
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 0
+     }
+    ]
+   },
+   "track": "No lane yet"
+  },
+  {
+   "name": "paused",
+   "plan": {
+    "cards": [],
+    "lanes": [
+     {
+      "agents": [],
+      "branch": "a",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-a",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "a",
+      "plan_rank": null,
+      "reason": "",
+      "short": "a",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "building",
+      "state_since": 1799999400000,
+      "train": null,
+      "worktree_path": ""
+     }
+    ],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "paused",
+      "story": "",
+      "story_at": 0
+     }
+    ]
+   },
+   "track": "Paused"
+  },
+  {
+   "name": "done",
+   "plan": {
+    "cards": [],
+    "lanes": [
+     {
+      "agents": [],
+      "branch": "a",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-a",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "a",
+      "plan_rank": null,
+      "reason": "",
+      "short": "a",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "building",
+      "state_since": 1799999400000,
+      "train": null,
+      "worktree_path": ""
+     }
+    ],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "done",
+      "story": "",
+      "story_at": 0
+     }
+    ]
+   },
+   "track": "Done"
+  },
+  {
+   "name": "over budget wins over moving",
+   "plan": {
+    "cards": [],
+    "lanes": [
+     {
+      "agents": [],
+      "branch": "a",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-a",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "a",
+      "plan_rank": null,
+      "reason": "",
+      "short": "a",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "building",
+      "state_since": 1799999400000,
+      "train": null,
+      "worktree_path": ""
+     }
+    ],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "budget_tokens": 100,
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "spend": {
+       "input_tokens": 600,
+       "runs": 1,
+       "unmeasured_agents": 0
+      },
+      "state": "active",
+      "story": "",
+      "story_at": 0
+     }
+    ]
+   },
+   "track": "Over budget: 600 of 100 tokens"
+  },
+  {
+   "name": "within budget says nothing of it",
+   "plan": {
+    "cards": [],
+    "lanes": [
+     {
+      "agents": [],
+      "branch": "a",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-a",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "a",
+      "plan_rank": null,
+      "reason": "",
+      "short": "a",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "building",
+      "state_since": 1799999400000,
+      "train": null,
+      "worktree_path": ""
+     }
+    ],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "budget_tokens": 1000,
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "spend": {
+       "input_tokens": 600,
+       "runs": 1,
+       "unmeasured_agents": 0
+      },
+      "state": "active",
+      "story": "",
+      "story_at": 0
+     }
+    ]
+   },
+   "track": "a is building"
+  },
+  {
+   "name": "summary: asks, moving, quiet; paused and done asks left out",
+   "plan": {
+    "cards": [],
+    "lanes": [
+     {
+      "agents": [],
+      "branch": "w",
+      "cards": [
+       {
+        "key": "c1",
+        "slice": "",
+        "task": "c1"
+       }
+      ],
+      "fix_rounds": 0,
+      "harness": "claude",
+      "id": "lane-w",
+      "landed_sha": null,
+      "model": "sonnet",
+      "name": "w",
+      "plan_rank": null,
+      "reason": "",
+      "short": "w",
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "building",
+      "state_since": 1799999400000,
+      "train": null,
+      "worktree_path": ""
+     }
+    ],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "A",
+      "name": "A",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "?",
+      "short": "A",
+      "state": "active",
+      "story": "",
+      "story_at": 1799568000000
+     },
+     {
+      "cards": [
+       {
+        "key": "c3",
+        "task": "c3"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "B",
+      "name": "B",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "B",
+      "state": "active",
+      "story": "",
+      "story_at": 1799568000000
+     },
+     {
+      "cards": [
+       {
+        "key": "c4",
+        "task": "c4"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "C",
+      "name": "C",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "?",
+      "short": "C",
+      "state": "active",
+      "story": "",
+      "story_at": 1799568000000
+     },
+     {
+      "cards": [
+       {
+        "key": "c5",
+        "task": "c5"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "D",
+      "name": "D",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "?",
+      "short": "D",
+      "state": "paused",
+      "story": "",
+      "story_at": 0
+     },
+     {
+      "cards": [
+       {
+        "key": "c6",
+        "task": "c6"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 1
+      },
+      "id": "E",
+      "name": "E",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "?",
+      "short": "E",
+      "state": "done",
+      "story": "",
+      "story_at": 0
+     }
+    ]
+   },
+   "summary": "2 waiting on you \u00b7 1 moving \u00b7 2 quiet"
+  },
+  {
+   "name": "summary: nothing to say",
+   "plan": {
+    "cards": [],
+    "lanes": [],
+    "now_ms": 1800000000000,
+    "order": [],
+    "rulings": [],
+    "themes": [
+     {
+      "cards": [
+       {
+        "key": "c1",
+        "task": "c1"
+       },
+       {
+        "key": "c2",
+        "task": "c2"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "cancelled": 0,
+       "done": 2,
+       "in_progress": 0,
+       "in_review": 0,
+       "needs_decision": 0,
+       "todo": 0
+      },
+      "id": "t",
+      "name": "T",
+      "next": "",
+      "ordinal": 0,
+      "outcome": "",
+      "owner_ask": "",
+      "short": "t",
+      "state": "active",
+      "story": "",
+      "story_at": 0
+     }
+    ]
+   },
+   "summary": null,
+   "track": "Every card is done"
+  }
+ ]
+}
