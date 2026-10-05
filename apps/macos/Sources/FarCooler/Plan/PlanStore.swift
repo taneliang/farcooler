@@ -63,6 +63,8 @@ final class PlanStore: ObservableObject {
     @Published var pages: [BoardPage] = []
     /// Whether the pages have been read at least once.
     @Published var pagesRead = false
+    /// This app's sentence for a pages read that didn't come back.
+    @Published var pagesTrouble: String?
     /// The slots hidden on this Mac with Hide Page: the owner's own filter,
     /// never sent to the runner. Kept per board, as `shown` is.
     @Published var hiddenPages: Set<String> {

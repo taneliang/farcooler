@@ -214,6 +214,32 @@ struct PlanPagesTests {
         #expect(ContentView.askItem(.ask("t-2"), in: items) == nil, "a review isn't the question")
     }
 
+    @Test("A hidden slot the runner no longer has stops being hidden")
+    func hiddenSlotsArePruned() async throws {
+        let store = try await Self.store(defaults: PlanViewTests.defaults())
+        store.plan.hide("spend")
+        store.plan.hide("retired")
+        await store.plan.reload()
+        #expect(store.plan.hiddenPages == ["spend"])
+    }
+
+    @Test("A pages read that fails says so, with Try Again, rather than Page Not Found")
+    func aFailedReadSaysSo() async throws {
+        let store = try await Self.store(defaults: PlanViewTests.defaults())
+        let answer = store.client.commandRunnerForTesting
+        store.client.commandRunnerForTesting = { args in
+            if args.starts(with: ["page", "list"]) { return (nil, "error: the runner went away") }
+            return await answer!(args)
+        }
+        await store.plan.reload()
+        #expect(store.plan.pagesTrouble == "Far Cooler couldn’t read this board’s pages.")
+        let drawn = await Self.drawnPage(store, .page("spend"))
+        #expect(drawn.contains("plan-pages-unavailable") && !drawn.contains("plan-page-not-found"), "\(drawn)")
+        store.client.commandRunnerForTesting = answer
+        await store.plan.reload()
+        #expect(store.plan.pagesTrouble == nil && store.plan.page("spend") != nil)
+    }
+
     @Test("A page is kept across a relaunch, and its crumb is its title")
     func pageKept() {
         let page = ContentView.Selection.workspace(host: "h", workspace: "w", focus: .plan(.page("train")))

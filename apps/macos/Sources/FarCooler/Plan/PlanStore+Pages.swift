@@ -24,8 +24,18 @@ extension PlanStore {
             return
         }
         let (data, _) = await client.pageList(repository: repositoryID, workspace: workspace.boardWorkspace)
-        guard let data, let list = try? BoardPageList.decode(data) else { return }
+        guard let data, let list = try? BoardPageList.decode(data) else {
+            // Said, not left as a page that's merely not found (review L5);
+            // a read a closing view cancelled says nothing.
+            if !Task.isCancelled { pagesTrouble = PageWords.couldntRead }
+            return
+        }
+        pagesTrouble = nil
         if list.pages != pages { pages = list.pages }
+        // A slot hidden here and since removed stops being hidden, so a page
+        // published later under the same name isn't born hidden (review L4).
+        let pruned = hiddenPages.intersection(list.pages.map(\.slot))
+        if pruned != hiddenPages { hiddenPages = pruned }
         pagesRead = true
     }
 

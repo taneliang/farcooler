@@ -46,6 +46,14 @@ struct PlanPageView: View {
             case .page(let slot):
                 if let found = plan.page(slot) {
                     PlanOrchestratorPage(page: found, world: context.world(plan), context: context)
+                } else if let trouble = plan.pagesTrouble, !plan.reading {
+                    ContentUnavailableView {
+                        Label(trouble, systemImage: "doc.text")
+                    } actions: {
+                        Button("Try Again") { Task { await plan.reload() } }
+                    }
+                    .background(WorkspaceStyle.paper)
+                    .identified("plan-pages-unavailable")
                 } else if plan.pagesRead || !plan.pagesAvailable {
                     // Removed, or never published: said once, never a spinner.
                     ContentUnavailableView("Page Not Found", systemImage: "doc.text")
