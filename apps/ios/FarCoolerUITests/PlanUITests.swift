@@ -22,6 +22,15 @@ final class PlanUITests: XCTestCase {
         return root.appendingPathComponent("test/fixtures/plan-seeded.json").path
     }
 
+    /// `test/fixtures/plan-cost-seeded.json` (ov-307): `farcooler plan --json` from a
+    /// scratch daemon whose theme and lane have budgets, whose agents have spent
+    /// across days, and whose finished cards were worked by two harnesses.
+    private static var costFixture: String {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { root.deleteLastPathComponent() }
+        return root.appendingPathComponent("test/fixtures/plan-cost-seeded.json").path
+    }
+
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
         app.descendants(matching: .any)[id]
     }
@@ -35,9 +44,9 @@ final class PlanUITests: XCTestCase {
 
     /// Billing's board, on a runner that advertises `board_plan` unless
     /// `extra` says otherwise.
-    private func openBoard(_ extra: [String] = ["-phone-plan"]) -> XCUIApplication {
+    private func openBoard(_ extra: [String] = ["-phone-plan"], fixture: String = PlanUITests.fixture) -> XCUIApplication {
         let app = XCUIApplication.phoneHarness(
-            ["-phone-empty-inbox", "-phone-board-reads", "-phone-plan-file", Self.fixture] + extra)
+            ["-phone-empty-inbox", "-phone-board-reads", "-phone-plan-file", fixture] + extra)
         let billing = app.buttons["workspace-row-Billing"]
         XCTAssertTrue(billing.waitForExistence(timeout: 30), "no Billing row")
         billing.tap()
@@ -92,6 +101,38 @@ final class PlanUITests: XCTestCase {
         XCTAssertTrue(element(app, "board-section-needs_decision").waitForExistence(timeout: 10), "tasks didn't return")
         XCTAssertTrue(element(app, "board-unread").waitForExistence(timeout: 10), "Unread didn't come back with the tasks")
         XCTAssertFalse(element(app, "plan-next-up").exists)
+    }
+
+    /// Cost (ov-307), from the CLI's own bytes: the theme past its budget says so in
+    /// the overview, the Cost section holds the week and the comparison with n and
+    /// the pair held back, and the theme's page draws its spend, budget and trend.
+    func testCostShowsOnThePlanAndTheThemePage() {
+        let app = openBoard(fixture: Self.costFixture)
+        showPlan(app)
+        XCTAssertTrue(element(app, "plan-themes").waitForExistence(timeout: 10), "no Themes: \(app.debugDescription)")
+        let over = app.descendants(matching: .any).matching(identifier: "plan-budget-over")
+        XCTAssertTrue(over.firstMatch.waitForExistence(timeout: 10), "no theme or lane over budget is flagged")
+        for _ in 0..<6 where !element(app, "plan-cost-header").isHittable { app.swipeUp() }
+        XCTAssertTrue(element(app, "plan-cost-header").exists, "no Cost section")
+        // By what is said, since a block that reads as one element has one label.
+        func said(_ words: String) -> Bool {
+            app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", words)).firstMatch.exists
+        }
+        XCTAssertTrue(said("Over budget"), "nothing says a theme or lane is over budget")
+        XCTAssertTrue(said("tokens in the last 7 days"), "no week: \(app.debugDescription)")
+        XCTAssertTrue(said("held back until three cards have finished"), "the pair with too few cards isn't said to be held back")
+        XCTAssertTrue(said("4 finished cards"), "no comparison row with its n")
+        keep(app, "plan-cost")
+        for _ in 0..<6 { app.swipeDown() }
+        let theme = element(app, "plan-theme-Invoices")
+        XCTAssertTrue(theme.waitForExistence(timeout: 10))
+        theme.tap()
+        XCTAssertTrue(element(app, "plan-theme-page").waitForExistence(timeout: 10))
+        for _ in 0..<4 where !element(app, "plan-theme-spend").isHittable { app.swipeUp() }
+        XCTAssertTrue(element(app, "plan-theme-spend").exists, "no Spend on the theme page")
+        XCTAssertTrue(element(app, "plan-trend").exists, "no trend")
+        XCTAssertTrue(said("Over budget. 4.9 million of 2 million tokens used."), "the theme page doesn't say it's over budget, in words")
+        keep(app, "plan-theme-spend")
     }
 
     /// A runner notice, as the harness takes one: a Darwin notification.

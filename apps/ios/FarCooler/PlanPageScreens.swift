@@ -192,6 +192,11 @@ struct PlanThemePage: View {
             PlanAnchoredPages(
                 pages: PageShelf.anchored(context.pages, to: theme.id, plan: plan), world: context.world,
                 onOpen: context.onOpen, onDestination: context.onDestination)
+            if PlanThemeSpend.hasSomething(theme) {
+                Section("Spend") {
+                    PlanThemeSpend(theme: theme, bodyFont: .body, secondaryFont: .footnote)
+                }
+            }
             let lanes = plan.lanes(in: theme)
             if !lanes.isEmpty {
                 Section("Lanes") {
@@ -372,6 +377,9 @@ struct PlanLanePage: View {
             Section("Spend") {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("\(PlanWords.spend(lane.spend)) · \(PlanWords.fixRounds(lane.fixRounds))")
+                    if let budget = PlanWords.budget(lane.spend, against: lane.budgetTokens) {
+                        PlanBudgetLine(budget: budget, font: .footnote)
+                    }
                     if lane.spend.totalTokens > 0, (lane.spend.costMicros ?? 0) > 0 {
                         Text(TaskUsageFormat.apiEquivalent).font(.footnote).foregroundStyle(.secondary)
                     }

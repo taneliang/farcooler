@@ -143,6 +143,14 @@ struct PlanBoardSections: View {
                     PlanHeader(title: "Themes", count: plan.shownThemes.count).accessibilityIdentifier("plan-themes")
                 }
             }
+            // Behind `board_cost`: a runner without it sends no cost (ov-307).
+            if let cost = plan.cost, cost.isWorthShowing {
+                Section {
+                    PlanCostBlock(cost: cost)
+                } header: {
+                    PlanHeader(title: "Cost", count: nil).accessibilityIdentifier("plan-cost-header")
+                }
+            }
             pagesSection(plan)
             let landed = plan.landedToday()
             if !landed.isEmpty {
@@ -251,7 +259,8 @@ enum PlanGlyph {
 
 /// One lane's row: its name and the theme it serves, then its reason or
 /// state. In Next Up its rank sits in the glyph column; elsewhere its state's
-/// glyph does, amber only when it's stale or waiting on you.
+/// glyph does, amber only when it's stale, waiting on you or over its token
+/// budget (ov-307).
 struct PlanLaneRow: View {
     let lane: PlanLane
     let theme: PlanTheme?
@@ -264,7 +273,7 @@ struct PlanLaneRow: View {
 
     /// Stale, or waiting on you: the only lanes drawn in color.
     private var warning: String? {
-        waitsOnOwner ? "Needs you" : PlanWords.stale(lane, now: now)
+        waitsOnOwner ? "Needs you" : PlanWords.stale(lane, now: now) ?? PlanWords.overBudget(lane)
     }
 
     var body: some View {
@@ -386,6 +395,10 @@ struct PlanThemeRow: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     if !theme.ownerAsk.isEmpty { PlanAsk(text: theme.ownerAsk, lines: 2) }
+                    // Past its token budget (ov-307): amber, with its words.
+                    if let over = PlanWords.overBudget(theme) {
+                        PlanBudgetLine(budget: over, font: .footnote).padding(.top, PaneMetrics.tight)
+                    }
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.forward")
