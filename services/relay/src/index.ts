@@ -13,6 +13,7 @@
 /// app bundle anyone can unzip — is not a secret.
 
 import { record, type Metrics } from './analytics'
+import { leadPlan, storePlan, type PlanBoard } from './plan-glance'
 import { pulseTurns } from './pulse-turns'
 import { verifySession } from './workos'
 import {
@@ -877,6 +878,8 @@ interface Notification {
   /// `false` on an agent notice whose task notice carries the alert: card
   /// only, no banner. Absent or anything else alerts as before.
   alert?: unknown
+  /// On a count notice (ov-310): each board with a plan. See `plan-glance.ts`.
+  plan?: unknown
 }
 
 interface Device {
@@ -1073,6 +1076,7 @@ async function notify(request: Request, env: Env): Promise<Response> {
         .run()
     }
   }
+  await storePlan(env.DB, daemon, install, body.plan)
 
   const devices = await env.DB.prepare(
     `SELECT platform, push_token, environment, live_activity_start_token, notify_on_done,
@@ -1370,7 +1374,9 @@ async function pulse(request: Request, env: Env): Promise<Response> {
     const held = newest.get(runner)
     if (!held || row.last_seen_at > held.last_seen_at) newest.set(runner, row)
   }
+  const plan = await leadPlan(env.DB, device.account_id, now)
   return json({
+    ...(plan ? { plan } : {}),
     turns: await pulseTurns(env.DB, device.account_id),
     runners: [...newest.values()]
       .sort((a, b) => a.label.localeCompare(b.label))
@@ -1626,7 +1632,7 @@ const CLAIM_MEMORY_MS = 60 * 60 * 1000
 /// the work is proportional to what is actually running. The one cron trigger
 /// (`sweepQuiet`) reaches it only through `readFleet`, for accounts with a card
 /// up.
-const ROW_RETENTION_MS = 24 * 60 * 60 * 1000
+export const ROW_RETENTION_MS = 24 * 60 * 60 * 1000
 
 /// How long a WORKING row keeps a LINE on the card before it collapses into
 /// `+N more`. Blocked and done rows keep theirs at any age: see `speaks`.
@@ -2625,7 +2631,7 @@ function fleetHeader(fleet: Fleet): string {
 /// belongs to a runner that ships separately from this worker, so a build that
 /// widened one of them could otherwise put this payload over the cap, where APNs
 /// does not truncate it but refuses it outright.
-function withFleet(state: ActivityState, fleet: Fleet): ActivityState {
+function withFleet(state: ActivityState, fleet: Fleet, plan: PlanBoard | null = null): ActivityState {
   state.blocked = fleet.blocked
   state.review = fleet.review
   // Only when a turn failed: an absent count is zero to an app that knows it,
@@ -2648,6 +2654,7 @@ function withFleet(state: ActivityState, fleet: Fleet): ActivityState {
   // characters (`heartbeat`), and eight of them can cost the card a row,
   // never the card. Past two the card counts rather than names anyway.
   if (fleet.quiet.length > 0) state.quiet = fleet.quiet.slice(0, 8)
+  state.plan = plan ?? undefined // ov-310; priced by the budget below, as `quiet` is
 
   const rows: ActivityRow[] = []
   for (const row of fleet.shown) {
@@ -2790,7 +2797,7 @@ async function pushActivity(
   // the byte budget prices it: it can cost the card a row, never the card.
   const ask = askOnCard(headline, now)
   if (ask) state.ask = ask
-  withFleet(state, fleet)
+  withFleet(state, fleet, await leadPlan(env.DB, daemon.account_id, now))
 
   // What separates the tiers is the alert, not whether a push goes out at all.
   // An activity push carrying an alert dictionary is PRESENTED — lock screen
@@ -3089,7 +3096,7 @@ async function refreshCard(
   // Before `withFleet`, as in `pushActivity`.
   const ask = askOnCard(headline, now)
   if (ask) state.ask = ask
-  withFleet(state, fleet)
+  withFleet(state, fleet, await leadPlan(env.DB, account, now))
 
   await deliverActivity(env, account, running.update_token, running.environment, {
     event: 'update',

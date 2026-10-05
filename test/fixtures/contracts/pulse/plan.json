@@ -1,0 +1,19 @@
+{
+  "plan": {
+    "workspace": "Main",
+    "needsYou": 2,
+    "now": [
+      {
+        "name": "mac-ux",
+        "state": "review"
+      },
+      {
+        "name": "ov-310",
+        "state": "building"
+      }
+    ],
+    "next": "mac-fu3"
+  },
+  "runners": [],
+  "turns": []
+}
