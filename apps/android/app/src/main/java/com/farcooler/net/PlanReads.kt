@@ -85,6 +85,22 @@ class PlanReads(
         }
     }
 
+    /**
+     * Show [ids] kept now (ov-333), before the runner's answer, as the Mac and the
+     * iPhone do: Keep is the owner's own mark and lands like read state. The read
+     * that follows makes it the runner's word again, or puts it back.
+     */
+    fun showKept(ids: Set<String>, workspaceId: String) {
+        val loaded = _states.value[workspaceId] as? PlanReadState.Loaded ?: return
+        val plan = loaded.plan
+        val moved = plan.rulings.map {
+            if (it.id in ids && it.isStanding) {
+                it.copy(state = com.farcooler.model.RulingState.CONFIRMED, settledBy = "user", settledAt = plan.nowMs)
+            } else it
+        }
+        set(workspaceId, PlanReadState.Loaded(plan.copy(rulings = moved)))
+    }
+
     /** A theme's or lane's record, for its page's timeline. One that doesn't come back leaves the page without; it doesn't wait on it. */
     suspend fun readRecord(page: PlanPage) {
         if (runnerCan() != true) return

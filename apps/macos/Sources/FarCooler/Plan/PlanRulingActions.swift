@@ -12,7 +12,8 @@ struct PlanRulingActions {
     /// Whether the workspace has an orchestrator running to ask.
     var canAsk = false
     /// Show the row actions without the pointer on the row: a capture of the
-    /// real window can't hover.
+    /// real window can't hover (`FARCOOLER_CAPTURE_RULING_ACTIONS`, set by the
+    /// capture script's caller).
     var alwaysShown = false
     var keep: (PlanRuling) -> Void = { _ in }
     var keepAll: () -> Void = {}
@@ -49,7 +50,7 @@ extension ContentView {
         return PlanRulingActions(
             canKeep: plan.canMarkRulings,
             canAsk: seat != nil,
-            alwaysShown: ProcessInfo.processInfo.arguments.contains("-plan-ruling-actions-shown"),
+            alwaysShown: ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_RULING_ACTIONS"] != nil,
             keep: { ruling in Task { await plan.keep(ruling) } },
             keepAll: { Task { await plan.keepAll() } },
             reverse: { ruling in

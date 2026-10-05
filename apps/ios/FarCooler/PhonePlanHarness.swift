@@ -32,7 +32,10 @@ import Foundation
 //   -phone-rulings        the runner also advertises `board_rulings` (ov-304), so the plan's
 //                         `rulings` draw as Decided For You. With `-phone-plan-file
 //                         test/fixtures/plan-rulings-seeded.json`: `farcooler plan --json` from a
-//                         scratch daemon given four rulings with `plan ruling add` and `set`
+//                         scratch daemon given four rulings with `plan ruling add` and `set`.
+//                         It also advertises `board_ruling_actions` (ov-333): `ruling.keep`
+//                         and `ruling.keep_all` mark the file's open rulings kept for the
+//                         rest of the run, and the next `plan.get` says so.
 //
 // Without any of these the runner is one from before the plan layer: no
 // `board_plan`, so the board has no control.
@@ -51,6 +54,26 @@ struct HarnessPlan {
 
     /// Whether the runner keeps rulings (`-phone-rulings`).
     static var rulingsAdvertised: Bool { CommandLine.arguments.contains("-phone-rulings") }
+
+    /// The rulings the owner kept this run, by id (`ruling.keep`, `ruling.keep_all`).
+    static var kept: Set<String> = []
+
+    /// `plan` with the rulings kept this run shown kept, as the runner's next
+    /// read would, by the user and now.
+    private static func keeping(_ plan: Any) -> Any {
+        guard !kept.isEmpty, var plan = plan as? [String: Any], var rulings = plan["rulings"] as? [[String: Any]]
+        else { return plan }
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        for index in rulings.indices where kept.contains(rulings[index]["id"] as? String ?? "")
+            && rulings[index]["state"] as? String == "standing"
+        {
+            rulings[index]["state"] = "confirmed"
+            rulings[index]["settled_by"] = "user"
+            rulings[index]["settled_at"] = now
+        }
+        plan["rulings"] = rulings
+        return plan
+    }
 
     /// Whether the runner keeps orchestrator pages (`-phone-pages`).
     static var pagesAdvertised: Bool {
@@ -151,7 +174,7 @@ struct HarnessPlan {
             }
             guard let board = args["workspace"] as? String, boards.contains(board), let plan = capture["plan"]
             else { throw ClientCore.CoreError.rejected("bad workspace", word: "invalid-argument") }
-            return try JSONSerialization.data(withJSONObject: Self.versioned(Self.measuring(plan)))
+            return try JSONSerialization.data(withJSONObject: Self.keeping(Self.versioned(Self.measuring(plan))))
         case "page.list":
             guard Self.pagesAdvertised else { return nil }
             if CommandLine.arguments.contains("-phone-pages-fails") {
@@ -160,6 +183,22 @@ struct HarnessPlan {
             guard let board = args["workspace"] as? String, boards.contains(board), let pages = capture["pages"]
             else { throw ClientCore.CoreError.rejected("bad workspace", word: "invalid-argument") }
             return try JSONSerialization.data(withJSONObject: Self.versioned(pages: Self.current(pages, plan: capture["plan"])))
+        case "ruling.keep", "ruling.keep_all":
+            guard Self.rulingsAdvertised, let plan = capture["plan"] as? [String: Any],
+                let rulings = plan["rulings"] as? [[String: Any]]
+            else { throw ClientCore.CoreError.rejected("no rulings", word: "capability-unsupported") }
+            if method == "ruling.keep" {
+                guard let id = args["ruling"] as? String, rulings.contains(where: { $0["id"] as? String == id }) else {
+                    throw ClientCore.CoreError.rejected("bad ruling", word: "not-found")
+                }
+                Self.kept.insert(id)
+            } else {
+                guard let board = args["workspace"] as? String, boards.contains(board) else {
+                    throw ClientCore.CoreError.rejected("bad workspace", word: "invalid-argument")
+                }
+                Self.kept.formUnion(rulings.compactMap { $0["id"] as? String })
+            }
+            return try JSONSerialization.data(withJSONObject: [:] as [String: Any])
         case "plan.events":
             let subject = (args["theme"] as? String) ?? (args["lane"] as? String)
             guard let subject, let records = capture["records"] as? [String: Any], let record = records[subject]

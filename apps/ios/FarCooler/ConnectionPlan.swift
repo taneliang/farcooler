@@ -36,6 +36,19 @@ final class PlanReads: ObservableObject {
         if states[workspace] != state { states[workspace] = state }
     }
 
+    /// Show `ids` kept now (ov-333), before the runner's answer, as the Mac does:
+    /// Keep is the owner's own mark and lands like read state. The read that
+    /// follows makes it the runner's word again, or puts it back.
+    func showKept(_ ids: Set<String>, in workspace: String) {
+        guard case .loaded(var plan)? = states[workspace] else { return }
+        for index in plan.rulings.indices where ids.contains(plan.rulings[index].id) && plan.rulings[index].isStanding {
+            plan.rulings[index].state = .confirmed
+            plan.rulings[index].settledBy = "user"
+            plan.rulings[index].settledAt = plan.nowMs
+        }
+        set(.loaded(plan), for: workspace)
+    }
+
     fileprivate func set(_ record: PlanRecord, for page: PhonePlanPage) {
         if records[page] != record { records[page] = record }
     }
@@ -66,6 +79,8 @@ extension Connection {
     var keepsPlan: Bool { knownBuild?.can(.boardPlan) == true }
     /// Whether it keeps rulings too (ov-304): its plan carries Decided For You.
     var keepsRulings: Bool { knownBuild?.can(.boardRulings) == true }
+    /// Whether it takes the owner's marks on a ruling (ov-333): Keep, Keep All.
+    var keepsRulingActions: Bool { knownBuild?.can(.boardRulingActions) == true }
 
     /// How long a read waits for the runner. A UI test shortens it
     /// (`-phone-plan-timeout`), so an unanswered read is seen to end.

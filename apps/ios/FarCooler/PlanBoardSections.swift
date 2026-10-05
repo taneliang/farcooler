@@ -33,6 +33,8 @@ struct PlanBoardHook {
     /// Whether this runner advertises `board_rulings` (ov-304): without it,
     /// no Decided For You.
     var keepsRulings = false
+    /// What the owner's Keep, Keep All, Reverse and Discuss do (ov-333).
+    var rulingActions = PhoneRulingActions()
 }
 
 /// The Tasks | Plan control, a segmented picker as Apple's own lists have it.
@@ -98,7 +100,7 @@ struct PlanBoardSections: View {
                 }
             }
             pagesSection(plan)
-            PlanRulingsSection(plan: plan, keeps: hook.keepsRulings)
+            PlanRulingsSection(plan: plan, keeps: hook.keepsRulings, actions: hook.rulingActions)
         } else {
             if !plan.nextUp.isEmpty {
                 Section {
@@ -168,7 +170,7 @@ struct PlanBoardSections: View {
             }
             // Last, as on the Mac: rulings ask nothing, and stand until the
             // owner says otherwise.
-            PlanRulingsSection(plan: plan, keeps: hook.keepsRulings)
+            PlanRulingsSection(plan: plan, keeps: hook.keepsRulings, actions: hook.rulingActions)
         }
     }
 }

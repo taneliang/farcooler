@@ -24,14 +24,14 @@ class PlanRulingsTest {
     fun `the fixture's rulings read standing first, with every part a row draws`() {
         val plan = Plan.decode(fixture)
         assertEquals(listOf("R-2", "R-1"), plan.rulings.map { it.short })
-        val standing = plan.standingRulings.single()
+        val standing = plan.openRulings.single()
         assertEquals("The inbox is amber.", standing.decision)
         assertEquals("It's the one attention color, so the inbox reads as needing you.", standing.why)
         assertEquals("One token; every surface follows.", standing.reversal)
         assertEquals(listOf("ov-1"), standing.cards.map { it.key })
         assertEquals("Visual language", standing.theme)
         assertNull(standing.settledAt)
-        val settled = plan.settledRulings.single()
+        val settled = plan.pastRulings.single()
         assertEquals(RulingState.CONFIRMED, settled.state)
         assertEquals("Keep it.", settled.note)
     }
@@ -47,7 +47,7 @@ class PlanRulingsTest {
         val plan = Plan.decode(fixture)
         assertEquals("ov-1 · Visual language", RulingWords.touches(plan.rulings[0]))
         assertNull(RulingWords.touches(plan.rulings[1]))
-        assertTrue(RulingWords.accessibility(plan.rulings[1]).endsWith("Confirmed"))
+        assertTrue(RulingWords.accessibility(plan.rulings[1]).endsWith("Kept"))
     }
 
     @Test

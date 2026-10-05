@@ -5,8 +5,9 @@ import XCTest
 /// plan --json` from a scratch daemon given four rulings with `plan ruling add`
 /// and `set`, so the bytes the phone decodes are the CLI's.
 ///
-/// Standing first, newest first, then the settled one; Copy Reference the
-/// only action; nothing on a runner without `board_rulings`.
+/// Only the open ones, newest first; the settled one folds into Past
+/// Decisions (ov-333). Keep and Keep All mark rulings kept through the runner;
+/// nothing on a runner without `board_rulings`.
 final class PlanRulingsUITests: XCTestCase {
     override func setUp() {
         continueAfterFailure = false
@@ -52,21 +53,64 @@ final class PlanRulingsUITests: XCTestCase {
         return target
     }
 
-    func testStandingRulingsComeFirstNewestFirst() {
+    func testOpenRulingsComeFirstNewestFirstAndTheRestFold() {
         let app = openPlan()
         XCTAssertTrue(reveal(app, "plan-rulings").exists, "no Decided For You")
         let newest = reveal(app, "plan-ruling-R-4")
         XCTAssertTrue(newest.exists)
         let next = element(app, "plan-ruling-R-3")
-        let settled = reveal(app, "plan-ruling-R-1")
-        XCTAssertTrue(next.exists && settled.exists)
+        XCTAssertTrue(next.exists)
         XCTAssertLessThan(newest.frame.minY, next.frame.minY, "newest first")
-        XCTAssertLessThan(next.frame.minY, settled.frame.minY, "standing before settled")
         XCTAssertTrue(newest.label.contains("Why:"), "the reason is read: \(newest.label)")
-        XCTAssertTrue(settled.label.hasSuffix("Confirmed"), settled.label)
+        XCTAssertFalse(element(app, "plan-ruling-R-1").exists, "a kept ruling is folded into Past Decisions")
+        let fold = reveal(app, "plan-rulings-past-header")
+        XCTAssertTrue(fold.exists, "no Past Decisions")
+        XCTAssertEqual(fold.value as? String, "Collapsed")
+        fold.tap()
+        let settled = reveal(app, "plan-ruling-R-1")
+        XCTAssertTrue(settled.exists)
+        XCTAssertTrue(settled.label.hasSuffix("Kept"), settled.label)
     }
 
-    func testCopyReferenceIsTheOnlyAction() {
+    /// A swipe offers Keep; keeping moves the ruling from Decided For You into
+    /// Past Decisions, and the runner was told.
+    func testKeepMovesARulingIntoPastDecisions() {
+        let app = openPlan()
+        let row = reveal(app, "plan-ruling-R-2")
+        row.swipeLeft()
+        let keep = app.buttons["Keep"].firstMatch
+        XCTAssertTrue(keep.waitForExistence(timeout: 5), "no Keep on the swipe")
+        keep.tap()
+        let gone = NSPredicate(format: "exists == false")
+        expectation(for: gone, evaluatedWith: element(app, "plan-ruling-R-2"))
+        waitForExpectations(timeout: 10)
+        let fold = reveal(app, "plan-rulings-past-header")
+        XCTAssertTrue(fold.exists)
+        fold.tap()
+        XCTAssertTrue(reveal(app, "plan-ruling-R-2").label.hasSuffix("Kept"))
+        XCTAssertTrue(element(app, "plan-ruling-R-4").exists, "the others are still open")
+    }
+
+    /// Keep All is in the section's header while there's more than one open,
+    /// and keeps every one: Decided For You is gone, and no count is left
+    /// behind.
+    func testKeepAllKeepsEveryOpenRuling() {
+        let app = openPlan()
+        let all = reveal(app, "plan-rulings-keep-all")
+        XCTAssertTrue(all.exists, "no Keep All")
+        all.tap()
+        let gone = NSPredicate(format: "exists == false")
+        expectation(for: gone, evaluatedWith: element(app, "plan-rulings"))
+        waitForExpectations(timeout: 10)
+        let fold = reveal(app, "plan-rulings-past-header")
+        XCTAssertTrue(fold.exists)
+        fold.tap()
+        for short in ["R-4", "R-3", "R-2", "R-1"] {
+            XCTAssertTrue(reveal(app, "plan-ruling-\(short)").label.hasSuffix("Kept"), short)
+        }
+    }
+
+    func testCopyReferenceIsStillOnAnOpenRuling() {
         let app = openPlan()
         let copy = reveal(app, "plan-ruling-R-3-copy")
         XCTAssertTrue(copy.exists, "no Copy Reference")
@@ -82,6 +126,7 @@ final class PlanRulingsUITests: XCTestCase {
         for _ in 0..<6 { app.swipeUp() }
         XCTAssertFalse(element(app, "plan-rulings").exists)
         XCTAssertFalse(element(app, "plan-ruling-R-4").exists)
+        XCTAssertFalse(element(app, "plan-rulings-past-header").exists)
     }
 
     /// Light and dark sheets. Opt-in, as PlanUITests' are:

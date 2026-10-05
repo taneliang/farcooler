@@ -33,6 +33,8 @@
 #   FARCOOLER_CAPTURE_WAIT    seconds a window settles before it's drawn (5)
 #   FARCOOLER_CAPTURE_WIDTH   the window's width in points (1360)
 #   FARCOOLER_CAPTURE_PEEK    set: the plan peeked over the chat, as ⌥⌘P does
+#   FARCOOLER_CAPTURE_RULING_ACTIONS  set: Keep, Reverse and Discuss drawn on each open
+#                             ruling, as when the pointer is on it (a capture can't hover)
 #   FARCOOLER_BIN             the CLI; unset, target/debug/farcooler and farcoolerd are built
 #   FARCOOLER_CAPTURE_APP_BIN the CLI the window runs, when it isn't FARCOOLER_BIN:
 #                             a wrapper that stalls draws a runner still connecting

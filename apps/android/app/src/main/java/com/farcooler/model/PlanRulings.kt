@@ -14,9 +14,12 @@ import kotlinx.serialization.json.longOrNull
 // twin of AgentKit's `PlanRulings.swift`. EXPERIMENTAL with the plan layer,
 // behind the runner's `board_rulings` capability.
 //
-// Nobody edits a ruling here. The owner confirms or reverses one by telling
-// the orchestrator, its only writer, so the one action is Copy reference:
-// "ruling R-12: The inbox is amber." Copy is Material's: sentence case.
+// A ruling is open until the owner acts (ov-333). Keep is the owner's own mark
+// and changes nothing in the plan; Reverse asks the orchestrator, which does
+// the work and marks the ruling reversed with the commit; Discuss starts a
+// message about it. [RulingActions] holds the rules for the last two, word for
+// word AgentKit's. The store's words are standing and confirmed; the owner
+// reads open and kept. Copy reference is Material's: sentence case.
 
 /** Where a ruling stands. */
 enum class RulingState(val wire: String) {
@@ -51,12 +54,17 @@ data class PlanRuling(
     val actor: String = "",
     val createdAt: Long = 0,
     val settledAt: Long? = null,
+    /** Who kept or reversed it ("user" for the owner); null while it's open. */
+    val settledBy: String? = null,
+    /** The commit that reversed it, when the orchestrator marked it with one. */
+    val reversedSha: String? = null,
     /** The theme it names, by id; null when it names none (ov-331: a theme's last move counts its rulings). */
     val themeId: String? = null,
 ) {
     /** What Copy reference puts on the clipboard, for telling the orchestrator. */
     val reference: String get() = "ruling $short: $decision"
 
+    /** Open until the owner keeps or reverses it. */
     val isStanding: Boolean get() = state == RulingState.STANDING
 
     companion object {
@@ -85,31 +93,51 @@ data class PlanRuling(
                 actor = o.text("actor"),
                 createdAt = o["created_at"]?.jsonPrimitive?.longOrNull ?: 0L,
                 settledAt = o["settled_at"]?.jsonPrimitive?.longOrNull,
+                settledBy = o["settled_by"]?.jsonPrimitive?.contentOrNull,
+                reversedSha = o["reversed_sha"]?.jsonPrimitive?.contentOrNull,
                 themeId = o["theme_id"]?.jsonPrimitive?.contentOrNull,
             )
         }
     }
 }
 
-/** The rulings that stand, newest first: what Decided for you leads with. */
-val Plan.standingRulings: List<PlanRuling> get() = rulings.filter { it.isStanding }
+/** The open rulings, newest first: all that Decided for you shows. */
+val Plan.openRulings: List<PlanRuling> get() = rulings.filter { it.isStanding }
 
-/** The confirmed and reversed ones, most recently settled first. */
-val Plan.settledRulings: List<PlanRuling> get() = rulings.filterNot { it.isStanding }
+/** The kept and reversed ones, most recently settled first: Past decisions. */
+val Plan.pastRulings: List<PlanRuling>
+    get() = rulings.filterNot { it.isStanding }
+        .sortedWith(compareByDescending<PlanRuling> { it.settledAt ?: 0L }.thenByDescending { it.number })
 
 /** What the Decided for you section says, in Material's sentence case. */
 object RulingWords {
     const val TITLE = "Decided for you"
     const val COPY_REFERENCE = "Copy reference"
     const val COPIED = "Reference copied"
+    const val KEEP = "Keep"
+    const val KEEP_ALL = "Keep all"
+    const val REVERSE = "Reverse"
+    const val DISCUSS = "Discuss"
+    /** The fold holding the kept and reversed rulings. */
+    const val PAST_DECISIONS = "Past decisions"
+    /** Why Reverse and Discuss are off, and what turns them on. */
+    const val NEEDS_ORCHESTRATOR = "Start an orchestrator to reverse or discuss a ruling"
     const val WHY = "Why"
     const val REVERSAL = "Reversing"
 
+    /** A ruling's state in the owner's words: open, kept, reversed. */
     fun state(state: RulingState): String = when (state) {
-        RulingState.STANDING -> "Standing"
-        RulingState.CONFIRMED -> "Confirmed"
+        RulingState.STANDING -> "Open"
+        RulingState.CONFIRMED -> "Kept"
         RulingState.REVERSED -> "Reversed"
         RulingState.UNKNOWN -> "Unknown"
+    }
+
+    /** "Kept", "Reversed in 6e7e5618": a past decision's state, with the commit that reversed it when named. */
+    fun settled(r: PlanRuling): String {
+        val word = state(r.state)
+        val sha = r.reversedSha
+        return if (r.state == RulingState.REVERSED && !sha.isNullOrEmpty()) "$word in $sha" else word
     }
 
     /** "ov-1, ov-2 · Visual language", or null when it touches nothing. */

@@ -157,3 +157,44 @@ async fn a_read_client_cannot_keep() {
         }
     }
 }
+
+/// An open ruling asks nothing of the owner (ov-333): it adds nothing to Needs
+/// You and wakes nothing, however many there are, and keeping them changes
+/// nothing there either. The only news is `plan_changed`.
+#[tokio::test]
+async fn open_rulings_never_reach_needs_you_or_a_notification() {
+    let h = start(Scope::Control).await;
+    let repo = a_repository(&h);
+    let mut a = connect(&h).await;
+    let mut listener = connect(&h).await;
+    let needs = |value: result::Value| match value {
+        result::Value::NeedsYouList(l) => l.items.len(),
+        other => panic!("wrong result: {other:?}"),
+    };
+    let before = needs(a.call(request("needs_you.list")).await.unwrap().value.unwrap());
+    for decision in ["A", "B", "C"] {
+        open(&h, repo.workspace, decision);
+    }
+    // Written through the store, so the daemon's own watchers see them as it
+    // would a CLI's write: announce one the way the socket does.
+    let added = payload::Payload::RulingAdd(pb::RulingAdd {
+        workspace_id: id(repo.workspace),
+        decision: "D".into(),
+        why: "Why.".into(),
+        reversal: "Cheap.".into(),
+        task_ids: vec![],
+        theme_id: None,
+        actor: "manager".into(),
+    });
+    call(&mut a, "ruling.add", BOARD_RULINGS, added).await.expect("ruling.add");
+    call(&mut a, "ruling.keep_all", BOARD_RULING_ACTIONS, keep_all(repo.workspace, "user")).await.expect("keep all");
+    assert_eq!(needs(a.call(request("needs_you.list")).await.unwrap().value.unwrap()), before, "rulings are not Needs You");
+    let mut other = 0;
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(400);
+    while let Ok(Ok(e)) = tokio::time::timeout_at(deadline, listener.next_event()).await {
+        if !matches!(e.payload, Some(event::Payload::PlanChanged(_))) {
+            other += 1;
+        }
+    }
+    assert_eq!(other, 0, "nothing but plan_changed is announced for a ruling");
+}

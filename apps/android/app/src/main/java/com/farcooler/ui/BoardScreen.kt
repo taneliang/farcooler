@@ -78,6 +78,7 @@ import com.farcooler.model.PhoneFirstRun
 import com.farcooler.model.Markdown
 import com.farcooler.model.RunnerBoards
 import com.farcooler.model.AskAboutTask
+import com.farcooler.model.RulingActions
 import com.farcooler.model.TaskAcceptanceProgress
 import com.farcooler.model.TaskUsageState
 import com.farcooler.model.TaskAgentLink
@@ -209,7 +210,13 @@ fun BoardTab(
     val pageLists by connection.pages.lists.collectAsStateWithLifecycle()
     val keepsPages = daemon?.can(Capability.BOARD_PAGES) == true
     val keepsRulings = daemon?.can(Capability.BOARD_RULINGS) == true
+    // The owner's marks on a ruling (ov-333): Keep and Keep all, and Reverse and
+    // Discuss to the orchestrator, which they never start.
+    val keepsRulingActions = daemon?.can(Capability.BOARD_RULING_ACTIONS) == true
     val clipboard = LocalClipboard.current
+    var pastRulingsOpen by rememberSaveable(workspace.id) { mutableStateOf(false) }
+    var rulingNotice by remember(workspace.id) { mutableStateOf<String?>(null) }
+    val rulingSeat = AskAboutTask.seat(workspace.id, fleet.worktrees, fleet.workspaces)
 
     // Read on opening, whatever was last read: the row that opened this may
     // be showing a count from before the last reconnect. While it is open, a
@@ -368,7 +375,48 @@ fun BoardTab(
                                     scope.launch { connection.pages.read(workspace) }
                                 }
                             } else null,
-                            rulings = if (keepsRulings) RulingsHook { scope.launch { clipboard.writeText("Far Cooler", it) } } else null,
+                            rulings = if (keepsRulings) RulingsHook(
+                                copy = { scope.launch { clipboard.writeText("Far Cooler", it) } },
+                                canMark = keepsRulingActions,
+                                canAsk = rulingSeat != null,
+                                pastOpen = pastRulingsOpen,
+                                onTogglePast = { pastRulingsOpen = !pastRulingsOpen },
+                                keep = { ruling -> scope.launch { connection.keepRuling(ruling, workspace) } },
+                                keepAll = { scope.launch { connection.keepAllRulings(workspace) } },
+                                reverse = { ruling ->
+                                    val seat = rulingSeat ?: return@RulingsHook
+                                    scope.launch {
+                                        val reversal = RulingActions.reverse(
+                                            ruling, seat.terminal.isAgentPane,
+                                            send = { text -> runCatching { connection.agentPrompt(seat.terminal.id, text) }.isSuccess },
+                                            paste = { text -> connection.draftPrompt(seat.terminal.id, text) },
+                                            copy = { text -> clipboard.writeText("Far Cooler", text) },
+                                        )
+                                        rulingNotice = RulingActions.notice(reversal, ruling)
+                                        if (reversal == RulingActions.Reversal.SENT || reversal == RulingActions.Reversal.DRAFTED) {
+                                            onJump(TerminalRef(connection.host.id, seat.worktreeId, seat.terminal.id))
+                                        }
+                                    }
+                                },
+                                discuss = { ruling ->
+                                    val seat = rulingSeat ?: return@RulingsHook
+                                    scope.launch {
+                                        val delivery = RulingActions.discuss(
+                                            ruling, seat.terminal.isAgentPane,
+                                            offer = { connection.composerHandoff.offer(seat.terminal.id, it) },
+                                            paste = { text -> connection.draftPrompt(seat.terminal.id, text) },
+                                            copy = { text -> clipboard.writeText("Far Cooler", text) },
+                                        )
+                                        if (delivery == AskAboutTask.Delivery.COPIED) {
+                                            rulingNotice = "Copied the start of a message about ${ruling.short}. Paste it into the orchestrator."
+                                        } else {
+                                            rulingNotice = null
+                                            onJump(TerminalRef(connection.host.id, seat.worktreeId, seat.terminal.id))
+                                        }
+                                    }
+                                },
+                                notice = rulingNotice,
+                            ) else null,
                         )
                     } else if (board.unreadable.isNotEmpty()) {
                         item(key = "unreadable") {

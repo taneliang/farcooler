@@ -121,7 +121,17 @@ object AskAboutTask {
         paste: suspend (String) -> DraftResult,
         copy: suspend (String) -> Unit,
     ): Delivery {
-        val text = draft(key, title)
+        return deliver(draft(key, title), isAgentPane, offer, paste, copy)
+    }
+
+    /** [deliver] for any draft: the rulings' Discuss leaves its own words the same way (ov-333). */
+    suspend fun deliver(
+        text: String,
+        isAgentPane: Boolean,
+        offer: (String) -> Unit,
+        paste: suspend (String) -> DraftResult,
+        copy: suspend (String) -> Unit,
+    ): Delivery {
         if (isAgentPane) {
             offer(text)
             return Delivery.COMPOSER

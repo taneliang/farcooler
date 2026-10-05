@@ -368,7 +368,7 @@ final class HarnessRunner {
                         + (CommandLine.arguments.contains("-phone-files-old") ? [] : ["worktree_files", "read_only_folders"])
                         + (HarnessPlan.advertised ? ["board_plan"] : [])
                         + (HarnessPlan.pagesAdvertised ? ["board_pages"] : [])
-                        + (HarnessPlan.rulingsAdvertised ? ["board_rulings"] : [])
+                        + (HarnessPlan.rulingsAdvertised ? ["board_rulings", "board_ruling_actions"] : [])
                         + (CommandLine.arguments.contains("-phone-usage-old") ? [] : ["agent_usage"])
                         + (CommandLine.arguments.contains("-phone-queue-old") ? [] : ["agent_queue"])),
                 grantedScope: Self.readOnly ? "read" : "control",
@@ -572,7 +572,8 @@ final class HarnessRunner {
             // `-phone-draft-refused`: the runner can't prove the pane safe, so the
             // phone copies the reference instead.
             guard args["terminal"] as? String == Self.billingOrchestrator,
-                let text = args["text"] as? String, text.hasPrefix("About bil-")
+                let text = args["text"] as? String,
+                text.hasPrefix("About bil-") || text.hasPrefix("About ruling ") || text.hasPrefix("Please reverse ruling ")
             else { throw ClientCore.CoreError.rejected("bad draft", word: "invalid-argument") }
             if CommandLine.arguments.contains("-phone-draft-refused") {
                 throw ClientCore.CoreError.rejected("not safe to paste", word: "agent-not-connected")
@@ -601,12 +602,14 @@ final class HarnessRunner {
             sent.append("\(method) fc-3-webhooks")
             connection.standIn(on: fleet())
             return try json([:])
-        case "plan.get", "plan.events", "page.list":
+        case "plan.get", "plan.events", "page.list", "ruling.keep", "ruling.keep_all":
             guard let plan = HarnessPlan(),
                 let data = try await plan.answer(method, args, boards: [Self.main, Self.billing])
             else { throw ClientCore.CoreError.rejected("not in the harness", word: "unimplemented") }
             sent.append(
-                method == "plan.events" ? "plan.events \((args["theme"] as? String) ?? (args["lane"] as? String) ?? "")" : method)
+                method == "plan.events"
+                    ? "plan.events \((args["theme"] as? String) ?? (args["lane"] as? String) ?? "")"
+                    : (method.hasPrefix("ruling.") ? "\(method) \((args["ruling"] as? String) ?? "")" : method))
             return data
         default:
             throw ClientCore.CoreError.rejected("not in the harness", word: "unimplemented")

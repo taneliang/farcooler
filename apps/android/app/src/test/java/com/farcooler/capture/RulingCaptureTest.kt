@@ -34,7 +34,7 @@ class RulingCaptureTest {
     @Test fun rulings() = Capture.both("plan-rulings") {
         LazyColumn(Modifier.fillMaxSize()) {
             item { PlanSwitch(showsPlan = true, onChange = {}) }
-            planItems(PlanReadState.Loaded(plan), emptyMap(), onOpen = {}, onRetry = {}, rulings = RulingsHook {})
+            planItems(PlanReadState.Loaded(plan), emptyMap(), onOpen = {}, onRetry = {}, rulings = RulingsHook(copy = {}, canMark = true, canAsk = true, pastOpen = true))
         }
     }
 

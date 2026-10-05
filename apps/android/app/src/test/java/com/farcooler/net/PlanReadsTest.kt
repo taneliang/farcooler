@@ -29,6 +29,27 @@ class PlanReadsTest {
         assertEquals("w1", sent.single().second["workspace"]?.toString()?.trim('"'))
     }
 
+    /** Keep shows the ruling kept at once, as the owner, and Keep All every open one (ov-333); a kept one stays kept. */
+    @Test
+    fun `keeping shows rulings kept at once and leaves the rest as they were`() = runBlocking {
+        val reads = PlanReads({ _, _ -> plan }, runnerCan = { true })
+        reads.read(workspace)
+        val before = (reads.states.value["w1"] as PlanReadState.Loaded).plan
+        assertEquals(listOf("R-2"), before.rulings.filter { it.isStanding }.map { it.short })
+        reads.showKept(setOf(before.rulings.first { it.short == "R-2" }.id), "w1")
+        val after = (reads.states.value["w1"] as PlanReadState.Loaded).plan
+        assertTrue(after.rulings.none { it.isStanding })
+        val kept = after.rulings.first { it.short == "R-2" }
+        assertEquals(com.farcooler.model.RulingState.CONFIRMED, kept.state)
+        assertEquals("user", kept.settledBy)
+        assertEquals(before.nowMs, kept.settledAt)
+        // R-1 was already kept by the manager: untouched.
+        assertEquals("manager", after.rulings.first { it.short == "R-1" }.settledBy)
+        // A board nobody has read has nothing to show.
+        reads.showKept(setOf("x"), "unread")
+        assertTrue(reads.states.value["unread"] == null)
+    }
+
     @Test
     fun `a runner without board_plan is never asked`() = runBlocking {
         val reads = PlanReads({ _, _ -> error("asked") }, runnerCan = { false })

@@ -44,10 +44,14 @@ class PlanWiringTest {
     fun `rulings are gated on board_rulings, copied to the clipboard, and drawn after the plan`() {
         val board = source("ui/BoardScreen.kt")
         assertTrue("the capability", "val keepsRulings = daemon?.can(Capability.BOARD_RULINGS) == true" in board)
-        assertTrue(
-            "no hook without it",
-            "rulings = if (keepsRulings) RulingsHook { scope.launch { clipboard.writeText(\"Far Cooler\", it) } } else null" in board,
-        )
+        assertTrue("no hook without it", "rulings = if (keepsRulings) RulingsHook(" in board)
+        assertTrue("copy goes to the clipboard", "copy = { scope.launch { clipboard.writeText(\"Far Cooler\", it) } }," in board)
+        // The owner's marks (ov-333): gated on their own capability, Keep to the runner, Reverse sent.
+        assertTrue("its own capability", "val keepsRulingActions = daemon?.can(Capability.BOARD_RULING_ACTIONS) == true" in board)
+        assertTrue("keep is the runner's mark", "connection.keepRuling(ruling, workspace)" in board)
+        assertTrue("keep all is one call", "connection.keepAllRulings(workspace)" in board)
+        assertTrue("reverse sends a message", "connection.agentPrompt(seat.terminal.id, text)" in board)
+        assertTrue("discuss leaves a draft", "connection.composerHandoff.offer(seat.terminal.id, it)" in board)
         val screens = source("ui/PlanScreens.kt")
         assertTrue("drawn after the plan", "rulingItems(state.plan, rulings)" in screens)
         val rows = source("ui/PlanRulingRows.kt")

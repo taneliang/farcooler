@@ -86,6 +86,7 @@ SOURCES = [
     "PlanRulingsSection.swift",
     "PlanPageScreens.swift",
     "ConnectionPlan.swift",
+    "ConnectionRulings.swift",
     # Orchestrator pages in the Plan view (ov-285): the Pages section, a page
     # pushed, a theme's anchored pages, and what the connection reads of them.
     "PlanOrchestratorPages.swift",

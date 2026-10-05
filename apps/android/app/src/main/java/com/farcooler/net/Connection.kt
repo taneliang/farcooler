@@ -2048,6 +2048,26 @@ class Connection(
     }
 
     /**
+     * The owner keeps one ruling (ov-333): `ruling.keep`, the runner's own mark
+     * as the user, shown kept at once and the plan read again, which puts it
+     * back if the runner refused. Never reaches the orchestrator.
+     */
+    suspend fun keepRuling(ruling: com.farcooler.model.PlanRuling, workspace: com.farcooler.model.WorkspaceSummary) {
+        plans.showKept(setOf(ruling.id), workspace.id)
+        attempt { core.call("ruling.keep", args("ruling" to ruling.id)) }
+        plans.read(workspace)
+    }
+
+    /** The owner keeps every open ruling on a board (`ruling.keep_all`). */
+    suspend fun keepAllRulings(workspace: com.farcooler.model.WorkspaceSummary) {
+        val board = workspace.boardWorkspace ?: return
+        val loaded = plans.states.value[workspace.id] as? com.farcooler.model.PlanReadState.Loaded ?: return
+        plans.showKept(loaded.plan.rulings.filter { it.isStanding }.map { it.id }.toSet(), workspace.id)
+        attempt { core.call("ruling.keep_all", args("workspace" to board)) }
+        plans.read(workspace)
+    }
+
+    /**
      * Ask the runner to paste [text] into a terminal orchestrator's box, pressing
      * no Enter (Ask the orchestrator, ov-241). DECLINED means nothing was typed;
      * UNKNOWN that no answer came in time, so it may have been.
