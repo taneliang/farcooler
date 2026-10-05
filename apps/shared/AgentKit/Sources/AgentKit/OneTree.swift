@@ -186,6 +186,10 @@ public struct OneTreeAsks: Equatable, Sendable {
 
 /// Which cards the tree shows: status is a filter on the tree, not a
 /// sidebar axis of its own.
+///
+/// `open`'s raw value stays, because a window's choice is kept under it
+/// (`oneTree.filter.<workspace>`); its title is "Not Done" (ruling R-13),
+/// since "Open" read as the opposite of In Review, which it includes.
 public enum OneTreeFilter: String, CaseIterable, Sendable {
     case open
     case inReview
@@ -193,10 +197,24 @@ public enum OneTreeFilter: String, CaseIterable, Sendable {
 
     public var title: String {
         switch self {
-        case .open: "Open"
+        case .open: "Not Done"
         case .inReview: "In Review"
         case .all: "All"
         }
+    }
+
+    /// What it shows, for the control's tooltip (ov-330).
+    public var help: String {
+        switch self {
+        case .open: "Every card that isn’t finished, the ones in review included."
+        case .inReview: "Only the cards waiting for review."
+        case .all: "Every card, finished and canceled ones too."
+        }
+    }
+
+    /// The tooltip over all three, one sentence each.
+    public static var allHelp: String {
+        allCases.map { "\($0.title): \($0.help)" }.joined(separator: "\n")
     }
 
     /// Whether a card in `status` is listed.

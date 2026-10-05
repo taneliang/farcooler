@@ -256,7 +256,7 @@ data class PageWorld(
 
         /** A card-count reference's status, as the board says it. */
         fun statusName(word: String): String =
-            if (word == "open") "Open" else TaskStatus.entries.firstOrNull { it.wire == word }?.title ?: word
+            if (word == "open") "Not Done" else TaskStatus.entries.firstOrNull { it.wire == word }?.title ?: word
     }
 }
 

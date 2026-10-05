@@ -22,6 +22,12 @@ import java.io.File
  * reader to the same words.
  */
 class PageTest {
+    /** The count reference "open" is "Not Done", as the Mac's tree filter and the iPhone say it (ov-330, R-13). */
+    @Test
+    fun `an open card count is called Not Done, never Open`() {
+        assertEquals("Not Done", PageWorld.statusName("open"))
+    }
+
     private val seeded = Json.parseToJsonElement(repositoryFile("test/fixtures/pages-seeded.json")).jsonObject
     private val plan = Plan.decode(seeded["plan"]!!.jsonObject)
     private val pages = BoardPage.list(seeded["pages"]!!.jsonObject)

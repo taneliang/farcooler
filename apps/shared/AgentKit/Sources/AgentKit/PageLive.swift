@@ -209,7 +209,7 @@ extension PageWorld {
 
     /// A card-count reference's status, as the board says it.
     static func statusName(_ word: String) -> String {
-        if word == "open" { return "Open" }
+        if word == "open" { return OneTreeFilter.open.title }
         return TaskStatus(rawValue: word)?.title ?? word
     }
 

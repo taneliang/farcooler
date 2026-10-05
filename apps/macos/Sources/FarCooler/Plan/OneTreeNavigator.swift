@@ -190,16 +190,17 @@ struct OneTreeNavigator: View {
             .padding(.vertical, NavigatorRhythm.rule)
     }
 
-    /// Status, as a filter on the tree: Open, In Review, All.
+    /// Status, as a filter on the tree: Not Done, In Review, All.
     private var filterPicker: some View {
         Picker("Show", selection: Binding(get: { filter }, set: { filterRaw = $0.rawValue })) {
-            ForEach(OneTreeFilter.allCases, id: \.self) { Text($0.title).tag($0) }
+            ForEach(OneTreeFilter.allCases, id: \.self) { Text($0.title).tag($0).help($0.help) }
         }
         .pickerStyle(.segmented)
         .labelsHidden()
         .controlSize(.small)
         .padding(.bottom, NavigatorRhythm.air)
         .accessibilityLabel("Show")
+        .help(OneTreeFilter.allHelp)
         .identified("one-tree-filter")
     }
 
