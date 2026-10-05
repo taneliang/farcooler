@@ -134,6 +134,7 @@ private struct JumpMenuRow: View {
             // Decorative: the row's name is its title alone.
             if let glyph = item.glyph {
                 Image(systemName: glyph)
+                    // style-exempt: secondary text on a menu's solid accent highlight, as NSMenu draws it.
                     .foregroundStyle(highlighted ? AnyShapeStyle(.white.opacity(0.75)) : AnyShapeStyle(JumpBar.icon(.ancestor).color))
                     .frame(width: JumpBar.glyphWidth)
                     .accessibilityHidden(true)
