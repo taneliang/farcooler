@@ -40,7 +40,9 @@ struct AppControlTests {
             }
         }
         guard connected == 0 else { return Data() }
-        var wait = timeval(tv_sec: 5, tv_usec: 0)
+        // Long: the answer is made on the main actor, which the rest of the
+        // suite can hold for many seconds (it took 18 in one full run).
+        var wait = timeval(tv_sec: 120, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &wait, socklen_t(MemoryLayout<timeval>.size))
         _ = (line + "\n").withCString { write(fd, $0, strlen($0)) }
         var data = Data()
