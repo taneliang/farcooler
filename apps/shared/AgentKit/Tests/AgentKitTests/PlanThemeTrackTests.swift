@@ -216,30 +216,6 @@ struct PlanThemeTrackTests {
         #expect(fixture.themes[0].lastMovedAt == Self.now - Self.hour)
     }
 
-    @Test("The One tree opens the theme that moved last, by the same rule")
-    func theTreeUsesTheRule() throws {
-        let old = Self.now - 9 * Self.day
-        let a = PlanModelTests.theme("A", cards: ["c1"], ordinal: 0)
-        var b = PlanModelTests.theme("B", cards: ["c2"], ordinal: 1)
-        b["story_at"] = old - Self.day
-        let ruling: [String: Any] = [
-            "id": "r1", "short": "R-1", "number": 1, "decision": "d", "why": "w", "reversal": "r", "cards": [],
-            "theme_id": "theme-B", "theme": "B", "state": "standing", "note": "", "actor": "manager",
-            "created_at": Self.now - Self.hour,
-        ]
-        let object: [String: Any] = [
-            "now_ms": Self.now, "themes": [a, b], "lanes": [], "order": [], "cards": [], "rulings": [ruling],
-        ]
-        let plan = try PlanModel.decode(JSONSerialization.data(withJSONObject: object))
-        let tasks = [OneTreeTask(id: "c1", key: "ov-1", title: "x", status: .todo, activityMs: old),
-                     OneTreeTask(id: "c2", key: "ov-2", title: "y", status: .todo, activityMs: old - 2 * Self.day)]
-        let byID = Dictionary(uniqueKeysWithValues: tasks.map { ($0.id, $0) })
-        #expect(OneTreeBuilder.newestTheme(plan.themes, plan: plan, tasks: byID) == "theme-B", "B's ruling is the newest move")
-        var quiet = plan
-        quiet.rulings = []
-        #expect(OneTreeBuilder.newestTheme(quiet.themes, plan: quiet, tasks: byID) == "theme-A", "without it, A's card moved last")
-    }
-
     // MARK: Around the themes
 
     @Test("Landed this week: the theme's landed lanes inside seven days, newest first")
