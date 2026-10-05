@@ -162,15 +162,6 @@ pub fn latest_per_workflow(runs: &[GhRun]) -> Vec<GhRun> {
     runs.iter().filter(|r| kept.contains(&r.id)).cloned().collect()
 }
 
-/// The runs on a branch's newest commit that has any: the commit of the most
-/// recently created run.
-pub fn newest_commit(runs: &[GhRun]) -> Vec<GhRun> {
-    let Some(head) = runs.iter().max_by(|a, b| a.created_at.cmp(&b.created_at).then(a.id.cmp(&b.id))) else {
-        return Vec::new();
-    };
-    runs.iter().filter(|r| r.head_sha == head.head_sha).cloned().collect()
-}
-
 fn run_state(run: &GhRun) -> &'static str {
     board_ci::job_state(&run.status, run.conclusion.as_deref())
 }
@@ -273,6 +264,20 @@ async fn with_jobs(
     (run, jobs)
 }
 
+/// The full SHA a ref names (a short SHA, or a branch), through gh.
+async fn commit_of(svc: &Service, tree: &Path, reference: &str) -> Option<String> {
+    let path = format!("repos/{{owner}}/{{repo}}/commits/{reference}");
+    let found = gh_get(svc, tree, &api_args(&path, &[], ".sha")).await;
+    found.map(|b| String::from_utf8_lossy(&b).trim().to_string()).filter(|s| s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+/// The newest run of each workflow on one commit.
+async fn runs_on(svc: &Service, tree: &Path, sha: &str) -> Option<Vec<GhRun>> {
+    const RUNS: &str = "repos/{owner}/{repo}/actions/runs";
+    let fields = [format!("head_sha={sha}"), "per_page=50".to_string()];
+    gh_get(svc, tree, &api_args(RUNS, &fields, RUNS_JQ)).await.and_then(|b| parse_runs(&b)).map(|r| latest_per_workflow(&r))
+}
+
 /// Read one subject now.
 pub async fn read_subject(svc: &Service, repository: Uuid, tree: &Path, subject: &str, memo: &mut Memo) -> CiRead {
     const RUNS: &str = "repos/{owner}/{repo}/actions/runs";
@@ -281,9 +286,7 @@ pub async fn read_subject(svc: &Service, repository: Uuid, tree: &Path, subject:
             Some(full) => Some(full.clone()),
             None if sha.len() == 40 => Some(sha.to_string()),
             None => {
-                let path = format!("repos/{{owner}}/{{repo}}/commits/{sha}");
-                let found = gh_get(svc, tree, &api_args(&path, &[], ".sha")).await;
-                let full = found.map(|b| String::from_utf8_lossy(&b).trim().to_string()).filter(|s| s.len() == 40);
+                let full = commit_of(svc, tree, sha).await;
                 if let Some(full) = &full {
                     memo.shas.insert(sha.to_string(), full.clone());
                 }
@@ -291,10 +294,7 @@ pub async fn read_subject(svc: &Service, repository: Uuid, tree: &Path, subject:
             }
         };
         match full {
-            Some(full) => {
-                let fields = [format!("head_sha={full}"), "per_page=50".to_string()];
-                gh_get(svc, tree, &api_args(RUNS, &fields, RUNS_JQ)).await.and_then(|b| parse_runs(&b)).map(|r| latest_per_workflow(&r))
-            }
+            Some(full) => runs_on(svc, tree, &full).await,
             None => None,
         }
     } else if let Some(id) = subject.strip_prefix("run:") {
@@ -310,11 +310,13 @@ pub async fn read_subject(svc: &Service, repository: Uuid, tree: &Path, subject:
                 bare
             }
         };
-        let fields = [format!("branch={branch}"), "per_page=30".to_string()];
-        gh_get(svc, tree, &api_args(RUNS, &fields, RUNS_JQ))
-            .await
-            .and_then(|b| parse_runs(&b))
-            .map(|r| latest_per_workflow(&newest_commit(&r)))
+        // The commit main is at now, asked every time: never the commit of
+        // the newest-created run, which a late follow-up run on an older
+        // commit can be (review train-1005c M3). Its own runs, or none yet.
+        match commit_of(svc, tree, &branch).await {
+            Some(head) => runs_on(svc, tree, &head).await,
+            None => None,
+        }
     } else {
         None
     };

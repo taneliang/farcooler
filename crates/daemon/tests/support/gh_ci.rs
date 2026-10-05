@@ -30,6 +30,9 @@ emit() {{ while IFS= read -r line || [ -n "$line" ]; do printf '%s\n' "$line"; d
 [ "$1 $2 $3" = "api -X GET" ] || exit 1
 case "$4" in
   "repos/{{owner}}/{{repo}}/commits/c85bf83d") emit commit-sha.txt ;;
+  # Main is at c85bf83d, though runs-main.json's newest-created run is on
+  # 898ae57d: what main reads is the commit it's at (review train-1005c M3).
+  "repos/{{owner}}/{{repo}}/commits/main") emit commit-sha.txt ;;
   "repos/{{owner}}/{{repo}}/actions/runs")
     case "$6" in
       branch=*) emit runs-main.json ;;

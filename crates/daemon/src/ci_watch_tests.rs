@@ -38,13 +38,14 @@ fn a_failed_commit_reads_failed_with_its_jobs() {
     assert!(read.jobs.iter().find(|j| j.name == "CI / Android").unwrap().url.starts_with("https://github.com/"));
 }
 
-/// Main: the runs of the branch's newest commit, one per workflow, all passed.
+/// One commit's runs (here 898ae57d's, from a list of main's), one per
+/// workflow, all passed. Which commit main is at is asked of gh, not guessed
+/// from the newest run (a_page_reads_live_ci).
 #[test]
-fn main_reads_its_newest_commit() {
+fn a_commit_s_runs_count_each_workflow_once() {
     let runs = parse_runs(&fixture("runs-main.json")).expect("gh's runs parse");
     assert_eq!(runs.len(), 30);
-    let head = newest_commit(&runs);
-    assert!(head.iter().all(|r| r.head_sha.starts_with("898ae57d")), "{head:?}");
+    let head: Vec<GhRun> = runs.into_iter().filter(|r| r.head_sha.starts_with("898ae57d")).collect();
     assert_eq!(head.len(), 5);
     let latest = latest_per_workflow(&head);
     let mut names: Vec<&str> = latest.iter().map(|r| r.name.as_str()).collect();

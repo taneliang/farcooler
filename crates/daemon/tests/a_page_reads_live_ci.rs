@@ -37,9 +37,9 @@ async fn a_page_naming_main_reads_main_s_ci() {
         assert!(Instant::now() < deadline, "the watch never read main for the page: {plan:?}");
         tokio::time::sleep(Duration::from_millis(200)).await;
     };
-    assert_eq!(main.status, pb::BoardCiStatus::Passed as i32);
-    assert!(main.sha.starts_with("898ae57d"), "main's newest commit with runs: {}", main.sha);
-    let mut names: Vec<&str> = main.jobs.iter().map(|j| j.name.as_str()).collect();
-    names.sort();
-    assert_eq!(names, ["CI", "Canary", "Canary wire baseline", "Doc comments"]);
+    // Main is at c85bf83d (the shim's commits/main), whose CI failed; a run
+    // created later on an older commit (runs-main.json's 898ae57d) mustn't
+    // stand for it (review train-1005c M3).
+    assert!(main.sha.starts_with("c85bf83d"), "the commit main is at: {}", main.sha);
+    assert_eq!(main.status, pb::BoardCiStatus::Failed as i32);
 }
