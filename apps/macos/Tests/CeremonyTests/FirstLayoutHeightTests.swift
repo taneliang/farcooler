@@ -71,6 +71,19 @@ struct FirstLayoutHeightTests {
     @Test("The overview's theme cards are their real height on the first pass: what's under them doesn't move")
     func themesOnFirstPass() async throws {
         let calls = PlanViewTests.Calls()
+        // The fixture's landed lane is "today" only in some time zones: it
+        // landed at 07:10 UTC and the plan's clock reads 08:00 UTC, so on CI
+        // (UTC) a Landed Today section sits under the themes and its header
+        // is counted as a gap, while on a Pacific Mac it falls on the day
+        // before and there's none. Move it three days back, so the overview
+        // ends at the themes in every zone.
+        var plan = try #require(try JSONSerialization.jsonObject(with: PlanViewTests.fixture()) as? [String: Any])
+        var lanes = try #require(plan["lanes"] as? [[String: Any]])
+        for index in lanes.indices where lanes[index]["state"] as? String == "landed" {
+            lanes[index]["state_since"] = 1_800_000_000_000 - 3 * 24 * 3_600_000
+        }
+        plan["lanes"] = lanes
+        calls.plan = try JSONSerialization.data(withJSONObject: plan)
         let store = try await PlanViewTests.store(plan: true, defaults: PlanViewTests.defaults(), calls: calls)
         await store.plan.reload()
         let seen = Seen()
@@ -92,6 +105,12 @@ struct FirstLayoutHeightTests {
         }
         let drawn = (seen.history["after"] ?? []).map(\.minY)
         #expect(drawn.allSatisfy { abs($0 - first.minY) < 0.5 }, "what follows the cards was drawn at \(drawn)")
-        #expect(first.minY - card.maxY < Spacing.section + 2 * NavigatorRhythm.section, "a gap under the last card: \(first.minY - card.maxY) pt")
+        // Under the last card is the overview's bottom padding and nothing
+        // else, so the gap is `Spacing.section`: a card measured short and
+        // corrected later leaves a different one. The 1 pt is for CI's 1x
+        // layout, which snaps text heights to whole points (at most half a
+        // point a line); the bug being caught is a card's worth of points.
+        let gap = first.minY - card.maxY
+        #expect(abs(gap - Spacing.section) < 1, "a gap under the last card: \(gap) pt, expected \(Spacing.section)")
     }
 }
