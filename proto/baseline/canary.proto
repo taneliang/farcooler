@@ -1,4 +1,4 @@
-// Shipped by Canary at adc85e94106283eddee345df15ac366a281d0ad4. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at b284fb1d8f3464c2c70455b4a409f1fe44d02d9a. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -230,7 +230,15 @@ message Request {
     PageSet page_set = 172;
     PageRemove page_remove = 173;
     PageStatsRequest page_stats = 174;
+    // Decided for you (ov-304), the plan layer's rulings, behind
+    // `board_rulings`. Experimental with the layer: 180-189 are theirs, the
+    // rest held by `reserved` below, so withdrawing them never frees a tag for another meaning. Read
+    // through `plan.get`'s `Plan.rulings`, so only the writes are here.
+    RulingAdd ruling_add = 180;
+    RulingSet ruling_set = 181;
   }
+  // The rest of rulings' block, kept for them (review 1005a L1).
+  reserved 182 to 189;
 }
 
 message Response {
@@ -341,7 +349,11 @@ message Result {
     BoardPage board_page = 171;
     PageSetResult page_set_result = 172;
     PageStatsList page_stats_list = 173;
+    // `ruling.add` and `ruling.set`, behind `board_rulings`: the ruling.
+    BoardRuling board_ruling = 180;
   }
+  // The rest of rulings' block, kept for them (review 1005a L1).
+  reserved 181 to 189;
 }
 
 // ---------------------------------------------------------------------------
@@ -4028,6 +4040,11 @@ message Plan {
   // Every card any theme or lane names, once.
   repeated PlanCard cards = 5;
   repeated PlanCoverage coverage = 6;
+  // Decided for you (ov-304), behind `board_rulings`: every standing ruling,
+  // newest first, then the ones confirmed or reversed in the last week (all
+  // of them when the request said so), most recently settled first. Empty
+  // from a runner without the capability, and a client shows nothing then.
+  repeated BoardRuling rulings = 7;
 }
 
 // `plan.get`, at `read`.
@@ -4165,6 +4182,76 @@ message PlanChanged {
   bytes workspace_id = 1;
   // As `TaskChanged.actor`, so a manager does not answer its own write.
   string actor = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Decided for you (ov-304)
+//
+// A RULING is a reversible call the orchestrator made on the owner's behalf:
+// what was decided, why, what reversing it costs, the cards and theme it
+// touches, and whether it stands. Part of the plan layer and as removable, but
+// behind its own `board_rulings` capability, since a runner with `board_plan`
+// alone has none. Only the orchestrator writes them; the owner confirms or
+// reverses one by telling it, naming the short id (`R-12`). Writes announce
+// `plan_changed`. Refusals are `Error.what` words: `decision`, `why`,
+// `reversal`, `note`, `ruling_state`, `other_board`, `actor`, `state`.
+// ---------------------------------------------------------------------------
+
+enum BoardRulingState {
+  BOARD_RULING_STATE_UNSPECIFIED = 0;
+  // Decided, and holding until the owner says otherwise.
+  BOARD_RULING_STATE_STANDING = 1;
+  BOARD_RULING_STATE_CONFIRMED = 2;
+  BOARD_RULING_STATE_REVERSED = 3;
+}
+
+message BoardRuling {
+  bytes id = 1;
+  bytes workspace_id = 2;
+  // The short id's number: `R-<number>`, counted per board.
+  uint32 number = 3;
+  // What was decided, in one line.
+  string decision = 4;
+  // Why, in one or two lines.
+  string why = 5;
+  // What reversing it costs.
+  string reversal = 6;
+  // The cards it touches, on this board.
+  repeated bytes task_ids = 7;
+  optional bytes theme_id = 8;
+  BoardRulingState state = 9;
+  // The words given with the last move, if any.
+  string note = 10;
+  // Who recorded it, in `TaskNote.actor`'s words.
+  string actor = 11;
+  int64 created_at = 12;
+  // Who confirmed or reversed it, and when; absent while it stands.
+  optional string settled_by = 13;
+  optional int64 settled_at = 14;
+  uint64 resource_version = 15;
+  // `task_ids`' keys, in the same order. Carried here rather than in
+  // `Plan.cards`, whose cards the reconciliation checks for a lane.
+  repeated string task_keys = 16;
+}
+
+// `ruling.add`, at `control`: a standing ruling with the board's next number.
+message RulingAdd {
+  bytes workspace_id = 1;
+  string decision = 2;
+  string why = 3;
+  string reversal = 4;
+  repeated bytes task_ids = 5;
+  optional bytes theme_id = 6;
+  string actor = 7;
+}
+
+// `ruling.set`, at `control`: confirm or reverse a ruling. Standing goes to
+// either; confirmed can still be reversed; reversed is final.
+message RulingSet {
+  bytes ruling_id = 1;
+  BoardRulingState state = 2;
+  optional string note = 3;
+  string actor = 4;
 }
 
 // ---------------------------------------------------------------------------
