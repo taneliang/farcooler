@@ -34,7 +34,6 @@ struct TaskKeyTextTests {
         let renderer = ImageRenderer(
             content: view.frame(width: width, alignment: .leading).fixedSize(horizontal: false, vertical: true)
                 .background(Color.black).environment(\.colorScheme, .dark))
-        renderer.scale = 2
         return NSBitmapImageRep(cgImage: try #require(renderer.cgImage))
     }
 
