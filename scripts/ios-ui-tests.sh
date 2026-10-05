@@ -75,6 +75,10 @@ if [ -n "$XCTESTRUN" ]; then
     [ -f "$XCTESTRUN" ] || { echo "ios-ui-tests: XCTESTRUN names $XCTESTRUN, which does not exist" >&2; exit 1; }
     ACTION=(test-without-building -xctestrun "$XCTESTRUN")
 else
+    # The project file is generated and not tracked (ov-338), so a checkout
+    # that has never generated one, or generated one before the last source
+    # was added, would otherwise build a project that is missing or stale.
+    ./apps/ios/generate-project.py >/dev/null
     ACTION=(test -project apps/ios/FarCooler.xcodeproj -scheme FarCooler)
 fi
 

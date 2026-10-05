@@ -67,6 +67,12 @@ check() {
 # `set -e` would turn into a crash.
 has() { if grep -q "$1" <<< "$2"; then echo yes; else echo no; fi; }
 
+# The project file is generated, so git must not track it (ov-338). Tracked, it
+# went stale in every commit — it stamps the commit count and short hash, which
+# no later commit can match — and every lane regenerated it and restored it.
+check "project.pbxproj is not tracked by git" \
+  "" "$(git ls-files -- "$PBX")"
+
 python3 apps/ios/generate-project.py > /dev/null
 
 # --- the build settings of one target ------------------------------------

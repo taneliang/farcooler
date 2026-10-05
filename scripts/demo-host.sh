@@ -826,6 +826,8 @@ if [ "$RESOLVED" = "$TRAP_DIR/claude" ] && [ -x "$STAND_IN" ]; then
 fi
 
 echo "building the iOS app…"
+# The project file is generated and not tracked (ov-338).
+./apps/ios/generate-project.py >/dev/null
 xcodebuild -project apps/ios/FarCooler.xcodeproj -scheme FarCooler \
     -configuration Debug \
     -destination "platform=iOS Simulator,id=$UDID" \
