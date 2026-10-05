@@ -78,7 +78,7 @@ object RulingActions {
     /** What the screen says after a Reverse, or null when nothing needs saying. */
     fun notice(reversal: Reversal, r: PlanRuling): String? = when (reversal) {
         Reversal.SENT -> "Asked the orchestrator to reverse ${r.short}."
-        Reversal.DRAFTED -> "Put the request in the orchestrator’s input. Press Return to send it."
+        Reversal.DRAFTED -> "Put the request in the orchestrator’s input. Press Return to send it." // casing ok: the key is named Return on a keyboard, and the iPhone says so too
         Reversal.COPIED -> "Copied the request to reverse ${r.short}. Paste it into the orchestrator."
         Reversal.MAYBE_DRAFTED -> null
         Reversal.FAILED -> "Couldn’t reach the orchestrator. Try again."

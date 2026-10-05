@@ -26,6 +26,11 @@ extension Connection {
     /// Send a typed message to a chat orchestrator, as its composer does.
     /// True only when the runner took it.
     func sendPrompt(terminal: String, text: String) async -> Bool {
-        (try? await rpc("terminal.agent_prompt", ["terminal": terminal, "text": text])) != nil
+        do {
+            _ = try await rpc("terminal.agent_prompt", ["terminal": terminal, "text": text])
+            return true
+        } catch {
+            return false
+        }
     }
 }
