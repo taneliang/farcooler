@@ -40,14 +40,31 @@ extension XCTestCase {
             hide.waitForExistence(timeout: 10),
             "\(identifier) never appeared, so there was no keyboard to hide",
             file: file, line: line)
-        let tappable = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in hide.isHittable }, object: nil)
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [tappable], timeout: 10), .completed,
+        XCTAssertTrue(
+            Self.holds(within: 10) { hide.isHittable },
             "\(identifier) is in the tree but never became tappable",
             file: file, line: line)
         XCTAssertEqual(hide.label, "Hide Keyboard", file: file, line: line)
         return hide
+    }
+
+    /// Whether `condition` holds within `seconds`, asked until it does, and
+    /// once more after the deadline if the last ask began before it.
+    ///
+    /// Not an `XCTWaiter`, whose timeout is wall clock around the asking: one
+    /// ask is a snapshot of the app's accessibility tree, and on CI's
+    /// simulator one has taken 10 to 20 seconds, so a waiter of 10 timed out
+    /// over an answer of yes still on its way (ov-336, main 37345722102: the
+    /// key was there and tappable, the tap after the failure put the keyboard
+    /// away). Here the answer that comes back counts, however late.
+    static func holds(within seconds: TimeInterval, _ condition: () -> Bool) -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while true {
+            let asked = Date()
+            if condition() { return true }
+            if asked >= deadline { return false }
+            Thread.sleep(forTimeInterval: 0.25)
+        }
     }
 
     /// Put the keyboard away with the key row's own key, and fail unless both
@@ -67,11 +84,8 @@ extension XCTestCase {
             app, identifier, raising: raising, file: file, line: line)
         let softwareKeyboardWasUp = app.keyboards.count > 0
         hide.tap()
-        let gone = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in !hide.exists && app.keyboards.count == 0 },
-            object: nil)
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [gone], timeout: 10), .completed,
+        XCTAssertTrue(
+            Self.holds(within: 10) { !hide.exists && app.keyboards.count == 0 },
             "after Hide Keyboard: key row \(hide.exists ? "still up" : "gone"), "
                 + "\(app.keyboards.count) keyboard(s) "
                 + "(a software keyboard was \(softwareKeyboardWasUp ? "" : "not ")up before)",

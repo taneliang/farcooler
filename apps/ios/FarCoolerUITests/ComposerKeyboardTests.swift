@@ -24,6 +24,12 @@ final class ComposerKeyboardTests: XCTestCase {
             app.buttons[Self.composerHideKeyboard].exists,
             "Hide Keyboard is offered with no keyboard up")
 
+        // Raised by a tap, as a person raises it: the composer never takes
+        // focus on its own, so waiting for it to was ten seconds of
+        // full-tree snapshots on every run (ov-336). `raising` stays as the
+        // second tap for a first one that landed before the field could
+        // take focus.
+        field.tap()
         hideKeyboard(app, Self.composerHideKeyboard, raising: field)
 
         // Still the composer, still docked: only the keyboard went.
