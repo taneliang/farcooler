@@ -136,7 +136,41 @@ fn the_plan() -> pb::Plan {
                 ..Default::default()
             },
         ],
+        trains: trains().0,
+        ci: trains().1,
     }
+}
+
+/// A train (ov-309): integ-9, red, carrying mac-ux, and the runner's CI read
+/// of its SHA. The client's `plan_json` test builds the same, so one fixture
+/// holds both.
+fn trains() -> (Vec<pb::BoardTrain>, Vec<pb::BoardCiRead>) {
+    let job = |name: &str, state: &str| pb::BoardCiJob { name: name.into(), state: state.into(), url: String::new() };
+    let train = pb::BoardTrain {
+        id: id(0x6001),
+        workspace_id: id(0x0202),
+        name: "integ-9".into(),
+        base: "origin/main".into(),
+        pushed_sha: Some("c85bf83d".into()),
+        state: pb::BoardTrainState::Red as i32,
+        state_since: NOW - 20 * 60_000,
+        actor: "manager".into(),
+        created_at: NOW - 2 * HOUR,
+        landed_at: None,
+        lane_ids: vec![id(0x2002)],
+        ci_subject: "sha:c85bf83d".into(),
+        resource_version: 3,
+    };
+    let read = pb::BoardCiRead {
+        subject: "sha:c85bf83d".into(),
+        sha: "c85bf83dce46a6b71d7312afc623899ae7914658".into(),
+        status: pb::BoardCiStatus::Failed as i32,
+        url: "https://github.com/taneliang/farcooler/actions/runs/37275435256".into(),
+        jobs: vec![job("CI / Swift (shared + macOS)", "failed"), job("CI / Android", "passed"), job("Canary", "passed")],
+        fetched_at: NOW - 60_000,
+        changed_at: NOW - 20 * 60_000,
+    };
+    (vec![train], vec![read])
 }
 
 fn fixture() -> Value {

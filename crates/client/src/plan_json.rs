@@ -159,6 +159,63 @@ fn ruling_json(plan: &pb::Plan, r: &pb::BoardRuling) -> Value {
     })
 }
 
+fn train_state_word(state: i32) -> &'static str {
+    match pb::BoardTrainState::try_from(state) {
+        Ok(pb::BoardTrainState::Integrating) => "integrating",
+        Ok(pb::BoardTrainState::Gating) => "gating",
+        Ok(pb::BoardTrainState::Pushed) => "pushed",
+        Ok(pb::BoardTrainState::Green) => "green",
+        Ok(pb::BoardTrainState::Red) => "red",
+        Ok(pb::BoardTrainState::Landed) => "landed",
+        Ok(pb::BoardTrainState::Dropped) => "dropped",
+        _ => "unknown",
+    }
+}
+
+fn ci_status_word(status: i32) -> &'static str {
+    match pb::BoardCiStatus::try_from(status) {
+        Ok(pb::BoardCiStatus::Passed) => "passed",
+        Ok(pb::BoardCiStatus::Failed) => "failed",
+        Ok(pb::BoardCiStatus::Running) => "running",
+        Ok(pb::BoardCiStatus::Queued) => "queued",
+        Ok(pb::BoardCiStatus::None) => "none",
+        _ => "unknown",
+    }
+}
+
+/// A train (ov-309), with its lanes named ("" never: a lane the plan no longer
+/// lists is named by its short id).
+fn train_json(plan: &pb::Plan, t: &pb::BoardTrain) -> Value {
+    let lane_name = |id: &[u8]| plan.lanes.iter().find(|l| l.id == id).map_or_else(|| short(id), |l| l.name.clone());
+    json!({
+        "id": id_text(&t.id),
+        "short": short(&t.id),
+        "name": t.name,
+        "base": t.base,
+        "pushed_sha": t.pushed_sha,
+        "state": train_state_word(t.state),
+        "state_since": t.state_since,
+        "actor": t.actor,
+        "created_at": t.created_at,
+        "landed_at": t.landed_at,
+        "lanes": t.lane_ids.iter().map(|id| json!({ "lane": id_text(id), "name": lane_name(id) })).collect::<Vec<_>>(),
+        "ci_subject": t.ci_subject,
+    })
+}
+
+/// What the runner last read of one CI subject (ov-309, ov-306).
+fn ci_json(r: &pb::BoardCiRead) -> Value {
+    json!({
+        "subject": r.subject,
+        "sha": r.sha,
+        "status": ci_status_word(r.status),
+        "url": r.url,
+        "jobs": r.jobs.iter().map(|j| json!({ "name": j.name, "state": j.state, "url": j.url })).collect::<Vec<_>>(),
+        "fetched_at": r.fetched_at,
+        "changed_at": r.changed_at,
+    })
+}
+
 /// Cards that are neither done nor canceled.
 fn is_open(status: i32) -> bool {
     status != pb::TaskStatus::Done as i32 && status != pb::TaskStatus::Cancelled as i32
@@ -194,6 +251,8 @@ pub fn plan_json(plan: &pb::Plan) -> Value {
                 && (c.status == pb::TaskStatus::InProgress as i32 || c.status == pb::TaskStatus::InReview as i32)
         }),
         "rulings": plan.rulings.iter().map(|r| ruling_json(plan, r)).collect::<Vec<_>>(),
+        "trains": plan.trains.iter().map(|t| train_json(plan, t)).collect::<Vec<_>>(),
+        "ci": plan.ci.iter().map(ci_json).collect::<Vec<_>>(),
     })
 }
 

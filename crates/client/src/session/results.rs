@@ -63,5 +63,6 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::PageSetResult(_) => "page_set_result",
         result::Value::PageStatsList(_) => "page_stats_list",
         result::Value::BoardRuling(_) => "board_ruling",
+        result::Value::BoardTrain(_) => "board_train",
     }
 }

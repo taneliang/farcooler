@@ -173,6 +173,7 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, scope: Scope, req
             Ok(result::Value::Lane(lane_view(svc, &lane, admin)?))
         }
         "ruling.add" | "ruling.set" => crate::rpc_rulings::dispatch(svc, watcher, req),
+        "train.start" | "train.set" => crate::rpc_trains::dispatch(svc, watcher, req),
         other => {
             tracing::error!(method = %other, "a plan route with no handler");
             Err(DomainError::NotFound)
@@ -421,6 +422,8 @@ fn pb_plan(p: &Plan, admin: bool) -> pb::Plan {
             .map(|c| pb::PlanCoverage { task_id: id_bytes(c.task_id), live: c.live, landed: c.landed })
             .collect(),
         rulings: p.rulings.iter().map(crate::rpc_rulings::pb_ruling).collect(),
+        trains: p.trains.iter().map(crate::rpc_trains::pb_train_view).collect(),
+        ci: p.ci.iter().map(crate::rpc_trains::pb_ci).collect(),
     }
 }
 

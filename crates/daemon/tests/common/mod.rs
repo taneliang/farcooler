@@ -155,7 +155,17 @@ pub fn stdio_command(dir: &std::path::Path, extra: &[&str]) -> Command {
 /// inventory is taken, which is fast on an idle machine and not on a busy one,
 /// and a fixed wait would be flaky in exactly the direction that wastes an hour.
 pub async fn listening_daemon(dir: &std::path::Path) -> DaemonChild {
-    let child = Command::new(env!("CARGO_BIN_EXE_farcoolerd"))
+    listening_daemon_with_env(dir, &[]).await
+}
+
+/// The same, with extra environment: a `gh` of the test's own ahead on `PATH`,
+/// for the reason `spawn_with_env` gives.
+pub async fn listening_daemon_with_env(dir: &std::path::Path, env: &[(&str, &str)]) -> DaemonChild {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_farcoolerd"));
+    for (key, value) in env {
+        command.env(key, value);
+    }
+    let child = command
         .env("FARCOOLER_HOME", dir)
         .env("FARCOOLER_TEST_STUB_AGENTS", "1")
         .stdout(std::process::Stdio::null())

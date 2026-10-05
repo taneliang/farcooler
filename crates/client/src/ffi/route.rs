@@ -165,7 +165,11 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // Rulings (ov-304) are read in `plan.get`'s answer. Only the
         // orchestrator writes one: the owner asks it, citing the short id.
         | Method::RulingAdd
-        | Method::RulingSet => None,
+        | Method::RulingSet
+        // Trains (ov-309) are read in `plan.get`'s answer too, and only the
+        // orchestrator writes them.
+        | Method::TrainStart
+        | Method::TrainSet => None,
         // The CLI reads it today; the Summary page (ov-188 phase 3) will
         // route it here.
         Method::ReportGet => None,

@@ -235,7 +235,7 @@ struct GhCheck {
 /// bare name is looked up after the child has moved into the worktree. And
 /// inside an exec allowlist of its own (`crate::git::gh_launch`), which the
 /// gits it starts inherit. No gh is the same as a gh that failed.
-async fn gh(worktree: &Path) -> Result<tokio::process::Command> {
+pub(crate) async fn gh(worktree: &Path) -> Result<tokio::process::Command> {
     let pins = crate::git::guard_pins(worktree).await?;
     let launch = crate::git::gh_launch().ok_or(farcooler_core::DomainError::OperationFailed)?;
     let mut gh = launch.command()?;

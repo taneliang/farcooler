@@ -551,6 +551,17 @@ pub mod capability {
     /// verb before sending, saying the runner needs an update to keep rulings.
     /// Needs `board_plan`, since rulings are read through the plan.
     pub const BOARD_RULINGS: &str = "board_rulings";
+    /// Trains (ov-309): `train.start`, `train.set`, and `Plan.trains` and
+    /// `Plan.ci` on `plan.get`, with the runner reading each pushed SHA's CI
+    /// through `gh`.
+    ///
+    /// **Experimental, with the plan layer it is part of.** Its own capability
+    /// because a runner with `board_plan` alone keeps no trains: a client that
+    /// reads it absent draws Now without train groups and a page's CI
+    /// references as plain text, and a CLI refuses a train verb before
+    /// sending, saying the runner needs an update to keep trains. Needs
+    /// `board_plan`, since trains are read through the plan.
+    pub const BOARD_TRAINS: &str = "board_trains";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -565,6 +576,7 @@ pub mod capability {
             AGENTS_FOUND,
             TASK_WAITS, TASK_WORKERS, NOTICE_TASK, BOARD_READS, WORKTREE_FILES, TERMINAL_NAMES, TERMINAL_PORTS,
             READ_ONLY_FOLDERS, AGENT_QUEUE, BOARD_PLAN, LFS_POINTERS, BOARD_PAGES, BOARD_RULINGS,
+            BOARD_TRAINS,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
@@ -758,6 +770,8 @@ pub mod method {
         PageStats = "page.stats" => BOARD_PAGES,
         RulingAdd = "ruling.add" => BOARD_RULINGS,
         RulingSet = "ruling.set" => BOARD_RULINGS,
+        TrainStart = "train.start" => BOARD_TRAINS,
+        TrainSet = "train.set" => BOARD_TRAINS,
     }
 }
 
@@ -813,6 +827,8 @@ mod page_wire_tests;
 mod plan_layer_tests;
 #[cfg(test)]
 mod ruling_wire_tests;
+#[cfg(test)]
+mod train_wire_tests;
 #[cfg(test)]
 mod task_starts_tests;
 

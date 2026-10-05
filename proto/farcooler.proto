@@ -235,9 +235,17 @@ message Request {
     // through `plan.get`'s `Plan.rulings`, so only the writes are here.
     RulingAdd ruling_add = 180;
     RulingSet ruling_set = 181;
+    // Trains (ov-309), the plan layer's batches of lanes landing together,
+    // behind `board_trains`. Experimental with the layer: 190-199 are theirs,
+    // the rest held by `reserved` below. Read through `plan.get`'s
+    // `Plan.trains`, so only the writes are here.
+    TrainStart train_start = 190;
+    TrainSet train_set = 191;
   }
   // The rest of rulings' block, kept for them (review 1005a L1).
   reserved 182 to 189;
+  // The rest of trains' block.
+  reserved 192 to 199;
 }
 
 message Response {
@@ -350,9 +358,13 @@ message Result {
     PageStatsList page_stats_list = 173;
     // `ruling.add` and `ruling.set`, behind `board_rulings`: the ruling.
     BoardRuling board_ruling = 180;
+    // `train.start` and `train.set`, behind `board_trains`: the train.
+    BoardTrain board_train = 190;
   }
   // The rest of rulings' block, kept for them (review 1005a L1).
   reserved 181 to 189;
+  // The rest of trains' block.
+  reserved 191 to 199;
 }
 
 // ---------------------------------------------------------------------------
@@ -4044,6 +4056,14 @@ message Plan {
   // of them when the request said so), most recently settled first. Empty
   // from a runner without the capability, and a client shows nothing then.
   repeated BoardRuling rulings = 7;
+  // Trains (ov-309), behind `board_trains`: every one not landed or dropped,
+  // oldest first, then those settled in the last week (all of them when the
+  // request said so), most recent first. Empty from a runner without it.
+  repeated BoardTrain trains = 8;
+  // What the runner last read of CI for each subject the board names: its
+  // trains' pushed SHAs and its pages' CI references (ov-306). Behind
+  // `board_trains`; empty without it, and a CI reference then draws as text.
+  repeated BoardCiRead ci = 9;
 }
 
 // `plan.get`, at `read`.
@@ -4251,6 +4271,116 @@ message RulingSet {
   BoardRulingState state = 2;
   optional string note = 3;
   string actor = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Trains (ov-309)
+//
+// A TRAIN is a batch of lanes landing together: a name, the base it was cut
+// from, the SHA it pushed and where it stands. Its lanes are the lanes whose
+// `Lane.train` names it. The runner reads the pushed SHA's CI through `gh`,
+// read only, while the train isn't settled, and moves a pushed train to green
+// or red, and back to pushed when a run starts again. Part of the plan layer
+// and as removable, behind its own `board_trains`. Writes announce
+// `plan_changed`, and so does a CI read that changed what a board shows.
+// Refusals are `Error.what` words: `name`, `name_taken`, `base`, `sha`,
+// `train_settled`, `other_board`, `actor`, `state`.
+// ---------------------------------------------------------------------------
+
+enum BoardTrainState {
+  BOARD_TRAIN_STATE_UNSPECIFIED = 0;
+  // Lanes are being picked into it.
+  BOARD_TRAIN_STATE_INTEGRATING = 1;
+  // Its local gates are running.
+  BOARD_TRAIN_STATE_GATING = 2;
+  // A SHA is out and CI hasn't finished on it.
+  BOARD_TRAIN_STATE_PUSHED = 3;
+  BOARD_TRAIN_STATE_GREEN = 4;
+  BOARD_TRAIN_STATE_RED = 5;
+  BOARD_TRAIN_STATE_LANDED = 6;
+  // Given up; its lanes go on in another train or alone.
+  BOARD_TRAIN_STATE_DROPPED = 7;
+}
+
+message BoardTrain {
+  bytes id = 1;
+  bytes workspace_id = 2;
+  string name = 3;
+  // What it was cut from: `origin/main`, or a SHA.
+  string base = 4;
+  optional string pushed_sha = 5;
+  BoardTrainState state = 6;
+  int64 state_since = 7;
+  // Who started it, in `TaskNote.actor`'s words.
+  string actor = 8;
+  int64 created_at = 9;
+  optional int64 landed_at = 10;
+  // The lanes on it, oldest first, finished ones included.
+  repeated bytes lane_ids = 11;
+  // The CI subject its pushed SHA is read under (`sha:<sha>`), matching a
+  // `BoardCiRead.subject` in the same plan once the runner has read it.
+  string ci_subject = 12;
+  uint64 resource_version = 13;
+}
+
+enum BoardCiStatus {
+  BOARD_CI_STATUS_UNSPECIFIED = 0;
+  // Every run finished and none failed.
+  BOARD_CI_STATUS_PASSED = 1;
+  // A run failed, timed out, was canceled or needs approval.
+  BOARD_CI_STATUS_FAILED = 2;
+  BOARD_CI_STATUS_RUNNING = 3;
+  // Waiting for a runner; none going yet.
+  BOARD_CI_STATUS_QUEUED = 4;
+  // GitHub has no run for it (yet).
+  BOARD_CI_STATUS_NONE = 5;
+  // `gh` couldn't say: logged out, offline, no such run. Never read as green.
+  BOARD_CI_STATUS_UNKNOWN = 6;
+}
+
+message BoardCiJob {
+  // The workflow's name and the job's: "CI / rust (ubuntu)".
+  string name = 1;
+  // `passed`, `failed`, `running`, `queued`, `skipped` or `canceled`.
+  string state = 2;
+  string url = 3;
+}
+
+// What the runner last read of one CI subject: `sha:<sha>` (every run on that
+// commit), `run:<id>` (one run) or `main` (the default branch's newest commit
+// with runs).
+message BoardCiRead {
+  string subject = 1;
+  // The commit its runs are for, in full; empty until a run names it.
+  string sha = 2;
+  BoardCiStatus status = 3;
+  // The run's page: for several runs, the first failing one's, else the first.
+  string url = 4;
+  repeated BoardCiJob jobs = 5;
+  // When the runner last asked, and when what it heard last changed.
+  int64 fetched_at = 6;
+  int64 changed_at = 7;
+}
+
+// `train.start`, at `control`: a train, integrating, with these lanes on it.
+message TrainStart {
+  bytes workspace_id = 1;
+  string name = 2;
+  string base = 3;
+  repeated bytes lane_ids = 4;
+  string actor = 5;
+}
+
+// `train.set`, at `control`: move it, rebase it, record what it pushed, and
+// put lanes on or off it. A new SHA without a state moves it to pushed.
+message TrainSet {
+  bytes train_id = 1;
+  BoardTrainState state = 2;
+  optional string base = 3;
+  optional string sha = 4;
+  repeated bytes add_lane_ids = 5;
+  repeated bytes remove_lane_ids = 6;
+  string actor = 7;
 }
 
 // ---------------------------------------------------------------------------

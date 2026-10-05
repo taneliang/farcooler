@@ -273,6 +273,10 @@ async fn run() -> Result<(), i32> {
     let watcher = Watcher::new(service.clone());
     tokio::spawn(watcher.clone().run());
 
+    // The CI watch (ov-309): reads GitHub Actions through `gh` for the trains
+    // and pages that name a commit, only here, never in a `--stdio` session.
+    tokio::spawn(farcooler_daemon::ci_watch::run(service.clone(), watcher.clone()));
+
     // Expire pasted images. Once at startup and daily after that, because the
     // host this runs on is a laptop that is asleep more often than it is
     // up — an interval alone would let a directory grow for weeks between two

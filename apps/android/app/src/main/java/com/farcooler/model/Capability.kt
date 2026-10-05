@@ -47,5 +47,6 @@ enum class Capability(val wire: String) {
     BOARD_PLAN("board_plan"),
     LFS_POINTERS("lfs_pointers"),
     BOARD_PAGES("board_pages"),
-    BOARD_RULINGS("board_rulings");
+    BOARD_RULINGS("board_rulings"),
+    BOARD_TRAINS("board_trains");
 }

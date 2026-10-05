@@ -1,0 +1,351 @@
+//! The runner's CI watch (ov-309, ov-306): reads GitHub Actions through `gh`,
+//! read only, for every CI subject a board names, and keeps what it heard in
+//! the store's `board_ci` (`farcooler_store::board_ci`).
+//!
+//! A board names a subject by pushing a train (`sha:<pushed sha>`) or by a
+//! page's CI reference (a SHA, a run, or `main`). The watch reads each one
+//! while it's named: every minute while any run is still going, and every ten
+//! minutes once everything it watches has finished, so a re-run is still seen.
+//! A write that gives a train a SHA kicks it to read at once. A read that
+//! changed what a board shows announces `plan_changed`, and the store moves a
+//! pushed train to green or red on the way.
+//!
+//! Every `gh` call is `gh api -X GET` with a `--jq` filter, run in the
+//! repository's main checkout through the daemon's own sandboxed launch
+//! (`stack::gh`). The filters are constants here and the parsers read what they
+//! print, so the test fixtures in `test/fixtures/ci/` are that exact output
+//! from a real `gh` against this repository. A `gh` that's missing, logged out
+//! or offline reads `unknown`, which never replaces a known read.
+//!
+//! Part of the plan layer and as removable: only the real daemon runs it
+//! (`main.rs`), never a `--stdio` session.
+
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
+use std::time::Duration;
+
+use farcooler_store::board_ci::{self, CiJob, CiRead, CiStatus, MAIN_SUBJECT};
+use farcooler_store::models::Actor;
+use serde::Deserialize;
+use uuid::Uuid;
+
+use crate::service::Service;
+use crate::watch::Watcher;
+
+/// How often subjects are read while any run is still going.
+pub const BUSY: Duration = Duration::from_secs(60);
+/// How often they're read once everything watched has finished.
+pub const QUIET: Duration = Duration::from_secs(10 * 60);
+
+/// What a list of runs is cut down to: the fields read here, nothing more.
+pub const RUNS_JQ: &str = "[.workflow_runs[] | {id, name, head_sha, status, conclusion, html_url, created_at}]";
+/// One run, the same fields.
+pub const RUN_JQ: &str = "{id, name, head_sha, status, conclusion, html_url, created_at}";
+/// A run's jobs.
+pub const JOBS_JQ: &str = "[.jobs[] | {name, status, conclusion, html_url}]";
+
+fn kicked() -> &'static tokio::sync::Notify {
+    static KICK: OnceLock<tokio::sync::Notify> = OnceLock::new();
+    KICK.get_or_init(tokio::sync::Notify::new)
+}
+
+/// Read now rather than at the next turn: a train was just given a SHA.
+pub fn kick() {
+    kicked().notify_one();
+}
+
+/// The watch, for the life of the daemon.
+pub async fn run(svc: Arc<Service>, watcher: Arc<Watcher>) {
+    let mut memo = Memo::default();
+    loop {
+        let busy = read_all(&svc, &watcher, &mut memo).await;
+        let wait = if busy { BUSY } else { QUIET };
+        tokio::select! {
+            _ = tokio::time::sleep(wait) => {}
+            _ = kicked().notified() => {}
+        }
+    }
+}
+
+/// What the watch remembers between turns: full SHAs for short ones, and a
+/// run's jobs while the run hasn't changed, so a finished run costs one call.
+#[derive(Default)]
+pub struct Memo {
+    shas: HashMap<String, String>,
+    jobs: HashMap<u64, (String, Option<String>, Vec<GhJob>)>,
+    default_branch: HashMap<Uuid, String>,
+}
+
+/// One run, as `RUNS_JQ` and `RUN_JQ` print it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct GhRun {
+    pub id: u64,
+    pub name: String,
+    pub head_sha: String,
+    pub status: String,
+    #[serde(default)]
+    pub conclusion: Option<String>,
+    pub html_url: String,
+    pub created_at: String,
+}
+
+/// One job, as `JOBS_JQ` prints it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct GhJob {
+    pub name: String,
+    pub status: String,
+    #[serde(default)]
+    pub conclusion: Option<String>,
+    #[serde(default)]
+    pub html_url: String,
+}
+
+/// `RUNS_JQ`'s output.
+pub fn parse_runs(bytes: &[u8]) -> Option<Vec<GhRun>> {
+    serde_json::from_slice(bytes).map_err(|e| tracing::warn!(error = %e, "could not read gh's runs")).ok()
+}
+
+/// `RUN_JQ`'s output.
+pub fn parse_run(bytes: &[u8]) -> Option<GhRun> {
+    serde_json::from_slice(bytes).map_err(|e| tracing::warn!(error = %e, "could not read gh's run")).ok()
+}
+
+/// `JOBS_JQ`'s output.
+pub fn parse_jobs(bytes: &[u8]) -> Option<Vec<GhJob>> {
+    serde_json::from_slice(bytes).map_err(|e| tracing::warn!(error = %e, "could not read gh's jobs")).ok()
+}
+
+/// The newest run of each workflow: a workflow run again on the same commit (a
+/// re-trigger, or a chained run) replaces its older run. In the order GitHub
+/// listed them, newest first.
+pub fn latest_per_workflow(runs: &[GhRun]) -> Vec<GhRun> {
+    let mut newest: BTreeMap<&str, &GhRun> = BTreeMap::new();
+    for run in runs {
+        let slot = newest.entry(run.name.as_str()).or_insert(run);
+        if run.id > slot.id {
+            *slot = run;
+        }
+    }
+    let kept: BTreeSet<u64> = newest.values().map(|r| r.id).collect();
+    runs.iter().filter(|r| kept.contains(&r.id)).cloned().collect()
+}
+
+/// The runs on a branch's newest commit that has any: the commit of the most
+/// recently created run.
+pub fn newest_commit(runs: &[GhRun]) -> Vec<GhRun> {
+    let Some(head) = runs.iter().max_by(|a, b| a.created_at.cmp(&b.created_at).then(a.id.cmp(&b.id))) else {
+        return Vec::new();
+    };
+    runs.iter().filter(|r| r.head_sha == head.head_sha).cloned().collect()
+}
+
+fn run_state(run: &GhRun) -> &'static str {
+    board_ci::job_state(&run.status, run.conclusion.as_deref())
+}
+
+/// What the runs (each with its jobs, when they were read) say about a
+/// subject. Jobs are named "workflow / job"; a run whose jobs couldn't be read
+/// stands as one line of its own.
+pub fn summarize(subject: &str, runs: &[(GhRun, Option<Vec<GhJob>>)]) -> CiRead {
+    let states: Vec<&str> = runs.iter().map(|(r, _)| run_state(r)).collect();
+    let status = board_ci::status_of(&states);
+    let failing = runs.iter().find(|(r, _)| matches!(run_state(r), "failed" | "canceled"));
+    let url = failing.or(runs.first()).map(|(r, _)| r.html_url.clone()).unwrap_or_default();
+    let mut jobs = Vec::new();
+    for (run, its) in runs {
+        match its {
+            Some(its) if !its.is_empty() => jobs.extend(its.iter().map(|j| CiJob {
+                name: format!("{} / {}", run.name, j.name),
+                state: board_ci::job_state(&j.status, j.conclusion.as_deref()).to_string(),
+                url: j.html_url.clone(),
+            })),
+            _ => jobs.push(CiJob { name: run.name.clone(), state: run_state(run).to_string(), url: run.html_url.clone() }),
+        }
+    }
+    CiRead {
+        subject: subject.to_string(),
+        sha: runs.first().map(|(r, _)| r.head_sha.clone()).unwrap_or_default(),
+        status,
+        url,
+        jobs,
+        fetched_at: 0,
+        changed_at: 0,
+    }
+}
+
+/// A read that says `gh` couldn't answer.
+fn unknown(subject: &str) -> CiRead {
+    CiRead {
+        subject: subject.to_string(),
+        sha: String::new(),
+        status: CiStatus::Unknown,
+        url: String::new(),
+        jobs: Vec::new(),
+        fetched_at: 0,
+        changed_at: 0,
+    }
+}
+
+/// `gh api -X GET <path> -f <field>... --jq <jq>`'s arguments.
+pub fn api_args(path: &str, fields: &[String], jq: &str) -> Vec<String> {
+    let mut args = vec!["api".to_string(), "-X".into(), "GET".into(), path.to_string()];
+    for field in fields {
+        args.push("-f".into());
+        args.push(field.clone());
+    }
+    args.push("--jq".into());
+    args.push(jq.to_string());
+    args
+}
+
+/// One `gh api` read in `tree`, or `None` for every way it can fail.
+async fn gh_get(svc: &Service, tree: &Path, args: &[String]) -> Option<Vec<u8>> {
+    let mut gh = crate::stack::gh(tree).await.ok()?;
+    let _permit = svc.gh_permit().await;
+    let out = tokio::time::timeout(
+        crate::stack::GH_TIMEOUT,
+        gh.current_dir(tree)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await;
+    match out {
+        Ok(Ok(o)) if o.status.success() => Some(o.stdout),
+        _ => None,
+    }
+}
+
+/// A run with its jobs, from `memo` while the run is unchanged.
+async fn with_jobs(
+    svc: &Service,
+    tree: &Path,
+    memo: &mut HashMap<u64, (String, Option<String>, Vec<GhJob>)>,
+    run: GhRun,
+) -> (GhRun, Option<Vec<GhJob>>) {
+    if let Some((s, c, jobs)) = memo.get(&run.id) {
+        if (s, c) == (&run.status, &run.conclusion) {
+            return (run, Some(jobs.clone()));
+        }
+    }
+    let path = format!("repos/{{owner}}/{{repo}}/actions/runs/{}/jobs", run.id);
+    let jobs = gh_get(svc, tree, &api_args(&path, &["per_page=100".into()], JOBS_JQ)).await.and_then(|b| parse_jobs(&b));
+    if let Some(jobs) = &jobs {
+        memo.insert(run.id, (run.status.clone(), run.conclusion.clone(), jobs.clone()));
+    }
+    (run, jobs)
+}
+
+/// Read one subject now.
+pub async fn read_subject(svc: &Service, repository: Uuid, tree: &Path, subject: &str, memo: &mut Memo) -> CiRead {
+    const RUNS: &str = "repos/{owner}/{repo}/actions/runs";
+    let runs = if let Some(sha) = subject.strip_prefix("sha:") {
+        let full = match memo.shas.get(sha) {
+            Some(full) => Some(full.clone()),
+            None if sha.len() == 40 => Some(sha.to_string()),
+            None => {
+                let path = format!("repos/{{owner}}/{{repo}}/commits/{sha}");
+                let found = gh_get(svc, tree, &api_args(&path, &[], ".sha")).await;
+                let full = found.map(|b| String::from_utf8_lossy(&b).trim().to_string()).filter(|s| s.len() == 40);
+                if let Some(full) = &full {
+                    memo.shas.insert(sha.to_string(), full.clone());
+                }
+                full
+            }
+        };
+        match full {
+            Some(full) => {
+                let fields = [format!("head_sha={full}"), "per_page=50".to_string()];
+                gh_get(svc, tree, &api_args(RUNS, &fields, RUNS_JQ)).await.and_then(|b| parse_runs(&b)).map(|r| latest_per_workflow(&r))
+            }
+            None => None,
+        }
+    } else if let Some(id) = subject.strip_prefix("run:") {
+        let path = format!("{RUNS}/{id}");
+        gh_get(svc, tree, &api_args(&path, &[], RUN_JQ)).await.and_then(|b| parse_run(&b)).map(|r| vec![r])
+    } else if subject == MAIN_SUBJECT {
+        let branch = match memo.default_branch.get(&repository) {
+            Some(b) => b.clone(),
+            None => {
+                let found = svc.default_branch(repository, tree).await.unwrap_or_else(|| "main".into());
+                let bare = found.strip_prefix("origin/").unwrap_or(&found).to_string();
+                memo.default_branch.insert(repository, bare.clone());
+                bare
+            }
+        };
+        let fields = [format!("branch={branch}"), "per_page=30".to_string()];
+        gh_get(svc, tree, &api_args(RUNS, &fields, RUNS_JQ))
+            .await
+            .and_then(|b| parse_runs(&b))
+            .map(|r| latest_per_workflow(&newest_commit(&r)))
+    } else {
+        None
+    };
+    let Some(runs) = runs else { return unknown(subject) };
+    let mut read = Vec::new();
+    for run in runs {
+        read.push(with_jobs(svc, tree, &mut memo.jobs, run).await);
+    }
+    summarize(subject, &read)
+}
+
+/// The main checkout `gh` runs in for a board's repository.
+fn tree_of(svc: &Service, workspace: Uuid) -> Option<(Uuid, PathBuf)> {
+    let ws = svc.store.get_workspace(workspace).ok()?;
+    let repo = svc.store.get_repository(ws.repository_id).ok()?;
+    Some((repo.id, svc.repository_worktree(&repo)))
+}
+
+/// Every board's CI subjects: its trains' pushed SHAs.
+pub fn wanted(svc: &Service) -> BTreeMap<Uuid, BTreeSet<String>> {
+    let mut wanted: BTreeMap<Uuid, BTreeSet<String>> = BTreeMap::new();
+    for train in svc.store.trains_following_ci().unwrap_or_default() {
+        if let Some(subject) = train.ci_subject() {
+            wanted.entry(train.workspace_id).or_default().insert(subject);
+        }
+    }
+    wanted
+}
+
+/// One turn: read every subject that's due, forget those nothing names, and
+/// announce each board whose reads changed. Whether anything watched is still
+/// going.
+pub async fn read_all(svc: &Service, watcher: &Watcher, memo: &mut Memo) -> bool {
+    let wanted = wanted(svc);
+    for ws in svc.store.list_workspaces(None).unwrap_or_default() {
+        let named: Vec<String> = wanted.get(&ws.id).map(|s| s.iter().cloned().collect()).unwrap_or_default();
+        if svc.store.keep_ci(ws.id, &named).unwrap_or(0) > 0 {
+            watcher.announce_plan_changed(ws.id, Actor::Runner);
+        }
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
+    let mut busy = false;
+    for (workspace, subjects) in wanted {
+        let Some((repository, tree)) = tree_of(svc, workspace) else { continue };
+        let mut changed = false;
+        for subject in subjects {
+            let last = svc.store.ci_read(workspace, &subject).ok().flatten();
+            if last.as_ref().is_some_and(|l| l.status.is_finished() && now - l.fetched_at < QUIET.as_millis() as i64) {
+                continue;
+            }
+            let read = read_subject(svc, repository, &tree, &subject, memo).await;
+            busy |= !read.status.is_finished();
+            match svc.store.record_ci(workspace, &read) {
+                Ok(w) => changed |= w.changed,
+                Err(e) => tracing::warn!(error = %e, subject, "could not keep a CI read"),
+            }
+        }
+        if changed {
+            watcher.announce_plan_changed(workspace, Actor::Runner);
+        }
+    }
+    busy
+}
+
+#[cfg(test)]
+#[path = "ci_watch_tests.rs"]
+mod tests;
