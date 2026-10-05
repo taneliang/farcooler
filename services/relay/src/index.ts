@@ -14,7 +14,7 @@
 
 import { record, type Metrics } from './analytics'
 import { cut, quietAfterMs, ROW_RETENTION_MS, WORKSPACE_BUDGET } from './bounds'
-import { leadPlan, storePlan, type PlanBoard } from './plan-glance'
+import { leadPlan, storePlan, type PlanLead } from './plan-glance'
 import { pulseTurns } from './pulse-turns'
 import { verifySession } from './workos'
 import {
@@ -1051,7 +1051,7 @@ async function notify(request: Request, env: Env): Promise<Response> {
   }
   // What this token last said, read before it is overwritten, so an ask
   // notice can tell a count that moved from one told again. See below.
-  const was = (kind === 'ask' || taskLike) && needsYou !== null
+  const was = (kind === 'ask' || kind === 'count' || taskLike) && needsYou !== null
     ? await env.DB.prepare(`SELECT needs_you, reviews FROM daemons WHERE id = ?`)
         .bind(daemon.id)
         .first<{ needs_you: number | null; reviews: number | null }>()
@@ -1079,7 +1079,7 @@ async function notify(request: Request, env: Env): Promise<Response> {
         .run()
     }
   }
-  await storePlan(env.DB, daemon, install, body.plan)
+  const leadMoved = await storePlan(env.DB, daemon, install, body.plan)
 
   const devices = await env.DB.prepare(
     `SELECT platform, push_token, environment, live_activity_start_token, notify_on_done,
@@ -1191,7 +1191,8 @@ async function notify(request: Request, env: Env): Promise<Response> {
         await refreshCard(env, daemon.account_id, headline =>
           counted || headline.terminal === changed)
       }
-    } else {
+    } else if (kind !== 'count' || leadMoved || (needsYou !== null && needsYou !== told) || reviewsMoved) {
+      // A count that moved nothing the card shows pushes nothing (ov-310 M3).
       await refreshCard(env, daemon.account_id)
     }
   } catch (error) {
@@ -1263,7 +1264,7 @@ async function heartbeat(request: Request, env: Env): Promise<Response> {
     // its own row alone.
     const named = await installKey(daemon.account_id, body.install)
     await env.DB.prepare(
-      `UPDATE daemons SET beat_every = NULL
+      `UPDATE daemons SET beat_every = NULL, plan = NULL, plan_at = NULL
        WHERE id = ?1 OR (account_id = ?2 AND install_id IS NOT NULL
          AND (install_id = ?3
               OR install_id = (SELECT install_id FROM daemons WHERE id = ?1)))`,
@@ -2568,7 +2569,7 @@ function fleetHeader(fleet: Fleet): string {
 /// belongs to a runner that ships separately from this worker, so a build that
 /// widened one of them could otherwise put this payload over the cap, where APNs
 /// does not truncate it but refuses it outright.
-function withFleet(state: ActivityState, fleet: Fleet, plan: PlanBoard | null = null): ActivityState {
+function withFleet(state: ActivityState, fleet: Fleet, plan: PlanLead | null = null): ActivityState {
   state.blocked = fleet.blocked
   state.review = fleet.review
   // Only when a turn failed: an absent count is zero to an app that knows it,

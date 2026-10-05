@@ -4,7 +4,7 @@
 /// daemon in particular — never learns which kind of phone it is talking to.
 /// The daemon says what happened; where that lands is this file's business.
 
-import type { PlanBoard } from './plan-glance'
+import type { PlanLead } from './plan-glance'
 
 export interface Payload {
   title: string
@@ -408,7 +408,7 @@ export interface ActivityState {
   /// The board the glance draws (ov-310): its name, its Needs You count, up
   /// to two Now lanes and the lane next up. Absent when no runner has a plan,
   /// and on every card from a relay older than this. See `plan-glance.ts`.
-  plan?: PlanBoard
+  plan?: PlanLead
 }
 
 /// A hook ask as the card carries it. The same object a daemon notice carries

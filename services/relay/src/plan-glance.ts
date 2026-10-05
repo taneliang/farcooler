@@ -18,7 +18,7 @@
 /// else on an entry is dropped, and a value of the wrong shape costs its
 /// board, never the notice.
 
-import { cut, quietAfterMs, ROW_RETENTION_MS, WORKSPACE_BUDGET } from './bounds'
+import { cut, quietAfterMs, WORKSPACE_BUDGET } from './bounds'
 
 /// A lane in Now: its name, and its state as the runner's store spells it
 /// (`building`, `review`, `fixing`, `landing`). The apps say the word.
@@ -80,7 +80,9 @@ export function planGlanceOf(raw: unknown): PlanBoard[] | null {
     }
     boards.push({
       workspace: cut(workspace.trim(), WORKSPACE_BUDGET),
-      needsYou: Math.min(needsYou, 0xffffffff),
+      // `Int` is 32 bits on an arm64_32 watch, so a count past it would fail
+      // to decode there and read as none.
+      needsYou: Math.min(needsYou, 0x7fffffff),
       now: lanes,
       ...(typeof next === 'string' && next !== '' ? { next: cut(next, PLAN_NAME_BUDGET) } : {}),
     })
@@ -88,21 +90,42 @@ export function planGlanceOf(raw: unknown): PlanBoard[] | null {
   return boards
 }
 
-/// File what a notice said about this runner's plan, if it said anything.
+/// The board the glance draws, and how sure the relay is of it: which runner
+/// said it, how long ago that runner was last heard (the relay's clock, so
+/// no device's clock enters it), and whether it has gone quiet. A quiet
+/// runner's plan is still the last word on it, and is drawn with its age.
+export interface PlanLead extends PlanBoard {
+  runner: string
+  heardAgo: number
+  quiet?: true
+}
+
+/// File what a notice said about this runner's plan, if it said anything,
+/// and say whether that moved the board the glance draws.
 ///
 /// Overwritten, never merged: the glance is the runner's reading now, as its
 /// count is. Every other token of the same install is this runner under an
-/// older pairing, and is cleared, as `needs_you` is.
+/// older pairing, and is cleared, as `needs_you` is. `plan_at` moves only when
+/// the glance itself did, so "the plan that moved last" is never a count
+/// notice about something else (review H1).
+///
+/// The answer is what keeps a count notice that moved only another board, or
+/// another runner's, from pushing an identical card (review M3).
 export async function storePlan(
   db: D1Database,
   daemon: { id: string; account_id: string },
   install: string | null,
   raw: unknown,
-): Promise<void> {
+): Promise<boolean> {
   const boards = planGlanceOf(raw)
-  if (boards === null) return
-  await db.prepare(`UPDATE daemons SET plan = ?, plan_at = ? WHERE id = ?`)
-    .bind(JSON.stringify(boards), Date.now(), daemon.id)
+  if (boards === null) return false
+  const now = Date.now()
+  const before = JSON.stringify(await leadPlan(db, daemon.account_id, now))
+  const glance = JSON.stringify(boards)
+  await db.prepare(
+    `UPDATE daemons SET plan = ?1, plan_at = CASE WHEN plan IS ?1 THEN plan_at ELSE ?2 END WHERE id = ?3`,
+  )
+    .bind(glance, now, daemon.id)
     .run()
   if (install !== null) {
     await db.prepare(
@@ -111,35 +134,60 @@ export async function storePlan(
       .bind(daemon.account_id, install, daemon.id)
       .run()
   }
+  return JSON.stringify(await leadPlan(db, daemon.account_id, now)) !== before
 }
 
 /// The one board the account's glance draws, or `null` for none.
 ///
-/// The first board of the runner whose plan moved last: the runner sends its
-/// busiest board first, and the newest word is the plan someone is working.
-/// A runner that has gone quiet (`quietAfterMs`) is passed over, since its Now
-/// is a claim nobody has vouched for since; so is a glance older than
-/// `ROW_RETENTION_MS`, the age at which the relay forgets a runner's count.
-export async function leadPlan(db: D1Database, account: string, now: number): Promise<PlanBoard | null> {
+/// Every runner's newest glance is kept until the runner sends another or is
+/// unpaired: a plan nobody touched over a weekend is still the plan, and the
+/// owner most needs it then (review H1). So nothing here ages out. Instead:
+///
+/// - a runner unpaired on purpose (`beat_every` NULL, `/v1/heartbeat` with
+///   `withdrawn`) is never drawn, and the withdrawal clears its plan (M2);
+/// - a runner that went quiet still leads with its last word, marked `quiet`
+///   with how long ago it was heard, so a surface says "Can't reach Studio"
+///   rather than "No board has a plan" (H2);
+/// - a runner still beating outranks a quiet one, a board with something
+///   needing the owner outranks one without (M4), and then the plan that
+///   moved last.
+export async function leadPlan(db: D1Database, account: string, now: number): Promise<PlanLead | null> {
   const held = await db.prepare(
-    `SELECT id, plan, plan_at, last_seen_at, beat_every FROM daemons
-     WHERE account_id = ? AND plan IS NOT NULL AND plan_at >= ?
-       AND (expires_at IS NULL OR expires_at > ?)
-     ORDER BY plan_at DESC, id`,
+    `SELECT id, label, name, plan, plan_at, last_seen_at, beat_every FROM daemons
+     WHERE account_id = ? AND plan IS NOT NULL AND beat_every IS NOT NULL
+       AND (expires_at IS NULL OR expires_at > ?)`,
   )
-    .bind(account, now - ROW_RETENTION_MS, now)
-    .all<{ id: string; plan: string; plan_at: number; last_seen_at: number | null; beat_every: number | null }>()
+    .bind(account, now)
+    .all<{
+      id: string
+      label: string
+      name: string | null
+      plan: string
+      plan_at: number | null
+      last_seen_at: number | null
+      beat_every: number
+    }>()
+  const leads: { lead: PlanLead; at: number; id: string }[] = []
   for (const row of held.results ?? []) {
-    const quiet = row.beat_every !== null && row.last_seen_at !== null &&
-      now - row.last_seen_at > quietAfterMs(row.beat_every)
-    if (quiet) continue
     let boards: PlanBoard[] | null = null
     try {
       boards = planGlanceOf(JSON.parse(row.plan))
     } catch {
       continue
     }
-    if (boards !== null && boards.length > 0) return boards[0]
+    if (boards === null || boards.length === 0) continue
+    const heardAgo = Math.max(0, now - (row.last_seen_at ?? row.plan_at ?? now))
+    const quiet = heardAgo > quietAfterMs(row.beat_every)
+    leads.push({
+      lead: { ...boards[0], runner: row.name || row.label, heardAgo, ...(quiet ? { quiet: true as const } : {}) },
+      at: row.plan_at ?? 0,
+      id: row.id,
+    })
   }
-  return null
+  leads.sort((a, b) =>
+    Number(a.lead.quiet ?? false) - Number(b.lead.quiet ?? false) ||
+    Number(b.lead.needsYou > 0) - Number(a.lead.needsYou > 0) ||
+    b.at - a.at ||
+    (a.id < b.id ? -1 : 1))
+  return leads[0]?.lead ?? null
 }

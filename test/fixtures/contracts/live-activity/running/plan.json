@@ -30,7 +30,9 @@
             "state": "building"
           }
         ],
-        "next": "mac-fu3"
+        "next": "mac-fu3",
+        "runner": "Studio",
+        "heardAgo": 0
       },
       "rows": [
         {

@@ -12,8 +12,18 @@
         "state": "building"
       }
     ],
-    "next": "mac-fu3"
+    "next": "mac-fu3",
+    "runner": "Studio",
+    "heardAgo": 90000
   },
-  "runners": [],
-  "turns": []
+  "turns": [],
+  "runners": [
+    {
+      "label": "Studio",
+      "name": "Studio",
+      "heardAgo": 90000,
+      "beatEvery": 300,
+      "runner": null
+    }
+  ]
 }
