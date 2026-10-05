@@ -9,7 +9,7 @@ import Testing
 /// full-bleed orange bands, and the file filter is the system field.
 @MainActor
 struct ChangesLookTests {
-    private func bitmap(_ appearance: NSAppearance.Name, scale: Int) throws -> NSBitmapImageRep {
+    private func filterHost(_ appearance: NSAppearance.Name) throws -> NSHostingView<some View> {
         let worktree = Worktree(
             id: "co", short: "co", task: "overnight", branch: "main", repository: "overnight", host: "",
             path: "/tmp/overnight", state: "active", terminals: [])
@@ -24,7 +24,11 @@ struct ChangesLookTests {
         host.appearance = NSAppearance(named: appearance)
         host.frame = CGRect(origin: .zero, size: size)
         host.layoutSubtreeIfNeeded()
-        return try #require(host.lookBitmap(scale: scale))
+        return host
+    }
+
+    private func bitmap(_ appearance: NSAppearance.Name, scale: Int) throws -> NSBitmapImageRep {
+        try #require(filterHost(appearance).lookBitmap(scale: scale))
     }
 
     @Test("The guessed-base warning is an amber row inset from the pane's edges, not a band across it", arguments: lookScales)
@@ -40,26 +44,21 @@ struct ChangesLookTests {
         }
     }
 
-    // Off on CI (ov-287): CI's headless runner draws the system text field
-    // without its white well at either scale (1 row lighter than the paper,
-    // where every local Mac draws about 22), so this pixel check describes
-    // the OS's drawing there, not the app's. It still runs in every train's
-    // local gates, where it goes red on a gray wash.
-    @Test(
-        "The file filter is the system's rounded field: a well lighter than the paper around it, not a gray wash",
-        .enabled(if: ProcessInfo.processInfo.environment["CI"] == nil, "CI draws the system field without its well"),
-        arguments: lookScales)
+    /// Every view under `root`, depth first.
+    private func descendants(of root: NSView) -> [NSView] { [root] + root.subviews.flatMap { descendants(of: $0) } }
+
+    // Structural, so it holds on any OS's drawing (ov-287): CI's headless
+    // runner draws the system field without its white well, so a pixel check
+    // there describes the OS, not the app. The filter must be an AppKit text
+    // field with the rounded bezel the `.roundedBorder` style asks for. A gray
+    // fill, a plain field or a hand-drawn shape has no bezeled NSTextField.
+    @Test("The file filter is the system's rounded field, not a gray wash", arguments: lookScales)
     func theFilterIsTheSystemField(scale: Int) throws {
-        let rep = try bitmap(.aqua, scale: scale)
-        // The paper beside the column's left edge, below the field. Measured at
-        // 0.98 here; the well is 1.00, a 0.02 step that holds at both scales
-        // because the field's fill is a solid color, not a gradient or a hairline.
-        let paper = rep.color(atPoint: 2, 70).brightnessComponent
-        // The field is the first thing under the strip, at the column's left.
-        var wells = 0
-        for y in 30..<90 where rep.color(atPoint: 100, y).brightnessComponent > paper + 0.01 { wells += 1 }
-        // A gray wash is darker than the paper, so it never counts; the real
-        // well is about 22 pt tall, and 8 is well under that.
-        #expect(wells > 8, "no system text field was drawn at \(scale)x: \(wells) rows lighter than the paper (\(paper))")
+        let host = try filterHost(.aqua)
+        let fields = descendants(of: host).compactMap { $0 as? NSTextField }.filter { $0.placeholderString == "Filter files" || ($0.cell as? NSTextFieldCell)?.placeholderString == "Filter files" }
+        let field = try #require(fields.first, "no AppKit text field carries the \"Filter files\" prompt at \(scale)x")
+        #expect(field.isBezeled, "the filter is not bezeled: it is drawn by hand")
+        #expect(field.bezelStyle == .roundedBezel, "the filter's bezel is not the system's rounded one")
+        #expect(field.isEditable)
     }
 }
