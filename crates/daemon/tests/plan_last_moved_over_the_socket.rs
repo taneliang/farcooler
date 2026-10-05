@@ -68,7 +68,7 @@ async fn a_theme_says_when_it_last_moved_by_its_lanes_and_its_cards() {
         payload::Payload::LaneCreate(pb::LaneCreate {
             workspace_id: id(repo.workspace),
             name: "busy-lane".into(),
-            cards: vec![pb::LaneCard { task_id: id(busy.id), slice: String::new() }],
+            cards: vec![pb::LaneCard { task_id: id(busy.id), slice: String::new(), stage: None }],
             actor: "manager".into(),
             ..Default::default()
         }),
