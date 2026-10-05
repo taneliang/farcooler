@@ -199,6 +199,16 @@ enum TitleStatus {
         return "\(word) — \(doing)"
     }
 
+    /// The state as the title bar and the activity panel name it, with whose
+    /// it is: "Orchestrator · Working", or "No Orchestrator" with none
+    /// (ov-320).
+    static func orchestratorWords(_ state: OrchestratorRow.State) -> String {
+        state == .none ? OrchestratorRow.word(.none) : "Orchestrator · \(OrchestratorRow.word(state))"
+    }
+
+    /// The tooltip over the orchestrator's part: what it shows (ov-320).
+    static let orchestratorHelp = "The orchestrator’s state and its current session"
+
     /// What VoiceOver reads for the orchestrator's part, whatever the form:
     /// "Orchestrator, Working, Reading the diff".
     static func orchestratorLabel(_ model: Model) -> String? {
@@ -315,7 +325,7 @@ struct TitleStatusView: View {
         let label = HStack(spacing: 6) {
             OrchestratorMark(state: model.orchestrator ?? .none, status: model.status)
             if form >= .short, let state = model.orchestrator {
-                Text(OrchestratorRow.word(state))
+                Text(form >= .medium ? TitleStatus.orchestratorWords(state) : OrchestratorRow.word(state))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .fixedSize()
@@ -340,7 +350,7 @@ struct TitleStatusView: View {
         // at every width). Padded above by twice that and still centered,
         // its words come down to the same baseline.
         .padding(.top, 2 * TitleStatus.menuBaselineNudge)
-        .help("Show the orchestrator")
+        .help(TitleStatus.orchestratorHelp)
         .accessibilityLabel(TitleStatus.orchestratorLabel(model) ?? "Orchestrator")
         .accessibilityIdentifier("title-status-orchestrator")
     }

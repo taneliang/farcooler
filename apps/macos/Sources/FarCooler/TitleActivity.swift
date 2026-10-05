@@ -199,7 +199,7 @@ struct TitleActivityPanel: View {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
                 OrchestratorMark(state: o.state, status: o.status).frame(width: 12)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(o.state == .none ? OrchestratorRow.word(.none) : "Orchestrator · \(OrchestratorRow.word(o.state))")
+                    Text(TitleStatus.orchestratorWords(o.state))
                         .font(.callout.weight(.semibold))
                     if let doing = o.nowDoing { Text(doing).font(.callout).lineLimit(2) }
                     if let said = o.lastSaid {
