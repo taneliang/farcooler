@@ -20,6 +20,11 @@ enum AppCommand: String {
     /// View ▸ Show Plan (⌥⌘P): the canvas back to the plan, or, with the
     /// canvas folded away, the plan peeked over the chat (ov-298).
     case showPlan
+    /// View ▸ Board: the navigator draws the task list by status, the
+    /// Board view, in place of the one tree, or the tree again (ov-321).
+    case boardView
+    /// ⌘↑: up the one tree, to the node over the selection's (ov-321).
+    case goUp
     case openInEditor
     case reload
     case showShortcuts
@@ -159,6 +164,10 @@ struct FarCoolerCommands: Commands {
             Button("Show Plan") { AppCommand.showPlan.post() }
                 .keyboardShortcut("p", modifiers: [.command, .option])
                 .disabled(!MainWindowFocus.goes(\.inWorkspace, mainWindow))
+            // A checkmark while the navigator draws the Board view: a state,
+            // and the same item puts the tree back (ov-321).
+            Toggle("Board", isOn: Binding(get: { mainWindow?.boardView == true }, set: { _ in AppCommand.boardView.post() }))
+                .disabled(!MainWindowFocus.goes(\.inWorkspace, mainWindow))
         }
 
         // File's close items, in place of SwiftUI's (ov-265). ⌘W closes the
@@ -225,6 +234,11 @@ struct FarCoolerCommands: Commands {
             .disabled(!MainWindowFocus.goes(\.goesHistory, mainWindow))
             // ⌘L, a browser's "focus the location bar": nothing here or in
             // the system's menus holds it, and ⌘ never reaches a terminal.
+            // ⌘↑, Finder's and Xcode's "enclosing" (ov-321): a terminal to
+            // its lane, a lane to its card, a card to its theme.
+            Button("Enclosing Item") { AppCommand.goUp.post() }
+                .keyboardShortcut(.upArrow, modifiers: .command)
+                .disabled(!MainWindowFocus.goes(\.goesUp, mainWindow))
             Button("Go to Jump Bar") { AppCommand.jumpBar.post() }
                 .keyboardShortcut("l", modifiers: .command)
                 .disabled(!MainWindowFocus.goes(\.hasJumpBar, mainWindow))

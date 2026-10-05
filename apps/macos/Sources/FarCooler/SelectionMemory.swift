@@ -44,6 +44,7 @@ enum SelectionMemory {
             case .plan(.theme(let theme)): third = "plan:theme:\(theme)"
             case .plan(.lane(let lane)): third = "plan:lane:\(lane)"
             case .plan(.page(let slot)): third = "plan:page:\(slot)"
+            case .plan(.needsYou): third = "plan:needs-you"
             }
             return "\(host)|\(id)|\(third)"
         case .looseWorktree(let host, let worktree, let terminal):
@@ -70,6 +71,8 @@ enum SelectionMemory {
             focus = .plan(.theme(String(third.dropFirst("plan:theme:".count))))
         } else if third.hasPrefix("plan:lane:"), third.count > "plan:lane:".count {
             focus = .plan(.lane(String(third.dropFirst("plan:lane:".count))))
+        } else if third == "plan:needs-you" {
+            focus = .plan(.needsYou)
         } else if third.hasPrefix("plan:page:"), third.count > "plan:page:".count {
             focus = .plan(.page(String(third.dropFirst("plan:page:".count))))
         } else if !third.isEmpty {

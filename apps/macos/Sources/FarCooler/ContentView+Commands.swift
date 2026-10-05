@@ -226,6 +226,8 @@ extension ContentView {
         focus.focuses = scene?.opened != nil || selection?.focus != nil
         focus.focused = focusColumn
         focus.inWorkspace = scene != nil
+        focus.boardView = showsBoardList
+        focus.goesUp = treeParent != nil
         if let scene, let board = scene.board {
             let entries = worktreeEntries(scene)
             let step = { (by: Int) in
@@ -369,6 +371,8 @@ extension ContentView {
             }
 
         case .showPlan: showPlan()
+        case .boardView: showsBoardList.toggle()
+        case .goUp: goUpTree()
 
         case .markAllRead:
             if let scene = selection.flatMap(workspaceScene), let board = scene.board {
@@ -435,6 +439,8 @@ extension ContentView {
 
         case .openPlan(let host, let workspace, let page):
             openPlan(page, host: host, workspace: workspace)
+
+        case .boardView: showsBoardList.toggle()
 
         case .newWorkspace(let name):
             newWorkspaceName = NewWorkspaceName(name: name)

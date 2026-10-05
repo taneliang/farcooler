@@ -40,8 +40,11 @@ extension ContentView {
                 }
             },
             breadcrumb: { place in
-                let worktrees = worktreeCrumb(for: place, scene: scene)
-                let crumbs = WorkspaceWorktrees.crumbs(
+                // The path through the one tree (ov-321), Theme › Task ›
+                // Lane › Terminal, where it has one; else as before.
+                let tree = treeCrumbs(for: place, host: host, workspace: summary, name: workspaceName(host, summary))
+                let worktrees = tree == nil ? worktreeCrumb(for: place, scene: scene) : nil
+                let crumbs = tree ?? WorkspaceWorktrees.crumbs(
                     crumbs(for: place, host: host, workspace: summary), isHere: worktrees?.isHere == true)
                 DrillBreadcrumb(
                     crumbs: crumbs,
@@ -258,15 +261,21 @@ extension ContentView {
             onUse: { useAsOrchestrator($0) })
     }
 
+    /// The workspace's name as its crumb says it: a repository's implicit
+    /// one by the repository's.
+    private func workspaceName(_ host: String, _ workspace: WorkspaceSummary?) -> String {
+        let repository = workspace.flatMap { w in
+            store.clients[host]?.repositories.first { $0.id == (w.repository ?? w.id) }?.displayName
+        } ?? ""
+        return workspace.map { $0.isImplicit ? repository : $0.name } ?? "Workspace"
+    }
+
     /// The breadcrumb over what's opened: Workspace › Task, Workspace › Task
     /// › Worktree, or Workspace › Worktree; for a loose worktree, its board's
     /// workspace › the worktree. `place` is what's drawn, which may be the
     /// one leaving rather than the window's.
     private func crumbs(for place: Selection, host: String, workspace: WorkspaceSummary?) -> [WorkspaceNavigation.Crumb] {
-        let repository = workspace.flatMap { w in
-            store.clients[host]?.repositories.first { $0.id == (w.repository ?? w.id) }?.displayName
-        } ?? ""
-        let name = workspace.map { $0.isImplicit ? repository : $0.name } ?? "Workspace"
+        let name = workspaceName(host, workspace)
         if case .looseWorktree(_, let id, _) = place {
             let here = WorkspaceNavigation.Crumb(title: worktree(host: host, id: id)?.task ?? "Worktree", target: nil)
             guard let workspace else { return [here] }
@@ -325,6 +334,12 @@ extension ContentView {
             } else {
                 ContentUnavailableView("Board Not Found", systemImage: "checklist")
                     .contentCard()
+            }
+        case .workspace(let host, let id, .plan(.needsYou)?):
+            if let workspace = board(host: host, id: id) {
+                PlanNeedsYouPage(needsYou: planNeedsYou(host: host, workspace: workspace))
+            } else {
+                ContentUnavailableView("Board Not Found", systemImage: "flag").contentCard()
             }
         case .workspace(let host, let id, .plan(let page)?):
             if let client = store.clients[host], let workspace = board(host: host, id: id) {

@@ -65,7 +65,9 @@ extension ContentView {
         else { return nil }
         let host = scene.host
         let orchestrator = scene.hasConversation ? navigatorOrchestrator(host: host, workspace: summary) : nil
-        let decisions = WorkspaceCounts.decisions(for: summary, host: host, in: store.needsYou)
+        // The workspace's Needs You items, the one tree's Needs You count:
+        // one number for one word (ov-321).
+        let needs = WorkspaceCounts.count(for: summary, host: host, in: store.needsYou)
         let read = scene.board == nil ? nil : boardStore(for: summary, client: client, host: host)
         let tasks = Set(read?.board.rows.map(\.id) ?? [])
         // The workspace's panes: its own, and any working one of its tasks.
@@ -77,7 +79,7 @@ extension ContentView {
         return TitleStatusSource(
             orchestrator: orchestrator?.state, status: orchestrator?.status, nowDoing: orchestrator?.nowDoing,
             board: read,
-            waiting: { column in client.boardWaiting(columnCount: column, decisions: decisions) },
+            waiting: { column in client.boardWaiting(columnCount: column, decisions: needs) },
             seat: WorkspaceScreen.orchestrator(of: summary, host: host, in: store.fleet)?.terminal, panes: panes)
     }
 
@@ -89,8 +91,10 @@ extension ContentView {
     /// palette's index and runs what's chosen as the palette did.
     var titleConsoleActions: TitleConsoleActions {
         let worktrees = store.fleet.worktrees
+        // Offered in a workspace, saying which way it goes (ov-321).
+        let boardView: Bool? = selection.flatMap(workspaceScene) == nil ? nil : showsBoardList
         return TitleConsoleActions(
-            find: { [paletteWorkspaces, paletteTasks, palettePlans, selectedPane] query in
+            find: { [paletteWorkspaces, paletteTasks, palettePlans, selectedPane, boardView] query in
                 query.isEmpty
                     ? PaletteIndex.recent(in: worktrees)
                     : PaletteIndex.matching(
@@ -99,7 +103,8 @@ extension ContentView {
                             worktrees.lazy.flatMap(\.terminals).first { $0.id == pane.terminal }
                         },
                         workspaces: paletteWorkspaces, tasks: paletteTasks, plans: palettePlans,
-                        offersNewWorkspace: !workspaceRepositories.isEmpty)
+                        offersNewWorkspace: !workspaceRepositories.isEmpty,
+                        boardView: boardView)
             },
             run: { perform($0) },
             files: FilesRouting.palette(paletteWorktree, client: paletteWorktree.flatMap { store.client(for: $0) }),
@@ -379,7 +384,7 @@ extension ContentView {
     }
 
     /// Show one of the project's terminals beside `workspace`'s board.
-    private func openProjectTerminal(
+    func openProjectTerminal(
         _ terminal: Terminal, in checkout: Worktree, host: String, workspace: WorkspaceSummary
     ) {
         navigate(
@@ -416,7 +421,7 @@ extension ContentView {
     /// A loose worktree in the navigator chosen, by a click or ↑ or ↓, or a
     /// terminal under it (ov-267): it opens in the main area, and the
     /// navigator keeps the keyboard, as a task's row does.
-    private func glance(at worktree: Worktree, terminal: String? = nil) {
+    func glance(at worktree: Worktree, terminal: String? = nil) {
         trail = nil
         let step = WorkspaceNavigation.boardStep(.choose(glance: true), from: boardState)
         if step.keyboard == .board { boardKeyboardPending = true }

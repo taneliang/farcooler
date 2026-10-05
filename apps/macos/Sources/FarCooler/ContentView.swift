@@ -175,6 +175,12 @@ struct ContentView: View {
     @State var navigatorFloating = false
     /// The plan peeked over the chat, with the canvas folded away (ov-298).
     @State var planPeeking = false
+    /// The one tree's row chosen last, by node id (ov-321): which copy of a
+    /// lane under two cards the jump bar's path and ⌘↑ go through.
+    @State var treeHint: String?
+    /// The navigator draws the Board view, the task list by status (View ▸
+    /// Board), in place of the one tree (ov-321).
+    @State var showsBoardList = false
     /// The navigator's pane heights a drag chose, this window's (ov-244).
     /// Kept in this window's record, not `@SceneStorage`: that comes back only
     /// when the system restores windows, which it doesn't by default (ov-248).

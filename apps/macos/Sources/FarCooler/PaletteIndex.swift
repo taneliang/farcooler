@@ -33,6 +33,9 @@ enum PaletteAction: Hashable {
     case openFile(worktree: String, path: String)
     /// A theme's or lane's page, in its workspace's canvas (ov-298).
     case openPlan(host: String, workspace: String, page: PlanPage)
+    /// The navigator's Board view, the task list by status, or the one tree
+    /// again (ov-321).
+    case boardView
 }
 
 /// The worktree ⌘P's `/` searches, and how (ov-189). A function rather than
@@ -162,9 +165,22 @@ enum PaletteIndex {
     static func matching(
         _ query: String, in worktrees: [Worktree], current: String? = nil,
         currentTerminal: Terminal? = nil, workspaces: [PaletteWorkspace] = [], tasks: [PaletteTask] = [],
-        plans: [PalettePlanItem] = [], offersNewWorkspace: Bool = false, limit: Int = 20
+        plans: [PalettePlanItem] = [], offersNewWorkspace: Bool = false, boardView: Bool? = nil, limit: Int = 20
     ) -> [PaletteEntry] {
         var scored: [(entry: PaletteEntry, score: Int)] = []
+        // The Board view, by its name, in a workspace (ov-321): `boardView`
+        // is whether it's drawn now, so the row says the way back.
+        if let boardView {
+            let title = boardView ? "Show Tree" : "Show Board"
+            if let score = [title, "Board", "Tasks by Status"].compactMap({ Fuzzy.score($0, query) }).max() {
+                scored.append((
+                    PaletteEntry(
+                        id: "board-view", action: .boardView, title: title,
+                        detail: boardView ? "The navigator as one tree" : "The navigator’s tasks by status",
+                        symbol: "checklist", kind: "command"),
+                    score))
+            }
+        }
         var bestWorktree: (worktree: Worktree, score: Int)?
 
         // Workspaces first among equals, and each kept on its own: a

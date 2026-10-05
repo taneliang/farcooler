@@ -21,6 +21,9 @@ enum PlanPage: Hashable {
     case lane(String)
     /// An orchestrator's page, by slot (ov-284).
     case page(String)
+    /// The workspace's Needs You, answered in place (ov-321): where the one
+    /// tree's Needs You row opens.
+    case needsYou
 
     /// What it is, for a menu with no name to give it.
     var word: String {
@@ -28,6 +31,7 @@ enum PlanPage: Hashable {
         case .theme: "Theme"
         case .lane: "Lane"
         case .page: "Page"
+        case .needsYou: "Needs You"
         }
     }
 
@@ -37,6 +41,7 @@ enum PlanPage: Hashable {
         case .theme: "map"
         case .lane: "arrow.triangle.branch"
         case .page: "doc.text"
+        case .needsYou: "flag"
         }
     }
 }
@@ -155,7 +160,7 @@ final class PlanStore: ObservableObject {
     func readRecord(_ page: PlanPage) async {
         let data: Data?
         switch page {
-        case .page:
+        case .page, .needsYou:
             // A page has no record: it's replaced whole.
             return
         case .theme(let id):
@@ -178,6 +183,7 @@ final class PlanStore: ObservableObject {
         case .theme(let id): theme(id)?.name
         case .lane(let id): lane(id)?.name
         case .page(let slot): self.page(slot)?.title
+        case .needsYou: OneTreeWords.needsYou
         }
     }
 }

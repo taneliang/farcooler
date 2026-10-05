@@ -50,6 +50,10 @@ struct MainWindowFocus: Equatable {
     var history: [PlaceRow] = []
     /// There is a place besides this one to go to.
     var goesHistory: Bool { history.count > 1 }
+    /// The navigator draws the Board view, not the one tree (ov-321).
+    var boardView = false
+    /// ⌘↑ has a node over the selection's to go to (ov-321).
+    var goesUp = false
     /// The jump bar is drawn, over a task or a worktree, for ⌘L (ov-192).
     var hasJumpBar = false
     /// Focus (⌃⌘↩) has something to put at full size, and whether it has.

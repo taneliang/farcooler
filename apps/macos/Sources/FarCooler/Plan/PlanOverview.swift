@@ -105,19 +105,18 @@ struct PlanOverviewView: View {
         CollapsibleSection("Themes", id: "plan.themes", style: .navigator, key: key("themes"), defaults: defaults,
             count: model.shownThemes.count
         ) {
-            // One column when narrow, more as it widens. Not a lazy grid: a
-            // handful of cards, each its real height on the first pass, so
-            // nothing under them jumps as an estimate gives way (ov-298).
-            AdaptiveColumns(minimum: PlanMetrics.themeCardMinimum, spacing: Spacing.group) {
+            // One line per theme (ov-321): the navigator's tree carries
+            // each theme's cards and lanes, so the canvas only names them,
+            // with their progress, and an ask in amber.
+            VStack(alignment: .leading, spacing: 0) {
                 ForEach(model.shownThemes) { theme in
-                    PlanThemeCard(theme: theme, selected: selected == .theme(theme.id), keyed: keyed) {
+                    PlanThemeRow(theme: theme, selected: selected == .theme(theme.id), keyed: keyed) {
                         onOpen(.theme(theme.id))
                     }
-                    .changeWashed(theme.id, card: true)
+                    .changeWashed(theme.id)
                 }
             }
             .listChanges(PlanChanges.themes(model.shownThemes))
-            .padding(.top, NavigatorRhythm.air)
         }
         .identified("plan-themes")
     }
