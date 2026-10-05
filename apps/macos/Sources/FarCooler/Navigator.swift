@@ -172,11 +172,13 @@ enum OrchestratorRow {
     ) -> String? {
         guard let terminal else { return nil }
         func text(_ s: String?) -> String? {
-            // Without the terminal's own furniture: key hints, spinners, boxes (ov-329).
-            guard let s = NowDoingText.clean(s) else { return nil }
+            guard let s = s?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
             return s
         }
-        let signal = text(terminal.line).flatMap { isHeadline($0, agent: Terminal.name(of: terminal.preset)) ? nil : $0 }
+        // Only the status line (`line`, the hook's activity) is cleaned of the
+        // terminal's furniture; what the agent said and the question it is
+        // blocked on are prose, kept as written (ov-329, review 1).
+        let signal = NowDoingText.clean(terminal.line).flatMap { isHeadline($0, agent: Terminal.name(of: terminal.preset)) ? nil : $0 }
         switch state {
         case .none, .starting, .stopped:
             return nil
