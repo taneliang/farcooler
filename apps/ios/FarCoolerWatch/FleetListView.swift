@@ -171,11 +171,17 @@ struct FleetListView<Client: FleetClient>: View {
                     }
                 }
             }
+            // The board with a plan (ov-310): its Needs You count, Now and
+            // next up, as the relay's pulse said them. The watch hears the
+            // plan from the relay alone; it can't reach a runner.
+            if let glance = plan.glance {
+                Section("Plan") { PlanGlanceView(glance, style: .rows) }
+            }
             Section {
                 agents(snapshot, at: now)
             } header: {
                 // Named only when there's a section above to tell it from.
-                if !items.isEmpty { Text("Agents") }
+                if !items.isEmpty || plan.glance != nil { Text("Agents") }
             }
             if let hedge = snapshot.hedge(quiet: quiet) { PartialFooter(hedge: hedge) }
         }

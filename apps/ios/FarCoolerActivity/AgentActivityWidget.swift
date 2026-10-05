@@ -122,7 +122,11 @@ struct AgentActivityWidget: Widget {
                 ask: ask,
                 layout: layout,
                 leader: GlanceState(card: context.state, known: failed),
-                stale: stale)
+                stale: stale,
+                // The plan's board (ov-310), stepping aside for an answer on
+                // offer for the reason the fleet line does: the buttons are
+                // what this card can't lose to the 160-point cap.
+                plan: ask.isPresent ? nil : context.state.plan)
                 // The card's own background. Left to the system's material
                 // rather than a color of ours: the lock screen wallpaper is
                 // behind it and a flat fill sits on top of the photo like a
@@ -609,10 +613,20 @@ private struct LockScreenCard: View {
     let leader: GlanceState
     /// ActivityKit's `isStale`. See `GlanceState.mark(stale:)`.
     let stale: Bool
+    /// The board the relay's glance leads with (ov-310), or nil for none. Its
+    /// three lines go last, under whichever card this is.
+    let plan: PlanGlance?
 
     var body: some View {
         if let layout {
-            GlanceCardView(layout: layout)
+            VStack(alignment: .leading, spacing: 0) {
+                GlanceCardView(layout: layout)
+                if let plan {
+                    PlanGlanceView(plan, style: .lines)
+                        .padding(.horizontal, 14)
+                        .padding(.bottom, 12)
+                }
+            }
         } else {
             VStack(alignment: .leading, spacing: 10) {
                 LeaderRow(
@@ -625,6 +639,10 @@ private struct LockScreenCard: View {
                         .foregroundStyle(.secondary)
                         .opacity(tail.dimsLine ? 0.6 : 1)
                         .lineLimit(1)
+                }
+                if let plan {
+                    Divider()  // style-exempt: a rule between a widget's lines
+                    PlanGlanceView(plan, style: .lines)
                 }
             }
             .padding(16)

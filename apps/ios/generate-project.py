@@ -489,6 +489,7 @@ AGENTKIT_SOURCES = [
     # up, from the pulse answer and the card. Beside `RunnerPulse.swift` and
     # `AgentActivityAttributes.swift` in every list that has either.
     "PlanGlance.swift",
+    "PlanGlanceView.swift",
     # The markdown renderer, shared for the same reason the reducer is: the
     # phone drew agent replies as plain `Text`, so a table arrived as a wall of
     # pipes and a heading as a line beginning with a hash. Same conversation,
@@ -645,6 +646,8 @@ ACTIVITY_SOURCES = [
     "FarCoolerActivityBundle.swift",
     "AgentActivityWidget.swift",
     "FleetWidget.swift",
+    # The plan on the glance (ov-310): the board, its Needs You, Now and next.
+    "PlanWidget.swift",
 ]
 
 # The notification service extension's own sources, in `apps/ios/FarCoolerNotify/`.
@@ -720,6 +723,7 @@ WATCH_AGENTKIT_SOURCES = [
     # up, from the pulse answer and the card. Beside `RunnerPulse.swift` and
     # `AgentActivityAttributes.swift` in every list that has either.
     "PlanGlance.swift",
+    "PlanGlanceView.swift",
     # The color, the mark and the type scale, which the watch app's own detail
     # header draws at
     # the 22pt lone-indicator size. Measured to typecheck for
@@ -762,7 +766,11 @@ WATCH_ONLY_AGENTKIT_SOURCES = [n for n in WATCH_AGENTKIT_SOURCES if n not in AGE
 #
 # It is embedded in the WATCH app's PlugIns, never the phone's — see
 # `watchWidgetEmbedPhase`.
-WATCH_WIDGET_SOURCES = ["WatchFleetWidget.swift"]
+WATCH_WIDGET_SOURCES = [
+    "WatchFleetWidget.swift",
+    # The plan in the Smart Stack and on a face (ov-310).
+    "WatchPlanWidget.swift",
+]
 
 # AgentKit files the complication compiles.
 #
@@ -794,6 +802,7 @@ WATCH_WIDGET_AGENTKIT_SOURCES = [
     # up, from the pulse answer and the card. Beside `RunnerPulse.swift` and
     # `AgentActivityAttributes.swift` in every list that has either.
     "PlanGlance.swift",
+    "PlanGlanceView.swift",
     "GlancePalette.swift",
     "GlanceMark.swift",
     "GlanceType.swift",
@@ -1013,6 +1022,7 @@ activity_build_ids = {
         # up, from the pulse answer and the card. Beside `RunnerPulse.swift` and
         # `AgentActivityAttributes.swift` in every list that has either.
         "PlanGlance.swift",
+        "PlanGlanceView.swift",
         # The card's buttons. `AnswerPermissionIntent` is what a button is wired
         # to and `GlancePermissions` is where its labels come from — the
         # extension can reach no runner, so the agent's own option names arrive

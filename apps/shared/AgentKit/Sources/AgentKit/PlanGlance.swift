@@ -146,3 +146,21 @@ extension RunnerPulse {
         return (try? JSONDecoder().decode(Answer.self, from: data))?.plan
     }
 }
+
+extension RunnerPulse.Reading {
+    /// The board the relay's answer named, if it answered and named one.
+    public var glance: PlanGlance? {
+        if case let .answered(_, _, plan) = self { return plan }
+        return nil
+    }
+
+    /// When a plan widget looks again: a look later after any answer or a
+    /// failed ask, since a plan moves without telling it; never without a
+    /// credential or with a refused one, which a new registration reloads.
+    public func nextPlanLook(at now: Date, every: TimeInterval) -> Date? {
+        switch self {
+        case .answered, .failed: now.addingTimeInterval(every)
+        case .noCredential, .refused: nil
+        }
+    }
+}

@@ -3,7 +3,7 @@ import WidgetKit
 
 /// The extension's entry point.
 ///
-/// A `WidgetBundle` with one widget in it rather than `@main` on the widget
+/// A `WidgetBundle` rather than `@main` on the widget
 /// itself, for the reason `FarCoolerActivityBundle` records: there is no way to
 /// add a second widget to a `@main` widget without rewriting the file into
 /// exactly this. WidgetKit discovers complications by asking the `@main` bundle
@@ -13,6 +13,7 @@ import WidgetKit
 struct FarCoolerWatchWidgets: WidgetBundle {
     var body: some Widget {
         WatchFleetWidget()
+        WatchPlanWidget()
     }
 }
 

@@ -88,3 +88,17 @@ struct PlanGlanceTests {
         #expect(none.nextLook == nil, "nothing beating and no plan: today's `.never`")
     }
 }
+
+extension PlanGlanceTests {
+    @Test("A plan widget reads the board off an answer, and looks again unless it can't ask")
+    func thePlanWidgetsReading() {
+        let now = Date(timeIntervalSince1970: 1_791_019_800)
+        #expect(RunnerPulse.Reading.answered([], plan: Self.main).glance == Self.main)
+        #expect(RunnerPulse.Reading.answered([]).glance == nil)
+        #expect(RunnerPulse.Reading.failed.glance == nil)
+        #expect(RunnerPulse.Reading.answered([]).nextPlanLook(at: now, every: 60) == now.addingTimeInterval(60))
+        #expect(RunnerPulse.Reading.failed.nextPlanLook(at: now, every: 60) == now.addingTimeInterval(60))
+        #expect(RunnerPulse.Reading.noCredential.nextPlanLook(at: now, every: 60) == nil)
+        #expect(RunnerPulse.Reading.refused.nextPlanLook(at: now, every: 60) == nil)
+    }
+}

@@ -17,5 +17,6 @@ struct FarCoolerActivityBundle: WidgetBundle {
     var body: some Widget {
         AgentActivityWidget()
         FleetWidget()
+        PlanWidget()
     }
 }
