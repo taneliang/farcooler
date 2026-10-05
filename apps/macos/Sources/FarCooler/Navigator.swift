@@ -172,7 +172,8 @@ enum OrchestratorRow {
     ) -> String? {
         guard let terminal else { return nil }
         func text(_ s: String?) -> String? {
-            guard let s = s?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
+            // Without the terminal's own furniture: key hints, spinners, boxes (ov-329).
+            guard let s = NowDoingText.clean(s) else { return nil }
             return s
         }
         let signal = text(terminal.line).flatMap { isHeadline($0, agent: Terminal.name(of: terminal.preset)) ? nil : $0 }

@@ -143,7 +143,7 @@ enum TitleStatus {
     }
 
     /// `text`'s width at the toolbar's font, rounded up.
-    private static func textWidth(_ text: String) -> CGFloat {
+    static func textWidth(_ text: String) -> CGFloat {
         let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
         return (text as NSString).size(withAttributes: [.font: font]).width.rounded(.up)
     }
@@ -202,8 +202,13 @@ enum TitleStatus {
     /// The state as the title bar and the activity panel name it, with whose
     /// it is: "Orchestrator · Working", or "No Orchestrator" with none
     /// (ov-320).
-    static func orchestratorWords(_ state: OrchestratorRow.State) -> String {
-        state == .none ? OrchestratorRow.word(.none) : "Orchestrator · \(OrchestratorRow.word(state))"
+    ///
+    /// With what it's doing (ov-329), one line of status, not a second field:
+    /// "Orchestrator · Working: Reviewing the gesture fix".
+    static func orchestratorWords(_ state: OrchestratorRow.State, doing: String? = nil) -> String {
+        guard state != .none else { return OrchestratorRow.word(.none) }
+        let words = "Orchestrator · \(OrchestratorRow.word(state))"
+        return doing.map { "\(words): \($0)" } ?? words
     }
 
     /// Whether the orchestrator's symbol stands before "Orchestrator · …":
@@ -294,7 +299,7 @@ struct TitleStatusView: View {
                 TitleConsoleField(model: console, actions: actions.consoleActions)
             } else {
                 if model.orchestrator != nil { orchestrator }
-                if form >= .medium { activityButton }
+                if TitleStatus.showsActivityButton(model, form: form) { activityButton }
                 Spacer(minLength: 0)
             }
             needYou
@@ -337,7 +342,9 @@ struct TitleStatusView: View {
                 OrchestratorMark.glyph.foregroundStyle(.secondary)
             }
             if form >= .short, let state = model.orchestrator {
-                Text(form >= .medium ? TitleStatus.orchestratorWords(state) : OrchestratorRow.word(state))
+                // The activity is part of the words, before the caret, and the
+                // tail of it gives way, cut to fit (`fittedWords`, ov-329).
+                Text(TitleStatus.fittedWords(model, form: form))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .fixedSize()
@@ -389,11 +396,11 @@ struct TitleStatusView: View {
             }
         } label: {
             HStack(spacing: 6) {
-                Text(model.nowDoing.map { "— \($0)" } ?? (model.orchestrator == nil ? "Go to Anything" : "Activity"))
+                Text(model.orchestrator == nil ? "Go to Anything" : "Activity")
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    // Keeps its width: the orchestrator's line is what gives way (ov-329).
+                    .fixedSize()
                 if actions.console != nil {
                     Text(model.orchestrator == nil ? "⌘P" : "⌘K").foregroundStyle(.tertiary).fixedSize()
                 }
@@ -401,7 +408,6 @@ struct TitleStatusView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
-        .layoutPriority(-1)
         .help(model.nowDoing ?? "Show what’s happening in this workspace")
         .accessibilityLabel("Activity")
         .accessibilityValue(model.nowDoing ?? "")
