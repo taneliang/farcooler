@@ -125,6 +125,8 @@ fun PlanSettledRulingRow(ruling: PlanRuling, copy: (String) -> Unit, modifier: M
         supportingContent = if (ruling.note.isEmpty()) null else {
             { Text(ruling.note, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.outline) }
         },
+        // A confirmed ruling can still be reversed, so it can be cited too (review 1005a F4).
+        trailingContent = { CopyReferenceButton(ruling, copy) },
         modifier = modifier.testTag("plan-ruling-${ruling.short}").rulingSemantics(ruling, copy),
     )
 }
