@@ -575,5 +575,73 @@
     "value": "See [the run](https://github.com/example/overnight/actions/runs/812)."
    }
   ]
+ },
+ {
+  "file": "refused/ci-not-a-subject.json",
+  "path": "blocks[0].items[0].ref.ci",
+  "says": "CI is named main",
+  "fix": [
+   {
+    "pointer": "/blocks/0/items/0/ref/ci",
+    "value": "main"
+   }
+  ]
+ },
+ {
+  "file": "refused/ci-run-not-a-number.json",
+  "path": "blocks[0].items[0].ci",
+  "says": "run: and a run's id",
+  "fix": [
+   {
+    "pointer": "/blocks/0/items/0/ci",
+    "value": "run:37275435256"
+   }
+  ]
+ },
+ {
+  "file": "refused/cards-not-a-status.json",
+  "path": "blocks[0].items[0].ref.cards",
+  "says": "cards are counted by status",
+  "fix": [
+   {
+    "pointer": "/blocks/0/items/0/ref/cards",
+    "value": "in_progress"
+   }
+  ]
+ },
+ {
+  "file": "refused/stat-value-and-ref.json",
+  "path": "blocks[0].items[0].value",
+  "says": "not both",
+  "fix": [
+   {
+    "pointer": "/blocks/0/items/0/value",
+    "remove": true
+   }
+  ]
+ },
+ {
+  "file": "refused/stat-needs-a-value.json",
+  "path": "blocks[0].items[0].value",
+  "says": "or a ref that draws it live",
+  "fix": [
+   {
+    "pointer": "/blocks/0/items/0/value",
+    "value": "Green"
+   }
+  ]
+ },
+ {
+  "file": "refused/spend-needs-a-lane-or-theme.json",
+  "path": "blocks[0].items[0].show",
+  "says": "spend can only be drawn for a ref to a lane or a theme",
+  "fix": [
+   {
+    "pointer": "/blocks/0/items/0/ref",
+    "value": {
+     "theme": "Visual language"
+    }
+   }
+  ]
  }
 ]

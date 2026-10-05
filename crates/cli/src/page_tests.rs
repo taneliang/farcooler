@@ -483,3 +483,60 @@ fn the_verbs_parse() {
     assert!(crate::Cli::try_parse_from(["farcooler", "page"]).is_err(), "a verb is needed");
     assert!(crate::Cli::try_parse_from(["farcooler", "page", "set", "s"]).is_err(), "--file is needed");
 }
+
+// ---- live data (ov-306) ----
+
+/// The live page drawn against a plan: CI from the runner's reads (a failed
+/// one in amber, a short SHA matching the read of its full one), the board's
+/// counts, and a lane's and a theme's spend. With no plan, each is its name.
+#[test]
+fn live_data_draws_what_the_runner_last_read() {
+    let doc = page_file("normalized/live.json");
+    let page = farcooler_core::page_doc::parse(&doc, &farcooler_core::page_doc::Caps::default()).unwrap();
+    let job = |name: &str, state: &str| pb::BoardCiJob { name: name.into(), state: state.into(), url: String::new() };
+    let mut mac_ux = lane("mac-ux", pb::LaneState::Review);
+    mac_ux.spend = Some(pb::LaneSpend { input_tokens: 400_000, output_tokens: 70_000, runs: 2, ..Default::default() });
+    let plan = pb::Plan {
+        lanes: vec![mac_ux],
+        themes: vec![pb::BoardThemeView {
+            theme: Some(pb::BoardTheme { name: "Visual language".into(), ..Default::default() }),
+            counts: Some(pb::PlanStatusCounts { done: 3, backlog: 7, ..Default::default() }),
+            spend: Some(pb::LaneSpend { input_tokens: 1_200_000, runs: 5, ..Default::default() }),
+            ..Default::default()
+        }],
+        ci: vec![
+            pb::BoardCiRead {
+                subject: "main".into(),
+                status: pb::BoardCiStatus::Running as i32,
+                jobs: vec![job("CI / Rust", "running"), job("CI / iOS", "passed"), job("Canary", "passed")],
+                url: "https://github.com/o/r/actions/runs/1".into(),
+                ..Default::default()
+            },
+            pb::BoardCiRead {
+                subject: "sha:c85bf83dce46a6b71d7312afc623899ae7914658".into(),
+                sha: "c85bf83dce46a6b71d7312afc623899ae7914658".into(),
+                status: pb::BoardCiStatus::Failed as i32,
+                jobs: vec![job("CI / Swift", "failed"), job("CI / Android", "passed")],
+                ..Default::default()
+            },
+        ],
+        board_counts: Some(pb::PlanStatusCounts { backlog: 4, in_progress: 2, in_review: 3, done: 11, ..Default::default() }),
+        ..Default::default()
+    };
+    let stored = pb::BoardPage { actor: "manager".into(), revision: 1, updated_at_ms: NOW, ..Default::default() };
+    let live = crate::page_text::Live { plan: Some(plan), ..Default::default() };
+    let text = crate::page_text::render(&stored, &page, None, &live, NOW);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(
+        lines[6],
+        "Main: Running (2 of 3 jobs done) · integ-13b: Failed (pushed at midnight) (attention) · In review: 3 · Open cards: 9 · \
+         Visual language: 1.2M tokens · mac-ux: 470K tokens",
+        "{text}"
+    );
+    assert!(text.contains("Visual language, 3 of 10 done  11"), "{text}");
+    assert!(text.contains("- CI on the pushed SHA -> c85bf83d: Failed · 1 of 2 jobs failed (attention) (ci c85bf83d)"), "{text}");
+    assert!(text.contains("- The run that failed -> CI run (ci run:37275435256)"), "a run the runner hasn't read is its label: {text}");
+
+    let nothing = crate::page_text::render(&stored, &page, None, &crate::page_text::Live::default(), NOW);
+    assert!(nothing.contains("Main: Main · integ-13b: c85bf83d (pushed at midnight) · In review: in_review"), "{nothing}");
+}

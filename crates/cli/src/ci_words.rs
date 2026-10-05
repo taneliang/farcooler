@@ -17,6 +17,11 @@ pub(crate) fn status_word(status: i32) -> &'static str {
     }
 }
 
+/// Whether it needs the owner: a failed run does.
+pub(crate) fn needs_attention(read: &pb::BoardCiRead) -> bool {
+    read.status == pb::BoardCiStatus::Failed as i32
+}
+
 /// "Failed · 2 of 15 jobs failed", "Running · 9 of 15 jobs done", "Passed ·
 /// 15 jobs", or the status alone with no jobs read.
 pub(crate) fn summary(read: &pb::BoardCiRead) -> String {

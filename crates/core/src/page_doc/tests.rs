@@ -15,7 +15,7 @@ fn read(rel: &str) -> String {
 }
 
 /// The documents an orchestrator would publish, as written.
-const ACCEPTED: [&str; 5] = ["train", "spend", "risks", "blocks", "refs"];
+const ACCEPTED: [&str; 6] = ["train", "spend", "risks", "blocks", "refs", "live"];
 
 fn page(name: &str) -> Page {
     parse(&read(&format!("{name}.json")), &Caps::default()).unwrap_or_else(|e| panic!("{name}: {e}"))
@@ -342,4 +342,24 @@ fn a_link_in_text_is_https_and_says_where_it_goes() {
         assert!(said.contains(says), "{bad}: {said}");
         assert!(!said.contains('\u{1b}'), "{bad}: a control character reached the sentence");
     }
+}
+
+// ---- live data (ov-306) ----
+
+/// The live page's references: CI by main, SHA (lowercased) and run, card
+/// counts, and spend, a figure's among them, each under the subject the
+/// runner reads it by.
+#[test]
+fn live_references_name_what_the_runner_reads() {
+    let live = page("live");
+    let refs = live.references();
+    let at = |path: &str| refs.iter().find(|r| r.path == path).unwrap_or_else(|| panic!("no ref at {path}")).reference;
+    assert_eq!(at("blocks[1].items[0]").target, Target::Ci("main".into()));
+    assert_eq!(at("blocks[1].items[1]").target, Target::Ci("c85bf83d".into()), "a SHA is kept lowercase");
+    assert_eq!(at("blocks[1].items[2]").target, Target::Cards("in_review".into()));
+    let subjects: Vec<String> = refs.iter().filter_map(|r| r.reference.target.ci_subject()).collect();
+    assert_eq!(subjects, ["main", "sha:c85bf83d", "sha:c85bf83d", "run:37275435256", "main", "main", "sha:c85bf83d"]);
+    let Block::Stats { items } = &live.blocks[1] else { panic!("the stats") };
+    assert_eq!((items[4].show, items[4].value.as_str()), (Some(Show::Spend), ""));
+    assert!(live.shape().contains("ref-ci:7") && live.shape().contains("ref-cards:3"), "{}", live.shape());
 }

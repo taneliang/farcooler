@@ -3,7 +3,8 @@
 //! the store's `board_ci` (`farcooler_store::board_ci`).
 //!
 //! A board names a subject by pushing a train (`sha:<pushed sha>`) or by a
-//! page's CI reference (a SHA, a run, or `main`). The watch reads each one
+//! page's CI reference (a SHA, a run, or `main`); publishing a page kicks the
+//! watch as a pushed SHA does. The watch reads each one
 //! while it's named: every minute while any run is still going, and every ten
 //! minutes once everything it watches has finished, so a re-run is still seen.
 //! A write that gives a train a SHA kicks it to read at once. A read that
@@ -300,13 +301,18 @@ fn tree_of(svc: &Service, workspace: Uuid) -> Option<(Uuid, PathBuf)> {
     Some((repo.id, svc.repository_worktree(&repo)))
 }
 
-/// Every board's CI subjects: its trains' pushed SHAs.
+/// Every board's CI subjects: its trains' pushed SHAs, and what its pages'
+/// CI references name (ov-306).
 pub fn wanted(svc: &Service) -> BTreeMap<Uuid, BTreeSet<String>> {
     let mut wanted: BTreeMap<Uuid, BTreeSet<String>> = BTreeMap::new();
     for train in svc.store.trains_following_ci().unwrap_or_default() {
         if let Some(subject) = train.ci_subject() {
             wanted.entry(train.workspace_id).or_default().insert(subject);
         }
+    }
+    // The pages' own file reads them, so nothing here names pages.
+    for (workspace, subject) in crate::rpc_pages::ci_subjects(svc) {
+        wanted.entry(workspace).or_default().insert(subject);
     }
     wanted
 }

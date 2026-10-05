@@ -1,5 +1,6 @@
 //! What `farcooler page schema` prints: the nine blocks with one example each,
-//! and the same vocabulary as JSON Schema (ov-269, ov-281).
+//! and the same vocabulary as JSON Schema (ov-269, ov-281), live data
+//! references included (ov-306).
 //!
 //! Written by hand beside `page_doc`, because no schema generator is in the
 //! tree. What keeps it honest is the tests: every example here is parsed by the
@@ -16,7 +17,7 @@ pub const EXAMPLES: [(&str, &str); 9] = [
     ("text", r#"{"type":"text","md":"Phones and the LFS record: **one build**, one review.","tone":"attention"}"#),
     (
         "stats",
-        r#"{"type":"stats","items":[{"label":"Green","value":"3"},{"label":"Fixing","value":"1","tone":"attention"}]}"#,
+        r#"{"type":"stats","items":[{"label":"Main","ref":{"ci":"main"}},{"label":"In review","ref":{"cards":"in_review"}},{"label":"Fixing","value":"1","tone":"attention"}]}"#,
     ),
     ("progress", r#"{"type":"progress","label":"Cards closed","done":2,"total":4,"detail":"since Monday"}"#),
     (
@@ -56,7 +57,7 @@ pub fn reference_text() -> String {
     let fields = [
         ("heading", "text"),
         ("text", "md (a Markdown subset: paragraphs, bullets, bold, italic, code, https links whose words don't name another domain), tone?"),
-        ("stats", "items[1..6] of {label, value, detail?, tone?}"),
+        ("stats", "items[1..6] of {label, value or ref (with show?), detail?, tone?}"),
         ("progress", "label, done, total, detail?, parts?[..6] of {label, count}"),
         ("table", "columns[1..8] of {title, align?, grow?}, rows[..50] of one cell per column; a cell is a string or {text?, ref?, show?, tone?, mono?}"),
         ("list", "items[1..50] of {text, state?, detail?, ref?, tone?}"),
@@ -74,7 +75,11 @@ pub fn reference_text() -> String {
         Target::KINDS.join(", ")
     );
     out += "The app draws a reference's current state, so prefer a reference to a copy of a status. A link is https only, and its domain is drawn beside it.\n";
-    out += "In a cell, ref with show (state or spend) draws a lane's live value; with text, the text is drawn and the ref is only the link.\n";
+    out += "In a cell or a figure, show picks the live value: state (a lane's), spend (a lane's or a theme's); with text, the text is drawn and the ref is only the link.\n";
+    out += &format!(
+        "Live data is a reference too: {{\"ci\":\"main\"}}, {{\"ci\":\"<sha>\"}} or {{\"ci\":\"run:<id>\"}} (read through gh while named), {{\"cards\":\"in_review\"}} ({}). Never type a figure the board knows.\n",
+        crate::page_doc::CARD_STATUSES.join(", ")
+    );
     out += &format!(
         "\nLimits: {} KiB, {} blocks, {} characters in md, {} in any other string, {} references, {} pages per workspace.\n",
         caps.document_bytes / 1024,
@@ -113,6 +118,8 @@ fn reference_schema(caps: &Caps) -> Value {
                 "properties": {"worktree": string(caps.string_chars), "name": string(caps.string_chars)},
             },
             "url": {"type": "string", "pattern": "^https://", "maxLength": caps.string_chars},
+            "ci": {"type": "string", "pattern": "^(main|[0-9A-Fa-f]{7,40}|run:[0-9]{1,20})$"},
+            "cards": {"enum": crate::page_doc::CARD_STATUSES},
             "label": string(caps.string_chars),
         },
         "additionalProperties": false,
@@ -155,8 +162,11 @@ pub fn json_schema() -> Value {
             "stats",
             &["items"],
             json!({"items": {"type": "array", "minItems": 1, "maxItems": caps.stats_items, "items": {
-                "type": "object", "additionalProperties": false, "required": ["label", "value"],
-                "properties": {"label": string(s), "value": string(s), "detail": string(s), "tone": tone()},
+                "type": "object", "additionalProperties": false, "required": ["label"],
+                "properties": {
+                    "label": string(s), "value": string(s), "ref": reference_schema(&caps),
+                    "show": {"enum": ["state", "spend"]}, "detail": string(s), "tone": tone(),
+                },
             }}}),
         ),
         block(

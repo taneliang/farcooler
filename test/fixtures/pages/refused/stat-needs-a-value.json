@@ -1,0 +1,14 @@
+{
+ "v": 1,
+ "title": "Refused",
+ "blocks": [
+  {
+   "type": "stats",
+   "items": [
+    {
+     "label": "Main"
+    }
+   ]
+  }
+ ]
+}

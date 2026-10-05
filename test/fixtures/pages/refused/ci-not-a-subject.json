@@ -1,0 +1,17 @@
+{
+ "v": 1,
+ "title": "Refused",
+ "blocks": [
+  {
+   "type": "list",
+   "items": [
+    {
+     "text": "x",
+     "ref": {
+      "ci": "latest"
+     }
+    }
+   ]
+  }
+ ]
+}

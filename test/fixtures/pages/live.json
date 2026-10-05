@@ -1,0 +1,27 @@
+{
+  "v": 1,
+  "title": "Trains tonight",
+  "summary": "Live: CI, spend and card counts, read when drawn",
+  "stale_after_min": 240,
+  "blocks": [
+    { "type": "text", "md": "Each train batches finished lanes, applies their review fixes, runs every gate once, then lands on a green main." },
+    { "type": "stats", "items": [
+        { "label": "Main", "ref": { "ci": "main" } },
+        { "label": "integ-13b", "ref": { "ci": "C85BF83D" }, "detail": "pushed at midnight" },
+        { "label": "In review", "ref": { "cards": "in_review" } },
+        { "label": "Open cards", "ref": { "cards": "open" } },
+        { "label": "Visual language", "ref": { "theme": "Visual language" }, "show": "spend" },
+        { "label": "mac-ux", "ref": { "lane": "mac-ux" }, "show": "spend" } ] },
+    { "type": "heading", "text": "integ-13b" },
+    { "type": "table",
+      "columns": [ { "title": "Lane" }, { "title": "State" }, { "title": "Spend", "align": "end" } ],
+      "rows": [
+        [ { "ref": { "lane": "mac-ux" } }, { "ref": { "lane": "mac-ux" }, "show": "state" }, { "ref": { "lane": "mac-ux" }, "show": "spend" } ],
+        [ { "ref": { "theme": "Visual language" } }, { "ref": { "cards": "done" } }, { "ref": { "theme": "Visual language" }, "show": "spend" } ] ] },
+    { "type": "list", "items": [
+        { "text": "CI on the pushed SHA", "ref": { "ci": "c85bf83d" } },
+        { "text": "The run that failed", "ref": { "ci": "run:37275435256", "label": "CI run" } },
+        { "text": "Main after it lands", "ref": { "ci": "main" } } ] },
+    { "type": "links", "items": [ { "ci": "main", "label": "Main's CI" }, { "ci": "c85bf83d" } ] }
+  ]
+}

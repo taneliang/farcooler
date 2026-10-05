@@ -1,0 +1,18 @@
+{
+ "v": 1,
+ "title": "Refused",
+ "blocks": [
+  {
+   "type": "stats",
+   "items": [
+    {
+     "label": "ov-1",
+     "ref": {
+      "task": "ov-1"
+     },
+     "show": "spend"
+    }
+   ]
+  }
+ ]
+}

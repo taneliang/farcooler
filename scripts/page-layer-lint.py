@@ -56,6 +56,7 @@ PAGE_FILES = [
     "crates/daemon/src/rpc_pages.rs",
     "crates/daemon/src/watch/pages.rs",
     "crates/daemon/tests/pages_over_the_socket.rs",
+    "crates/daemon/tests/a_page_reads_live_ci.rs",
     # The client: pages as JSON for the phones.
     "crates/client/src/page_json.rs",
     "crates/client/src/page_json_tests.rs",
@@ -90,6 +91,9 @@ REGISTRIES = {
     "crates/client/src/session/results.rs": r"^\s*result::Value::(BoardPageList|BoardPage|PageSetResult|PageStatsList)\(_\) =>",
     "crates/cli/src/main.rs": r"event::Payload::PagesChanged\(p\) => event_lines::pages_event_json\(&p\),|\(Payload::PagesChanged\(Default::default\(\)\), \"pages\"\),",
     "crates/cli/src/event_lines.rs": r"pages_event_json|pb::PagesChanged",
+    # The CI watch (ov-306) reads the subjects pages name, asked of the pages'
+    # own file in one line.
+    "crates/daemon/src/ci_watch.rs": r"^\s*for \(workspace, subject\) in crate::rpc_pages::ci_subjects\(svc\) \{\s*$",
 }
 
 # What names pages, by meaning rather than by one spelling. Matched over the
@@ -226,6 +230,7 @@ REGISTRY_LINES = {
     "crates/client/src/session/results.rs": "result::Value::BoardPage(_) => \"board_page\",",
     "crates/cli/src/main.rs": "event::Payload::PagesChanged(p) => event_lines::pages_event_json(&p),",
     "crates/cli/src/event_lines.rs": "pub(crate) fn pages_event_json() {}",
+    "crates/daemon/src/ci_watch.rs": "    for (workspace, subject) in crate::rpc_pages::ci_subjects(svc) {",
 }
 
 

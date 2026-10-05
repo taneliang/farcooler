@@ -6,8 +6,8 @@ use icu_normalizer::ComposingNormalizerBorrowed;
 use serde_json::{Map, Value};
 
 use super::{
-    Align, BLOCK_TYPES, Block, Caps, Cell, Column, Entry, Item, Order, Page, Part, Reference, Show, State, Stat, Step,
-    STALE_AFTER_MAX_MIN, Target, Tone, VERSION, url_host, valid_slot,
+    Align, BLOCK_TYPES, Block, CARD_STATUSES, Caps, Cell, Column, Entry, Item, Order, Page, Part, Reference, Show, State,
+    Stat, Step, STALE_AFTER_MAX_MIN, Target, Tone, VERSION, url_host, valid_slot,
 };
 
 /// Why a document isn't a page: the JSON path of what's wrong and what is.
@@ -142,7 +142,7 @@ fn block(v: &Value, path: &str, ctx: &mut Ctx) -> R<Block> {
             let items = list(required(m, "items", path)?, &p, 1, caps.stats_items, "a stats row", "figures")?
                 .iter()
                 .enumerate()
-                .map(|(i, item)| stat(item, &format!("{p}[{i}]"), caps))
+                .map(|(i, item)| stat(item, &format!("{p}[{i}]"), ctx))
                 .collect::<R<Vec<_>>>()?;
             Block::Stats { items }
         }
@@ -203,14 +203,44 @@ fn block(v: &Value, path: &str, ctx: &mut Ctx) -> R<Block> {
     })
 }
 
-fn stat(v: &Value, path: &str, caps: &Caps) -> R<Stat> {
-    let m = object(v, path, &["label", "value", "detail", "tone"], false)?;
-    Ok(Stat {
-        label: text(required(m, "label", path)?, &join(path, "label"), caps.string_chars, false, false)?,
-        value: text(required(m, "value", path)?, &join(path, "value"), caps.string_chars, false, false)?,
-        detail: optional_text(m, "detail", path, caps.string_chars)?,
-        tone: tone(m, path)?,
-    })
+/// A figure: its value as written, or a `ref` (with `show` where the
+/// reference has more than one live value) that draws it live (ov-306).
+fn stat(v: &Value, path: &str, ctx: &mut Ctx) -> R<Stat> {
+    let caps = ctx.caps;
+    let m = object(v, path, &["label", "value", "ref", "show", "detail", "tone"], false)?;
+    let label = text(required(m, "label", path)?, &join(path, "label"), caps.string_chars, false, false)?;
+    let reference = match m.get("ref") {
+        Some(r) => Some(reference(r, &join(path, "ref"), ctx)?),
+        None => None,
+    };
+    let value = match (m.get("value"), &reference) {
+        (Some(_), Some(_)) => {
+            return err(&join(path, "value"), "a figure is a value or a ref drawn live, not both. Take out the value: the ref keeps it current.");
+        }
+        (Some(v), None) => text(v, &join(path, "value"), caps.string_chars, false, false)?,
+        (None, Some(_)) => String::new(),
+        (None, None) => return err(&join(path, "value"), "is required, or a ref that draws it live."),
+    };
+    let show = match m.get("show") {
+        None => None,
+        Some(s) => Some(show_for(s, reference.as_ref(), &join(path, "show"))?),
+    };
+    Ok(Stat { label, value, reference, show, detail: optional_text(m, "detail", path, caps.string_chars)?, tone: tone(m, path)? })
+}
+
+/// A `show` beside `reference`: `state` for a lane, `spend` for a lane or a
+/// theme (a theme's since ov-306).
+fn show_for(s: &Value, reference: Option<&Reference>, path: &str) -> R<Show> {
+    let show = match s.as_str() {
+        Some("state") => Show::State,
+        Some("spend") => Show::Spend,
+        _ => return err(path, "state or spend."),
+    };
+    match (show, reference.map(|r| &r.target)) {
+        (Show::State, Some(Target::Lane(_))) | (Show::Spend, Some(Target::Lane(_) | Target::Theme(_))) => Ok(show),
+        (Show::State, _) => err(path, "a lane's state can only be drawn for a ref to a lane."),
+        (Show::Spend, _) => err(path, "spend can only be drawn for a ref to a lane or a theme."),
+    }
 }
 
 fn progress(v: &Value, path: &str, caps: &Caps) -> R<Block> {
@@ -324,17 +354,7 @@ fn cell(v: &Value, path: &str, ctx: &mut Ctx) -> R<Cell> {
     let show = match m.get("show") {
         None => None,
         Some(s) => {
-            let show = match s.as_str() {
-                Some("state") => Show::State,
-                Some("spend") => Show::Spend,
-                _ => return err(&join(path, "show"), "state or spend."),
-            };
-            if !matches!(reference, Some(Reference { target: Target::Lane(_), .. })) {
-                return err(&join(path, "show"), format!("a lane's {} can only be drawn for a ref to a lane.", match show {
-                    Show::State => "state",
-                    Show::Spend => "spend",
-                }));
-            }
+            let show = show_for(s, reference.as_ref(), &join(path, "show"))?;
             if text_v.is_some() {
                 return err(&join(path, "show"), "draws the live value, which text would hide. Take out the text, or take out show.");
             }
@@ -440,6 +460,22 @@ fn reference(v: &Value, path: &str, ctx: &mut Ctx) -> R<Reference> {
                 return err(&at, "a page is named by its slot: lowercase letters, digits and hyphens, at most 40.");
             }
             Target::Page(slot)
+        }
+        "ci" => {
+            let raw = text(value, &at, caps.string_chars, false, false)?.to_ascii_lowercase();
+            let run = raw.strip_prefix("run:").filter(|id| !id.is_empty() && id.len() <= 20 && id.bytes().all(|b| b.is_ascii_digit()));
+            let sha = (7..=40).contains(&raw.len()) && raw.bytes().all(|b| b.is_ascii_hexdigit());
+            if raw != "main" && run.is_none() && !sha {
+                return err(&at, "CI is named main, a commit's SHA (7 to 40 hex digits), or run: and a run's id, like run:18234567.");
+            }
+            Target::Ci(raw)
+        }
+        "cards" => {
+            let status = text(value, &at, caps.string_chars, false, false)?;
+            if !CARD_STATUSES.contains(&status.as_str()) {
+                return err(&at, format!("cards are counted by status: {}.", words(&CARD_STATUSES)));
+            }
+            Target::Cards(status)
         }
         "terminal" => {
             let tm = object(value, &at, &["worktree", "name"], false)?;

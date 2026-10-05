@@ -9,16 +9,20 @@
 use std::collections::HashMap;
 
 use farcooler_core::local_time;
-use farcooler_core::page_doc::{Block, Cell, Entry, Item, Order, Page, Reference, Show, State, Target, Tone, url_host};
+use farcooler_core::page_doc::{Block, Cell, Entry, Item, Order, Page, Reference, Show, Stat, State, Target, Tone, url_host};
 use farcooler_core::usage_words::{NOT_REPORTED, dollars, tokens};
 use farcooler_protocol::v1 as pb;
+
+use crate::ci_words;
 
 /// What a page's references are drawn from: the board as the app holds it.
 #[derive(Default)]
 pub(crate) struct Live {
     /// Cards by lowercase key: title and status.
     pub(crate) cards: HashMap<String, (String, i32)>,
-    /// The plan, when the runner has one and the page names a lane or a theme.
+    /// The plan, when the runner has one and the page names a lane, a theme,
+    /// CI or a card count: CI reads and the board's counts come with it
+    /// (ov-306).
     pub(crate) plan: Option<pb::Plan>,
     /// Pages by slot: title.
     pub(crate) pages: HashMap<String, String>,
@@ -116,11 +120,20 @@ fn live_value(reference: &Reference, show: Option<Show>, live: &Live) -> (String
             let theme = live.plan.as_ref().and_then(|p| {
                 p.themes.iter().find(|v| v.theme.as_ref().is_some_and(|t| t.name.eq_ignore_ascii_case(name)))
             });
-            match theme {
-                Some(v) => (format!("{}, {}", label.unwrap_or(&v.theme.clone().unwrap_or_default().name), theme_progress(v)), false),
-                None => (label.unwrap_or(name).to_string(), false),
+            match (theme, show) {
+                (Some(v), Some(Show::Spend)) => (spend(&v.spend.unwrap_or_default()), false),
+                (Some(v), _) => (format!("{}, {}", label.unwrap_or(&v.theme.clone().unwrap_or_default().name), theme_progress(v)), false),
+                (None, _) => (label.unwrap_or(name).to_string(), false),
             }
         }
+        Target::Ci(_) => match ci_read(reference, live) {
+            Some(read) => (format!("{}: {}", ci_name(reference), ci_words::summary(read)), ci_words::needs_attention(read)),
+            None => (ci_name(reference), false),
+        },
+        Target::Cards(status) => match card_count(status, live) {
+            Some(n) => (n.to_string(), false),
+            None => (label.unwrap_or(status).to_string(), false),
+        },
         Target::Page(slot) => (label.map(str::to_string).or_else(|| live.pages.get(slot).cloned()).unwrap_or_else(|| slot.clone()), false),
         Target::Worktree(name) => (label.unwrap_or(name).to_string(), false),
         Target::Terminal { name, .. } => (label.unwrap_or(name).to_string(), false),
@@ -132,6 +145,68 @@ fn live_value(reference: &Reference, show: Option<Show>, live: &Live) -> (String
             }, false)
         }
     }
+}
+
+/// What a CI reference is called: its label, else "Main", "Run 812" or the
+/// commit's first eight digits.
+fn ci_name(reference: &Reference) -> String {
+    if let Some(label) = &reference.label {
+        return label.clone();
+    }
+    match &reference.target {
+        Target::Ci(s) if s == "main" => "Main".to_string(),
+        Target::Ci(s) => match s.strip_prefix("run:") {
+            Some(id) => format!("Run {id}"),
+            None => s.chars().take(8).collect(),
+        },
+        other => other.name().to_string(),
+    }
+}
+
+/// The runner's last read of a CI reference, when the plan carries one.
+fn ci_read<'a>(reference: &Reference, live: &'a Live) -> Option<&'a pb::BoardCiRead> {
+    let subject = reference.target.ci_subject()?;
+    ci_words::read_for(&live.plan.as_ref()?.ci, &subject)
+}
+
+/// How many of the board's cards are in `status` (`open`: not done or
+/// canceled), when the plan carries the board's counts.
+fn card_count(status: &str, live: &Live) -> Option<u32> {
+    let c = live.plan.as_ref()?.board_counts?;
+    Some(match status {
+        "backlog" => c.backlog,
+        "todo" => c.todo,
+        "needs_decision" => c.needs_decision,
+        "in_progress" => c.in_progress,
+        "in_review" => c.in_review,
+        "done" => c.done,
+        "cancelled" => c.cancelled,
+        "open" => c.backlog + c.todo + c.needs_decision + c.in_progress + c.in_review,
+        _ => return None,
+    })
+}
+
+/// A figure's value, its detail and whether it needs the owner: as written,
+/// or drawn live from its reference (ov-306). A CI figure is its status word,
+/// with how its jobs stand as the detail unless the page gave one.
+fn stat_value(s: &Stat, live: &Live) -> (String, Option<String>, bool) {
+    let Some(reference) = &s.reference else { return (s.value.clone(), s.detail.clone(), false) };
+    if let (Target::Ci(_), Some(read)) = (&reference.target, ci_read(reference, live)) {
+        let summary = ci_words::summary(read);
+        let (word, jobs) = summary.split_once(" · ").map_or((summary.as_str(), None), |(w, j)| (w, Some(j.to_string())));
+        return (word.to_string(), s.detail.clone().or(jobs), ci_words::needs_attention(read));
+    }
+    let (value, attention) = match (&reference.target, s.show) {
+        (Target::Theme(name), None) => {
+            let theme = live.plan.as_ref().and_then(|p| {
+                p.themes.iter().find(|v| v.theme.as_ref().is_some_and(|t| t.name.eq_ignore_ascii_case(name)))
+            });
+            theme.map_or_else(|| (reference.label.clone().unwrap_or_else(|| name.clone()), false), |v| (theme_progress(v), false))
+        }
+        (Target::Lane(_), None) => live_value(reference, Some(Show::State), live),
+        _ => live_value(reference, s.show, live),
+    };
+    (value, s.detail.clone(), attention)
 }
 
 /// Where a reference goes, for a person who can't tap it: `(ask ov-274)`.
@@ -206,11 +281,12 @@ fn block_text(block: &Block, live: &Live, out: &mut Vec<String>) {
             let figures: Vec<String> = items
                 .iter()
                 .map(|s| {
-                    let mut f = format!("{}: {}", s.label, s.value);
-                    if let Some(detail) = &s.detail {
+                    let (value, detail, attention) = stat_value(s, live);
+                    let mut f = format!("{}: {value}", s.label);
+                    if let Some(detail) = &detail {
                         f.push_str(&format!(" ({detail})"));
                     }
-                    f.push_str(tone(s.tone));
+                    f.push_str(if attention { ATTENTION } else { tone(s.tone) });
                     f
                 })
                 .collect();

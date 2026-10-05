@@ -395,7 +395,7 @@ async fn live_of<L: DispatchLink>(link: &mut L, board: &Board, ws: &bytes::Bytes
                 .collect();
         }
     }
-    if names(|t| matches!(t, Target::Lane(_) | Target::Theme(_))) {
+    if names(|t| matches!(t, Target::Lane(_) | Target::Theme(_) | Target::Ci(_) | Target::Cards(_))) {
         live.plan = plan_of(link, ws).await;
     }
     if names(|t| matches!(t, Target::Page(_))) {

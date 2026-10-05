@@ -75,6 +75,10 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, req: Request) -> 
             let stored = outcome.page();
             if changed {
                 watcher.announce_pages_changed(workspace, &stored.slot, stored.revision, actor, false);
+                // A CI reference (ov-306) is read now, not at the watch's next turn.
+                if page.references().iter().any(|at| at.reference.target.ci_subject().is_some()) {
+                    crate::ci_watch::kick();
+                }
             }
             Ok(result::Value::PageSetResult(pb::PageSetResult { page: Some(pb_page(stored, true)), changed }))
         }
@@ -163,6 +167,19 @@ fn check_references(svc: &Service, workspace: Uuid, page: &Page) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Every board's CI subjects its pages' references name (ov-306), for the CI
+/// watch (`ci_watch.rs`) to read while they're named.
+pub(crate) fn ci_subjects(svc: &Service) -> Vec<(Uuid, String)> {
+    let mut out = Vec::new();
+    for ws in svc.store.list_workspaces(None).unwrap_or_default() {
+        for page in svc.store.list_pages(ws.id).unwrap_or_default() {
+            let Ok(doc) = page_doc::parse(&page.doc_json, &Caps::default()) else { continue };
+            out.extend(doc.references().iter().filter_map(|at| at.reference.target.ci_subject()).map(|s| (ws.id, s)));
+        }
+    }
+    out
 }
 
 fn pb_page(p: &StoredPage, with_doc: bool) -> pb::BoardPage {

@@ -1,0 +1,150 @@
+{
+  "blocks": [
+    {
+      "md": "Each train batches finished lanes, applies their review fixes, runs every gate once, then lands on a green main.",
+      "type": "text"
+    },
+    {
+      "items": [
+        {
+          "label": "Main",
+          "ref": {
+            "ci": "main"
+          }
+        },
+        {
+          "detail": "pushed at midnight",
+          "label": "integ-13b",
+          "ref": {
+            "ci": "c85bf83d"
+          }
+        },
+        {
+          "label": "In review",
+          "ref": {
+            "cards": "in_review"
+          }
+        },
+        {
+          "label": "Open cards",
+          "ref": {
+            "cards": "open"
+          }
+        },
+        {
+          "label": "Visual language",
+          "ref": {
+            "theme": "Visual language"
+          },
+          "show": "spend"
+        },
+        {
+          "label": "mac-ux",
+          "ref": {
+            "lane": "mac-ux"
+          },
+          "show": "spend"
+        }
+      ],
+      "type": "stats"
+    },
+    {
+      "text": "integ-13b",
+      "type": "heading"
+    },
+    {
+      "columns": [
+        {
+          "title": "Lane"
+        },
+        {
+          "title": "State"
+        },
+        {
+          "align": "end",
+          "title": "Spend"
+        }
+      ],
+      "rows": [
+        [
+          {
+            "ref": {
+              "lane": "mac-ux"
+            }
+          },
+          {
+            "ref": {
+              "lane": "mac-ux"
+            },
+            "show": "state"
+          },
+          {
+            "ref": {
+              "lane": "mac-ux"
+            },
+            "show": "spend"
+          }
+        ],
+        [
+          {
+            "ref": {
+              "theme": "Visual language"
+            }
+          },
+          {
+            "ref": {
+              "cards": "done"
+            }
+          },
+          {
+            "ref": {
+              "theme": "Visual language"
+            },
+            "show": "spend"
+          }
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "items": [
+        {
+          "ref": {
+            "ci": "c85bf83d"
+          },
+          "text": "CI on the pushed SHA"
+        },
+        {
+          "ref": {
+            "ci": "run:37275435256",
+            "label": "CI run"
+          },
+          "text": "The run that failed"
+        },
+        {
+          "ref": {
+            "ci": "main"
+          },
+          "text": "Main after it lands"
+        }
+      ],
+      "type": "list"
+    },
+    {
+      "items": [
+        {
+          "ci": "main",
+          "label": "Main's CI"
+        },
+        {
+          "ci": "c85bf83d"
+        }
+      ],
+      "type": "links"
+    }
+  ],
+  "stale_after_min": 240,
+  "summary": "Live: CI, spend and card counts, read when drawn",
+  "title": "Trains tonight",
+  "v": 1
+}

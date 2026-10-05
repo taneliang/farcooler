@@ -13,8 +13,11 @@
 //! no layout language, no nesting beyond one level, no script, no HTML and no
 //! fetched image. A reference names something the app already holds (a card, a
 //! lane, a theme, a page, a worktree, a terminal) and the app draws its current
-//! state, so a page can't go stale about anything the board knows. The only
-//! thing that leaves the app is an `https` link, drawn with its domain.
+//! state, so a page can't go stale about anything the board knows. Live data
+//! (ov-306) is references too: a commit's or a run's CI, main's CI, a lane's
+//! or a theme's spend, and how many cards are in a status, so a figure the
+//! board or the runner knows is never typed in. The only thing that leaves the
+//! app is an `https` link, drawn with its domain.
 //!
 //! # Additive and removable
 //!
@@ -372,13 +375,21 @@ impl Block {
     }
 }
 
-/// One figure in a stats row.
+/// One figure in a stats row: a value as written, or a reference drawn live
+/// (ov-306), never both.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Stat {
     /// What it measures.
     pub label: String,
-    /// The figure, as written.
+    /// The figure, as written; empty when a reference draws it.
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub value: String,
+    /// What draws the figure live.
+    #[serde(rename = "ref", skip_serializing_if = "Option::is_none")]
+    pub reference: Option<Reference>,
+    /// Which live value of the reference to draw.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show: Option<Show>,
     /// A line under it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
@@ -434,7 +445,7 @@ pub struct Column {
 pub enum Show {
     /// A lane's state words ("Fixing, round 1").
     State,
-    /// A lane's spend.
+    /// A lane's or a theme's spend (a theme's since ov-306).
     Spend,
 }
 
@@ -560,11 +571,33 @@ pub enum Target {
     },
     /// An `https` link.
     Url(String),
+    /// CI (ov-306): `main` (the default branch's newest commit with runs), a
+    /// commit's SHA in lowercase, or `run:<id>`. The runner reads it through
+    /// `gh` while a page names it.
+    Ci(String),
+    /// How many of the board's cards are in a status (ov-306), by the status's
+    /// word: `in_review`, or `open` for every card not done or canceled.
+    Cards(String),
 }
+
+/// The words a `cards` reference counts by: the board's statuses, and `open`.
+pub const CARD_STATUSES: [&str; 8] =
+    ["backlog", "todo", "needs_decision", "in_progress", "in_review", "done", "cancelled", "open"];
 
 impl Target {
     /// Every target's key, in the order the refusals list them.
-    pub const KINDS: [&'static str; 8] = ["task", "ask", "lane", "theme", "page", "worktree", "terminal", "url"];
+    pub const KINDS: [&'static str; 10] =
+        ["task", "ask", "lane", "theme", "page", "worktree", "terminal", "url", "ci", "cards"];
+
+    /// The CI subject a `ci` target is read under (`main`, `sha:<sha>`,
+    /// `run:<id>`), as the runner keeps it.
+    pub fn ci_subject(&self) -> Option<String> {
+        match self {
+            Target::Ci(s) if s == "main" || s.starts_with("run:") => Some(s.clone()),
+            Target::Ci(sha) => Some(format!("sha:{sha}")),
+            _ => None,
+        }
+    }
 
     /// The key this target is written under.
     pub fn kind(&self) -> &'static str {
@@ -577,6 +610,8 @@ impl Target {
             Target::Worktree(_) => "worktree",
             Target::Terminal { .. } => "terminal",
             Target::Url(_) => "url",
+            Target::Ci(_) => "ci",
+            Target::Cards(_) => "cards",
         }
     }
 
@@ -589,7 +624,9 @@ impl Target {
             | Target::Theme(s)
             | Target::Page(s)
             | Target::Worktree(s)
-            | Target::Url(s) => s,
+            | Target::Url(s)
+            | Target::Ci(s)
+            | Target::Cards(s) => s,
             Target::Terminal { name, .. } => name,
         }
     }
@@ -676,11 +713,14 @@ impl Page {
                         out.push(RefAt { path: format!("blocks[{b}].items[{i}]"), reference });
                     }
                 }
-                Block::Heading { .. }
-                | Block::Text { .. }
-                | Block::Stats { .. }
-                | Block::Progress { .. }
-                | Block::Steps { .. } => {}
+                Block::Stats { items } => {
+                    for (i, stat) in items.iter().enumerate() {
+                        if let Some(reference) = &stat.reference {
+                            out.push(RefAt { path: format!("blocks[{b}].items[{i}]"), reference });
+                        }
+                    }
+                }
+                Block::Heading { .. } | Block::Text { .. } | Block::Progress { .. } | Block::Steps { .. } => {}
             }
         }
         out
