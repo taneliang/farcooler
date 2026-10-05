@@ -58,7 +58,7 @@ class PlanRulingsTest {
         val only = Plan(rulings = listOf(PlanRuling("x", "R-1", 1, "A", "B", "C")))
         assertTrue("rulings alone don't make a board planned (review 1005a F1)", only.isEmpty)
         assertFalse(only.showsNothing)
-        assertTrue(plan.showsNothing)
+        assertTrue(Plan().showsNothing)
     }
 
     @Test
