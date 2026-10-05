@@ -44,6 +44,21 @@ struct TaskKeyCardsTests {
         #expect(card.accessibilityLabel == "ov-248, Mac: the jump bar opens anything")
     }
 
+    @Test("The CLI's own board and plan, through the app's parsers, give each key its card")
+    func fromTheCLI() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<6 { root.deleteLastPathComponent() }
+        let dir = root.appendingPathComponent("test/fixtures/task-key-cards")
+        let board = try TaskBoardModel.decode(Data(contentsOf: dir.appendingPathComponent("tasks.json")))
+        let plan = try PlanModel.decode(Data(contentsOf: dir.appendingPathComponent("plan.json")))
+        let cards = TaskKeyCards(runner: "", boards: ["w": board], plans: ["w": plan])
+        #expect(cards.card(for: "bil-1")?.details == "In Progress · Invoices · invoice-totals")
+        #expect(cards.card(for: "bil-1")?.excerpt == "Invoices show the sum of their lines.")
+        #expect(cards.card(for: "bil-2")?.details == "Needs Decision · Invoices · rounding")
+        #expect(cards.card(for: "bil-3")?.details == "Done · Invoices")
+        #expect(cards.card(for: "bil-4") == nil)
+    }
+
     @Test("Without a note or a plan, the card says the intent's first line and the status alone")
     func intentExcerpt() throws {
         let board = Self.board([Self.row("t1", "ov-1", "Fix it", .todo, intent: "\n## Why it matters\nSecond line")])
