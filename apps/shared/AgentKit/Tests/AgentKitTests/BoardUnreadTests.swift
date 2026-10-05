@@ -135,6 +135,15 @@ func identityIsTheTicketsAndTheNotes() {
     #expect(BoardArrivals.new(old: ["x", "y"], now: ["y", "z", "x"]) == ["z"])
 }
 
+@Test("What changed: an arrival, or a row still there whose signature moved; nothing on a first draw (ov-298)")
+func changedIsArrivedOrMoved() {
+    #expect(BoardArrivals.changed(old: nil, now: ["x": "queued"]).isEmpty)
+    let old = ["x": "queued", "y": "building", "gone": "review"]
+    let now = ["x": "queued", "y": "review", "z": "queued"]
+    #expect(BoardArrivals.changed(old: old, now: now) == ["y", "z"])
+    #expect(BoardArrivals.changed(old: now, now: now).isEmpty, "nothing moved, nothing flashes")
+}
+
 @Test("History groups Today, Yesterday, This Week and Earlier, newest first")
 func historyGroupsByWhenItLanded() {
     let rows = [

@@ -29,12 +29,6 @@ struct BoardSummaryStrip: View {
     private var collapsedBinding: Binding<Bool>?
     @State private var ownCollapsed: Bool
     private var collapsed: Bool { collapsedBinding?.wrappedValue ?? ownCollapsed }
-    /// What was listed at the last draw, by identity: what tells a new
-    /// arrival from an item that was already there (`BoardArrivals`). Nil
-    /// before the first, so nothing flashes on opening the board.
-    @State private var listed: [String]?
-    /// The arrivals still washed in the accent.
-    @State private var arrived: Set<String> = []
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.boardMotionSlowdown) private var slowdown
     @Environment(\.markReadConfirmation) private var confirmation
@@ -104,7 +98,14 @@ struct BoardSummaryStrip: View {
                         activity(summary.activity, follows: first != 3, now: now)
                     }
                 }
-                .animation(BoardMotion.list(reduceMotion: reduceMotion, slowedBy: slowdown), value: Self.identities(summary))
+                // The shared data-change motion (`listChanges`, ov-298): by
+                // what arrived on the board, not what the filter let back in,
+                // so clearing the filter washes nothing (ov-177).
+                .listChanges(
+                    Self.identities(summary).map { ListChangeRow(id: $0) },
+                    arrivals: Self.identities(Self.summary(store: store, reads: store.reads, filter: "")).map {
+                        ListChangeRow(id: $0)
+                    })
             }
             // The button's action without the pointer, for VoiceOver.
             .headerAction(offersMarkRead(summary) ? markReadAction(summary) : nil)
@@ -128,11 +129,6 @@ struct BoardSummaryStrip: View {
                 guard !collapsed else { return }
                 await store.readSummaryNotes(reads: store.reads)
             }
-            // What arrived on the board, not what the filter let back in:
-            // clearing the filter washes nothing (ov-177).
-            .onChange(of: Self.identities(Self.summary(store: store, reads: store.reads, filter: "")), initial: true) {
-                _, ids in arrive(ids)
-            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("board-summary")
@@ -154,17 +150,6 @@ struct BoardSummaryStrip: View {
     static func identities(_ summary: BoardSummary) -> [String] {
         (summary.finished + summary.moved + summary.created).map(\.id)
             + summary.activity.map { "\($0.id)/\($0.noteID)" }
-    }
-
-    /// New arrivals washed in the accent, fading over `highlightFade`.
-    private func arrive(_ ids: [String]) {
-        let new = BoardArrivals.new(old: listed, now: ids)
-        listed = ids
-        guard !new.isEmpty else { return }
-        arrived.formUnion(new)
-        DispatchQueue.main.async {
-            withAnimation(.easeOut(duration: BoardMotion.highlightFade * slowdown)) { arrived.subtract(new) }
-        }
     }
 
     /// The collapsed strip's one line: "3 unread".
@@ -294,17 +279,17 @@ struct BoardSummaryStrip: View {
                 ForEach(capped.shown) { item in
                     CompactTaskRow(
                         key: item.key, title: item.title, selected: item.id == selectedLine, keyed: keyed,
-                        highlighted: arrived.contains(item.id), keyMark: "summary.key", titleMark: "summary.title"
+                        keyMark: "summary.key", titleMark: "summary.title"
                     ) {
                         Text(Self.when(item, now: now))
                             .font(.system(size: WorkspaceStyle.PaneText.minimum))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
+                    .changeWashed(item.id)
                     .contentShape(Rectangle())
                     .onTapGesture { open(item.id, task: item.taskID) }
                     .id(NavigatorItem.unread(item.id))
-                    .transition(BoardMotion.rowTransition(reduceMotion: reduceMotion, slowedBy: slowdown))
                     .accessibilityElement(children: .combine)
                     .accessibilityAddTraits(.isButton)
                     .accessibilityAction(.default) { open(item.id, task: item.taskID) }
@@ -330,15 +315,14 @@ struct BoardSummaryStrip: View {
                 ForEach(capped.shown) { entry in
                     CompactTaskRow(
                         key: entry.key, title: entry.title, selected: entry.id == selectedLine, keyed: keyed,
-                        highlighted: arrived.contains("\(entry.id)/\(entry.noteID)"),
                         keyMark: "summary.key", titleMark: "summary.title"
                     ) {
                         ActivityNoteView(entry: entry, now: now)
                     }
+                    .changeWashed("\(entry.id)/\(entry.noteID)")
                     .contentShape(Rectangle())
                     .onTapGesture { open(entry.id, task: entry.taskID) }
                     .id(NavigatorItem.unread(entry.id))
-                    .transition(BoardMotion.rowTransition(reduceMotion: reduceMotion, slowedBy: slowdown))
                     .accessibilityElement(children: .combine)
                     .accessibilityAddTraits(.isButton)
                     .accessibilityAction(.default) { open(entry.id, task: entry.taskID) }
