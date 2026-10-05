@@ -68,6 +68,7 @@ import com.farcooler.model.PLAN_STORY_LINES
 import com.farcooler.model.PlanTheme
 import com.farcooler.model.PlanTrack
 import com.farcooler.model.storyAge
+import com.farcooler.model.themeGroups
 import com.farcooler.model.track
 import com.farcooler.model.trackSpoken
 import com.farcooler.model.trackSummary
@@ -201,13 +202,13 @@ private fun LazyListScope.loaded(
                 )
             }
         }
-        for (theme in themes.filter { it.state == "active" }) {
+        for (theme in plan.themeGroups.active) {
             item(key = "plan/theme/${theme.id}") {
                 PlanThemeRow(theme, plan.track(theme), plan.nowMs) { onOpen(PlanPage.Theme(theme.id)) }
             }
         }
         // Paused and done themes fold into one closed row, as on the Mac and the iPhone.
-        val closed = themes.filter { it.state != "active" }
+        val closed = plan.themeGroups.closed
         if (closed.isNotEmpty()) {
             item(key = "plan/themes/closed") {
                 PlanHeader(

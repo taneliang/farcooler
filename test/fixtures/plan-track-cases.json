@@ -764,7 +764,7 @@
      }
     ]
    },
-   "track": "3 lanes moving \u00b7 slow no move in 4 h"
+   "track": "3 lanes moving · slow: no move in 4 h"
   },
   {
    "name": "the lane stalled longest is the one named",
@@ -899,7 +899,7 @@
      }
     ]
    },
-   "track": "3 lanes moving \u00b7 b no move in 5 h"
+   "track": "3 lanes moving · b: no move in 5 h"
   },
   {
    "name": "every working lane stale: stuck, longest named",
@@ -1109,7 +1109,7 @@
      }
     ]
    },
-   "track": "2 lanes moving \u00b7 b no move in an hour"
+   "track": "2 lanes moving · b: no move in an hour"
   },
   {
    "name": "queued first",
@@ -1522,7 +1522,7 @@
      }
     ]
    },
-   "track": "No lane \u00b7 quiet for 3 days"
+   "track": "No lane · quiet for 3 days"
   },
   {
    "name": "quiet one day",
@@ -1566,7 +1566,7 @@
      }
     ]
    },
-   "track": "No lane \u00b7 quiet for 1 day"
+   "track": "No lane · quiet for 1 day"
   },
   {
    "name": "quiet at exactly 24 h",
@@ -1610,7 +1610,7 @@
      }
     ]
    },
-   "track": "No lane \u00b7 quiet for 1 day"
+   "track": "No lane · quiet for 1 day"
   },
   {
    "name": "idle inside the day",
@@ -1924,7 +1924,7 @@
      }
     ]
    },
-   "track": "No lane \u00b7 quiet for 5 days"
+   "track": "No lane · quiet for 5 days"
   },
   {
    "name": "a dropped lane does not keep it awake",
@@ -1999,7 +1999,7 @@
      }
     ]
    },
-   "track": "No lane \u00b7 quiet for 5 days"
+   "track": "No lane · quiet for 5 days"
   },
   {
    "name": "a landed lane does",
@@ -2697,7 +2697,7 @@
      }
     ]
    },
-   "summary": "2 waiting on you \u00b7 1 moving \u00b7 2 quiet"
+   "summary": "2 waiting on you · 1 moving · 2 quiet"
   },
   {
    "name": "summary: nothing to say",

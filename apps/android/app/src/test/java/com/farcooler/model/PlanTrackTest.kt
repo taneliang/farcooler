@@ -58,7 +58,7 @@ class PlanTrackTest {
         assertEquals("s: no move in an hour", words(plan(theme(), lane("s", LaneState.BUILDING, since = now - 70 * 60_000, stale = true))))
         assertEquals("s: no move in 3 h", words(plan(theme(), lane("s", LaneState.BUILDING, since = now - 3 * hour, stale = true))))
         assertEquals(
-            "2 lanes moving · slow no move in 4 h",
+            "2 lanes moving · slow: no move in 4 h",
             words(plan(theme(), lane("fine", LaneState.BUILDING), lane("slow", LaneState.REVIEW, since = now - 4 * hour, stale = true))),
         )
     }
@@ -156,6 +156,17 @@ class PlanTrackTest {
                 assertEquals("$name: the summary", want, plan.trackSummary())
             }
         }
+    }
+
+    @Test
+    fun `themes split into active ones in the board's order and a closed fold of paused and done`() {
+        fun t(name: String, state: String, ordinal: Long) = theme(state = state).copy(id = name, name = name, ordinal = ordinal)
+        val plan = Plan(
+            nowMs = now,
+            themes = listOf(t("Zed", "active", 2), t("Beta", "paused", 0), t("Alpha", "active", 1), t("Gone", "dropped", 3), t("Fin", "done", 4)),
+        )
+        assertEquals(listOf("Alpha", "Zed"), plan.themeGroups.active.map { it.name })
+        assertEquals(listOf("Beta", "Fin"), plan.themeGroups.closed.map { it.name })
     }
 
     private fun repositoryFile(relative: String): String {

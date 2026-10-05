@@ -179,8 +179,7 @@ extension PlanBoardSections {
     /// ones close into one disclosure at the end. The page has the rest.
     @ViewBuilder func themesSection(_ plan: PlanModel) -> some View {
         let shown = plan.shownThemes
-        let active = shown.filter { $0.state == "active" }
-        let closed = shown.filter { $0.state != "active" }
+        let (active, closed) = (plan.themeGroups.active, plan.themeGroups.closed)
         Section {
             ForEach(active) { theme in
                 PlanThemeRow(theme: theme, track: plan.track(of: theme), now: plan.nowMs) { hook.onOpen(.theme(theme.id)) }

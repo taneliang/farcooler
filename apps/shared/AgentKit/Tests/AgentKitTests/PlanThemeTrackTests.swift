@@ -74,7 +74,7 @@ struct PlanThemeTrackTests {
         let plan = try Self.plan(lanes: [
             Self.lane("fine", "building"), Self.lane("slow", "review", since: Self.now - 4 * Self.hour, stale: true),
         ])
-        #expect(Self.words(plan) == "2 lanes moving · slow no move in 4 h")
+        #expect(Self.words(plan) == "2 lanes moving · slow: no move in 4 h")
         #expect(Self.track(plan).isMoving)
     }
 
@@ -329,5 +329,17 @@ struct PlanThemeTrackTests {
                 #expect(plan.trackSummary() == item["summary"] as? String, "\(name): the summary")
             }
         }
+    }
+
+    @Test("Themes split into active ones in the board's order and one closed fold of paused and done; dropped are in neither")
+    func themeGroups() throws {
+        let themes = [
+            ("Zed", "active", 2), ("Beta", "paused", 0), ("Alpha", "active", 1), ("Gone", "dropped", 3), ("Fin", "done", 4),
+        ].map { name, state, ordinal in PlanModelTests.theme(name, cards: [], ordinal: ordinal, state: state) }
+        let plan = try PlanModelTests.plan(themes: themes, lanes: [])
+        let groups = plan.themeGroups
+        #expect(groups.active.map(\.name) == ["Alpha", "Zed"], "the board's order, not alphabetical")
+        #expect(groups.closed.map(\.name) == ["Beta", "Fin"], "paused, then done")
+        #expect(!(groups.active + groups.closed).contains { $0.name == "Gone" })
     }
 }

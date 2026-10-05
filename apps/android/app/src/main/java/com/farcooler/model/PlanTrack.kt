@@ -90,6 +90,13 @@ fun Plan.track(theme: PlanTheme): PlanTrack {
     return PlanTrack.Idle
 }
 
+/** The themes as a list draws them: active ones in the board's order, then paused and done ones folded into one row. */
+data class PlanThemeGroups(val active: List<PlanTheme>, val closed: List<PlanTheme>)
+
+/** The Mac's Themes, the iPhone's and Android's all split on this one rule. */
+val Plan.themeGroups: PlanThemeGroups
+    get() = shownThemes.let { shown -> PlanThemeGroups(shown.filter { it.state == "active" }, shown.filter { it.state != "active" }) }
+
 /** "3 waiting on you · 4 moving · 1 quiet": the Themes section's one line, or null when none of it applies. */
 fun Plan.trackSummary(): String? {
     val shown = shownThemes
@@ -107,7 +114,7 @@ fun PlanWords.track(track: PlanTrack, now: Long): String = when (track) {
     is PlanTrack.OverBudget -> PlanCostWords.budgetLine(track.budget)
     is PlanTrack.Stuck -> "${track.lane}: ${noMove(track.since, now)}"
     is PlanTrack.Moving -> {
-        val tail = track.stalled?.let { " · ${it.lane} ${noMove(it.since, now)}" } ?: ""
+        val tail = track.stalled?.let { " · ${it.lane}: ${noMove(it.since, now)}" } ?: ""
         val lane = track.lanes.singleOrNull()
         if (lane == null) {
             "${track.lanes.size} lanes moving$tail"

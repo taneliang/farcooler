@@ -123,8 +123,7 @@ struct PlanOverviewView: View {
     /// one row after them, and the work outside any theme as a footer.
     private func themes(_ model: PlanModel) -> some View {
         let shown = model.shownThemes
-        let active = shown.filter { $0.state == "active" }
-        let closed = shown.filter { $0.state != "active" }
+        let (active, closed) = (model.themeGroups.active, model.themeGroups.closed)
         return CollapsibleSection("Themes", id: "plan.themes", style: .navigator, key: key("themes"), defaults: defaults,
             count: shown.count,
             accessory: {
