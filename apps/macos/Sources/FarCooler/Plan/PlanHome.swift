@@ -32,7 +32,13 @@ struct PlanHome: View {
 
     var body: some View {
         ScrollView {
-            PlanHomeContent(plan: board.plan, statuses: board.board.statuses, needsYou: needsYou, onOpen: onOpen)
+            PlanHomeContent(
+                plan: board.plan, statuses: board.board.statuses, activity: board.board.activity, needsYou: needsYou,
+                onOpen: onOpen
+            )
+            // A reading width (ov-331): the themes are prose now, and 680 pt
+            // is about 75 characters of body text. Narrower, it just wraps.
+            .frame(maxWidth: PlanMetrics.readingWidth, alignment: .leading)
                 .padding(.horizontal, ColumnGrid.a + ColumnGrid.step)
                 .padding(.vertical, 2 * ColumnGrid.rhythm)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -49,6 +55,8 @@ struct PlanHome: View {
 struct PlanHomeContent: View {
     @ObservedObject var plan: PlanStore
     let statuses: [String: TaskStatus]
+    /// Each card's last move on the board, by task id.
+    var activity: [String: Int64] = [:]
     let needsYou: PlanNeedsYou
     let onOpen: (PlanPage) -> Void
 
@@ -56,7 +64,7 @@ struct PlanHomeContent: View {
         VStack(alignment: .leading, spacing: NavigatorRhythm.section) {
             if !needsYou.items.isEmpty || !asks.isEmpty { needs }
             if plan.available {
-                PlanOverviewView(plan: plan, statuses: statuses, selected: nil, onOpen: onOpen)
+                PlanOverviewView(plan: plan, statuses: statuses, selected: nil, activity: activity, onOpen: onOpen)
                 // The calls made for the owner (ov-304), last: they ask
                 // nothing, and stand until the owner says otherwise.
                 PlanRulingsSection(plan: plan)
@@ -190,7 +198,7 @@ struct PlanPeek: View {
             // A click beside the card puts it away; it draws nothing.
             Color.clear.contentShape(Rectangle()).onTapGesture(perform: onClose)
             ScrollView {
-                PlanHomeContent(plan: board.plan, statuses: board.board.statuses, needsYou: needsYou) { page in
+                PlanHomeContent(plan: board.plan, statuses: board.board.statuses, activity: board.board.activity, needsYou: needsYou) { page in
                     onClose()
                     onOpen(page)
                 }

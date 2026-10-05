@@ -101,7 +101,7 @@ struct FirstLayoutHeightTests {
             seen: seen, size: CGSize(width: 320, height: 1400))
         host.layoutSubtreeIfNeeded()
         let first = try #require(seen.frames["after"], "drawn: \(seen.frames.keys)")
-        let card = try #require(seen.frames["plan-theme-Visual language"])
+        let card = try #require(seen.frames["plan-theme-entry-Visual language"])
         for _ in 0..<10 {
             host.layoutSubtreeIfNeeded()
             try await Task.sleep(for: .milliseconds(20))

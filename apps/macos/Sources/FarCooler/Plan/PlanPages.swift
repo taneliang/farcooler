@@ -210,19 +210,24 @@ struct PlanThemePage: View {
                 PlanBar(counts: theme.counts).padding(.top, Spacing.tight)
             }
             story
+            // Where it stands, then what it needs from the owner, then Next:
+            // the order the canvas's entry reads in (ov-331), so opening the
+            // page reads as the rest of the entry.
             if !theme.next.isEmpty || !theme.ownerAsk.isEmpty {
                 VStack(alignment: .leading, spacing: Spacing.group) {
-                    if !theme.next.isEmpty {
-                        PlanSection(title: "Next") { Text(theme.next).planBody() }
-                    }
                     if !theme.ownerAsk.isEmpty {
                         PlanAsk(text: theme.ownerAsk)
                             .font(.system(size: WorkspaceStyle.PaneText.title))
+                    }
+                    if !theme.next.isEmpty {
+                        PlanSection(title: "Next") { Text(theme.next).planBody() }
+                            .identified("plan-theme-next")
                     }
                 }
             }
             // After Needs You and before Lanes (ov-269 design 6.1).
             PlanAnchoredPages(pages: anchored, world: world, context: context, onHide: onHide)
+            decided
             if PlanThemeSpend.hasSomething(theme) {
                 PlanSection(title: "Spend") {
                     PlanThemeSpend(
@@ -232,6 +237,21 @@ struct PlanThemePage: View {
             }
             lanes
             cards
+        }
+    }
+
+    /// The calls made for the owner that name this theme (ov-331): the canvas's
+    /// entry shows two, and the page all of them, standing first.
+    @ViewBuilder private var decided: some View {
+        let rulings = plan.rulings(in: theme)
+        if !rulings.isEmpty {
+            PlanSection(title: "Decided") {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(rulings.filter(\.isStanding)) { PlanRulingRow(ruling: $0, copy: PlanRulingsList.toPasteboard) }
+                    ForEach(rulings.filter { !$0.isStanding }) { PlanSettledRulingRow(ruling: $0, copy: PlanRulingsList.toPasteboard) }
+                }
+            }
+            .identified("plan-theme-decided")
         }
     }
 

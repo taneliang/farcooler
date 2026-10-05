@@ -300,4 +300,27 @@ struct PlanThemeTrackTests {
         #expect(PlanWords.storyAge(plan.themes[0], now: Self.now) == "Updated 3 h ago")
         #expect(PlanWords.storyAge(try Self.plan(storyAt: Self.now - Self.hour).themes[0], now: Self.now) == nil)
     }
+
+    // MARK: The entry's brief
+
+    @Test("The brief lists three lanes and two rulings, says how many more, and leaves empty lines out")
+    func brief() throws {
+        func ruling(_ n: Int, state: String = "standing") -> [String: Any] {
+            ["id": "r\(n)", "short": "R-\(n)", "number": n, "decision": "d\(n)", "why": "w", "reversal": "r", "cards": [],
+             "theme_id": "theme-T", "theme": "T", "state": state, "note": "", "actor": "manager", "created_at": n]
+        }
+        let lanes = (1...5).map { Self.lane("l\($0)", "building") }
+        let plan = try Self.plan(
+            lanes: lanes, extra: ["rulings": [ruling(1), ruling(2), ruling(3), ruling(4, state: "confirmed")]]
+        ) { $0["story"] = "Going well."; $0["story_at"] = Self.now - Self.hour }
+        let brief = PlanThemeBrief(plan.themes[0], in: plan)
+        #expect(brief.moving.map(\.name) == ["l1", "l2", "l3"] && brief.movingMore == 2)
+        #expect(brief.decided.map(\.short) == ["R-1", "R-2"] && brief.decidedMore == 1, "standing only: R-4 is settled")
+        #expect(brief.story == "Going well." && brief.storyAge == "Updated 1 h ago")
+        #expect(brief.outcome == nil && brief.ask == nil && brief.next == nil && brief.landed == nil && brief.budget == nil)
+        let within = try Self.plan { $0["budget_tokens"] = 1000 }
+        #expect(PlanThemeBrief(within.themes[0], in: within).budget != nil)
+        let over = try Self.plan { $0["budget_tokens"] = 100; $0["spend"] = ["input_tokens": 600, "runs": 1, "unmeasured_agents": 0] }
+        #expect(PlanThemeBrief(over.themes[0], in: over).budget == nil, "over budget is the track line's, not said twice")
+    }
 }

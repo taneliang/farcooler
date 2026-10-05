@@ -89,12 +89,16 @@ struct PlanChangesTests {
         #expect(!heard.animated.contains(true), "the selection ran animated: \(heard.animated)")
 
         // The runner says mac-ux went back to fixing: it washes, on the spring,
-        // and nothing else does.
+        // and so does the one theme it moves, whose track line changes with
+        // it (ov-331: "mac-ux is in review" is now "mac-ux is fixing"); nothing
+        // else does.
         heard.events = []
         calls.plan = try Self.plan(movingMacUX: "fixing")
         await store.plan.reload()
         await settle()
-        #expect(heard.washed == [Self.laneID], "only the lane that changed washes: \(heard.washed)")
+        #expect(
+            Set(heard.washed) == [Self.laneID, "00000000-0000-0000-0000-000000003001"] && heard.washed.count == 2,
+            "only the lane that changed, and the theme it moves, wash: \(heard.washed)")
         #expect(heard.animated.contains(true), "the change ran on the spring: \(heard.animated)")
     }
 }

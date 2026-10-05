@@ -88,6 +88,21 @@ enum PlanChanges {
         }
     }
 
+    /// The canvas's entries wash when anything they say moves: the sidebar's
+    /// signature, plus the story, the track and what the entry lists.
+    static func entries(_ themes: [PlanTheme], _ model: PlanModel, activity: [String: Int64]) -> [ListChangeRow] {
+        themes.map { theme in
+            let brief = PlanThemeBrief(theme, in: model, activity: activity)
+            return ListChangeRow(
+                id: theme.id,
+                signature: [
+                    theme.name, theme.state, "\(theme.counts)", theme.next, theme.ownerAsk, theme.outcome, theme.story,
+                    PlanWords.track(brief.track, now: 0), brief.moving.map { "\($0.id)\($0.state)" }.joined(separator: ","),
+                    brief.landed ?? "", brief.decided.map(PlanWords.rulingSignature).joined(separator: ","),
+                ].joined(separator: "\u{1}"))
+        }
+    }
+
     static func themes(_ themes: [PlanTheme]) -> [ListChangeRow] {
         themes.map { theme in
             ListChangeRow(

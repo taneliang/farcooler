@@ -120,6 +120,10 @@ extension PlanWords {
     /// ruling (ov-273), after "where each st…" was clipped at two.
     public static let outcomeLines = 3
 
+    /// How many lines a theme's story gets on a phone's row (ov-331); the
+    /// Mac's entry shows four.
+    public static let storyLines = 3
+
     /// The button under a read that didn't come back.
     public static let tryAgain = "Try Again"
 }

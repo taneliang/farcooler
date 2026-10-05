@@ -2,7 +2,7 @@ import AgentKit
 import SwiftUI
 
 // The plan's overview (ov-268 design 6.1): the lanes working now, Next Up,
-// the themes as cards, the orchestrator's pages and what landed today. A lane
+// the themes as short briefs, the orchestrator's pages and what landed today. A lane
 // or a theme opens its page in the main area, where a task opens. Since
 // ov-298 there's no Tasks | Plan control to show it in the navigator's place;
 // the navigator lists the themes and the task index (`PlanNavigator`).
@@ -23,8 +23,14 @@ struct PlanOverviewView: View {
     /// Whether the navigator has the keyboard: a selected row reads in the
     /// accent.
     var keyed = false
+    /// Each card's last move on the board, by task id (the theme's "quiet").
+    var activity: [String: Int64] = [:]
     let onOpen: (PlanPage) -> Void
     var defaults: UserDefaults = .standard
+    /// Bumped when an entry folds, so the entries redraw from `defaults`.
+    @State private var folds = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.boardMotionSlowdown) private var slowdown
 
     var body: some View {
         VStack(alignment: .leading, spacing: NavigatorRhythm.section) {
@@ -112,24 +118,75 @@ struct PlanOverviewView: View {
         .identified("plan-now")
     }
 
+    /// Themes (ov-331): each active theme a short brief, open until the
+    /// owner closes it, in the board's order; paused and done ones folded into
+    /// one row after them, and the work outside any theme as a footer.
     private func themes(_ model: PlanModel) -> some View {
-        CollapsibleSection("Themes", id: "plan.themes", style: .navigator, key: key("themes"), defaults: defaults,
-            count: model.shownThemes.count
-        ) {
-            // One line per theme (ov-321): the navigator's tree carries
-            // each theme's cards and lanes, so the canvas only names them,
-            // with their progress, and an ask in amber.
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(model.shownThemes) { theme in
-                    PlanThemeRow(theme: theme, selected: selected == .theme(theme.id), keyed: keyed) {
-                        onOpen(.theme(theme.id))
-                    }
-                    .changeWashed(theme.id)
+        let shown = model.shownThemes
+        let active = shown.filter { $0.state == "active" }
+        let closed = shown.filter { $0.state != "active" }
+        return CollapsibleSection("Themes", id: "plan.themes", style: .navigator, key: key("themes"), defaults: defaults,
+            count: shown.count,
+            accessory: {
+                if let summary = model.trackSummary(activity: activity) {
+                    Text(summary)
+                        .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .padding(.trailing, NavigatorGrid.gap)
+                        .probed("plan-themes-summary")
                 }
             }
-            .listChanges(PlanChanges.themes(model.shownThemes))
+        ) {
+            VStack(alignment: .leading, spacing: 0) {
+                entries(active, model)
+                if !closed.isEmpty { closedThemes(closed, model) }
+                PlanOutsideRow(outside: model.outsideThemes(statuses: statuses), onOpen: onOpen)
+            }
         }
         .identified("plan-themes")
+    }
+
+    private func entries(_ themes: [PlanTheme], _ model: PlanModel) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.group) {
+            ForEach(themes) { theme in
+                PlanThemeEntry(
+                    theme: theme, plan: model, activity: activity, expanded: isExpanded(theme), selected: selected == .theme(theme.id),
+                    keyed: keyed,
+                    onToggle: { all in fold(theme, all: all, among: model.shownThemes) }, onOpen: onOpen
+                )
+                .changeWashed(theme.id)
+            }
+        }
+        .listChanges(PlanChanges.entries(themes, model, activity: activity))
+    }
+
+    /// Paused and done, as one row that's closed until opened.
+    private func closedThemes(_ themes: [PlanTheme], _ model: PlanModel) -> some View {
+        CollapsibleSection("Paused and Done", id: "plan.themes.closed", style: .minor, key: key("themes-closed"), defaults: defaults,
+            expandedByDefault: false, count: themes.count
+        ) {
+            entries(themes, model)
+        }
+        .padding(.top, NavigatorRhythm.group)
+        .identified("plan-themes-closed")
+    }
+
+    private func isExpanded(_ theme: PlanTheme) -> Bool {
+        _ = folds
+        return PlanThemeFold.isExpanded(theme: theme, host: plan.host, workspace: plan.workspace.id, in: defaults)
+    }
+
+    /// Fold or unfold one entry on the shared spring, or, with ⌥, every theme
+    /// to match it, as the Finder does.
+    private func fold(_ theme: PlanTheme, all: Bool, among themes: [PlanTheme]) {
+        let open = !isExpanded(theme)
+        BoardMotion.toggle(reduceMotion: reduceMotion, slowedBy: slowdown) {
+            for target in all ? themes : [theme] {
+                PlanThemeFold.set(open, theme: target.id, host: plan.host, workspace: plan.workspace.id, in: defaults)
+            }
+            folds += 1
+        }
     }
 
     /// The runner's week and cost per finished card by harness and model.
@@ -195,9 +252,9 @@ struct PlanOverviewView: View {
 
 /// Sizes the Plan view's own shapes use, beside the navigator's grid.
 enum PlanMetrics {
-    /// A theme card's least width: two fit side by side once the navigator
-    /// is about twice its usual width.
-    static let themeCardMinimum: CGFloat = 220
+    /// The widest the canvas's plan reads (ov-331): about 75 characters of
+    /// body text, close to a theme page's 720.
+    static let readingWidth: CGFloat = 680
     /// The theme bar's height.
     static let bar: CGFloat = 4
 }
@@ -342,80 +399,6 @@ enum PlanGlyph {
     }
 }
 
-/// A theme's card in the overview: its name and progress, its outcome, the
-/// bar, what's next and, in amber, what needs the owner.
-struct PlanThemeCard: View {
-    let theme: PlanTheme
-    let selected: Bool
-    let keyed: Bool
-    let action: () -> Void
-    @Environment(\.colorScheme) private var scheme
-    @State private var hovering = false
-
-    /// How many lines of the outcome the card shows.
-    static let outcomeLines = 3
-    static let outcomeFont = Font.system(size: WorkspaceStyle.PaneText.secondary)
-
-    var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: Spacing.tight) {
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
-                    Text(theme.name)
-                        .font(.system(size: WorkspaceStyle.PaneText.title, weight: .semibold))
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                    if theme.state != "active" {
-                        Text(theme.state.capitalized)
-                            .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                if !theme.outcome.isEmpty {
-                    // Up to three lines, the owner's ruling (ov-273): an
-                    // outcome is one sentence, and two lines cut most of them.
-                    TaskKeyText(keysIn: theme.outcome)
-                        .font(Self.outcomeFont)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(Self.outcomeLines)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .probed("plan-theme-outcome")
-                }
-                PlanBar(counts: theme.counts)
-                    .padding(.top, Spacing.tight)
-                Text(PlanWords.progress(theme.counts))
-                    .font(.system(size: WorkspaceStyle.PaneText.secondary).monospacedDigit())
-                    .foregroundStyle(.secondary)
-                if !theme.next.isEmpty {
-                    (Text("Next: ").foregroundStyle(.secondary) + Text(theme.next))
-                        .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, Spacing.tight)
-                }
-                if !theme.ownerAsk.isEmpty {
-                    PlanAsk(text: theme.ownerAsk, lines: 2)
-                }
-            }
-            .padding(Spacing.inset)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            .surface(.inset, in: .card)
-            .background {
-                if selected {
-                    RoundedRectangle.card.fill(Fill.selection(active: keyed))
-                } else if hovering {
-                    RoundedRectangle.card.fill(Fill.hover)
-                }
-            }
-            .contentShape(.card)
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
-        .identified("plan-theme-\(theme.name)")
-    }
-}
-
 /// "● Needs you: …": the one colored mark a theme has, with words.
 struct PlanAsk: View {
     let text: String
@@ -474,49 +457,16 @@ struct PlanBar: View {
 }
 
 extension TaskBoardModel {
+    /// Each card's last move in ms, by id: what keeps a theme from reading
+    /// as quiet while its cards are still moving.
+    var activity: [String: Int64] {
+        Dictionary(
+            rows.map { ($0.id, Int64($0.lastMoved.timeIntervalSince1970 * 1000)) }, uniquingKeysWith: { a, _ in a })
+    }
+
     /// Each task's status by id: what the Plan view asks whether a lane
     /// waits on the owner.
     var statuses: [String: TaskStatus] {
         Dictionary(rows.map { ($0.id, $0.status) }, uniquingKeysWith: { a, _ in a })
-    }
-}
-
-/// Equal columns at least `minimum` wide, as many as fit, filled row by row,
-/// each row as tall as its tallest: an adaptive grid that measures every
-/// item in the pass that places it.
-struct AdaptiveColumns: Layout {
-    let minimum: CGFloat
-    let spacing: CGFloat
-
-    private func columns(_ width: CGFloat) -> Int { max(1, Int((width + spacing) / (minimum + spacing))) }
-
-    private func rows(_ width: CGFloat, _ subviews: Subviews) -> (column: CGFloat, heights: [CGFloat]) {
-        let count = columns(width)
-        let column = max(0, (width - CGFloat(count - 1) * spacing) / CGFloat(count))
-        var heights: [CGFloat] = []
-        for start in stride(from: 0, to: subviews.count, by: count) {
-            heights.append(subviews[start..<min(start + count, subviews.count)]
-                .map { $0.sizeThatFits(.init(width: column, height: nil)).height }.max() ?? 0)
-        }
-        return (column, heights)
-    }
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? minimum
-        let heights = rows(width, subviews).heights
-        return CGSize(width: width, height: heights.reduce(0, +) + CGFloat(max(heights.count - 1, 0)) * spacing)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let count = columns(bounds.width)
-        let (column, heights) = rows(bounds.width, subviews)
-        var y = bounds.minY
-        for (row, height) in heights.enumerated() {
-            for index in row * count..<min((row + 1) * count, subviews.count) {
-                let x = bounds.minX + CGFloat(index - row * count) * (column + spacing)
-                subviews[index].place(at: CGPoint(x: x, y: y), anchor: .topLeading, proposal: .init(width: column, height: nil))
-            }
-            y += height + spacing
-        }
     }
 }

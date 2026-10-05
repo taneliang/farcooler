@@ -47,17 +47,17 @@ struct PlanCostViewTests {
         return seen.views
     }
 
-    @Test("A theme past its budget says so beside its progress; within it, or with no budget, it says nothing")
+    @Test("A theme past its budget says so on its track line; within it, or with no budget, it says nothing")
     func aThemePastItsBudgetSaysSo() async throws {
         let over = try await Self.drawn(PlanViewTests.fixture())
-        #expect(over["plan-theme-Visual language-over-budget"] != nil, "320K of a 250K budget: \(over.keys.sorted())")
+        #expect(over["plan-theme-entry-Visual language-over-budget"] != nil, "320K of a 250K budget: \(over.keys.sorted())")
 
         let within = try await Self.drawn(Self.plan { _, theme in theme["budget_tokens"] = 400_000 })
-        #expect(within["plan-theme-Visual language"] != nil, "the theme is still drawn")
-        #expect(within["plan-theme-Visual language-over-budget"] == nil, "within its budget draws no warning")
+        #expect(within["plan-theme-entry-Visual language-head"] != nil, "the theme is still drawn")
+        #expect(within["plan-theme-entry-Visual language-over-budget"] == nil, "within its budget draws no warning")
 
         let none = try await Self.drawn(Self.plan { _, theme in theme["budget_tokens"] = NSNull() })
-        #expect(none["plan-theme-Visual language-over-budget"] == nil, "no budget, nothing to flag")
+        #expect(none["plan-theme-entry-Visual language-over-budget"] == nil, "no budget, nothing to flag")
     }
 
     @Test("A lane that waits on you and is over its budget says both")
@@ -85,6 +85,6 @@ struct PlanCostViewTests {
             theme["trend_tokens"] = NSNull()
         })
         #expect(withheld["plan-cost-section"] == nil, "a runner without board_cost sends none")
-        #expect(withheld["plan-theme-Visual language-over-budget"] == nil)
+        #expect(withheld["plan-theme-entry-Visual language-over-budget"] == nil)
     }
 }
