@@ -20,6 +20,7 @@
 use clap::{Subcommand, ValueEnum};
 use farcooler_protocol::capability;
 use farcooler_protocol::v1::{self as pb, request, result};
+use farcooler_transport::ClientError;
 use serde_json::{Value, json};
 
 use super::{Failed, Keys, ago, expect_value, find_lane, get_plan, id_text, refused_here, unreadable};
@@ -82,8 +83,11 @@ pub(super) enum TrainStateArg {
 }
 
 /// This module's sentences for the words the runner refuses a train with.
+/// Asked before `plan.rs`'s, whose `sha` and `name` mean a lane's.
 pub(super) fn said_here(what: &str) -> Option<&'static str> {
     Some(match what {
+        "name" => "A train's name is one word with no spaces, like integ-14.",
+        "name_taken" => "That train name is already used on this board. Trains keep their names, so pick the next one.",
         "base" => "That base is too long. Name a ref or a SHA.",
         "sha" => "Give the SHA it pushed with --sha: 7 to 40 hex digits. A train is pushed, green or red only once it has one.",
         "train_settled" => "That train has landed or been dropped, so it takes no more moves or SHAs.",
@@ -101,7 +105,12 @@ fn needs_trains<L: DispatchLink>(link: &L) -> Result<(), Failed> {
 async fn send<L: DispatchLink>(link: &mut L, board: &Board, method: &str, p: request::Payload) -> Result<pb::BoardTrain, Failed> {
     let mut r = with(req_for(method, board.repository), p);
     r.required_capabilities.push(capability::BOARD_TRAINS.to_string());
-    let answer = link.call(r).await.map_err(|e| refused_here(e, "The runner couldn't record that train. Try again."))?;
+    let answer = link.call(r).await.map_err(|e| match &e {
+        ClientError::Daemon { code, what, .. } if said_here(what).is_some() => {
+            Box::new(Refused::naming(said_here(what).unwrap_or_default().to_string(), *code, what.clone())) as Failed
+        }
+        _ => refused_here(e, "The runner couldn't record that train. Try again."),
+    })?;
     match expect_value(answer.value)? {
         result::Value::BoardTrain(t) => Ok(t),
         _ => Err(unreadable()),

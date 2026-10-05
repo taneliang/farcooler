@@ -438,7 +438,7 @@ fn said_here(what: &str) -> Option<&'static str> {
 /// else the one `refused` makes.
 fn refused_here(err: ClientError, invalid: &str) -> Failed {
     if let ClientError::Daemon { code, what, .. } = &err
-        && let Some(said) = said_here(what).or_else(|| ruling::said_here(what)).or_else(|| train::said_here(what))
+        && let Some(said) = said_here(what).or_else(|| ruling::said_here(what))
     {
         return Box::new(Refused::naming(said.to_string(), *code, what.clone()));
     }

@@ -980,11 +980,21 @@ async fn the_train_list_names_failed_jobs() {
     assert!(lines[4].ends_with("runs/37275435256 · read 1m ago"), "{}", lines[4]);
 }
 
-/// The runner's refusals read as sentences.
+/// The runner's refusals read as sentences, a train's own before a lane's: a
+/// bad SHA isn't "too long", and a bad name names a train.
 #[tokio::test]
-async fn a_settled_train_refusal_reads_as_a_sentence() {
+async fn a_train_refusal_reads_as_a_train_sentence() {
     let mut link = runner();
-    link.refuse = Some("train_settled");
-    let err = say(&mut link, "train set integ-9 --state gating").await.unwrap_err();
-    assert_eq!(err.to_string(), "That train has landed or been dropped, so it takes no more moves or SHAs.");
+    for (what, said) in [
+        ("train_settled", "That train has landed or been dropped, so it takes no more moves or SHAs."),
+        ("sha", "Give the SHA it pushed with --sha: 7 to 40 hex digits. A train is pushed, green or red only once it has one."),
+        ("name", "A train's name is one word with no spaces, like integ-14."),
+    ] {
+        link.refuse = Some(what);
+        let err = say(&mut link, "train set integ-9 --state gating").await.unwrap_err();
+        assert_eq!(err.to_string(), said, "{what}");
+    }
+    link.refuse = Some("sha");
+    let lane = say(&mut link, "lane set mac-ux --sha abc").await.unwrap_err();
+    assert_eq!(lane.to_string(), "That's too long.", "a lane's words are the lane's");
 }
