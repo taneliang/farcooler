@@ -1056,11 +1056,13 @@ mod tests {
     /// The working practice (ov-217) added 46 after about 20 lines of trims:
     /// the two landing modes, the plan and rulings, landing hygiene, and a
     /// check-in with initiative. The owner asked for all of it in this skill,
-    /// and only the landing and check-in steps are read every turn.
+    /// and only the landing and check-in steps are read every turn. The real
+    /// haiku runs (ov-217) added 1 more: the exact commands a landing, a
+    /// ruling and a dispatch end with.
     #[test]
     fn the_skill_is_short() {
         let lines = skill_body(Harness::Claude).lines().count();
-        assert!(lines <= 232, "{lines} lines");
+        assert!(lines <= 233, "{lines} lines");
     }
 
     #[test]

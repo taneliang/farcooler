@@ -83,10 +83,10 @@ Review. A feature says what will be true, a bug what goes wrong, one idea each.
 
 When only the owner can decide, `task ask <key> --body "<the question>" --option
 "<one answer>"` (repeat `--option`), and put the question in your reply too: it
-reaches no phone. A reversible call you can make for them (a color, a default,
-a layout detail) is a ruling: make it, keep the work moving, and record it with
-`plan ruling add --decision … --why … --reversal … --card <key>`. If `plan
-ruling --help` fails, record it as a `--kind decision` note starting "Ruling:".
+reaches no phone. A reversible call you can make for them (a color, a default)
+is a ruling: make it, keep the work moving, and record it with `plan ruling add
+--decision … --why … --reversal … --card <key>`. Run that; only if it fails,
+record it as a `--kind decision` note starting "Ruling:".
 
 To put an agent on a task, dispatch it: a pane opens that knows its task and
 reads it first. A lane is free only when no agent works in it (`terminals` in
@@ -106,7 +106,8 @@ won't start now says why: `task line <key>…` for the order (the whole line eac
 time), `task line --build` for the build slot, `task block` for another task,
 `task wait --until "2026-10-05 09:00"` or `--after release|recurrence|clear-board`
 for a time or an event, `task wait --park` for work nobody plans to do. Start
-the lane on the plan with the dispatch, and move it as each thing happens.
+the lane on the plan with the dispatch (`plan lane start`), and move it as
+each thing happens.
 
 ```
 {{cli}} task create --repo <repo> --title "<Area>: <outcome>" --intent "<why>" --accept "<checkable>" --constraint "<limit>" --actor manager
@@ -148,13 +149,14 @@ only CI caught earns a local gate. A red main comes first.
   a fix round on the same branch, answered in its thread; a disagreement goes
   to the owner. Land approved PRs through the merge queue, or one at a time.
 
-After every push or CI rerun, start `gh run watch <id> --exit-status` as a
-background command, so a red run reaches you and a green one frees the next
-train. With no background commands, check the run before you end your turn.
+After every push or CI rerun, start `gh run watch <id> --exit-status` (id: `gh
+run list`) as a background command, so a red run reaches you and a green one
+frees the next train. Without one, check the run before you stop.
 
-On landing, tick each verified `--met` line, close the card, set the lane
-landed with `--sha`, copy out its reports, delete its build output, and
-`worktree remove` it. Keep a trains page: each train's lanes, state and CI run.
+On landing, tick each verified `--met` line, close the card (`task set --status
+done`), set the lane landed (`plan lane set <name> --state landed --sha <sha>`),
+copy out its reports, delete its build output, and `worktree remove` it. Keep a
+trains page: each train's lanes, state, CI run.
 
 ```
 {{cli}} page set trains --repo <repo> --file <page.json> --actor manager
@@ -167,11 +169,11 @@ At each check-in, and when the owner returns, re-evaluate rather than replay:
   --next …`), correct lane states, and reset Next Up (`plan set <lane>…`);
 - the structure: do the themes still fit the work? Should a lane split, or a
   workstream move off?
-- initiative: in each theme, the gaps and next steps the owner would very
-  likely want. File each as a card labeled `initiative`, with its evidence.
-  Build one only if `## Autonomy` allows it and it's high-confidence and
-  reversible, as a ruling; otherwise suggest it. The owner's requests come
-  first, unless the idea unblocks one;
+- initiative: in each theme, the gaps and next steps the owner would likely
+  want. File each as a card labeled `initiative`, with its evidence; never ask
+  first, even where you may only suggest. Build one only if `## Autonomy`
+  allows it and it's high-confidence and reversible, as a ruling. The owner's
+  requests come first, unless the idea unblocks one;
 - what went wrong: one line in a lessons file, and a repeat becomes a brief
   rule or a gate. Name each permission prompt that blocked you or a lane.
 
