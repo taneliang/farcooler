@@ -26,6 +26,11 @@ final class TerminalKeyHover {
 
     /// The pointer moved over `view`: follow it onto or off a key.
     func moved(_ view: TerminalRenderView, _ event: NSEvent) {
+        // A pane mounted out of sight (opacity 0 under an opened task, or a
+        // tile behind a zoomed one) still has its tracking area, which
+        // SwiftUI's opacity and hit-testing don't clip: no card from it
+        // (train 1004r, K1).
+        guard view.isShown else { return exited() }
         let cell = view.cellForTesting(event)
         let x = view.convert(event.locationInWindow, from: nil).x
         hover(view, row: cell.row, column: cell.column, x: x)
