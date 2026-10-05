@@ -5,9 +5,10 @@ import Testing
 
 @testable import Far_Cooler
 
-/// The plan layer on the Mac (ov-273): opt-in behind a Tasks | Plan control
-/// that only a runner with `board_plan` offers, Tasks the default, and a
-/// board drawn as it was whenever Plan isn't chosen.
+/// The plan layer on the Mac (ov-273), the primary way of working since
+/// ov-298: no Tasks | Plan control. A planned board's navigator lists its
+/// themes and the task index as peers; a runner without `board_plan`, or a
+/// board with nothing planned, is drawn as it always was.
 @MainActor
 @Suite(.serialized)
 struct PlanViewTests {
@@ -26,12 +27,23 @@ struct PlanViewTests {
         ("00000000-0000-0000-0000-000000001003", "ov-3", "done"),
     ]
 
-    /// What the stubbed CLI was asked, in order.
-    final class Calls { var args: [[String]] = [] }
+    /// What the stubbed CLI was asked, in order, and the plan it answers
+    /// with, which a test may change between reads.
+    final class Calls {
+        var args: [[String]] = []
+        var plan: Data?
+    }
+
+    /// The fixture with nothing planned: no theme, no lane.
+    static func emptyPlan() throws -> Data {
+        var object = try #require(try JSONSerialization.jsonObject(with: fixture()) as? [String: Any])
+        for key in ["themes", "lanes", "order", "cards"] { object[key] = [] }
+        return try JSONSerialization.data(withJSONObject: object)
+    }
 
     static func store(plan: Bool, defaults: UserDefaults, calls: Calls = Calls()) async throws -> TaskBoardStore {
         let client = DaemonClient(target: "", notifications: NotificationCenter())
-        let planData = try fixture()
+        if calls.plan == nil { calls.plan = try fixture() }
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         client.commandRunnerForTesting = { args in
             calls.args.append(args)
@@ -41,7 +53,7 @@ struct PlanViewTests {
                 }
                 return (Data(#"{"tasks":[\#(rows.joined(separator: ","))]}"#.utf8), nil)
             }
-            if args.first == "plan" { return (planData, nil) }
+            if args.first == "plan" { return (calls.plan, nil) }
             return (Data(), nil)
         }
         client.daemonBuild = DaemonBuild(
@@ -147,94 +159,87 @@ struct PlanViewTests {
 
     static func defaults() -> UserDefaults { UserDefaults(suiteName: "ov273-\(UUID().uuidString)")! }
 
-    @Test("A runner without board_plan draws no control and the board as it was")
+    @Test("A runner without board_plan draws the board as it was, and is never asked for a plan")
     func oldRunner() async throws {
         let defaults = Self.defaults()
-        let store = try await Self.store(plan: false, defaults: defaults)
-        store.plan.shown = true  // even chosen before, on another build
+        let calls = Calls()
+        let store = try await Self.store(plan: false, defaults: defaults, calls: calls)
         let drawn = await Self.draw(store, defaults: defaults)
         defer { drawn.window.close() }
-        #expect(!drawn.ids.contains("board-plan-toggle"))
-        #expect(!drawn.ids.contains("plan-overview"))
+        #expect(!drawn.ids.contains("plan-themes"))
         #expect(drawn.ids.contains("board-row-ov-1"), "the task rows are drawn: \(drawn.ids)")
+        #expect(drawn.ids.contains("section-header-summary"), "Unread, as before")
+        #expect(!calls.args.contains { $0.first == "plan" })
     }
 
-    @Test("With board_plan, Tasks is the default and the board under the control is the board as it was")
-    func tasksByDefault() async throws {
+    @Test("A board with nothing planned is the board as it was: the same views, the same frames")
+    func nothingPlanned() async throws {
         let old = Self.defaults()
         let without = await Self.draw(try await Self.store(plan: false, defaults: old), defaults: old)
         defer { without.window.close() }
         let fresh = Self.defaults()
-        let store = try await Self.store(plan: true, defaults: fresh)
-        #expect(store.plan.shown == false, "Tasks is the default")
+        let calls = Calls()
+        calls.plan = try Self.emptyPlan()
+        let store = try await Self.store(plan: true, defaults: fresh, calls: calls)
         let with = await Self.draw(store, defaults: fresh)
         defer { with.window.close() }
-        #expect(with.ids.contains("board-plan-toggle"))
-        #expect(!with.ids.contains("plan-overview"))
-        // The same views, the control aside, each the same size: only moved
-        // down by the control's row. The navigator's panes fill what height
-        // is left, so they give up the control's.
-        #expect(with.ids.subtracting(["board-plan-toggle"]) == without.ids)
-        let toggle = try #require(with.seen.views["board-plan-toggle"])
-        for id in without.ids where !id.hasPrefix("navigator-") {
+        for _ in 0..<20 where !store.plan.hasRead { await with.settle() }
+        await with.settle()
+        #expect(store.plan.hasRead && !store.plan.planned, "read, and nothing in it")
+        #expect(with.ids == without.ids, "added \(with.ids.subtracting(without.ids)), lost \(without.ids.subtracting(with.ids))")
+        for id in without.ids {
             let (a, b) = (without.seen.views[id]!, with.seen.views[id]!)
-            #expect(abs(a.width - b.width) < 0.5 && abs(a.height - b.height) < 0.5, "\(id) changed size")
-            #expect(b.minY > toggle.minY, "\(id) is above the control")
+            #expect(abs(a.minY - b.minY) < 0.5 && abs(a.height - b.height) < 0.5, "\(id) moved")
         }
-        #expect(store.plan.plan.isEmpty && !store.plan.hasRead, "the plan isn't read until Plan is chosen")
     }
 
-    @Test("Plan shows Next Up with each lane's theme, Now and Themes, and a lane opens its page")
-    func planShown() async throws {
+    @Test("A planned board's navigator: Themes, then the task index, collapsed, with no Unread and no toggle")
+    func plannedNavigator() async throws {
         let defaults = Self.defaults()
         let store = try await Self.store(plan: true, defaults: defaults)
-        store.plan.shown = true
         let drawn = await Self.draw(store, defaults: defaults)
         defer { drawn.window.close() }
-        #expect(drawn.ids.isSuperset(of: ["board-plan-toggle", "plan-overview", "plan-next-up", "plan-now", "plan-themes"]))
-        #expect(!drawn.ids.contains("board-row-ov-1"), "no task rows while the plan is shown")
-        #expect(drawn.ids.contains("plan-lane-mac-fu3-theme"), "Next Up names the theme it serves")
-        #expect(drawn.ids.contains("plan-theme-Visual language"))
-        #expect(drawn.press("plan-lane-mac-ux"))
-        await drawn.settle()
-        #expect(drawn.opened.last == .lane("00000000-0000-0000-0000-000000002002"))
+        for _ in 0..<20 where !drawn.ids.contains("plan-themes") { await drawn.settle() }
+        #expect(store.plan.planned)
+        #expect(drawn.ids.isSuperset(of: ["section-header-themes", "plan-theme-Visual language", "section-header-tasks"]))
+        #expect(!drawn.ids.contains("board-plan-toggle"))
+        #expect(!drawn.ids.contains("section-header-summary"), "Unread isn't in the index")
+        #expect(!drawn.ids.contains("board-row-ov-1"), "every status group starts closed")
+        #expect(drawn.ids.contains("section-header-status.needs_decision"), "the index's groups are drawn: \(drawn.ids)")
+        let themes = try #require(drawn.seen.views["section-header-themes"])
+        let tasks = try #require(drawn.seen.views["section-header-tasks"])
+        #expect(themes.maxY <= tasks.minY + 0.5, "Themes comes before Tasks")
+        #expect(drawn.ids.contains("plan-theme-Visual language-progress"), "each theme says how far it is")
+        #expect(PlanNavigator.progress(try #require(store.plan.plan.themes.first).counts) == "1/3")
         #expect(drawn.press("plan-theme-Visual language"))
         await drawn.settle()
         #expect(drawn.opened.last == .theme("00000000-0000-0000-0000-000000003001"))
     }
 
-    @Test("Plan replaces only the Tasks section: the orchestrator, the filter, Terminals and Worktrees stay")
-    func planReplacesOnlyTasks() async throws {
+    @Test("Terminals and Worktrees stay on a planned board, and the orchestrator's row is one line")
+    func plannedKeepsTheRest() async throws {
         let defaults = Self.defaults()
         let store = try await Self.store(plan: true, defaults: defaults)
-        let tasks = await Self.draw(store, defaults: defaults, full: true)
-        let before = tasks.ids
-        tasks.window.close()
-        let kept: Set<String> = [
-            "navigator-divider", "section-header-tasks", "section-header-terminals", "section-header-worktrees",
-            "navigator-terminal-term0", "navigator-pane-terminals", "navigator-pane-worktrees",
-        ]
-        #expect(before.isSuperset(of: kept), "the board with Tasks chosen: \(before)")
-        #expect(before.contains("board-row-ov-1"))
-
-        store.plan.shown = true
         let drawn = await Self.draw(store, defaults: defaults, full: true)
         defer { drawn.window.close() }
-        #expect(drawn.ids.isSuperset(of: kept), "lost with Plan chosen: \(kept.subtracting(drawn.ids))")
-        #expect(drawn.ids.contains("plan-overview"))
-        #expect(!drawn.ids.contains("board-row-ov-1"), "the plan is in the Tasks section, in place of its rows")
+        for _ in 0..<20 where !drawn.ids.contains("plan-themes") { await drawn.settle() }
+        let kept: Set<String> = [
+            "navigator-divider", "section-header-themes", "section-header-tasks", "section-header-terminals",
+            "section-header-worktrees", "navigator-terminal-term0", "navigator-pane-terminals", "navigator-pane-worktrees",
+        ]
+        #expect(drawn.ids.isSuperset(of: kept), "lost: \(kept.subtracting(drawn.ids))")
+        let row = try #require(drawn.seen.views["navigator-orchestrator"])
+        #expect(row.height < 1.5 * ColumnGrid.rowHeight, "one line, not \(row.height) pt")
     }
 
-    @Test("The choice is kept per board on this Mac")
-    func keptPerBoard() async throws {
+    @Test("The task index's groups start closed, and what's opened is kept per board, apart from the task list's")
+    func indexKeptPerBoard() {
         let defaults = Self.defaults()
-        let client = DaemonClient(target: "", notifications: NotificationCenter())
-        let a = WorkspaceSummary.implicit(repository: "a")
-        let b = WorkspaceSummary.implicit(repository: "b")
-        PlanStore(client: client, workspace: a, host: "local", defaults: defaults).shown = true
-        #expect(PlanStore(client: client, workspace: a, host: "local", defaults: defaults).shown)
-        #expect(!PlanStore(client: client, workspace: b, host: "local", defaults: defaults).shown)
-        #expect(!PlanStore(client: client, workspace: a, host: "other", defaults: defaults).shown)
+        #expect(PlanNavigator.collapsed(host: "local", workspace: "a", from: defaults) == Set(TaskBoardModel.order))
+        PlanNavigator.setCollapsed([.done], host: "local", workspace: "a", in: defaults)
+        #expect(PlanNavigator.collapsed(host: "local", workspace: "a", from: defaults) == [.done])
+        #expect(PlanNavigator.collapsed(host: "local", workspace: "b", from: defaults) == Set(TaskBoardModel.order))
+        #expect(BoardForm.collapsed(host: "local", workspace: "a", from: defaults) == BoardForm.collapsedByDefault)
     }
 
     @Test("A plan line from the runner re-reads that board's plan, and no other's, through the client's own stream")
@@ -275,13 +280,10 @@ struct PlanViewTests {
         #expect(reads() == 2, "this board's plan moved, once")
     }
 
-    @Test("A task's page names its lane and theme only while the plan is shown")
+    @Test("A task's page names its lane and theme wherever the runner keeps a plan")
     func taskLine() async throws {
-        let defaults = Self.defaults()
-        let store = try await Self.store(plan: true, defaults: defaults)
-        await store.plan.reload()
-        let seen = NavigatorFilterTests.Seen()
-        func drawn() async -> Set<String> {
+        func drawn(_ store: TaskBoardStore) async -> Set<String> {
+            let seen = NavigatorFilterTests.Seen()
             let host = NSHostingView(
                 rootView: PlanTaskLineView(plan: store.plan, task: "00000000-0000-0000-0000-000000001001") { _ in }
                     .frame(width: 600, height: 60)
@@ -291,16 +293,16 @@ struct PlanViewTests {
                         Color.clear
                     })
             host.frame = CGRect(x: 0, y: 0, width: 600, height: 60)
-            for _ in 0..<5 {
+            for _ in 0..<10 {
                 host.layoutSubtreeIfNeeded()
                 try? await Task.sleep(for: .milliseconds(20))
             }
             return Set(seen.views.keys)
         }
-        #expect(!(await drawn()).contains("plan-task-line"))
-        store.plan.shown = true
-        seen.views = [:]
-        #expect((await drawn()).contains("plan-task-line"))
+        let old = try await Self.store(plan: false, defaults: Self.defaults())
+        #expect(!(await drawn(old)).contains("plan-task-line"))
+        let store = try await Self.store(plan: true, defaults: Self.defaults())
+        #expect((await drawn(store)).contains("plan-task-line"), "read on its own, with no navigator")
         #expect(store.plan.plan.taskLine("00000000-0000-0000-0000-000000001001")?.text == "In lane mac-ux · Visual language")
     }
 
@@ -315,17 +317,5 @@ struct PlanViewTests {
             lane, trail: nil, workspace: "Main", task: { $0 }, worktree: { $0 }, plan: { _ in "mac-ux" })
         #expect(crumbs.map(\.title) == ["Main", "mac-ux"])
         #expect(crumbs.first?.target == .workspace(host: "h", workspace: "w", focus: nil))
-    }
-
-    @Test("View ▸ Show Plan says what it will do, and acts only where the board offers a plan")
-    func menu() {
-        var focus = MainWindowFocus(overlayOpen: false, hasNavigator: true)
-        #expect(MainWindowFocus.planTitle(nil) == "Show Plan")
-        #expect(MainWindowFocus.planTitle(false) == "Show Plan")
-        #expect(MainWindowFocus.planTitle(true) == "Show Tasks")
-        #expect(MainWindowFocus.togglesPlan(focus, plan: false))
-        #expect(!MainWindowFocus.togglesPlan(focus, plan: nil), "a runner without a plan")
-        focus.hasNavigator = false
-        #expect(!MainWindowFocus.togglesPlan(focus, plan: false))
     }
 }

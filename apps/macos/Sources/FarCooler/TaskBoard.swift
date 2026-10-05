@@ -513,8 +513,8 @@ enum TaskBoardWrites {
 struct TaskBoardView: View {
     @ObservedObject var store: TaskBoardStore
     @ObservedObject var client: DaemonClient
-    /// The store's plan, watched so that choosing Plan redraws which rows
-    /// the Tasks section has to walk (`items`), not only its content.
+    /// The store's plan, watched so that a plan read redraws the navigator
+    /// around it (`PlanNavigator`), and which rows ↑ and ↓ walk (`items`).
     @ObservedObject private var planStore: PlanStore
     let agents: BoardAgents
     /// Go to a pane working a task. The window's, because only the window can
@@ -568,6 +568,8 @@ struct TaskBoardView: View {
     /// The list's collapsed sections: read from `defaults` in `init`, and
     /// again when the view is handed another board.
     @State private var collapsed: Set<TaskStatus>
+    /// A planned board's task index's, kept apart, every group closed at first.
+    @State private var indexCollapsed: Set<TaskStatus>
     /// The navigator's sections closed on this Mac: Orchestrator, Tasks,
     /// Worktrees. Their rows leave ↑ and ↓'s walk while closed.
     @State private var closedSections: Set<String>
@@ -682,17 +684,14 @@ struct TaskBoardView: View {
         _collapsed = State(
             initialValue: BoardForm.collapsed(
                 host: store.hostKey, workspace: store.workspace.id, from: defaults))
+        _indexCollapsed = State(
+            initialValue: PlanNavigator.collapsed(host: store.hostKey, workspace: store.workspace.id, from: defaults))
         _closedSections = State(initialValue: Self.closedSections(store, defaults))
         _unreadCollapsed = State(initialValue: defaults.bool(forKey: BoardSummaryStrip.collapsedKey(store)))
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            // Tasks | Plan, on a runner that keeps a plan (ov-273). It
-            // switches the Tasks section's content and nothing else: the
-            // orchestrator's row, Terminals and Worktrees stay as they are,
-            // and with Tasks chosen the board is the board as it was.
-            PlanToggle(plan: store.plan)
             topBand
             list
         }
@@ -709,6 +708,11 @@ struct TaskBoardView: View {
         // store in the same place, and a `.task` with no id would never read
         // it — the board would sit on empty columns until the next event.
         .task(id: ObjectIdentifier(store)) { await store.readIfNeverRead() }
+        // The plan, read wherever the runner keeps one: it decides how the
+        // navigator is drawn (ov-298), and moves as the runner says it did.
+        .task(id: [planStore.available ? 1 : 0, planStore.generation]) {
+            if planStore.available { await planStore.reloadIfMoved() }
+        }
         // This board's choices, read again whenever the view is handed
         // another board.
         .onChange(of: remembered) { _, key in
@@ -716,6 +720,7 @@ struct TaskBoardView: View {
             filter = ""
             unreadLine = nil
             collapsed = BoardForm.collapsed(host: key.host, workspace: key.workspace, from: defaults)
+            indexCollapsed = PlanNavigator.collapsed(host: key.host, workspace: key.workspace, from: defaults)
             closedSections = Self.closedSections(store, defaults)
             unreadCollapsed = defaults.bool(forKey: BoardSummaryStrip.collapsedKey(store))
         }
@@ -850,11 +855,10 @@ struct TaskBoardView: View {
         let terminals = worktrees.terminals.narrowed(by: filter)
         let inProgress = store.board.columns.first { $0.status == .inProgress }?.rows.count ?? 0
         let unreadable = !shown.unreadable.isEmpty
-        // With Plan chosen the Tasks section holds the plan, which the
-        // filter doesn't narrow, so it stays.
-        let showsTasks = plan.showsTasks(unreadable: unreadable) || store.plan.showing
+        let showsTasks = plan.showsTasks(unreadable: unreadable)
+        let planned = PlanNavigator.Shown(planStore, filter: filter)
         let ruleUnderOrchestrator = orchestrator != nil && plan.showsOrchestrator
-            && (showsTasks || terminals.isShown || plan.showsWorktrees)
+            && (showsTasks || terminals.isShown || plan.showsWorktrees || !planned.isEmpty)
         return Group {
             // The orchestrator's row stays put over the panes; each pane
             // scrolls on its own under its header (`NavigatorSplitView`,
@@ -862,7 +866,7 @@ struct TaskBoardView: View {
             // (`NavigatorRhythm`, ov-243), a rule's half a section gap on
             // either side.
             VStack(alignment: .leading, spacing: 0) {
-                if plan.isEmpty(unreadable: unreadable) && !terminals.isShown && !store.plan.showing {
+                if plan.isEmpty(unreadable: unreadable) && !terminals.isShown && planned.isEmpty {
                     NavigatorNoResults(filter: filter)
                 }
                 if let orchestrator, plan.showsOrchestrator {
@@ -883,7 +887,8 @@ struct TaskBoardView: View {
                     }
                 }
                 NavigatorSplitView(panes: panes(
-                    showsTasks: showsTasks, plan: plan, shown: shown, worktrees: worktrees, terminals: terminals),
+                    showsTasks: showsTasks, plan: plan, shown: shown, worktrees: worktrees, terminals: terminals,
+                    planned: planned),
                     kept: split, onRuleFocus: { heard.ruleFocused = $0 }, reveal: revealed)
             }
             .padding(.top, NavigatorRhythm.band)
@@ -950,12 +955,13 @@ struct TaskBoardView: View {
         .accessibilityIdentifier("board-list")
     }
 
-    /// The Tasks section's content: Unread, then each status.
+    /// The Tasks section's content: Unread, then each status; on a planned
+    /// board, the statuses alone, an index (ov-298).
     @ViewBuilder
     private func tasks(_ plan: NavigatorFiltering, shown: TaskBoardModel, worktrees: BoardWorktrees) -> some View {
         // Its groups, Unread and each status, a group gap apart.
         VStack(alignment: .leading, spacing: NavigatorRhythm.group) {
-            if store.hasRead, plan.showsUnread {
+            if store.hasRead, plan.showsUnread, !planStore.planned {
                 // Edge to edge, its own inset at column A.
                 BoardSummaryStrip(
                     store: store, defaults: defaults, filter: filter, selectedLine: litLine, keyed: hasKeyboard,
@@ -980,7 +986,7 @@ struct TaskBoardView: View {
                     TaskListSection(
                         section: section,
                         // Filtering opens every section with a match.
-                        expanded: BoardForm.isExpanded(section, collapsed: filtering ? [] : collapsed),
+                        expanded: BoardForm.isExpanded(section, collapsed: filtering ? [] : shownCollapsed),
                         onToggle: { toggle(section.status) },
                         store: store, agents: agents, onGoTo: onGoTo,
                         selected: selected, lit: litLine == nil ? selected : nil, keyed: hasKeyboard,
@@ -1012,9 +1018,8 @@ struct TaskBoardView: View {
     private func items(worktrees all: BoardWorktrees) -> [NavigatorItem] {
         let shown = BoardFilter.narrowed(store.board, filter)
         let plan = self.plan(worktrees: all, shown: shown)
-        // With Plan chosen the section holds no task rows to walk.
-        let tasksOpen = !closedSections.contains("tasks") && !store.plan.showing
-        let unread = tasksOpen && store.hasRead && plan.showsUnread && !unreadCollapsed
+        let tasksOpen = !closedSections.contains("tasks")
+        let unread = tasksOpen && store.hasRead && plan.showsUnread && !unreadCollapsed && !planStore.planned
             ? BoardSummaryStrip.lines(BoardSummaryStrip.summary(store: store, reads: store.reads, filter: filter))
             : []
         return Navigator.items(
@@ -1022,7 +1027,7 @@ struct TaskBoardView: View {
             unread: unread,
             tasks: tasksOpen
                 ? BoardKeys.rows(
-                    shown, collapsed: collapsed, reads: store.reads, keeping: selected, showingMore: showingMore,
+                    shown, collapsed: shownCollapsed, reads: store.reads, keeping: selected, showingMore: showingMore,
                     filtering: filtering, now: Date())
                 : [],
             // The Terminals section's rows, as `list` draws them: none when
@@ -1044,7 +1049,7 @@ struct TaskBoardView: View {
 
     /// The navigator's collapsible sections. Not the orchestrator's row
     /// (ov-177), whose closed state, kept from before, is no longer read.
-    static let navigatorSections = ["tasks", "terminals", "worktrees"]
+    static let navigatorSections = ["themes", "pages", "tasks", "terminals", "worktrees"]
 
     /// A navigator section's header (ov-92): the one collapsible section,
     /// in the navigator's style, its open state kept per board on this Mac.
@@ -1062,10 +1067,11 @@ struct TaskBoardView: View {
         .padding(.horizontal, NavigatorGrid.edge)
     }
 
-    /// The navigator's panes, Tasks, Terminals and Worktrees, those shown.
+    /// The navigator's panes, those shown: a planned board's Themes and
+    /// Pages (`PlanNavigator`), then Tasks, Terminals and Worktrees.
     private func panes(
         showsTasks: Bool, plan: NavigatorFiltering, shown: TaskBoardModel, worktrees: BoardWorktrees,
-        terminals: ProjectTerminals
+        terminals: ProjectTerminals, planned: PlanNavigator.Shown
     ) -> [NavigatorSplitPane] {
         var panes: [NavigatorSplitPane] = []
         func pane(_ id: String, fills: Bool = false, header: some View, content: some View) {
@@ -1073,16 +1079,17 @@ struct TaskBoardView: View {
                 id: id, fills: fills, expanded: !closedSections.contains(id), header: AnyView(header),
                 content: AnyView(content.padding(.horizontal, NavigatorGrid.edge))))
         }
+        if !planned.themes.isEmpty {
+            pane("themes", header: sectionHeader("Themes", id: "themes", count: planned.themes.count),
+                content: PlanNavigatorThemes(themes: planned.themes, selected: planPage, keyed: hasKeyboard, onOpen: onPlan))
+        }
+        if planned.showsPages {
+            pane("pages", header: sectionHeader("Pages", id: "pages", count: planned.pages.count),
+                content: PlanNavigatorPages(plan: planStore, pages: planned.pages, selected: planPage, keyed: hasKeyboard, onOpen: onPlan))
+        }
         if showsTasks {
-            // The Tasks | Plan control's one effect: what this section holds.
             pane("tasks", fills: true, header: sectionHeader("Tasks", id: "tasks"),
-                content: PlanOrTasks(plan: store.plan) {
-                    tasks(plan, shown: shown, worktrees: worktrees)
-                } overview: {
-                    PlanOverviewView(
-                        plan: store.plan, statuses: store.board.statuses, selected: planPage, keyed: hasKeyboard,
-                        onOpen: onPlan, defaults: defaults)
-                })
+                content: tasks(plan, shown: shown, worktrees: worktrees))
         }
         if terminals.isShown {
             // No count when it only offers New Terminal: "0" would read as
@@ -1117,8 +1124,15 @@ struct TaskBoardView: View {
     }
 
 
+    /// The status groups closed: a planned board's index's, or the list's.
+    private var shownCollapsed: Set<TaskStatus> { planStore.planned ? indexCollapsed : collapsed }
+
     /// Open or close one section, and keep it that way on this device.
     private func toggle(_ status: TaskStatus) {
+        if planStore.planned {
+            indexCollapsed.formSymmetricDifference([status])
+            return PlanNavigator.setCollapsed(indexCollapsed, host: store.hostKey, workspace: store.workspace.id, in: defaults)
+        }
         if collapsed.contains(status) {
             collapsed.remove(status)
         } else {

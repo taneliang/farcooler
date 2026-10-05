@@ -6,9 +6,9 @@ import Testing
 @testable import Far_Cooler
 
 /// Orchestrator pages on the Mac (ov-269 design 6.1, ov-284): a Pages section
-/// in the Plan view, a page in the main area, anchored pages inside their
-/// theme, Hide Page on this Mac only, and with Plan off a board that draws
-/// exactly as it did.
+/// in a planned board's navigator (ov-298), a page in the main area, anchored
+/// pages inside their theme, Hide Page on this Mac only, and on a runner
+/// without the plan a board that draws exactly as it did.
 @MainActor
 @Suite(.serialized)
 struct PlanPagesTests {
@@ -94,11 +94,10 @@ struct PlanPagesTests {
         #expect(PlanStore(client: store.client, workspace: store.workspace, host: store.plan.host, defaults: defaults).hiddenPages.isEmpty)
     }
 
-    @Test("The Plan view draws a Pages section after Themes; a row opens its page")
+    @Test("A planned board's navigator draws Pages after Themes; a row opens its page")
     func pagesSection() async throws {
         let defaults = PlanViewTests.defaults()
         let store = try await Self.store(defaults: defaults)
-        store.plan.shown = true
         let drawn = await PlanViewTests.draw(store, defaults: defaults)
         defer { drawn.window.close() }
         for _ in 0..<20 where !drawn.ids.contains("plan-pages") { await drawn.settle() }
@@ -117,33 +116,28 @@ struct PlanPagesTests {
         let defaults = PlanViewTests.defaults()
         let calls = PlanViewTests.Calls()
         let store = try await Self.store(pages: false, defaults: defaults, calls: calls)
-        store.plan.shown = true
         let drawn = await PlanViewTests.draw(store, defaults: defaults)
         defer { drawn.window.close() }
-        await drawn.settle()
+        for _ in 0..<20 where !drawn.ids.contains("plan-themes") { await drawn.settle() }
         #expect(drawn.ids.contains("plan-themes"))
         #expect(!drawn.ids.contains("plan-pages"))
         #expect(!calls.args.contains { $0.first == "page" })
     }
 
-    /// The owner's rule for the experiment (ov-268 Q2, ov-269 4.3 point 4):
-    /// with Plan off, pages change nothing. The same views at the same
-    /// frames as a runner without pages, and no page is read.
-    @Test("With Plan off, a board on a runner with pages is the board as it was, and no page is read")
-    func planOffIsUnchanged() async throws {
-        let old = PlanViewTests.defaults()
-        let oldCalls = PlanViewTests.Calls()
-        let without = await PlanViewTests.draw(try await Self.store(pages: false, defaults: old, calls: oldCalls), defaults: old)
-        defer { without.window.close() }
-        let fresh = PlanViewTests.defaults()
+    /// A board with pages and nothing else planned is planned: its pages
+    /// are listed, and the task list becomes the index (ov-298).
+    @Test("Pages alone make a board planned")
+    func pagesAlonePlan() async throws {
+        let defaults = PlanViewTests.defaults()
         let calls = PlanViewTests.Calls()
-        let with = await PlanViewTests.draw(try await Self.store(defaults: fresh, calls: calls), defaults: fresh, full: false)
-        defer { with.window.close() }
-        #expect(with.ids == without.ids)
-        for id in without.ids {
-            #expect(with.seen.views[id] == without.seen.views[id], "\(id) moved")
-        }
-        #expect(!calls.args.contains { $0.first == "page" }, "pages were read with Plan off")
+        calls.plan = try PlanViewTests.emptyPlan()
+        let store = try await Self.store(defaults: defaults, calls: calls)
+        let drawn = await PlanViewTests.draw(store, defaults: defaults)
+        defer { drawn.window.close() }
+        for _ in 0..<20 where !drawn.ids.contains("plan-pages") { await drawn.settle() }
+        #expect(store.plan.planned)
+        #expect(drawn.ids.isSuperset(of: ["plan-pages", "plan-page-spend"]))
+        #expect(!drawn.ids.contains("plan-themes"))
     }
 
     /// What `PlanPageView` draws for `page`, by identifier.

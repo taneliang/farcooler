@@ -368,13 +368,6 @@ extension ContentView {
                 console.console.open(recents: true)
             }
 
-        case .togglePlan:
-            if let scene = selection.flatMap(workspaceScene), let board = scene.board,
-                let plan = boardStores["\(scene.host)/\(board)"]?.plan, plan.available
-            {
-                plan.shown.toggle()
-            }
-
         case .markAllRead:
             if let scene = selection.flatMap(workspaceScene), let board = scene.board {
                 boardStores["\(scene.host)/\(board)"]?.askToMarkAllRead(markReadConfirmation)

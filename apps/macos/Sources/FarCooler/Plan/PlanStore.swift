@@ -2,17 +2,16 @@ import AgentKit
 import Combine
 import Foundation
 
-// The plan layer on the Mac (ov-268, phase P4 is ov-273): the Plan view, a
-// theme's page and a lane's page, behind a Tasks | Plan control on the board.
+// The plan layer on the Mac (ov-268, phase P4 is ov-273): the plan's
+// sections, a theme's page and a lane's page.
 //
-// EXPERIMENTAL and opt-in. Tasks is the default, and the control only shows
-// on a runner that advertises `board_plan`; until someone picks Plan, the
-// board draws exactly what it drew before. Removing the layer means deleting
-// this folder, the `plan` case of `WorkspaceSelection.Focus` and the call
-// sites that name `PlanStore` (see the design's section 8).
+// The primary way of working since ov-298 (the owner, Oct 4: "Let's make that
+// the primary way of working"): there's no Tasks | Plan control. A board whose
+// runner keeps a plan, once it has one, lists its themes and pages beside the
+// task index (`planned`); a runner without `board_plan`, or a board with no
+// plan yet, draws the board as it always did.
 //
-// The rules are AgentKit's `PlanModel`; this reads it and remembers the
-// choice.
+// The rules are AgentKit's `PlanModel`; this reads it.
 
 /// A page the Plan view opens in the main area, where a task opens.
 enum PlanPage: Hashable {
@@ -42,8 +41,7 @@ enum PlanPage: Hashable {
     }
 }
 
-/// One board's plan, as this window last read it, and whether the board
-/// shows it.
+/// One board's plan, as this window last read it.
 ///
 /// One per `TaskBoardStore` (`TaskBoardStore.plan`), so it lives and dies
 /// with the board's: a store held over from a dropped connection would go on
@@ -73,14 +71,6 @@ final class PlanStore: ObservableObject {
             defaults.set(hiddenPages.sorted(), forKey: Self.hiddenKey(host: host, workspace: workspace.id))
         }
     }
-    /// Whether the board shows the plan rather than its tasks. Kept per
-    /// board on this Mac, as the Unread strip's collapsed state is.
-    @Published var shown: Bool {
-        didSet {
-            guard shown != oldValue else { return }
-            defaults.set(shown, forKey: Self.shownKey(host: host, workspace: workspace.id))
-        }
-    }
 
     let client: DaemonClient
     let workspace: WorkspaceSummary
@@ -94,19 +84,18 @@ final class PlanStore: ObservableObject {
         self.workspace = workspace
         self.host = host
         self.defaults = defaults
-        shown = defaults.bool(forKey: Self.shownKey(host: host, workspace: workspace.id))
         hiddenPages = Set(defaults.stringArray(forKey: Self.hiddenKey(host: host, workspace: workspace.id)) ?? [])
     }
 
-    static func shownKey(host: String, workspace: String) -> String { "board.plan.shown.\(host).\(workspace)" }
-
-    /// Whether this runner keeps a plan: only then is there a control. A
-    /// runner not read yet, or too old, offers nothing new.
+    /// Whether this runner keeps a plan. A runner not read yet, or too old,
+    /// offers nothing new.
     var available: Bool { client.daemonBuild?.can(.boardPlan) == true }
 
-    /// What the board draws: the plan, only where the runner keeps one and
-    /// someone chose it.
-    var showing: Bool { available && shown }
+    /// Whether the board is drawn around its plan (ov-298): a runner that
+    /// keeps one, a plan read, and something in it, a theme, a lane or a
+    /// page. Until then, and on a board with nothing planned, the navigator
+    /// is the task list it always was.
+    var planned: Bool { available && hasRead && (!plan.isEmpty || !pages.isEmpty) }
 
     var repositoryID: String { workspace.repository ?? workspace.id }
 

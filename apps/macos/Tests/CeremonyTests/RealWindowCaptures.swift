@@ -55,8 +55,8 @@ struct RealWindowCaptures {
     }
 
     /// `FARCOOLER_CAPTURE_DEFAULTS`: one `key=true|false` per line, set for
-    /// every place and put back afterwards: a board's Plan view chosen, say,
-    /// as `board.plan.shown.local.<workspace>=true` (ov-284).
+    /// every place and put back afterwards: a navigator section closed, say,
+    /// as `navigator.closed.local.<workspace>.themes=true`.
     static func extraDefaults(_ text: String?) -> [String: Bool] {
         var out: [String: Bool] = [:]
         for line in (text ?? "").split(whereSeparator: \.isNewline) {

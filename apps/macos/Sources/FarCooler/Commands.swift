@@ -23,8 +23,6 @@ enum AppCommand: String {
     case search
     /// Board ▸ Mark All as Read: the navigator's Unread, read (ov-104).
     case markAllRead
-    /// View ▸ Show Plan: the board's Tasks | Plan control (ov-273).
-    case togglePlan
     case commandPalette
     /// ⌘K: the title bar's field, to see what's happening or find
     /// something (ov-214, ov-264).
@@ -101,7 +99,6 @@ enum AppCommand: String {
 struct FarCoolerCommands: Commands {
     /// Nil unless the main window is key. See `MainWindowFocus`.
     @FocusedValue(\.mainWindow) private var mainWindow
-    @FocusedValue(\.boardPlan) private var boardPlan
     /// Nil unless a diff is the focused pane. See `DiffMenuFocus`.
     @FocusedValue(\.diffMenu) private var diff
     @Environment(\.openWindow) private var openWindow
@@ -156,10 +153,6 @@ struct FarCoolerCommands: Commands {
             Button("Show Board") { AppCommand.showBoard.post() }
                 .keyboardShortcut("b", modifiers: [.command, .shift])
                 .disabled(!MainWindowFocus.isKey(mainWindow))
-            // The board's Tasks | Plan control, from the menu (ov-273): only
-            // where the runner keeps a plan.
-            Button(MainWindowFocus.planTitle(boardPlan)) { AppCommand.togglePlan.post() }
-                .disabled(!MainWindowFocus.togglesPlan(mainWindow, plan: boardPlan))
         }
 
         // File's close items, in place of SwiftUI's (ov-265). ⌘W closes the

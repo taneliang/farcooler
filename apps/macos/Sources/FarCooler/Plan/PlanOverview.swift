@@ -1,37 +1,18 @@
 import AgentKit
 import SwiftUI
 
-// The Plan view (ov-268 design 6.1): what the board's navigator shows when
-// Plan is chosen. Next Up first, because it's what the owner can't see
-// anywhere else; then the lanes working now, the themes as cards, and what
-// landed today. A lane or a theme opens its page in the main area, where a
-// task opens.
+// The plan's overview (ov-268 design 6.1): the lanes working now, Next Up,
+// the themes as cards, the orchestrator's pages and what landed today. A lane
+// or a theme opens its page in the main area, where a task opens. Since
+// ov-298 there's no Tasks | Plan control to show it in the navigator's place;
+// the navigator lists the themes and the task index (`PlanNavigator`).
+//
+// Every list here moves as the task list does when the plan changes: a lane
+// or theme that arrives or changes washes, and rows come, go and move on the
+// shared spring (`listChanges`).
 
-/// The board's Tasks | Plan control: shown only on a runner that keeps a
-/// plan, Tasks the default.
-struct PlanToggle: View {
-    @ObservedObject var plan: PlanStore
-
-    var body: some View {
-        if plan.available {
-            Picker("Board", selection: $plan.shown) {
-                Text("Tasks").tag(false)
-                Text("Plan").tag(true)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .controlSize(.small)
-            .help("Show this board’s tasks, or its plan: themes, lanes and what’s next")
-            .padding(.horizontal, NavigatorGrid.boxEdge)
-            .padding(.top, NavigatorRhythm.band)
-            .identified("board-plan-toggle")
-            .focusedSceneValue(\.boardPlan, plan.shown)
-        }
-    }
-}
-
-/// The navigator's Tasks section with Plan chosen. A pane's content, so it
-/// scrolls in the pane's own scroll view and takes the pane's inset.
+/// The plan's overview: a pane's content, so it scrolls in its host's own
+/// scroll view and takes its inset.
 struct PlanOverviewView: View {
     @ObservedObject var plan: PlanStore
     /// Each card's status as the board read it, by task id: whether a lane
@@ -69,8 +50,9 @@ struct PlanOverviewView: View {
             PlanNotice(title: PlanWords.nothingPlanned, detail: PlanWords.nothingPlannedDetail)
                 .identified("plan-empty")
         } else {
-            if !model.nextUp.isEmpty { nextUp(model) }
+            // What's running, then what's next (ov-298: the owner's order).
             if !model.working.isEmpty || !model.unranked.isEmpty { now(model) }
+            if !model.nextUp.isEmpty { nextUp(model) }
             if !model.shownThemes.isEmpty { themes(model) }
             // After Themes (ov-269 design 6.1): only on a runner with pages.
             if !plan.listedPages.isEmpty || plan.hiddenCount > 0 { pages() }
@@ -91,8 +73,10 @@ struct PlanOverviewView: View {
                         lane: lane, theme: model.theme(of: lane), rank: index + 1, now: model.nowMs,
                         waitsOnOwner: false, selected: selected == .lane(lane.id), keyed: keyed
                     ) { onOpen(.lane(lane.id)) }
+                    .changeWashed(lane.id)
                 }
             }
+            .listChanges(PlanChanges.lanes(model.nextUp, model, statuses: statuses))
         }
         .identified("plan-next-up")
     }
@@ -109,8 +93,10 @@ struct PlanOverviewView: View {
                         waitsOnOwner: model.waitsOnOwner(lane, statuses: statuses),
                         selected: selected == .lane(lane.id), keyed: keyed
                     ) { onOpen(.lane(lane.id)) }
+                    .changeWashed(lane.id)
                 }
             }
+            .listChanges(PlanChanges.lanes(lanes, model, statuses: statuses))
         }
         .identified("plan-now")
     }
@@ -128,8 +114,10 @@ struct PlanOverviewView: View {
                     PlanThemeCard(theme: theme, selected: selected == .theme(theme.id), keyed: keyed) {
                         onOpen(.theme(theme.id))
                     }
+                    .changeWashed(theme.id, card: true)
                 }
             }
+            .listChanges(PlanChanges.themes(model.shownThemes))
             .padding(.top, NavigatorRhythm.air)
         }
         .identified("plan-themes")
@@ -450,22 +438,6 @@ struct PlanBar: View {
         case .inReview: AnyShapeStyle(.tertiary)
         case .inProgress: AnyShapeStyle(.quaternary)
         case .notStarted: AnyShapeStyle(.quinary)
-        }
-    }
-}
-
-/// The board's tasks, or with Plan chosen its plan: the one switch between
-/// them, so the tasks are drawn exactly as before whenever Plan isn't.
-struct PlanOrTasks<Tasks: View, Overview: View>: View {
-    @ObservedObject var plan: PlanStore
-    @ViewBuilder let tasks: () -> Tasks
-    @ViewBuilder let overview: () -> Overview
-
-    var body: some View {
-        if plan.showing {
-            overview()
-        } else {
-            tasks()
         }
     }
 }

@@ -116,6 +116,6 @@ struct ProjectTerminalsTests {
     /// others, between Tasks and Worktrees.
     @Test("Terminals is a navigator section between Tasks and Worktrees")
     func terminalsIsANavigatorSection() {
-        #expect(TaskBoardView.navigatorSections == ["tasks", "terminals", "worktrees"])
+        #expect(TaskBoardView.navigatorSections == ["themes", "pages", "tasks", "terminals", "worktrees"])
     }
 }

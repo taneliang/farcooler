@@ -486,8 +486,8 @@ private struct PlanTimeline: View {
 
 // MARK: - The task page's line
 
-/// "In lane mac-ux · Visual language" under a task's title while the board
-/// shows its plan (6.4): each half opens its page. Read from the plan the
+/// "In lane mac-ux · Visual language" under a task's title, on a runner
+/// that keeps a plan (6.4): each half opens its page. Read from the plan the
 /// window already holds; nothing new is asked of the runner.
 struct PlanTaskLineView: View {
     @ObservedObject var plan: PlanStore
@@ -495,7 +495,7 @@ struct PlanTaskLineView: View {
     let onOpen: (PlanPage) -> Void
 
     var body: some View {
-        if plan.showing, let line = plan.plan.taskLine(task) {
+        if plan.available, let line = plan.plan.taskLine(task) {
             HStack(spacing: Spacing.tight) {
                 if let lane = line.lane, let words = line.laneWords {
                     Button(words) { onOpen(.lane(lane.id)) }
@@ -519,7 +519,7 @@ struct PlanTaskLineView: View {
             .padding(.horizontal, TaskTypography.inset.leading)
             .padding(.bottom, ColumnGrid.rhythm)
             .frame(maxWidth: .infinity, alignment: .leading)
-        } else if plan.showing {
+        } else if plan.available {
             Color.clear.frame(height: 0)
                 .task(id: ObjectIdentifier(plan)) { await plan.readIfNeverRead() }
         }

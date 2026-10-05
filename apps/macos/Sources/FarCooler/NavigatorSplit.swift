@@ -376,7 +376,9 @@ struct NavigatorSplitView: View {
     }
 
     /// The names the rules read for VoiceOver, by pane.
-    static let titles = ["tasks": "Tasks", "terminals": "Terminals", "worktrees": "Worktrees"]
+    static let titles = [
+        "themes": "Themes", "pages": "Pages", "tasks": "Tasks", "terminals": "Terminals", "worktrees": "Worktrees",
+    ]
 }
 
 /// A rule between two panes: a line, the grip over it, and its keyboard

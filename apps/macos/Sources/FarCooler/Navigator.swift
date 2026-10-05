@@ -264,46 +264,35 @@ struct OrchestratorRowView: View {
             icon
                 .gridMark("orchestrator", .icon)
                 .glyphColumn()
-            VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
-                if model.state == .none {
-                    Text(OrchestratorRow.word(.none))
-                        .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
-                        .gridMark("orchestrator", .text)
-                    actions
-                } else {
-                    HStack(spacing: 6) {
-                        // What it is, on the row itself: there's no section
-                        // header over it to say so (ov-177).
-                        Text(OrchestratorRow.title)
-                            .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
-                            .lineLimit(1)
-                            .gridMark("orchestrator", .text)
-                        Text(OrchestratorRow.word(model.state))
-                            .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                            // Its status's ink (`Status.tone`): amber for needs you, red
-                            // for failed; the accent is for controls.
-                            .foregroundStyle(model.state.status?.tone.color(scheme) ?? SidebarInk.secondary)
-                            .lineLimit(1)
-                    }
-                    if let doing = model.nowDoing {
-                        Text(doing)
-                            .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                            .foregroundStyle(SidebarInk.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                            .help(doing)
-                            .accessibilityIdentifier("orchestrator-now-doing")
-                    }
-                    if let foot = OrchestratorRow.foot(agent: model.agent, inProgress: inProgress) {
-                        Text(foot)
-                            .font(.system(size: WorkspaceStyle.PaneText.minimum))
-                            .foregroundStyle(SidebarInk.secondary)
-                            .lineLimit(1)
-                    }
+            // One line (ov-298): what it is and its state's word. What it's
+            // doing is the title bar's, and here on hover; with none running,
+            // Start Orchestrator beside its name where it fits.
+            if model.state == .none {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: SidebarGrid.gap) { noneTitle; Spacer(minLength: 0); actions }
+                    VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) { noneTitle; actions }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    // What it is, on the row itself: there's no section
+                    // header over it to say so (ov-177).
+                    Text(OrchestratorRow.title)
+                        .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
+                        .lineLimit(1)
+                        .gridMark("orchestrator", .text)
+                    Text(OrchestratorRow.word(model.state))
+                        .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                        // Its status's ink (`Status.tone`): amber for needs you, red
+                        // for failed; the accent is for controls.
+                        .foregroundStyle(model.state.status?.tone.color(scheme) ?? SidebarInk.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .help(help)
         .navigatorRow(selected: selected, keyed: keyed, leading: 0, box: "orchestrator")
         .onTapGesture(perform: model.onSelect)
         // With no orchestrator its two menus stay reachable on their own.
@@ -313,6 +302,22 @@ struct OrchestratorRowView: View {
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction(.default, model.onSelect)
         .accessibilityIdentifier("navigator-orchestrator")
+        .probed("navigator-orchestrator")
+    }
+
+    /// "No Orchestrator", on the row's text column.
+    private var noneTitle: some View {
+        Text(OrchestratorRow.word(.none))
+            .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
+            .lineLimit(1)
+            .gridMark("orchestrator", .text)
+    }
+
+    /// What the row no longer has lines for: what it's doing, its harness
+    /// and how many tasks are in progress.
+    private var help: String {
+        [model.nowDoing, OrchestratorRow.foot(agent: model.agent, inProgress: inProgress)]
+            .compactMap { $0 }.joined(separator: "\n")
     }
 
     /// Its state as an icon, the title bar's mark too (`OrchestratorMark`).
@@ -333,7 +338,6 @@ struct OrchestratorRowView: View {
                 VStack(alignment: .leading, spacing: NavigatorRhythm.air) { startMenu(starts); useMenu }
             }
             .controlSize(.small)
-            .padding(.top, NavigatorRhythm.lineGap)
         }
     }
 

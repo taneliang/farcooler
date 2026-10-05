@@ -141,18 +141,22 @@ struct PlanSpecimenTests {
         let narrow = CGSize(width: 300, height: 1100)
         let wide = CGSize(width: 580, height: 1100)
 
-        // The board with Tasks chosen, and on a runner without a plan.
-        plan.shown = false
-        try await Self.write("board-tasks-narrow", size: narrow) { Board(store: store) }
+        // On a runner without a plan, and the planned navigator (ov-298).
         try await Self.write("board-old-runner-narrow", size: narrow) { Board(store: source.old) }
-
-        // The Plan view.
-        plan.shown = true
         let model = plan.plan
         let lane = model.lanes.first { $0.name == "mac-rel" } ?? model.lanes[0]
         let theme = model.shownThemes.first { $0.name == "Visual language" } ?? model.themes[0]
-        try await Self.write("plan-overview-narrow", size: narrow) { Board(store: store, page: .lane(lane.id)) }
-        try await Self.write("plan-overview-wide", size: wide) { Board(store: store) }
+        try await Self.write("plan-navigator-narrow", size: narrow) { Board(store: store, page: .theme(theme.id)) }
+
+        // The overview, on its own.
+        try await Self.write("plan-overview-narrow", size: narrow) {
+            PlanOverviewView(plan: plan, statuses: store.board.statuses, selected: .lane(lane.id), onOpen: { _ in })
+                .padding(.horizontal, NavigatorGrid.edge).background(WorkspaceStyle.canvas)
+        }
+        try await Self.write("plan-overview-wide", size: wide) {
+            PlanOverviewView(plan: plan, statuses: store.board.statuses, selected: nil, onOpen: { _ in })
+                .padding(.horizontal, NavigatorGrid.edge).background(WorkspaceStyle.canvas)
+        }
 
         // The pages, in the main area beside it.
         let context = PlanPageContext(
