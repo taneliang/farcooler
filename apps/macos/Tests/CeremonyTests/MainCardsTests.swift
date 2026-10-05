@@ -52,6 +52,10 @@ struct MainCardsTests {
                     BoardHistoryView(
                         store: TaskBoardStore(client: client, workspace: workspace), status: .done, onOpen: { _ in }))
             ),
+            (
+                "plan-home",
+                AnyView(PlanHome(board: TaskBoardStore(client: client, workspace: workspace), needsYou: PlanNeedsYou(), onOpen: { _ in }))
+            ),
             ("plan-theme", AnyView(PlanPageView(plan: plan, page: .theme("t"), context: context))),
             ("plan-lane", AnyView(PlanPageView(plan: plan, page: .lane("l"), context: context))),
             ("plan-page", AnyView(PlanPageView(plan: plan, page: .page("p"), context: context))),
@@ -181,11 +185,18 @@ struct MainCardsTests {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().appendingPathComponent("Sources/FarCooler")
         let walker = try #require(FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil))
+        // Paper as a surface's fill, by count: the card itself, and the plan
+        // peeked over the chat, a card that floats over a card. Anything
+        // else is a card drawn by hand beside `contentCard()`, which a change
+        // to its gutter or radius would leave behind (train 1004r, M1).
+        let fills: [String: Int] = ["PaneCanvas.swift": 1, "Plan/PlanHome.swift": 1]
         var offenders: [String] = []
         for case let url as URL in walker where url.pathExtension == "swift" {
             let relative = String(url.path.dropFirst(root.path.count + 1))
             let text = try String(contentsOf: url, encoding: .utf8)
             if text.contains(".background(WorkspaceStyle.paper)"), !inside.contains(relative) { offenders.append(relative) }
+            let filled = text.components(separatedBy: "fill: WorkspaceStyle.paper").count - 1
+            if filled > fills[relative, default: 0] { offenders.append("\(relative), a card by hand") }
         }
         #expect(offenders.isEmpty, "paper behind a whole view in \(offenders)")
     }

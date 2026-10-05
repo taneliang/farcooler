@@ -38,9 +38,9 @@ struct PlanHome: View {
                 .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .scrollBounceBehavior(.basedOnSize)
-        .clipShape(.card)
-        .surface(.content, in: .card, fill: WorkspaceStyle.paper)
-        .padding(Gutter.window)
+        // The one card every destination sits on (ov-297), so a change to
+        // its gutter or radius moves the canvas's home with the rest.
+        .contentCard()
         .identified("plan-home")
     }
 }
