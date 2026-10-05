@@ -280,7 +280,8 @@ S13 (ov-213) is written, not run: it needs a real model, and the scorer's checks
 ## Practice round (ov-217)
 
 The skill now carries the two landing modes, the plan, rulings, landing
-hygiene, a trains page and a check-in with initiative. S14 to S19 are their
+hygiene, trains (a trains page until ov-309 put them on the plan as `plan
+train`) and a check-in with initiative. S14 to S19 are their
 scenarios, and S6 now covers plan and page writes too (`is_plan_write` in
 score.py). The world adds a fake `gh` (`fake-gh.sh`, logging to `<dir>/gh.log`)
 on the pane's PATH in every scenario, so no scenario reaches GitHub, and a bare

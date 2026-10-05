@@ -1064,7 +1064,9 @@ mod tests {
     #[test]
     fn the_skill_is_short() {
         let lines = skill_body(Harness::Claude).lines().count();
-        assert!(lines <= 241, "{lines} lines");
+        // 241 until trains moved onto the plan (ov-309): two commands and the
+        // live page references (ov-306), for the hand-kept page they replace.
+        assert!(lines <= 249, "{lines} lines");
     }
 
     #[test]

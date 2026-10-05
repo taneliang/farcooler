@@ -293,7 +293,7 @@ def is_plan_write(c):
     if "--help" in c or "-h" in c or len(c) < 2:
         return False
     if c[0] == "plan":
-        return c[1] == "set" or (c[1] in ("lane", "theme", "ruling") and len(c) > 2
+        return c[1] == "set" or (c[1] in ("lane", "theme", "ruling", "train") and len(c) > 2
                                  and c[2] not in ("list", "show"))
     return c[0] == "page" and c[1] in ("set", "rm")
 

@@ -95,7 +95,9 @@ fn a_reversible_call_is_recorded_as_a_ruling() {
 
 /// Landing ends with the card closed, the lane landed, the worktree removed
 /// and its build output gone; a push or a rerun is watched, so a run nobody
-/// looks at doesn't sit green and unlanded; and the trains are a page.
+/// looks at doesn't sit green and unlanded; and trains are kept on the plan
+/// (ov-309), with a page's figures drawn live (ov-306), never a hand-kept
+/// trains page.
 #[test]
 fn landing_is_watched_and_cleaned_up() {
     for h in ALL {
@@ -104,7 +106,11 @@ fn landing_is_watched_and_cleaned_up() {
         assert!(land.contains("as a background command"), "{h:?}: {land}");
         assert!(land.contains("delete its build output, and `worktree remove` it"), "{h:?}: {land}");
         assert!(land.contains("tick each verified `--met` line"), "{h:?}: {land}");
-        assert!(land.contains("farcooler page set trains"), "{h:?}: {land}");
+        assert!(land.contains("farcooler plan train start <integ-N> --repo <repo> --lane <lane>"), "{h:?}: {land}");
+        assert!(land.contains("farcooler plan train set <integ-N> --repo <repo> --sha <pushed sha>"), "{h:?}: {land}");
+        assert!(land.contains("plan train set <integ-N> --state landed"), "{h:?}: {land}");
+        assert!(!land.contains("page set trains"), "{h:?}: the hand-kept trains page is gone: {land}");
+        assert!(land.contains(r#"`{"ci":"main"}`"#) && land.contains(r#"`{"cards":"in_review"}`"#), "{h:?}: {land}");
         assert!(land.contains("Local gates mirror CI"), "{h:?}: {land}");
         assert!(land.contains("runs every gate once"), "{h:?}: {land}");
     }
@@ -148,7 +154,7 @@ fn every_plan_and_page_write_names_the_manager() {
         .contents;
     let writes: Vec<&str> = text
         .lines()
-        .filter(|l| ["farcooler plan lane ", "farcooler page set "].iter().any(|w| l.starts_with(w)))
+        .filter(|l| ["farcooler plan lane ", "farcooler plan train ", "farcooler page set "].iter().any(|w| l.starts_with(w)))
         .collect();
     assert!(writes.len() >= 3, "too few plan writes to check: {writes:?}");
     for line in writes {

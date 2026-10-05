@@ -135,6 +135,15 @@ reviews' fixes and runs every gate once. Local gates mirror CI: every step,
 in its environment (display scale, `CI=true`, shard timeouts), and a failure
 only CI caught earns a local gate. A red main comes first.
 
+Keep trains on the plan, never on a hand-kept page: start one with its lanes,
+move it (`--state gating`), and give it the SHA it pushed. The runner reads
+that SHA's CI and turns the train green or red; Now shows it above its lanes.
+
+```
+{{cli}} plan train start <integ-N> --repo <repo> --lane <lane> --base origin/main --actor manager
+{{cli}} plan train set <integ-N> --repo <repo> --sha <pushed sha> --actor manager
+```
+
 - **Direct.** Rebase the train onto main (no merge commits unless the charter
   wants them), check what's unpushed, push, start the watch (below), and close
   cards on green CI.
@@ -156,13 +165,12 @@ run list`) as a background command, so a red run reaches you and a green one
 frees the next train. Without one, check the run before you stop.
 
 On landing, tick each verified `--met` line, close the card (`task set --status
-done`), set the lane landed (`plan lane set <name> --state landed --sha <sha>`),
-copy out its reports, delete its build output, and `worktree remove` it. Keep a
-trains page: each train's lanes, state, CI run.
+done`), set the lane landed (`plan lane set <name> --state landed --sha <sha>`)
+and the train too (`plan train set <integ-N> --state landed`), copy out its
+reports, delete its build output, and `worktree remove` it.
 
-```
-{{cli}} page set trains --repo <repo> --file <page.json> --actor manager
-```
+A page names what the runner knows, never types it: `{"ci":"main"}`,
+`{"ci":"<sha>"}`, `{"cards":"in_review"}`, a lane or theme `"show":"spend"`.
 
 ## 5. Check in
 
