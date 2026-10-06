@@ -29,6 +29,8 @@
 #   FARCOOLER_CAPTURE_HOVER   jump bar pieces drawn hovered, by VoiceOver name, one
 #                             per line ("Go to Billing", "Show other workspaces")
 #   FARCOOLER_CAPTURE_FOLD    collapse or expand: the navigator's tree folded, as View's items do
+#   FARCOOLER_CAPTURE_RUNNERS runners configured before the window opens, one target per
+#                             line: "carl.invalid" is never reachable, so the toolbar says it's offline
 #   FARCOOLER_CAPTURE_SCALE   the bitmap's scale, 1 or 2; unset, the window's own
 #   FARCOOLER_CAPTURE_WAIT    seconds a window settles before it's drawn (5)
 #   FARCOOLER_CAPTURE_WIDTH   the window's width in points (1360)

@@ -98,10 +98,20 @@ struct RealWindowCaptures {
         // it was when the captures are done (review L9).
         let defaults = UserDefaults.standard
         let extra = Self.extraDefaults(env["FARCOOLER_CAPTURE_DEFAULTS"])
-        let touched = ["window.sessions.v1", SelectionMemory.destinationKey, SelectionMemory.key] + extra.keys.sorted()
+        let touched =
+            ["window.sessions.v1", SelectionMemory.destinationKey, SelectionMemory.key, "hosts.configured"]
+            + extra.keys.sorted()
         let saved = Dictionary(uniqueKeysWithValues: touched.map { ($0, defaults.object(forKey: $0)) })
         defer { Self.restore(saved, in: defaults) }
         for (key, value) in extra { defaults.set(value, forKey: key) }
+        // `FARCOOLER_CAPTURE_RUNNERS`: runners configured by target, one per
+        // line, before the window opens ("carl.invalid" is never reachable, so
+        // the toolbar says "carl.invalid offline"). Read once by `Runners`, so
+        // set before anything touches it.
+        if let runners = env["FARCOOLER_CAPTURE_RUNNERS"] {
+            let list = runners.split(whereSeparator: \.isNewline).map { ["target": String($0)] }
+            defaults.set(try JSONSerialization.data(withJSONObject: list), forKey: "hosts.configured")
+        }
         // `FARCOOLER_CAPTURE_HOVER`: jump bar pieces drawn as if the pointer
         // were on them, by name, one per line ("Go to Billing"), no input sent.
         JumpBarHover.forced = Set((env["FARCOOLER_CAPTURE_HOVER"] ?? "").split(whereSeparator: \.isNewline).map(String.init))

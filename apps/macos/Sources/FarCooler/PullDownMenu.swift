@@ -30,8 +30,10 @@ struct PullDownMenu<Content: View>: View {
         } label: {
             label().background(Anchor(coordinator: coordinator, entries: entries))
         }
-        .buttonStyle(.borderless)
-        .fixedSize()
+        // The toolbar's own button style (ov-350), as Needs You and the
+        // sidebar button have it: the system pads a toolbar button's label
+        // inside its glass capsule. `.borderless` and `.fixedSize()` removed
+        // that padding, so "carl offline" ran to the capsule's edge.
     }
 
     private struct Anchor: NSViewRepresentable {
