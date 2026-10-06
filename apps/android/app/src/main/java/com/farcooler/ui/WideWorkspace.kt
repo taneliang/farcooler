@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.focusGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -23,6 +22,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.surfaceColorAtElevation
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
@@ -32,6 +35,7 @@ import androidx.compose.material3.adaptive.layout.PaneAdaptedValue
 import androidx.compose.material3.adaptive.layout.PaneScaffoldDirective
 import androidx.compose.material3.adaptive.layout.ThreePaneScaffoldValue
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,7 +64,7 @@ import androidx.compose.ui.unit.dp
  * Folded, the window is narrow and this says [Kind.PHONE]. At 1200 dp (extra
  * large) the tree fits as a column as well. Between them the tree is folded
  * into the rail's Plan place, so that the plan keeps at least [MIN_PLAN_DP]
- * (owner ruling): at 840 dp it gets 440, and at 1200 dp 560.
+ * (owner ruling): at 840 dp it gets 438, and at 1200 dp 517 ([planWidthDp]).
  *
  * The width read is the WINDOW's, not the screen's, so a tablet in split
  * screen is a phone for as long as it is narrow.
@@ -89,10 +93,29 @@ object WorkspaceLayout {
         THREE_PANE,
     }
 
+    /**
+     * What the plan pane is left at [widthDp] in [kind]: the window less the
+     * rail, the tree's column and the chat's, and the one-dp rules between
+     * them. This is the number the minimum is enforced on, so the choice in
+     * [of] and the widths the frame hands the scaffold can't disagree.
+     */
+    fun planWidthDp(kind: Kind, widthDp: Int): Int = when (kind) {
+        Kind.PHONE -> widthDp
+        Kind.TWO_PANE -> widthDp - WideRailDp - wideChatWidth(kind).value.toInt() - 2
+        Kind.THREE_PANE -> widthDp - WideRailDp - WideListWidth.value.toInt() - wideChatWidth(kind).value.toInt() - 3
+    }
+
+    /**
+     * The layout for a window [widthDp] wide. A wide layout is chosen only if it
+     * is past its Material breakpoint AND leaves the plan [MIN_PLAN_DP], so the
+     * minimum holds by the choice and not by a constraint on the drawn pane
+     * (a `widthIn(min)` inside a pane that fills it can never widen it).
+     */
     fun of(widthDp: Int, implicit: Boolean): Kind = when {
-        implicit || widthDp < EXPANDED_DP -> Kind.PHONE
-        widthDp < THREE_PANE_DP -> Kind.TWO_PANE
-        else -> Kind.THREE_PANE
+        implicit -> Kind.PHONE
+        widthDp >= THREE_PANE_DP && planWidthDp(Kind.THREE_PANE, widthDp) >= MIN_PLAN_DP -> Kind.THREE_PANE
+        widthDp >= EXPANDED_DP && planWidthDp(Kind.TWO_PANE, widthDp) >= MIN_PLAN_DP -> Kind.TWO_PANE
+        else -> Kind.PHONE
     }
 
     /** The current window's, read the way the adaptive library reads it. */
@@ -181,6 +204,15 @@ internal val WideListWidth: Dp = 240.dp
 internal fun wideChatWidth(kind: WorkspaceLayout.Kind): Dp =
     if (kind == WorkspaceLayout.Kind.THREE_PANE) 360.dp else 320.dp
 
+/** The tree panel's elevation over the plan. */
+private val TreePanelElevation = 3.dp
+
+/** The panel's container: the surface at its elevation, so what is drawn at its edge can match it. */
+internal fun treePanelContainer(scheme: ColorScheme): Color = scheme.surfaceColorAtElevation(TreePanelElevation)
+
+/** What the tree's chips fade into: the surface, unless the tree is drawn in the panel. */
+internal val LocalTreeFade = compositionLocalOf { Color.Unspecified }
+
 /** The rail's width, Material's. */
 internal const val WideRailDp = 80
 
@@ -199,14 +231,20 @@ class TreePanelState {
         private set
     private var seenKind: WorkspaceLayout.Kind? = null
     private var seenDestination: WideDestination? = null
+    // What the panel was opened under. `sync` runs in an effect, a frame after
+    // an outside change, so [isShown] compares against this instead and never
+    // draws a panel over a place it wasn't opened on.
+    private var openedUnder: Pair<WorkspaceLayout.Kind, WideDestination>? = null
 
-    /** Whether the panel is up at [kind]. */
-    fun isShown(kind: WorkspaceLayout.Kind): Boolean = open && kind == WorkspaceLayout.Kind.TWO_PANE
+    /** Whether the panel is up at [kind], with [destination] selected. */
+    fun isShown(kind: WorkspaceLayout.Kind, destination: WideDestination): Boolean =
+        open && kind == WorkspaceLayout.Kind.TWO_PANE && openedUnder == (kind to destination)
 
     /** The rail's Plan place tapped while [selected] is up. True when the place should be selected. */
     fun planTapped(selected: WideDestination, kind: WorkspaceLayout.Kind): Boolean {
         if (selected == WideDestination.PLAN && kind == WorkspaceLayout.Kind.TWO_PANE) {
             open = !open
+            openedUnder = kind to selected
             return false
         }
         open = false
@@ -226,8 +264,8 @@ class TreePanelState {
     }
 
     /** Back: true when it closed the panel, so it didn't leave the workspace. */
-    fun back(kind: WorkspaceLayout.Kind): Boolean {
-        if (!isShown(kind)) return false
+    fun back(kind: WorkspaceLayout.Kind, destination: WideDestination): Boolean {
+        if (!isShown(kind, destination)) return false
         open = false
         return true
     }
@@ -253,8 +291,9 @@ fun wideJump(ref: com.farcooler.net.TerminalRef, orchestrator: com.farcooler.mod
  * edge, opened by tapping the rail's Plan place while it is selected ([panel]).
  *
  * Panes are divided by the theme's separator, drawn as vertical rules. The
- * plan's pane is given at least [WorkspaceLayout.MIN_PLAN_DP] by a width
- * constraint of its own, not by the scaffold's preferred widths.
+ * plan's pane is what the tree's and the chat's widths leave, and the layout
+ * choice ([WorkspaceLayout.of]) only picks this frame where that is at least
+ * [WorkspaceLayout.MIN_PLAN_DP].
  *
  * For TalkBack: the scrim is a labeled button, the plan behind an open panel
  * is hidden from it, focus moves into the panel on open and back to the rail's
@@ -278,13 +317,13 @@ fun WideWorkspaceFrame(
     chatModifier: Modifier = Modifier,
     content: @Composable (WideContent) -> Unit,
 ) {
-    val shown = panel.isShown(kind)
+    val shown = panel.isShown(kind, destination)
     val contents = destination.contents(kind, shown)
     val columns = kind == WorkspaceLayout.Kind.THREE_PANE
     val panelFocus = remember { FocusRequester() }
     val planFocus = remember { FocusRequester() }
     // Back dismisses the panel before it leaves the workspace.
-    BackHandler(enabled = shown) { panel.back(kind) }
+    BackHandler(enabled = shown) { panel.back(kind, destination) }
     // Focus into the panel as it opens, and back to the rail's Plan place as it closes.
     var wasShown by remember { mutableStateOf(false) }
     LaunchedEffect(shown) {
@@ -347,11 +386,11 @@ fun WideWorkspaceFrame(
                     AnimatedPane {
                         Row(Modifier.fillMaxSize()) {
                             Box(Modifier.weight(1f).fillMaxHeight().testTag(WidePane.MAIN.tag)) {
-                                // The plan is never drawn narrower than its minimum, whatever the scaffold allots.
+                                // Its 360 dp minimum is kept by the layout choice (WorkspaceLayout.of), not here.
                                 // Hidden from TalkBack while the panel is over it.
                                 val main = contents[WidePane.MAIN]
                                 Box(
-                                    Modifier.fillMaxSize().widthIn(min = WorkspaceLayout.MIN_PLAN_DP.dp)
+                                    Modifier.fillMaxSize()
                                         .then(if (shown) Modifier.clearAndSetSemantics {} else Modifier),
                                 ) { if (main != null) content(main) }
                                 // The tree over the plan's leading edge, with a scrim that closes it.
@@ -359,18 +398,22 @@ fun WideWorkspaceFrame(
                                 if (!columns && tree != null) {
                                     Box(
                                         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
-                                            .clickable(onClickLabel = "Close tree", role = Role.Button, onClick = { panel.back(kind) })
+                                            .clickable(onClickLabel = "Close tree", role = Role.Button, onClick = { panel.back(kind, destination) })
                                             .testTag("wide-tree-scrim"),
                                     )
+                                    val container = treePanelContainer(MaterialTheme.colorScheme)
                                     Surface(
                                         modifier = Modifier.width(WideListWidth).fillMaxHeight().testTag(WidePane.LIST.tag)
                                             .semantics { paneTitle = "Tree" }
                                             .focusRequester(panelFocus).focusGroup(),
-                                        tonalElevation = 3.dp,
+                                        color = container,
                                         shadowElevation = 6.dp,
                                     ) {
                                         Row(Modifier.fillMaxSize()) {
-                                            Box(Modifier.weight(1f).fillMaxHeight()) { content(tree) }
+                                            // The chips' edge fade is drawn in the panel's own color.
+                                            CompositionLocalProvider(LocalTreeFade provides container) {
+                                                Box(Modifier.weight(1f).fillMaxHeight()) { content(tree) }
+                                            }
                                             VerticalSeparator()
                                         }
                                     }

@@ -28,6 +28,28 @@ class WideWorkspaceTest {
         }
     }
 
+    /**
+     * The plan keeps 360 dp by the layout choice (ov-353 R2-2): over every
+     * window width, a wide layout is only chosen where the plan is left at
+     * least [WorkspaceLayout.MIN_PLAN_DP]. The widths are the ones the frame
+     * hands the scaffold, so changing the chat's or the tree's width moves the
+     * breakpoints here and not just the drawing.
+     */
+    @Test
+    fun `a wide layout always leaves the plan its minimum`() {
+        for (width in 0..3000) {
+            val kind = WorkspaceLayout.of(width, implicit = false)
+            if (kind == phone) continue
+            assertTrue("$width dp: ${WorkspaceLayout.planWidthDp(kind, width)} left", WorkspaceLayout.planWidthDp(kind, width) >= WorkspaceLayout.MIN_PLAN_DP)
+        }
+        // The narrowest wide windows, by the numbers: rail 80, chat 320 or 360, tree 240, and the rules.
+        assertEquals(438, WorkspaceLayout.planWidthDp(two, 840))
+        assertEquals(1199 - 80 - 320 - 2, WorkspaceLayout.planWidthDp(two, 1199))
+        assertEquals(517, WorkspaceLayout.planWidthDp(three, 1200))
+        // The plan is drawn at least as wide as it is promised at 840 and 1200 (the scaffold's widths come from the same constants).
+        assertTrue(WorkspaceLayout.planWidthDp(two, 840) >= WorkspaceLayout.MIN_PLAN_DP)
+    }
+
     /** A runner without workspaces has no orchestrator or plan to put beside a tree, however wide the window. */
     @Test
     fun `an implicit workspace stays the phone's layout at any width`() {

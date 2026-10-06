@@ -416,7 +416,7 @@ internal fun TreeFilterChips(filter: OneTree.Filter, onChoose: (OneTree.Filter) 
             Box(
                 Modifier.align(Alignment.CenterEnd).width(32.dp).height(FilterChipDefaults.Height).testTag("tree-filter-fade").background(
                     androidx.compose.ui.graphics.Brush.horizontalGradient(
-                        listOf(Color.Transparent, MaterialTheme.colorScheme.surface),
+                        listOf(Color.Transparent, LocalTreeFade.current.takeIf { it != Color.Unspecified } ?: MaterialTheme.colorScheme.surface),
                     ),
                 ),
             )

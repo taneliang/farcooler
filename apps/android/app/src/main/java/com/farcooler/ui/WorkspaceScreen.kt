@@ -35,7 +35,6 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.movableContentOf
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.focusGroup
 import androidx.compose.runtime.setValue
@@ -194,34 +193,28 @@ fun WorkspaceScreen(
     val wide = layout != WorkspaceLayout.Kind.PHONE
     // The tree's panel over the plan, where it isn't a column. Closed by any
     // change of rail place or layout, from here or from outside.
-    val panel = remember(workspace.id) { TreePanelState() }
-    LaunchedEffect(layout, route.tab) { panel.sync(layout, WideDestination.of(route.tab)) }
     // The chat pane takes focus when a Discuss jumps to the orchestrator beside it.
     val chatFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    val wiring = remember(workspace.id) { WideWiring(focusChat = { chatFocus.requestFocus() }) }
+    val panel = wiring.panel
+    LaunchedEffect(layout, route.tab) { wiring.sync(layout, route.tab) }
     // One TerminalPane for both layouts: it moves between the phone's slot and
     // the wide one, so a fold or a resize across 840 dp keeps its state
     // (the half-typed message, the scroll) instead of remounting it.
-    val orchestratorPane = remember(model) {
-        movableContentOf { pane: OrchestratorPaneInputs ->
-            TerminalPane(
-                model = model,
-                ref = pane.ref,
-                connection = pane.connection,
-                worktree = pane.worktree,
-                showRunner = pane.showRunner,
-                live = pane.live,
-                onPickImage = {},
-                showTopBar = false,
-                onOpenDrawer = {},
-            )
-        }
+    val orchestratorPane = rememberMovablePane(model) { pane: OrchestratorPaneInputs ->
+        TerminalPane(
+            model = model,
+            ref = pane.ref,
+            connection = pane.connection,
+            worktree = pane.worktree,
+            showRunner = pane.showRunner,
+            live = pane.live,
+            onPickImage = {},
+            showTopBar = false,
+            onOpenDrawer = {},
+        )
     }
-    val jump: (TerminalRef) -> Unit = { ref ->
-        when (wideJump(ref, live?.terminal)) {
-            WideJump.FOCUS_CHAT -> chatFocus.requestFocus()
-            WideJump.OPEN -> model.openFromBoard(ref)
-        }
-    }
+    val jump: (TerminalRef) -> Unit = { ref -> wiring.jump(ref, live?.terminal) { model.openFromBoard(it) } }
     val reading = live?.terminal?.id?.takeIf { (wide || route.tab == WorkspaceTab.ORCHESTRATOR) && onScreen }
     DisposableEffect(reading) {
         if (reading != null) {
@@ -286,7 +279,7 @@ fun WorkspaceScreen(
                     connection = connection,
                     workspace = workspace,
                     // Picking from the panel closes it first, as the phone's sheet does.
-                    nav = treeNavigation(model, route.hostId, route.workspaceId) { fleet.worktrees }.then { panel.picked() },
+                    nav = wiring.treeNavigation(treeNavigation(model, route.hostId, route.workspaceId) { fleet.worktrees }),
                 )
                 WideContent.PLAN -> PlanHome(
                     connection = connection,
@@ -302,7 +295,8 @@ fun WorkspaceScreen(
                     onOpenTask = { model.navigate(Route.BoardTask(route.hostId, route.workspaceId, it)) },
                     onOpenPlan = { page -> model.navigate(Route.PlanPage(route.hostId, route.workspaceId, page.kind, page.id)) },
                     onOpenHistory = { status -> model.navigate(Route.BoardHistory(route.hostId, route.workspaceId, status.wire)) },
-                    onJump = { model.openFromBoard(it) },
+                    // The chat is beside the board, so a Discuss on the orchestrator focuses it.
+                    onJump = jump,
                     orchestratorRunning = seat is OrchestratorSeat.Live || seat is OrchestratorSeat.Starting,
                     onShowOrchestrator = null,
                 )
