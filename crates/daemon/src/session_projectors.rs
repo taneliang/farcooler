@@ -20,15 +20,19 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use farcooler_core::session_log::projector::{Activity, HookEffect, Row, SessionProjector};
 use uuid::Uuid;
 
 /// Every open projector, by terminal.
+///
+/// One lock per projector, and the map's own lock only long enough to find
+/// it: a rebuild reads a whole transcript, and every claude hook on the runner
+/// (a held PermissionRequest among them) passes through `hook` here.
 #[derive(Default)]
 pub struct SessionProjectors {
-    open: Mutex<HashMap<Uuid, SessionProjector>>,
+    open: Mutex<HashMap<Uuid, Arc<Mutex<SessionProjector>>>>,
 }
 
 /// Whether claude panes get a projector without anyone asking for one.
@@ -41,35 +45,52 @@ fn now_ms() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
 }
 
+fn lock(session: &Mutex<SessionProjector>) -> std::sync::MutexGuard<'_, SessionProjector> {
+    session.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 impl SessionProjectors {
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<Uuid, SessionProjector>> {
-        self.open.lock().unwrap_or_else(|e| e.into_inner())
+    fn get(&self, terminal: Uuid) -> Option<Arc<Mutex<SessionProjector>>> {
+        self.open.lock().unwrap_or_else(|e| e.into_inner()).get(&terminal).cloned()
     }
 
     /// Open a projector for `terminal` on `transcript`, read what is on disk
     /// so far, and keep it. A terminal already open on that transcript is
     /// left as it is; on another, it is moved there with its rows kept.
+    ///
+    /// A new one is built and read with no lock held, and put in the map only
+    /// once it is whole.
     pub fn open(&self, terminal: Uuid, transcript: PathBuf) {
-        let mut open = self.lock();
-        match open.get_mut(&terminal) {
-            Some(session) => session.rebind(transcript),
-            None => {
-                open.insert(terminal, SessionProjector::open(transcript));
-            }
-        }
-        if let Some(session) = open.get_mut(&terminal) {
+        if let Some(session) = self.get(terminal) {
+            let mut session = lock(&session);
+            session.rebind(transcript);
             session.poll();
+            return;
         }
+        let mut session = SessionProjector::open(transcript);
+        session.poll();
+        self.open
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(terminal)
+            .or_insert_with(|| Arc::new(Mutex::new(session)));
     }
 
     pub fn is_open(&self, terminal: Uuid) -> bool {
-        self.lock().contains_key(&terminal)
+        self.get(terminal).is_some()
+    }
+
+    /// The transcript `terminal`'s projector reads, if one is open.
+    pub fn transcript(&self, terminal: Uuid) -> Option<PathBuf> {
+        let session = self.get(terminal)?;
+        let path = lock(&session).transcript().to_path_buf();
+        Some(path)
     }
 
     /// A claude hook routed to `terminal`. Nothing when no projector is open.
     pub fn hook(&self, terminal: Uuid, event: &str, payload: &serde_json::Value) {
-        let mut open = self.lock();
-        let Some(session) = open.get_mut(&terminal) else { return };
+        let Some(session) = self.get(terminal) else { return };
+        let mut session = lock(&session);
         // The file first, so a hook that arrives after its own record is
         // checked against it rather than put up as news.
         session.poll();
@@ -82,8 +103,8 @@ impl SessionProjectors {
     /// The watcher's tick: whatever the files gained, and what claude's
     /// registry says the process is doing.
     pub fn tick(&self, terminal: Uuid, activity: Option<Activity>) {
-        let mut open = self.lock();
-        let Some(session) = open.get_mut(&terminal) else { return };
+        let Some(session) = self.get(terminal) else { return };
+        let mut session = lock(&session);
         session.poll();
         if let Some(activity) = activity {
             session.projection_mut().set_activity(activity);
@@ -92,19 +113,22 @@ impl SessionProjectors {
 
     /// A page of `terminal`'s rows, oldest first: up to `limit` before `ord`.
     pub fn page(&self, terminal: Uuid, before: Option<u64>, limit: usize) -> Option<Vec<Row>> {
-        Some(self.lock().get(&terminal)?.projection().page(before, limit).to_vec())
+        let session = self.get(terminal)?;
+        let page = lock(&session).projection().page(before, limit).to_vec();
+        Some(page)
     }
 
     /// `terminal`'s rows changed after revision `rev`, and the revision now.
     pub fn changed_since(&self, terminal: Uuid, rev: u64) -> Option<(Vec<Row>, u64)> {
-        let open = self.lock();
-        let p = open.get(&terminal)?.projection();
+        let session = self.get(terminal)?;
+        let session = lock(&session);
+        let p = session.projection();
         Some((p.changed_since(rev).into_iter().cloned().collect(), p.revision()))
     }
 
     /// The terminal is gone.
     pub fn forget(&self, terminal: Uuid) {
-        self.lock().remove(&terminal);
+        self.open.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal);
     }
 }
 

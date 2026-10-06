@@ -163,3 +163,28 @@ fn the_ingress_feeds_a_claude_hook_to_the_open_projector() {
     ingress.forget(terminal);
     assert!(!global().is_open(terminal), "forgetting the terminal closes its projector");
 }
+
+/// One terminal's projector busy (a rebuild, say) holds up no other
+/// terminal's hooks.
+#[test]
+fn a_busy_projector_does_not_hold_up_another_terminals_hooks() {
+    let dir = Dir::new("locks");
+    let projectors = Arc::new(SessionProjectors::default());
+    let (a, b) = (Uuid::now_v7(), Uuid::now_v7());
+    projectors.open(a, dir.file("a.jsonl", EDITS));
+    projectors.open(b, dir.file("b.jsonl", EDITS));
+    let busy = projectors.get(a).unwrap();
+    let _held = busy.lock().unwrap();
+    // A hook for `a` now waits on `a`'s projector; it must wait there and not
+    // somewhere every terminal shares.
+    let waiting = projectors.clone();
+    std::thread::spawn(move || waiting.hook(a, "UserPromptSubmit", &json!({"prompt_id":"pa","prompt":"a"})));
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    let (done, finished) = std::sync::mpsc::channel();
+    let other = projectors.clone();
+    std::thread::spawn(move || {
+        other.hook(b, "UserPromptSubmit", &json!({"prompt_id":"pb","prompt":"b"}));
+        let _ = done.send(());
+    });
+    assert!(finished.recv_timeout(std::time::Duration::from_secs(5)).is_ok(), "b's hook waited on a's projector");
+}
