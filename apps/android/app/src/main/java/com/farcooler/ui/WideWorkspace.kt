@@ -160,7 +160,7 @@ fun WideWorkspaceFrame(
                 selected = false,
                 onClick = onNeedsYou,
                 icon = { Icon(Icons.Filled.Flag, contentDescription = null) },
-                label = { Text("Needs You") },
+                label = { Text("Needs you") },
                 modifier = Modifier.testTag("wide-rail-needs-you"),
             )
             NavigationRailItem(
