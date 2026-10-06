@@ -44,7 +44,7 @@ use farcooler_agent_hooks::Agent;
 use farcooler_agent_hooks::assemble::MessageAssembler;
 use farcooler_agent_hooks::facts::{Facts, facts};
 use farcooler_agent_hooks::ask::{is_gate, permission_ask};
-use farcooler_agent_hooks::wire::{HookLine, LONGEST_HOLD, Reply, decode_line, encode_line};
+use farcooler_agent_hooks::wire::{HookLine, LONGEST_HOLD, Reply, decode_line, encode_line, is_fence};
 use farcooler_core::derive;
 use farcooler_core::inventory::{RuntimeInventory, RuntimeSnapshot};
 use farcooler_protocol::v1::TerminalState;
@@ -856,8 +856,22 @@ impl HookIngress {
                 continue;
             };
             let f = facts(hook.agent, &hook.payload);
-            if let Some(session) = f.session_id.as_deref() {
+            // The fence (`hook_asks`): marked and answered before claude can
+            // draw a dialog for this call; the call's end, or a turn's, ends
+            // the mark.
+            let session = f.session_id.as_deref();
+            if let Some(session) = session {
                 self.asks.heard(session, is_gate(hook.agent, &hook.event));
+            }
+            if is_fence(hook.agent, &hook.event) {
+                if let Some(session) = session {
+                    self.asks.tool_starting(session).await;
+                }
+                write_reply(&mut write, &Reply::verdict(None)).await?;
+            } else if let Some(session) = session
+                && matches!(hook.event.as_str(), "PostToolUse" | "PostToolUseFailure" | "Stop" | "UserPromptSubmit")
+            {
+                self.asks.tool_ended(session);
             }
             let terminal = self.terminal_for(&f, hook.agent);
             if is_gate(hook.agent, &hook.event) {
@@ -1789,3 +1803,7 @@ mod tests {
         assert!(!ingress.is_tailing(terminal), "nothing was installed to deliver to");
     }
 }
+
+#[cfg(test)]
+#[path = "hook_fence_tests.rs"]
+mod hook_fence_tests;

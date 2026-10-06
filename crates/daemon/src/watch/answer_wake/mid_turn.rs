@@ -3,32 +3,33 @@
 //!
 //! **The Enter.** Mid-turn is when claude raises a dialog: a permission, a
 //! question (`AskUserQuestion`), leaving plan mode. An Enter that lands on
-//! one answers it, with its first option, which is Yes. So the Enter is
-//! pressed only past two more checks, in this order, with nothing awaited
-//! between the second and the write (`enter`):
+//! one answers it, with its first option, which is Yes, and that can't be
+//! taken back. So the race is closed by ordering, not by timing (`enter`):
 //! 1. a fresh capture reads the box holding exactly the text, and the pane
 //!    not Blocked;
-//! 2. the transcript has no tool call written since the paste began: every
-//!    one of those dialogs is a tool call (`AskUserQuestion` and
-//!    `ExitPlanMode` are tools too), and claude writes the call before it
-//!    draws the dialog (`tool_called_since`);
-//! 3. no gate (`PermissionRequest`, which claude raises for all three) has
-//!    begun in the session since the paste began (`HookAsks::gated_since`),
-//!    and no ask is held on the pane.
+//! 2. the session's fence is taken (`HookAsks::fence`). Claude runs its
+//!    `PreToolUse` hook, and waits for it, before it draws any permission
+//!    dialog; the daemon answers that hook only after marking the call in
+//!    flight and taking the same lock (`HookAsks::tool_starting`);
+//! 3. under the fence: no call in flight, none written to the transcript
+//!    since the paste began (`tool_called_since`), no gate begun since then,
+//!    and no ask held on the pane;
+//! 4. Enter, and the fence held `KEY_LANDS` past `tmux send-keys` returning.
 //!
-//! Measured on 2.1.290, five dialogs: the tool call is written 0 to 25 ms
-//! before the dialog is drawn; the hook is started within about 10 ms of the
-//! draw, either side; and an Enter sent the moment the hook started did
-//! approve the dialog. The Enter takes one `tmux send-keys`, 5 to 13 ms. So
-//! check 3 alone can't close the race, and check 2 narrows it to a tool call
-//! written in the few milliseconds between it and the Enter reaching the
-//! pane; neither closes it entirely. A dialog in the way leaves the text in
-//! the box, unsent.
+//! So a dialog drawn after check 3 needs a `PreToolUse` answered after the
+//! fence is let go, by which time the key has been read as typing. Measured
+//! on claude 2.1.290 against a stand-in API, over 25 dialogs: none was drawn
+//! before its `PreToolUse` hook returned, and a hook that sleeps 300 ms
+//! delays the dialog by 300 ms. What's left: a `tmux send-keys` taking longer
+//! than the hook's patience (the daemon answers a `PreToolUse` after 300 ms
+//! on the fence whatever holds it), or a hook that never reaches the daemon.
+//! A dialog in the way leaves the text in the box, unsent.
 //!
 //! A session this daemon has never heard a hook from is never typed into
-//! mid-turn: its agent waits for the turn to end. codex queues too, but
-//! raises its approvals with no hook and no transcript record first, so a
-//! working codex waits likewise (`queues_mid_turn`).
+//! mid-turn: its agent waits for the turn to end. Nor is one Far Cooler didn't
+//! launch, which has none of its hooks. codex queues too, but raises its
+//! approvals with no hook to wait on, so a working codex waits likewise
+//! (`queues_mid_turn`).
 //!
 //! **The queue.** Claude writes `{"type":"queue-operation","operation":
 //! "enqueue","content":"<text>"}` to its transcript at once (measured on
@@ -54,6 +55,12 @@ use farcooler_store::models::Terminal;
 use super::{PASTE_POLL, Proven};
 use crate::runtime::Runtime;
 use crate::watch::Watcher;
+
+/// How long the fence is held after `tmux send-keys` returns, for the key to
+/// reach claude and be read as typing. Measured on 2.1.290, a key sent this
+/// way was on the screen within 7.3 ms at the 99th percentile (100 keys,
+/// load around 6); this is seven times that, for a loaded runner.
+pub(crate) const KEY_LANDS: Duration = Duration::from_millis(50);
 
 /// How long after the Enter the queue has to show the message.
 const QUEUE_SETTLES: Duration = Duration::from_secs(3);
@@ -121,14 +128,20 @@ impl Watcher {
         }
         let runtime = Runtime { marks: None, ..self.service.runtime() };
         let asks = self.service.hooks().asks();
-        // From here to the write, nothing is awaited.
-        if tool_called_since(&witness.path, witness.from)
+        // The fence: no `PreToolUse` is answered, so no dialog drawn, from
+        // the checks below until the key has landed.
+        let Some(fence) = asks.fence(&witness.session) else { return Err(NoEnter::Dialog) };
+        let _fenced = fence.lock().await;
+        if asks.tool_in_flight(&witness.session)
+            || tool_called_since(&witness.path, witness.from)
             || asks.gated_since(&witness.session, witness.pasted)
             || asks.is_holding(to.id)
         {
             return Err(NoEnter::Dialog);
         }
-        runtime.send_bytes_hex(to.id, "0d").await.map_err(|_| NoEnter::Failed)
+        runtime.send_bytes_hex(to.id, "0d").await.map_err(|_| NoEnter::Failed)?;
+        tokio::time::sleep(KEY_LANDS).await;
+        Ok(())
     }
 
     /// Whether `text`, just submitted mid-turn, reached the agent's queue

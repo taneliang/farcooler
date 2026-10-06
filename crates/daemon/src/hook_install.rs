@@ -80,7 +80,22 @@ const CLAUDE_CODEX_EVENTS: &[(&str, bool)] = &[
 /// ask while the owner's phone and watch are offered it. Its entry carries
 /// `"matcher": "*"` and a `timeout` of `CLAUDE_GATE_TIMEOUT_S`, which is the
 /// shape the ov-14 spike measured.
-const CLAUDE_ONLY_EVENTS: &[(&str, bool)] = &[("MessageDisplay", false), ("PermissionRequest", true)];
+///
+/// `PreToolUse` is claude's one fence (ov-360, `wire::FENCES`): registered as
+/// waiting, like the gate, with `"matcher": "*"`, because claude waits on it
+/// before any permission dialog, and the daemon answers it only once it has
+/// marked a tool call in flight, under the lock the mid-turn Enter holds.
+/// `PostToolUse` and `PostToolUseFailure` end the mark. Each costs a hook's
+/// start and a round trip on every tool call, about 15–20 ms. ov-364, which
+/// registers the tool hooks for the native view, keeps these three as they
+/// are here, or changes `answer_wake::mid_turn` with them.
+const CLAUDE_ONLY_EVENTS: &[(&str, bool)] = &[
+    ("MessageDisplay", false),
+    ("PermissionRequest", true),
+    ("PreToolUse", true),
+    ("PostToolUse", false),
+    ("PostToolUseFailure", false),
+];
 
 /// What claude's permission hook may take before claude SIGTERMs it, in
 /// seconds (measured: spike run 9, 8.004 s for `timeout: 8`).
@@ -1551,10 +1566,11 @@ mod tests {
         assert!(std::time::Duration::from_secs(timeout) > longest, "{timeout} s is not above {longest:?}");
     }
 
-    /// `GATES` is what the daemon treats as an ask, and these files are what
-    /// the agents run. The two must name the same hooks, in both directions:
-    /// a gate the daemon holds that no agent registers is a feature that never
-    /// runs, and a registered gate the daemon doesn't hold costs every prompt
+    /// `GATES` is what the daemon treats as an ask, and `FENCES` what it
+    /// answers once a tool call is marked; these files are what the agents
+    /// run. The two must name the same waiting hooks, in both directions: one
+    /// the daemon answers that no agent registers is a feature that never
+    /// runs, and a registered one the daemon doesn't answer costs every call
     /// the hook's 400 ms for nothing.
     #[test]
     fn every_gate_is_registered_as_gating_for_its_agent_and_nothing_else_is() {
@@ -1563,8 +1579,12 @@ mod tests {
         for agent in [Agent::Claude, Agent::Codex, Agent::Cursor] {
             let mut installed: Vec<String> =
                 registered(agent).into_iter().filter(|(_, gating)| *gating).map(|(e, _)| e).collect();
-            let mut gates: Vec<String> =
-                GATES.iter().filter(|(a, _)| *a == agent).map(|(_, e)| e.to_string()).collect();
+            let mut gates: Vec<String> = GATES
+                .iter()
+                .chain(farcooler_agent_hooks::wire::FENCES)
+                .filter(|(a, _)| *a == agent)
+                .map(|(_, e)| e.to_string())
+                .collect();
             installed.sort();
             gates.sort();
             assert_eq!(installed, gates, "{agent:?}");

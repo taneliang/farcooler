@@ -163,6 +163,49 @@ async fn the_enter_waits_on_the_screen_and_the_hooks() {
     assert_eq!(si.submitted(), ["hello"], "{}", si.log());
 }
 
+/// The Enter takes the session's fence: while something else holds it (a
+/// `PreToolUse` being answered), no Enter goes in; and a call marked in
+/// flight when the fence is let go stops it.
+#[tokio::test]
+async fn the_enter_holds_the_fence_and_waits_on_a_tool_call() {
+    use super::mid_turn::{NoEnter, Witness};
+    let b = board().await;
+    let orchestrator = b.adopted_shell().await;
+    let si = b.stand_in(&orchestrator, "claude", "claude").await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("t.jsonl");
+    let asks = b.svc.hooks().asks().clone();
+    asks.heard(SESSION, false);
+    si.show("draft:hello").await;
+    b.screen_with(orchestrator.id, "hello").await;
+
+    let fence = asks.fence(SESSION).expect("a fence");
+    let held = fence.lock().await;
+    let enter = tokio::spawn({
+        let (watcher, to, witness) = (b.watcher.clone(), orchestrator.clone(), Witness::for_tests(SESSION, &path));
+        async move { watcher.enter(&to, "claude", &witness, "hello").await }
+    });
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!(!si.log().contains("ENTER"), "an Enter while the fence was held: {}", si.log());
+    // A `PreToolUse` arrives: marked at once, answered once the fence is free.
+    let starting = tokio::spawn({
+        let asks = asks.clone();
+        async move { asks.tool_starting(SESSION).await }
+    });
+    while !asks.tool_in_flight(SESSION) {
+        tokio::task::yield_now().await;
+    }
+    drop(held);
+    assert_eq!(enter.await.unwrap(), Err(NoEnter::Dialog));
+    starting.await.unwrap();
+    assert!(!si.log().contains("ENTER"), "{}", si.log());
+
+    // The call over, the Enter goes in.
+    asks.tool_ended(SESSION);
+    assert_eq!(b.watcher.enter(&orchestrator, "claude", &Witness::for_tests(SESSION, &path), "hello").await, Ok(()));
+    si.submits(1).await;
+}
+
 /// An answer is told to a working agent too, and the task says it's queued.
 #[tokio::test]
 async fn an_answer_reaches_a_working_claude_through_its_queue() {

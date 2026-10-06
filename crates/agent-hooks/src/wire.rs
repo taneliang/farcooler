@@ -102,6 +102,25 @@ pub const HOLD_GRACE: Duration = Duration::from_secs(2);
 /// carries no gating flag, because this table is the whole of that fact.
 pub const GATES: &[(Agent, &str)] = &[(Agent::Claude, "PermissionRequest")];
 
+/// The hooks that fence (ov-360): an agent waits on the daemon's word before
+/// it goes on, as on a gate, but there's nothing to decide. The word is
+/// always "no decision", sent once the daemon has marked a tool call in
+/// flight for the session, under the session's lock.
+///
+/// Claude's `PreToolUse` only. claude runs it, and waits for it, before it
+/// draws any permission dialog (measured on 2.1.290: over 25 dialogs, none
+/// drawn before the hook returned; a hook that sleeps 300 ms delays the
+/// dialog by 300 ms). So a daemon pressing Enter in claude's box while it
+/// works holds the same lock from its last check until the key has landed,
+/// and a dialog can't be drawn in between. The installer registers these as
+/// waiting hooks (`--gating`) like the gates.
+pub const FENCES: &[(Agent, &str)] = &[(Agent::Claude, "PreToolUse")];
+
+/// Whether `event` from `agent` is a fence (`FENCES`).
+pub fn is_fence(agent: Agent, event: &str) -> bool {
+    FENCES.iter().any(|&(a, e)| a == agent && e == event)
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "behavior", rename_all = "snake_case")]
 pub enum Decision {

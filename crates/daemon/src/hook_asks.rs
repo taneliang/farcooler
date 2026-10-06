@@ -30,6 +30,16 @@
 //! session, not terminal: a claude started by hand routes to no terminal,
 //! and its session id is known from its own registry. A session never heard
 //! from has no such signal, and isn't typed into mid-turn.
+//!
+//! **The fence** (ov-360). Per session, a lock and a mark: a tool call in
+//! flight. Claude's `PreToolUse` hook marks it, then takes the lock, then is
+//! answered (`tool_starting`); claude draws no permission dialog before that
+//! answer. The mid-turn Enter takes the same lock, checks the mark, and holds
+//! the lock until its key has landed (`answer_wake::mid_turn`). So an Enter
+//! and a dialog can't overlap: whichever takes the lock first finishes
+//! first. `PostToolUse`, `PostToolUseFailure`, `Stop` and `UserPromptSubmit`
+//! end the mark (`tool_ended`); a turn starting or ending has no tool call
+//! in flight.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -129,11 +139,21 @@ pub struct HookAsks {
 }
 
 /// What was last heard from one session.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct Heard {
     at: Instant,
     gate: Option<Instant>,
+    /// A `PreToolUse` came and no end of the call yet.
+    tool_in_flight: bool,
+    /// The fence's lock.
+    fence: Arc<tokio::sync::Mutex<()>>,
 }
+
+/// How long a `PreToolUse` waits on the fence's lock before it's answered
+/// anyway. The mid-turn Enter holds it for one `tmux send-keys` and a settle,
+/// tens of milliseconds; the hook gives up on the daemon at 400 ms. The mark
+/// is set before the wait, so an Enter after it sees the call either way.
+const FENCE_WAIT: Duration = Duration::from_millis(300);
 
 /// Sessions remembered before the oldest are let go: far more than a runner
 /// runs at once.
@@ -161,11 +181,47 @@ impl HookAsks {
                 sessions.remove(&oldest);
             }
         }
-        let heard = sessions.entry(session.to_string()).or_insert(Heard { at: now, gate: None });
+        let heard = sessions.entry(session.to_string()).or_insert_with(|| Heard {
+            at: now,
+            gate: None,
+            tool_in_flight: false,
+            fence: Arc::default(),
+        });
         heard.at = now;
         if gate {
             heard.gate = Some(now);
         }
+    }
+
+    /// The fence's lock for `session`, or `None` for a session never heard
+    /// from.
+    pub fn fence(&self, session: &str) -> Option<Arc<tokio::sync::Mutex<()>>> {
+        self.sessions.lock().unwrap_or_else(|e| e.into_inner()).get(session).map(|h| h.fence.clone())
+    }
+
+    /// A `PreToolUse` from `session`: mark the call in flight, then wait (up
+    /// to `FENCE_WAIT`) for any Enter holding the fence to finish. The hook
+    /// is answered after this returns.
+    pub async fn tool_starting(&self, session: &str) {
+        let fence = {
+            let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+            let Some(heard) = sessions.get_mut(session) else { return };
+            heard.tool_in_flight = true;
+            heard.fence.clone()
+        };
+        let _ = tokio::time::timeout(FENCE_WAIT, fence.lock()).await;
+    }
+
+    /// The tool call in flight in `session`, if any, is over.
+    pub fn tool_ended(&self, session: &str) {
+        if let Some(heard) = self.sessions.lock().unwrap_or_else(|e| e.into_inner()).get_mut(session) {
+            heard.tool_in_flight = false;
+        }
+    }
+
+    /// Whether `session` has a tool call in flight.
+    pub fn tool_in_flight(&self, session: &str) -> bool {
+        self.sessions.lock().unwrap_or_else(|e| e.into_inner()).get(session).is_some_and(|h| h.tool_in_flight)
     }
 
     /// Whether any hook was ever heard from `session` by this daemon.
@@ -882,6 +938,32 @@ mod tests {
             asks.heard(&format!("x{n}"), false);
         }
         assert_eq!(asks.sessions.lock().unwrap().len(), SESSIONS_KEPT);
+    }
+
+    /// A `PreToolUse` marks the call at once, then waits for the fence an
+    /// Enter holds, and is answered when it's let go; the call's end clears
+    /// the mark.
+    #[tokio::test]
+    async fn a_tool_call_is_marked_then_waits_for_the_fence() {
+        let (asks, _) = ledger();
+        let asks = Arc::new(asks);
+        asks.heard("s1", false);
+        let fence = asks.fence("s1").expect("a fence");
+        let held = fence.lock().await;
+        let starting = tokio::spawn({
+            let asks = asks.clone();
+            async move { asks.tool_starting("s1").await }
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(asks.tool_in_flight("s1"), "marked before the wait");
+        assert!(!starting.is_finished(), "answered while the Enter held the fence");
+        drop(held);
+        tokio::time::timeout(Duration::from_secs(1), starting).await.expect("answered once let go").unwrap();
+        asks.tool_ended("s1");
+        assert!(!asks.tool_in_flight("s1"));
+        assert!(asks.fence("unheard").is_none());
+        asks.tool_starting("unheard").await;
+        assert!(!asks.tool_in_flight("unheard"));
     }
 
     #[tokio::test]
