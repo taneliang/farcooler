@@ -1,0 +1,1 @@
+{"agentType": "general-purpose", "description": "Count the lines", "toolUseId": "toolu_bg", "spawnDepth": 1, "requestShape": "background", "requestNonInteractive": true}

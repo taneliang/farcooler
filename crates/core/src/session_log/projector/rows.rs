@@ -1,0 +1,272 @@
+//! What a native view draws, one row per thing that happened.
+//!
+//! Every row has an id that never changes once it is handed out, so a client
+//! can apply a change to the row it already drew rather than re-diffing the
+//! list. A provisional row (one a hook announced and the transcript has not
+//! yet confirmed) keeps its id when it is confirmed: the client sees the same
+//! row become firm, never a second row beside it.
+//!
+//! Nothing is ever renumbered (ov-358 found today's ring renumbering its
+//! window on trim, which froze every reader at 4096 events). A row's `ord` is
+//! its position at insertion and `rev` the revision that last changed it; both
+//! only grow, so a page cursor (`ord`) and a follow cursor (`rev`) stay valid
+//! for the life of the session.
+
+use serde::Serialize;
+
+/// One row, where it sits, and whether the transcript has confirmed it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Row {
+    /// Insertion order, from 0. Rows are never removed, so this is also the
+    /// row's index, and a page is a range of it.
+    pub ord: u64,
+    /// The projection's revision when this row last changed. Monotonic.
+    pub rev: u64,
+    /// Stable for the life of the session: `turn:<promptId>`,
+    /// `tool:<tool_use_id>`, `sub:<tool_use_id>`, and so on.
+    pub id: String,
+    /// The `Turn` row this one belongs to. `None` for a turn itself, and for
+    /// anything that happened before the first prompt this projection saw.
+    pub turn: Option<String>,
+    /// Announced by a hook and not yet confirmed by a transcript record.
+    pub provisional: bool,
+    pub kind: RowKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum RowKind {
+    Turn(Turn),
+    Prose(Prose),
+    Thinking(Thinking),
+    Tool(Tool),
+    Subagent(Subagent),
+    Ask(Ask),
+    Queued(Queued),
+    Notice(Notice),
+    Handoff(Handoff),
+    Gap(Gap),
+}
+
+/// One prompt and everything the agent did about it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Turn {
+    /// What was asked, in full (to `PROMPT_CHARS`), line breaks kept: the
+    /// person's own message is a row every device draws, not a title. Today's
+    /// chat path records no user message at all (ov-358, finding 4).
+    pub prompt: String,
+    pub origin: TurnOrigin,
+    pub started_ms: Option<i64>,
+    pub ended_ms: Option<i64>,
+    /// Claude's own `turn_duration` when it wrote one, else the span from the
+    /// prompt to the end.
+    pub duration_ms: Option<i64>,
+    /// `None` while the turn is open.
+    pub outcome: Option<TurnOutcome>,
+    /// Background subagents this turn launched that have not ended. A turn
+    /// can be over with agents still running; the view says both.
+    pub background_running: u32,
+    /// What claude's session registry last said about the process, for the
+    /// newest turn only: busy, idle, or running a shell command.
+    pub activity: Option<Activity>,
+}
+
+/// Who started a turn: claude's own `promptSource` / `origin.kind`, folded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum TurnOrigin {
+    /// A person, at the terminal or through Far Cooler typing for them.
+    Typed,
+    /// A message written while the agent was busy, sent from claude's queue.
+    Queued,
+    /// A background task finished and claude woke itself to read the result.
+    Notification,
+    /// A program driving claude, not a person.
+    Sdk,
+    /// A turn whose start this projection never saw (it began before the file
+    /// was read, or the source said something new).
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum TurnOutcome {
+    Finished,
+    Interrupted,
+    Failed { detail: String },
+    /// A hook saw the prompt submitted and the transcript moved on to a later
+    /// turn without ever writing it. Seen live: two of seven prompts in the
+    /// recorded sandbox session.
+    Unrecorded,
+}
+
+/// The registry's `status`, which claude rewrites as the process moves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum Activity {
+    Busy,
+    Idle,
+    /// Running a `!` shell command. Seen live as `"shell"`; not in the brief.
+    Shell,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Prose {
+    pub text: String,
+    /// The turn's closing answer (`stop_reason == "end_turn"`) rather than
+    /// narration on the way there.
+    pub conclusion: bool,
+    pub at_ms: Option<i64>,
+}
+
+/// That the agent thought, and for how long. Its words are not kept: claude
+/// writes them empty or signed, and the view shows only the duration.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Thinking {
+    pub started_ms: Option<i64>,
+    pub ended_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Tool {
+    pub name: String,
+    /// The one input field a person reads first: a description, a command, a
+    /// path or a pattern.
+    pub summary: String,
+    pub status: ToolStatus,
+    pub started_ms: Option<i64>,
+    pub ended_ms: Option<i64>,
+    /// An edit's hunks, from the result's `structuredPatch`.
+    pub diff: Vec<Hunk>,
+    pub file_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum ToolStatus {
+    Running,
+    Done,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Hunk {
+    pub old_start: u32,
+    pub old_lines: u32,
+    pub new_start: u32,
+    pub new_lines: u32,
+    /// Unified-diff lines, each starting with ` `, `-` or `+`.
+    pub lines: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Subagent {
+    /// The `Agent` call that launched it: the join key onto its meta file.
+    pub tool_use_id: String,
+    /// `agentId`, once the launch result or the meta file names it.
+    pub agent_id: Option<String>,
+    pub agent_type: String,
+    pub description: String,
+    pub background: bool,
+    pub status: SubagentState,
+    pub started_ms: Option<i64>,
+    pub ended_ms: Option<i64>,
+    /// Tool calls seen in its own transcript.
+    pub tool_count: u32,
+    /// Its latest tool call, as `Name summary`.
+    pub current_action: String,
+    /// The newest record in its own transcript, for a live run time.
+    pub last_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum SubagentState {
+    Running,
+    Completed,
+    Failed,
+    Killed,
+    Stopped,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Ask {
+    pub kind: AskKind,
+    /// The question, or the tool asking permission and what it would touch.
+    pub text: String,
+    pub tool: Option<String>,
+    pub asked_ms: Option<i64>,
+    pub answered_ms: Option<i64>,
+    pub answered: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum AskKind {
+    /// `AskUserQuestion`.
+    Question,
+    /// A held `PermissionRequest`.
+    Permission,
+    /// `ExitPlanMode`.
+    PlanExit,
+}
+
+/// A message written while claude was busy, waiting in claude's own queue.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Queued {
+    pub text: String,
+    pub state: QueuedState,
+    pub at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum QueuedState {
+    Waiting,
+    /// Taken off the queue; its turn follows as a prompt with
+    /// `promptSource: queued`.
+    Sent,
+    /// Taken back before it was sent.
+    Withdrawn,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Notice {
+    pub kind: NoticeKind,
+    pub text: String,
+    pub at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum NoticeKind {
+    /// The context was compacted (`compact_boundary`, or `SessionStart`
+    /// with `source: compact`).
+    Compacted,
+    /// `/clear`: the conversation continues in a new session file.
+    Cleared,
+    /// `claude --resume` picked this conversation up again.
+    Resumed,
+    /// A slash command claude ran locally.
+    Command,
+    /// A request failed and claude is retrying, or gave up.
+    ApiError,
+}
+
+/// Something only the terminal can show: a panel, a trust or MCP dialog.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Handoff {
+    pub reason: String,
+    pub at_ms: Option<i64>,
+}
+
+/// Where the projection cannot say what happened.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Gap {
+    pub reason: GapReason,
+    /// Consecutive gaps of one reason fold into one row.
+    pub count: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum GapReason {
+    /// A complete line that is not a JSON object.
+    Unparsed,
+    /// A line over the reader's cap, skipped unread.
+    TooLarge,
+    /// A record of a type this build does not know, named.
+    Unknown(String),
+    /// The file shrank or was replaced, and was read again from its start.
+    Rewritten,
+}
