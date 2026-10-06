@@ -186,7 +186,9 @@ fun WorkspaceScreen(
     if (describing) QuickTaskSheet(model = model, workspace = workspace, hostId = route.hostId, onDismiss = { describing = false })
     if (naming) NewWorktreeSheet(model = model, workspace = workspace, hostId = route.hostId, onDismiss = { naming = false })
 
-    val reading = live?.terminal?.id?.takeIf { route.tab == WorkspaceTab.ORCHESTRATOR && onScreen }
+    // The wide layout (ov-347) has the chat up whichever rail place is selected.
+    val wide = WorkspaceLayout.current(workspace.isImplicit) == WorkspaceLayout.Kind.WIDE
+    val reading = live?.terminal?.id?.takeIf { (wide || route.tab == WorkspaceTab.ORCHESTRATOR) && onScreen }
     DisposableEffect(reading) {
         if (reading != null) {
             model.claimReading(connection, reading)
@@ -195,6 +197,105 @@ fun WorkspaceScreen(
         onDispose {
             if (reading != null) model.releaseReading(connection, reading)
         }
+    }
+
+    if (wide) {
+        WideWorkspaceFrame(
+            destination = WideDestination.of(route.tab),
+            onSelect = { model.selectTab(route, it.tab) },
+            onBack = onBack,
+            onNeedsYou = { model.goHome() },
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (subtitle.isNotEmpty()) {
+                                Text(
+                                    subtitle,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    },
+                    actions = {
+                        // The tree is always up, so its two ways to make a
+                        // worktree are always here; so are the chat's controls.
+                        if (mayControl) {
+                            IconButton(onClick = { describing = true }, modifier = Modifier.testTag("new-worktree")) {
+                                Icon(Icons.Filled.AutoAwesome, contentDescription = "New worktree")
+                            }
+                            IconButton(onClick = { naming = true }) {
+                                Icon(Icons.Filled.Add, contentDescription = "Name a new worktree")
+                            }
+                        }
+                        OrchestratorActions(
+                            connection = connection,
+                            seat = seat,
+                            mayControl = mayControl,
+                            availability = daemon?.availability ?: HarnessAvailability(null),
+                            onReplace = { start(it, replace = true) },
+                            onOpenWorktree = { ref -> model.open(ref) },
+                        )
+                    },
+                )
+            },
+        ) { pane ->
+            when (pane) {
+                WideContent.TREE -> ThemesTab(
+                    connection = connection,
+                    workspace = workspace,
+                    nav = treeNavigation(model, route.hostId, route.workspaceId) { fleet.worktrees },
+                )
+                WideContent.PLAN -> PlanHome(
+                    connection = connection,
+                    workspace = workspace,
+                    orchestrator = live?.terminal,
+                    onOpenPlan = { page -> model.navigate(Route.PlanPage(route.hostId, route.workspaceId, page.kind, page.id)) },
+                    onNeedsYou = { model.goHome() },
+                    onJump = { model.openFromBoard(it) },
+                )
+                WideContent.BOARD -> BoardTab(
+                    connection = connection,
+                    workspace = workspace,
+                    onOpenTask = { model.navigate(Route.BoardTask(route.hostId, route.workspaceId, it)) },
+                    onOpenPlan = { page -> model.navigate(Route.PlanPage(route.hostId, route.workspaceId, page.kind, page.id)) },
+                    onOpenHistory = { status -> model.navigate(Route.BoardHistory(route.hostId, route.workspaceId, status.wire)) },
+                    onJump = { model.openFromBoard(it) },
+                    orchestratorRunning = seat is OrchestratorSeat.Live || seat is OrchestratorSeat.Starting,
+                    onShowOrchestrator = null,
+                )
+                WideContent.CHAT -> if (live != null) {
+                    TerminalPane(
+                        model = model,
+                        ref = TerminalRef(route.hostId, live.worktreeId, live.terminal.id),
+                        connection = connection,
+                        worktree = fleet.worktrees.firstOrNull { it.id == live.worktreeId },
+                        showRunner = connections.size > 1,
+                        live = onScreen && foreground,
+                        onPickImage = {},
+                        showTopBar = false,
+                        onOpenDrawer = {},
+                    )
+                } else {
+                    OrchestratorEmpty(
+                        seat = seat,
+                        actions = seatActions(seat, mayControl),
+                        refusal = refusal,
+                        availability = daemon?.availability ?: HarnessAvailability(null),
+                        runner = connection.host.displayLabel,
+                        missing = missing,
+                        onStart = { start(it, replace = false) },
+                        onReplace = { start(it, replace = true) },
+                        onRestart = { terminal -> scope.launch { connection.act(Connection.Action.RESTART, terminal) } },
+                    )
+                }
+            }
+        }
+        return
     }
 
     Scaffold(

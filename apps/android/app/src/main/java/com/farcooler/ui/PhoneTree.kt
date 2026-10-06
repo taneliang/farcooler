@@ -2,6 +2,7 @@ package com.farcooler.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -104,6 +106,90 @@ class TreeNavigation(
     val onOpenLevel: (String) -> Unit,
 )
 
+/**
+ * What the plan says now: the strip, read from [connection]'s plan, board and
+ * Needs You list, with the reads that fill them kicked off when nothing has
+ * been read yet. The phone's strip and the wide workspace's plan home both
+ * draw it.
+ */
+@Composable
+internal fun rememberPlanStrip(connection: Connection, workspace: WorkspaceSummary, orchestrator: Terminal?): PlanStrip {
+    val planStates by connection.plans.states.collectAsStateWithLifecycle()
+    val boards by connection.boards.collectAsStateWithLifecycle()
+    val list by connection.needsYou.collectAsStateWithLifecycle()
+    val daemon by connection.daemon.collectAsStateWithLifecycle()
+    val keepsPlan = daemon?.can(Capability.BOARD_PLAN) == true
+    LaunchedEffect(workspace.id, keepsPlan) {
+        if (boards[workspace.id] == null) connection.readBoard(workspace)
+        if (keepsPlan && planStates[workspace.id] == null) connection.plans.read(workspace)
+    }
+    val plan = (planStates[workspace.id] as? PlanReadState.Loaded)?.plan ?: Plan()
+    return PlanStrip.of(plan, PlanStrip.needsYouCount(workspace, boards[workspace.id], plan, list), orchestrator)
+}
+
+/**
+ * The plan's overview as list items: the orchestrator's header, then the
+ * plan's own rows (or the notice that the runner needs an update). The
+ * sheet's body on the phone and the main pane's home on a wide screen.
+ * [onNeedsYou] and [onOpen] are what a tap on those rows does; the sheet
+ * wraps them to close itself first.
+ */
+internal fun LazyListScope.planHome(
+    connection: Connection,
+    workspace: WorkspaceSummary,
+    strip: PlanStrip,
+    keepsPlan: Boolean,
+    planState: PlanReadState?,
+    statuses: Map<String, com.farcooler.model.TaskStatus>,
+    rulings: RulingsHook?,
+    scope: kotlinx.coroutines.CoroutineScope,
+    onNeedsYou: () -> Unit,
+    onOpen: (PlanPage) -> Unit,
+) {
+    item(key = "orchestrator") { SheetHeader(strip, onNeedsYou) }
+    if (keepsPlan) {
+        planItems(
+            state = planState,
+            statuses = statuses,
+            onOpen = onOpen,
+            onRetry = { scope.launch { connection.plans.read(workspace) } },
+            // Decided For You's copy, as on the Board (review 5).
+            rulings = rulings,
+        )
+    } else {
+        item(key = "needs-update") { PlanNotice(com.farcooler.model.PlanWords.NEEDS_UPDATE, null) }
+    }
+}
+
+/**
+ * The plan as the main pane's home on a wide screen (ov-347): the sheet's
+ * body without the sheet, so the plan is always open beside the chat.
+ */
+@Composable
+fun PlanHome(
+    connection: Connection,
+    workspace: WorkspaceSummary,
+    orchestrator: Terminal?,
+    onOpenPlan: (PlanPage) -> Unit,
+    onNeedsYou: () -> Unit,
+    onJump: (com.farcooler.net.TerminalRef) -> Unit,
+) {
+    val planStates by connection.plans.states.collectAsStateWithLifecycle()
+    val boards by connection.boards.collectAsStateWithLifecycle()
+    val daemon by connection.daemon.collectAsStateWithLifecycle()
+    val keepsPlan = daemon?.can(Capability.BOARD_PLAN) == true
+    val scope = rememberCoroutineScope()
+    val rulings = rememberRulingsHook(connection, workspace, onJump)
+    val strip = rememberPlanStrip(connection, workspace, orchestrator)
+    LazyColumn(Modifier.fillMaxSize().testTag("plan-home")) {
+        planHome(
+            connection, workspace, strip, keepsPlan, planStates[workspace.id],
+            boards[workspace.id]?.rows.orEmpty().associate { it.id to it.status },
+            rulings, scope, onNeedsYou, onOpenPlan,
+        )
+    }
+}
+
 /** The strip, under the tab row while the orchestrator is up, and the sheet it opens. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -111,7 +197,6 @@ fun PlanStripBar(connection: Connection, workspace: WorkspaceSummary, orchestrat
     var peekingJump by remember { mutableStateOf<com.farcooler.net.TerminalRef?>(null) }
     val planStates by connection.plans.states.collectAsStateWithLifecycle()
     val boards by connection.boards.collectAsStateWithLifecycle()
-    val list by connection.needsYou.collectAsStateWithLifecycle()
     val daemon by connection.daemon.collectAsStateWithLifecycle()
     val keepsPlan = daemon?.can(Capability.BOARD_PLAN) == true
     val scope = rememberCoroutineScope()
@@ -120,12 +205,7 @@ fun PlanStripBar(connection: Connection, workspace: WorkspaceSummary, orchestrat
     val rulings = rememberRulingsHook(connection, workspace) { ref ->
         peekingJump = ref
     }
-    LaunchedEffect(workspace.id, keepsPlan) {
-        if (boards[workspace.id] == null) connection.readBoard(workspace)
-        if (keepsPlan && planStates[workspace.id] == null) connection.plans.read(workspace)
-    }
-    val plan = (planStates[workspace.id] as? PlanReadState.Loaded)?.plan ?: Plan()
-    val strip = PlanStrip.of(plan, PlanStrip.needsYouCount(workspace, boards[workspace.id], plan, list), orchestrator)
+    val strip = rememberPlanStrip(connection, workspace, orchestrator)
     var peeking by remember { mutableStateOf(false) }
     if (!strip.isEmpty) PlanStripPill(strip) { peeking = true }
     LaunchedEffect(peekingJump) {
@@ -138,33 +218,25 @@ fun PlanStripBar(connection: Connection, workspace: WorkspaceSummary, orchestrat
         val state = rememberModalBottomSheetState(skipPartiallyExpanded = false)
         ModalBottomSheet(onDismissRequest = { peeking = false }, sheetState = state, modifier = Modifier.testTag("plan-sheet")) {
             LazyColumn(Modifier.fillMaxWidth()) {
-                item(key = "orchestrator") {
-                    SheetHeader(strip) {
+                planHome(
+                    connection, workspace, strip, keepsPlan, planStates[workspace.id],
+                    boards[workspace.id]?.rows.orEmpty().associate { it.id to it.status },
+                    rulings, scope,
+                    onNeedsYou = {
                         scope.launch {
                             state.hide()
                             peeking = false
                             onNeedsYou()
                         }
-                    }
-                }
-                if (keepsPlan) {
-                    planItems(
-                        state = planStates[workspace.id],
-                        statuses = boards[workspace.id]?.rows.orEmpty().associate { it.id to it.status },
-                        onOpen = { page ->
-                            scope.launch {
-                                state.hide()
-                                peeking = false
-                                onOpenPlan(page)
-                            }
-                        },
-                        onRetry = { scope.launch { connection.plans.read(workspace) } },
-                        // Decided For You's copy, as on the Board (review 5).
-                        rulings = rulings,
-                    )
-                } else {
-                    item(key = "needs-update") { PlanNotice(com.farcooler.model.PlanWords.NEEDS_UPDATE, null) }
-                }
+                    },
+                    onOpen = { page ->
+                        scope.launch {
+                            state.hide()
+                            peeking = false
+                            onOpenPlan(page)
+                        }
+                    },
+                )
             }
         }
     }
@@ -314,7 +386,8 @@ fun ThemesTab(connection: Connection, workspace: WorkspaceSummary, nav: TreeNavi
 /** Material's filter chips: one choice of three, kept per workspace (review 18). */
 @Composable
 internal fun TreeFilterChips(filter: OneTree.Filter, onChoose: (OneTree.Filter) -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    // Scrolls, for the wide workspace's 240 dp list pane, where the third chip is past the edge.
+    Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         OneTree.Filter.entries.forEach { f ->
             androidx.compose.material3.FilterChip(
                 selected = f == filter,
