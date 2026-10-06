@@ -270,10 +270,12 @@ impl SessionProjector {
         if paths.iter().any(|p| p == self.main.path()) {
             folded += self.poll_main();
         }
-        let known: std::collections::HashSet<String> = self.subagents.keys().cloned().collect();
-        if paths.iter().any(|p| p.starts_with(&self.subagents_dir)) {
-            self.discover_subagents();
+        // Most events in a project directory are another session's.
+        if !paths.iter().any(|p| p.starts_with(&self.subagents_dir)) {
+            return folded;
         }
+        let known: std::collections::HashSet<String> = self.subagents.keys().cloned().collect();
+        self.discover_subagents();
         let agents: Vec<String> = self
             .subagents
             .iter()

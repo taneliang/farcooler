@@ -166,3 +166,33 @@ fn a_nested_agent_notified_only_in_main_ends_on_a_rebuild() {
     assert_eq!(nested.status, SubagentState::Completed, "{nested:?}");
     assert_eq!(nested.ended_ms, Some(ms("10:00:40.000")), "at the notification's time");
 }
+
+/// A watch event that names only the subagents directory (a file created in
+/// it) reads a subagent file that has just appeared.
+#[test]
+fn an_event_on_the_subagents_directory_reads_a_new_subagent() {
+    let scratch = Scratch::new("new-subagent");
+    let main = scratch.path().join(format!("{SESSION}.jsonl"));
+    std::fs::write(
+        &main,
+        jsonl(&[
+            json!({"type":"user","promptId":"p1","promptSource":"typed","uuid":"u1","timestamp":"2026-10-06T10:00:00Z","message":{"content":"Go."}}),
+            agent_call("m1", "toolu_late", "Look around", true),
+        ]),
+    )
+    .unwrap();
+    let subs = scratch.path().join(SESSION).join("subagents");
+    std::fs::create_dir_all(&subs).unwrap();
+    let mut s = SessionProjector::open(main);
+    s.poll();
+    std::fs::write(subs.join("agent-alate.meta.json"), r#"{"agentType":"Explore","toolUseId":"toolu_late"}"#).unwrap();
+    std::fs::write(
+        subs.join("agent-alate.jsonl"),
+        jsonl(&[json!({"type":"assistant","uuid":"n1","timestamp":"2026-10-06T10:00:04Z","message":{"content":[{"type":"tool_use","id":"toolu_r","name":"Read","input":{"file_path":"a.rs"}}]}})]),
+    )
+    .unwrap();
+    s.poll_paths(std::slice::from_ref(&subs));
+    let late = sub(s.projection(), "sub:toolu_late");
+    assert_eq!(late.agent_id.as_deref(), Some("alate"), "{late:?}");
+    assert_eq!(late.tool_count, 1);
+}
