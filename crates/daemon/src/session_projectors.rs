@@ -33,6 +33,10 @@ use uuid::Uuid;
 #[derive(Default)]
 pub struct SessionProjectors {
     open: Mutex<HashMap<Uuid, Arc<Mutex<SessionProjector>>>>,
+    /// Terminals whose first projector is being built outside the lock. A
+    /// `forget` meanwhile takes the terminal out of here, and the finished
+    /// build is then dropped rather than kept for a terminal that is gone.
+    building: Mutex<std::collections::HashSet<Uuid>>,
 }
 
 /// Whether claude panes get a projector without anyone asking for one.
@@ -67,13 +71,18 @@ impl SessionProjectors {
             session.poll();
             return;
         }
+        self.building.lock().unwrap_or_else(|e| e.into_inner()).insert(terminal);
         let mut session = SessionProjector::open(transcript);
         session.poll();
-        self.open
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .entry(terminal)
-            .or_insert_with(|| Arc::new(Mutex::new(session)));
+        self.finish(terminal, session);
+    }
+
+    /// Keep a projector built for `terminal`, unless `forget` came first.
+    fn finish(&self, terminal: Uuid, session: SessionProjector) {
+        let mut open = self.open.lock().unwrap_or_else(|e| e.into_inner());
+        if self.building.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal) {
+            open.entry(terminal).or_insert_with(|| Arc::new(Mutex::new(session)));
+        }
     }
 
     pub fn is_open(&self, terminal: Uuid) -> bool {
@@ -128,7 +137,9 @@ impl SessionProjectors {
 
     /// The terminal is gone.
     pub fn forget(&self, terminal: Uuid) {
-        self.open.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal);
+        let mut open = self.open.lock().unwrap_or_else(|e| e.into_inner());
+        self.building.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal);
+        open.remove(&terminal);
     }
 }
 

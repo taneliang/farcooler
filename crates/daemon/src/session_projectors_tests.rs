@@ -188,3 +188,22 @@ fn a_busy_projector_does_not_hold_up_another_terminals_hooks() {
     });
     assert!(finished.recv_timeout(std::time::Duration::from_secs(5)).is_ok(), "b's hook waited on a's projector");
 }
+
+/// A terminal forgotten while its first projector is being built does not
+/// get that projector afterwards.
+#[test]
+fn a_projector_built_for_a_terminal_forgotten_meanwhile_is_dropped() {
+    let dir = Dir::new("forgotten");
+    let path = dir.file("s.jsonl", EDITS);
+    let projectors = SessionProjectors::default();
+    let terminal = Uuid::now_v7();
+    // `open`'s two halves, with `forget` between them.
+    projectors.building.lock().unwrap().insert(terminal);
+    let mut session = farcooler_core::session_log::projector::SessionProjector::open(path.clone());
+    session.poll();
+    projectors.forget(terminal);
+    projectors.finish(terminal, session);
+    assert!(!projectors.is_open(terminal), "leaked");
+    projectors.open(terminal, path);
+    assert!(projectors.is_open(terminal), "an ordinary open still keeps it");
+}
