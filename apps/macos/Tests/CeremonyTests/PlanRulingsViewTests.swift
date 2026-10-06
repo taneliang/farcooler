@@ -233,4 +233,79 @@ struct PlanRulingsViewTests {
         await drawn.settle()
         #expect(drawn.copied == ["ruling R-2: The inbox is amber."])
     }
+
+    // MARK: Reverse asks first (ruling R-18)
+
+    /// The dialog's own Reverse button, on the sheet a click on Reverse opened.
+    private static func confirmButton(in window: NSWindow) -> NSButton? {
+        func find(_ view: NSView) -> NSButton? {
+            if let button = view as? NSButton, button.title == "Reverse" { return button }
+            for child in view.subviews { if let found = find(child) { return found } }
+            return nil
+        }
+        return window.attachedSheet?.contentView.flatMap(find)
+    }
+
+    @Test("Reverse sends the request only from the dialog's own Reverse button")
+    func theDialogConfirmsAndSends() async throws {
+        var sent: [String] = []
+        var actions = PlanRulingActions(canKeep: true, canAsk: true, alwaysShown: true)
+        actions.reverse = { sent.append($0.short) }
+        let drawn = try await Self.draw(rulings: true, actions: actions)
+        defer { drawn.window.close() }
+        try Self.click(drawn, "plan-ruling-R-2-reverse")
+        for _ in 0..<30 where drawn.window.attachedSheet == nil { await drawn.settle() }
+        let confirm = try #require(Self.confirmButton(in: drawn.window), "no confirmation dialog opened")
+        #expect(sent.isEmpty, "opening the dialog sends nothing")
+        confirm.performClick(nil)
+        for _ in 0..<30 where sent.isEmpty { await drawn.settle() }
+        #expect(sent == ["R-2"], "confirming sends the reversal once")
+    }
+
+    /// Hosted on its own, the context menu's Reverse hands over to the row's
+    /// confirmation and never sends itself: wiring it to `actions.reverse`
+    /// goes red here.
+    @Test("The context menu's Reverse goes to the confirmation, never straight to the orchestrator")
+    func theMenuNeverSendsDirectly() async throws {
+        var sent: [String] = []
+        var asked = 0
+        var actions = PlanRulingActions(canKeep: true, canAsk: true)
+        actions.reverse = { sent.append($0.short) }
+        let ruling = PlanRuling(id: "r2", number: 2, decision: "The inbox is amber.", why: "w", reversal: "r")
+        let seen = NavigatorFilterTests.Seen()
+        let host = NSHostingView(
+            rootView: RulingMenu(ruling: ruling, copy: { _ in }, onReverse: { asked += 1 })
+                .environment(\.planRulingActions, actions)
+                .frame(width: 200, height: 200)
+                .environment(\.gridProbing, true)
+                .overlayPreferenceValue(ProbedViewsKey.self) { probed in
+                    GeometryReader { proxy in
+                        let _ = seen.views = Dictionary(
+                            probed.map { ($0.id, proxy[$0.bounds]) }, uniquingKeysWith: { first, _ in first })
+                        Color.clear
+                    }
+                })
+        let window = NavigatorFilterTests.KeyWindow(
+            contentRect: NSRect(x: -4000, y: -4000, width: 200, height: 200), styleMask: [.borderless],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        defer { window.close() }
+        for _ in 0..<15 {
+            host.layoutSubtreeIfNeeded()
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        let frame = try #require(seen.views["ruling-menu-reverse"], "\(seen.views.keys.sorted())")
+        let at = NSPoint(x: frame.midX, y: 200 - frame.midY)
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            window.sendEvent(
+                NSEvent.mouseEvent(
+                    with: type, location: at, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!)
+        }
+        try? await Task.sleep(for: .milliseconds(200))
+        #expect(asked == 1, "the menu item asks for the confirmation")
+        #expect(sent.isEmpty, "and sends nothing itself")
+    }
 }

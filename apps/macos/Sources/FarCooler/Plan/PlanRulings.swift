@@ -298,6 +298,7 @@ struct RulingMenu: View {
         if actions.canKeep, ruling.isStanding {
             Button(PlanWords.keepRuling) { actions.keep(ruling) }
             Button(PlanWords.reverseRuling, action: onReverse).disabled(!actions.canAsk)
+                .identified("ruling-menu-reverse")
             Button(PlanWords.discussRuling) { actions.discuss(ruling) }.disabled(!actions.canAsk)
             Divider()  // style-exempt: a menu divider, in the context menu RulingMenu builds
         }

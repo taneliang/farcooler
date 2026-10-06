@@ -101,7 +101,7 @@ fn a_kept_ruling_is_precedent_and_a_reversed_one_is_a_lesson() {
     for h in ALL {
         let third = section(&prose(h), "3. Dispatch, answer, or report");
         assert!(third.contains("cite a kept one as precedent"), "{h:?}: {third}");
-        assert!(third.contains("`plan ruling reverse R-12 [--sha <commit>]`, note the lesson as a decision note on its card, ask next time"), "{h:?}: {third}");
+        assert!(third.contains("`plan ruling reverse R-12 [--sha <commit>]`, note the lesson on its card as a decision, ask next time"), "{h:?}: {third}");
         assert!(third.contains("Never keep one for them."), "{h:?}: {third}");
     }
 }
