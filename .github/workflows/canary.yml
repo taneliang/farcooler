@@ -101,13 +101,16 @@ jobs:
           fetch-depth: 0
       # Main's successful CI runs, newest first. The script takes the nearest
       # one in this commit's history, so the list's order does not matter.
+      # A GitHub 5xx or timeout is retried with backoff; a persistent one
+      # fails the job with an ::error::, never a guess at what to ship
+      # (scripts/gh-api-retry.sh, ov-344).
       - name: List the green CI runs
         if: github.event_name == 'workflow_run'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=100" \
+          ./scripts/gh-api-retry.sh "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=100" \
             --jq '.workflow_runs[] | {head_sha, created_at}' > "$RUNNER_TEMP/green.ndjson"
           echo "$(wc -l < "$RUNNER_TEMP/green.ndjson") green CI runs listed"
       - name: Decide
@@ -119,6 +122,7 @@ jobs:
           CANDIDATES: ${{ runner.temp }}/green.ndjson
         run: ./scripts/canary-plan.py
       - run: ./scripts/canary-plan.py --self-test
+      - run: ./scripts/gh-api-retry.sh --self-test
 
   # The wire lint, here, before anything ships. CI runs it too, but nothing
   # here waited for CI: a renumbered field went red there and out to TestFlight
