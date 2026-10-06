@@ -40,40 +40,9 @@ final class ShellPaneScrollTests: XCTestCase {
     }
 
     /// `ws`, `tab`, and the rest of `ShellRootView.probe`'s value, once the
-    /// shell has finished with the last gesture.
-    ///
-    /// **Waits for `busy=0`, because XCUITest does not.** A drag returns, and
-    /// the next query is answered, once XCUITest calls the app idle — and a
-    /// page turn changes `tab` only when its spring's completion re-seats the
-    /// position, which that idle check does not wait for. Read straight after
-    /// the return swipe under `-shell-slow-frame`, the probe said `tab=1
-    /// busy=1` in 15 reads of 15, with the release already decided as a commit
-    /// to tab 0; `testAHorizontalSwipeOverTheDiffTurnsThePage` failed on CI
-    /// (run 37404997172) on exactly that `1`. A shell that never settles — a
-    /// release that never ran — still fails, here, by name.
+    /// shell has finished with the last gesture (`XCUIApplication.shellState`).
     private func state(_ app: XCUIApplication) throws -> [String: Int] {
-        let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
-        guard probe.waitForExistence(timeout: 30) else {
-            print(app.debugDescription)
-            throw HarnessFailure("The shell never rendered its probe.")
-        }
-        let deadline = Date().addingTimeInterval(10)
-        var value = probe.value as? String ?? ""
-        while value.split(separator: " ").contains("busy=1") {
-            guard Date() < deadline else {
-                throw HarnessFailure(
-                    "The shell never let go of the last gesture (\(value)).")
-            }
-            Thread.sleep(forTimeInterval: 0.1)
-            value = probe.value as? String ?? ""
-        }
-        var parsed: [String: Int] = [:]
-        for pair in value.split(separator: " ") {
-            let halves = pair.split(separator: "=")
-            guard halves.count == 2, let value = Int(halves[1]) else { continue }
-            parsed[String(halves[0])] = value
-        }
-        return parsed
+        try app.shellState()
     }
 
     /// Where the visible pane's own scroll view is.

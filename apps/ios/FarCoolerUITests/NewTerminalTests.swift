@@ -37,21 +37,14 @@ final class NewTerminalTests: XCTestCase {
         return LiveRunner.launch()
     }
 
-    /// `ws`, `tab`, `worktrees`, `tabs`, … off the shell's probe.
+    /// `ws`, `tab`, `worktrees`, `tabs`, … off the shell's probe, once the
+    /// shell has finished with the last gesture (`XCUIApplication.shellState`).
     ///
     /// Read by NAME, never by position: `TerminalScrollTests.field` documents
     /// what reading that string positionally cost, and this one has grown four
     /// fields since it was written.
-    private func state(_ app: XCUIApplication) -> [String: Int] {
-        let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
-        guard probe.exists else { return [:] }
-        var parsed: [String: Int] = [:]
-        for pair in (probe.value as? String ?? "").split(separator: " ") {
-            let halves = pair.split(separator: "=")
-            guard halves.count == 2, let value = Int(halves[1]) else { continue }
-            parsed[String(halves[0])] = value
-        }
-        return parsed
+    private func state(_ app: XCUIApplication) throws -> [String: Int] {
+        try app.shellState()
     }
 
     /// Walk into the demo's 'crossing' worktree (ov-55: the app opens on
@@ -153,11 +146,11 @@ final class NewTerminalTests: XCTestCase {
         if confirm.waitForExistence(timeout: 5) { confirm.tap() }
 
         let gone = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in self.state(app)["tabs"] == tabsBefore },
+            predicate: NSPredicate { _, _ in (try? self.state(app))?["tabs"] == tabsBefore },
             object: nil)
         XCTAssertEqual(
             XCTWaiter.wait(for: [gone], timeout: 30), .completed,
-            "the worktree has \(state(app)["tabs"] ?? -1) tabs, not the \(tabsBefore) it started "
+            "the worktree has \((try? state(app))?["tabs"] ?? -1) tabs, not the \(tabsBefore) it started "
                 + "with: the terminal this test made is still on \(runner)")
     }
 
@@ -172,7 +165,7 @@ final class NewTerminalTests: XCTestCase {
         let app = launch()
         try waitForShell(app)
 
-        let before = state(app)
+        let before = try state(app)
         let tabsBefore = try XCTUnwrap(before["tabs"], "the shell published no tab count")
         let tabBefore = try XCTUnwrap(before["tab"], "the shell published no current tab")
 
@@ -197,7 +190,7 @@ final class NewTerminalTests: XCTestCase {
         // than slept on: `DaemonClient.createTerminal` waits up to three
         // seconds for exactly this on the Mac.
         let grew = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in (self.state(app)["tabs"] ?? 0) > tabsBefore },
+            predicate: NSPredicate { _, _ in ((try? self.state(app))?["tabs"] ?? 0) > tabsBefore },
             object: nil)
         guard XCTWaiter.wait(for: [grew], timeout: 30) == .completed else {
             XCTFail(
@@ -206,7 +199,7 @@ final class NewTerminalTests: XCTestCase {
             return
         }
 
-        let after = state(app)
+        let after = try state(app)
         // Removed again when the test is done, pass or fail. See
         // `closeWhatThisMade` for why that is not tidiness.
         // Only when the worktree grew by exactly one: a landing index read

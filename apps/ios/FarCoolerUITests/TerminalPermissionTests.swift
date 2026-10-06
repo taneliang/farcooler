@@ -50,19 +50,20 @@ final class TerminalPermissionTests: XCTestCase {
         XCTAssertTrue(bar.waitForExistence(timeout: 30), "the bar never appeared")
         XCTAssertTrue(bar.label.contains("asking"), "opened \(bar.label), not asking")
 
-        for _ in 0..<4 where probe(app, "shell-state")["tab"] != "2" {
+        // Read once the shell has let go of the last swipe, so the tab is where
+        // it landed (`XCUIApplication.shellState`).
+        for _ in 0..<4 where try app.shellState()["tab"] != 2 {
             let y = 0.42
-            let tab = Int(probe(app, "shell-state")["tab"] ?? "") ?? 0
+            let tab = try app.shellState()["tab"] ?? 0
             let (fromX, toX) = tab < 2 ? (0.78, 0.22) : (0.22, 0.78)
             app.coordinate(withNormalizedOffset: CGVector(dx: fromX, dy: y)).press(
                 forDuration: 0.05,
                 thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: toX, dy: y)),
                 withVelocity: .slow, thenHoldForDuration: 0.4)
-            _ = waitFor(3) { self.probe(app, "shell-state")["tab"] == "2" }
+            _ = waitFor(3) { (try? app.shellState())?["tab"] == 2 }
         }
-        XCTAssertEqual(
-            probe(app, "shell-state")["tab"], "2",
-            "not on asking's claude tab: \(probe(app, "shell-state"))")
+        let shell = try app.shellState()
+        XCTAssertEqual(shell["tab"], 2, "not on asking's claude tab: \(shell)")
         XCTAssertTrue(bar.label.contains("asking"), "swiped off asking onto \(bar.label)")
         XCTAssertTrue(
             waitFor(10) { !self.probe(app, "terminal-ask").isEmpty },

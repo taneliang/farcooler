@@ -973,9 +973,11 @@ final class TerminalScrollTests: XCTestCase {
 
         let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
         func place() -> String {
-            (probe.value as? String ?? "").split(separator: " ")
-                .filter { $0.hasPrefix("ws=") || $0.hasPrefix("tab=") }.joined(separator: " ")
+            guard let state = try? app.shellState() else { return "" }
+            return "ws=\(state["ws"] ?? -1) tab=\(state["tab"] ?? -1)"
         }
+        // Once the swipe that got here has settled, so `before` is where it landed.
+        _ = try app.shellState()
         let before = place()
         XCTAssertFalse(before.isEmpty, "the shell never reported where it was")
 

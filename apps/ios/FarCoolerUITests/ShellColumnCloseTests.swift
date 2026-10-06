@@ -35,20 +35,11 @@ final class ShellColumnCloseTests: XCTestCase {
         return app
     }
 
-    /// `ws`, `tab`, `column`, `pinned`, and the rest of `ShellRootView.probe`.
+    /// `ws`, `tab`, `column`, `pinned`, and the rest of `ShellRootView.probe`,
+    /// once the shell has finished with the last gesture
+    /// (`XCUIApplication.shellState`).
     private func state(_ app: XCUIApplication) throws -> [String: Int] {
-        let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
-        guard probe.waitForExistence(timeout: 30) else {
-            print(app.debugDescription)
-            throw HarnessFailure("The shell never rendered its probe.")
-        }
-        var parsed: [String: Int] = [:]
-        for pair in (probe.value as? String ?? "").split(separator: " ") {
-            let halves = pair.split(separator: "=")
-            guard halves.count == 2, let value = Int(halves[1]) else { continue }
-            parsed[String(halves[0])] = value
-        }
-        return parsed
+        try app.shellState()
     }
 
     private func bar(_ app: XCUIApplication) -> XCUIElement {

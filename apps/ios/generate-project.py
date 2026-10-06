@@ -880,6 +880,9 @@ UI_TEST_SOURCES = [
     # Not a test: the demo runner, and the walk from Needs You into one of
     # its worktrees that every live-runner suite starts with.
     "LiveRunner.swift",
+    # Not a test: the one reader of the shell's `shell-state` probe, which
+    # waits for it to stop being busy (ov-354).
+    "ShellState.swift",
     "WorkspaceScreenTests.swift",
     # The workspace screen's title, segments and plan strip read over the
     # terminal theme's ground, measured in pixels (ov-342). Over the canned runner.

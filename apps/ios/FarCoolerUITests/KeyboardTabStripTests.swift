@@ -51,12 +51,7 @@ final class KeyboardTabStripTests: XCTestCase {
         guard probe.waitForExistence(timeout: 5) else {
             throw XCTSkip("The shell never reported where it was.")
         }
-        func field(_ name: String) -> Int? {
-            (probe.value as? String ?? "").split(separator: " ")
-                .first { $0.hasPrefix("\(name)=") }
-                .flatMap { Int($0.split(separator: "=")[1]) }
-        }
-        let home = try XCTUnwrap(field("tab"))
+        let home = try XCTUnwrap(try app.shellState()["tab"])
         let initialBarFrame = bar.frame
 
         let transcript = app.scrollViews["agent-transcript"]
@@ -119,7 +114,7 @@ final class KeyboardTabStripTests: XCTestCase {
         try XCTSkipUnless(home != 0, "This pane is already the first tab; nothing to move to.")
         lift(bar, by: 20)
         let landed = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in field("tab") == 0 }, object: nil)
+            predicate: NSPredicate { _, _ in (try? app.shellState())?["tab"] == 0 }, object: nil)
         XCTAssertEqual(
             XCTWaiter.wait(for: [landed], timeout: 5), .completed,
             "A lift on the bar after the keyboard had come and gone chose nothing: "
