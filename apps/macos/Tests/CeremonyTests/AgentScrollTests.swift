@@ -71,10 +71,10 @@ struct AgentScrollTests {
 
     /// A terminal of its own, so the composer starts from no draft: drafts
     /// are kept per pane across runs (`PaneDraftStore`).
-    static func terminal(_ id: String) throws -> Terminal {
+    static func terminal(_ id: String, activity: String = "idle") throws -> Terminal {
         let json = #"""
             {"id":"\#(id)","short":"\#(id)","title":"Terminal 1","preset":"claude","state":"running",
-             "epoch":1,"paneMode":"agent","activity":"idle"}
+             "epoch":1,"paneMode":"agent","activity":"\#(activity)"}
             """#
         return try JSONDecoder().decode(Terminal.self, from: Data(json.utf8))
     }
@@ -119,6 +119,42 @@ struct AgentScrollTests {
         process.waitUntilExit()
     }
 
+    /// The pane's terminal, which a test changes as the fleet would.
+    @MainActor
+    final class Mount: ObservableObject {
+        @Published var terminal: Terminal
+        init(_ terminal: Terminal) { self.terminal = terminal }
+    }
+
+    struct Hosted: View {
+        @ObservedObject var mount: Mount
+        let binary: String
+        let probe: AgentScrollProbe
+        var body: some View {
+            AgentSurface(
+                terminal: mount.terminal, binary: binary, environment: ProcessInfo.processInfo.environment,
+                hostArguments: [], linkGeneration: 0, refusal: { nil }, isFocused: false,
+                searchFiles: { _ in [] }, onResize: { _, _ in }
+            )
+            .environment(\.agentScrollProbe, probe)
+            .frame(width: 700, height: 600)
+        }
+    }
+
+    /// A real click at `point` in `host`'s own coordinates, delivered as
+    /// the window delivers one: an event, not the button's action called.
+    static func click(_ host: NSView, at point: NSPoint, in window: NSWindow) {
+        let location = host.convert(point, to: nil)
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            guard
+                let event = NSEvent.mouseEvent(
+                    with: type, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+            else { continue }
+            window.sendEvent(event)
+        }
+    }
+
     /// Lets layout and any scroll it asks for land.
     static func settle() async { try? await Task.sleep(for: .milliseconds(400)) }
 
@@ -135,14 +171,8 @@ struct AgentScrollTests {
         let probe = AgentScrollProbe()
         let pane = "scroll-\(UUID().uuidString.prefix(8))"
         defer { PaneDraftStore.record("", forPane: pane) }
-        let surface = AgentSurface(
-            terminal: try Self.terminal(pane), binary: standIn.binary, environment: ProcessInfo.processInfo.environment,
-            hostArguments: [], linkGeneration: 0, refusal: { nil }, isFocused: false,
-            searchFiles: { _ in [] }, onResize: { _, _ in }
-        )
-        .environment(\.agentScrollProbe, probe)
-        .frame(width: 700, height: 600)
-        let host = NSHostingView(rootView: surface)
+        let mount = Mount(try Self.terminal(pane))
+        let host = NSHostingView(rootView: Hosted(mount: mount, binary: standIn.binary, probe: probe))
         let window = NSWindow(
             contentRect: NSRect(x: -7000, y: -7000, width: 700, height: 600), styleMask: [.titled],
             backing: .buffered, defer: false)
@@ -165,6 +195,11 @@ struct AgentScrollTests {
         #expect(opened.contentInsets.bottom > 40, "the composer makes no inset: \(opened.contentInsets.bottom)")
         #expect(opened.visibleRect.height > opened.containerSize.height + 40, "content doesn't run under the composer")
         #expect(probe.following && !probe.showsJump)
+        // A row's spacing between the last row and the glass, not the 1 pt
+        // anchor under it: the tail can be "in view" with no room at all.
+        #expect(
+            (probe.clearance ?? 0) >= Spacing.inset - 1,
+            "the last row ends \(probe.clearance ?? -1) pt above the composer")
         Self.capture(window, "1-opened")
 
         // Pinned: a streamed reply is followed.
@@ -196,11 +231,27 @@ struct AgentScrollTests {
         #expect(!probe.following && probe.showsJump)
         Self.capture(window, "2-scrolled-up")
 
+        // Nor does the composer growing, or Working… appearing: both re-anchor
+        // a pinned transcript, and only a pinned one.
+        probe.prefill?((1...6).map { "Draft line \($0)" }.joined(separator: "\n"))
+        try await Task.sleep(for: .milliseconds(1_000))
+        #expect(abs((probe.geometry?.contentOffset.y ?? 0) - offset) < 1, "the composer growing moved a reader who'd scrolled up")
+        #expect(!probe.following && probe.showsJump)
+        mount.terminal = try Self.terminal(pane, activity: "working")
+        try await Task.sleep(for: .milliseconds(1_000))
+        #expect(abs((probe.geometry?.contentOffset.y ?? 0) - offset) < 1, "Working… appearing moved a reader who'd scrolled up")
+        #expect(!probe.following && probe.showsJump)
+        // One line again, for the growth below.
+        probe.prefill?("x")
+
         // A sent message comes into view, from up there.
         probe.send?("Here's what I want next.")
         #expect(await Self.until { probe.following && (probe.tailHiddenBy ?? .infinity) <= 0.5 }, "the sent message stayed out of view: \(probe.tailHiddenBy ?? -1) pt")
         #expect(!probe.showsJump)
         await Self.settle()
+        #expect(
+            (probe.clearance ?? 0) >= Spacing.inset - 1,
+            "the sent message ends \(probe.clearance ?? -1) pt above the composer")
         Self.capture(window, "3-sent")
 
         // The composer growing keeps the tail in view.
@@ -215,7 +266,13 @@ struct AgentScrollTests {
         scroll.contentView.scroll(to: NSPoint(x: 0, y: 100))
         scroll.reflectScrolledClipView(scroll.contentView)
         #expect(await Self.until(10) { probe.showsJump })
-        probe.jump?()
+        await Self.settle()
+        // Clicked where it's drawn: centered, its bottom 8 pt over the
+        // composer group, whose top is where the scroll view's container
+        // ends. It's drawn outside that group's frame, which is where a
+        // click can miss.
+        let container = try #require(probe.geometry?.containerSize.height)
+        Self.click(host, at: NSPoint(x: 350, y: container - Spacing.group - 15), in: window)
         #expect(await Self.until { probe.following && (probe.tailHiddenBy ?? .infinity) <= 0.5 }, "Jump to Latest didn't return to the tail")
         #expect(!probe.showsJump)
 

@@ -328,6 +328,9 @@ struct AgentSurface: View {
                         },
                         onEditMessage: { prefill = $0 }
                     )
+                    // Where the last row ends, for a test's probe; nothing
+                    // in the app, whose probe is nil.
+                    .modifier(LastRowProbe(probe: row.id == stream.transcript.rows.last?.id ? probe : nil))
                     .id(row.id)
                 }
 
@@ -437,7 +440,6 @@ struct AgentSurface: View {
             scrollToTail()
             probe?.send = { text in Task { await stream.send(text) } }
             probe?.prefill = { prefill = $0 }
-            probe?.jump = { jumpToTail() }
         }
         // The pane is in agent mode with no agent in it, said where the
         // conversation would have been.
