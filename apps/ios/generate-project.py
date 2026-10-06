@@ -506,6 +506,10 @@ AGENTKIT_SOURCES = [
     # pipes and a heading as a line beginning with a hash. Same conversation,
     # unreadable on one of the two clients.
     "MarkdownView.swift",
+    # Each run of a reply as its own compared view, and the split that lets
+    # a streaming reply redraw only its last paragraph (ov-382).
+    # `MarkdownView.swift` draws through it.
+    "MarkdownPiece.swift",
     # Both `MarkdownView.swift` above and `DiffComputation.swift` reference it,
     # so the phone does not build without it. Not optional the way a view is:
     # this is the memo that keeps a transcript row's body from re-parsing its

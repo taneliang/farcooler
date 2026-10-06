@@ -851,6 +851,7 @@ struct AgentView: View {
                         AgentRowView(
                             row: row,
                             isLast: row.id == transcript.rows.last?.id,
+                            turnRunning: isWorking,
                             pending: permission(gating: row),
                             onAnswer: { optionID in
                                 guard let id = transcript.pendingPermission?.id else { return }
@@ -1263,6 +1264,10 @@ private struct AgentRowView: View {
     /// while nothing has followed it — the transcript already knows the order,
     /// so asking "is anything after me" is the same question.
     var isLast: Bool = false
+    /// Whether the turn is still running, so the newest reply may still
+    /// grow: drawn `streaming` (ov-382), a delta redraws only its last
+    /// paragraph. The Mac's `AgentRowView` says why `isLast` alone isn't it.
+    var turnRunning = false
     var pending: PendingPermission?
     var onAnswer: ((String) -> Void)?
 
@@ -1273,7 +1278,7 @@ private struct AgentRowView: View {
         // once a message has been placed, where it came from changes nothing
         // about how it is drawn.
         case let .message(role, text, _):
-            MessageRow(role: role, text: text, isLive: isLast)
+            MessageRow(role: role, text: text, isLive: isLast, streaming: isLast && turnRunning)
         case let .tool(tool):
             ToolRowView(tool: tool, isLive: isLast, pending: pending, onAnswer: onAnswer)
         case let .subagent(block):
@@ -1292,6 +1297,8 @@ private struct MessageRow: View {
     let text: String
     /// Whether this is the newest row, which is what makes a thought "live".
     var isLive: Bool = false
+    /// A reply still being written (`MarkdownText.streaming`).
+    var streaming = false
 
     var body: some View {
         switch role {
@@ -1325,7 +1332,7 @@ private struct MessageRow: View {
             // uses. Plain `Text` here meant a table arrived as a wall of pipes
             // and a heading as a line starting with a hash: the same
             // conversation, unreadable on the phone.
-            AgentReplyText(text: text, trailingClearance: 40)
+            AgentReplyText(text: text, trailingClearance: 40, streaming: streaming)
 
         case .thought:
             // Open while it is being written, closed once it is done.
