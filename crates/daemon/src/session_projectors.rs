@@ -1,0 +1,119 @@
+//! The daemon's session projectors: one per claude pane that has one open
+//! (ov-363).
+//!
+//! A projector is opened for a terminal and rebuilt from the transcript on
+//! disk (design decision D8: rebuild, no checkpoint). From then on it is fed
+//! from three places, which are the inputs the design names:
+//!
+//! - every claude hook routed to the terminal (`HookIngress::accept`), as
+//!   provisional rows;
+//! - the watcher's tick for the pane (`watch::registry_join`), which reads
+//!   what the files gained and hands over claude's registry status;
+//! - `SessionStart` for another session, which moves it to that transcript.
+//!
+//! **Beside the old readers, not yet instead of them.** Nothing reads rows
+//! out of here yet: the paged `agent.rows` RPC is ov-366. Until it lands a
+//! projector is opened only on request (`open`), or for every claude pane
+//! whose log the registry names when `FARCOOLER_PROJECTOR=1` is set, so the
+//! daemon can be run with it shadowing the old readers. watch.rs's own
+//! turn, question and subagent state still come from `claude::parse_line`.
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+
+use farcooler_core::session_log::projector::{Activity, HookEffect, Row, SessionProjector};
+use uuid::Uuid;
+
+/// Every open projector, by terminal.
+#[derive(Default)]
+pub struct SessionProjectors {
+    open: Mutex<HashMap<Uuid, SessionProjector>>,
+}
+
+/// Whether claude panes get a projector without anyone asking for one.
+pub fn shadowing() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("FARCOOLER_PROJECTOR").is_some_and(|v| v == "1"))
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
+}
+
+impl SessionProjectors {
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<Uuid, SessionProjector>> {
+        self.open.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Open a projector for `terminal` on `transcript`, read what is on disk
+    /// so far, and keep it. A terminal already open on that transcript is
+    /// left as it is; on another, it is moved there with its rows kept.
+    pub fn open(&self, terminal: Uuid, transcript: PathBuf) {
+        let mut open = self.lock();
+        match open.get_mut(&terminal) {
+            Some(session) => session.rebind(transcript),
+            None => {
+                open.insert(terminal, SessionProjector::open(transcript));
+            }
+        }
+        if let Some(session) = open.get_mut(&terminal) {
+            session.poll();
+        }
+    }
+
+    pub fn is_open(&self, terminal: Uuid) -> bool {
+        self.lock().contains_key(&terminal)
+    }
+
+    /// A claude hook routed to `terminal`. Nothing when no projector is open.
+    pub fn hook(&self, terminal: Uuid, event: &str, payload: &serde_json::Value) {
+        let mut open = self.lock();
+        let Some(session) = open.get_mut(&terminal) else { return };
+        // The file first, so a hook that arrives after its own record is
+        // checked against it rather than put up as news.
+        session.poll();
+        if let HookEffect::Rebind { transcript_path: Some(path), .. } = session.projection_mut().hook(event, payload, now_ms()) {
+            session.rebind(path);
+            session.poll();
+        }
+    }
+
+    /// The watcher's tick: whatever the files gained, and what claude's
+    /// registry says the process is doing.
+    pub fn tick(&self, terminal: Uuid, activity: Option<Activity>) {
+        let mut open = self.lock();
+        let Some(session) = open.get_mut(&terminal) else { return };
+        session.poll();
+        if let Some(activity) = activity {
+            session.projection_mut().set_activity(activity);
+        }
+    }
+
+    /// A page of `terminal`'s rows, oldest first: up to `limit` before `ord`.
+    pub fn page(&self, terminal: Uuid, before: Option<u64>, limit: usize) -> Option<Vec<Row>> {
+        Some(self.lock().get(&terminal)?.projection().page(before, limit).to_vec())
+    }
+
+    /// `terminal`'s rows changed after revision `rev`, and the revision now.
+    pub fn changed_since(&self, terminal: Uuid, rev: u64) -> Option<(Vec<Row>, u64)> {
+        let open = self.lock();
+        let p = open.get(&terminal)?.projection();
+        Some((p.changed_since(rev).into_iter().cloned().collect(), p.revision()))
+    }
+
+    /// The terminal is gone.
+    pub fn forget(&self, terminal: Uuid) {
+        self.lock().remove(&terminal);
+    }
+}
+
+/// The daemon's projectors.
+pub fn global() -> &'static SessionProjectors {
+    static PROJECTORS: OnceLock<SessionProjectors> = OnceLock::new();
+    PROJECTORS.get_or_init(SessionProjectors::default)
+}
+
+#[cfg(test)]
+#[path = "session_projectors_tests.rs"]
+mod tests;

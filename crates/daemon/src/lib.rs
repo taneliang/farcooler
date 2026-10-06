@@ -44,6 +44,7 @@ pub mod review_ops;
 pub mod runtime;
 pub mod service;
 pub mod sessions;
+pub mod session_projectors;
 pub mod stack;
 pub mod session_discovery;
 pub mod skill_install;

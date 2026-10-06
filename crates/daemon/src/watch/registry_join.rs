@@ -9,12 +9,31 @@
 
 use std::path::PathBuf;
 
+use uuid::Uuid;
+
 use super::{LogFormat, PaneJoin, PaneLog};
 
 /// What the registry says this pane's log is, if it says anything.
 pub(super) fn registered_log(pane: &PaneJoin) -> Option<PathBuf> {
     let registry = crate::claude_registry::global();
     crate::registry_binding::registered_log(registry, pane.preset.as_deref(), pane.pid, &pane.cwd)
+}
+
+/// The pane's tick for its session projector (`session_projectors`): what its
+/// files gained, and the registry's busy or idle. Opens one for a claude pane
+/// the registry names only while the daemon shadows (`FARCOOLER_PROJECTOR=1`).
+pub(super) fn feed_projector(terminal: Uuid, pane: &PaneJoin) {
+    let projectors = crate::session_projectors::global();
+    if !projectors.is_open(terminal) {
+        if !crate::session_projectors::shadowing() {
+            return;
+        }
+        let Some(path) = registered_log(pane) else { return };
+        projectors.open(terminal, path);
+    }
+    let claude = pane.preset.as_deref().is_some_and(|p| p.starts_with("claude"));
+    let entry = pane.pid.filter(|_| claude).and_then(|pid| crate::claude_registry::global().by_pid(pid));
+    projectors.tick(terminal, entry.and_then(|e| e.status));
 }
 
 /// Move a claude pane that is reading one session's log onto the one the

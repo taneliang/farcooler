@@ -474,6 +474,9 @@ impl HookIngress {
         let first = !assemblers.contains_key(&terminal);
         let events = assemblers.entry(terminal).or_default().accept(agent, event, payload);
         drop(assemblers);
+        if agent == Agent::Claude {
+            crate::session_projectors::global().hook(terminal, event, payload);
+        }
         if first {
             tracing::info!(
                 terminal = %terminal,
@@ -501,6 +504,7 @@ impl HookIngress {
     pub fn forget(&self, terminal: Uuid) {
         self.asks.forget(terminal);
         self.assemblers.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal);
+        crate::session_projectors::global().forget(terminal);
         if let Some(alive) = self.tails.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal) {
             alive.store(false, Ordering::Relaxed);
         }

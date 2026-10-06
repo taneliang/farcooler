@@ -4460,6 +4460,7 @@ impl Watcher {
         let log = tokio::task::spawn_blocking(move || {
             let mut log = log;
             registry_join::follow_registry(&mut log, registry_join::registered_log(&pane));
+            registry_join::feed_projector(id, &pane);
             advance_log(log, &pane, now, churn, working, |pane| {
                 // Claude's registry first; the title-and-files guess only
                 // where it has no answer.
