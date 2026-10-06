@@ -123,9 +123,10 @@ pub struct Projection {
     /// over 156 real files, a front-of-queue pop was wrong 1,506 times in
     /// 1,888. The prompt that follows says which it was.
     pending_dequeues: u32,
-    /// Hashes of every line already folded. A rewrite read again from its
-    /// start, or a `/resume` back into a session already shown, re-reads lines
-    /// this projection has; folding them twice would duplicate their rows.
+    /// Hashes of every line with a `uuid` already folded. A rewrite read again
+    /// from its start, or a `/resume` back into a session already shown,
+    /// re-reads lines this projection has; folding them twice would duplicate
+    /// their rows. (Lines without a `uuid` are always folded; see `repeated`.)
     seen_lines: HashSet<u64>,
     /// Turns a `turn_duration` has already timed. A second one is not theirs.
     timed: HashSet<usize>,
@@ -307,6 +308,17 @@ impl Projection {
             return;
         }
         self.push(id, self.turn, false, RowKind::Gap(Gap { reason, count: 1 }));
+    }
+
+    /// Whether `line` is a record already folded, noting it if not.
+    ///
+    /// Only a record with a `uuid` can be a repeat: claude gives every
+    /// message, prompt and system record one, so a second copy of such a line
+    /// is the same record read again. A record without one (`queue-operation`
+    /// above all) can be written twice on purpose: two identical dequeues in
+    /// the same millisecond are two dequeues, 44 times in the real corpus.
+    fn repeated(&mut self, scope: &str, record: &Record<'_>, line: &[u8]) -> bool {
+        record.uuid.get().is_some() && self.seen(scope, line)
     }
 
     /// Whether `line` has been folded already, noting it if not.
@@ -513,13 +525,13 @@ impl Projection {
     pub fn fold_line(&mut self, line: &[u8]) {
         self.stats.lines += 1;
         self.stats.bytes += line.len() as u64;
-        if self.seen("", line) {
-            return;
-        }
         let Some(record) = decode(line) else {
             self.gap(GapReason::Unparsed);
             return;
         };
+        if self.repeated("", &record, line) {
+            return;
+        }
         let at = record.timestamp.get().and_then(parse_iso8601_millis);
         match record.kind.get() {
             Some("user") => self.user(&record, at),
@@ -1082,9 +1094,6 @@ impl Projection {
     pub fn fold_subagent_line(&mut self, agent_id: &str, meta: Option<&SubagentMeta>, line: &[u8]) {
         self.stats.lines += 1;
         self.stats.bytes += line.len() as u64;
-        if self.seen(agent_id, line) {
-            return;
-        }
         if !self.agents.contains_key(agent_id) {
             if let Some(meta) = meta {
                 self.join_by_meta(agent_id, meta);
@@ -1094,6 +1103,9 @@ impl Projection {
             self.stats.gaps += 1;
             return;
         };
+        if self.repeated(agent_id, &record, line) {
+            return;
+        }
         let at = record.timestamp.get().and_then(parse_iso8601_millis);
         let mut tools = 0u32;
         let mut action = None;

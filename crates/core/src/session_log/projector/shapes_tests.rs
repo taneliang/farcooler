@@ -125,3 +125,20 @@ fn a_second_turn_duration_does_not_retime_a_timed_turn() {
     let p = fold(&format!("{META_PROMPT}{late}\n"));
     assert_eq!(turn(&p, "turn:p2").duration_ms, Some(500));
 }
+
+#[test]
+fn two_identical_dequeues_in_one_millisecond_are_two_dequeues() {
+    // Claude wrote this 44 times in the real corpus: the same dequeue line
+    // twice, same millisecond, delivering two queued messages.
+    let lines = [
+        r#"{"type":"user","promptId":"p1","promptSource":"typed","uuid":"u1","message":{"content":"Start."}}"#,
+        r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-10-06T12:00:01.000Z","content":"First queued."}"#,
+        r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-10-06T12:00:02.000Z","content":"Second queued."}"#,
+        r#"{"type":"queue-operation","operation":"dequeue","timestamp":"2026-10-06T12:00:03.000Z"}"#,
+        r#"{"type":"queue-operation","operation":"dequeue","timestamp":"2026-10-06T12:00:03.000Z"}"#,
+        r#"{"type":"user","promptId":"p2","promptSource":"queued","uuid":"u2","message":{"content":"First queued."}}"#,
+        r#"{"type":"user","promptId":"p3","promptSource":"queued","uuid":"u3","message":{"content":"Second queued."}}"#,
+    ];
+    let p = fold(&lines.join("\n"));
+    assert_eq!(queued(&p), [("First queued.", QueuedState::Sent), ("Second queued.", QueuedState::Sent)]);
+}
