@@ -39,7 +39,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -197,7 +196,7 @@ internal fun SheetHeader(strip: PlanStrip) {
                 Text(it, color = glanceColor(GlancePalette.amber))
             }
         }
-        HorizontalDivider(Modifier.padding(top = 8.dp))
+        Separator(Modifier.padding(top = 8.dp))
     }
 }
 
@@ -282,7 +281,7 @@ fun ThemesTab(model: AppModel, connection: Connection, workspace: WorkspaceSumma
                     )
                 }
                 items(tree.work, key = { it.id }) { TreeRow(it, nav) }
-                if (tree.below.isNotEmpty()) item(key = "divider") { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
+                if (tree.below.isNotEmpty()) item(key = "divider") { Separator(Modifier.padding(vertical = 8.dp)) }
                 items(tree.below, key = { it.id }) { TreeRow(it, nav) }
                 // The Worktrees tab's two ways to make one, kept: each claims it
                 // for this workspace.
@@ -331,7 +330,7 @@ fun TreeLevelScreen(connection: Connection, workspace: WorkspaceSummary, nodeId:
                             trailingContent = { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.outline) },
                             modifier = Modifier.clickable(role = Role.Button) { open(node.target, nav) }.testTag("tree-own"),
                         )
-                        HorizontalDivider()
+                        Separator()
                     }
                     items(node.children, key = { it.id }) { TreeRow(it, nav) }
                 }
