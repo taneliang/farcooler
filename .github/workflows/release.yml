@@ -287,7 +287,7 @@ jobs:
             --sign "$MACOS_SIGN_IDENTITY" "$app"
 
           ditto -c -k --keepParent "$app" 'Far Cooler.zip'
-          xcrun notarytool submit 'Far Cooler.zip' \
+          ./scripts/notarytool-retry.sh submit 'Far Cooler.zip' \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
@@ -339,7 +339,7 @@ jobs:
         run: |
           set -euo pipefail
           dmg="$(ls *.dmg)"
-          xcrun notarytool submit "$dmg" \
+          ./scripts/notarytool-retry.sh submit "$dmg" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
