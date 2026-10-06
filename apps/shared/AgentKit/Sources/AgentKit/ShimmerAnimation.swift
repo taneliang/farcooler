@@ -15,17 +15,34 @@ public enum ShimmerAnimation {
     /// Half the band's width, as a fraction of the label's.
     static let halfWidth = 0.3
 
+    /// How far the band reaches, in the label's widths: from wholly before
+    /// the first letter to wholly past the last.
+    static let reach = (from: -0.35 - halfWidth, to: 1.35 + halfWidth)
+
     /// The band's three stops at `phase` (0...1 through one pass): clear,
-    /// opaque at the center, clear. The center travels from 0.35 before the
-    /// first letter to 0.35 past the last, as the timeline's did, so the band
-    /// enters and leaves rather than appearing at an edge.
+    /// opaque at the center, clear. The center travels from 0.35 of the
+    /// label's width before its first letter to 0.35 past its last, as the
+    /// timeline's did, so the band enters and leaves rather than appearing at
+    /// an edge.
     ///
-    /// Not clamped to 0...1: `CAGradientLayer` extends the stops past the
-    /// layer's edges, so a band half off the label draws as its visible half.
-    /// `ShimmerAnimationTests` renders that.
+    /// In the band layer's own 0...1, which spans `reach` (`bandFrame`).
+    /// `CAGradientLayer` ignores stops outside 0...1 and spaces the colors
+    /// evenly instead, so stops in the label's own units, which run from
+    /// -0.65 to 1.65, drew a band parked mid-label for most of each pass
+    /// (ov-382 review). `ShimmerAnimationTests` renders it.
     public static func locations(at phase: Double) -> [NSNumber] {
         let center = -0.35 + phase * 1.7
-        return [center - halfWidth, center, center + halfWidth].map { NSNumber(value: $0) }
+        let span = reach.to - reach.from
+        return [center - halfWidth, center, center + halfWidth].map { NSNumber(value: ($0 - reach.from) / span) }
+    }
+
+    /// The band layer's frame for a label laid out in `bounds`: as tall,
+    /// and wide enough to reach from before the label to past it. A mask
+    /// only counts where it overlaps, so the part outside does nothing.
+    public static func bandFrame(in bounds: CGRect) -> CGRect {
+        CGRect(
+            x: bounds.minX + bounds.width * reach.from, y: bounds.minY,
+            width: bounds.width * (reach.to - reach.from), height: bounds.height)
     }
 
     /// Where the band rests between passes, and where a still label leaves

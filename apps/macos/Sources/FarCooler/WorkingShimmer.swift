@@ -55,7 +55,7 @@ final class ShimmerBandView<Content: View>: NSView {
         hosting.frame = bounds
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        band.frame = bounds
+        band.frame = ShimmerAnimation.bandFrame(in: bounds)
         CATransaction.commit()
     }
 
