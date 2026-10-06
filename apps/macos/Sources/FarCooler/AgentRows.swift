@@ -690,6 +690,10 @@ private struct GapRow: View {
 /// worth copying does now, and it reads as the agent about to speak rather than
 /// as the app being busy.
 struct WorkingRow: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Reduce Motion's answer, for a test, which can't set the system's.
+    @Environment(\.workingRowStill) private var still
+
     var body: some View {
         // A layer animation, not a `TimelineView` or an animated `@State`.
         //
@@ -702,14 +706,25 @@ struct WorkingRow: View {
         // ms at a time for the whole of a turn (ov-382). `ShimmerBand` hands
         // the sweep to Core Animation, which keeps its own clock whatever
         // happens to the view, and costs the main thread nothing per frame.
+        //
+        // Not under Reduce Motion (ov-382 review): a repeating decorative
+        // sweep with no information in it is what that setting stops. The
+        // label stays, secondary, quieter than the words above it.
         let label = Text("Working…").font(.callout)
         label
             .foregroundStyle(.secondary)
             .overlay(alignment: .leading) {
-                ShimmerBand(content: label.foregroundStyle(.primary))
-                    .accessibilityHidden(true)
+                if !reduceMotion && !still {
+                    ShimmerBand(content: label.foregroundStyle(.primary))
+                        .accessibilityHidden(true)
+                }
             }
     }
+}
+
+extension EnvironmentValues {
+    /// Draw `WorkingRow` as Reduce Motion draws it, without its sweep.
+    @Entry var workingRowStill = false
 }
 
 /// A message written but not yet sent.

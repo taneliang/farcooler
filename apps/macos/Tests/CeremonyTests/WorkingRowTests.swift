@@ -46,4 +46,19 @@ struct WorkingRowTests {
         }
         #expect(inked > 20, "the row drew \(inked) inked pixels")
     }
+
+    /// Under Reduce Motion, no sweep: the still label alone. Through
+    /// `workingRowStill`, which is what a test can set.
+    @Test func reduceMotionLeavesTheLabelStill() throws {
+        let row = NSHostingView(rootView: WorkingRow().environment(\.workingRowStill, true))
+        let window = NSWindow(
+            contentRect: NSRect(x: -9000, y: -9000, width: 200, height: 40), styleMask: [.borderless],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        row.frame = NSRect(origin: .zero, size: row.fittingSize)
+        window.contentView = row
+        row.layoutSubtreeIfNeeded()
+        #expect(Self.bands(in: row).isEmpty, "a sweep under Reduce Motion")
+    }
 }
