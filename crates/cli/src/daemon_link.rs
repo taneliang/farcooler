@@ -255,7 +255,7 @@ async fn ensure_in(
         Err(other) => return Err(Box::new(other)),
     };
 
-    if link.daemon_build() == farcooler_protocol::BUILD {
+    if farcooler_protocol::build_identity::same_build(link.daemon_build(), farcooler_protocol::BUILD) {
         return Ok((Ensured::Unchanged, link.daemon_build().to_string()));
     }
 
@@ -279,7 +279,7 @@ async fn ensure_in(
     spawn_daemon()?;
     let started = wait_for(socket).await?;
     let build = started.daemon_build().to_string();
-    if build != farcooler_protocol::BUILD {
+    if !farcooler_protocol::build_identity::same_build(&build, farcooler_protocol::BUILD) {
         // The daemon beside this CLI is not the daemon this CLI was built with,
         // so replacing it again would loop forever. Say which two, and stop.
         return Err(format!(

@@ -28,6 +28,8 @@ mod program_field_tests;
 mod remote;
 mod runner_install;
 mod runner_pipe;
+#[cfg(test)]
+mod status_build_tests;
 
 use std::path::PathBuf;
 
@@ -1409,7 +1411,7 @@ async fn status(runner: Option<&str>, json: bool) -> Fallible {
     println!("platform      {}", host_facts.platform);
     println!("daemon        {}", host_facts.daemon_version);
     println!("this cli      {}", farcooler_protocol::BUILD);
-    if host_facts.daemon_version != farcooler_protocol::BUILD {
+    if !farcooler_protocol::build_identity::same_build(&host_facts.daemon_version, farcooler_protocol::BUILD) {
         // Said out loud rather than left to be noticed. A CLI and a daemon
         // built from different source can speak the same protocol perfectly
         // and still behave like two different programs, and the symptom of
@@ -1474,7 +1476,7 @@ fn status_json(
         // Two builds that cannot agree on what they are running is a
         // fact a client needs, not a detail. It is how a fix that was
         // compiled and tested goes on reproducing in the app.
-        "buildsMatch": host.daemon_version == farcooler_protocol::BUILD,
+        "buildsMatch": farcooler_protocol::build_identity::same_build(&host.daemon_version, farcooler_protocol::BUILD),
         // Distinct from `buildsMatch`, and they answer different
         // questions. That one is "are these the same build"; this is
         // "what can that runner do", which is the one a client acts on

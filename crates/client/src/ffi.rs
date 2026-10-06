@@ -1628,7 +1628,7 @@ async fn dispatch(
                 "readOnlyFolders": files_args::read_only_folders(&facts, session.can(farcooler_protocol::capability::READ_ONLY_FOLDERS)),
                 "daemonVersion": facts.daemon_version,
                 "clientVersion": farcooler_protocol::BUILD,
-                "buildsMatch": facts.daemon_version == farcooler_protocol::BUILD,
+                "buildsMatch": farcooler_protocol::build_identity::same_build(&facts.daemon_version, farcooler_protocol::BUILD),
                 "capabilities": capabilities,
                 // What this SESSION may ask for, beside what the runner can
                 // serve. The two are a pair and a control needs both: a

@@ -4,6 +4,7 @@
 //! `envelope_length:u32` in network byte order followed by one serialized
 //! `WireEnvelope`. The framing stays transport-portable.
 
+pub mod build_identity;
 pub mod framing;
 pub mod ids;
 
