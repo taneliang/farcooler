@@ -488,7 +488,23 @@ struct OneTreeBuilder {
 
     func build() -> OneTree {
         let tree = themeNodes() + [noThemeNode(), unreadableNode()].compactMap { $0 }
-        return OneTree(places: places(), tree: tree, below: [mainCheckoutNode(), looseNode()].compactMap { $0 })
+        return OneTree(
+            places: places(), tree: tree, below: [mainCheckoutNode(), looseNode(reached: Self.worktrees(in: tree))].compactMap { $0 })
+    }
+
+    /// The worktrees the rows in `nodes` reach: a lane's, a card's own, and
+    /// those whose panes are listed.
+    static func worktrees(in nodes: [OneTreeNode]) -> Set<String> {
+        var out = Set<String>()
+        func walk(_ nodes: [OneTreeNode]) {
+            for node in nodes {
+                if let id = node.worktreeID { out.insert(id) }
+                if case .worktree(let id)? = node.target { out.insert(id) }
+                walk(node.children)
+            }
+        }
+        walk(nodes)
+        return out
     }
 
     // MARK: Joins
@@ -733,17 +749,17 @@ struct OneTreeBuilder {
         return finish(
             OneTreeNode(
                 id: id, kind: .group, title: OneTreeWords.mainCheckout, detail: OneTreeWords.shells(terminals.count),
-                glyph: OneTreeGlyph.mainCheckout, target: .worktree(checkout.id), children: terminals))
+                glyph: OneTreeGlyph.mainCheckout, target: .worktree(checkout.id), children: terminals, worktreeID: checkout.id))
     }
 
-    /// Loose Worktrees: the workspace's worktrees no lane and no card
-    /// reaches, whatever the filter shows. Leftovers, for cleanup: closed.
-    func looseNode() -> OneTreeNode? {
-        let reached = laneWorktreeIDs.union(input.tasks.compactMap(\.worktreeID))
+    /// Loose Worktrees: the workspace's worktrees no row the tree shows
+    /// reaches (`reached`). Leftovers, for cleanup: closed. A worktree
+    /// whose card the filter leaves out is here too, so a cancelled card's
+    /// checkout under Not Done, or an in-progress card's under In Review,
+    /// can still be found (ov-300 review 2).
+    func looseNode(reached: Set<String>) -> OneTreeNode? {
         let unreached = input.worktrees.filter { worktree in
-            !worktree.isMainCheckout && worktree.id != input.mainCheckout?.id
-                && !reached.contains(worktree.id)
-                && !worktree.taskIDs.contains { tasksByID[$0] != nil }
+            !worktree.isMainCheckout && worktree.id != input.mainCheckout?.id && !reached.contains(worktree.id)
         }
         let loose = unreached.filter { !$0.isHidden }
         // The hidden ones, in a closed group of their own: where Unhide is

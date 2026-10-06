@@ -37,7 +37,7 @@ object OneTree {
         }
     }
 
-    enum class Kind { THEME, TASK, DONE_FOLD, LANE, TERMINAL, SUBAGENT, GROUP, WORKTREE }
+    enum class Kind { THEME, TASK, DONE_FOLD, LANE, TERMINAL, SUBAGENT, PAGE, GROUP, WORKTREE }
 
     /** Where a node goes when it's chosen. */
     sealed interface Target {
@@ -46,6 +46,8 @@ object OneTree {
         data class Lane(val id: String) : Target
         data class Worktree(val id: String) : Target
         data class Terminal(val worktree: String, val terminal: String) : Target
+        /** An orchestrator's page, by slot. */
+        data class Page(val slot: String) : Target
         /** A subagent's: it has no pane, and runs inside the orchestrator. */
         data object Orchestrator : Target
     }
@@ -123,6 +125,9 @@ object OneTree {
         const val MAIN_CHECKOUT = "Main checkout"
         const val LOOSE_WORKTREES = "Loose worktrees"
         const val SUBAGENT_CAPTION = "No terminal; runs inside the orchestrator"
+        const val HIDDEN = "Hidden"
+        const val NOT_ON_THIS_VERSION = "Not on this version"
+        const val NOT_ON_THIS_VERSION_CAPTION = "This runner uses states this Far Cooler doesn’t have yet."
         fun done(n: Int) = "$n done"
         fun also(keys: List<String>): String = when (keys.size) {
             0 -> ""
@@ -149,7 +154,9 @@ object OneTree {
         worktrees: List<Worktree>,
         items: List<NeedsYouItem>,
         filter: Filter,
-    ): Tree = Builder(workspace, board, plan, worktrees, items, filter).build()
+        /** The board's orchestrator pages: each anchored one hangs under its theme. */
+        pages: List<BoardPage> = emptyList(),
+    ): Tree = Builder(workspace, board, plan, worktrees, items, filter, pages).build()
 
     /** Card statuses as the plan's CLI words them: "In Review", "in_review". */
     internal fun status(word: String): TaskStatus? {
@@ -166,8 +173,10 @@ object OneTree {
         allWorktrees: List<Worktree>,
         items: List<NeedsYouItem>,
         val filter: Filter,
+        val pages: List<BoardPage>,
     ) {
         val rows = board?.rows.orEmpty()
+        val unreadable = board?.unreadable.orEmpty()
         val cards: Map<String, Card>
         val themes = plan.shownThemes
         val lanes = plan.lanes.filter { it.state != LaneState.DROPPED }
@@ -215,8 +224,25 @@ object OneTree {
         }
 
         fun build(): Tree {
-            val work = themeNodes() + listOfNotNull(noThemeNode())
-            return Tree(work, listOfNotNull(mainCheckoutNode(), looseNode()))
+            val work = themeNodes() + listOfNotNull(noThemeNode(), unreadableNode())
+            val reached = mutableSetOf<String>()
+            fun walk(nodes: List<Node>) {
+                nodes.forEach { n ->
+                    n.worktreeId?.let(reached::add)
+                    (n.target as? Target.Worktree)?.let { reached += it.id }
+                    walk(n.children)
+                }
+            }
+            walk(work)
+            return Tree(work, listOfNotNull(mainCheckoutNode(), looseNode(reached)))
+        }
+
+        /** Cards in a status this build doesn't know: said, in a group of their own, rather than dropped. */
+        fun unreadableNode(): Node? {
+            if (unreadable.isEmpty()) return null
+            val id = "group:unreadable"
+            return Node(id, Kind.GROUP, Words.NOT_ON_THIS_VERSION, detail = "${unreadable.size}", caption = Words.NOT_ON_THIS_VERSION_CAPTION,
+                children = unreadable.map { Node("$id/card:${it.id}", Kind.TASK, it.title, key = it.key, detail = it.status, quiet = true) })
         }
 
         fun lanes(task: String) = lanesByTask[task].orEmpty()
@@ -234,6 +260,7 @@ object OneTree {
                     children += Node("$id/done", Kind.DONE_FOLD, Words.done(done.size), children = done.map { taskNode(it, id) }, quiet = true)
                 }
             }
+            children += pages.filter { it.themeAnchor == theme.id }.map { Node("$id/page:${it.slot}", Kind.PAGE, it.title, target = Target.Page(it.slot)) }
             Node(id, Kind.THEME, theme.name, detail = Words.progress(theme.counts), target = Target.Theme(theme.id), children = children, asks = theme.id in askThemes)
         }
 
@@ -303,7 +330,7 @@ object OneTree {
         }
 
         fun workerNodes(workers: List<TaskWorker>, parent: String) = workers.filter { it.state.isOpen }.mapIndexed { i, w ->
-            subagent("$parent/worker:$i", Words.subagent("Subagent", w.harness))
+            subagent("$parent/worker:$i", Words.subagent("Subagent", w.model.ifEmpty { w.harness }))
         }
 
         fun subagent(id: String, title: String) = Node(id, Kind.SUBAGENT, title, caption = Words.SUBAGENT_CAPTION, target = Target.Orchestrator)
@@ -317,16 +344,26 @@ object OneTree {
             return Node(id, Kind.GROUP, Words.MAIN_CHECKOUT, detail = Words.shells(terminals.size), target = Target.Worktree(wt.id), children = terminals, worktreeId = wt.id)
         }
 
-        fun looseNode(): Node? {
-            val reached = laneWorktrees.values.map { it.id }.toSet() + rows.mapNotNull { it.worktreeId }
-            val loose = worktrees.filter { it.id !in reached && taskIds(it).none { t -> t in cards } }
-            if (loose.isEmpty()) return null
+        /**
+         * Loose worktrees: the workspace's worktrees no row the tree shows
+         * reaches, a cancelled card's under Not done among them; the hidden
+         * ones in a closed group of their own.
+         */
+        fun looseNode(reached: Set<String>): Node? {
+            val unreached = worktrees.filter { it.id !in reached }
+            if (unreached.isEmpty()) return null
             val id = "group:loose"
-            return Node(id, Kind.GROUP, Words.LOOSE_WORKTREES, detail = "${loose.count { !it.isHidden }}", children = loose.map { wt ->
-                val wid = "$id/worktree:${wt.id}"
-                Node(wid, Kind.WORKTREE, wt.task, caption = if (wt.isHidden) "Hidden" else "", target = Target.Worktree(wt.id),
-                    children = terminalNodes(wt, wid), quiet = wt.isHidden, worktreeId = wt.id)
-            })
+            fun row(wt: Worktree, parent: String): Node {
+                val wid = "$parent/worktree:${wt.id}"
+                return Node(wid, Kind.WORKTREE, wt.task, target = Target.Worktree(wt.id), children = terminalNodes(wt, wid), quiet = wt.isHidden, worktreeId = wt.id)
+            }
+            val shown = unreached.filter { !it.isHidden }
+            val hidden = unreached.filter { it.isHidden }
+            val children = shown.map { row(it, id) } + listOfNotNull(
+                if (hidden.isEmpty()) null
+                else Node("$id/hidden", Kind.GROUP, Words.HIDDEN, detail = "${hidden.size}", children = hidden.map { row(it, "$id/hidden") }, quiet = true),
+            )
+            return Node(id, Kind.GROUP, Words.LOOSE_WORKTREES, detail = "${shown.size}", children = children)
         }
     }
 }

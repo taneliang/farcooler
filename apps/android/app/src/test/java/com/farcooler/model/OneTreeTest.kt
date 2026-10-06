@@ -83,8 +83,9 @@ class OneTreeTest {
         val bil9 = tree.all.first { it.target == OneTree.Target.Task("t9") }
         assertEquals(listOf(OneTree.Target.Worktree("wt-hooks")), bil9.children.map { it.target })
         val loose = tree.below[1]
-        assertEquals(listOf("spike"), loose.children.map { it.title })
-        assertEquals("Hidden", loose.children[0].caption)
+        // Hidden, so in Loose worktrees' own closed Hidden group, as on the iPhone.
+        assertEquals(listOf("Hidden"), loose.children.map { it.title })
+        assertEquals(listOf("spike"), loose.children[0].children.map { it.title })
         assertFalse(tree.all.any { it.title == "other" })
     }
 
@@ -135,7 +136,7 @@ class OneTreeTest {
         val strip = PlanStrip.of(plan, needsYou = 2, orchestrator = Terminal(id = "o", state = "running", activity = "idle", role = "orchestrator"))
         assertEquals(listOf("2 need you", "mac-vis Building", "phones-b In review", "+4", "next: plan-phones"), strip.parts)
         assertEquals(PlanStrip.Orchestrator.IDLE, strip.orchestrator)
-        assertTrue(strip.accessibilityLabel.startsWith("Orchestrator idle, 2 need you"))
+        assertTrue(strip.accessibilityLabel.startsWith("Orchestrator, idle. 2 need you"))
         assertTrue(PlanStrip.of(Plan(), 0, null).isEmpty)
         assertEquals("1 needs you", PlanStrip.of(Plan(), 1, null).text)
     }

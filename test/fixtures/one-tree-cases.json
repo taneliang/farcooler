@@ -1,0 +1,2679 @@
+{
+ "_doc": "The One tree and the plan strip on both phones (ov-300): inputs in the wire's own shapes, and the outline and strip both ports must produce. Read by AgentKit's PhoneTreeCasesTests and Android's OneTreeCasesTest. Outline lines: two spaces a level, then kind, key and title, then detail, caption and also, then a bullet for a dot; lowercased, since iOS says titles in title case and Android in sentence case.",
+ "cases": [
+  {
+   "name": "board-open",
+   "workspace": {
+    "id": "ws",
+    "name": "Billing",
+    "repository": "repo"
+   },
+   "board": {
+    "tasks": [
+     {
+      "id": "t1",
+      "key": "ov-1",
+      "title": "Title t1",
+      "status": "in_progress",
+      "status_since": 1799999995000,
+      "workspace": "ws"
+     },
+     {
+      "id": "t2",
+      "key": "ov-2",
+      "title": "Title t2",
+      "status": "cancelled",
+      "status_since": 1799999991000,
+      "workspace": "ws",
+      "worktree_id": "wt-gone"
+     },
+     {
+      "id": "t3",
+      "key": "ov-3",
+      "title": "Title t3",
+      "status": "in_review",
+      "status_since": 1799999996000,
+      "workspace": "ws"
+     },
+     {
+      "id": "t4",
+      "key": "ov-4",
+      "title": "Title t4",
+      "status": "done",
+      "status_since": 1799999992000,
+      "workspace": "ws"
+     },
+     {
+      "id": "t5",
+      "key": "ov-5",
+      "title": "Title t5",
+      "status": "todo",
+      "status_since": 1799999993000,
+      "workspace": "ws"
+     },
+     {
+      "id": "t6",
+      "key": "ov-6",
+      "title": "Title t6",
+      "status": "backlog",
+      "status_since": 1799999994000,
+      "workspace": "ws"
+     },
+     {
+      "id": "t7",
+      "key": "ov-7",
+      "title": "Title t7",
+      "status": "todo",
+      "status_since": 1799999990500,
+      "workspace": "ws",
+      "updated_at": 1799999999000
+     },
+     {
+      "id": "t8",
+      "key": "ov-8",
+      "title": "Title t8",
+      "status": "in_progress",
+      "status_since": 1799999997000,
+      "workspace": "ws",
+      "workers": [
+       {
+        "id": "w8",
+        "harness": "claude",
+        "agent_id": "x",
+        "label": "",
+        "model": "sonnet",
+        "state": "running",
+        "started_at": 1799999900000
+       }
+      ]
+     },
+     {
+      "id": "t9",
+      "key": "ov-9",
+      "title": "Title t9",
+      "status": "parked",
+      "status_since": 1799999998000,
+      "workspace": "ws",
+      "worktree_id": "wt-parked"
+     }
+    ]
+   },
+   "plan": {
+    "now_ms": 1800000000000,
+    "themes": [
+     {
+      "id": "theme-plan",
+      "short": "plan",
+      "name": "Plan",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "Which one?",
+      "state": "active",
+      "ordinal": 0,
+      "cards": [
+       {
+        "task": "t1",
+        "key": "ov-1"
+       },
+       {
+        "task": "t2",
+        "key": "ov-2"
+       },
+       {
+        "task": "t4",
+        "key": "ov-4"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 1,
+       "in_review": 0,
+       "done": 1,
+       "cancelled": 1
+      }
+     },
+     {
+      "id": "theme-mac",
+      "short": "mac",
+      "name": "Mac",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "",
+      "state": "active",
+      "ordinal": 1,
+      "cards": [
+       {
+        "task": "t3",
+        "key": "ov-3"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 0,
+       "in_review": 1,
+       "done": 0,
+       "cancelled": 0
+      }
+     }
+    ],
+    "lanes": [
+     {
+      "id": "lane-copy",
+      "short": "copy",
+      "name": "copy",
+      "state": "building",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/copy",
+      "branch": "copy",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t1",
+        "key": "ov-1",
+        "slice": ""
+       },
+       {
+        "task": "t3",
+        "key": "ov-3",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
+     },
+     {
+      "id": "lane-fix",
+      "short": "fix",
+      "name": "fix",
+      "state": "fixing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/fix",
+      "branch": "fix",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t1",
+        "key": "ov-1",
+        "slice": ""
+       }
+      ],
+      "agents": [
+       {
+        "harness": "claude",
+        "agent_id": "a1",
+        "role": "fix",
+        "model": "claude-opus-5-5",
+        "started_at": 0,
+        "ended_at": null
+       }
+      ],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
+     },
+     {
+      "id": "lane-next",
+      "short": "next",
+      "name": "next",
+      "state": "queued",
+      "reason": "",
+      "plan_rank": 1,
+      "worktree_path": "",
+      "branch": "next",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t5",
+        "key": "ov-5",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
+     }
+    ],
+    "order": [
+     "lane-next"
+    ],
+    "cards": []
+   },
+   "worktrees": [
+    {
+     "id": "wt-copy",
+     "short": "wt-copy",
+     "repository": "repo",
+     "task": "copy",
+     "branch": "copy",
+     "worktree": "/repo/.claude/worktrees/copy",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [
+      {
+       "id": "c1",
+       "short": "c1",
+       "title": "",
+       "preset": "claude",
+       "state": "running",
+       "epoch": 1,
+       "paneMode": "terminal",
+       "role": "agent",
+       "taskId": "t1",
+       "activity": "working"
+      },
+      {
+       "id": "c2",
+       "short": "c2",
+       "title": "",
+       "preset": "zsh",
+       "state": "running",
+       "epoch": 1,
+       "paneMode": "terminal"
+      },
+      {
+       "id": "c3",
+       "short": "c3",
+       "title": "",
+       "preset": "zsh",
+       "state": "running",
+       "epoch": 1,
+       "paneMode": "changes"
+      }
+     ],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-fix",
+     "short": "wt-fix",
+     "repository": "repo",
+     "task": "fix",
+     "branch": "fix",
+     "worktree": "/repo/.claude/worktrees/fix",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-gone",
+     "short": "wt-gone",
+     "repository": "repo",
+     "task": "gone",
+     "branch": "gone",
+     "worktree": "/repo/.claude/worktrees/gone",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-parked",
+     "short": "wt-parked",
+     "repository": "repo",
+     "task": "parked",
+     "branch": "parked",
+     "worktree": "/repo/.claude/worktrees/parked",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-spike",
+     "short": "wt-spike",
+     "repository": "repo",
+     "task": "spike",
+     "branch": "spike",
+     "worktree": "/repo/.claude/worktrees/spike",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-stash",
+     "short": "wt-stash",
+     "repository": "repo",
+     "task": "stash",
+     "branch": "stash",
+     "worktree": "/repo/.claude/worktrees/stash",
+     "state": "hidden",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-other",
+     "short": "wt-other",
+     "repository": "repo",
+     "task": "other",
+     "branch": "other",
+     "worktree": "/repo/.claude/worktrees/other",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws-other"
+    },
+    {
+     "id": "wt-main",
+     "short": "wt-main",
+     "repository": "repo",
+     "task": "overnight",
+     "branch": "overnight",
+     "worktree": "/repo/.claude/worktrees/overnight",
+     "state": "ready",
+     "isMainCheckout": true,
+     "terminals": [
+      {
+       "id": "m1",
+       "short": "m1",
+       "title": "",
+       "preset": "zsh",
+       "state": "running",
+       "epoch": 1,
+       "paneMode": "terminal"
+      },
+      {
+       "id": "m2",
+       "short": "m2",
+       "title": "",
+       "preset": "claude",
+       "state": "running",
+       "epoch": 1,
+       "paneMode": "terminal",
+       "role": "orchestrator"
+      },
+      {
+       "id": "m3",
+       "short": "m3",
+       "title": "",
+       "preset": "claude",
+       "state": "running",
+       "epoch": 1,
+       "paneMode": "terminal",
+       "role": "agent",
+       "taskId": "t1"
+      }
+     ],
+     "open_tasks": []
+    }
+   ],
+   "pages": {
+    "pages": [
+     {
+      "id": "p1",
+      "slot": "copy",
+      "title": "Copy rules",
+      "anchor_kind": "theme",
+      "anchor": "theme-mac"
+     },
+     {
+      "id": "p2",
+      "slot": "train",
+      "title": "Train"
+     }
+    ]
+   },
+   "items": [
+    {
+     "id": "decision:t3",
+     "kind": "decision",
+     "rank": 1,
+     "workspace_id": "ws",
+     "task": {
+      "id": "t3",
+      "key": "ov-3",
+      "title": "t3",
+      "status": "in_review"
+     },
+     "question": "?"
+    },
+    {
+     "id": "decision:t6",
+     "kind": "decision",
+     "rank": 1,
+     "workspace_id": "ws-other",
+     "task": {
+      "id": "t6",
+      "key": "ov-6",
+      "title": "t6",
+      "status": "backlog"
+     },
+     "question": "?"
+    }
+   ],
+   "filter": "open",
+   "outline": [
+    "theme plan · 1/2 •",
+    "  task ov-1 title t1",
+    "    lane copy · building · also ov-3",
+    "      terminal claude · agent",
+    "      terminal shell",
+    "    lane fix · fixing",
+    "      subagent fixer · opus · no terminal; runs inside the orchestrator",
+    "  donefold 1 done",
+    "    task ov-4 title t4",
+    "theme mac · 0/1 •",
+    "  task ov-3 title t3 •",
+    "    lane copy · building · also ov-1",
+    "      terminal claude · agent",
+    "      terminal shell",
+    "  page copy rules",
+    "group no theme · 4",
+    "  task ov-6 title t6",
+    "  task ov-7 title t7",
+    "  task ov-5 title t5",
+    "    lane next · queued",
+    "  task ov-8 title t8",
+    "    subagent subagent · sonnet · no terminal; runs inside the orchestrator",
+    "group not on this version · 1 · this runner uses states this far cooler doesn’t have yet.",
+    "  task ov-9 title t9 · parked",
+    "group main checkout · 1 shell",
+    "  terminal shell",
+    "group loose worktrees · 3",
+    "  worktree gone",
+    "  worktree parked",
+    "  worktree spike",
+    "  group hidden · 1",
+    "    worktree stash"
+   ]
+  },
+  {
+   "name": "board-in_review",
+   "workspace": {
+    "id": "ws",
+    "name": "Billing",
+    "repository": "repo"
+   },
+   "board": {
+    "tasks": [
+     {
+      "id": "t1",
+      "key": "ov-1",
+      "title": "Title t1",
+      "status": "in_progress",
+      "status_since": 1799999995000,
+      "workspace": "ws"
+     },
+     {
+      "id": "t2",
+      "key": "ov-2",
+      "title": "Title t2",
+      "status": "cancelled",
+      "status_since": 1799999991000,
+      "workspace": "ws",
+      "worktree_id": "wt-gone"
+     },
+     {
+      "id": "t3",
+      "key": "ov-3",
+      "title": "Title t3",
+      "status": "in_review",
+      "status_since": 1799999996000,
+      "workspace": "ws"
+     },
+     {
+      "id": "t4",
+      "key": "ov-4",
+      "title": "Title t4",
+      "status": "done",
+      "status_since": 1799999992000,
+      "workspace": "ws"
+     },
+     {
+      "id": "t5",
+      "key": "ov-5",
+      "title": "Title t5",
+      "status": "todo",
+      "status_since": 1799999993000,
+      "workspace": "ws"
+     },
+     {
+      "id": "t6",
+      "key": "ov-6",
+      "title": "Title t6",
+      "status": "backlog",
+      "status_since": 1799999994000,
+      "workspace": "ws"
+     },
+     {
+      "id": "t7",
+      "key": "ov-7",
+      "title": "Title t7",
+      "status": "todo",
+      "status_since": 1799999990500,
+      "workspace": "ws",
+      "updated_at": 1799999999000
+     },
+     {
+      "id": "t8",
+      "key": "ov-8",
+      "title": "Title t8",
+      "status": "in_progress",
+      "status_since": 1799999997000,
+      "workspace": "ws",
+      "workers": [
+       {
+        "id": "w8",
+        "harness": "claude",
+        "agent_id": "x",
+        "label": "",
+        "model": "sonnet",
+        "state": "running",
+        "started_at": 1799999900000
+       }
+      ]
+     },
+     {
+      "id": "t9",
+      "key": "ov-9",
+      "title": "Title t9",
+      "status": "parked",
+      "status_since": 1799999998000,
+      "workspace": "ws",
+      "worktree_id": "wt-parked"
+     }
+    ]
+   },
+   "plan": {
+    "now_ms": 1800000000000,
+    "themes": [
+     {
+      "id": "theme-plan",
+      "short": "plan",
+      "name": "Plan",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "Which one?",
+      "state": "active",
+      "ordinal": 0,
+      "cards": [
+       {
+        "task": "t1",
+        "key": "ov-1"
+       },
+       {
+        "task": "t2",
+        "key": "ov-2"
+       },
+       {
+        "task": "t4",
+        "key": "ov-4"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 1,
+       "in_review": 0,
+       "done": 1,
+       "cancelled": 1
+      }
+     },
+     {
+      "id": "theme-mac",
+      "short": "mac",
+      "name": "Mac",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "",
+      "state": "active",
+      "ordinal": 1,
+      "cards": [
+       {
+        "task": "t3",
+        "key": "ov-3"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 0,
+       "in_review": 1,
+       "done": 0,
+       "cancelled": 0
+      }
+     }
+    ],
+    "lanes": [
+     {
+      "id": "lane-copy",
+      "short": "copy",
+      "name": "copy",
+      "state": "building",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/copy",
+      "branch": "copy",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t1",
+        "key": "ov-1",
+        "slice": ""
+       },
+       {
+        "task": "t3",
+        "key": "ov-3",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
+     },
+     {
+      "id": "lane-fix",
+      "short": "fix",
+      "name": "fix",
+      "state": "fixing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/fix",
+      "branch": "fix",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t1",
+        "key": "ov-1",
+        "slice": ""
+       }
+      ],
+      "agents": [
+       {
+        "harness": "claude",
+        "agent_id": "a1",
+        "role": "fix",
+        "model": "claude-opus-5-5",
+        "started_at": 0,
+        "ended_at": null
+       }
+      ],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
+     },
+     {
+      "id": "lane-next",
+      "short": "next",
+      "name": "next",
+      "state": "queued",
+      "reason": "",
+      "plan_rank": 1,
+      "worktree_path": "",
+      "branch": "next",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t5",
+        "key": "ov-5",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
+     }
+    ],
+    "order": [
+     "lane-next"
+    ],
+    "cards": []
+   },
+   "worktrees": [
+    {
+     "id": "wt-copy",
+     "short": "wt-copy",
+     "repository": "repo",
+     "task": "copy",
+     "branch": "copy",
+     "worktree": "/repo/.claude/worktrees/copy",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [
+      {
+       "id": "c1",
+       "short": "c1",
+       "title": "",
+       "preset": "claude",
+       "state": "running",
+       "epoch": 1,
+       "paneMode": "terminal",
+       "role": "agent",
+       "taskId": "t1",
+       "activity": "working"
+      },
+      {
+       "id": "c2",
+       "short": "c2",
+       "title": "",
+       "preset": "zsh",
+       "state": "running",
+       "epoch": 1,
+       "paneMode": "terminal"
+      },
+      {
+       "id": "c3",
+       "short": "c3",
+       "title": "",
+       "preset": "zsh",
+       "state": "running",
+       "epoch": 1,
+       "paneMode": "changes"
+      }
+     ],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-fix",
+     "short": "wt-fix",
+     "repository": "repo",
+     "task": "fix",
+     "branch": "fix",
+     "worktree": "/repo/.claude/worktrees/fix",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-gone",
+     "short": "wt-gone",
+     "repository": "repo",
+     "task": "gone",
+     "branch": "gone",
+     "worktree": "/repo/.claude/worktrees/gone",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-parked",
+     "short": "wt-parked",
+     "repository": "repo",
+     "task": "parked",
+     "branch": "parked",
+     "worktree": "/repo/.claude/worktrees/parked",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-spike",
+     "short": "wt-spike",
+     "repository": "repo",
+     "task": "spike",
+     "branch": "spike",
+     "worktree": "/repo/.claude/worktrees/spike",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-stash",
+     "short": "wt-stash",
+     "repository": "repo",
+     "task": "stash",
+     "branch": "stash",
+     "worktree": "/repo/.claude/worktrees/stash",
+     "state": "hidden",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-other",
+     "short": "wt-other",
+     "repository": "repo",
+     "task": "other",
+     "branch": "other",
+     "worktree": "/repo/.claude/worktrees/other",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws-other"
+    },
+    {
+     "id": "wt-main",
+     "short": "wt-main",
+     "repository": "repo",
+     "task": "overnight",
+     "branch": "overnight",
+     "worktree": "/repo/.claude/worktrees/overnight",
+     "state": "ready",
+     "isMainCheckout": true,
+     "terminals": [
+      {
+       "id": "m1",
+       "short": "m1",
+       "title": "",
+       "preset": "zsh",
+       "state": "running",
+       "epoch": 1,
+       "paneMode": "terminal"
+      },
+      {
+       "id": "m2",
+       "short": "m2",
+       "title": "",
+       "preset": "claude",
+       "state": "running",
+       "epoch": 1,
+       "paneMode": "terminal",
+       "role": "orchestrator"
+      },
+      {
+       "id": "m3",
+       "short": "m3",
+       "title": "",
+       "preset": "claude",
+       "state": "running",
+       "epoch": 1,
+       "paneMode": "terminal",
+       "role": "agent",
+       "taskId": "t1"
+      }
+     ],
+     "open_tasks": []
+    }
+   ],
+   "pages": {
+    "pages": [
+     {
+      "id": "p1",
+      "slot": "copy",
+      "title": "Copy rules",
+      "anchor_kind": "theme",
+      "anchor": "theme-mac"
+     },
+     {
+      "id": "p2",
+      "slot": "train",
+      "title": "Train"
+     }
+    ]
+   },
+   "items": [
+    {
+     "id": "decision:t3",
+     "kind": "decision",
+     "rank": 1,
+     "workspace_id": "ws",
+     "task": {
+      "id": "t3",
+      "key": "ov-3",
+      "title": "t3",
+      "status": "in_review"
+     },
+     "question": "?"
+    },
+    {
+     "id": "decision:t6",
+     "kind": "decision",
+     "rank": 1,
+     "workspace_id": "ws-other",
+     "task": {
+      "id": "t6",
+      "key": "ov-6",
+      "title": "t6",
+      "status": "backlog"
+     },
+     "question": "?"
+    }
+   ],
+   "filter": "in_review",
+   "outline": [
+    "theme mac · 0/1 •",
+    "  task ov-3 title t3 •",
+    "    lane copy · building · also ov-1",
+    "      terminal claude · agent",
+    "      terminal shell",
+    "  page copy rules",
+    "group not on this version · 1 · this runner uses states this far cooler doesn’t have yet.",
+    "  task ov-9 title t9 · parked",
+    "group main checkout · 1 shell",
+    "  terminal shell",
+    "group loose worktrees · 4",
+    "  worktree fix",
+    "  worktree gone",
+    "  worktree parked",
+    "  worktree spike",
+    "  group hidden · 1",
+    "    worktree stash"
+   ]
+  },
+  {
+   "name": "board-all",
+   "workspace": {
+    "id": "ws",
+    "name": "Billing",
+    "repository": "repo"
+   },
+   "board": {
+    "tasks": [
+     {
+      "id": "t1",
+      "key": "ov-1",
+      "title": "Title t1",
+      "status": "in_progress",
+      "status_since": 1799999995000,
+      "workspace": "ws"
+     },
+     {
+      "id": "t2",
+      "key": "ov-2",
+      "title": "Title t2",
+      "status": "cancelled",
+      "status_since": 1799999991000,
+      "workspace": "ws",
+      "worktree_id": "wt-gone"
+     },
+     {
+      "id": "t3",
+      "key": "ov-3",
+      "title": "Title t3",
+      "status": "in_review",
+      "status_since": 1799999996000,
+      "workspace": "ws"
+     },
+     {
+      "id": "t4",
+      "key": "ov-4",
+      "title": "Title t4",
+      "status": "done",
+      "status_since": 1799999992000,
+      "workspace": "ws"
+     },
+     {
+      "id": "t5",
+      "key": "ov-5",
+      "title": "Title t5",
+      "status": "todo",
+      "status_since": 1799999993000,
+      "workspace": "ws"
+     },
+     {
+      "id": "t6",
+      "key": "ov-6",
+      "title": "Title t6",
+      "status": "backlog",
+      "status_since": 1799999994000,
+      "workspace": "ws"
+     },
+     {
+      "id": "t7",
+      "key": "ov-7",
+      "title": "Title t7",
+      "status": "todo",
+      "status_since": 1799999990500,
+      "workspace": "ws",
+      "updated_at": 1799999999000
+     },
+     {
+      "id": "t8",
+      "key": "ov-8",
+      "title": "Title t8",
+      "status": "in_progress",
+      "status_since": 1799999997000,
+      "workspace": "ws",
+      "workers": [
+       {
+        "id": "w8",
+        "harness": "claude",
+        "agent_id": "x",
+        "label": "",
+        "model": "sonnet",
+        "state": "running",
+        "started_at": 1799999900000
+       }
+      ]
+     },
+     {
+      "id": "t9",
+      "key": "ov-9",
+      "title": "Title t9",
+      "status": "parked",
+      "status_since": 1799999998000,
+      "workspace": "ws",
+      "worktree_id": "wt-parked"
+     }
+    ]
+   },
+   "plan": {
+    "now_ms": 1800000000000,
+    "themes": [
+     {
+      "id": "theme-plan",
+      "short": "plan",
+      "name": "Plan",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "Which one?",
+      "state": "active",
+      "ordinal": 0,
+      "cards": [
+       {
+        "task": "t1",
+        "key": "ov-1"
+       },
+       {
+        "task": "t2",
+        "key": "ov-2"
+       },
+       {
+        "task": "t4",
+        "key": "ov-4"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 1,
+       "in_review": 0,
+       "done": 1,
+       "cancelled": 1
+      }
+     },
+     {
+      "id": "theme-mac",
+      "short": "mac",
+      "name": "Mac",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "",
+      "state": "active",
+      "ordinal": 1,
+      "cards": [
+       {
+        "task": "t3",
+        "key": "ov-3"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 0,
+       "in_review": 1,
+       "done": 0,
+       "cancelled": 0
+      }
+     }
+    ],
+    "lanes": [
+     {
+      "id": "lane-copy",
+      "short": "copy",
+      "name": "copy",
+      "state": "building",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/copy",
+      "branch": "copy",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t1",
+        "key": "ov-1",
+        "slice": ""
+       },
+       {
+        "task": "t3",
+        "key": "ov-3",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
+     },
+     {
+      "id": "lane-fix",
+      "short": "fix",
+      "name": "fix",
+      "state": "fixing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/fix",
+      "branch": "fix",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t1",
+        "key": "ov-1",
+        "slice": ""
+       }
+      ],
+      "agents": [
+       {
+        "harness": "claude",
+        "agent_id": "a1",
+        "role": "fix",
+        "model": "claude-opus-5-5",
+        "started_at": 0,
+        "ended_at": null
+       }
+      ],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
+     },
+     {
+      "id": "lane-next",
+      "short": "next",
+      "name": "next",
+      "state": "queued",
+      "reason": "",
+      "plan_rank": 1,
+      "worktree_path": "",
+      "branch": "next",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t5",
+        "key": "ov-5",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
+     }
+    ],
+    "order": [
+     "lane-next"
+    ],
+    "cards": []
+   },
+   "worktrees": [
+    {
+     "id": "wt-copy",
+     "short": "wt-copy",
+     "repository": "repo",
+     "task": "copy",
+     "branch": "copy",
+     "worktree": "/repo/.claude/worktrees/copy",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [
+      {
+       "id": "c1",
+       "short": "c1",
+       "title": "",
+       "preset": "claude",
+       "state": "running",
+       "epoch": 1,
+       "paneMode": "terminal",
+       "role": "agent",
+       "taskId": "t1",
+       "activity": "working"
+      },
+      {
+       "id": "c2",
+       "short": "c2",
+       "title": "",
+       "preset": "zsh",
+       "state": "running",
+       "epoch": 1,
+       "paneMode": "terminal"
+      },
+      {
+       "id": "c3",
+       "short": "c3",
+       "title": "",
+       "preset": "zsh",
+       "state": "running",
+       "epoch": 1,
+       "paneMode": "changes"
+      }
+     ],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-fix",
+     "short": "wt-fix",
+     "repository": "repo",
+     "task": "fix",
+     "branch": "fix",
+     "worktree": "/repo/.claude/worktrees/fix",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-gone",
+     "short": "wt-gone",
+     "repository": "repo",
+     "task": "gone",
+     "branch": "gone",
+     "worktree": "/repo/.claude/worktrees/gone",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-parked",
+     "short": "wt-parked",
+     "repository": "repo",
+     "task": "parked",
+     "branch": "parked",
+     "worktree": "/repo/.claude/worktrees/parked",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-spike",
+     "short": "wt-spike",
+     "repository": "repo",
+     "task": "spike",
+     "branch": "spike",
+     "worktree": "/repo/.claude/worktrees/spike",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-stash",
+     "short": "wt-stash",
+     "repository": "repo",
+     "task": "stash",
+     "branch": "stash",
+     "worktree": "/repo/.claude/worktrees/stash",
+     "state": "hidden",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-other",
+     "short": "wt-other",
+     "repository": "repo",
+     "task": "other",
+     "branch": "other",
+     "worktree": "/repo/.claude/worktrees/other",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws-other"
+    },
+    {
+     "id": "wt-main",
+     "short": "wt-main",
+     "repository": "repo",
+     "task": "overnight",
+     "branch": "overnight",
+     "worktree": "/repo/.claude/worktrees/overnight",
+     "state": "ready",
+     "isMainCheckout": true,
+     "terminals": [
+      {
+       "id": "m1",
+       "short": "m1",
+       "title": "",
+       "preset": "zsh",
+       "state": "running",
+       "epoch": 1,
+       "paneMode": "terminal"
+      },
+      {
+       "id": "m2",
+       "short": "m2",
+       "title": "",
+       "preset": "claude",
+       "state": "running",
+       "epoch": 1,
+       "paneMode": "terminal",
+       "role": "orchestrator"
+      },
+      {
+       "id": "m3",
+       "short": "m3",
+       "title": "",
+       "preset": "claude",
+       "state": "running",
+       "epoch": 1,
+       "paneMode": "terminal",
+       "role": "agent",
+       "taskId": "t1"
+      }
+     ],
+     "open_tasks": []
+    }
+   ],
+   "pages": {
+    "pages": [
+     {
+      "id": "p1",
+      "slot": "copy",
+      "title": "Copy rules",
+      "anchor_kind": "theme",
+      "anchor": "theme-mac"
+     },
+     {
+      "id": "p2",
+      "slot": "train",
+      "title": "Train"
+     }
+    ]
+   },
+   "items": [
+    {
+     "id": "decision:t3",
+     "kind": "decision",
+     "rank": 1,
+     "workspace_id": "ws",
+     "task": {
+      "id": "t3",
+      "key": "ov-3",
+      "title": "t3",
+      "status": "in_review"
+     },
+     "question": "?"
+    },
+    {
+     "id": "decision:t6",
+     "kind": "decision",
+     "rank": 1,
+     "workspace_id": "ws-other",
+     "task": {
+      "id": "t6",
+      "key": "ov-6",
+      "title": "t6",
+      "status": "backlog"
+     },
+     "question": "?"
+    }
+   ],
+   "filter": "all",
+   "outline": [
+    "theme plan · 1/2 •",
+    "  task ov-1 title t1",
+    "    lane copy · building · also ov-3",
+    "      terminal claude · agent",
+    "      terminal shell",
+    "    lane fix · fixing",
+    "      subagent fixer · opus · no terminal; runs inside the orchestrator",
+    "  task ov-2 title t2",
+    "    lane gone",
+    "  task ov-4 title t4",
+    "theme mac · 0/1 •",
+    "  task ov-3 title t3 •",
+    "    lane copy · building · also ov-1",
+    "      terminal claude · agent",
+    "      terminal shell",
+    "  page copy rules",
+    "group no theme · 4",
+    "  task ov-6 title t6",
+    "  task ov-7 title t7",
+    "  task ov-5 title t5",
+    "    lane next · queued",
+    "  task ov-8 title t8",
+    "    subagent subagent · sonnet · no terminal; runs inside the orchestrator",
+    "group not on this version · 1 · this runner uses states this far cooler doesn’t have yet.",
+    "  task ov-9 title t9 · parked",
+    "group main checkout · 1 shell",
+    "  terminal shell",
+    "group loose worktrees · 2",
+    "  worktree parked",
+    "  worktree spike",
+    "  group hidden · 1",
+    "    worktree stash"
+   ]
+  },
+  {
+   "name": "no-plan",
+   "workspace": {
+    "id": "ws",
+    "name": "Billing",
+    "repository": "repo"
+   },
+   "board": {
+    "tasks": [
+     {
+      "id": "t1",
+      "key": "ov-1",
+      "title": "Title t1",
+      "status": "in_progress",
+      "status_since": 1799999995000,
+      "workspace": "ws"
+     },
+     {
+      "id": "t2",
+      "key": "ov-2",
+      "title": "Title t2",
+      "status": "cancelled",
+      "status_since": 1799999991000,
+      "workspace": "ws",
+      "worktree_id": "wt-gone"
+     },
+     {
+      "id": "t3",
+      "key": "ov-3",
+      "title": "Title t3",
+      "status": "in_review",
+      "status_since": 1799999996000,
+      "workspace": "ws"
+     },
+     {
+      "id": "t4",
+      "key": "ov-4",
+      "title": "Title t4",
+      "status": "done",
+      "status_since": 1799999992000,
+      "workspace": "ws"
+     },
+     {
+      "id": "t5",
+      "key": "ov-5",
+      "title": "Title t5",
+      "status": "todo",
+      "status_since": 1799999993000,
+      "workspace": "ws"
+     },
+     {
+      "id": "t6",
+      "key": "ov-6",
+      "title": "Title t6",
+      "status": "backlog",
+      "status_since": 1799999994000,
+      "workspace": "ws"
+     },
+     {
+      "id": "t7",
+      "key": "ov-7",
+      "title": "Title t7",
+      "status": "todo",
+      "status_since": 1799999990500,
+      "workspace": "ws",
+      "updated_at": 1799999999000
+     },
+     {
+      "id": "t8",
+      "key": "ov-8",
+      "title": "Title t8",
+      "status": "in_progress",
+      "status_since": 1799999997000,
+      "workspace": "ws",
+      "workers": [
+       {
+        "id": "w8",
+        "harness": "claude",
+        "agent_id": "x",
+        "label": "",
+        "model": "sonnet",
+        "state": "running",
+        "started_at": 1799999900000
+       }
+      ]
+     },
+     {
+      "id": "t9",
+      "key": "ov-9",
+      "title": "Title t9",
+      "status": "parked",
+      "status_since": 1799999998000,
+      "workspace": "ws",
+      "worktree_id": "wt-parked"
+     }
+    ]
+   },
+   "plan": {
+    "now_ms": 1800000000000,
+    "themes": [],
+    "lanes": [],
+    "order": [],
+    "cards": []
+   },
+   "worktrees": [
+    {
+     "id": "wt-copy",
+     "short": "wt-copy",
+     "repository": "repo",
+     "task": "copy",
+     "branch": "copy",
+     "worktree": "/repo/.claude/worktrees/copy",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [
+      {
+       "id": "c1",
+       "short": "c1",
+       "title": "",
+       "preset": "claude",
+       "state": "running",
+       "epoch": 1,
+       "paneMode": "terminal",
+       "role": "agent",
+       "taskId": "t1",
+       "activity": "working"
+      },
+      {
+       "id": "c2",
+       "short": "c2",
+       "title": "",
+       "preset": "zsh",
+       "state": "running",
+       "epoch": 1,
+       "paneMode": "terminal"
+      },
+      {
+       "id": "c3",
+       "short": "c3",
+       "title": "",
+       "preset": "zsh",
+       "state": "running",
+       "epoch": 1,
+       "paneMode": "changes"
+      }
+     ],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-fix",
+     "short": "wt-fix",
+     "repository": "repo",
+     "task": "fix",
+     "branch": "fix",
+     "worktree": "/repo/.claude/worktrees/fix",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-gone",
+     "short": "wt-gone",
+     "repository": "repo",
+     "task": "gone",
+     "branch": "gone",
+     "worktree": "/repo/.claude/worktrees/gone",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-parked",
+     "short": "wt-parked",
+     "repository": "repo",
+     "task": "parked",
+     "branch": "parked",
+     "worktree": "/repo/.claude/worktrees/parked",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-spike",
+     "short": "wt-spike",
+     "repository": "repo",
+     "task": "spike",
+     "branch": "spike",
+     "worktree": "/repo/.claude/worktrees/spike",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-stash",
+     "short": "wt-stash",
+     "repository": "repo",
+     "task": "stash",
+     "branch": "stash",
+     "worktree": "/repo/.claude/worktrees/stash",
+     "state": "hidden",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-other",
+     "short": "wt-other",
+     "repository": "repo",
+     "task": "other",
+     "branch": "other",
+     "worktree": "/repo/.claude/worktrees/other",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws-other"
+    },
+    {
+     "id": "wt-main",
+     "short": "wt-main",
+     "repository": "repo",
+     "task": "overnight",
+     "branch": "overnight",
+     "worktree": "/repo/.claude/worktrees/overnight",
+     "state": "ready",
+     "isMainCheckout": true,
+     "terminals": [
+      {
+       "id": "m1",
+       "short": "m1",
+       "title": "",
+       "preset": "zsh",
+       "state": "running",
+       "epoch": 1,
+       "paneMode": "terminal"
+      },
+      {
+       "id": "m2",
+       "short": "m2",
+       "title": "",
+       "preset": "claude",
+       "state": "running",
+       "epoch": 1,
+       "paneMode": "terminal",
+       "role": "orchestrator"
+      },
+      {
+       "id": "m3",
+       "short": "m3",
+       "title": "",
+       "preset": "claude",
+       "state": "running",
+       "epoch": 1,
+       "paneMode": "terminal",
+       "role": "agent",
+       "taskId": "t1"
+      }
+     ],
+     "open_tasks": []
+    }
+   ],
+   "pages": {
+    "pages": []
+   },
+   "items": [],
+   "filter": "open",
+   "outline": [
+    "group no theme · 6",
+    "  task ov-6 title t6",
+    "  task ov-7 title t7",
+    "  task ov-5 title t5",
+    "  task ov-8 title t8",
+    "    subagent subagent · sonnet · no terminal; runs inside the orchestrator",
+    "  task ov-1 title t1",
+    "    lane copy",
+    "      terminal claude · agent",
+    "      terminal shell",
+    "  task ov-3 title t3",
+    "  donefold 1 done",
+    "    task ov-4 title t4",
+    "group not on this version · 1 · this runner uses states this far cooler doesn’t have yet.",
+    "  task ov-9 title t9 · parked",
+    "group main checkout · 1 shell",
+    "  terminal shell",
+    "group loose worktrees · 4",
+    "  worktree fix",
+    "  worktree gone",
+    "  worktree parked",
+    "  worktree spike",
+    "  group hidden · 1",
+    "    worktree stash"
+   ]
+  }
+ ],
+ "strips": [
+  {
+   "name": "working",
+   "plan": {
+    "now_ms": 1800000000000,
+    "themes": [
+     {
+      "id": "theme-plan",
+      "short": "plan",
+      "name": "Plan",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "Which one?",
+      "state": "active",
+      "ordinal": 0,
+      "cards": [
+       {
+        "task": "t1",
+        "key": "ov-1"
+       },
+       {
+        "task": "t2",
+        "key": "ov-2"
+       },
+       {
+        "task": "t4",
+        "key": "ov-4"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 1,
+       "in_review": 0,
+       "done": 1,
+       "cancelled": 1
+      }
+     },
+     {
+      "id": "theme-mac",
+      "short": "mac",
+      "name": "Mac",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "",
+      "state": "active",
+      "ordinal": 1,
+      "cards": [
+       {
+        "task": "t3",
+        "key": "ov-3"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 0,
+       "in_review": 1,
+       "done": 0,
+       "cancelled": 0
+      }
+     }
+    ],
+    "lanes": [
+     {
+      "id": "lane-copy",
+      "short": "copy",
+      "name": "copy",
+      "state": "building",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/copy",
+      "branch": "copy",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t1",
+        "key": "ov-1",
+        "slice": ""
+       },
+       {
+        "task": "t3",
+        "key": "ov-3",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
+     },
+     {
+      "id": "lane-fix",
+      "short": "fix",
+      "name": "fix",
+      "state": "fixing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/fix",
+      "branch": "fix",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t1",
+        "key": "ov-1",
+        "slice": ""
+       }
+      ],
+      "agents": [
+       {
+        "harness": "claude",
+        "agent_id": "a1",
+        "role": "fix",
+        "model": "claude-opus-5-5",
+        "started_at": 0,
+        "ended_at": null
+       }
+      ],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
+     },
+     {
+      "id": "lane-next",
+      "short": "next",
+      "name": "next",
+      "state": "queued",
+      "reason": "",
+      "plan_rank": 1,
+      "worktree_path": "",
+      "branch": "next",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t5",
+        "key": "ov-5",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
+     }
+    ],
+    "order": [
+     "lane-next"
+    ],
+    "cards": []
+   },
+   "needs_you": 2,
+   "orchestrator": {
+    "id": "o",
+    "short": "o",
+    "title": "",
+    "preset": "claude",
+    "state": "running",
+    "epoch": 1,
+    "role": "orchestrator",
+    "activity": "working",
+    "line": "Dispatching ov-321"
+   },
+   "parts": [
+    "2 need you",
+    "copy building",
+    "fix fixing",
+    "next: next"
+   ],
+   "state": "working",
+   "line": "Dispatching ov-321",
+   "label": "orchestrator, working. 2 need you, copy building, fix fixing, next: next."
+  },
+  {
+   "name": "blocked",
+   "plan": {
+    "now_ms": 1800000000000,
+    "themes": [
+     {
+      "id": "theme-plan",
+      "short": "plan",
+      "name": "Plan",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "Which one?",
+      "state": "active",
+      "ordinal": 0,
+      "cards": [
+       {
+        "task": "t1",
+        "key": "ov-1"
+       },
+       {
+        "task": "t2",
+        "key": "ov-2"
+       },
+       {
+        "task": "t4",
+        "key": "ov-4"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 1,
+       "in_review": 0,
+       "done": 1,
+       "cancelled": 1
+      }
+     },
+     {
+      "id": "theme-mac",
+      "short": "mac",
+      "name": "Mac",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "",
+      "state": "active",
+      "ordinal": 1,
+      "cards": [
+       {
+        "task": "t3",
+        "key": "ov-3"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 0,
+       "in_review": 1,
+       "done": 0,
+       "cancelled": 0
+      }
+     }
+    ],
+    "lanes": [
+     {
+      "id": "lane-copy",
+      "short": "copy",
+      "name": "copy",
+      "state": "building",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/copy",
+      "branch": "copy",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t1",
+        "key": "ov-1",
+        "slice": ""
+       },
+       {
+        "task": "t3",
+        "key": "ov-3",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
+     },
+     {
+      "id": "lane-fix",
+      "short": "fix",
+      "name": "fix",
+      "state": "fixing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/fix",
+      "branch": "fix",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t1",
+        "key": "ov-1",
+        "slice": ""
+       }
+      ],
+      "agents": [
+       {
+        "harness": "claude",
+        "agent_id": "a1",
+        "role": "fix",
+        "model": "claude-opus-5-5",
+        "started_at": 0,
+        "ended_at": null
+       }
+      ],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
+     },
+     {
+      "id": "lane-next",
+      "short": "next",
+      "name": "next",
+      "state": "queued",
+      "reason": "",
+      "plan_rank": 1,
+      "worktree_path": "",
+      "branch": "next",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t5",
+        "key": "ov-5",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
+     }
+    ],
+    "order": [
+     "lane-next"
+    ],
+    "cards": []
+   },
+   "needs_you": 1,
+   "orchestrator": {
+    "id": "o",
+    "short": "o",
+    "title": "",
+    "preset": "claude",
+    "state": "running",
+    "epoch": 1,
+    "role": "orchestrator",
+    "activity": "blocked",
+    "blockedQuestion": "Run the migration?",
+    "line": "Waiting"
+   },
+   "parts": [
+    "1 needs you",
+    "copy building",
+    "fix fixing",
+    "next: next"
+   ],
+   "state": "needs you",
+   "line": "Run the migration?",
+   "label": "orchestrator, waiting on you. 1 needs you, copy building, fix fixing, next: next."
+  },
+  {
+   "name": "headline",
+   "plan": {
+    "now_ms": 1800000000000,
+    "themes": [
+     {
+      "id": "theme-plan",
+      "short": "plan",
+      "name": "Plan",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "Which one?",
+      "state": "active",
+      "ordinal": 0,
+      "cards": [
+       {
+        "task": "t1",
+        "key": "ov-1"
+       },
+       {
+        "task": "t2",
+        "key": "ov-2"
+       },
+       {
+        "task": "t4",
+        "key": "ov-4"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 1,
+       "in_review": 0,
+       "done": 1,
+       "cancelled": 1
+      }
+     },
+     {
+      "id": "theme-mac",
+      "short": "mac",
+      "name": "Mac",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "",
+      "state": "active",
+      "ordinal": 1,
+      "cards": [
+       {
+        "task": "t3",
+        "key": "ov-3"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 0,
+       "in_review": 1,
+       "done": 0,
+       "cancelled": 0
+      }
+     }
+    ],
+    "lanes": [
+     {
+      "id": "lane-copy",
+      "short": "copy",
+      "name": "copy",
+      "state": "building",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/copy",
+      "branch": "copy",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t1",
+        "key": "ov-1",
+        "slice": ""
+       },
+       {
+        "task": "t3",
+        "key": "ov-3",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
+     },
+     {
+      "id": "lane-fix",
+      "short": "fix",
+      "name": "fix",
+      "state": "fixing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/fix",
+      "branch": "fix",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t1",
+        "key": "ov-1",
+        "slice": ""
+       }
+      ],
+      "agents": [
+       {
+        "harness": "claude",
+        "agent_id": "a1",
+        "role": "fix",
+        "model": "claude-opus-5-5",
+        "started_at": 0,
+        "ended_at": null
+       }
+      ],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
+     },
+     {
+      "id": "lane-next",
+      "short": "next",
+      "name": "next",
+      "state": "queued",
+      "reason": "",
+      "plan_rank": 1,
+      "worktree_path": "",
+      "branch": "next",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t5",
+        "key": "ov-5",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
+     }
+    ],
+    "order": [
+     "lane-next"
+    ],
+    "cards": []
+   },
+   "needs_you": 0,
+   "orchestrator": {
+    "id": "o",
+    "short": "o",
+    "title": "",
+    "preset": "claude",
+    "state": "running",
+    "epoch": 1,
+    "role": "orchestrator",
+    "activity": "working",
+    "line": "claude 4m",
+    "headline": "claude 4m",
+    "said": "Read the plan."
+   },
+   "parts": [
+    "copy building",
+    "fix fixing",
+    "next: next"
+   ],
+   "state": "working",
+   "line": "Read the plan.",
+   "label": "orchestrator, working. copy building, fix fixing, next: next."
+  },
+  {
+   "name": "none",
+   "plan": {
+    "now_ms": 1800000000000,
+    "themes": [],
+    "lanes": [],
+    "order": [],
+    "cards": []
+   },
+   "needs_you": 0,
+   "orchestrator": null,
+   "parts": [],
+   "state": "no orchestrator",
+   "line": null,
+   "label": "no orchestrator."
+  },
+  {
+   "name": "stopped",
+   "plan": {
+    "now_ms": 1800000000000,
+    "themes": [
+     {
+      "id": "theme-plan",
+      "short": "plan",
+      "name": "Plan",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "Which one?",
+      "state": "active",
+      "ordinal": 0,
+      "cards": [
+       {
+        "task": "t1",
+        "key": "ov-1"
+       },
+       {
+        "task": "t2",
+        "key": "ov-2"
+       },
+       {
+        "task": "t4",
+        "key": "ov-4"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 1,
+       "in_review": 0,
+       "done": 1,
+       "cancelled": 1
+      }
+     },
+     {
+      "id": "theme-mac",
+      "short": "mac",
+      "name": "Mac",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "",
+      "state": "active",
+      "ordinal": 1,
+      "cards": [
+       {
+        "task": "t3",
+        "key": "ov-3"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 0,
+       "in_review": 1,
+       "done": 0,
+       "cancelled": 0
+      }
+     }
+    ],
+    "lanes": [
+     {
+      "id": "lane-copy",
+      "short": "copy",
+      "name": "copy",
+      "state": "building",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/copy",
+      "branch": "copy",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t1",
+        "key": "ov-1",
+        "slice": ""
+       },
+       {
+        "task": "t3",
+        "key": "ov-3",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
+     },
+     {
+      "id": "lane-fix",
+      "short": "fix",
+      "name": "fix",
+      "state": "fixing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/fix",
+      "branch": "fix",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t1",
+        "key": "ov-1",
+        "slice": ""
+       }
+      ],
+      "agents": [
+       {
+        "harness": "claude",
+        "agent_id": "a1",
+        "role": "fix",
+        "model": "claude-opus-5-5",
+        "started_at": 0,
+        "ended_at": null
+       }
+      ],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
+     },
+     {
+      "id": "lane-next",
+      "short": "next",
+      "name": "next",
+      "state": "queued",
+      "reason": "",
+      "plan_rank": 1,
+      "worktree_path": "",
+      "branch": "next",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t5",
+        "key": "ov-5",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
+     }
+    ],
+    "order": [
+     "lane-next"
+    ],
+    "cards": []
+   },
+   "needs_you": 3,
+   "orchestrator": {
+    "id": "o",
+    "short": "o",
+    "title": "",
+    "preset": "claude",
+    "state": "lost",
+    "epoch": 1,
+    "role": "orchestrator",
+    "activity": "working"
+   },
+   "parts": [
+    "3 need you",
+    "copy building",
+    "fix fixing",
+    "next: next"
+   ],
+   "state": "stopped",
+   "line": null,
+   "label": "orchestrator, stopped. 3 need you, copy building, fix fixing, next: next."
+  }
+ ]
+}

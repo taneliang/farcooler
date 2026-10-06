@@ -59,9 +59,9 @@ final class PhoneTreeUITests: XCTestCase {
         XCTAssertTrue(element(app, "orchestrator-pane").waitForExistence(timeout: 10), "not on the orchestrator")
         let strip = app.buttons["plan-strip"]
         XCTAssertTrue(strip.waitForExistence(timeout: 15), "no strip: \(app.debugDescription)")
-        XCTAssertTrue(strip.label.hasPrefix("Orchestrator idle, 2 need you, mac-vis Building, phones-b In Review"), strip.label)
+        XCTAssertTrue(strip.label.hasPrefix("Orchestrator, idle. 2 need you, mac-vis Building, phones-b In Review"), strip.label)
         XCTAssertTrue(strip.label.contains("+4"), strip.label)
-        XCTAssertTrue(strip.label.hasSuffix("next: plan-phones"), strip.label)
+        XCTAssertTrue(strip.label.hasSuffix("next: plan-phones."), strip.label)
         // Above the pane, not over it: the pane's top (its mount probe sits
         // at its top edge) starts under the strip.
         let mount = element(app, "orchestrator-mount")

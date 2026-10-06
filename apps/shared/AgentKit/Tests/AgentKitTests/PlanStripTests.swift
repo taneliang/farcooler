@@ -50,11 +50,12 @@ struct PlanStripTests {
         #expect(PlanStrip(plan: plan, needsYou: 0, orchestrator: .idle).parts == ["next: a"])
     }
 
-    @Test("VoiceOver hears the orchestrator's state first, since the mark draws it")
+    @Test("VoiceOver hears the orchestrator's state first, since the mark draws it, and each thing once")
     func accessibilityLabel() throws {
         let strip = PlanStrip(plan: try Self.plan(), needsYou: 2, orchestrator: .needsYou)
-        #expect(strip.accessibilityLabel.hasPrefix("Orchestrator needs you, 2 need you, mac-vis Building"))
-        #expect(PlanStrip(plan: .empty, needsYou: 1, orchestrator: .none).accessibilityLabel == "No orchestrator, 1 needs you")
+        #expect(strip.accessibilityLabel.hasPrefix("Orchestrator, waiting on you. 2 need you, mac-vis Building"))
+        #expect(PlanStrip(plan: .empty, needsYou: 1, orchestrator: .none).accessibilityLabel == "No orchestrator. 1 needs you.")
+        #expect(PlanStrip(plan: .empty, needsYou: 0, orchestrator: .working).accessibilityLabel == "Orchestrator, working.")
     }
 
     @Test("color only for a state that wants the owner")

@@ -151,10 +151,16 @@ public struct PlanStrip: Equatable, Sendable {
     /// The parts as one line: "2 need you · mac-vis Building · next: plan-phones".
     public var text: String { parts.joined(separator: " · ") }
 
-    /// What VoiceOver and TalkBack say: the state's word first, since the
-    /// mark draws it.
+    /// What VoiceOver and TalkBack say, each thing once: "Orchestrator,
+    /// working. 2 need you, mac-vis Building, next: plan-phones." A blocked
+    /// orchestrator is "waiting on you", so it never says "need you" twice.
     public var accessibilityLabel: String {
-        let state = orchestrator == .none ? "No orchestrator" : "Orchestrator \(orchestrator.word.lowercased())"
-        return ([state] + parts).joined(separator: ", ")
+        let state: String =
+            switch orchestrator {
+            case .none: "No orchestrator."
+            case .needsYou: "Orchestrator, waiting on you."
+            default: "Orchestrator, \(orchestrator.word.lowercased())."
+            }
+        return parts.isEmpty ? state : "\(state) \(parts.joined(separator: ", "))."
     }
 }

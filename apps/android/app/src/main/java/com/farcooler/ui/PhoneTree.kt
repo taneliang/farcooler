@@ -24,6 +24,7 @@ import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.CheckCircleOutline
 import androidx.compose.material.icons.outlined.Circle
+import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Home
@@ -234,16 +235,20 @@ private fun rememberTree(connection: Connection, workspace: WorkspaceSummary, fi
     val boards by connection.boards.collectAsStateWithLifecycle()
     val list by connection.needsYou.collectAsStateWithLifecycle()
     val fleet by connection.fleet.collectAsStateWithLifecycle()
+    val pageLists by connection.pages.lists.collectAsStateWithLifecycle()
     val daemon by connection.daemon.collectAsStateWithLifecycle()
     val keepsPlan = daemon?.can(Capability.BOARD_PLAN) == true
+    val keepsPages = daemon?.can(Capability.BOARD_PAGES) == true
     LaunchedEffect(workspace.id, keepsPlan) {
         if (boards[workspace.id] == null) connection.readBoard(workspace)
         if (keepsPlan && planStates[workspace.id] == null) connection.plans.read(workspace)
+        if (keepsPages && pageLists[workspace.id] == null) connection.pages.read(workspace)
     }
     val board = boards[workspace.id] ?: return null
     val plan = (planStates[workspace.id] as? PlanReadState.Loaded)?.plan ?: Plan()
-    return remember(board, plan, fleet, list, filter) {
-        OneTree.build(workspace, board, plan, fleet.worktrees, list?.items.orEmpty(), filter)
+    val pages = (pageLists[workspace.id] as? com.farcooler.net.PageListState.Loaded)?.pages.orEmpty()
+    return remember(board, plan, fleet, list, filter, pages) {
+        OneTree.build(workspace, board, plan, fleet.worktrees, list?.items.orEmpty(), filter, pages)
     }
 }
 
@@ -354,6 +359,7 @@ private fun open(target: OneTree.Target, nav: TreeNavigation) {
         is OneTree.Target.Lane -> nav.onOpenPlan(PlanPage.Lane(target.id))
         is OneTree.Target.Worktree -> nav.onOpenWorktree(target.id)
         is OneTree.Target.Terminal -> nav.onOpenTerminal(target.worktree, target.terminal)
+        is OneTree.Target.Page -> nav.onOpenPlan(PlanPage.Page(target.slot))
         OneTree.Target.Orchestrator -> Unit
     }
 }
@@ -428,6 +434,7 @@ private fun icon(node: OneTree.Node): ImageVector = when (node.kind) {
     OneTree.Kind.LANE -> Icons.Outlined.AccountTree
     OneTree.Kind.TERMINAL -> if (node.detail == "Agent") Icons.Outlined.AutoAwesome else Icons.Outlined.Terminal
     OneTree.Kind.SUBAGENT -> Icons.Outlined.Person
+    OneTree.Kind.PAGE -> Icons.Outlined.Description
     OneTree.Kind.WORKTREE -> Icons.Outlined.AccountTree
     OneTree.Kind.GROUP -> when (node.id) {
         "group:main" -> Icons.Outlined.Home

@@ -76,6 +76,8 @@ data class TaskWorker(
     val doing: String = "",
     /** The pane its orchestrator runs in: where the subagent lives. */
     val orchestratorTerminalId: String? = null,
+    /** Its model, as the runner recorded it (`claude-opus-5-5`), or empty. */
+    val model: String = "",
 )
 
 /** How the subagent control reads: some still at it, or the last one done. */
@@ -298,6 +300,7 @@ internal object StartWire {
                 endedAtMs = o.millis("ended_at"),
                 doing = o.text("doing") ?: "",
                 orchestratorTerminalId = o.text("orchestrator_terminal"),
+                model = o.text("model") ?: "",
             )
         }
 }

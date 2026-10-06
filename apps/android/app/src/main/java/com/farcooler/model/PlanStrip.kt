@@ -47,9 +47,16 @@ data class PlanStrip(
 
     val text: String get() = parts.joinToString(" · ")
 
-    /** What TalkBack says: the state first, since the mark draws it. */
+    /** What TalkBack says, each thing once: "Orchestrator, working. 2 need you, mac-vis Building, next: plan-phones." */
     val accessibilityLabel: String
-        get() = (listOf(if (orchestrator == Orchestrator.NONE) "No orchestrator" else "Orchestrator ${orchestrator.word.lowercase()}") + parts).joinToString(", ")
+        get() {
+            val state = when (orchestrator) {
+                Orchestrator.NONE -> "No orchestrator."
+                Orchestrator.NEEDS_YOU -> "Orchestrator, waiting on you."
+                else -> "Orchestrator, ${orchestrator.word.lowercase()}."
+            }
+            return if (parts.isEmpty()) state else "$state ${parts.joinToString(", ")}."
+        }
 
     companion object {
         /** How many Now lanes the strip names, as the Mac's does. */
