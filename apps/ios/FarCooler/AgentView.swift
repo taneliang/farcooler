@@ -406,6 +406,7 @@ struct AgentView: View {
                 // None in a column (ov-348), whose composer is the inline one:
                 // the bar's controller holds first responder to keep its
                 // accessory up, and so took every tap meant for the field.
+                .onChange(of: inColumn, initial: true) { _, column in composer.inColumn = column }
                 #if DEBUG
                 .modifier(ComposerPhotoHarness(model: composer))
                 #endif
@@ -2397,7 +2398,8 @@ private struct AgentComposer: View {
                     .disabled(!canSend)
                     // ⌘↩ sends from the iPad's column, where a keyboard is the
                     // usual way in and Return is a new line (review R2-3).
-                    .keyboardShortcut(inColumn ? KeyboardShortcut(.return, modifiers: .command) : nil)
+                    .keyboardShortcut(
+                        inColumn && !ComposerHarness.dropsSendShortcut ? KeyboardShortcut(.return, modifiers: .command) : nil)
                     // Named, for VoiceOver and for the tests: a glyph-only
                     // button is read out as its symbol otherwise, and "arrow up
                     // circle fill" is not what this does.
@@ -2507,7 +2509,7 @@ private struct AgentComposer: View {
                     .padding(.top, 2)
             }
             ComposerTextView(
-                model: model, text: $model.text, selection: $model.selection, measuredHeight: $fieldHeight,
+                model: model, inColumn: inColumn, text: $model.text, selection: $model.selection, measuredHeight: $fieldHeight,
                 isEditing: $model.isFocused,
                 onCommandReturn: inColumn ? { send() } : nil)
                 .frame(height: fieldHeight)
@@ -2908,8 +2910,11 @@ private struct SuggestionList: View {
 /// text field at all, and this one needs an ordinary text field that also
 /// exposes its selection.
 private struct ComposerTextView: UIViewRepresentable {
-    /// Whose focus `isEditing` is: see `ComposerModel.focusOwner`.
+    /// Whose focus `isEditing` is, and who tells it of a take-down: see
+    /// `ComposerModel.fieldTakenDown`.
     let model: ComposerModel
+    /// Which width this field was made for.
+    let inColumn: Bool
     @Binding var text: String
     /// The selection in UTF-16 units: where the caret is, for the pickers, and
     /// what a field built after a width change restores.
@@ -2927,8 +2932,9 @@ private struct ComposerTextView: UIViewRepresentable {
     /// Whether this view is first responder. Written from the delegate's own
     /// begin and end callbacks, so a resign from anywhere (Hide Keyboard, a
     /// pane switch, `KeyboardDismissal`) reaches it. A field that is taken
-    /// down keeps it true (`ComposerField.isBeingTakenDown`), and a field
-    /// made while it is true takes the focus: the other width's composer.
+    /// down keeps it while a replacement is coming (`ComposerModel.fieldTakenDown`),
+    /// and a field that arrives while it is true takes the focus: the other
+    /// width's composer.
     @Binding var isEditing: Bool
     /// What ⌘↩ does while the field has the keyboard: send, in the iPad's
     /// column (review R2-3). The field's own key command, because the text
@@ -2955,8 +2961,16 @@ private struct ComposerTextView: UIViewRepresentable {
             location: min(saved.location, view.textStorage.length),
             length: min(saved.length, max(view.textStorage.length - saved.location, 0)))
         view.delegate = context.coordinator
-        view.wantsFocusOnArrival = isEditing
-        DispatchQueue.main.async { context.coordinator.report(view) }
+        model.fieldMade(view)
+        view.shouldTakeFocus = { [model] in model.isFocused }
+        view.onTakeDown = { [model, inColumn, weak view] in
+            if let view { model.fieldTakenDown(view, madeForColumn: inColumn) }
+        }
+        DispatchQueue.main.async {
+            context.coordinator.report(view)
+            // A caret restored in a long draft is brought into view.
+            view.scrollRangeToVisible(view.selectedRange)
+        }
         return view
     }
 
@@ -2980,7 +2994,7 @@ private struct ComposerTextView: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ uiView: UITextView, coordinator: Coordinator) {
-        (uiView as? ComposerField)?.isBeingTakenDown = true
+        (uiView as? ComposerField)?.takeDown()
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -3013,8 +3027,7 @@ private struct ComposerTextView: UIViewRepresentable {
         }
 
         func textViewDidBeginEditing(_ textView: UITextView) {
-            parent.model.focusOwner = textView
-            parent.isEditing = true
+            parent.model.focusBegan()
         }
 
         func textViewDidEndEditing(_ textView: UITextView) {
@@ -3022,8 +3035,6 @@ private struct ComposerTextView: UIViewRepresentable {
             // not the reader putting the keyboard away: the composer for the
             // other width is waiting to take the focus over (ov-357).
             guard (textView as? ComposerField)?.isBeingTakenDown != true else { return }
-            // Nor a field that isn't the one holding the focus any more.
-            guard parent.model.focusOwner == nil || parent.model.focusOwner === textView else { return }
             parent.isEditing = false
         }
 

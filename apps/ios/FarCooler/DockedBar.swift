@@ -160,8 +160,9 @@ final class DockedBarController: UIViewController {
         //
         // `update(rootView:)` below is the only other `setNeedsLayout` there
         // is, and it runs only when the view that vends the bar is
-        // re-evaluated. The draft, the cursor and the attachments are `@State`
-        // inside the composer — see `AgentComposer` — so typing re-lays this
+        // re-evaluated. The draft, the cursor and the attachments are in the
+        // pane's `ComposerModel`, which the composer observes — see
+        // `AgentComposer` — so typing re-lays this
         // hosting controller out without `AgentView` hearing about it at all.
         // The accessory kept the height one line measured, SwiftUI drew four
         // lines overflowing out of the top of it, and the transcript went on

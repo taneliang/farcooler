@@ -55,6 +55,10 @@ import SwiftUI
 //   -pad-compact             on an iPad, the app as a one-third Split View draws it: 375 points
 //                            wide at compact width (ov-348, `PadCompactWindow`); the
 //                            com.farcooler.harness.pad-compact notice turns it on and off
+//   -phone-accept-prompts    a chat orchestrator takes any message, recorded as
+//                            `prompt billing <text> images=<n>` (ov-357)
+//   -composer-no-send-shortcut  the composer's Send button has no ⌘↩, leaving the field's
+//                            own key command (ov-357)
 //   -pad-compact-wide        that window 800 points wide instead: compact by its size class alone
 //   -phone-files-old         the runner is older than Files: no worktree_files, no read_only_folders
 //   -phone-plan, -phone-plan-fails, -phone-plan-hangs, -phone-plan-timeout N,
@@ -608,6 +612,15 @@ final class HarnessRunner {
             sent.append("draft billing \(text)")
             return try json([:])
         case "terminal.agent_prompt":
+            // `-phone-accept-prompts`: any message to the chat orchestrator is
+            // taken and recorded with its photo count, for the composer's
+            // send tests (ov-357).
+            if CommandLine.arguments.contains("-phone-accept-prompts"),
+                args["terminal"] as? String == Self.billingOrchestrator, let text = args["text"] as? String
+            {
+                sent.append("prompt billing \(text) images=\((args["images"] as? [Any])?.count ?? 0)")
+                return try json([:])
+            }
             // A message to a chat orchestrator (`-phone-orchestrator-chat`): what a
             // ruling's Reverse sends (ov-333).
             guard args["terminal"] as? String == Self.billingOrchestrator,

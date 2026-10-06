@@ -7,18 +7,28 @@ import UIKit
 final class ComposerField: UITextView {
     var onCommandReturn: (() -> Void)?
 
-    /// Whether the composer this one replaces had the keyboard: set when the
-    /// field is made, acted on once it's in a window, where it can take it
-    /// (ov-357).
-    var wantsFocusOnArrival = false
+    /// Asked once, when the field first has a window: whether the reader had
+    /// the keyboard in the composer this one replaces. Asked then, and not
+    /// when the field is made, since the reader may put the keyboard away in
+    /// between (ov-357).
+    var shouldTakeFocus: (() -> Bool)?
+
+    /// Told when the field leaves its window or is dismantled, so the model
+    /// can tell a hand-off to another composer from a pane that's hidden.
+    var onTakeDown: (() -> Void)?
 
     /// Set as the field is leaving its window or being dismantled, so the
     /// resign that comes with it isn't read as the reader putting the
     /// keyboard away. See `ComposerTextView.Coordinator`.
-    var isBeingTakenDown = false
+    private(set) var isBeingTakenDown = false
+
+    func takeDown() {
+        isBeingTakenDown = true
+        onTakeDown?()
+    }
 
     override func willMove(toWindow newWindow: UIWindow?) {
-        if newWindow == nil { isBeingTakenDown = true }
+        if newWindow == nil { takeDown() }
         super.willMove(toWindow: newWindow)
     }
 
@@ -26,9 +36,9 @@ final class ComposerField: UITextView {
         super.didMoveToWindow()
         guard window != nil else { return }
         isBeingTakenDown = false
-        if wantsFocusOnArrival {
-            wantsFocusOnArrival = false
-            becomeFirstResponder()
+        if let ask = shouldTakeFocus {
+            shouldTakeFocus = nil
+            if ask() { becomeFirstResponder() }
         }
     }
 

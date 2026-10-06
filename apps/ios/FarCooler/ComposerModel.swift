@@ -28,9 +28,52 @@ final class ComposerModel: ObservableObject {
     /// Written from the text view's own begin and end callbacks, so a resign
     /// from anywhere reaches it; not from a field being taken down.
     @Published var isFocused = false
-    /// The field that has the keyboard, so that a field resigning late, after
-    /// the one that replaced it has taken the focus, doesn't clear it.
-    weak var focusOwner: UITextView?
+    /// Whether the pane is in the iPad's column, kept by `AgentView`, so a
+    /// field taken down can be told as a hand-off (the width changed) from a
+    /// hidden pane (it didn't).
+    var inColumn = false
+    private weak var field: UITextView?
+    private var handoffPending = false
+
+    /// A composer field was made. If a field was waiting for its replacement,
+    /// this is it.
+    func fieldMade(_ new: UITextView) {
+        field = new
+        handoffPending = false
+    }
+
+    /// The newest field, made for the column or for the keyboard, left its
+    /// window while it had the keyboard.
+    ///
+    /// Judged on the next turn of the main queue, by when the pane's mode
+    /// has been updated: a pane in the mode the field was made for is hidden,
+    /// by a screen over it or another tab, nothing is coming and the
+    /// reader's keyboard went with the field. A pane in the other mode is
+    /// crossing 700 points, and the other composer is on its way, a
+    /// moment later when it's the keyboard's: the focus is kept for it, and
+    /// dropped if it never comes.
+    func fieldTakenDown(_ old: UITextView, madeForColumn: Bool) {
+        guard isFocused, field === old else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, isFocused, field === old else { return }
+            guard madeForColumn != inColumn else {
+                isFocused = false
+                return
+            }
+            handoffPending = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                guard let self, handoffPending else { return }
+                handoffPending = false
+                isFocused = false
+            }
+        }
+    }
+
+    /// A field began editing: the focus is somebody's again.
+    func focusBegan() {
+        handoffPending = false
+        isFocused = true
+    }
 
     /// The caret as a `Character` offset, which `activeToken(in:cursor:)`
     /// counts in. Set, it puts the caret there with nothing selected.
@@ -82,6 +125,19 @@ final class ComposerModel: ObservableObject {
         guard let index = text.index(text.startIndex, offsetBy: characterOffset, limitedBy: text.endIndex)
         else { return (text as NSString).length }
         return text.utf16.distance(from: text.utf16.startIndex, to: index.samePosition(in: text.utf16) ?? text.utf16.endIndex)
+    }
+}
+
+/// `-composer-no-send-shortcut` (DEBUG): the Send button keeps no ⌘↩, so a test
+/// can tell the field's key command from the button's shortcut. Only the
+/// shortcut is dropped; both sends are the shipping code.
+enum ComposerHarness {
+    static var dropsSendShortcut: Bool {
+        #if DEBUG
+        CommandLine.arguments.contains("-composer-no-send-shortcut")
+        #else
+        false
+        #endif
     }
 }
 
