@@ -98,7 +98,15 @@ impl Projection {
                     }
                 }
             }
-            "Stop" | "StopFailure" if payload.get("agent_id").is_some() => {}
+            // A subagent's own stop is its end, not the turn's.
+            "Stop" | "StopFailure" if payload.get("agent_id").is_some() => {
+                let agent = text(payload, "agent_id").unwrap_or_default();
+                let state = if event == "Stop" { SubagentState::Completed } else { SubagentState::Failed };
+                match self.agents.get(agent).copied() {
+                    Some(i) => self.end_subagent(i, state, at),
+                    None => self.stop_orphan(agent),
+                }
+            }
             "Stop" => {
                 let turn = self.hook_turn(payload, now);
                 self.end_turn(turn, at, TurnOutcome::Finished);
@@ -162,7 +170,10 @@ impl Projection {
     /// `SubagentStart`: tie its `agent_id` to the `Agent` call's row, when
     /// exactly one running row of its type is still untied. The hook names
     /// no `tool_use_id`, so two of one type launched together wait for their
-    /// meta files instead (`join_by_meta`).
+    /// meta files instead (`join_by_meta`). And folded before the other's
+    /// `PreToolUse` (each hook connection is its own task), one row looks
+    /// like the only one: so this tie is provisional (`hook_linked`), and the
+    /// meta file or the launch result that names the row has the last word.
     fn subagent_started(&mut self, payload: &Value) {
         let Some(agent) = text(payload, "agent_id") else { return };
         if self.agents.contains_key(agent) {
@@ -177,6 +188,7 @@ impl Projection {
         });
         if let (Some((i, _)), None) = (untied.next(), untied.next()) {
             self.join_agent(agent, i);
+            self.hook_linked.insert(agent.to_string());
         }
     }
 

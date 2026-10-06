@@ -54,3 +54,5 @@ mod follow_tests;
 mod matching_tests;
 #[cfg(test)]
 mod nested_tests;
+#[cfg(test)]
+mod subagent_link_tests;

@@ -144,6 +144,11 @@ pub struct Projection {
     /// Turns a hook opened that the transcript has not yet written, so a
     /// confirmed turn retires them without walking every row.
     hook_turns: Vec<usize>,
+    /// Agents a `SubagentStart` tied to a row by type alone. The hook names
+    /// no `tool_use_id`, and folded out of order it can tie two agents of
+    /// one type each to the other's row, so its tie holds only until a meta
+    /// file or a launch result names the row (`join_surely`).
+    pub(super) hook_linked: HashSet<String>,
     /// Uuid-less lines folded so far, by scope and line hash, as the most
     /// copies of each met in any one read of its file (see `repeated`).
     folded_copies: HashMap<u64, u32>,
@@ -932,7 +937,7 @@ impl Projection {
     pub(super) fn subagent_result(&mut self, i: usize, failed: bool, result: Option<&ToolUseResult<'_>>, at: Option<i64>) {
         if let Some(result) = result {
             if let Some(agent_id) = result.agent_id.get() {
-                self.join_agent(agent_id, i);
+                self.join_surely(agent_id, i);
             }
             if let RowKind::Subagent(sub) = &mut self.rows[i].kind {
                 if let Some(count) = result.total_tool_use_count.int() {
@@ -1167,7 +1172,7 @@ impl Projection {
     pub fn fold_subagent_line(&mut self, agent_id: &str, meta: Option<&SubagentMeta>, line: &[u8]) {
         self.stats.lines += 1;
         self.stats.bytes += line.len() as u64;
-        if !self.agents.contains_key(agent_id) {
+        if !self.is_joined(agent_id) {
             if let Some(meta) = meta {
                 self.join_by_meta(agent_id, meta);
             }
@@ -1220,8 +1225,11 @@ impl Projection {
     }
 
     /// Whether a subagent's `agentId` is tied to its row yet.
+    ///
+    /// One a `SubagentStart` tied by type alone is not: its meta file still
+    /// gets to say which row it is.
     pub fn is_joined(&self, agent_id: &str) -> bool {
-        self.agents.contains_key(agent_id)
+        self.agents.contains_key(agent_id) && !self.hook_linked.contains(agent_id)
     }
 
     /// `SubagentStop` for an agent no row has claimed yet: remembered, and
@@ -1246,8 +1254,49 @@ impl Projection {
                 sub.background = true;
             }
         }
-        self.join_agent(agent_id, i);
+        self.join_surely(agent_id, i);
         self.count_background(i);
+    }
+
+    /// Tie `agent_id` to row `i` on a record that names both: a meta file's
+    /// `toolUseId`, or a launch result's `agentId`. A tie a `SubagentStart`
+    /// made otherwise is undone first, on both sides: the agent leaves the
+    /// row it was given, taking what its transcript said with it, and an
+    /// agent the hook gave row `i` leaves it for its own meta to place.
+    pub(super) fn join_surely(&mut self, agent_id: &str, i: usize) {
+        self.hook_linked.remove(agent_id);
+        if self.agents.get(agent_id) == Some(&i) {
+            return;
+        }
+        if let Some(j) = self.agents.get(agent_id).copied() {
+            self.untie(agent_id, j);
+        }
+        if let RowKind::Subagent(Subagent { agent_id: Some(other), .. }) = &self.rows[i].kind {
+            let other = other.clone();
+            if self.hook_linked.contains(&other) {
+                self.untie(&other, i);
+            }
+        }
+        self.join_agent(agent_id, i);
+    }
+
+    /// Undo a hook's tie of `agent_id` to row `j`: what its transcript gave
+    /// the row goes back to the agent as an orphan's, for its right row.
+    fn untie(&mut self, agent_id: &str, j: usize) {
+        self.agents.remove(agent_id);
+        let seen = self.seen_tools.remove(&j).unwrap_or(0);
+        if let RowKind::Subagent(sub) = &mut self.rows[j].kind {
+            let orphan = self.orphans.entry(agent_id.to_string()).or_default();
+            orphan.tool_count += seen;
+            if !sub.current_action.is_empty() {
+                orphan.current_action = std::mem::take(&mut sub.current_action);
+            }
+            orphan.last_ms = orphan.last_ms.max(sub.last_ms);
+            sub.agent_id = None;
+            sub.tool_count = 0;
+            sub.last_ms = sub.started_ms;
+        }
+        self.touch(j);
     }
 }
 
