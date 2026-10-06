@@ -11,6 +11,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -189,6 +192,15 @@ fun PlanHome(
         )
     }
 }
+
+/** This navigation, running [after] first on every destination it opens. */
+fun TreeNavigation.then(after: () -> Unit) = TreeNavigation(
+    onOpenTask = { after(); onOpenTask(it) },
+    onOpenPlan = { after(); onOpenPlan(it) },
+    onOpenTerminal = { worktree, terminal -> after(); onOpenTerminal(worktree, terminal) },
+    onOpenWorktree = { after(); onOpenWorktree(it) },
+    onOpenLevel = { after(); onOpenLevel(it) },
+)
 
 /** The strip, under the tab row while the orchestrator is up, and the sheet it opens. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -386,14 +398,27 @@ fun ThemesTab(connection: Connection, workspace: WorkspaceSummary, nav: TreeNavi
 /** Material's filter chips: one choice of three, kept per workspace (review 18). */
 @Composable
 internal fun TreeFilterChips(filter: OneTree.Filter, onChoose: (OneTree.Filter) -> Unit) {
-    // Scrolls, for the wide workspace's 240 dp list pane, where the third chip is past the edge.
-    Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OneTree.Filter.entries.forEach { f ->
-            androidx.compose.material3.FilterChip(
-                selected = f == filter,
-                onClick = { onChoose(f) },
-                label = { Text(f.title) },
-                modifier = Modifier.testTag("tree-filter-${f.name.lowercase()}"),
+    // Scrolls, for the wide workspace's 240 dp list pane, where the third chip
+    // is past the edge; a fade at the edge says there's more.
+    val scroll = androidx.compose.foundation.rememberScrollState()
+    Box(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().horizontalScroll(scroll).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OneTree.Filter.entries.forEach { f ->
+                androidx.compose.material3.FilterChip(
+                    selected = f == filter,
+                    onClick = { onChoose(f) },
+                    label = { Text(f.title) },
+                    modifier = Modifier.testTag("tree-filter-${f.name.lowercase()}"),
+                )
+            }
+        }
+        if (scroll.canScrollForward) {
+            Box(
+                Modifier.align(Alignment.CenterEnd).width(32.dp).height(FilterChipDefaults.Height).testTag("tree-filter-fade").background(
+                    androidx.compose.ui.graphics.Brush.horizontalGradient(
+                        listOf(Color.Transparent, MaterialTheme.colorScheme.surface),
+                    ),
+                ),
             )
         }
     }

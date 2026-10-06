@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -133,7 +134,7 @@ fun Separator(modifier: Modifier = Modifier) {
 /** [Separator] turned to stand between side-by-side panes. */
 @Composable
 fun VerticalSeparator(modifier: Modifier = Modifier) {
-    androidx.compose.material3.VerticalDivider(modifier, color = MaterialTheme.colorScheme.outlineVariant)
+    VerticalDivider(modifier, color = MaterialTheme.colorScheme.outlineVariant)
 }
 
 /**

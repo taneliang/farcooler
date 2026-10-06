@@ -20,10 +20,13 @@ import org.robolectric.shadows.ShadowLooper
  * tree of the compose view directly. Nothing is clicked or typed.
  */
 object SemanticsProbe {
-    fun tagged(content: @androidx.compose.runtime.Composable () -> Unit): Map<String, Rect> {
+    fun tagged(act: (ComponentActivity) -> Unit = {}, content: @androidx.compose.runtime.Composable () -> Unit): Map<String, Rect> {
         var found = emptyMap<String, Rect>()
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity { it.setContent { content() } }
+            ShadowLooper.idleMainLooper()
+            // What a person does to the activity (a Back press), then what is drawn after it.
+            scenario.onActivity { act(it) }
             ShadowLooper.idleMainLooper()
             scenario.onActivity { activity ->
                 val root = roots(activity.window.decorView).first()

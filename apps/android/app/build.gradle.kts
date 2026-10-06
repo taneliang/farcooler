@@ -368,7 +368,6 @@ dependencies {
     // in the Compose BOM and so carry their own version.
     implementation(libs.androidx.compose.material3.adaptive)
     implementation(libs.androidx.compose.material3.adaptive.layout)
-    implementation(libs.androidx.compose.material3.adaptive.navigation)
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     implementation(platform(libs.firebase.bom))

@@ -8,6 +8,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.farcooler.data.Themes
@@ -26,6 +27,7 @@ import com.farcooler.ui.SheetHeader
 import com.farcooler.ui.TreeFilterChips
 import com.farcooler.ui.TreeNavigation
 import com.farcooler.ui.TreeRootList
+import com.farcooler.ui.TreePanelState
 import com.farcooler.ui.WideContent
 import com.farcooler.ui.WideDestination
 import com.farcooler.ui.WideWorkspaceFrame
@@ -78,13 +80,13 @@ class WideWorkspaceCaptureTest {
     @Composable
     private fun Host(destination: WideDestination = WideDestination.PLAN, treeOpen: Boolean = false) {
         val kind = WorkspaceLayout.current(implicit = false)
+        val panel = remember { TreePanelState().also { if (treeOpen) it.planTapped(WideDestination.PLAN, kind) } }
         if (kind != WorkspaceLayout.Kind.PHONE) {
             WideWorkspaceFrame(
                 kind = kind,
                 destination = destination,
-                treeOpen = treeOpen,
+                panel = panel,
                 onSelect = {},
-                onToggleTree = {},
                 onBack = {},
                 onNeedsYou = {},
                 topBar = { TopAppBar(title = { Text("Billing") }) },
@@ -115,7 +117,8 @@ class WideWorkspaceCaptureTest {
     private fun Chat() = Column(Modifier.fillMaxSize().padding(16.dp)) { rows.forEach { AgentRowView(it) } }
 
     /** The tagged nodes of what [content] draws, with where each is on screen. */
-    private fun drawn(content: @Composable () -> Unit): Map<String, Rect> = SemanticsProbe.tagged { FarCoolerTheme { content() } }
+    private fun drawn(act: (androidx.activity.ComponentActivity) -> Unit = {}, content: @Composable () -> Unit): Map<String, Rect> =
+        SemanticsProbe.tagged(act) { FarCoolerTheme { content() } }
 
     @Test
     @Config(qualifiers = "w1280dp-h800dp-xhdpi")
@@ -125,6 +128,8 @@ class WideWorkspaceCaptureTest {
             assertTrue("$tag is drawn: ${tags.keys}", tag in tags)
         }
         assertFalse("the strip is the phone's", "plan-strip" in tags)
+        // The tree's rows get the pane's height under the chips (the chips' fade once took it all).
+        assertTrue("tree rows are drawn: ${tags["tree-root"]}", (tags["tree-root"]?.height ?: 0f) > 400f)
         val order = listOf("wide-rail", "wide-pane-list", "wide-pane-main", "wide-pane-supporting").map { tags.getValue(it).left }
         assertEquals(order.sorted(), order)
         // The plan keeps 360 dp or more (xhdpi: 2 px a dp, so 720 px).
@@ -163,6 +168,28 @@ class WideWorkspaceCaptureTest {
         assertTrue("wide-tree-scrim" in open)
         assertTrue(open.getValue("wide-pane-list").left >= open.getValue("wide-pane-main").left)
         assertTrue(open.getValue("wide-pane-list").right <= open.getValue("wide-pane-main").right)
+        // The plan keeps its 360 dp (xhdpi: 2 px a dp) with the panel over it, too.
+        assertTrue(open.getValue("wide-pane-main").width >= 360 * 2)
+    }
+
+    /** Back with the panel open closes the panel (and, with it shut, is the screen's own). */
+    @Test
+    @Config(qualifiers = "w1000dp-h700dp-xhdpi")
+    fun `back closes the open tree panel`() {
+        val open = drawn { Host(treeOpen = true) }
+        assertTrue("wide-tree-scrim" in open)
+        val after = drawn(act = { it.onBackPressedDispatcher.onBackPressed() }) { Host(treeOpen = true) }
+        assertFalse("the panel is gone after Back", "wide-pane-list" in after)
+        assertFalse("wide-tree-scrim" in after)
+        assertTrue("the workspace itself is still there", "wide-workspace" in after)
+    }
+
+    /** The plan is never narrower than 360 dp at either layout's narrowest width and with the tree a column. */
+    @Test
+    @Config(qualifiers = "w1200dp-h800dp-xhdpi")
+    fun `the chat is 360 dp from 1200 dp`() {
+        val tags = drawn { Host() }
+        assertEquals(360 * 2f, tags.getValue("wide-pane-supporting").width, 2f)
     }
 
     @Test

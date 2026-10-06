@@ -2,6 +2,7 @@
 
 package com.farcooler.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -10,6 +11,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.focusGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Flag
@@ -29,6 +32,18 @@ import androidx.compose.material3.adaptive.layout.PaneAdaptedValue
 import androidx.compose.material3.adaptive.layout.PaneScaffoldDirective
 import androidx.compose.material3.adaptive.layout.ThreePaneScaffoldValue
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
@@ -156,12 +171,78 @@ internal fun wideScaffoldDirective(kind: WorkspaceLayout.Kind) = PaneScaffoldDir
     excludedBounds = emptyList(),
 )
 
-/** The tree's column, and the chat's. The plan takes what's left. */
+/** The tree's column. */
 internal val WideListWidth: Dp = 240.dp
-internal val WideChatWidth: Dp = 320.dp
+
+/**
+ * The chat's column: 360 dp where there are three columns to spare it, 320 dp
+ * beside only the plan, so that the plan keeps [WorkspaceLayout.MIN_PLAN_DP].
+ */
+internal fun wideChatWidth(kind: WorkspaceLayout.Kind): Dp =
+    if (kind == WorkspaceLayout.Kind.THREE_PANE) 360.dp else 320.dp
 
 /** The rail's width, Material's. */
 internal const val WideRailDp = 80
+
+/**
+ * Where the tree panel stands at [WorkspaceLayout.Kind.TWO_PANE], as a plain
+ * holder so its rules are testable without a screen.
+ *
+ * The panel is a transient overlay, like the phone's plan sheet: it closes
+ * when something is picked from it, when the rail place or the layout changes
+ * under it, and on Back, which dismisses it before it leaves the workspace.
+ * Where the tree is a column, or there are no panes, it is never shown, so a
+ * stale flag can't surface it after a resize.
+ */
+class TreePanelState {
+    var open by mutableStateOf(false)
+        private set
+    private var seenKind: WorkspaceLayout.Kind? = null
+    private var seenDestination: WideDestination? = null
+
+    /** Whether the panel is up at [kind]. */
+    fun isShown(kind: WorkspaceLayout.Kind): Boolean = open && kind == WorkspaceLayout.Kind.TWO_PANE
+
+    /** The rail's Plan place tapped while [selected] is up. True when the place should be selected. */
+    fun planTapped(selected: WideDestination, kind: WorkspaceLayout.Kind): Boolean {
+        if (selected == WideDestination.PLAN && kind == WorkspaceLayout.Kind.TWO_PANE) {
+            open = !open
+            return false
+        }
+        open = false
+        return true
+    }
+
+    /** Something was picked from the panel (a row, a level, a terminal): it closes first, as the phone's sheet does. */
+    fun picked() {
+        open = false
+    }
+
+    /** The rail place or the layout changed, from here or from outside (a deep link, a resize, a fold). */
+    fun sync(kind: WorkspaceLayout.Kind, destination: WideDestination) {
+        if (kind != seenKind || destination != seenDestination) open = false
+        seenKind = kind
+        seenDestination = destination
+    }
+
+    /** Back: true when it closed the panel, so it didn't leave the workspace. */
+    fun back(kind: WorkspaceLayout.Kind): Boolean {
+        if (!isShown(kind)) return false
+        open = false
+        return true
+    }
+}
+
+/** What a jump to a terminal does beside the chat. */
+enum class WideJump { FOCUS_CHAT, OPEN }
+
+/**
+ * A Discuss or a jump to [ref], with [orchestrator] up in the chat pane: the
+ * orchestrator's own terminal is already beside the plan, so it takes focus
+ * instead of being pushed as a full screen over it.
+ */
+fun wideJump(ref: com.farcooler.net.TerminalRef, orchestrator: com.farcooler.model.Terminal?): WideJump =
+    if (orchestrator != null && ref.terminalId == orchestrator.id) WideJump.FOCUS_CHAT else WideJump.OPEN
 
 /**
  * The wide workspace's frame: a navigation rail, and beside it Material's
@@ -169,29 +250,47 @@ internal const val WideRailDp = 80
  * the orchestrator's chat as the extra pane, which is the supporting pane of
  * the design. At [WorkspaceLayout.Kind.THREE_PANE] the tree is the list pane;
  * at [WorkspaceLayout.Kind.TWO_PANE] it is a panel over the plan's leading
- * edge, opened by tapping the rail's Plan place while it is selected.
+ * edge, opened by tapping the rail's Plan place while it is selected ([panel]).
  *
- * Panes are divided by the theme's separator, drawn as vertical rules.
+ * Panes are divided by the theme's separator, drawn as vertical rules. The
+ * plan's pane is given at least [WorkspaceLayout.MIN_PLAN_DP] by a width
+ * constraint of its own, not by the scaffold's preferred widths.
+ *
+ * For TalkBack: the scrim is a labeled button, the plan behind an open panel
+ * is hidden from it, focus moves into the panel on open and back to the rail's
+ * Plan place on close, and that place says whether the tree is open.
  *
  * What goes in each pane is [WideDestination.contents]; [content] draws it.
  * The frame knows nothing about connections, so the tests and the captures
- * can drive it with the app's own views.
+ * can drive it with the app's own views. [chatModifier] lets the screen focus
+ * the chat pane.
  */
 @Composable
 fun WideWorkspaceFrame(
     kind: WorkspaceLayout.Kind,
     destination: WideDestination,
-    treeOpen: Boolean,
+    panel: TreePanelState,
     onSelect: (WideDestination) -> Unit,
-    onToggleTree: () -> Unit,
     onBack: () -> Unit,
     onNeedsYou: () -> Unit,
     topBar: @Composable () -> Unit,
     modifier: Modifier = Modifier,
+    chatModifier: Modifier = Modifier,
     content: @Composable (WideContent) -> Unit,
 ) {
-    val contents = destination.contents(kind, treeOpen)
+    val shown = panel.isShown(kind)
+    val contents = destination.contents(kind, shown)
     val columns = kind == WorkspaceLayout.Kind.THREE_PANE
+    val panelFocus = remember { FocusRequester() }
+    val planFocus = remember { FocusRequester() }
+    // Back dismisses the panel before it leaves the workspace.
+    BackHandler(enabled = shown) { panel.back(kind) }
+    // Focus into the panel as it opens, and back to the rail's Plan place as it closes.
+    var wasShown by remember { mutableStateOf(false) }
+    LaunchedEffect(shown) {
+        if (shown) panelFocus.requestFocus() else if (wasShown) planFocus.requestFocus()
+        wasShown = shown
+    }
     Row(modifier.fillMaxSize().testTag("wide-workspace")) {
         NavigationRail(
             header = {
@@ -211,14 +310,16 @@ fun WideWorkspaceFrame(
             NavigationRailItem(
                 selected = destination == WideDestination.PLAN,
                 // Tapping the place that is already up opens the tree, where the tree isn't a column.
-                onClick = { if (destination == WideDestination.PLAN && !columns) onToggleTree() else onSelect(WideDestination.PLAN) },
+                onClick = { if (panel.planTapped(destination, kind)) onSelect(WideDestination.PLAN) },
                 icon = { Icon(Icons.Outlined.AccountTree, contentDescription = null) },
                 label = { Text(WideDestination.PLAN.title) },
-                modifier = Modifier.testTag("wide-rail-plan"),
+                modifier = Modifier.focusRequester(planFocus).testTag("wide-rail-plan").semantics {
+                    if (!columns && destination == WideDestination.PLAN) stateDescription = if (shown) "Tree open" else "Tree closed"
+                },
             )
             NavigationRailItem(
                 selected = destination == WideDestination.BOARD,
-                onClick = { onSelect(WideDestination.BOARD) },
+                onClick = { if (panel.planTapped(WideDestination.BOARD, kind)) onSelect(WideDestination.BOARD) },
                 icon = { Icon(Icons.Outlined.ViewKanban, contentDescription = null) },
                 label = { Text(WideDestination.BOARD.title) },
                 modifier = Modifier.testTag("wide-rail-board"),
@@ -231,10 +332,14 @@ fun WideWorkspaceFrame(
                 directive = wideScaffoldDirective(kind),
                 value = wideScaffoldValue(kind),
                 listPane = {
+                    // Null-safe: a window shrinking from three columns to two can compose this pane's exit once more.
                     AnimatedPane(Modifier.preferredWidth(WideListWidth)) {
-                        Row(Modifier.fillMaxSize().testTag(WidePane.LIST.tag)) {
-                            Box(Modifier.weight(1f).fillMaxHeight()) { content(contents.getValue(WidePane.LIST)) }
-                            VerticalSeparator()
+                        val tree = contents[WidePane.LIST]
+                        if (columns && tree != null) {
+                            Row(Modifier.fillMaxSize().testTag(WidePane.LIST.tag)) {
+                                Box(Modifier.weight(1f).fillMaxHeight()) { content(tree) }
+                                VerticalSeparator()
+                            }
                         }
                     }
                 },
@@ -242,20 +347,30 @@ fun WideWorkspaceFrame(
                     AnimatedPane {
                         Row(Modifier.fillMaxSize()) {
                             Box(Modifier.weight(1f).fillMaxHeight().testTag(WidePane.MAIN.tag)) {
-                                content(contents.getValue(WidePane.MAIN))
+                                // The plan is never drawn narrower than its minimum, whatever the scaffold allots.
+                                // Hidden from TalkBack while the panel is over it.
+                                val main = contents[WidePane.MAIN]
+                                Box(
+                                    Modifier.fillMaxSize().widthIn(min = WorkspaceLayout.MIN_PLAN_DP.dp)
+                                        .then(if (shown) Modifier.clearAndSetSemantics {} else Modifier),
+                                ) { if (main != null) content(main) }
                                 // The tree over the plan's leading edge, with a scrim that closes it.
-                                if (!columns && WidePane.LIST in contents) {
+                                val tree = contents[WidePane.LIST]
+                                if (!columns && tree != null) {
                                     Box(
                                         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
-                                            .clickable(onClick = onToggleTree).testTag("wide-tree-scrim"),
+                                            .clickable(onClickLabel = "Close tree", role = Role.Button, onClick = { panel.back(kind) })
+                                            .testTag("wide-tree-scrim"),
                                     )
                                     Surface(
-                                        modifier = Modifier.width(WideListWidth).fillMaxHeight().testTag(WidePane.LIST.tag),
+                                        modifier = Modifier.width(WideListWidth).fillMaxHeight().testTag(WidePane.LIST.tag)
+                                            .semantics { paneTitle = "Tree" }
+                                            .focusRequester(panelFocus).focusGroup(),
                                         tonalElevation = 3.dp,
                                         shadowElevation = 6.dp,
                                     ) {
                                         Row(Modifier.fillMaxSize()) {
-                                            Box(Modifier.weight(1f).fillMaxHeight()) { content(contents.getValue(WidePane.LIST)) }
+                                            Box(Modifier.weight(1f).fillMaxHeight()) { content(tree) }
                                             VerticalSeparator()
                                         }
                                     }
@@ -266,8 +381,10 @@ fun WideWorkspaceFrame(
                     }
                 },
                 extraPane = {
-                    AnimatedPane(Modifier.preferredWidth(WideChatWidth)) {
-                        Box(Modifier.fillMaxSize().testTag(WidePane.SUPPORTING.tag)) { content(contents.getValue(WidePane.SUPPORTING)) }
+                    AnimatedPane(Modifier.preferredWidth(wideChatWidth(kind))) {
+                        Box(Modifier.fillMaxSize().then(chatModifier).testTag(WidePane.SUPPORTING.tag)) {
+                            contents[WidePane.SUPPORTING]?.let { content(it) }
+                        }
                     }
                 },
             )

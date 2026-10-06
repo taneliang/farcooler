@@ -34,18 +34,15 @@ class WideWorkspaceTest {
         for (width in listOf(840, 1199, 1200, 1280)) assertEquals(phone, WorkspaceLayout.of(width, implicit = true))
     }
 
-    /** Owner ruling: the plan is never given less than 360 dp, at the narrowest width of each layout. */
+    /**
+     * The chat is 360 dp with three columns and 320 dp beside only the plan.
+     * The plan's own 360 dp is measured on the drawn pane at 840, 1199 and 1200
+     * dp in WideWorkspaceCaptureTest, not computed here.
+     */
     @Test
-    fun `the plan keeps 360 dp at each layout's narrowest width`() {
-        val rail = WideRailDp
-        val chat = WideChatWidth.value.toInt()
-        val list = WideListWidth.value.toInt()
-        val twoPane = WorkspaceLayout.EXPANDED_DP - rail - chat
-        val threePane = WorkspaceLayout.THREE_PANE_DP - rail - chat - list
-        assertTrue("two panes: $twoPane", twoPane >= WorkspaceLayout.MIN_PLAN_DP)
-        assertTrue("three panes: $threePane", threePane >= WorkspaceLayout.MIN_PLAN_DP)
-        // And the tree as a column at 840 dp would have broken it: why it folds into the rail.
-        assertTrue(twoPane - list < WorkspaceLayout.MIN_PLAN_DP)
+    fun `the chat is wider where there are three columns`() {
+        assertEquals(360f, wideChatWidth(three).value, 0f)
+        assertEquals(320f, wideChatWidth(two).value, 0f)
     }
 
     /** Three columns: tree, plan and chat; the board swaps only the main pane. */
@@ -118,5 +115,14 @@ class WideWorkspaceTest {
         assertEquals(PaneAdaptedValue.Hidden, folded.secondary)
         assertEquals(PaneAdaptedValue.Expanded, folded.tertiary)
         assertEquals(2, wideScaffoldDirective(two).maxHorizontalPartitions)
+    }
+
+    /** Discuss on the orchestrator's own terminal focuses the chat beside the plan; any other terminal is pushed. */
+    @Test
+    fun `a jump to the orchestrator focuses the chat`() {
+        val orchestrator = com.farcooler.model.Terminal(id = "o", state = "running", role = "orchestrator")
+        assertEquals(WideJump.FOCUS_CHAT, wideJump(com.farcooler.net.TerminalRef("h", "main", "o"), orchestrator))
+        assertEquals(WideJump.OPEN, wideJump(com.farcooler.net.TerminalRef("h", "w", "other"), orchestrator))
+        assertEquals(WideJump.OPEN, wideJump(com.farcooler.net.TerminalRef("h", "main", "o"), null))
     }
 }

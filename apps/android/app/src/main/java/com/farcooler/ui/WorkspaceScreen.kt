@@ -35,7 +35,9 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.movableContentOf
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.focusGroup
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -190,8 +192,36 @@ fun WorkspaceScreen(
     // The wide layout (ov-347) has the chat up whichever rail place is selected.
     val layout = WorkspaceLayout.current(workspace.isImplicit)
     val wide = layout != WorkspaceLayout.Kind.PHONE
-    // The tree's panel over the plan, where it isn't a column.
-    var treeOpen by rememberSaveable(workspace.id) { mutableStateOf(false) }
+    // The tree's panel over the plan, where it isn't a column. Closed by any
+    // change of rail place or layout, from here or from outside.
+    val panel = remember(workspace.id) { TreePanelState() }
+    LaunchedEffect(layout, route.tab) { panel.sync(layout, WideDestination.of(route.tab)) }
+    // The chat pane takes focus when a Discuss jumps to the orchestrator beside it.
+    val chatFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    // One TerminalPane for both layouts: it moves between the phone's slot and
+    // the wide one, so a fold or a resize across 840 dp keeps its state
+    // (the half-typed message, the scroll) instead of remounting it.
+    val orchestratorPane = remember(model) {
+        movableContentOf { pane: OrchestratorPaneInputs ->
+            TerminalPane(
+                model = model,
+                ref = pane.ref,
+                connection = pane.connection,
+                worktree = pane.worktree,
+                showRunner = pane.showRunner,
+                live = pane.live,
+                onPickImage = {},
+                showTopBar = false,
+                onOpenDrawer = {},
+            )
+        }
+    }
+    val jump: (TerminalRef) -> Unit = { ref ->
+        when (wideJump(ref, live?.terminal)) {
+            WideJump.FOCUS_CHAT -> chatFocus.requestFocus()
+            WideJump.OPEN -> model.openFromBoard(ref)
+        }
+    }
     val reading = live?.terminal?.id?.takeIf { (wide || route.tab == WorkspaceTab.ORCHESTRATOR) && onScreen }
     DisposableEffect(reading) {
         if (reading != null) {
@@ -207,9 +237,9 @@ fun WorkspaceScreen(
         WideWorkspaceFrame(
             kind = layout,
             destination = WideDestination.of(route.tab),
-            treeOpen = treeOpen,
-            onSelect = { treeOpen = false; model.selectTab(route, it.tab) },
-            onToggleTree = { treeOpen = !treeOpen },
+            panel = panel,
+            onSelect = { model.selectTab(route, it.tab) },
+            chatModifier = Modifier.focusRequester(chatFocus).focusGroup(),
             onBack = onBack,
             onNeedsYou = { model.goHome() },
             topBar = {
@@ -255,7 +285,8 @@ fun WorkspaceScreen(
                 WideContent.TREE -> ThemesTab(
                     connection = connection,
                     workspace = workspace,
-                    nav = treeNavigation(model, route.hostId, route.workspaceId) { fleet.worktrees },
+                    // Picking from the panel closes it first, as the phone's sheet does.
+                    nav = treeNavigation(model, route.hostId, route.workspaceId) { fleet.worktrees }.then { panel.picked() },
                 )
                 WideContent.PLAN -> PlanHome(
                     connection = connection,
@@ -263,7 +294,7 @@ fun WorkspaceScreen(
                     orchestrator = live?.terminal,
                     onOpenPlan = { page -> model.navigate(Route.PlanPage(route.hostId, route.workspaceId, page.kind, page.id)) },
                     onNeedsYou = { model.goHome() },
-                    onJump = { model.openFromBoard(it) },
+                    onJump = jump,
                 )
                 WideContent.BOARD -> BoardTab(
                     connection = connection,
@@ -276,16 +307,14 @@ fun WorkspaceScreen(
                     onShowOrchestrator = null,
                 )
                 WideContent.CHAT -> if (live != null) {
-                    TerminalPane(
-                        model = model,
-                        ref = TerminalRef(route.hostId, live.worktreeId, live.terminal.id),
-                        connection = connection,
-                        worktree = fleet.worktrees.firstOrNull { it.id == live.worktreeId },
-                        showRunner = connections.size > 1,
-                        live = onScreen && foreground,
-                        onPickImage = {},
-                        showTopBar = false,
-                        onOpenDrawer = {},
+                    orchestratorPane(
+                        OrchestratorPaneInputs(
+                            ref = TerminalRef(route.hostId, live.worktreeId, live.terminal.id),
+                            connection = connection,
+                            worktree = fleet.worktrees.firstOrNull { it.id == live.worktreeId },
+                            showRunner = connections.size > 1,
+                            live = onScreen && foreground,
+                        ),
                     )
                 } else {
                     OrchestratorEmpty(
@@ -373,16 +402,14 @@ fun WorkspaceScreen(
             if (live != null) {
                 val showing = route.tab == WorkspaceTab.ORCHESTRATOR
                 Box(Modifier.fillMaxSize().alpha(if (showing) 1f else 0f).mountedPane(showing)) {
-                    TerminalPane(
-                        model = model,
-                        ref = TerminalRef(route.hostId, live.worktreeId, live.terminal.id),
-                        connection = connection,
-                        worktree = fleet.worktrees.firstOrNull { it.id == live.worktreeId },
-                        showRunner = connections.size > 1,
-                        live = showing && onScreen && foreground,
-                        onPickImage = {},
-                        showTopBar = false,
-                        onOpenDrawer = {},
+                    orchestratorPane(
+                        OrchestratorPaneInputs(
+                            ref = TerminalRef(route.hostId, live.worktreeId, live.terminal.id),
+                            connection = connection,
+                            worktree = fleet.worktrees.firstOrNull { it.id == live.worktreeId },
+                            showRunner = connections.size > 1,
+                            live = showing && onScreen && foreground,
+                        ),
                     )
                 }
             }
@@ -436,6 +463,15 @@ fun WorkspaceScreen(
         }
     }
 }
+
+/** What the orchestrator's pane is drawn from, passed to the one pane that moves between layouts. */
+private data class OrchestratorPaneInputs(
+    val ref: TerminalRef,
+    val connection: Connection,
+    val worktree: com.farcooler.model.Worktree?,
+    val showRunner: Boolean,
+    val live: Boolean,
+)
 
 /**
  * A workspace route with no workspace behind it: a spinner while the runner
