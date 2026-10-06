@@ -127,8 +127,10 @@ final class PhoneTreeUITests: XCTestCase {
         XCTAssertFalse(navigation.label.contains("Needs You"), "a dot on a theme that asks nothing")
         XCTAssertLessThan(visual.frame.minY, navigation.frame.minY, "not in plan order")
         XCTAssertTrue(app.buttons["tree-row-No Theme"].exists, "no No Theme")
-        XCTAssertFalse(app.buttons["tree-row-Plan"].exists, "a pinned Plan place on the phone")
-        XCTAssertFalse(app.buttons["tree-row-Needs You"].exists, "a pinned Needs You place on the phone")
+        // Any element: a place's row would draw with no button, since it goes
+        // nowhere on the phone.
+        XCTAssertFalse(element(app, "tree-row-Plan").exists, "a pinned Plan place on the phone")
+        XCTAssertFalse(element(app, "tree-row-Needs You").exists, "a pinned Needs You place on the phone")
         keep(app, "tree-root")
     }
 
