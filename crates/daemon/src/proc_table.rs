@@ -18,7 +18,9 @@
 fn line(pid: i32, ppid: i32, pgid: i32, tty: &str, foreground: bool, args: &str) -> String {
     // A newline inside an argument would split one row into two.
     let args: String = args.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
-    let args = if args.trim().is_empty() { "-" } else { args.trim() };
+    // A foreground row with no argv stays empty, so `parse` skips it as it
+    // skips one `ps` printed empty, and the pane keeps tmux's name for it.
+    let args = if args.trim().is_empty() && !foreground { "-" } else { args.trim() };
     format!("{pid} {ppid} {pgid} {tty} {} {args}\n", if foreground { "S+" } else { "S" })
 }
 
@@ -29,6 +31,26 @@ pub fn snapshot() -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
+/// One `struct kinfo_proc` on 64-bit macOS (`<sys/sysctl.h>`), and the offsets
+/// this reads from it. The `libc` crate has no definition. They were read off
+/// the kernel's own answer against `ps`'s for every process on a live host
+/// (all 979 agreed), and the layout has been fixed since the 64-bit ABI.
+#[cfg(target_os = "macos")]
+mod kinfo {
+    pub const SIZE: usize = 648;
+    pub const P_FLAG: usize = 32;
+    pub const P_PID: usize = 40;
+    pub const E_PPID: usize = 560;
+    pub const E_PGID: usize = 564;
+    pub const E_TDEV: usize = 572;
+    pub const E_TPGID: usize = 576;
+    /// `p_flag`: the process has a controlling terminal.
+    pub const P_CONTROLT: i32 = 0x2;
+}
+
+/// Every process, from the one `sysctl(KERN_PROC_ALL)` that `ps` itself starts
+/// with. Per-pid `proc_pidinfo` costs about ten times as much per process on
+/// a loaded host; this is a single call.
 #[cfg(target_os = "macos")]
 fn walk() -> Option<String> {
     unsafe extern "C" {
@@ -40,70 +62,73 @@ fn walk() -> Option<String> {
             len: libc::c_int,
         ) -> *mut libc::c_char;
     }
-    // `proc_bsdinfo.pbi_flags`, `PROC_FLAG_CTTY` in `<sys/proc_info.h>`: the
-    // process has a controlling terminal. (`PROC_FLAG_CONTROLT` is 0x80, and
-    // `PROC_FLAG_SLEADER` 0x20; read off a live pane's session leader, 0x...f0.)
-    const PROC_FLAG_CTTY: u32 = 0x40;
-    const NODEV: u32 = u32::MAX;
+    const NODEV: i32 = -1;
 
-    // SAFETY: a null buffer of size 0 asks only for the count.
-    let count = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) };
-    if count <= 0 {
+    let mut mib = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_ALL];
+    let mut buf: Vec<u8> = Vec::new();
+    // The table can grow between asking its size and reading it (ENOMEM):
+    // ask again, a few times, and then give up to `ps`.
+    let mut filled = None;
+    for _ in 0..4 {
+        let mut size: libc::size_t = 0;
+        // SAFETY: a null buffer asks only for the size.
+        let rc = unsafe { libc::sysctl(mib.as_mut_ptr(), 3, std::ptr::null_mut(), &mut size, std::ptr::null_mut(), 0) };
+        if rc != 0 || size == 0 {
+            return None;
+        }
+        size += size / 8 + kinfo::SIZE * 16;
+        buf.resize(size, 0);
+        // SAFETY: `buf` holds `size` bytes and the kernel writes at most that.
+        let rc = unsafe { libc::sysctl(mib.as_mut_ptr(), 3, buf.as_mut_ptr().cast(), &mut size, std::ptr::null_mut(), 0) };
+        if rc == 0 {
+            filled = Some(size);
+            break;
+        }
+    }
+    let size = filled?;
+    if size % kinfo::SIZE != 0 {
+        // A layout this code doesn't know: refuse rather than misread it.
         return None;
     }
-    // Room for processes that start between the two calls.
-    let mut pids = vec![0 as libc::pid_t; count as usize + 256];
-    // SAFETY: the buffer holds `len * 4` bytes and the kernel writes at most that.
-    let got = unsafe {
-        libc::proc_listallpids(pids.as_mut_ptr().cast(), (pids.len() * std::mem::size_of::<libc::pid_t>()) as libc::c_int)
-    };
-    if got <= 0 {
-        return None;
-    }
-    pids.truncate(got as usize);
+    let int = |rec: &[u8], at: usize| i32::from_ne_bytes([rec[at], rec[at + 1], rec[at + 2], rec[at + 3]]);
 
-    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
     let mut out = String::new();
-    let mut ttys: std::collections::HashMap<u32, String> = std::collections::HashMap::new();
-    for pid in pids.into_iter().filter(|&p| p > 0) {
-        let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
-        // SAFETY: a zeroed `proc_bsdinfo` of exactly `size` bytes.
-        let written = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, info.as_mut_ptr().cast(), size) };
-        if written != size {
+    let mut ttys: std::collections::HashMap<i32, String> = std::collections::HashMap::new();
+    let (me, my_parent) = (std::process::id() as i32, unsafe { libc::getppid() });
+    let mut saw_myself = false;
+    for rec in buf[..size].chunks_exact(kinfo::SIZE) {
+        let pid = int(rec, kinfo::P_PID);
+        if pid <= 0 {
             continue;
         }
-        // SAFETY: fully written by the call above.
-        let info = unsafe { info.assume_init() };
-        let tty = if info.e_tdev == NODEV {
+        let (ppid, pgid, tdev, tpgid) =
+            (int(rec, kinfo::E_PPID), int(rec, kinfo::E_PGID), int(rec, kinfo::E_TDEV), int(rec, kinfo::E_TPGID));
+        saw_myself |= pid == me && ppid == my_parent;
+        let tty = if tdev == NODEV {
             "??".to_string()
         } else {
-            ttys.entry(info.e_tdev)
+            ttys.entry(tdev)
                 .or_insert_with(|| {
-                    let mut buf = [0 as libc::c_char; 64];
-                    // SAFETY: `buf` is 64 bytes and `devname_r` writes a NUL-terminated name into at most `len`.
-                    let name = unsafe { devname_r(info.e_tdev as libc::dev_t, libc::S_IFCHR, buf.as_mut_ptr(), 64) };
-                    if name.is_null() {
+                    let mut name = [0 as libc::c_char; 64];
+                    // SAFETY: `name` is 64 bytes and `devname_r` writes a NUL-terminated name into at most `len`.
+                    let found = unsafe { devname_r(tdev as libc::dev_t, libc::S_IFCHR, name.as_mut_ptr(), 64) };
+                    if found.is_null() {
                         return "??".to_string();
                     }
                     // SAFETY: NUL-terminated by `devname_r`.
-                    unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().into_owned()
+                    unsafe { std::ffi::CStr::from_ptr(name.as_ptr()) }.to_string_lossy().into_owned()
                 })
                 .clone()
         };
-        let pgid = info.pbi_pgid as i32;
-        let foreground = tty != "??" && info.pbi_flags & PROC_FLAG_CTTY != 0 && info.e_tpgid == info.pbi_pgid;
+        let foreground = tty != "??" && int(rec, kinfo::P_FLAG) & kinfo::P_CONTROLT != 0 && pgid == tpgid;
         // Arguments only where they are read: `foreground::parse` labels a pane
         // from its foreground rows and from nothing else.
-        let args = if foreground { procargs(pid).unwrap_or_else(|| comm(&info.pbi_comm)) } else { String::new() };
-        out.push_str(&line(pid, info.pbi_ppid as i32, pgid, &tty, foreground, &args));
+        let args = if foreground { procargs(pid).unwrap_or_default() } else { String::new() };
+        out.push_str(&line(pid, ppid, pgid, &tty, foreground, &args));
     }
-    Some(out)
-}
-
-#[cfg(target_os = "macos")]
-fn comm(raw: &[libc::c_char]) -> String {
-    let bytes: Vec<u8> = raw.iter().take_while(|&&c| c != 0).map(|&c| c as u8).collect();
-    String::from_utf8_lossy(&bytes).into_owned()
+    // This process must be in the table, under its own parent: if it isn't,
+    // the layout is not the one the offsets were read from.
+    saw_myself.then_some(out)
 }
 
 /// `argv` joined by spaces, from the kernel's `KERN_PROCARGS2`, as `ps` reads it.
@@ -253,6 +278,7 @@ mod tests {
     fn a_row_is_one_line_in_ps_column_order() {
         assert_eq!(line(5, 1, 5, "ttys1", true, "a\nb"), "5 1 5 ttys1 S+ a b\n");
         assert_eq!(line(6, 5, 6, "??", false, ""), "6 5 6 ?? S -\n");
+        assert_eq!(line(7, 5, 7, "ttys1", true, ""), "7 5 7 ttys1 S+ \n");
     }
 
     /// The whole table, read in this process, holds this process under its own
