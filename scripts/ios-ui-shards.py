@@ -55,6 +55,7 @@ SHARDS = {
         "DynamicTypeTests",  # -agent-layout-harness; 36 s
         "ActionFailureTests",  # -phone-harness and -agent-layout-harness; 234 s
         "TaskUsageUITests",  # -phone-harness (ov-195); 67 s
+        "PhoneTreeUITests",  # -phone-harness -phone-plan (ov-300); not yet timed, 11 tests
     ],
     "phone": [
         "PagesUITests",  # -phone-harness -phone-plan -phone-pages (ov-285); 650 s
