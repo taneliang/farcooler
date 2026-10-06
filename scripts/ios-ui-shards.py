@@ -51,6 +51,7 @@ SHARDS = {
         "AgentEndedSessionTests",  # -agent-layout-harness (KeyboardTabStripTests.swift); 111 s
         "AgentTranscriptScrollTests",  # -agent-layout-harness (KeyboardTabStripTests.swift); 107 s
         "AgentDraftTests",  # -agent-layout-harness; 125 s
+        "AgentFollowTests",  # -agent-layout-harness (ov-383); not yet timed, 2 tests
         "AgentRetrySendTests",  # -agent-layout-harness; 25 s
         "AgentStoppedTests",  # -agent-layout-harness -stopped; 27 s
         "ComposerKeyboardTests",  # -agent-layout-harness; 49 s

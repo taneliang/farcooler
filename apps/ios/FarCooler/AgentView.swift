@@ -59,6 +59,7 @@ struct AgentView: View {
     //    underneath the composer. See `obstruction`.
     // 4. UNPINNED IS INVIOLABLE. Nothing scrolls a reader who has scrolled
     //    away. Not a streamed token, not the keyboard, not a finished turn.
+    //    Only their own send, which brings what they sent into view (ov-383).
     // 5. THE WAY BACK IS OFFERED, NOT TAKEN. See `jumpToLatest`.
     // 6. FOLLOWING IS NOT ANIMATED. A reply arrives several events a second
     //    and an eased scroll per event is the jitter. The content grows at the
@@ -962,6 +963,16 @@ struct AgentView: View {
                 // second while a reply streams, and an eased scroll per event
                 // is the jitter, not the smoothness.
                 anchorToTail(animated: false, settling: false)
+            }
+            // A message just sent comes into view, wherever the reader was,
+            // as in Messages (ov-383). The one exception to principle 4, and
+            // the reader's own doing: what they sent is what they're looking
+            // for. Its echo is drawn without an event, so the cursor above
+            // never moves for it. Settling, because the composer empties and
+            // shrinks in the same moment.
+            .onChange(of: transcript.sends) { _, _ in
+                setPinned(true)
+                anchorToTail(animated: false, settling: true)
             }
             // THE VIEWPORT MOVED. The half that was missing.
             //

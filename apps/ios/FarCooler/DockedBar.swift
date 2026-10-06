@@ -95,6 +95,14 @@ final class KeyboardInset: ObservableObject {
                 })
         }
         observers.append(
+            center.addObserver(forName: AccessoryHostView.didResize, object: nil, queue: .main) {
+                [weak self] note in
+                guard let cover = note.userInfo?["cover"] as? CGFloat,
+                    let screenHeight = note.userInfo?["screen"] as? CGFloat
+                else { return }
+                MainActor.assumeIsolated { self?.apply(accessoryCover: cover, screenHeight: screenHeight) }
+            })
+        observers.append(
             center.addObserver(
                 forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main
             ) { [weak self] _ in
@@ -107,6 +115,20 @@ final class KeyboardInset: ObservableObject {
 
     deinit {
         observers.forEach(NotificationCenter.default.removeObserver)
+    }
+
+    /// The accessory was resized with no keyboard frame to say so (ov-383).
+    ///
+    /// With the keys up, UIKit resizes the accessory for a row added above
+    /// the field from outside it — a failed send's banner, a queued message,
+    /// the plan — and the frame it reported last goes on counting the bar it
+    /// had: 456 points for a composer reaching up 516, measured, and the
+    /// banner drew over the message it was about. So the accessory says where
+    /// its top now is, which is the same overlap a frame would have given.
+    /// When a frame does come, it says the same or later, and wins.
+    private func apply(accessoryCover cover: CGFloat, screenHeight: CGFloat) {
+        guard cover > 0, cover < screenHeight * 0.8 else { return }
+        height = cover
     }
 
     private func apply(_ note: Notification) {
@@ -262,6 +284,25 @@ final class AccessoryHostView: UIView {
     /// Reported upward so the conversation can leave room. See `DockedBar`.
     var onHeightChange: ((CGFloat) -> Void)?
 
+    /// Posted when UIKit has given the accessory a new height, with how far
+    /// up its window it now reaches (`cover`) and the window's height
+    /// (`screen`). See `KeyboardInset.apply(accessoryCover:screenHeight:)`.
+    static let didResize = Notification.Name("FarCooler.AccessoryHostView.didResize")
+
+    /// The bounds height last reported in `didResize`.
+    private var reportedHeight: CGFloat = 0
+
+    /// Say so once UIKit has applied a new height: the frame is the laid-out
+    /// one here, so its top is where the composer now starts.
+    private func reportCover() {
+        guard let window, abs(bounds.height - reportedHeight) > 0.5 else { return }
+        reportedHeight = bounds.height
+        let top = convert(bounds, to: nil).minY
+        NotificationCenter.default.post(
+            name: Self.didResize, object: nil,
+            userInfo: ["cover": window.bounds.height - top, "screen": window.bounds.height])
+    }
+
     init(host: MeasuredHostingController) {
         self.host = host
         super.init(frame: .zero)
@@ -305,6 +346,7 @@ final class AccessoryHostView: UIView {
         // equal what the content wants, so comparing the two never converges and
         // invalidates forever.
         guard bounds.width > 0 else { return }
+        reportCover()
         let height = fittedHeight()
         guard abs(height - measured) > 0.5 else { return }
         measured = height

@@ -873,6 +873,10 @@ UI_TEST_SOURCES = [
     # on `-agent-layout-harness`, whose fixture is built in the app — so it
     # cannot skip itself green when the demo daemon is down.
     "AgentDraftTests.swift",
+    # The chat following like Messages (ov-383): a sent message comes into
+    # view, and the follow survives the composer growing. Stands on
+    # `-agent-layout-harness`, so it needs no runner either.
+    "AgentFollowTests.swift",
     "ShellGestureTests.swift",
     # The phone's workspace screen: its Orchestrator, Board and Worktrees
     # segments, Start Orchestrator, and the board's empty statuses. Needs no
