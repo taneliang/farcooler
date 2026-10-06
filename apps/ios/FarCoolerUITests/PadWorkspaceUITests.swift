@@ -222,9 +222,9 @@ final class PadWorkspaceUITests: XCTestCase {
 
     /// **The draft crosses 700 points**: typed in the column's composer, it's
     /// in the keyboard's composer once the window is compact, and back in the
-    /// column's when it's wide again. Two composers, one draft (the store).
-    /// The words cross; picked photos, the caret and the keyboard's focus
-    /// don't, since each composer is its own field.
+    /// column's when it's wide again. Two composers, one draft. The photos,
+    /// the caret and the keyboard cross too, which `ComposerWidthUITests`
+    /// holds (ov-357).
     func testTheDraftCrossesToTheDockedComposerAndBack() {
         let app = openBilling(["-phone-orchestrator-chat", "-pad-compact-wide"])
         layout(app, is: "threeColumns", "landscape")

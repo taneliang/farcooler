@@ -11,6 +11,13 @@ import XCTest
 ///
 /// Run on an iPad simulator (`fc-lanes-ipad`); on an iPhone every test skips,
 /// which `scripts/ios-ui-tests.sh` refuses as a run.
+///
+/// Each test was seen red with its production line broken: the key command and
+/// the Send button's shortcut both off (either alone still sends, so one
+/// alone isn't a mutation), the restored selection moved to the end, the
+/// focus not handed on, the focus handed on always, the resign of a field
+/// taken down read as Hide Keyboard, and the photos dropped when the width
+/// changes.
 final class ComposerWidthUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -60,6 +67,14 @@ final class ComposerWidthUITests: XCTestCase {
     }
 
     private var field: (XCUIApplication) -> XCUIElement { { $0.textViews.firstMatch } }
+
+    /// Hide Keyboard is drawn while the model says the field has the keyboard,
+    /// so it's there when the focus truly crossed and the old field's resign
+    /// on its way out wasn't taken for the reader putting the keyboard away.
+    private func assertHideKeyboardShown(_ app: XCUIApplication, _ why: String) {
+        let hide = app.buttons.matching(NSPredicate(format: "label == 'Hide Keyboard'")).firstMatch
+        XCTAssertTrue(hide.waitForExistence(timeout: 10), "\(why): the composer has the keyboard but not Hide Keyboard")
+    }
 
     private func sendButton(_ app: XCUIApplication) -> XCUIElement {
         app.buttons.matching(NSPredicate(format: "label == 'Send'")).firstMatch
@@ -122,6 +137,7 @@ final class ComposerWidthUITests: XCTestCase {
         XCTAssertTrue(photo.firstMatch.waitForExistence(timeout: 10), "the photo didn't cross to the docked composer")
         XCTAssertEqual(photo.count, 1, "the photo was doubled")
         XCTAssertTrue(hasKeyboardFocus(docked), "the docked composer didn't take the keyboard")
+        assertHideKeyboardShown(app, "docked")
         app.typeText("X")
         waitFor(docked, "value == %@", "hello Xworld", "the caret didn't cross to the docked composer")
 
@@ -132,6 +148,7 @@ final class ComposerWidthUITests: XCTestCase {
         XCTAssertTrue(photo.firstMatch.waitForExistence(timeout: 10), "the photo didn't cross back")
         XCTAssertEqual(photo.count, 1, "the photo was doubled coming back")
         XCTAssertTrue(hasKeyboardFocus(column), "the column composer didn't take the keyboard back")
+        assertHideKeyboardShown(app, "column again")
         app.typeText("Y")
         waitFor(column, "value == %@", "hello XYworld", "the caret didn't cross back")
     }
