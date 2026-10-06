@@ -110,6 +110,42 @@ final class PhoneTreeUITests: XCTestCase {
         XCTAssertTrue(strip.waitForExistence(timeout: 10), "Back didn't come back to the orchestrator")
     }
 
+    /// **Decided For You works in the sheet as on the Board** (review 5):
+    /// Keep All there tells the runner, and the section empties.
+    func testTheSheetsRulingsCanBeKept() {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { root.deleteLastPathComponent() }
+        let rulings = root.appendingPathComponent("test/fixtures/plan-rulings-seeded.json").path
+        let app = XCUIApplication.phoneHarness(
+            ["-phone-empty-inbox", "-phone-billing-led", "-phone-plan", "-phone-rulings", "-phone-plan-file", rulings])
+        app.buttons["workspace-row-Billing"].tap()
+        let strip = app.buttons["plan-strip"]
+        XCTAssertTrue(strip.waitForExistence(timeout: 15), "no strip")
+        strip.tap()
+        XCTAssertTrue(element(app, "plan-sheet-orchestrator").waitForExistence(timeout: 10), "no sheet")
+        app.navigationBars["Plan"].swipeUp()
+        let all = element(app, "plan-rulings-keep-all")
+        for _ in 0..<8 where !(all.exists && all.isHittable) { app.swipeUp() }
+        XCTAssertTrue(all.exists && all.isHittable, "no Keep All in the sheet: \(app.debugDescription)")
+        all.tap()
+        let sent = element(app, "harness-sent")
+        let kept = NSPredicate { _, _ in (sent.value as? String ?? "").contains("ruling.keep_all") }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: kept, object: nil)], timeout: 10), .completed,
+            "Keep All told the runner nothing: \(sent.value ?? "")")
+    }
+
+    /// **The sheet's Needs You row opens Needs You** (review 12).
+    func testTheSheetsNeedsYouRowOpensNeedsYou() {
+        let app = openBilling()
+        let strip = app.buttons["plan-strip"]
+        XCTAssertTrue(strip.waitForExistence(timeout: 15), "no strip")
+        strip.tap()
+        let row = app.buttons["plan-sheet-needs-you"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "no Needs You row")
+        row.tap()
+        XCTAssertTrue(app.navigationBars["Needs You"].waitForExistence(timeout: 10), "it didn't open Needs You")
+    }
+
     // MARK: The tree
 
     /// **The Themes segment is the tree's root**: the plan's themes in its
@@ -190,6 +226,56 @@ final class PhoneTreeUITests: XCTestCase {
         // so No Theme holds none in review and goes.
         XCTAssertFalse(app.buttons["tree-row-No Theme"].waitForExistence(timeout: 3), "No Theme stayed under In Review")
         XCTAssertTrue(app.buttons["tree-row-Visual language"].exists, "a theme with cards in review went")
+
+        // Kept: back to Needs You and into Billing again, still In Review.
+        app.navigationBars.buttons["BackButton"].firstMatch.tap()
+        app.buttons["workspace-row-Billing"].tap()
+        XCTAssertTrue(app.buttons["tree-row-Visual language"].waitForExistence(timeout: 10), "the tree didn't come back")
+        XCTAssertFalse(app.buttons["tree-row-No Theme"].exists, "the filter wasn't kept")
+        XCTAssertEqual(app.buttons["tree-filter"].label, "Show: In Review")
+    }
+
+    /// **A worktree no card reaches, put away, is under Loose Worktrees ›
+    /// Hidden**, and Unhide brings it out of Hidden (review 6).
+    func testAHiddenLooseWorktreeIsUnderLooseHidden() {
+        let app = openBilling(["-phone-loose-hidden"])
+        app.buttons["segment-tree"].tap()
+        tap(app, "tree-row-Loose Worktrees", "the root")
+        tap(app, "tree-row-Hidden", "Loose Worktrees")
+        let row = app.buttons["worktree-row-spike"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "spike isn't under Hidden: \(app.debugDescription)")
+        let from = row.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
+        from.press(forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: -120, dy: 0)), withVelocity: .slow, thenHoldForDuration: 0.3)
+        let unhide = app.buttons["unhide-spike"]
+        XCTAssertTrue(unhide.waitForExistence(timeout: 5), "no Unhide on a hidden loose worktree")
+        unhide.tap()
+        let sent = element(app, "harness-sent")
+        let unhid = NSPredicate { _, _ in (sent.value as? String ?? "").contains("worktree.unhide spike") }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: unhid, object: nil)], timeout: 10), .completed)
+        // Out of Hidden: back at Loose Worktrees, it's a row of its own.
+        app.navigationBars.buttons["BackButton"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["worktree-row-spike"].waitForExistence(timeout: 10), "spike didn't leave Hidden")
+        XCTAssertFalse(app.buttons["tree-row-Hidden"].exists, "Hidden stayed with nothing in it")
+    }
+
+    /// **A relaunch onto a theme's level opens on it**, reading the plan it's
+    /// built from, never on "No Longer Here" (review 1).
+    func testARelaunchOntoAThemeLevelOpensOnIt() {
+        let first = openBilling()
+        first.buttons["segment-tree"].tap()
+        tap(first, "tree-row-Visual language", "the root")
+        XCTAssertTrue(first.navigationBars["Visual language"].waitForExistence(timeout: 10))
+        let probe = element(first, "phone-probe")
+        let kept = NSPredicate(format: "value ENDSWITH %@", "kept=2")
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: kept, evaluatedWith: probe)], timeout: 30), .completed,
+            "the stack wasn't kept: \(probe.value ?? "")")
+        first.terminate()
+
+        let app = XCUIApplication.phoneHarness(
+            ["-phone-empty-inbox", "-phone-billing-led", "-phone-plan", "-phone-plan-file", Self.fixture, "-phone-keep-stack"])
+        XCTAssertTrue(app.buttons["tree-row-ov-226"].waitForExistence(timeout: 30), "the level didn't come back: \(app.debugDescription)")
+        XCTAssertTrue(app.navigationBars["Visual language"].exists)
+        XCTAssertFalse(element(app, "tree-gone").exists, "it said No Longer Here")
     }
 
     // MARK: Captures

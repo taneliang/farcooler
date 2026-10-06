@@ -170,41 +170,7 @@ struct WorkspaceScreen: View {
     /// All are the runner's own mark. Reverse and Discuss go to the
     /// orchestrator, which they never start: with none running they're off.
     private func rulingActions(_ summary: WorkspaceSummary) -> PhoneRulingActions {
-        let seat = Self.orchestratorIsUp(in: connection, summary: summary)
-            ? OrchestratorSegment.terminal(in: connection, summary: summary) : nil
-        let connection = connection
-        /// Where the orchestrator's pane is, to go there after a send or a draft.
-        func goToSeat() {
-            guard let seat,
-                let home = connection.fleet.worktrees.first(where: { $0.terminals.contains { $0.id == seat.id } })
-            else { return }
-            navigator?.open(.worktree(runner: place.runner, worktree: home.id, landing: .terminal(seat.id)))
-        }
-        return PhoneRulingActions(
-            canMark: connection.keepsRulingActions && connection.knownBuild?.grantedScope != "read",
-            canAsk: seat != nil,
-            keep: { ruling in Task { await connection.keepRuling(ruling, in: summary) } },
-            keepAll: { Task { await connection.keepAllRulings(in: summary) } },
-            reverse: { ruling in
-                guard let seat else { return nil }
-                let outcome = await RulingActions.reverse(
-                    ruling, isAgentPane: seat.isAgentPane,
-                    send: { await connection.sendPrompt(terminal: seat.id, text: $0) },
-                    paste: { await connection.draftPrompt(terminal: seat.id, text: $0) },
-                    copy: { UIPasteboard.general.string = $0 })
-                if outcome != .copied && outcome != .failed { goToSeat() }
-                return RulingActions.notice(for: outcome, ruling: ruling)
-            },
-            discuss: { ruling in
-                guard let seat else { return nil }
-                let delivery = await RulingActions.discuss(
-                    ruling, isAgentPane: seat.isAgentPane,
-                    offer: { connection.composerOffers.offer($0, to: seat.id) },
-                    paste: { await connection.draftPrompt(terminal: seat.id, text: $0) },
-                    copy: { UIPasteboard.general.string = $0 })
-                if delivery != .copied { goToSeat() }
-                return delivery == .copied ? "Copied the start of a message about \(ruling.short). Paste it into the orchestrator." : nil
-            })
+        connection.rulingActions(summary, place: place) { navigator?.open($0) }
     }
 
     /// Whether the workspace has an orchestrator that isn't dead.
@@ -721,4 +687,50 @@ private struct WorkspaceWorktrees: View {
 
     private var owned: [Worktree] { all.filter { !$0.isHidden } }
     private var hidden: [Worktree] { all.filter(\.isHidden) }
+}
+
+extension Connection {
+    /// Decided For You's Keep, Keep All, Reverse and Discuss for `summary`'s
+    /// plan, wherever its sections are drawn: the Board's Plan view and the
+    /// Plan sheet (ov-300 review 5). `open` goes to the orchestrator's pane
+    /// after a send or a draft; the sheet closes itself first.
+    func rulingActions(
+        _ summary: WorkspaceSummary, place: PhoneWorkspace, open: @escaping @MainActor (PhoneRoute) -> Void
+    ) -> PhoneRulingActions {
+        let seat = WorkspaceScreen.orchestratorIsUp(in: self, summary: summary)
+            ? OrchestratorSegment.terminal(in: self, summary: summary) : nil
+        let connection = self
+        /// Where the orchestrator's pane is, to go there after a send or a draft.
+        @MainActor func goToSeat() {
+            guard let seat,
+                let home = connection.fleet.worktrees.first(where: { $0.terminals.contains { $0.id == seat.id } })
+            else { return }
+            open(.worktree(runner: place.runner, worktree: home.id, landing: .terminal(seat.id)))
+        }
+        return PhoneRulingActions(
+            canMark: connection.keepsRulingActions && connection.knownBuild?.grantedScope != "read",
+            canAsk: seat != nil,
+            keep: { ruling in Task { await connection.keepRuling(ruling, in: summary) } },
+            keepAll: { Task { await connection.keepAllRulings(in: summary) } },
+            reverse: { ruling in
+                guard let seat else { return nil }
+                let outcome = await RulingActions.reverse(
+                    ruling, isAgentPane: seat.isAgentPane,
+                    send: { await connection.sendPrompt(terminal: seat.id, text: $0) },
+                    paste: { await connection.draftPrompt(terminal: seat.id, text: $0) },
+                    copy: { UIPasteboard.general.string = $0 })
+                if outcome != .copied && outcome != .failed { goToSeat() }
+                return RulingActions.notice(for: outcome, ruling: ruling)
+            },
+            discuss: { ruling in
+                guard let seat else { return nil }
+                let delivery = await RulingActions.discuss(
+                    ruling, isAgentPane: seat.isAgentPane,
+                    offer: { connection.composerOffers.offer($0, to: seat.id) },
+                    paste: { await connection.draftPrompt(terminal: seat.id, text: $0) },
+                    copy: { UIPasteboard.general.string = $0 })
+                if delivery != .copied { goToSeat() }
+                return delivery == .copied ? "Copied the start of a message about \(ruling.short). Paste it into the orchestrator." : nil
+            })
+    }
 }

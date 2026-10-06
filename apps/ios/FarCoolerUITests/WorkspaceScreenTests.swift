@@ -69,8 +69,15 @@ final class WorkspaceScreenTests: XCTestCase {
 
         choose(app, "Themes")
         XCTAssertTrue(app.buttons["tree-row-No Theme"].waitForExistence(timeout: 5), "no tree")
-        // Unclaimed: not Billing's, so not loose in its tree either.
+        // scratch is unclaimed and fc-3-webhooks hangs under bil-9, so
+        // Billing has nothing loose: a Loose Worktrees group here would be
+        // listing another's worktree (review 6). The repository's checkout is
+        // the Main Checkout group every workspace shows, never one of
+        // Billing's worktrees.
+        XCTAssertFalse(app.buttons["tree-row-Loose Worktrees"].exists, "a worktree that isn't Billing's is loose in its tree")
         XCTAssertFalse(app.buttons["worktree-row-scratch"].exists)
+        XCTAssertTrue(app.buttons["tree-row-Main Checkout"].exists, "no Main Checkout")
+        XCTAssertFalse(app.buttons["worktree-row-overnight"].exists, "the checkout is listed as one of Billing's worktrees")
         XCTAssertTrue(app.buttons["new-worktree"].exists, "no New Worktree…")
 
         // The choice is kept per workspace: Billing comes back on Themes.

@@ -24,6 +24,23 @@ extension Connection {
                 filter: filter, needsYouCount: workspaceNeedsYou(summary)))
     }
 
+    /// Where `summary`'s board read stands, for a level waiting on it.
+    func boardRead(_ summary: WorkspaceSummary) -> PhoneTree.Read {
+        if boards[summary.id] != nil { return .read }
+        return unreadBoards.contains(summary.id) ? .failed : .pending
+    }
+
+    /// Where `summary`'s plan read stands. A runner that keeps none has
+    /// nothing to wait for; one that needs an update has answered.
+    func planRead(_ summary: WorkspaceSummary) -> PhoneTree.Read {
+        guard keepsPlan else { return .notKept }
+        switch plans.state(summary.id) {
+        case nil, .loading?: return .pending
+        case .unavailable?: return .failed
+        default: return .read
+        }
+    }
+
     /// Read what the tree is built from that hasn't been read yet.
     func readTree(_ summary: WorkspaceSummary) async {
         if boards[summary.id] == nil { _ = await readBoard(summary) }
@@ -70,7 +87,15 @@ struct TreeRootList: View {
     var body: some View {
         let root = PhoneTree.root(connection.oneTree(summary, filter: filter))
         List {
-            if connection.boards[summary.id] == nil {
+            if connection.boardRead(summary) == .failed {
+                Section {
+                    Text("Far Cooler couldn’t read this board.")
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("tree-board-failed")
+                    Button(PlanWords.tryAgain) { Task { _ = await connection.readBoard(summary) } }
+                        .accessibilityIdentifier("tree-board-retry")
+                }
+            } else if connection.boards[summary.id] == nil {
                 Section {
                     ProgressView()
                         .frame(maxWidth: .infinity)
@@ -164,11 +189,33 @@ struct TreeLevelScreen: View {
     }
 
     var body: some View {
+        let summary = connection.workspace(place.workspace)
+        let node = summary.flatMap(node)
         Group {
-            if let summary = connection.workspace(place.workspace), let node = node(summary) {
-                level(node)
-                    .task { await connection.readTree(summary) }
-            } else {
+            switch summary.map({ PhoneTree.level(found: node != nil, board: connection.boardRead($0), plan: connection.planRead($0)) }) ?? .gone {
+            case .node:
+                if let node { level(node) }
+            case .loading:
+                // A level restored on a relaunch arrives before the board and
+                // the plan it's built from (review 1): it waits, and says so.
+                ProgressView("Reading the plan…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityIdentifier("tree-level-loading")
+            case .failed:
+                ContentUnavailableView {
+                    Label(PlanWords.couldntRead, systemImage: "exclamationmark.triangle")
+                } actions: {
+                    Button(PlanWords.tryAgain) {
+                        guard let summary else { return }
+                        Task {
+                            _ = await connection.readBoard(summary)
+                            if connection.keepsPlan { await connection.readPlan(summary) }
+                        }
+                    }
+                    .accessibilityIdentifier("tree-level-retry")
+                }
+                .accessibilityIdentifier("tree-level-failed")
+            case .gone:
                 ContentUnavailableView {
                     Label("No Longer Here", systemImage: "questionmark.folder")
                 } description: {
@@ -177,7 +224,13 @@ struct TreeLevelScreen: View {
                 .accessibilityIdentifier("tree-gone")
             }
         }
+        .navigationTitle(node.map { $0.key.isEmpty ? $0.title : "\($0.key) \($0.title)" } ?? WorkspaceSegment.tree.title)
         .navigationBarTitleDisplayMode(.inline)
+        // Read whatever it's built from, found or not: a restored level is
+        // what asks for the plan when nothing else on the stack has.
+        .task(id: summary?.id) {
+            if let summary { await connection.readTree(summary) }
+        }
         // Its cards' keys preview their tasks, as the board's do.
         .environment(\.taskKeyLinker, connection.taskKeyLinker(navigator))
     }
@@ -219,7 +272,6 @@ struct TreeLevelScreen: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle(node.key.isEmpty ? node.title : "\(node.key) \(node.title)")
         .actionFailureAlert($moveFailure)
         .accessibilityIdentifier("tree-level")
     }
@@ -260,9 +312,11 @@ struct TreeRow: View {
         return "tree-row-\(node.key.isEmpty ? node.title : node.key)"
     }
 
-    /// The row's worktree, when it's a lane's or a loose one's own checkout.
+    /// The row's worktree, when it's a lane's or a loose one's own checkout,
+    /// or the repository's main checkout.
     private var worktree: Worktree? {
-        guard node.kind == .lane || node.kind == .worktree, let id = node.worktreeID else { return nil }
+        guard node.kind == .lane || node.kind == .worktree || node.id == "group:main", let id = node.worktreeID
+        else { return nil }
         return connection.fleet.worktrees.first { $0.id == id }
     }
 
@@ -301,6 +355,13 @@ struct TreeRow: View {
                 if !node.caption.isEmpty {
                     Text(node.caption).font(.caption).foregroundStyle(.secondary)
                 }
+                // Its branch, as the Worktrees list's row said it (review 13).
+                if let branch = worktree?.branch, !branch.isEmpty {
+                    Text(branch)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
                 // Put away, but still its card's: said, where Unhide is.
                 if worktree?.isHidden == true {
                     Text(OneTreeWords.hidden).font(.caption).foregroundStyle(.secondary)
@@ -313,6 +374,13 @@ struct TreeRow: View {
                     .frame(width: 8, height: 8)
                     .accessibilityLabel(OneTreeWords.needsYou)
                     .accessibilityIdentifier("tree-dot")
+            }
+            // What changed in it and nobody has looked at, as the list said it.
+            if let worktree, let inbox = connection.inbox[worktree.id], inbox.hasDiff {
+                Text("+\(inbox.insertions) −\(inbox.deletions)")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("tree-row-diff")
             }
             if !node.detail.isEmpty {
                 Text(node.detail)
@@ -333,7 +401,10 @@ struct TreeRow: View {
     /// Hide and Unhide, on a lane's or a loose worktree's own checkout: the
     /// Worktrees segment's swipe, kept. Not below a Control grant.
     @ViewBuilder private var worktreeActions: some View {
-        if let worktree, !worktree.isPrimaryCheckout, connection.daemon?.mayAct ?? true
+        // The checkout too, where this workspace owns it, as the Worktrees
+        // list offered it (review 14).
+        if let worktree, !worktree.isPrimaryCheckout || worktree.workspace == place.workspace,
+            connection.daemon?.mayAct ?? true
         {
             if worktree.isHidden {
                 Button("Unhide") { Task { failure = await connection.unhideWorktree(worktree) } }

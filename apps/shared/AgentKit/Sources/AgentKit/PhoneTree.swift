@@ -106,6 +106,39 @@ enum PhoneTree {
         tree.allNodes.first { $0.id == id }
     }
 
+    // MARK: A level, restored or opened
+
+    /// Where one read the tree is built from stands.
+    enum Read: Equatable {
+        /// Not answered yet: never asked, or asked and out.
+        case pending
+        case read
+        case failed
+        /// The runner keeps none (a plan on an older runner): nothing to wait for.
+        case notKept
+    }
+
+    /// What a pushed level draws.
+    enum LevelState: Equatable {
+        case node
+        /// Still reading what it's built from.
+        case loading
+        /// A read failed before the node was found: said, with Try Again.
+        case failed
+        /// Both reads came back and the node isn't in them.
+        case gone
+    }
+
+    /// A level found draws; one not found waits for the board and the plan
+    /// (a level restored on a relaunch arrives before either is read, ov-300
+    /// review 1), and is gone only once both have come back without it.
+    static func level(found: Bool, board: Read, plan: Read) -> LevelState {
+        if found { return .node }
+        if board == .failed || plan == .failed { return .failed }
+        if board == .pending || plan == .pending { return .loading }
+        return .gone
+    }
+
     // MARK: Tapping
 
     /// What a tapped row does.

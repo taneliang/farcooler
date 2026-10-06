@@ -71,27 +71,45 @@ enum LiveRunner {
         let workspaces = app.buttons.matching(identifierPrefix: "workspace-row-")
         for index in 0..<workspaces.count {
             workspaces.element(boundBy: index).tap()
-            // A workspace with an orchestrator has its worktrees in its tree
-            // (ov-300): one with no card is under Loose Worktrees.
             guard app.buttons["segment-board"].waitForExistence(timeout: 10) else { continue }
             let segment = app.buttons["segment-tree"].exists ? app.buttons["segment-tree"] : app.buttons["segment-worktrees"]
             segment.tap()
-            let loose = app.buttons["tree-row-Loose Worktrees"]
-            var pushed = false
-            if !row.waitForExistence(timeout: 3), loose.exists {
-                loose.tap()
-                pushed = true
-            }
-            if row.waitForExistence(timeout: 5) {
+            // A workspace with an orchestrator has its worktrees in its tree
+            // (ov-300): under a card, a lane, or Loose Worktrees, so the
+            // whole tree is searched (review 8).
+            if findInTree(app, row, depth: 4) {
                 row.tap()
+                // A worktree with panes pushes its level first; its own row,
+                // Open Worktree, opens it.
+                let own = app.buttons.matching(NSPredicate(format: "identifier == 'tree-own' AND label == 'Open Worktree'")).firstMatch
+                if own.waitForExistence(timeout: 3) { own.tap() }
                 return try waitForShell(app, name)
             }
-            if pushed { app.navigationBars.buttons["BackButton"].firstMatch.tap() }
             app.navigationBars.buttons["BackButton"].firstMatch.tap()
         }
         print(app.debugDescription)
         throw XCTSkip(
             "\(missing) no worktree called '\(name)' on \(address); run ./scripts/demo-host.sh.")
+    }
+
+    /// Whether `row` is on the tree's level on screen or one under it,
+    /// depth first, at most `depth` levels down. Every row is tried; one that
+    /// opens something other than a level (a task, a pane) is backed out of.
+    /// It comes back up to where it started when it finds nothing.
+    static func findInTree(_ app: XCUIApplication, _ row: XCUIElement, depth: Int) -> Bool {
+        if row.waitForExistence(timeout: 2) { return true }
+        guard depth > 0 else { return false }
+        let ids = app.buttons.matching(identifierPrefix: "tree-row-").allElementsBoundByIndex.map(\.identifier)
+        for id in ids {
+            let next = app.buttons[id]
+            guard next.exists, next.isHittable else { continue }
+            next.tap()
+            let level = app.descendants(matching: .any)["tree-level"]
+            if level.waitForExistence(timeout: 3), findInTree(app, row, depth: depth - 1) { return true }
+            let pane = app.buttons["worktree-back"].firstMatch
+            if pane.exists { pane.tap() } else { app.navigationBars.buttons["BackButton"].firstMatch.tap() }
+        }
+        return false
     }
 
     /// The worktree's shell, up: its pane bar's Back and the shell's probe.

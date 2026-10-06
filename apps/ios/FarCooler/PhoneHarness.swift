@@ -47,6 +47,8 @@ import SwiftUI
 //   -phone-usage-fails       the runner doesn't answer usage.task
 //   -phone-task-fails        the runner refuses task.get, so a task has no record
 //   -phone-hide-fails        the runner refuses worktree.hide and worktree.unhide
+//   -phone-loose-hidden      Billing also owns spike, a worktree no card reaches, put away:
+//                            the tree's Loose Worktrees › Hidden (ov-300)
 //   -phone-reopen-worktree   the last launch kept the checkout worktree open to resume, with
 //                            Changes chosen in it (ov-233); implies -phone-keep-stack
 //   -phone-no-kept-focus     with -phone-reopen-worktree, nothing was chosen in it: the rule decides
@@ -288,6 +290,8 @@ final class HarnessRunner {
     static let checkout = "0198f2c0-0000-7000-8000-00000000c001"
     static let webhooks = "0198f2c0-0000-7000-8000-00000000c002"
     static let scratch = "0198f2c0-0000-7000-8000-00000000c003"
+    /// `-phone-loose-hidden`: Billing's spike, owned by no card.
+    static let spike = "0198f2c0-0000-7000-8000-00000000c004"
     static let mainOrchestrator = "0198f2c0-0000-7000-8000-00000000d001"
     static let agent = "0198f2c0-0000-7000-8000-00000000d002"
     static let shell = "0198f2c0-0000-7000-8000-00000000d003"
@@ -311,6 +315,8 @@ final class HarnessRunner {
     /// Whether fc-3-webhooks is put away, as the runner keeps it: starts so
     /// under `-phone-webhooks-hidden`, and `worktree.unhide` clears it.
     private var webhooksHidden = CommandLine.arguments.contains("-phone-webhooks-hidden")
+    /// Whether spike is put away: starts so under `-phone-loose-hidden`.
+    private var spikeHidden = true
     /// Whether a started orchestrator's pane has ended at once, exit 127
     /// (`-phone-start-127`).
     private var billingDead = false
@@ -449,7 +455,13 @@ final class HarnessRunner {
                     id: Self.scratch, short: "c003", repository: Self.repository,
                     task: "scratch", branch: "scratch", state: "ready", terminals: [],
                     openTasks: []),
-            ],
+            ] + (CommandLine.arguments.contains("-phone-loose-hidden")
+                ? [
+                    Worktree(
+                        id: Self.spike, short: "c004", repository: Self.repository,
+                        task: "spike", branch: "spike", state: spikeHidden ? "hidden" : "ready", terminals: [],
+                        workspace: Self.billing, openTasks: [])
+                ] : []),
             workspaces: [
                 WorkspaceSummary(
                     id: Self.main, name: "Main", taskPrefix: "ove", isMain: true, ordinal: 0,
@@ -605,11 +617,16 @@ final class HarnessRunner {
             if CommandLine.arguments.contains("-phone-hide-fails") {
                 throw ClientCore.CoreError.rejected("unavailable", word: "unavailable")
             }
-            guard args["worktree"] as? String == Self.webhooks else {
+            switch args["worktree"] as? String {
+            case Self.webhooks:
+                webhooksHidden = method == "worktree.hide"
+                sent.append("\(method) fc-3-webhooks")
+            case Self.spike where CommandLine.arguments.contains("-phone-loose-hidden"):
+                spikeHidden = method == "worktree.hide"
+                sent.append("\(method) spike")
+            default:
                 throw ClientCore.CoreError.rejected("bad worktree", word: "invalid-argument")
             }
-            webhooksHidden = method == "worktree.hide"
-            sent.append("\(method) fc-3-webhooks")
             connection.standIn(on: fleet())
             return try json([:])
         case "plan.get", "plan.events", "page.list", "ruling.keep", "ruling.keep_all":

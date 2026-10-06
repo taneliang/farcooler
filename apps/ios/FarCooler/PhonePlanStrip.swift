@@ -39,9 +39,10 @@ struct PhonePlanStrip: View {
     let place: PhoneWorkspace
 
     @State private var peeking = false
-    /// A page chosen in the sheet: pushed once the sheet has gone, so the
-    /// push lands on the stack rather than under a sheet going away.
-    @State private var chosen: PhonePlanPage?
+    /// Where something chosen in the sheet goes (a page, the orchestrator's
+    /// pane after a ruling's Discuss, or Needs You): gone to once the sheet
+    /// has gone, so it lands on the stack rather than under a sheet going away.
+    @State private var chosen: PlanSheetExit?
     @Environment(\.phoneNavigator) private var navigator
     @Environment(\.colorScheme) private var scheme
 
@@ -78,8 +79,8 @@ struct PhonePlanStrip: View {
             if connection.keepsPlan, reads.state(summary.id) == nil { await connection.readPlan(summary) }
         }
         .sheet(isPresented: $peeking, onDismiss: pushChosen) {
-            PlanSheet(connection: connection, summary: summary, place: place) { page in
-                chosen = page
+            PlanSheet(connection: connection, summary: summary, place: place) { exit in
+                chosen = exit
                 peeking = false
             }
             .presentationDetents([.medium, .large])
@@ -107,13 +108,17 @@ struct PhonePlanStrip: View {
         .contentShape(Capsule())
     }
 
-    /// The parts, with what needs you in the attention color.
+    /// The parts, what needs you first and in weight, behind an amber dot.
+    /// Not amber text: over the glass on a dark pane, and on plain white,
+    /// the amber measured 1.4:1 and 3.6:1, under the 4.5:1 text needs
+    /// (review 17). The dot carries the color; the words carry the meaning.
     private func words(_ strip: PlanStrip) -> Text {
         var rest = strip.parts
         var text = Text("")
         if let needs = strip.needsYouWords, rest.first == needs {
             rest.removeFirst()
-            text = Text(needs).foregroundStyle(Tint.attention(scheme)).fontWeight(.semibold)
+            text = Text(Image(systemName: "circle.fill")).font(.system(size: 7)).foregroundStyle(Tint.attention(scheme))
+                + Text(" ") + Text(needs).fontWeight(.semibold)
             if !rest.isEmpty { text = text + Text(" · ") }
         }
         return text + Text(rest.joined(separator: " · "))
@@ -128,9 +133,12 @@ struct PhonePlanStrip: View {
     }
 
     private func pushChosen() {
-        guard let page = chosen else { return }
+        guard let exit = chosen else { return }
         chosen = nil
-        navigator?.open(.plan(place, page: page))
+        switch exit {
+        case .open(let route): navigator?.open(route)
+        case .needsYou: navigator?.go([])
+        }
     }
 }
 
@@ -141,18 +149,18 @@ struct PlanSheet: View {
     @ObservedObject var connection: Connection
     let summary: WorkspaceSummary
     let place: PhoneWorkspace
-    /// A lane, theme or page chosen: the sheet goes, and it's pushed.
-    let onOpen: (PhonePlanPage) -> Void
+    /// Somewhere to go: the sheet goes first.
+    let onExit: (PlanSheetExit) -> Void
 
     @ObservedObject private var reads: PlanReads
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
 
-    init(connection: Connection, summary: WorkspaceSummary, place: PhoneWorkspace, onOpen: @escaping (PhonePlanPage) -> Void) {
+    init(connection: Connection, summary: WorkspaceSummary, place: PhoneWorkspace, onExit: @escaping (PlanSheetExit) -> Void) {
         self.connection = connection
         self.summary = summary
         self.place = place
-        self.onOpen = onOpen
+        self.onExit = onExit
         reads = connection.plans
     }
 
@@ -207,9 +215,25 @@ struct PlanSheet: View {
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("plan-sheet-orchestrator")
         if let needs = strip.needsYouWords {
-            Label(needs, systemImage: OneTreeGlyph.needsYou)
-                .foregroundStyle(Tint.attention(scheme))
-                .accessibilityIdentifier("plan-sheet-needs-you")
+            // The way to what needs you (review 12): the sheet goes, and the
+            // app's Needs You opens. The flag carries the color, the words
+            // stay the text's own (review 17).
+            Button { onExit(.needsYou) } label: {
+                HStack {
+                    Label {
+                        Text(needs).foregroundStyle(.primary)
+                    } icon: {
+                        Image(systemName: OneTreeGlyph.needsYou).foregroundStyle(Tint.attention(scheme))
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.forward")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("plan-sheet-needs-you")
         }
     }
 
@@ -228,11 +252,19 @@ struct PlanSheet: View {
                 await connection.readPlan(summary)
                 if connection.keepsPages { await connection.readPages(summary) }
             },
-            onOpen: onOpen,
+            onOpen: { onExit(.open(.plan(place, page: $0))) },
             statuses: Dictionary(
                 (connection.boards[summary.id]?.rows ?? []).map { ($0.id, $0.status) },
                 uniquingKeysWith: { first, _ in first }),
             pages: connection.keepsPages ? connection.pages : nil,
-            keepsRulings: connection.keepsRulings)
+            keepsRulings: connection.keepsRulings,
+            // Keep, Keep All, Reverse and Discuss, as on the Board (review 5).
+            rulingActions: connection.rulingActions(summary, place: place) { onExit(.open($0)) })
     }
+}
+
+/// Where the Plan sheet sends the phone once it has gone.
+enum PlanSheetExit: Equatable {
+    case open(PhoneRoute)
+    case needsYou
 }

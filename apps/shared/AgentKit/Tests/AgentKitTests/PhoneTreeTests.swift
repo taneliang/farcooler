@@ -290,3 +290,16 @@ struct PhoneTreeTests {
         #expect(PhoneLaunch.decode(PhoneLaunch.encode(stack)) == stack)
     }
 }
+
+extension PhoneTreeTests {
+    @Test("a level not found waits for the board and the plan, and is gone only once both came back without it")
+    func levelWaitsForItsReads() {
+        #expect(PhoneTree.level(found: true, board: .pending, plan: .pending) == .node)
+        #expect(PhoneTree.level(found: false, board: .pending, plan: .read) == .loading)
+        #expect(PhoneTree.level(found: false, board: .read, plan: .pending) == .loading)
+        #expect(PhoneTree.level(found: false, board: .read, plan: .failed) == .failed)
+        #expect(PhoneTree.level(found: false, board: .failed, plan: .pending) == .failed)
+        #expect(PhoneTree.level(found: false, board: .read, plan: .read) == .gone)
+        #expect(PhoneTree.level(found: false, board: .read, plan: .notKept) == .gone)
+    }
+}
