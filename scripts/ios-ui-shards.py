@@ -33,16 +33,17 @@ WORKFLOW = ROOT / ".github/workflows/ci.yml"
 # test count: PlanUITests alone is six minutes.
 SHARDS = {
     # Seconds are each class's time in run 37269677267 (agent's from
-    # 37267080552), test start to test end. Four shards of 940 to 1,000 s
-    # (ov-301). Runner variance is large: the same class has taken 276 s and
-    # 442 s, so rebalance from more than one run when a shard drifts.
+    # 37267080552), test start to test end, except those moved in ov-384, which
+    # are the mean of runs 37503739914, 37509877259 and 37523241692. Tests per
+    # shard in those means: shell 1,196 s, agent 1,137 s, phone 1,204 s, phone2
+    # 1,158 s, so all four are within 6%. Runner variance is large: the same
+    # class has taken 276 s and 442 s, so rebalance from more than one run when
+    # a shard drifts.
     "shell": [
         "ShellGestureTests",  # -shell-harness; 442 s
         "ShellPaneScrollTests",  # -shell-harness; one live method, in SKIP; 204 s
         "ShellColumnCloseTests",  # -shell-harness; 106 s
         "TerminalLigatureTests",  # -terminal-ligature; 12 s
-        "TaskScreenTests",  # -phone-harness; 152 s
-        "ReadScopeTests",  # -phone-harness (TaskScreenTests.swift); 24 s
         "PlanRulingsUITests",  # -phone-harness -phone-plan -phone-rulings (ov-304); moved from phone at 76% of budget (37409958732)
     ],
     "agent": [
@@ -61,6 +62,7 @@ SHARDS = {
     "phone": [
         "PagesUITests",  # -phone-harness -phone-plan -phone-pages (ov-285); 650 s
         "WorkspaceScreenTests",  # -phone-harness; 221 s
+        "TaskScreenTests",  # -phone-harness; 189 s; moved from shell (ov-384), which was at 85% of budget (37525148773)
         "WorkspaceChromeTests",  # -phone-harness -phone-plan (ov-342); not yet timed, 3 tests
         "PhoneReopenTests",  # -phone-harness; 129 s
     ],
@@ -70,6 +72,7 @@ SHARDS = {
         "ChangesPatchNoticeTests",  # -changes-layout-harness; 53 s
         "ChangesLfsNoticeTests",  # -changes-layout-harness -lfs-pointers (ov-199); 52 s
         "ChangesPullRequestTests",  # -changes-layout-harness; 44 s
+        "ReadScopeTests",  # -phone-harness (TaskScreenTests.swift); 24 s; moved from shell (ov-384)
         "RunnerReachTests",  # seeded -hosts at an address that never answers; 9 s
         "TerminalTaskKeyTests",  # -phone-harness -phone-terminal-key (ov-215); 53 s
         "BoardUnreadUITests",  # -phone-harness (ov-113); 127 s
