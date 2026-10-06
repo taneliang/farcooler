@@ -19,6 +19,9 @@ import SwiftUI
 // - Worktrees, on a runner without workspaces: the ones it owns, with their
 //   tasks and changes. New Worktree… claims the worktree for this workspace.
 //   A workspace with an orchestrator has them in its tree instead.
+//
+// On an iPad at regular width the segments are columns instead (ov-348,
+// `PadWorkspace.swift`): the tree, the plan and the orchestrator's chat.
 
 struct WorkspaceScreen: View {
     @ObservedObject var fleet: FleetStore
@@ -28,6 +31,15 @@ struct WorkspaceScreen: View {
 
     /// The segment on screen, kept per workspace (`WorkspaceSegment`).
     @State private var segment: WorkspaceSegment
+    /// What an iPad's plan column shows (ov-348): kept while the screen is,
+    /// across a turn or a resize to the phone's layout and back.
+    @State private var canvas: PadCanvas = .plan
+    /// Whether the tree is shown over the plan, where two columns leave no
+    /// room for it as a third.
+    @State private var treeShown = false
+    /// The screen's width, for `PadLayout`.
+    @State private var width: Double = 0
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     init(fleet: FleetStore, hosts: RunnerStore, connection: Connection, place: PhoneWorkspace) {
         self.fleet = fleet
@@ -76,77 +88,196 @@ struct WorkspaceScreen: View {
         WorkspaceSegment.shown(segment, implicit: summary.isImplicit)
     }
 
+    /// The layout for this window (`PadLayout`): columns on an iPad at
+    /// regular width, the phone's segments otherwise.
+    private func layout(_ summary: WorkspaceSummary) -> PadLayout {
+        PadLayout.of(
+            isPad: UIDevice.current.userInterfaceIdiom == .pad, regularWidth: sizeClass == .regular,
+            width: width, implicit: summary.isImplicit)
+    }
+
+    /// One layout for both, so the orchestrator's pane is the same view in
+    /// each (`PadWorkspace.swift`): turning an iPad, or narrowing its window,
+    /// moves the pane between a segment and a column without building it
+    /// again, so its session and its place are kept, as ov-66 keeps them
+    /// across segments. The columns, when there are any, come before it.
     @ViewBuilder
     private func content(_ summary: WorkspaceSummary) -> some View {
+        let layout = layout(summary)
+        let columns = layout.hasColumns
+        let widths = layout.widths(width)
         let shown = current(summary)
-        ZStack {
-            // Mounted whenever the workspace has the segment, whichever is
-            // up, and live only on its own (ov-66, the owner's ruling 2), as
-            // Android keeps it: going to the board and back neither
-            // reconnects the pane nor loses its place. Hidden, it holds no
-            // stream (`TerminalView`'s `isVisible`) and takes no touches.
-            if WorkspaceSegment.offered(implicit: summary.isImplicit).contains(.orchestrator) {
-                let up = shown == .orchestrator
-                OrchestratorSegment(connection: connection, summary: summary, place: place, shown: up)
-                    .opacity(up ? 1 : 0)
-                    .allowsHitTesting(up)
-                    .accessibilityHidden(!up)
+        let sidebarUp = layout == .twoColumns && treeShown
+        HStack(spacing: 0) {
+            if layout == .threeColumns {
+                tree(summary)
+                    .frame(width: widths.tree)
+                    .separator(.split, edge: .trailing)
             }
-            switch shown {
-            case .orchestrator:
-                EmptyView()
-            case .board:
-                WorkspaceBoardList(
-                    board: connection.boards[summary.id],
-                    unread: connection.unreadBoards.contains(summary.id),
-                    place: place,
-                    speaksOfAgents: TaskAgentLink.speaksOfAgents(
-                        connected: connection.isAnswering, build: connection.daemon),
-                    waiting: RunnerBoards.waiting(
-                        on: connection.boards[summary.id], in: summary, items: connection.needsYou,
-                        listRead: connection.needsYouRead && !connection.needsYouDerived,
-                        build: connection.daemon),
-                    agents: connection.boardAgents(for:),
-                    orchestrator: connection.orchestratorAgent(for:),
-                    onOpen: { row in navigator?.open(.task(place, task: row.id)) },
-                    onJump: { agent in openAgent(agent) },
-                    onRefresh: { await connection.readBoard(summary) },
-                    ledByOrchestrator: WorkspaceSegment.offered(implicit: summary.isImplicit)
-                        .contains(.orchestrator),
-                    orchestratorRunning: Self.orchestratorIsUp(in: connection, summary: summary),
-                    onShowOrchestrator: { segment = .orchestrator },
-                    onHistory: { status in navigator?.open(.history(place, status: status.rawValue)) },
-                    reads: connection.boardReads[summary.id] ?? .firstLook(now: Date()),
-                    readNotes: { row in await connection.taskRecord(row.id)?.detail.notes },
-                    readsAreShared: { connection.readsAreShared(workspace: summary.id) },
-                    onMarkAllRead: { latest in
-                        guard let rows = connection.boards[summary.id]?.rows else { return }
-                        connection.markAllRead(rows: rows, latest: latest, workspace: summary.id)
-                    },
-                    plan: planHook(summary))
-                .task { await connection.readBoard(summary) }
-            case .worktrees:
-                WorkspaceWorktrees(connection: connection, summary: summary, place: place)
-            case .tree:
-                TreeRootList(connection: connection, summary: summary, place: place)
+            if columns {
+                PadCanvasColumn(connection: connection, summary: summary, place: place, canvas: $canvas) {
+                    boardList(summary, columns: true)
+                }
+                .frame(width: widths.plan)
+                .separator(.split, edge: .trailing)
+                .accessibilityHidden(sidebarUp)
+            }
+            VStack(spacing: 0) {
+            if columns { PadChatHeader(connection: connection, summary: summary) }
+            ZStack {
+                // Mounted whenever the workspace has the segment, whichever is
+                // up, and live only on its own (ov-66, the owner's ruling 2), as
+                // Android keeps it: going to the board and back neither
+                // reconnects the pane nor loses its place. Hidden, it holds no
+                // stream (`TerminalView`'s `isVisible`) and takes no touches.
+                // In columns it's the chat, always up (ov-348).
+                if WorkspaceSegment.offered(implicit: summary.isImplicit).contains(.orchestrator) {
+                    let up = columns || shown == .orchestrator
+                    OrchestratorSegment(connection: connection, summary: summary, place: place, shown: up)
+                        .opacity(up ? 1 : 0)
+                        .allowsHitTesting(up)
+                        .accessibilityHidden(!up || sidebarUp)
+                }
+                if !columns {
+                    switch shown {
+                    case .orchestrator:
+                        EmptyView()
+                    case .board:
+                        boardList(summary, columns: false)
+                    case .worktrees:
+                        WorkspaceWorktrees(connection: connection, summary: summary, place: place)
+                    case .tree:
+                        TreeRootList(connection: connection, summary: summary, place: place)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            // The chat column, for a test to measure; on a phone, the screen.
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier(columns ? "pad-chat" : "workspace-body")
+        }
+        .overlay(alignment: .leading) {
+            if sidebarUp {
+                PadTreeSidebar(width: PadLayout.sidebar(width), close: { treeShown = false }) {
+                    tree(summary)
+                }
             }
         }
+        .animation(.snappy, value: sidebarUp)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onGeometryChange(for: Double.self) { $0.size.width } action: { width = $0 }
         // A bar of the navigation bar's own, so the control sits in its
         // material and takes its touches, rather than under its edge.
         .safeAreaBar(edge: .top) {
-            VStack(spacing: 0) {
-                SegmentBar(
-                    segments: WorkspaceSegment.offered(implicit: summary.isImplicit),
-                    selection: $segment)
-                // The plan in one line, over the orchestrator's pane (ov-300).
-                if shown == .orchestrator {
-                    PhonePlanStrip(connection: connection, summary: summary, place: place)
+            if !columns {
+                VStack(spacing: 0) {
+                    SegmentBar(
+                        segments: WorkspaceSegment.offered(implicit: summary.isImplicit),
+                        selection: $segment)
+                    // The plan in one line, over the orchestrator's pane (ov-300).
+                    if shown == .orchestrator {
+                        PhonePlanStrip(connection: connection, summary: summary, place: place)
+                    }
+                }
+            }
+        }
+        .toolbar {
+            if layout == .twoColumns {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        treeShown.toggle()
+                    } label: {
+                        Label(WorkspaceSegment.tree.title, systemImage: "sidebar.leading")
+                    }
+                    .accessibilityValue(treeShown ? "Shown" : "Hidden")
+                    .accessibilityIdentifier("pad-tree-toggle")
+                }
+            }
+            if columns {
+                // The board, a toolbar item on an iPad (design §4), shown in
+                // the plan column; again, the plan.
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        canvas = canvas == .board ? .plan : .board
+                    } label: {
+                        Label(WorkspaceSegment.board.title, systemImage: "checklist")
+                    }
+                    .accessibilityAddTraits(canvas == .board ? .isSelected : [])
+                    .accessibilityIdentifier("pad-board")
                 }
             }
         }
         .onChange(of: segment) { _, chosen in chosen.remember(for: place) }
+        // The sidebar shown on demand is a passing thing: a new layout puts
+        // it away, as a pick does.
+        .onChange(of: layout) { _, _ in treeShown = false }
+        #if DEBUG
+        .overlay(alignment: .bottomTrailing) { layoutProbe(layout) }
+        #endif
     }
+
+    /// The tree as an outline, its pick shown in the plan column.
+    private func tree(_ summary: WorkspaceSummary) -> some View {
+        PadTreeColumn(connection: connection, summary: summary, place: place, canvas: canvas) { pick in
+            treeShown = false
+            switch pick {
+            case .canvas(let chosen): canvas = chosen
+            case .open(let route): navigator?.open(route)
+            case .needsYou: navigator?.go([])
+            case .none: break
+            }
+        }
+    }
+
+    /// The workspace's board, in its segment or, on an iPad, in the plan
+    /// column, where the orchestrator it offers to show is already beside it.
+    private func boardList(_ summary: WorkspaceSummary, columns: Bool) -> some View {
+        WorkspaceBoardList(
+            board: connection.boards[summary.id],
+            unread: connection.unreadBoards.contains(summary.id),
+            place: place,
+            speaksOfAgents: TaskAgentLink.speaksOfAgents(
+                connected: connection.isAnswering, build: connection.daemon),
+            waiting: RunnerBoards.waiting(
+                on: connection.boards[summary.id], in: summary, items: connection.needsYou,
+                listRead: connection.needsYouRead && !connection.needsYouDerived,
+                build: connection.daemon),
+            agents: connection.boardAgents(for:),
+            orchestrator: connection.orchestratorAgent(for:),
+            onOpen: { row in
+                if columns { canvas = .task(row.id) } else { navigator?.open(.task(place, task: row.id)) }
+            },
+            onJump: { agent in openAgent(agent) },
+            onRefresh: { await connection.readBoard(summary) },
+            ledByOrchestrator: WorkspaceSegment.offered(implicit: summary.isImplicit)
+                .contains(.orchestrator),
+            orchestratorRunning: Self.orchestratorIsUp(in: connection, summary: summary),
+            onShowOrchestrator: columns ? nil : { segment = .orchestrator },
+            onHistory: { status in navigator?.open(.history(place, status: status.rawValue)) },
+            reads: connection.boardReads[summary.id] ?? .firstLook(now: Date()),
+            readNotes: { row in await connection.taskRecord(row.id)?.detail.notes },
+            readsAreShared: { connection.readsAreShared(workspace: summary.id) },
+            onMarkAllRead: { latest in
+                guard let rows = connection.boards[summary.id]?.rows else { return }
+                connection.markAllRead(rows: rows, latest: latest, workspace: summary.id)
+            },
+            plan: planHook(summary))
+        .task { await connection.readBoard(summary) }
+    }
+
+    #if DEBUG
+    /// `pad-layout`: which layout is drawn, for a UI test to tell columns
+    /// from the phone's screen without measuring.
+    private func layoutProbe(_ layout: PadLayout) -> some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.001))  // style-exempt: DEBUG probe: a near-invisible hit target the UI tests read, not a fill
+            .frame(width: 1, height: 1)  // style-exempt: DEBUG probe: a near-invisible hit target the UI tests read, not a fill
+            .accessibilityElement()
+            .accessibilityIdentifier("pad-layout")
+            .accessibilityValue("\(layout)")
+    }
+    #endif
 
     /// The board's plan (ov-274): what its Plan view reads and where a lane
     /// or theme opens.

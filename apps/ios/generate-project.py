@@ -83,9 +83,11 @@ SOURCES = [
     # connection reads of it. Deleting the layer deletes these three.
     "PlanBoardSections.swift",
     # The plan's strip on the orchestrator and the Plan sheet it peeks, and the
-    # One tree's root and pushed levels (ov-300).
+    # One tree's root and pushed levels (ov-300), and on an iPad the tree, the
+    # plan and the chat in columns (ov-348).
     "PhonePlanStrip.swift",
     "PhoneTreeScreens.swift",
+    "PadWorkspace.swift",
     "PlanTrainRow.swift",
     "PlanRulingsSection.swift",
     "PlanPageScreens.swift",
@@ -605,6 +607,9 @@ AGENTKIT_SOURCES = [
     "OneTreeKeys.swift",
     "PlanStrip.swift",
     "PhoneTree.swift",
+    # The iPad's workspace in columns (ov-348): which windows get them, their
+    # widths, and where a pick in the tree goes.
+    "PadLayout.swift",
     # Orchestrator pages (ov-269): the document, its live references, the
     # layout rules and the renderer, one SwiftUI implementation the Mac and
     # the phone share (ov-284, ov-285). Experimental, and removable with pages.
@@ -892,6 +897,8 @@ UI_TEST_SOURCES = [
     "PlanRulingsUITests.swift",
     # The plan strip, its sheet and the One tree on the phone (ov-300).
     "PhoneTreeUITests.swift",
+    # The iPad's workspace in columns (ov-348), on an iPad simulator.
+    "PadWorkspaceUITests.swift",
     "DynamicTypeTests.swift",
     # A task's agent and back, a notification landing with its workspace and
     # task under it, and a decision answered from Needs You. Needs no runner,

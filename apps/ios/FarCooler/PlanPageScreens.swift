@@ -11,14 +11,19 @@ struct PlanPageScreen: View {
     @ObservedObject private var pageReads: PageReads
     let place: PhoneWorkspace
     let page: PhonePlanPage
+    /// Whether it names the navigation bar: not in the iPad's plan column
+    /// (ov-348), whose bar is the workspace's and whose header names it.
+    let titled: Bool
     @Environment(\.phoneNavigator) private var navigator
+    @Environment(\.canvasOpen) private var canvasOpen
 
-    init(connection: Connection, place: PhoneWorkspace, page: PhonePlanPage) {
+    init(connection: Connection, place: PhoneWorkspace, page: PhonePlanPage, titled: Bool = true) {
         self.connection = connection
         reads = connection.plans
         pageReads = connection.pages
         self.place = place
         self.page = page
+        self.titled = titled
     }
 
     private var summary: WorkspaceSummary? { connection.workspace(place.workspace) }
@@ -51,8 +56,7 @@ struct PlanPageScreen: View {
         }
         // A task key in a page's text opens its task, as one in a note does.
         .environment(\.taskKeyLinker, connection.taskKeyLinker(navigator))
-        .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.inline)
+        .modifier(BarTitle(title: titled ? title : nil))
         // Its cards' keys preview their tasks (ov-299).
         .environment(\.taskKeyLinker, connection.taskKeyLinker(navigator))
         .task(id: page) { await load() }
@@ -60,13 +64,22 @@ struct PlanPageScreen: View {
         .onDisappear { if reads.openPage == page { reads.openPage = nil } }
     }
 
-    private var title: String {
-        guard let plan = reads.state(place.workspace)?.plan else { return page.word }
+    private var title: String { Self.title(page, plan: reads.state(place.workspace)?.plan, pages: pageReads.pages(place.workspace)) }
+
+    /// A page's name: its theme's, its lane's or its own, else what it is.
+    static func title(_ page: PhonePlanPage, plan: PlanModel?, pages: [BoardPage]) -> String {
+        guard let plan else { return page.word }
         switch page {
         case .theme(let id): return plan.themes.first { $0.id == id }?.name ?? page.word
         case .lane(let id): return plan.lanes.first { $0.id == id }?.name ?? page.word
-        case .page(let slot): return pageReads.pages(place.workspace).first { $0.slot == slot }?.title ?? page.word
+        case .page(let slot): return pages.first { $0.slot == slot }?.title ?? page.word
         }
+    }
+
+    /// Push `route`, unless the iPad's plan column this is drawn in shows it.
+    private func open(_ route: PhoneRoute) {
+        if canvasOpen?(route) == true { return }
+        navigator?.open(route)
     }
 
     private func load() async {
@@ -83,13 +96,13 @@ struct PlanPageScreen: View {
         let context = PlanPageContext(
             rows: Dictionary(
                 (connection.boards[place.workspace]?.rows ?? []).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
-            onTask: { row in navigator?.open(.task(place, task: row.id)) },
-            onOpen: { page in navigator?.open(.plan(place, page: page)) },
+            onTask: { row in open(.task(place, task: row.id)) },
+            onOpen: { page in open(.plan(place, page: page)) },
             pages: pageReads.pages(place.workspace),
             world: summary.map { connection.pageWorld($0) } ?? PageWorld(),
             onDestination: { destination in
                 switch connection.route(destination, from: place) {
-                case .push(let route)?: navigator?.open(route)
+                case .push(let route)?: open(route)
                 case .needsYou?: navigator?.go([])
                 case nil: break
                 }
@@ -124,6 +137,22 @@ struct PlanPageScreen: View {
                 ContentUnavailableView("Page Not Found", systemImage: "doc.richtext")
                     .accessibilityIdentifier("plan-page-gone")
             }
+        }
+    }
+}
+
+/// The navigation bar's title, inline, or none: a screen drawn in a column
+/// leaves the bar to the screen it's in.
+struct BarTitle: ViewModifier {
+    let title: String?
+
+    func body(content: Content) -> some View {
+        if let title {
+            content
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
+        } else {
+            content
         }
     }
 }

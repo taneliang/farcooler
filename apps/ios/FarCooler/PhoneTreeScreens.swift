@@ -153,21 +153,7 @@ struct TreeRootList: View {
             if connection.keepsPlan { await connection.readPlan(summary) }
         }
         .actionFailureAlert($moveFailure)
-        .sheet(isPresented: $composing) {
-            TaskComposerView(connection: connection, workspace: summary)
-        }
-        .sheet(isPresented: $fromBranch) {
-            NewWorktreeView(
-                repositories: connection.repositories.filter {
-                    summary.repository == nil || $0.id == summary.repository
-                },
-                connection: connection
-            ) { repository, name, branch, adopt in
-                return await connection.createWorktree(
-                    repository: repository, name: name, branch: branch, adopt: adopt,
-                    workspace: summary.boardWorkspace)
-            }
-        }
+        .newWorktreeSheets(composing: $composing, fromBranch: $fromBranch, connection: connection, summary: summary)
     }
 }
 
@@ -303,7 +289,7 @@ struct TreeRow: View {
             }
         }
         .accessibilityIdentifier(identifier)
-        .swipeActions(edge: .trailing) { worktreeActions }
+        .worktreeSwipe(node: node, connection: connection, place: place, failure: $failure)
     }
 
     /// A worktree's row is named as the Worktrees segment's was, so a
@@ -318,11 +304,7 @@ struct TreeRow: View {
 
     /// The row's worktree, when it's a lane's or a loose one's own checkout,
     /// or the repository's main checkout.
-    private var worktree: Worktree? {
-        guard node.kind == .lane || node.kind == .worktree || node.id == "group:main", let id = node.worktreeID
-        else { return nil }
-        return connection.fleet.worktrees.first { $0.id == id }
-    }
+    private var worktree: Worktree? { WorktreeSwipeActions.worktree(node, in: connection) }
 
     private func perform(_ tap: PhoneTree.Tap) {
         switch tap {
@@ -400,25 +382,5 @@ struct TreeRow: View {
         }
         .contentShape(.rect)
         .accessibilityElement(children: .combine)
-    }
-
-    /// Hide and Unhide, on a lane's or a loose worktree's own checkout: the
-    /// Worktrees segment's swipe, kept. Not below a Control grant.
-    @ViewBuilder private var worktreeActions: some View {
-        // The checkout too, where this workspace owns it, as the Worktrees
-        // list offered it (review 14).
-        if let worktree, !worktree.isPrimaryCheckout || worktree.workspace == place.workspace,
-            connection.daemon?.mayAct ?? true
-        {
-            if worktree.isHidden {
-                Button("Unhide") { Task { failure = await connection.unhideWorktree(worktree) } }
-                    .tint(.blue)
-                    .accessibilityIdentifier("unhide-\(worktree.task)")
-            } else {
-                Button("Hide") { Task { failure = await connection.hideWorktree(worktree) } }
-                    .tint(.gray)
-                    .accessibilityIdentifier("hide-\(worktree.task)")
-            }
-        }
     }
 }

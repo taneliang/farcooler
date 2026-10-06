@@ -52,6 +52,8 @@ import SwiftUI
 //   -phone-reopen-worktree   the last launch kept the checkout worktree open to resume, with
 //                            Changes chosen in it (ov-233); implies -phone-keep-stack
 //   -phone-no-kept-focus     with -phone-reopen-worktree, nothing was chosen in it: the rule decides
+//   -pad-compact             on an iPad, the app as a one-third Split View draws it: 375 points
+//                            wide at compact width (ov-348, `PadCompactWindow`)
 //   -phone-files-old         the runner is older than Files: no worktree_files, no read_only_folders
 //   -phone-plan, -phone-plan-fails, -phone-plan-hangs, -phone-plan-timeout N,
 //                            -phone-plan-file <path>: the plan layer (ov-274), see
@@ -135,6 +137,7 @@ struct PhoneHarness: View {
         for key in UserDefaults.standard.dictionaryRepresentation().keys
         where key.hasPrefix("workspace.segment.") || key.hasPrefix("board.collapsed.")
             || key.hasPrefix("board.read.") || key.hasPrefix("board.plan.") || key.hasPrefix("tree.filter.")
+            || key.hasPrefix("pad.tree.")
         {
             UserDefaults.standard.removeObject(forKey: key)
         }
@@ -168,6 +171,7 @@ struct PhoneHarness: View {
                 HostOnboardingView(hosts: hosts)
             } else {
                 PhoneRoot(fleet: fleet, hosts: hosts, pendingDestination: $pendingDestination)
+                    .modifier(PadCompactWindow())
             }
         }
             .overlay(alignment: .topLeading) { snapshotProbe }

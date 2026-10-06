@@ -152,45 +152,68 @@ struct PlanSheet: View {
     /// Somewhere to go: the sheet goes first.
     let onExit: (PlanSheetExit) -> Void
 
-    @ObservedObject private var reads: PlanReads
     @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            PlanHomeList(connection: connection, summary: summary, hook: hook) { onExit(.needsYou) }
+                .navigationTitle("Plan")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }
+                            .accessibilityIdentifier("plan-sheet-done")
+                    }
+                }
+        }
+        .accessibilityIdentifier("plan-sheet")
+    }
+
+    private var hook: PlanBoardHook {
+        connection.planHomeHook(
+            summary, place: place, onOpen: { onExit(.open(.plan(place, page: $0))) },
+            // Keep, Keep All, Reverse and Discuss, as on the Board (review 5).
+            onRuling: { onExit(.open($0)) })
+    }
+}
+
+/// The Plan's home: the orchestrator's state and line, what needs you, then
+/// the plan's sections as the Board's Plan view draws them. The phone's
+/// sheet draws it, and so does the iPad's plan column (ov-348).
+struct PlanHomeList: View {
+    @ObservedObject var connection: Connection
+    let summary: WorkspaceSummary
+    let hook: PlanBoardHook
+    /// The way to what needs you.
+    let onNeedsYou: () -> Void
+
+    @ObservedObject private var reads: PlanReads
     @Environment(\.colorScheme) private var scheme
 
-    init(connection: Connection, summary: WorkspaceSummary, place: PhoneWorkspace, onExit: @escaping (PlanSheetExit) -> Void) {
+    init(connection: Connection, summary: WorkspaceSummary, hook: PlanBoardHook, onNeedsYou: @escaping () -> Void) {
         self.connection = connection
         self.summary = summary
-        self.place = place
-        self.onExit = onExit
+        self.hook = hook
+        self.onNeedsYou = onNeedsYou
         reads = connection.plans
     }
 
     var body: some View {
         let strip = connection.planStrip(summary)
-        NavigationStack {
-            List {
-                Section { orchestrator(strip) }
-                if connection.keepsPlan {
-                    PlanBoardSections(hook: hook)
-                } else {
-                    // A runner too old to keep a plan: said, once.
-                    Section {
-                        PlanNotice(title: PlanWords.needsUpdate, detail: nil)
-                            .accessibilityIdentifier("plan-needs-update")
-                    }
+        List {
+            Section { orchestrator(strip) }
+            if connection.keepsPlan {
+                PlanBoardSections(hook: hook)
+            } else {
+                // A runner too old to keep a plan: said, once.
+                Section {
+                    PlanNotice(title: PlanWords.needsUpdate, detail: nil)
+                        .accessibilityIdentifier("plan-needs-update")
                 }
             }
-            .listStyle(.insetGrouped)
-            .navigationTitle("Plan")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                        .accessibilityIdentifier("plan-sheet-done")
-                }
-            }
-            .refreshable { await hook.read() }
         }
-        .accessibilityIdentifier("plan-sheet")
+        .listStyle(.insetGrouped)
+        .refreshable { await hook.read() }
     }
 
     /// The orchestrator's state and line, and the workspace's count.
@@ -218,7 +241,7 @@ struct PlanSheet: View {
             // The way to what needs you (review 12): the sheet goes, and the
             // app's Needs You opens. The flag carries the color, the words
             // stay the text's own (review 17).
-            Button { onExit(.needsYou) } label: {
+            Button { onNeedsYou() } label: {
                 HStack {
                     Label {
                         Text(needs).foregroundStyle(.primary)
@@ -244,22 +267,30 @@ struct PlanSheet: View {
         case .quiet: .secondary
         }
     }
+}
 
-    private var hook: PlanBoardHook {
-        PlanBoardHook(
-            summary: summary, place: place, reads: connection.plans, keeps: connection.keepsPlan,
+extension Connection {
+    /// What the Plan's home reads and where it goes: `onOpen` for a theme's,
+    /// a lane's or a page's page, `onRuling` for where a ruling's Reverse or
+    /// Discuss sends the owner after it.
+    func planHomeHook(
+        _ summary: WorkspaceSummary, place: PhoneWorkspace, onOpen: @escaping (PhonePlanPage) -> Void,
+        onRuling: @escaping @MainActor (PhoneRoute) -> Void
+    ) -> PlanBoardHook {
+        let connection = self
+        return PlanBoardHook(
+            summary: summary, place: place, reads: plans, keeps: keepsPlan,
             read: {
                 await connection.readPlan(summary)
                 if connection.keepsPages { await connection.readPages(summary) }
             },
-            onOpen: { onExit(.open(.plan(place, page: $0))) },
+            onOpen: onOpen,
             statuses: Dictionary(
-                (connection.boards[summary.id]?.rows ?? []).map { ($0.id, $0.status) },
+                (boards[summary.id]?.rows ?? []).map { ($0.id, $0.status) },
                 uniquingKeysWith: { first, _ in first }),
-            pages: connection.keepsPages ? connection.pages : nil,
-            keepsRulings: connection.keepsRulings,
-            // Keep, Keep All, Reverse and Discuss, as on the Board (review 5).
-            rulingActions: connection.rulingActions(summary, place: place) { onExit(.open($0)) })
+            pages: keepsPages ? pages : nil,
+            keepsRulings: keepsRulings,
+            rulingActions: rulingActions(summary, place: place, open: onRuling))
     }
 }
 

@@ -10,6 +10,9 @@ struct TaskScreen: View {
     @ObservedObject var connection: Connection
     let place: PhoneWorkspace
     let task: String
+    /// Whether it names the navigation bar: not in the iPad's plan column
+    /// (ov-348), whose bar is the workspace's and whose header names it.
+    var titled = true
 
     /// The task's record, read on arrival and after an answer.
     @State private var record: TaskDetailModel?
@@ -47,8 +50,7 @@ struct TaskScreen: View {
         }
         // The key is in the heading card; saying it here as well put `bil-9`
         // twice, one line apart.
-        .navigationTitle("Task")
-        .navigationBarTitleDisplayMode(.inline)
+        .modifier(BarTitle(title: titled ? "Task" : nil))
         .task { await load() }
         .refreshable { await load() }
         .alert("Answer", isPresented: $writing) {
