@@ -53,6 +53,14 @@ struct MarkdownPiece: View, Equatable {
     /// written does five times a second. What's selectable while a reply
     /// streams is every paragraph before it.
     var open = false
+    /// Whether its text goes through `Markdown.mergedCache`. Not for a
+    /// streaming reply's pieces (ov-382 review): a paragraph of one is
+    /// gathered into a different run once it settles, so its entry would
+    /// never be read again, and a long stream's worth of them evicts the
+    /// settled rows a reader is looking at. Left out of `==`: it changes
+    /// where the text is kept, not what's drawn, so settling, which turns it
+    /// on, redraws nothing for it.
+    var memo = true
     /// The space above it: the gap after the run before it.
     var gap: CGFloat = 0
 
@@ -113,7 +121,7 @@ struct MarkdownPiece: View, Equatable {
     }
 
     private func merged(_ paragraphs: [String]) -> AttributedString {
-        if open { return MarkdownText.merged(paragraphs) }
+        if open || !memo { return MarkdownText.merged(paragraphs) }
         return Markdown.mergedCache.value(for: paragraphs) { MarkdownText.merged($0) }
     }
 

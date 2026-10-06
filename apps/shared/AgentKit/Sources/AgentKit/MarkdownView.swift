@@ -368,7 +368,7 @@ public struct MarkdownText: View {
             : Markdown.cachedRuns(text, spacing: spacing)
         return runs.indices.map { index in
             MarkdownPiece(
-                run: runs[index], secondary: secondary, open: streaming && index == runs.count - 1,
+                run: runs[index], secondary: secondary, open: streaming && index == runs.count - 1, memo: !streaming,
                 gap: index == 0
                     ? 0
                     : MarkdownBlockSpacing.gap(

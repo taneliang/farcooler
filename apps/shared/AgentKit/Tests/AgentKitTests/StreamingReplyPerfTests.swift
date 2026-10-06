@@ -134,6 +134,21 @@ struct StreamingReplyPerfTests {
         #expect(streaming.suffix(tail.count).map(\.run) == tail.map { .prose([$0]) })
     }
 
+    /// A streaming reply's pieces leave the merged-text memo alone: their
+    /// entries would never be read again once the run is gathered, and they
+    /// evict settled rows' (ov-382 review). A settled reply uses it.
+    @Test func aStreamingReplyLeavesTheMemoAlone() {
+        let text = Self.prose(8_000, seed: 5, lists: false)
+        Markdown.mergedCache.removeAll()
+        let host = Host()
+        defer { host.close() }
+        _ = host.show(text, streaming: true)
+        _ = host.show(text + "more ", streaming: true)
+        #expect(Markdown.mergedCache.misses == 0, "streaming took \(Markdown.mergedCache.misses) memo slots")
+        _ = host.show(text, streaming: false)
+        #expect(Markdown.mergedCache.misses > 0, "a settled reply skipped the memo")
+    }
+
     /// Settling a reply redraws the pieces of its last run, not the reply.
     @Test func settlingRedrawsOnlyTheLastRun() {
         let host = Host()
