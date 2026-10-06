@@ -198,11 +198,11 @@ fn a_projector_built_for_a_terminal_forgotten_meanwhile_is_dropped() {
     let projectors = SessionProjectors::default();
     let terminal = Uuid::now_v7();
     // `open`'s two halves, with `forget` between them.
-    projectors.building.lock().unwrap().insert(terminal, Vec::new());
+    let guard = projectors.begin(terminal);
     let mut session = farcooler_core::session_log::projector::SessionProjector::open(path.clone());
     session.poll();
     projectors.forget(terminal);
-    projectors.finish(terminal, session);
+    projectors.finish(guard, session);
     assert!(!projectors.is_open(terminal), "leaked");
     projectors.open(terminal, path);
     assert!(projectors.is_open(terminal), "an ordinary open still keeps it");

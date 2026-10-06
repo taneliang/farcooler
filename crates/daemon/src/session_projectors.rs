@@ -15,26 +15,37 @@
 //!   missed;
 //! - `SessionStart` for another session, which moves it to that transcript.
 //!
+//! **One watch for every projector** (`session_watch.rs`): a single notify
+//! watcher, its directories routed to the terminals that read them, and its
+//! events read on a thread of their own, so the watcher's callback never
+//! waits on a projector.
+//!
 //! **Rebuild first, then hooks.** A hook that arrives while a terminal's
 //! first projector is being read is held, and applied once the read is
 //! whole, in the order the hooks came. Applied to a half-read projection it
-//! would be a row with an `ord` ahead of turns older than it.
+//! would be a row with an `ord` ahead of turns older than it. A second open
+//! meanwhile waits for that read rather than starting its own.
 //!
 //! **Behind `FARCOOLER_PROJECTOR=1` until a client reads it** (ov-372). The
-//! flag gates all of it: with it unset no projector opens for a pane, and
-//! `agent.rows` and `agent.rows_follow` are refused as unsupported, so the
-//! daemon does what it did before. watch.rs's own turn, question and subagent
-//! state still come from `claude::parse_line` either way.
+//! flag gates all of it: with it unset no projector opens for a pane,
+//! `agent.rows` and `agent.rows_follow` are refused as unsupported, and
+//! `agent_rows` is left out of the hello, so the daemon does what it did
+//! before. watch.rs's own turn, question and subagent state still come from
+//! `claude::parse_line` either way.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
 use farcooler_core::session_log::projector::{Activity, Change, HookEffect, Row, SessionProjector};
 use serde_json::Value;
 use uuid::Uuid;
+
+#[path = "session_watch.rs"]
+mod session_watch;
+use session_watch::Watches;
 
 /// How often a watched projector still reads every file, for a change its
 /// watch missed. An unwatched one reads them every tick.
@@ -42,6 +53,14 @@ const FULL_READ_EVERY: Duration = Duration::from_secs(30);
 
 /// The most changes a follow sends. A follower further behind pages again.
 pub const MAX_CHANGES: usize = 500;
+
+/// The most hooks held for one terminal while its first projector is read.
+/// A build reads at a few microseconds a line, so this is never reached
+/// unless something has gone wrong; past it, hooks are dropped, not kept.
+pub const MAX_HELD: usize = 256;
+
+/// How long a second open waits for a build already under way.
+const BUILD_WAIT: Duration = Duration::from_secs(120);
 
 /// A projector, and what its followers wait on.
 pub struct Open {
@@ -51,22 +70,21 @@ pub struct Open {
     pub epoch: u64,
     /// The projection's revision, sent after every change.
     revision: tokio::sync::watch::Sender<u64>,
-    watch: Mutex<Option<Watch>>,
+    /// The directories the shared watch reads for this projector.
+    watched: Mutex<Vec<PathBuf>>,
     last_full: Mutex<Instant>,
-}
-
-/// A watch on one session's files.
-struct Watch {
-    _watcher: notify::RecommendedWatcher,
-    dirs: (PathBuf, PathBuf),
-    /// The subagents directory may not exist yet; it is watched once it does.
-    subagents: bool,
 }
 
 impl Open {
     fn new(session: SessionProjector) -> Open {
         let (revision, _) = tokio::sync::watch::channel(session.projection().revision());
-        Open { session: Mutex::new(session), epoch: next_epoch(), revision, watch: Mutex::new(None), last_full: Mutex::new(Instant::now()) }
+        Open {
+            session: Mutex::new(session),
+            epoch: next_epoch(),
+            revision,
+            watched: Mutex::new(Vec::new()),
+            last_full: Mutex::new(Instant::now()),
+        }
     }
 
     pub fn lock(&self) -> MutexGuard<'_, SessionProjector> {
@@ -80,36 +98,6 @@ impl Open {
             *rev = now;
             moved
         });
-    }
-
-    /// Watch the session's files, or move the watch to where they are now.
-    /// Never with the projector locked: the watch's callback takes that lock,
-    /// and replacing a watcher waits for its callback thread.
-    fn ensure_watch(self: &Arc<Self>, dirs: (PathBuf, PathBuf)) -> bool {
-        let mut watch = self.watch.lock().unwrap_or_else(|e| e.into_inner());
-        let subagents = dirs.1.is_dir();
-        if watch.as_ref().is_some_and(|w| w.dirs == dirs && w.subagents == subagents) {
-            return true;
-        }
-        let weak = Arc::downgrade(self);
-        let made = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-            let (Ok(event), Some(open)) = (event, weak.upgrade()) else { return };
-            let mut session = open.lock();
-            session.poll_paths(&event.paths);
-            open.publish(&session);
-        });
-        let Ok(mut watcher) = made else {
-            *watch = None;
-            return false;
-        };
-        use notify::Watcher as _;
-        if watcher.watch(&dirs.0, notify::RecursiveMode::NonRecursive).is_err() {
-            *watch = None;
-            return false;
-        }
-        let subagents = subagents && watcher.watch(&dirs.1, notify::RecursiveMode::NonRecursive).is_ok();
-        *watch = Some(Watch { _watcher: watcher, dirs, subagents });
-        true
     }
 }
 
@@ -133,14 +121,60 @@ struct Held {
 /// One lock per projector, and the map's own lock only long enough to find
 /// it: a rebuild reads a whole transcript, and every claude hook on the runner
 /// (a held PermissionRequest among them) passes through `hook` here.
-#[derive(Default)]
 pub struct SessionProjectors {
+    inner: Arc<Inner>,
+}
+
+pub(crate) struct Inner {
     open: Mutex<HashMap<Uuid, Arc<Open>>>,
     /// Terminals whose first projector is being built outside the lock, with
     /// the hooks that arrived meanwhile. A `forget` meanwhile takes the
     /// terminal out of here, and the finished build is then dropped rather
     /// than kept for a terminal that is gone.
     building: Mutex<HashMap<Uuid, Vec<Held>>>,
+    /// Told whenever a build ends, kept or not.
+    built: Condvar,
+    watches: Watches,
+    /// Itself, for the watch's thread, which must not keep it alive.
+    me: std::sync::Weak<Inner>,
+}
+
+impl Default for SessionProjectors {
+    fn default() -> Self {
+        SessionProjectors {
+            inner: Arc::new_cyclic(|me| Inner {
+                open: Mutex::new(HashMap::new()),
+                building: Mutex::new(HashMap::new()),
+                built: Condvar::new(),
+                watches: Watches::default(),
+                me: me.clone(),
+            }),
+        }
+    }
+}
+
+/// The watch goes with its owner, on the owner's thread: dropped on its own
+/// event thread, an FSEvents watcher waits forever for itself to go idle.
+impl Drop for SessionProjectors {
+    fn drop(&mut self) {
+        self.inner.watches.close();
+    }
+}
+
+/// A build under way. Dropped without `finish` (a panic in the read), it
+/// takes the terminal out of `building`, so hooks stop being held for it and
+/// a waiting open stops waiting.
+struct Building {
+    inner: Arc<Inner>,
+    terminal: Uuid,
+}
+
+impl Drop for Building {
+    fn drop(&mut self) {
+        let mut building = self.inner.building.lock().unwrap_or_else(|e| e.into_inner());
+        building.remove(&self.terminal);
+        self.inner.built.notify_all();
+    }
 }
 
 /// Whether claude panes get a projector, and `agent.rows` is served.
@@ -204,9 +238,47 @@ pub enum Follow {
     Reset { epoch: u64, rev: u64 },
 }
 
-impl SessionProjectors {
+impl Inner {
     fn get(&self, terminal: Uuid) -> Option<Arc<Open>> {
         self.open.lock().unwrap_or_else(|e| e.into_inner()).get(&terminal).cloned()
+    }
+
+    /// What a watch event names, read by the projectors whose directories
+    /// hold it. On the watch's own thread, never the watcher's callback.
+    fn read_events(&self, terminals: &[Uuid], paths: &[PathBuf]) {
+        for &terminal in terminals {
+            let Some(open) = self.get(terminal) else { continue };
+            let mut session = open.lock();
+            session.poll_paths(paths);
+            open.publish(&session);
+        }
+    }
+
+    /// Point the shared watch at `dirs` for `terminal`, and away from any it
+    /// read before and no longer does. Whether the main file's directory is
+    /// watched. Never with a projector locked.
+    fn ensure_watch(&self, terminal: Uuid, open: &Open, dirs: (PathBuf, PathBuf)) -> bool {
+        let mut want = vec![dirs.0.clone()];
+        if dirs.1.is_dir() {
+            want.push(dirs.1);
+        }
+        let had = open.watched.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if had == want {
+            return true;
+        }
+        for dir in had.iter().filter(|d| !want.contains(d)) {
+            self.watches.unroute(terminal, dir);
+        }
+        let routed: Vec<PathBuf> = want.into_iter().filter(|dir| had.contains(dir) || self.watches.route(self, terminal, dir)).collect();
+        let main = routed.contains(&dirs.0);
+        *open.watched.lock().unwrap_or_else(|e| e.into_inner()) = routed;
+        main
+    }
+}
+
+impl SessionProjectors {
+    fn get(&self, terminal: Uuid) -> Option<Arc<Open>> {
+        self.inner.get(terminal)
     }
 
     /// Open a projector for `terminal` on `transcript`, read what is on disk
@@ -214,44 +286,65 @@ impl SessionProjectors {
     /// left as it is; on another, it is moved there with its rows kept.
     ///
     /// A new one is built and read with no lock held, and put in the map only
-    /// once it is whole; hooks that arrive meanwhile are applied after.
+    /// once it is whole; hooks that arrive meanwhile are applied after. An
+    /// open while another is building waits for that build.
     pub fn open(&self, terminal: Uuid, transcript: PathBuf) {
         let transcript = canonical(&transcript);
-        if let Some(open) = self.get(terminal) {
-            let dirs = {
-                let mut session = open.lock();
-                session.rebind(transcript);
-                session.poll();
-                open.publish(&session);
-                session.watched_dirs()
-            };
-            open.ensure_watch(dirs);
-            return;
+        let started = Instant::now();
+        loop {
+            if let Some(open) = self.get(terminal) {
+                let dirs = {
+                    let mut session = open.lock();
+                    session.rebind(transcript);
+                    session.poll();
+                    open.publish(&session);
+                    session.watched_dirs()
+                };
+                self.inner.ensure_watch(terminal, &open, dirs);
+                return;
+            }
+            let mut building = self.inner.building.lock().unwrap_or_else(|e| e.into_inner());
+            if !building.contains_key(&terminal) {
+                building.insert(terminal, Vec::new());
+                break;
+            }
+            let Some(left) = BUILD_WAIT.checked_sub(started.elapsed()) else { return };
+            let (building, waited) = self.inner.built.wait_timeout(building, left).unwrap_or_else(|e| e.into_inner());
+            drop(building);
+            if waited.timed_out() {
+                return;
+            }
         }
-        self.building.lock().unwrap_or_else(|e| e.into_inner()).entry(terminal).or_default();
+        let guard = Building { inner: self.inner.clone(), terminal };
         let mut session = SessionProjector::open(transcript);
         session.poll();
-        self.finish(terminal, session);
+        self.finish(guard, session);
     }
 
     /// Keep a projector built for `terminal`, unless `forget` came first, and
     /// apply the hooks held while it was built.
-    fn finish(&self, terminal: Uuid, session: SessionProjector) {
+    fn finish(&self, guard: Building, session: SessionProjector) {
+        let terminal = guard.terminal;
         let dirs = session.watched_dirs();
-        let mut building = self.building.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(held) = building.remove(&terminal) else { return };
+        let mut building = self.inner.building.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(held) = building.remove(&terminal) else {
+            drop(building);
+            drop(guard);
+            return;
+        };
         let built = Arc::new(Open::new(session));
-        let open = self.open.lock().unwrap_or_else(|e| e.into_inner()).entry(terminal).or_insert(built).clone();
+        let open = self.inner.open.lock().unwrap_or_else(|e| e.into_inner()).entry(terminal).or_insert(built).clone();
         // Locked before the build is no longer marked as one, so a hook that
         // misses the mark waits here for the held ones to go first.
         let mut session = open.lock();
         drop(building);
+        drop(guard);
         for hook in held {
             apply(&mut session, &hook.event, &hook.payload, hook.at);
         }
         open.publish(&session);
         drop(session);
-        open.ensure_watch(dirs);
+        self.inner.ensure_watch(terminal, &open, dirs);
     }
 
     pub fn is_open(&self, terminal: Uuid) -> bool {
@@ -265,13 +358,25 @@ impl SessionProjectors {
         Some(path)
     }
 
+    /// Run `f` on `terminal`'s projector, locked. For a caller that reads
+    /// more than one thing at one revision, and for tests that hold the lock.
+    pub fn with_session<R>(&self, terminal: Uuid, f: impl FnOnce(&mut SessionProjector) -> R) -> Option<R> {
+        let open = self.get(terminal)?;
+        let mut session = open.lock();
+        Some(f(&mut session))
+    }
+
     /// A claude hook routed to `terminal`. Held while its projector is being
     /// built; nothing when none is open.
     pub fn hook(&self, terminal: Uuid, event: &str, payload: &Value) {
         {
-            let mut building = self.building.lock().unwrap_or_else(|e| e.into_inner());
+            let mut building = self.inner.building.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(held) = building.get_mut(&terminal) {
-                held.push(Held { event: event.to_string(), payload: payload.clone(), at: now_ms() });
+                if held.len() < MAX_HELD {
+                    held.push(Held { event: event.to_string(), payload: payload.clone(), at: now_ms() });
+                } else if held.len() == MAX_HELD {
+                    tracing::warn!(terminal = %terminal, "a projector's build is holding too many hooks; dropping the rest");
+                }
                 return;
             }
         }
@@ -284,7 +389,7 @@ impl SessionProjectors {
             (session.transcript() != before).then(|| session.watched_dirs())
         };
         if let Some(dirs) = dirs {
-            open.ensure_watch(dirs);
+            self.inner.ensure_watch(terminal, &open, dirs);
         }
     }
 
@@ -296,7 +401,7 @@ impl SessionProjectors {
     pub fn tick(&self, terminal: Uuid, activity: Option<Activity>) {
         let Some(open) = self.get(terminal) else { return };
         let dirs = open.lock().watched_dirs();
-        let watched = open.ensure_watch(dirs);
+        let watched = self.inner.ensure_watch(terminal, &open, dirs);
         let mut last_full = open.last_full.lock().unwrap_or_else(|e| e.into_inner());
         let mut session = open.lock();
         if !watched || last_full.elapsed() >= FULL_READ_EVERY {
@@ -336,11 +441,11 @@ impl SessionProjectors {
     }
 
     /// What changed for a follower at `after` in projection `epoch`, waiting
-    /// up to `wait` for something to. `None` when no projector is open.
-    pub async fn follow(&self, terminal: Uuid, epoch: u64, after: u64, wait: Duration) -> Option<Follow> {
+    /// until `deadline` for something to, and sending at most `max` changes.
+    /// `None` when no projector is open.
+    pub async fn follow(&self, terminal: Uuid, epoch: u64, after: u64, deadline: tokio::time::Instant, max: usize) -> Option<Follow> {
         let open = self.get(terminal)?;
         let mut changed = open.revision.subscribe();
-        let deadline = tokio::time::Instant::now() + wait;
         loop {
             let answer = {
                 let session = open.lock();
@@ -349,7 +454,7 @@ impl SessionProjectors {
                 if epoch != open.epoch || after > rev {
                     return Some(Follow::Reset { epoch: open.epoch, rev });
                 }
-                match p.changes_since(after, MAX_CHANGES) {
+                match p.changes_since(after, max) {
                     None => return Some(Follow::Reset { epoch: open.epoch, rev }),
                     Some(changes) if !changes.is_empty() => Some(Follow::Changes { epoch: open.epoch, rev, changes: owned(changes) }),
                     Some(_) => None,
@@ -366,11 +471,31 @@ impl SessionProjectors {
         }
     }
 
-    /// The terminal is gone.
+    /// The terminal is gone. Its watch is let go on a thread of its own:
+    /// never the watch's (where FSEvents would wait on itself forever), and
+    /// not the caller's, since taking a directory off an FSEvents stream
+    /// restarts the stream, about half a second measured.
     pub fn forget(&self, terminal: Uuid) {
-        let mut building = self.building.lock().unwrap_or_else(|e| e.into_inner());
-        building.remove(&terminal);
-        self.open.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal);
+        let open = {
+            let mut building = self.inner.building.lock().unwrap_or_else(|e| e.into_inner());
+            building.remove(&terminal);
+            self.inner.built.notify_all();
+            self.inner.open.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal)
+        };
+        let Some(open) = open else { return };
+        let dirs = std::mem::take(&mut *open.watched.lock().unwrap_or_else(|e| e.into_inner()));
+        if dirs.is_empty() {
+            return;
+        }
+        let inner = self.inner.clone();
+        let unrouted = std::thread::Builder::new().name("fc-projector-unwatch".into()).spawn(move || {
+            for dir in &dirs {
+                inner.watches.unroute(terminal, dir);
+            }
+        });
+        if let Err(e) = unrouted {
+            tracing::warn!(error = %e, "could not let a forgotten projector's watch go");
+        }
     }
 }
 
@@ -389,6 +514,19 @@ fn owned(changes: Vec<Change<'_>>) -> Vec<RowChange> {
 pub fn global() -> &'static SessionProjectors {
     static PROJECTORS: OnceLock<SessionProjectors> = OnceLock::new();
     PROJECTORS.get_or_init(SessionProjectors::default)
+}
+
+#[cfg(test)]
+impl SessionProjectors {
+    /// `open`'s first half: `terminal` marked as building.
+    fn begin(&self, terminal: Uuid) -> Building {
+        self.inner.building.lock().unwrap().insert(terminal, Vec::new());
+        Building { inner: self.inner.clone(), terminal }
+    }
+
+    async fn follow_for(&self, terminal: Uuid, epoch: u64, after: u64, wait: Duration) -> Option<Follow> {
+        self.follow(terminal, epoch, after, tokio::time::Instant::now() + wait, MAX_CHANGES).await
+    }
 }
 
 #[cfg(test)]

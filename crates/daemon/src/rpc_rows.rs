@@ -31,6 +31,9 @@ pub const MAX_PAGE: usize = 500;
 pub const MAX_WAIT: Duration = Duration::from_secs(25);
 
 pub(crate) async fn dispatch(svc: &Service, req: Request) -> Result<result::Value> {
+    // A follow's wait counts from here, so a first follow that rebuilds a
+    // transcript still answers inside the client's 30 s deadline.
+    let arrived = tokio::time::Instant::now();
     if !session_projectors::shadowing() {
         return Err(DomainError::CapabilityUnsupported { needed: farcooler_protocol::capability::AGENT_ROWS });
     }
@@ -54,10 +57,10 @@ pub(crate) async fn dispatch(svc: &Service, req: Request) -> Result<result::Valu
         }
         ("agent.rows_follow", Some(request::Payload::AgentRowsFollow(p))) => {
             let terminal = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-            let wait = Duration::from_millis(u64::from(p.wait_ms)).min(MAX_WAIT);
+            let deadline = arrived + Duration::from_millis(u64::from(p.wait_ms)).min(MAX_WAIT);
             let open = ensure_open(svc, terminal).await?;
             let follow = match open {
-                true => session_projectors::global().follow(terminal, p.epoch, p.after_rev, wait).await,
+                true => session_projectors::global().follow(terminal, p.epoch, p.after_rev, deadline, session_projectors::MAX_CHANGES).await,
                 false => None,
             };
             let follow = match follow {
@@ -65,7 +68,7 @@ pub(crate) async fn dispatch(svc: &Service, req: Request) -> Result<result::Valu
                 // No session to follow: nothing changes, after the wait, so
                 // a follower does not spin.
                 None => {
-                    tokio::time::sleep(wait).await;
+                    tokio::time::sleep_until(deadline).await;
                     Follow::Changes { epoch: 0, rev: 0, changes: Vec::new() }
                 }
             };
