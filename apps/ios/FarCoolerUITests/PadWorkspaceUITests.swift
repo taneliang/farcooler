@@ -29,7 +29,9 @@ final class PadWorkspaceUITests: XCTestCase {
     }
 
     private func keep(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
+        // The screen's, not the app's: in landscape on an iPad simulator (iOS
+        // 27) `app.screenshot()` came back turned a quarter and cut short.
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = name
         shot.lifetime = .keepAlways
         add(shot)
