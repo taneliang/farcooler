@@ -2,8 +2,8 @@
 //!
 //! Claiming's weakest signal (`claims::scan`) asks where each process under a
 //! pane is working. `ps` can't say: it has no column for it on macOS. `lsof -d
-//! cwd` can, but it's a process of its own, and the watcher already spends one
-//! `ps` and one `lsof` a second. This is one syscall per pid.
+//! cwd` can, but it's a process of its own, and the watcher already reads the host's
+//! processes every second. This is one syscall per pid.
 //!
 //! The kernel's answer is already resolved: `/tmp/x` comes back as
 //! `/private/tmp/x` on macOS, which is how a worktree path is compared anyway.
