@@ -28,6 +28,9 @@ final class ComposerModel: ObservableObject {
     /// Written from the text view's own begin and end callbacks, so a resign
     /// from anywhere reaches it; not from a field being taken down.
     @Published var isFocused = false
+    /// The field that has the keyboard, so that a field resigning late, after
+    /// the one that replaced it has taken the focus, doesn't clear it.
+    weak var focusOwner: UITextView?
 
     /// The caret as a `Character` offset, which `activeToken(in:cursor:)`
     /// counts in. Set, it puts the caret there with nothing selected.

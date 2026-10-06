@@ -2507,7 +2507,7 @@ private struct AgentComposer: View {
                     .padding(.top, 2)
             }
             ComposerTextView(
-                text: $model.text, selection: $model.selection, measuredHeight: $fieldHeight,
+                model: model, text: $model.text, selection: $model.selection, measuredHeight: $fieldHeight,
                 isEditing: $model.isFocused,
                 onCommandReturn: inColumn ? { send() } : nil)
                 .frame(height: fieldHeight)
@@ -2908,6 +2908,8 @@ private struct SuggestionList: View {
 /// text field at all, and this one needs an ordinary text field that also
 /// exposes its selection.
 private struct ComposerTextView: UIViewRepresentable {
+    /// Whose focus `isEditing` is: see `ComposerModel.focusOwner`.
+    let model: ComposerModel
     @Binding var text: String
     /// The selection in UTF-16 units: where the caret is, for the pickers, and
     /// what a field built after a width change restores.
@@ -3010,13 +3012,18 @@ private struct ComposerTextView: UIViewRepresentable {
             DispatchQueue.main.async { binding.wrappedValue = clamped }
         }
 
-        func textViewDidBeginEditing(_ textView: UITextView) { parent.isEditing = true }
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            parent.model.focusOwner = textView
+            parent.isEditing = true
+        }
 
         func textViewDidEndEditing(_ textView: UITextView) {
             // A field leaving the window resigns on its way out, and that is
             // not the reader putting the keyboard away: the composer for the
             // other width is waiting to take the focus over (ov-357).
             guard (textView as? ComposerField)?.isBeingTakenDown != true else { return }
+            // Nor a field that isn't the one holding the focus any more.
+            guard parent.model.focusOwner == nil || parent.model.focusOwner === textView else { return }
             parent.isEditing = false
         }
 
