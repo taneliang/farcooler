@@ -14,16 +14,19 @@
 //! 3. under the fence: no call in flight, none written to the transcript
 //!    since the paste began (`tool_called_since`), no gate begun since then,
 //!    and no ask held on the pane;
-//! 4. Enter, and the fence held `KEY_LANDS` past `tmux send-keys` returning.
+//! 4. Enter, and the fence held `KEY_LANDS` past `tmux send-keys` returning;
+//!    a send that fails or overruns `ENTER_DEADLINE` is killed and the fence
+//!    held `LATE_KEY` more, as its key may still land.
 //!
 //! So a dialog drawn after check 3 needs a `PreToolUse` answered after the
 //! fence is let go, by which time the key has been read as typing. Measured
 //! on claude 2.1.290 against a stand-in API, over 25 dialogs: none was drawn
 //! before its `PreToolUse` hook returned, and a hook that sleeps 300 ms
-//! delays the dialog by 300 ms. What's left: a `tmux send-keys` taking longer
-//! than the hook's patience (the daemon answers a `PreToolUse` after 300 ms
-//! on the fence whatever holds it), or a hook that never reaches the daemon.
-//! A dialog in the way leaves the text in the box, unsent.
+//! delays the dialog by 300 ms. A `PreToolUse` waits on the fence up to
+//! `FENCE_HOLD`, above the most the Enter can hold it (`LONGEST_FENCE`), so it
+//! is never answered under an Enter. What's left: a hook that never reaches
+//! the daemon, or a key a killed `tmux` delivers later than `LATE_KEY`. A
+//! dialog in the way leaves the text in the box, unsent.
 //!
 //! A session this daemon has never heard a hook from is never typed into
 //! mid-turn: its agent waits for the turn to end. Nor is one Far Cooler didn't
@@ -61,6 +64,19 @@ use crate::watch::Watcher;
 /// way was on the screen within 7.3 ms at the 99th percentile (100 keys,
 /// load around 6); this is seven times that, for a loaded runner.
 pub(crate) const KEY_LANDS: Duration = Duration::from_millis(50);
+
+/// The longest the Enter's `tmux send-keys` may take before it's killed.
+pub(crate) const ENTER_DEADLINE: Duration = Duration::from_secs(2);
+
+/// How long the fence stays held after a send that failed or overran: a key
+/// sent can reach the pane after its `tmux` has gone.
+pub(crate) const LATE_KEY: Duration = Duration::from_secs(5);
+
+/// The longest the Enter holds the fence, from its checks on. Below
+/// `HookAsks`'s `FENCE_HOLD`, so a `PreToolUse` is never answered while an
+/// Enter holds it.
+pub(crate) const LONGEST_FENCE: Duration =
+    Duration::from_millis(ENTER_DEADLINE.as_millis() as u64 + LATE_KEY.as_millis() as u64 + KEY_LANDS.as_millis() as u64);
 
 /// How long after the Enter the queue has to show the message.
 const QUEUE_SETTLES: Duration = Duration::from_secs(3);
@@ -139,9 +155,25 @@ impl Watcher {
         {
             return Err(NoEnter::Dialog);
         }
-        runtime.send_bytes_hex(to.id, "0d").await.map_err(|_| NoEnter::Failed)?;
-        tokio::time::sleep(KEY_LANDS).await;
-        Ok(())
+        // A send that overruns its deadline is dropped, which kills its
+        // `tmux` (`kill_on_drop`). It may still have reached the pane, late,
+        // so the fence is held a while longer before it's let go.
+        let send = async {
+            #[cfg(test)]
+            tokio::time::sleep(Duration::from_millis(self.slow_enter_ms.load(std::sync::atomic::Ordering::SeqCst))).await;
+            runtime.send_bytes_hex(to.id, "0d").await
+        };
+        match tokio::time::timeout(ENTER_DEADLINE, send).await {
+            Ok(Ok(())) => {
+                tokio::time::sleep(KEY_LANDS).await;
+                Ok(())
+            }
+            Ok(Err(_)) | Err(_) => {
+                tracing::warn!(terminal = %to.id, "a mid-turn Enter didn't go cleanly; holding the fence while it may still land");
+                tokio::time::sleep(LATE_KEY).await;
+                Err(NoEnter::Failed)
+            }
+        }
     }
 
     /// Whether `text`, just submitted mid-turn, reached the agent's queue

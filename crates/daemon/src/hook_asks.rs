@@ -149,11 +149,12 @@ struct Heard {
     fence: Arc<tokio::sync::Mutex<()>>,
 }
 
-/// How long a `PreToolUse` waits on the fence's lock before it's answered
-/// anyway. The mid-turn Enter holds it for one `tmux send-keys` and a settle,
-/// tens of milliseconds; the hook gives up on the daemon at 400 ms. The mark
-/// is set before the wait, so an Enter after it sees the call either way.
-const FENCE_WAIT: Duration = Duration::from_millis(300);
+/// The longest a `PreToolUse` waits on the fence's lock. Above the longest
+/// the mid-turn Enter can hold it (`answer_wake::mid_turn::LONGEST_FENCE`),
+/// so a `PreToolUse` is never answered while an Enter holds it: the Enter
+/// gives up, and lets go, first. A hook kept waiting is first told so with a
+/// hold (`hook_ingress::fence`), which gives it this long.
+pub const FENCE_HOLD: Duration = Duration::from_secs(10);
 
 /// Sessions remembered before the oldest are let go: far more than a runner
 /// runs at once.
@@ -199,17 +200,21 @@ impl HookAsks {
         self.sessions.lock().unwrap_or_else(|e| e.into_inner()).get(session).map(|h| h.fence.clone())
     }
 
-    /// A `PreToolUse` from `session`: mark the call in flight, then wait (up
-    /// to `FENCE_WAIT`) for any Enter holding the fence to finish. The hook
-    /// is answered after this returns.
+    /// A `PreToolUse` from `session`: mark the call in flight, and hand back
+    /// the fence its answer waits for. `None` for a session never heard from.
+    pub fn mark_tool_starting(&self, session: &str) -> Option<Arc<tokio::sync::Mutex<()>>> {
+        let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+        let heard = sessions.get_mut(session)?;
+        heard.tool_in_flight = true;
+        Some(heard.fence.clone())
+    }
+
+    /// `mark_tool_starting`, then wait (up to `FENCE_HOLD`) for any Enter
+    /// holding the fence to let go. The hook is answered after this returns.
     pub async fn tool_starting(&self, session: &str) {
-        let fence = {
-            let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
-            let Some(heard) = sessions.get_mut(session) else { return };
-            heard.tool_in_flight = true;
-            heard.fence.clone()
-        };
-        let _ = tokio::time::timeout(FENCE_WAIT, fence.lock()).await;
+        if let Some(fence) = self.mark_tool_starting(session) {
+            let _ = tokio::time::timeout(FENCE_HOLD, fence.lock()).await;
+        }
     }
 
     /// The tool call in flight in `session`, if any, is over.

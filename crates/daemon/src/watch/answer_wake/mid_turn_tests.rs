@@ -206,6 +206,41 @@ async fn the_enter_holds_the_fence_and_waits_on_a_tool_call() {
     si.submits(1).await;
 }
 
+/// An Enter whose send is slow, longer than the 300 ms a `PreToolUse` once
+/// waited, keeps the fence until it's done: the call that arrives meanwhile
+/// is answered only after the key has gone in.
+#[tokio::test]
+async fn a_slow_enter_keeps_the_fence_until_its_key_is_in() {
+    use super::mid_turn::Witness;
+    let b = board().await;
+    let orchestrator = b.adopted_shell().await;
+    let si = b.stand_in(&orchestrator, "claude", "claude").await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("t.jsonl");
+    let asks = b.svc.hooks().asks().clone();
+    asks.heard(SESSION, false);
+    si.show("draft:hello").await;
+    b.screen_with(orchestrator.id, "hello").await;
+    b.watcher.slow_enter_ms.store(700, Ordering::SeqCst);
+    let fence = asks.fence(SESSION).expect("a fence");
+    let enter = tokio::spawn({
+        let (watcher, to, witness) = (b.watcher.clone(), orchestrator.clone(), Witness::for_tests(SESSION, &path));
+        async move {
+            let entered = watcher.enter(&to, "claude", &witness, "hello").await;
+            (entered, std::time::Instant::now())
+        }
+    });
+    while fence.try_lock().is_ok() {
+        tokio::task::yield_now().await;
+    }
+    asks.tool_starting(SESSION).await;
+    let answered = std::time::Instant::now();
+    let (entered, done) = enter.await.unwrap();
+    assert_eq!(entered, Ok(()));
+    assert!(answered >= done, "the call was answered while the Enter held the fence");
+    si.submits(1).await;
+}
+
 /// An answer is told to a working agent too, and the task says it's queued.
 #[tokio::test]
 async fn an_answer_reaches_a_working_claude_through_its_queue() {

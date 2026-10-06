@@ -68,19 +68,40 @@ async fn a_pre_tool_use_is_marked_and_answered_after_the_fence() {
     }
     assert!(!asks.tool_in_flight("s1"), "the call's end cleared the mark");
 
-    // With the fence held, the answer waits for it to be let go.
+    // With the fence held, by an Enter whose send is slow, longer than the
+    // 300 ms the answer once gave it: the hook is told to hold, and the
+    // answer waits for the fence to be let go, however long, up to the hold.
     let fence = asks.fence("s1").expect("a fence");
-    let held = fence.lock().await;
+    let held = fence.clone().lock_owned().await;
     let started = std::time::Instant::now();
     let waiting = tokio::task::spawn_blocking({
         let socket = socket.clone();
-        move || (hook(&socket, "PreToolUse", "s1", patience), std::time::Instant::now())
+        move || {
+            let line = HookLine {
+                agent: Agent::Claude,
+                event: "PreToolUse".into(),
+                payload: serde_json::json!({ "session_id": "s1" }),
+            };
+            let mut stream = std::os::unix::net::UnixStream::connect(&socket).expect("connect");
+            stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).expect("timeout");
+            std::io::Write::write_all(&mut stream, encode_line(&line).expect("encode").as_bytes()).expect("write");
+            let mut reader = std::io::BufReader::new(&stream);
+            let (mut first, mut second) = (String::new(), String::new());
+            let _ = std::io::BufRead::read_line(&mut reader, &mut first);
+            let _ = std::io::BufRead::read_line(&mut reader, &mut second);
+            (first, second, std::time::Instant::now())
+        }
     });
-    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
-    assert!(asks.tool_in_flight("s1"), "marked before the wait");
+    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+    assert!(!waiting.is_finished(), "answered while the fence was held, after {:?}", started.elapsed());
     let let_go = std::time::Instant::now();
     drop(held);
-    let (reply, answered) = waiting.await.unwrap();
-    assert!(reply.is_some(), "answered once let go");
-    assert!(answered >= let_go, "answered {:?} in, before the fence was let go", answered - started);
+    let (first, second, answered) = waiting.await.unwrap();
+    assert!(first.contains("hold_ms"), "told to hold first: {first:?}");
+    assert!(!second.is_empty() && !second.contains("allow"), "then no decision: {second:?}");
+    assert!(answered >= let_go, "answered before the fence was let go");
+    assert!(
+        crate::watch::answer_wake::mid_turn::LONGEST_FENCE < crate::hook_asks::FENCE_HOLD,
+        "an Enter can hold the fence past the hook's hold"
+    );
 }

@@ -919,6 +919,9 @@ pub struct Watcher {
     /// Make the next paste fail as a send would (`answer_wake`'s tests).
     #[cfg(test)]
     fail_sends: std::sync::atomic::AtomicBool,
+    /// Make each mid-turn Enter's send take this many ms (`mid_turn`'s tests).
+    #[cfg(test)]
+    slow_enter_ms: std::sync::atomic::AtomicU64,
 }
 
 /// One client's claim about what it is showing, and when it said so.
@@ -2787,6 +2790,8 @@ impl Watcher {
             )),
             #[cfg(test)]
             fail_sends: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            slow_enter_ms: std::sync::atomic::AtomicU64::new(0),
             clears_pending: std::sync::Mutex::new(HashSet::new()),
             taps: std::sync::Mutex::new(None),
             task_notices: std::sync::Mutex::new(HashMap::new()),

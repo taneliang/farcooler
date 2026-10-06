@@ -864,10 +864,7 @@ impl HookIngress {
                 self.asks.heard(session, is_gate(hook.agent, &hook.event));
             }
             if is_fence(hook.agent, &hook.event) {
-                if let Some(session) = session {
-                    self.asks.tool_starting(session).await;
-                }
-                write_reply(&mut write, &Reply::verdict(None)).await?;
+                fence::answer(&self.asks, session, &mut write).await?;
             } else if let Some(session) = session
                 && matches!(hook.event.as_str(), "PostToolUse" | "PostToolUseFailure" | "Stop" | "UserPromptSubmit")
             {
@@ -1804,6 +1801,7 @@ mod tests {
     }
 }
 
+mod fence;
 #[cfg(test)]
 #[path = "hook_fence_tests.rs"]
 mod hook_fence_tests;
