@@ -27,6 +27,10 @@ use crate::server::{SESSION_NAME, TmuxServer};
 /// that would be a second command, which is the very step that can fail.
 pub const OPENING_MARK: &str = "#farcooler-opening:";
 
+/// The most input bytes `send_bytes_hex` gives one `send-keys`: under 3.7's
+/// 1,000 arguments and 3.4's 16 KB with room to spare. See `send_bytes_hex`.
+pub const SEND_KEYS_RUN: usize = 512;
+
 /// `command`, carrying the opening mark for `terminal_id`. See `OPENING_MARK`.
 pub fn marked(command: &str, terminal_id: Uuid) -> String {
     format!("{command} {OPENING_MARK}{terminal_id}")
@@ -420,6 +424,13 @@ impl TmuxServer {
     /// included, and those exact bytes reach the PTY. Nothing is interpreted as
     /// a tmux key name along the way, so a literal `Up` typed by a user is text
     /// and an actual arrow key is `1b5b41`.
+    ///
+    /// Sent in runs of `SEND_KEYS_RUN` bytes, one `send-keys` each, in order.
+    /// A paste is one call, and tmux refuses a long one whole: 3.7 takes at
+    /// most 1,000 arguments to a command, so 996 bytes after `send-keys -t %N
+    /// -H`, and 3.4 at most 16 KB of them, about 5,400 bytes at three each.
+    /// Past either, every byte of the paste was dropped with `command too
+    /// long` on stderr (ov-349).
     pub async fn send_bytes_hex(&self, pane_id: &str, hex: &str) -> Result<()> {
         if hex.is_empty() {
             return Ok(());
@@ -432,13 +443,15 @@ impl TmuxServer {
         let bytes: Vec<String> =
             hex.as_bytes().chunks(2).map(|p| String::from_utf8_lossy(p).into_owned()).collect();
 
-        let mut args: Vec<&str> = vec!["send-keys", "-t", pane_id, "-H"];
-        args.extend(bytes.iter().map(|s| s.as_str()));
+        for run in bytes.chunks(SEND_KEYS_RUN) {
+            let mut args: Vec<&str> = vec!["send-keys", "-t", pane_id, "-H"];
+            args.extend(run.iter().map(|s| s.as_str()));
 
-        let out = self.run(&args).await?;
-        if !out.ok() {
-            tracing::warn!(stderr = %out.stderr, "send-keys -H failed");
-            return Err(DomainError::TmuxUnavailable);
+            let out = self.run(&args).await?;
+            if !out.ok() {
+                tracing::warn!(stderr = %out.stderr, "send-keys -H failed");
+                return Err(DomainError::TmuxUnavailable);
+            }
         }
         Ok(())
     }

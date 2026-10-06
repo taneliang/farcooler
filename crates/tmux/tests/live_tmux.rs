@@ -660,3 +660,44 @@ async fn a_zoomed_window_is_still_zoomed_on_the_same_pane_after_a_resize() {
 
     srv.kill_server().await.unwrap();
 }
+
+/// A paste is one `send_bytes_hex` call, however long, and every byte of it
+/// reaches the pane in order (ov-349).
+///
+/// tmux refuses a command past 1,000 arguments (3.7) or 16 KB of them (3.4),
+/// and one `send-keys -H` per paste put a byte in each argument: a paste
+/// over 996 bytes was dropped whole, locally and over ssh alike, with only
+/// `command too long` on a stderr nobody reads. Sized past both limits, and
+/// carrying what a paste carries: newlines, the bracket, and UTF-8.
+#[tokio::test]
+async fn a_long_paste_reaches_the_pane_whole() {
+    let Some(srv) = live_server("a_long_paste_reaches_the_pane_whole").await else { return };
+    let got = std::env::temp_dir().join(format!("fc-paste-{}", Uuid::now_v7().simple()));
+    // Raw, so the line discipline neither edits nor echoes: what cat writes
+    // is exactly what the pane was sent.
+    let command = format!("sh -c 'stty raw -echo; exec cat > {}'", got.display());
+    let win = srv
+        .create_terminal_window(Uuid::now_v7(), Uuid::now_v7(), "paste", "/tmp", &command)
+        .await
+        .unwrap();
+    until("the recorder to start", || async { got.exists() }).await;
+
+    let mut paste = b"\x1b[200~".to_vec();
+    let mut line = 0;
+    while paste.len() < 6_000 {
+        paste.extend(format!("line {line}: a \u{201c}quoted\u{201d} word \u{2014} and more\n").into_bytes());
+        line += 1;
+    }
+    paste.extend(b"\x1b[201~");
+    let hex: String = paste.iter().map(|b| format!("{b:02x}")).collect();
+
+    srv.send_bytes_hex(&win.pane_id, &hex).await.expect("the paste is sent");
+    until("every pasted byte", || async {
+        std::fs::metadata(&got).map(|m| m.len() as usize >= paste.len()).unwrap_or(false)
+    })
+    .await;
+    assert!(std::fs::read(&got).unwrap() == paste, "the pane got other bytes than were pasted");
+
+    let _ = std::fs::remove_file(&got);
+    srv.kill_server().await.unwrap();
+}
