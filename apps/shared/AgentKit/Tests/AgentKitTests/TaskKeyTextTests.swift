@@ -98,5 +98,18 @@ struct TaskKeyTextTests {
         let linked = Self.linker.linked(AttributedString("Nothing here, utf-8"))
         #expect(Self.linker.markedText(linked).keys == 0)
     }
+
+    /// What lets text with no card skip building a `Text` per run (ov-382):
+    /// only a link to a key with a card counts.
+    @Test("Only a key with a card is a card")
+    func hasCard() {
+        let linker = Self.linker
+        #expect(linker.hasCard(in: linker.linked(AttributedString("Blocked on ov-190"))))
+        #expect(!linker.hasCard(in: linker.linked(AttributedString("Blocked on ov-999"))))
+        #expect(!linker.hasCard(in: Markdown.inline("A [link](https://example.com), **bold** and `code`")))
+        let noCards = TaskKeyLinker(index: linker.index, open: { _ in })
+        #expect(!noCards.hasCard(in: linker.linked(AttributedString("Blocked on ov-190"))))
+        #expect(!TaskKeyLinker.none.hasCard(in: linker.linked(AttributedString("Blocked on ov-190"))))
+    }
 }
 #endif

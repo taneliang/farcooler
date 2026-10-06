@@ -60,6 +60,11 @@ extension TaskKeyLinker {
     /// With `links` false, the keys' links are dropped as they're drawn: the
     /// text looks as it did, and only the hovercard knows where they are.
     func markedText(_ linked: AttributedString, links: Bool = true) -> (text: Text, keys: Int) {
+        // Nothing to mark, the common case: one `Text`, not one per run
+        // joined by interpolation. A reply has a run for every change of
+        // style, and building and freeing a `Text` apiece was a sixth of a
+        // streaming reply's main thread (ov-358 §3).
+        guard hasCard(in: linked) else { return (Text(linked), 0) }
         var out: Text?
         var keys = 0
         func append(_ next: Text) { out = out.map { Text("\($0)\(next)") } ?? next }
@@ -76,9 +81,17 @@ extension TaskKeyLinker {
         return (out ?? Text(""), keys)
     }
 
+    /// Whether any link in `linked` is a key this linker has a card for.
+    /// With no cards at all, the answer is no without reading the text.
+    func hasCard(in linked: AttributedString) -> Bool {
+        guard !index.isEmpty else { return false }
+        return linked.runs.contains { run in run.link.map { card(for: $0) != nil } ?? false }
+    }
+
     /// What VoiceOver says for `linked`: each key with a card followed by its
     /// title, "ov-190 (Fix the login)", or nil when no key has one.
     public func spoken(_ linked: AttributedString) -> String? {
+        guard hasCard(in: linked) else { return nil }
         var out = ""
         var any = false
         for run in linked.runs {
