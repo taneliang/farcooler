@@ -76,16 +76,21 @@ runs:
         echo "Simulator: $rest ($udid)"
         echo "SIMULATOR_ID=$udid" >> "$GITHUB_ENV"
 
-    # Started here and NOT waited for (ov-384). The boot takes 50 to 180 s and
-    # xcodebuild then spends 75 to 165 s of its own loading before it names a
-    # destination, so waiting here did the two one after the other on a
-    # three-core runner for no reason: xcodebuild waits for a booting
-    # destination itself and does not start a test before it is ready. The
-    # first launch after an install has still taken over a minute, which is
-    # what each test's `launchDrawn` (180 s for the first frame) is for.
-    - name: Start booting the simulator
+    # Booted, and waited for, in a step of its own, so the first test does
+    # not pay for the boot inside its probe's timeout. A first launch after
+    # an install has still taken over a minute, which is what each test's
+    # `launchDrawn` (180 s for the first frame) is for.
+    #
+    # Tried and dropped (ov-384): starting the boot here and letting xcodebuild
+    # wait for it. It saved nothing. From the first step to the first test took
+    # 250 to 444 s (median about 390) against about 380 s waiting, because on a
+    # three-core runner xcodebuild's own start-up slows down by what the boot
+    # takes (run 37541243561).
+    - name: Boot the simulator
       shell: bash -e {0}
-      run: xcrun simctl boot "$SIMULATOR_ID"
+      run: |
+        xcrun simctl boot "$SIMULATOR_ID"
+        xcrun simctl bootstatus "$SIMULATOR_ID" -b
 
     # The script, never xcodebuild directly: it fails a run where every test
     # skipped, and one where a test skipped for want of a runner. XCTESTRUN,
