@@ -224,13 +224,12 @@ impl Projection {
         // happened to contain it (ov-363 review 1, finding 10).
         let turn_id = self.rows[turn].id.clone();
         let words = squeeze(delta, usize::MAX);
-        let claimed: std::collections::HashSet<usize> = self.hook_messages.values().map(|&(i, _)| i).collect();
-        let written = (0..self.rows.len()).find(|&i| {
+        let written = self.from_turn(turn).find(|&i| {
             let row = &self.rows[i];
             !row.provisional
                 && !row.retracted
                 && row.turn.as_deref() == Some(&turn_id)
-                && !claimed.contains(&i)
+                && !self.claimed.contains(&i)
                 && matches!(&row.kind, RowKind::Prose(p) if squeeze(&p.text, usize::MAX).starts_with(&words))
         });
         // A turn the transcript has closed has all its words written: a flush
@@ -247,6 +246,7 @@ impl Projection {
             }
         };
         self.hook_messages.insert(message.to_string(), (i, index));
+        self.claimed.insert(i);
     }
 
     /// The transcript has closed `turn`, so every word it will write for it
@@ -262,13 +262,12 @@ impl Projection {
     pub(super) fn settle_prose(&mut self, turn: usize) {
         let turn_id = self.rows[turn].id.clone();
         let in_turn = |row: &Row| row.turn.as_deref() == Some(turn_id.as_str()) && !row.retracted && matches!(row.kind, RowKind::Prose(_));
-        let waiting: Vec<usize> = (0..self.rows.len()).filter(|&i| self.rows[i].provisional && in_turn(&self.rows[i])).collect();
+        let waiting: Vec<usize> = self.from_turn(turn).filter(|&i| self.rows[i].provisional && in_turn(&self.rows[i])).collect();
         if waiting.is_empty() {
             return;
         }
-        let claimed: std::collections::HashSet<usize> = self.hook_messages.values().map(|&(i, _)| i).collect();
         let mut unclaimed: Vec<usize> =
-            (0..self.rows.len()).filter(|&i| !self.rows[i].provisional && in_turn(&self.rows[i]) && !claimed.contains(&i)).collect();
+            self.from_turn(turn).filter(|&i| !self.rows[i].provisional && in_turn(&self.rows[i]) && !self.claimed.contains(&i)).collect();
         let words = |row: &Row| match &row.kind {
             RowKind::Prose(p) => squeeze(&p.text, usize::MAX),
             _ => String::new(),
@@ -286,6 +285,7 @@ impl Projection {
                     for entry in self.hook_messages.values_mut().filter(|(row, _)| *row == i) {
                         entry.0 = written;
                     }
+                    self.claimed.insert(written);
                 }
                 None => {
                     self.rows[i].provisional = false;

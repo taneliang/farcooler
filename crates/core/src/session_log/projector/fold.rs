@@ -133,6 +133,13 @@ pub struct Projection {
     /// Hook `message_id` to the prose row it became or matched,
     /// and the last `index` applied to it.
     pub(super) hook_messages: HashMap<String, (usize, Option<u64>)>,
+    /// The rows in `hook_messages`, so a match need not walk it.
+    pub(super) claimed: HashSet<usize>,
+    /// The turn row showing `activity`, so a new one clears just that one.
+    activity_shown: Option<usize>,
+    /// Turns a hook opened that the transcript has not yet written, so a
+    /// confirmed turn retires them without walking every row.
+    hook_turns: Vec<usize>,
     /// Uuid-less lines folded so far, by scope and line hash, as the most
     /// copies of each met in any one read of its file (see `repeated`).
     folded_copies: HashMap<u64, u32>,
@@ -400,15 +407,22 @@ impl Projection {
     pub(super) fn show_activity(&mut self) {
         let Some(newest) = self.newest_turn else { return };
         let activity = self.activity;
-        for i in 0..self.rows.len() {
+        let shown = self.activity_shown.replace(newest);
+        for (i, want) in [(shown.filter(|&s| s != newest), None), (Some(newest), activity)] {
+            let Some(i) = i else { continue };
             if let RowKind::Turn(turn) = &mut self.rows[i].kind {
-                let want = if i == newest { activity } else { None };
                 if turn.activity != want {
                     turn.activity = want;
                     self.touch(i);
                 }
             }
         }
+    }
+
+    /// Rows that can belong to turn `turn`: a turn's rows are all added after
+    /// it, so the walk starts there rather than at the session's start.
+    pub(super) fn from_turn(&self, turn: usize) -> std::ops::Range<usize> {
+        turn..self.rows.len()
     }
 
     pub(super) fn turn_mut(&mut self, i: usize) -> Option<&mut Turn> {
@@ -438,7 +452,7 @@ impl Projection {
     /// them, or the turn was cut short.
     fn settle_asks(&mut self, turn: usize, at: Option<i64>) {
         let id = self.rows[turn].id.clone();
-        for i in 0..self.rows.len() {
+        for i in self.from_turn(turn) {
             if self.rows[i].turn.as_deref() != Some(&id) {
                 continue;
             }
@@ -508,6 +522,9 @@ impl Projection {
         let i = self.push(id, None, provisional, RowKind::Turn(turn));
         self.newest_turn = Some(i);
         self.show_activity();
+        if provisional {
+            self.hook_turns.push(i);
+        }
         if !provisional {
             self.enter_turn(i, at);
         }
@@ -534,12 +551,13 @@ impl Projection {
     /// Turns a hook opened before `confirmed` that the transcript has now
     /// passed without writing.
     fn retire_unrecorded(&mut self, confirmed: usize, at: Option<i64>) {
-        for i in 0..confirmed {
-            let open = self.rows[i].provisional && matches!(&self.rows[i].kind, RowKind::Turn(t) if t.outcome.is_none());
-            if open {
-                self.end_turn(i, at, TurnOutcome::Unrecorded);
-            }
+        let open = |rows: &[Row], i: usize| rows[i].provisional && matches!(&rows[i].kind, RowKind::Turn(t) if t.outcome.is_none());
+        let passed: Vec<usize> = self.hook_turns.iter().copied().filter(|&i| i < confirmed && open(&self.rows, i)).collect();
+        for i in passed {
+            self.end_turn(i, at, TurnOutcome::Unrecorded);
         }
+        let rows = &self.rows;
+        self.hook_turns.retain(|&i| open(rows, i));
     }
 
     /// The transcript's turn, opening a placeholder when a record arrives with
@@ -764,7 +782,7 @@ impl Projection {
     fn prose(&mut self, turn: usize, id: String, text: &str, conclusion: bool, at: Option<i64>) {
         let turn_id = self.rows[turn].id.clone();
         let words = squeeze(text, usize::MAX);
-        let waiting = (0..self.rows.len()).find(|&i| {
+        let waiting = self.from_turn(turn).find(|&i| {
             let row = &self.rows[i];
             row.provisional
                 && row.turn.as_deref() == Some(&turn_id)
@@ -982,13 +1000,12 @@ impl Projection {
     /// belongs to.
     fn count_background(&mut self, sub: usize) {
         let Some(turn_id) = self.rows[sub].turn.clone() else { return };
-        let running = self
-            .rows
+        let Some(&t) = self.index.get(&turn_id) else { return };
+        let running = self.rows[self.from_turn(t)]
             .iter()
             .filter(|r| r.turn.as_deref() == Some(&turn_id))
             .filter(|r| matches!(&r.kind, RowKind::Subagent(s) if s.background && s.status == SubagentState::Running))
             .count() as u32;
-        let Some(&t) = self.index.get(&turn_id) else { return };
         if let Some(turn) = self.turn_mut(t) {
             if turn.background_running != running {
                 turn.background_running = running;

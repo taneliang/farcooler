@@ -72,3 +72,31 @@ fn a_follower_too_far_behind_is_told_to_page_instead() {
     assert_eq!(p.changes_since(0, 10_000).unwrap().len(), p.rows().len());
     assert!(p.changes_since(p.revision(), 3).unwrap().is_empty());
 }
+
+/// The fold's cost a line does not grow with the session: the last 5,000
+/// turns of 25,000 (50,000 rows) fold about as fast as the first 5,000.
+/// Walking every row at each turn (activity, unrecorded turns, asks, prose)
+/// made a 50,000-row attach take 30 s.
+#[test]
+fn a_late_turn_folds_as_fast_as_an_early_one() {
+    let lines: Vec<String> = (0..25_000)
+        .flat_map(|n| {
+            [
+                json!({"type":"user","promptId":format!("p{n}"),"promptSource":"typed","uuid":format!("u{n}"),"timestamp":"2026-10-06T10:00:00Z","message":{"content":"Another small change."}}).to_string(),
+                json!({"type":"assistant","uuid":format!("a{n}"),"timestamp":"2026-10-06T10:00:01Z","message":{"content":[{"type":"text","text":"Done."}],"stop_reason":"end_turn"}}).to_string(),
+            ]
+        })
+        .collect();
+    let mut p = Projection::new();
+    let mut fold = |range: std::ops::Range<usize>| {
+        let started = std::time::Instant::now();
+        for line in &lines[range] {
+            p.fold_line(line.as_bytes());
+        }
+        started.elapsed()
+    };
+    let early = fold(0..10_000);
+    fold(10_000..40_000);
+    let late = fold(40_000..50_000);
+    assert!(late < early * 3 + std::time::Duration::from_millis(50), "early {early:?}, late {late:?}");
+}
