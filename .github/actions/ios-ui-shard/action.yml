@@ -1,0 +1,96 @@
+# One iOS UI shard: unpack the products the `ios` job built, boot a simulator
+# and run the shard's classes. Two jobs in ci.yml use it, `ios-ui` (a matrix of
+# three shards) and `ios-ui-late` (the fourth), which differ only in when the
+# runner pool can start them (ov-384); the steps live here so they cannot drift.
+#
+# The caller checks the repository out first. A local action is read from the
+# checkout, which is why that step cannot be in here.
+name: iOS UI shard
+description: Run one shard of the runnerless iOS UI tests against the products the iOS job built.
+inputs:
+  shard:
+    description: A key of SHARDS in scripts/ios-ui-shards.py.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Check the runner has Xcode 27
+      shell: bash
+      run: |
+        xcodebuild -version
+        xcodebuild -version | head -1 | grep -q '^Xcode 27\.'
+    - name: Download the products the iOS job built
+      uses: actions/download-artifact@v4
+      with:
+        name: ios-ui-products
+        path: ${{ runner.temp }}
+    - name: Unpack them
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "$RUNNER_TEMP/ios-dd"
+        tar -C "$RUNNER_TEMP/ios-dd" -xf "$RUNNER_TEMP/ios-ui-products.tar"
+        runs=("$RUNNER_TEMP"/ios-dd/Products/*.xctestrun)
+        [ "${#runs[@]}" -eq 1 ] && [ -f "${runs[0]}" ] || {
+          echo "expected one .xctestrun in the iOS job's products, found: ${runs[*]}" >&2; exit 1; }
+        echo "XCTESTRUN=${runs[0]}" >> "$GITHUB_ENV"
+        echo "Running ${runs[0]}"
+
+    # By UDID, so the destination cannot be ambiguous. `iPhone 17` on the
+    # newest iOS runtime when the image has one — every local timing and
+    # every layout-sensitive assertion (ShellGestureTests, DynamicTypeTests)
+    # was measured on it — and otherwise the first iPhone on that runtime,
+    # said out loud. No iPhone at all is a hard stop with the list printed.
+    - name: Pick a simulator
+      shell: bash
+      run: |
+        pick=$(xcrun simctl list devices available -j | python3 -c '
+        import json, sys
+        devices = json.load(sys.stdin)["devices"]
+        def version(runtime):
+            tail = runtime.rsplit(".", 1)[-1]
+            return [int(p) for p in tail.split("-")[1:] if p.isdigit()]
+        ios = sorted((r for r in devices if ".SimRuntime.iOS-" in r), key=version, reverse=True)
+        for runtime in ios:
+            phones = [d for d in devices[runtime] if d["name"].startswith("iPhone")]
+            if not phones:
+                continue
+            exact = [d for d in phones if d["name"] == "iPhone 17"]
+            chosen = (exact or phones)[0]
+            print(chosen["udid"], "exact" if exact else "fallback", chosen["name"], runtime)
+            sys.exit()
+        ')
+        if [ -z "$pick" ]; then
+          xcrun simctl list devices available
+          echo "No available iPhone simulator on this runner." >&2
+          exit 1
+        fi
+        read -r udid how rest <<< "$pick"
+        if [ "$how" = fallback ]; then
+          echo "::warning::No iPhone 17 on this runner; using $rest. Local timings and layouts were measured on iPhone 17."
+        fi
+        echo "Simulator: $rest ($udid)"
+        echo "SIMULATOR_ID=$udid" >> "$GITHUB_ENV"
+
+    # Booted, and waited for, in a step of its own, so the first test does
+    # not pay for the boot inside its probe's timeout. A first launch after
+    # an install has still taken over a minute, which is what each test's
+    # `launchDrawn` (180 s for the first frame) is for.
+    - name: Boot the simulator
+      shell: bash
+      run: |
+        xcrun simctl boot "$SIMULATOR_ID"
+        xcrun simctl bootstatus "$SIMULATOR_ID" -b
+
+    # The script, never xcodebuild directly: it fails a run where every test
+    # skipped, and one where a test skipped for want of a runner. XCTESTRUN,
+    # set above, makes it `test-without-building` against those products.
+    - name: Run the runnerless UI tests
+      shell: bash
+      env:
+        SHARD: ${{ inputs.shard }}
+      run: |
+        # The class list is split into arguments on purpose.
+        # shellcheck disable=SC2046
+        SKIP_TESTING="$(./scripts/ios-ui-shards.py --skip)" \
+          ./scripts/ios-ui-tests.sh $(./scripts/ios-ui-shards.py "$SHARD")
