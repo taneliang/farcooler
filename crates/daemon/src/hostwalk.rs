@@ -219,6 +219,23 @@ mod tests {
         assert_eq!(walk.reads(), (3, 1), "three ticks, one socket read");
     }
 
+    /// A change in the processes under the panes is read at once, not after
+    /// the cache runs out: a second pane's tree is a different pid set.
+    #[tokio::test]
+    async fn a_changed_set_of_processes_asks_about_sockets_again() {
+        let first = pane_running("sleep", &["33"]);
+        let walk = HostWalk::default();
+        let one = RuntimeSnapshot::healthy(vec![tagged(&first.tty, false)]);
+        walk.read(&one).await;
+        walk.read(&one).await;
+        assert_eq!(walk.reads(), (2, 1), "the same processes, one socket read");
+
+        let second = pane_running("sleep", &["34"]);
+        let two = RuntimeSnapshot::healthy(vec![tagged(&first.tty, false), tagged(&second.tty, false)]);
+        walk.read(&two).await;
+        assert_eq!(walk.reads(), (3, 2), "a new pane's processes are a new question");
+    }
+
     /// The in-process table agrees with `ps` about the pane: the same pid is
     /// the tty's foreground, with the same label.
     #[tokio::test]

@@ -9,6 +9,11 @@
 //! two sources cannot disagree about what a row means, because there is one
 //! reader.
 //!
+//! One difference from `ps`: a foreground process whose argv can't be read
+//! (a `sudo` it may not inspect, a zombie) prints empty args here, where `ps`
+//! prints `(comm)`. `foreground::parse` skips a row with no args, so the pane
+//! keeps tmux's `pane_current_command` for it instead of a label.
+//!
 //! `None` means this system has no in-process answer, or the walk found
 //! nothing at all (a sandbox hiding the table). The caller then falls back to
 //! `ps`, which is slower and always right.
@@ -287,6 +292,26 @@ mod tests {
         // `ps -o tdev` printed 16/59 for ttys059, read off a live pane.
         assert_eq!(tty_name(0x1000_003b), "ttys059");
         assert_eq!(tty_name(0x1000_0000), "ttys000");
+    }
+
+    /// `tty_name` computes a pty's name from major 16. This stats a real pty
+    /// slave, so a kernel that moved the major fails here and not silently.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn a_pty_slave_has_the_major_the_name_rule_assumes() {
+        use std::os::unix::fs::MetadataExt;
+        // SAFETY: plain libc pty setup; return values are checked.
+        let (master, name) = unsafe {
+            let master = libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY);
+            assert!(master >= 0 && libc::grantpt(master) == 0 && libc::unlockpt(master) == 0);
+            let name = std::ffi::CStr::from_ptr(libc::ptsname(master)).to_str().unwrap().to_string();
+            (master, name)
+        };
+        let rdev = std::fs::metadata(&name).expect("the pty slave").rdev() as i32;
+        // SAFETY: closing the descriptor opened above.
+        unsafe { libc::close(master) };
+        assert_eq!((rdev >> 24) & 0xff, 16, "{name} is not major 16");
+        assert_eq!(tty_name(rdev), name.trim_start_matches("/dev/"));
     }
 
     #[test]
