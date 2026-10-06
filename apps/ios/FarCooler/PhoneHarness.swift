@@ -132,7 +132,7 @@ struct PhoneHarness: View {
         }
         for key in UserDefaults.standard.dictionaryRepresentation().keys
         where key.hasPrefix("workspace.segment.") || key.hasPrefix("board.collapsed.")
-            || key.hasPrefix("board.read.") || key.hasPrefix("board.plan.")
+            || key.hasPrefix("board.read.") || key.hasPrefix("board.plan.") || key.hasPrefix("tree.filter.")
         {
             UserDefaults.standard.removeObject(forKey: key)
         }

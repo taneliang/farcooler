@@ -1,7 +1,8 @@
 import XCTest
 
-/// The phone's workspace screen (ov-55 4A.2): Orchestrator, Board and
-/// Worktrees, one at a time, under the workspace's name.
+/// The phone's workspace screen (ov-55 4A.2): Orchestrator, Themes (the One
+/// tree, which took Worktrees' place, ov-300) and Board, one at a time, under
+/// the workspace's name.
 ///
 /// No runner and no daemon: `-phone-harness` stands the app's own stack on a
 /// canned runner (`PhoneHarness`) with two workspaces, Main, whose
@@ -29,9 +30,20 @@ final class WorkspaceScreenTests: XCTestCase {
     }
 
     private func choose(_ app: XCUIApplication, _ segment: String) {
-        let button = app.buttons["segment-\(segment.lowercased())"]
+        let id = segment == "Themes" ? "segment-tree" : "segment-\(segment.lowercased())"
+        let button = app.buttons[id]
         XCTAssertTrue(button.waitForExistence(timeout: 5), "no \(segment) segment")
         button.tap()
+    }
+
+    /// Down the tree to bil-9's own worktree: No Theme › bil-9.
+    private func openWebhooksLevel(_ app: XCUIApplication) {
+        choose(app, "Themes")
+        for id in ["tree-row-No Theme", "tree-row-bil-9"] {
+            let row = app.buttons[id]
+            XCTAssertTrue(row.waitForExistence(timeout: 10), "no \(id): \(app.debugDescription)")
+            row.tap()
+        }
     }
 
     /// **Three segments, each showing its own thing**: the orchestrator's
@@ -55,18 +67,21 @@ final class WorkspaceScreenTests: XCTestCase {
         XCTAssertTrue(element(app, "board-card-bil-7").exists, "bil-7 is not on the board")
         XCTAssertTrue(element(app, "board-card-bil-9").exists, "bil-9 is not on the board")
 
-        choose(app, "Worktrees")
-        XCTAssertTrue(app.buttons["worktree-row-fc-3-webhooks"].waitForExistence(timeout: 5))
-        // Unclaimed, and Main's checkout: neither is Billing's.
+        choose(app, "Themes")
+        XCTAssertTrue(app.buttons["tree-row-No Theme"].waitForExistence(timeout: 5), "no tree")
+        // Unclaimed: not Billing's, so not loose in its tree either.
         XCTAssertFalse(app.buttons["worktree-row-scratch"].exists)
-        XCTAssertFalse(app.buttons["worktree-row-overnight"].exists)
         XCTAssertTrue(app.buttons["new-worktree"].exists, "no New Worktree…")
 
-        // The choice is kept per workspace: Billing comes back on Worktrees.
+        // The choice is kept per workspace: Billing comes back on Themes.
         app.navigationBars.buttons.firstMatch.tap()
         openWorkspace(app, "Billing")
+        XCTAssertTrue(app.buttons["tree-row-No Theme"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["segment-tree"].isSelected)
+
+        // Billing's worktree hangs under the card it's for.
+        for id in ["tree-row-No Theme", "tree-row-bil-9"] { app.buttons[id].tap() }
         XCTAssertTrue(app.buttons["worktree-row-fc-3-webhooks"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["segment-worktrees"].isSelected)
     }
 
     /// **A worktree put away can be taken back out, and put away again**,
@@ -76,10 +91,10 @@ final class WorkspaceScreenTests: XCTestCase {
     func testAHiddenWorktreeCanBeUnhiddenAndHiddenAgain() throws {
         let app = launch(["-phone-webhooks-hidden"])
         openWorkspace(app, "Billing")
-        choose(app, "Worktrees")
+        openWebhooksLevel(app)
         let row = app.buttons["worktree-row-fc-3-webhooks"]
         XCTAssertTrue(row.waitForExistence(timeout: 10), "the hidden worktree isn't listed")
-        XCTAssertTrue(app.staticTexts["Hidden"].exists, "no Hidden section")
+        XCTAssertTrue(row.label.contains("Hidden"), "it doesn't say it's hidden: \(row.label)")
 
         func swipe() {
             let from = row.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
@@ -100,7 +115,10 @@ final class WorkspaceScreenTests: XCTestCase {
         XCTAssertEqual(
             XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: unhid, object: nil)], timeout: 10),
             .completed, "Unhide sent nothing: \(sent.value ?? "")")
-        XCTAssertFalse(app.staticTexts["Hidden"].waitForExistence(timeout: 3), "the section stayed")
+        let shown = NSPredicate(format: "NOT (label CONTAINS 'Hidden')")
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: shown, object: row)], timeout: 5),
+            .completed, "it still says it's hidden")
 
         swipe()
         let hide = app.buttons["hide-fc-3-webhooks"]
@@ -112,7 +130,10 @@ final class WorkspaceScreenTests: XCTestCase {
         XCTAssertEqual(
             XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: hid, object: nil)], timeout: 10),
             .completed, "Hide sent nothing: \(sent.value ?? "")")
-        XCTAssertTrue(app.staticTexts["Hidden"].waitForExistence(timeout: 5), "it did not go back")
+        let hidden = NSPredicate(format: "label CONTAINS 'Hidden'")
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: hidden, object: row)], timeout: 5),
+            .completed, "it did not go back")
     }
 
     /// **The board says how many decisions are waiting, from the runner's
@@ -178,7 +199,7 @@ final class WorkspaceScreenTests: XCTestCase {
         let before = try XCTUnwrap(mount.value as? String)
         choose(app, "Board")
         XCTAssertTrue(element(app, "board").waitForExistence(timeout: 10), "the board did not show")
-        choose(app, "Worktrees")
+        choose(app, "Themes")
         choose(app, "Orchestrator")
         XCTAssertTrue(mount.waitForExistence(timeout: 10), "the pane did not come back")
         XCTAssertEqual(mount.value as? String, before, "the pane was built again")

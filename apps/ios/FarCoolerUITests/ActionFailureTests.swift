@@ -23,7 +23,12 @@ final class ActionFailureTests: XCTestCase {
         let workspace = app.buttons["workspace-row-Billing"]
         XCTAssertTrue(workspace.waitForExistence(timeout: 30))
         workspace.tap()
-        app.buttons["segment-worktrees"].tap()
+        // bil-9's own worktree, under its card in the tree (ov-300).
+        app.buttons["segment-tree"].tap()
+        for id in ["tree-row-No Theme", "tree-row-bil-9"] {
+            XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 10), "no \(id)")
+            app.buttons[id].tap()
+        }
         let row = app.buttons["worktree-row-fc-3-webhooks"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         let from = row.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
@@ -100,7 +105,7 @@ final class ActionFailureTests: XCTestCase {
         let workspace = app.buttons["workspace-row-Billing"]
         XCTAssertTrue(workspace.waitForExistence(timeout: 30))
         workspace.tap()
-        app.buttons["segment-worktrees"].tap()
+        app.buttons["segment-tree"].tap()
         let fromBranch = app.buttons["From a Branch…"]
         XCTAssertTrue(fromBranch.waitForExistence(timeout: 10))
         fromBranch.tap()

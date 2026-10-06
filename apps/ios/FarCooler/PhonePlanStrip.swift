@@ -1,0 +1,238 @@
+import SwiftUI
+
+// The plan's strip on the orchestrator, and the Plan sheet it peeks
+// (ov-300; Concept C of .claude/agent/reports/ov-298/research-layout.md,
+// 3.3, the phone form). One line pinned under the segment control while the
+// orchestrator is up: its state as a mark, what needs you, what's moving and
+// what's next. A tap raises the Plan as a sheet at the medium detent, over
+// the pane, which keeps its size; dragged up, it's the whole plan.
+//
+// The rules are AgentKit's (`PlanStrip`, `PhoneTree`); this draws, in iOS's
+// idiom: a capsule of the system's glass, and color only for what needs you.
+// See .claude/agent/reports/phones-tree/design.md.
+
+extension Connection {
+    /// `summary`'s strip, from what this connection holds.
+    func planStrip(_ summary: WorkspaceSummary) -> PlanStrip {
+        let terminal = OrchestratorSegment.terminal(in: self, summary: summary)
+        let state = PhoneTree.orchestrator(terminal)
+        let plan = plans.state(summary.id)?.plan ?? .empty
+        return PlanStrip(
+            plan: plan, needsYou: workspaceNeedsYou(summary), orchestrator: state,
+            line: PhoneTree.line(terminal, state: state))
+    }
+
+    /// The workspace's Needs You count: the Mac's title bar's number.
+    func workspaceNeedsYou(_ summary: WorkspaceSummary) -> Int {
+        PhoneTree.needsYouCount(
+            summary: summary, board: boards[summary.id], plan: plans.state(summary.id)?.plan ?? .empty,
+            items: needsYou, listRead: needsYouRead && !needsYouDerived,
+            listServed: daemon?.can(.needsYou) == true)
+    }
+}
+
+/// The strip, and the sheet it opens.
+struct PhonePlanStrip: View {
+    @ObservedObject var connection: Connection
+    @ObservedObject private var reads: PlanReads
+    let summary: WorkspaceSummary
+    let place: PhoneWorkspace
+
+    @State private var peeking = false
+    /// A page chosen in the sheet: pushed once the sheet has gone, so the
+    /// push lands on the stack rather than under a sheet going away.
+    @State private var chosen: PhonePlanPage?
+    @Environment(\.phoneNavigator) private var navigator
+    @Environment(\.colorScheme) private var scheme
+
+    init(connection: Connection, summary: WorkspaceSummary, place: PhoneWorkspace) {
+        self.connection = connection
+        reads = connection.plans
+        self.summary = summary
+        self.place = place
+    }
+
+    var body: some View {
+        let strip = connection.planStrip(summary)
+        // A stack, not a group: with nothing to say it still stands, so the
+        // read below still runs.
+        VStack(spacing: 0) {
+            if !strip.isEmpty {
+                Button { peeking = true } label: { label(strip) }
+                    .buttonStyle(.plain)
+                    .surface(.floating, in: Capsule())
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(strip.accessibilityLabel)
+                    .accessibilityHint("Shows the plan")
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityIdentifier("plan-strip")
+            } else {
+                Color.clear.frame(height: 0).accessibilityHidden(true)
+            }
+        }
+        // Nothing else on the orchestrator asks for the plan or the board.
+        .task(id: connection.keepsPlan) {
+            if connection.boards[summary.id] == nil { _ = await connection.readBoard(summary) }
+            if connection.keepsPlan, reads.state(summary.id) == nil { await connection.readPlan(summary) }
+        }
+        .sheet(isPresented: $peeking, onDismiss: pushChosen) {
+            PlanSheet(connection: connection, summary: summary, place: place) { page in
+                chosen = page
+                peeking = false
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+    }
+
+    private func label(_ strip: PlanStrip) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: strip.orchestrator.glyph)
+                .foregroundStyle(tone(strip.orchestrator.tone))
+                .accessibilityHidden(true)
+            words(strip)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Image(systemName: "chevron.up")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
+        }
+        .font(.subheadline)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .contentShape(Capsule())
+    }
+
+    /// The parts, with what needs you in the attention color.
+    private func words(_ strip: PlanStrip) -> Text {
+        var rest = strip.parts
+        var text = Text("")
+        if let needs = strip.needsYouWords, rest.first == needs {
+            rest.removeFirst()
+            text = Text(needs).foregroundStyle(Tint.attention(scheme)).fontWeight(.semibold)
+            if !rest.isEmpty { text = text + Text(" · ") }
+        }
+        return text + Text(rest.joined(separator: " · "))
+    }
+
+    private func tone(_ tone: PlanStripTone) -> Color {
+        switch tone {
+        case .attention: Tint.attention(scheme)
+        case .failure: Tint.failure
+        case .quiet: .secondary
+        }
+    }
+
+    private func pushChosen() {
+        guard let page = chosen else { return }
+        chosen = nil
+        navigator?.open(.plan(place, page: page))
+    }
+}
+
+/// The Plan, as a sheet over the orchestrator: what the orchestrator is doing
+/// and what needs you, then the plan's sections as the Board's Plan view
+/// draws them.
+struct PlanSheet: View {
+    @ObservedObject var connection: Connection
+    let summary: WorkspaceSummary
+    let place: PhoneWorkspace
+    /// A lane, theme or page chosen: the sheet goes, and it's pushed.
+    let onOpen: (PhonePlanPage) -> Void
+
+    @ObservedObject private var reads: PlanReads
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var scheme
+
+    init(connection: Connection, summary: WorkspaceSummary, place: PhoneWorkspace, onOpen: @escaping (PhonePlanPage) -> Void) {
+        self.connection = connection
+        self.summary = summary
+        self.place = place
+        self.onOpen = onOpen
+        reads = connection.plans
+    }
+
+    var body: some View {
+        let strip = connection.planStrip(summary)
+        NavigationStack {
+            List {
+                Section { orchestrator(strip) }
+                if connection.keepsPlan {
+                    PlanBoardSections(hook: hook)
+                } else {
+                    // A runner too old to keep a plan: said, once.
+                    Section {
+                        PlanNotice(title: PlanWords.needsUpdate, detail: nil)
+                            .accessibilityIdentifier("plan-needs-update")
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Plan")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .accessibilityIdentifier("plan-sheet-done")
+                }
+            }
+            .refreshable { await hook.read() }
+        }
+        .accessibilityIdentifier("plan-sheet")
+    }
+
+    /// The orchestrator's state and line, and the workspace's count.
+    @ViewBuilder
+    private func orchestrator(_ strip: PlanStrip) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: strip.orchestrator.glyph)
+                .foregroundStyle(tone(strip.orchestrator.tone))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Orchestrator · \(strip.orchestrator.word)")
+                    .font(.headline)
+                if let line = strip.line {
+                    Text(line)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                        .accessibilityIdentifier("plan-sheet-line")
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("plan-sheet-orchestrator")
+        if let needs = strip.needsYouWords {
+            Label(needs, systemImage: OneTreeGlyph.needsYou)
+                .foregroundStyle(Tint.attention(scheme))
+                .accessibilityIdentifier("plan-sheet-needs-you")
+        }
+    }
+
+    private func tone(_ tone: PlanStripTone) -> Color {
+        switch tone {
+        case .attention: Tint.attention(scheme)
+        case .failure: Tint.failure
+        case .quiet: .secondary
+        }
+    }
+
+    private var hook: PlanBoardHook {
+        PlanBoardHook(
+            summary: summary, place: place, reads: connection.plans, keeps: connection.keepsPlan,
+            read: {
+                await connection.readPlan(summary)
+                if connection.keepsPages { await connection.readPages(summary) }
+            },
+            onOpen: onOpen,
+            statuses: Dictionary(
+                (connection.boards[summary.id]?.rows ?? []).map { ($0.id, $0.status) },
+                uniquingKeysWith: { first, _ in first }),
+            pages: connection.keepsPages ? connection.pages : nil,
+            keepsRulings: connection.keepsRulings)
+    }
+}

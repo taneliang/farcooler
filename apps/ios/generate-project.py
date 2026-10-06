@@ -82,6 +82,10 @@ SOURCES = [
     # view in the board's list, a theme's and a lane's page, and what the
     # connection reads of it. Deleting the layer deletes these three.
     "PlanBoardSections.swift",
+    # The plan's strip on the orchestrator and the Plan sheet it peeks, and the
+    # One tree's root and pushed levels (ov-300).
+    "PhonePlanStrip.swift",
+    "PhoneTreeScreens.swift",
     "PlanTrainRow.swift",
     "PlanRulingsSection.swift",
     "PlanPageScreens.swift",
@@ -886,6 +890,8 @@ UI_TEST_SOURCES = [
     # Decided For You in the Plan view (ov-304), over the canned runner with a
     # seeded board's rulings (`-phone-rulings`).
     "PlanRulingsUITests.swift",
+    # The plan strip, its sheet and the One tree on the phone (ov-300).
+    "PhoneTreeUITests.swift",
     "DynamicTypeTests.swift",
     # A task's agent and back, a notification landing with its workspace and
     # task under it, and a decision answered from Needs You. Needs no runner,

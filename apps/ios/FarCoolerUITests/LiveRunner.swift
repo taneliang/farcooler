@@ -71,13 +71,22 @@ enum LiveRunner {
         let workspaces = app.buttons.matching(identifierPrefix: "workspace-row-")
         for index in 0..<workspaces.count {
             workspaces.element(boundBy: index).tap()
-            let segment = app.buttons["segment-worktrees"]
-            guard segment.waitForExistence(timeout: 10) else { continue }
+            // A workspace with an orchestrator has its worktrees in its tree
+            // (ov-300): one with no card is under Loose Worktrees.
+            guard app.buttons["segment-board"].waitForExistence(timeout: 10) else { continue }
+            let segment = app.buttons["segment-tree"].exists ? app.buttons["segment-tree"] : app.buttons["segment-worktrees"]
             segment.tap()
+            let loose = app.buttons["tree-row-Loose Worktrees"]
+            var pushed = false
+            if !row.waitForExistence(timeout: 3), loose.exists {
+                loose.tap()
+                pushed = true
+            }
             if row.waitForExistence(timeout: 5) {
                 row.tap()
                 return try waitForShell(app, name)
             }
+            if pushed { app.navigationBars.buttons["BackButton"].firstMatch.tap() }
             app.navigationBars.buttons["BackButton"].firstMatch.tap()
         }
         print(app.debugDescription)

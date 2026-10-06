@@ -288,6 +288,12 @@ struct PhoneRoot: View {
             } else {
                 RunnerGone()
             }
+        case .tree(let place, let node):
+            if let connection = fleet.connection(for: place) {
+                TreeLevelScreen(connection: connection, place: place, nodeID: node)
+            } else {
+                RunnerGone()
+            }
         case .worktree:
             // Never pushed: a worktree covers the stack. See
             // `PhoneNavigator.worktree`.

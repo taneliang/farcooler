@@ -1,19 +1,24 @@
 import SwiftUI
 
 // One workspace, pushed from Needs You (spec §6.1): its name as the title,
-// and a segmented Orchestrator, Board and Worktrees control under it,
-// remembered per workspace (`WorkspaceSegment`).
+// and a segmented Orchestrator, Themes and Board control under it (Board and
+// Worktrees on a runner without workspaces), remembered per workspace
+// (`WorkspaceSegment`).
 //
 // - Orchestrator: its pane, full height, in the existing terminal and agent
-//   views. With none, Start Orchestrator (ruling 8); lost, Restart and
-//   Replace; starting, "Starting Orchestrator…" and, after 30 seconds, the
-//   warning that the seat can stick (spec §8).
+//   views, under the plan's strip, which peeks the Plan as a sheet (ov-300,
+//   `PhonePlanStrip`). With none, Start Orchestrator (ruling 8); lost,
+//   Restart and Replace; starting, "Starting Orchestrator…" and, after 30
+//   seconds, the warning that the seat can stick (spec §8).
+// - Themes: the One tree's root, each level pushed (ov-300,
+//   `PhoneTreeScreens`): Theme › Task › Lane › Terminal.
 // - Board: the list form, in-line (`WorkspaceBoardList`). A card pushes its
 //   task, so the board is never covered by a jump. The orchestrator owns the
 //   task list (ov-184): the board reads, and a decision is answered from its
 //   task, but nothing here files, moves or edits a task.
-// - Worktrees: the ones it owns, with their tasks and changes. New Worktree…
-//   claims the worktree for this workspace.
+// - Worktrees, on a runner without workspaces: the ones it owns, with their
+//   tasks and changes. New Worktree… claims the worktree for this workspace.
+//   A workspace with an orchestrator has them in its tree instead.
 
 struct WorkspaceScreen: View {
     @ObservedObject var fleet: FleetStore
@@ -68,8 +73,7 @@ struct WorkspaceScreen: View {
     /// The segment to draw: the one chosen, unless this workspace doesn't
     /// offer it.
     private func current(_ summary: WorkspaceSummary) -> WorkspaceSegment {
-        let offered = WorkspaceSegment.offered(implicit: summary.isImplicit)
-        return offered.contains(segment) ? segment : offered[0]
+        WorkspaceSegment.shown(segment, implicit: summary.isImplicit)
     }
 
     @ViewBuilder
@@ -123,15 +127,23 @@ struct WorkspaceScreen: View {
                 .task { await connection.readBoard(summary) }
             case .worktrees:
                 WorkspaceWorktrees(connection: connection, summary: summary, place: place)
+            case .tree:
+                TreeRootList(connection: connection, summary: summary, place: place)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // A bar of the navigation bar's own, so the control sits in its
         // material and takes its touches, rather than under its edge.
         .safeAreaBar(edge: .top) {
-            SegmentBar(
-                segments: WorkspaceSegment.offered(implicit: summary.isImplicit),
-                selection: $segment)
+            VStack(spacing: 0) {
+                SegmentBar(
+                    segments: WorkspaceSegment.offered(implicit: summary.isImplicit),
+                    selection: $segment)
+                // The plan in one line, over the orchestrator's pane (ov-300).
+                if shown == .orchestrator {
+                    PhonePlanStrip(connection: connection, summary: summary, place: place)
+                }
+            }
         }
         .onChange(of: segment) { _, chosen in chosen.remember(for: place) }
     }

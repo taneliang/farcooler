@@ -23,7 +23,7 @@ final class DynamicTypeTests: XCTestCase {
         row.tap()
         let board = app.buttons["segment-board"]
         XCTAssertTrue(board.waitForExistence(timeout: 10), "the workspace did not open")
-        for id in ["segment-orchestrator", "segment-worktrees"] {
+        for id in ["segment-orchestrator", "segment-tree"] {
             let segment = app.buttons[id]
             XCTAssertTrue(segment.exists, "no \(id)")
             XCTAssertEqual(
