@@ -77,12 +77,17 @@ struct MarkdownPiece: View, Equatable {
         a.run == b.run && a.secondary == b.secondary && a.open == b.open && a.gap == b.gap
     }
 
+    #if DEBUG
     /// The bytes of text whose piece's `body` has run: what
-    /// `StreamingReplyPerfTests` measures a delta's redraw in.
+    /// `StreamingReplyPerfTests` measures a delta's redraw in. Debug builds
+    /// only, which is what tests run, so a release body counts nothing.
     @MainActor static var drawnBytes = 0
+    #endif
 
     var body: some View {
+        #if DEBUG
         let _ = Self.drawnBytes += bytes
+        #endif
         Group {
             if open {
                 content
@@ -105,6 +110,7 @@ struct MarkdownPiece: View, Equatable {
         }
     }
 
+    #if DEBUG
     /// Its text's size, in UTF-8 bytes.
     private var bytes: Int {
         switch run {
@@ -119,6 +125,7 @@ struct MarkdownPiece: View, Equatable {
             }
         }
     }
+    #endif
 
     private func merged(_ paragraphs: [String]) -> AttributedString {
         if open || !memo { return MarkdownText.merged(paragraphs) }
