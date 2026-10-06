@@ -110,8 +110,8 @@ final class PhoneTreeUITests: XCTestCase {
         XCTAssertTrue(strip.waitForExistence(timeout: 10), "Back didn't come back to the orchestrator")
     }
 
-    /// **Decided For You works in the sheet as on the Board** (review 5):
-    /// Keep All there tells the runner, and the section empties.
+    /// **Decided For You works in the sheet as on the Board** (review 5): a
+    /// ruling's swipe offers Keep there, and Keep tells the runner.
     func testTheSheetsRulingsCanBeKept() {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<4 { root.deleteLastPathComponent() }
@@ -122,16 +122,26 @@ final class PhoneTreeUITests: XCTestCase {
         let strip = app.buttons["plan-strip"]
         XCTAssertTrue(strip.waitForExistence(timeout: 15), "no strip")
         strip.tap()
+        let sheet = element(app, "plan-sheet")
         XCTAssertTrue(element(app, "plan-sheet-orchestrator").waitForExistence(timeout: 10), "no sheet")
-        app.navigationBars["Plan"].swipeUp()
-        let all = element(app, "plan-rulings-keep-all")
-        for _ in 0..<8 where !(all.exists && all.isHittable) { app.swipeUp() }
-        XCTAssertTrue(all.exists && all.isHittable, "no Keep All in the sheet: \(app.debugDescription)")
-        all.tap()
+        // Inside the sheet's own list, down to the ruling.
+        let list = sheet.collectionViews.firstMatch
+        let row = element(app, "plan-ruling-R-3")
+        for _ in 0..<10 where !(row.exists && row.isHittable) { list.swipeUp(velocity: .slow) }
+        XCTAssertTrue(row.exists && row.isHittable, "no ruling in the sheet: \(app.debugDescription)")
+        row.swipeLeft()
+        let keep = app.buttons["Keep"].firstMatch
+        XCTAssertTrue(keep.waitForExistence(timeout: 5), "no Keep on the sheet's ruling: \(app.debugDescription)")
+        keep.tap()
+        // It leaves Decided For You in the sheet, as on the Board…
+        let gone = NSPredicate(format: "exists == false")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: gone, object: row)], timeout: 10), .completed,
+            "the kept ruling stayed open in the sheet")
+        // …and the runner was told, by the ruling's id.
         let sent = element(app, "harness-sent")
-        let kept = NSPredicate { _, _ in (sent.value as? String ?? "").contains("ruling.keep_all") }
+        let kept = NSPredicate { _, _ in (sent.value as? String ?? "").contains("ruling.keep ") }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: kept, object: nil)], timeout: 10), .completed,
-            "Keep All told the runner nothing: \(sent.value ?? "")")
+            "Keep told the runner nothing: \(sent.value ?? "")")
     }
 
     /// **The sheet's Needs You row opens Needs You** (review 12).
@@ -272,10 +282,20 @@ final class PhoneTreeUITests: XCTestCase {
         first.terminate()
 
         let app = XCUIApplication.phoneHarness(
-            ["-phone-empty-inbox", "-phone-billing-led", "-phone-plan", "-phone-plan-file", Self.fixture, "-phone-keep-stack"])
-        XCTAssertTrue(app.buttons["tree-row-ov-226"].waitForExistence(timeout: 30), "the level didn't come back: \(app.debugDescription)")
+            ["-phone-empty-inbox", "-phone-billing-led", "-phone-plan", "-phone-plan-file", Self.fixture, "-phone-keep-stack",
+             "-phone-plan-lags"])
+        // Watched while it comes back: No Longer Here, even for a moment
+        // before the plan is read, is the bug.
+        let row = app.buttons["tree-row-ov-226"]
+        let gone = element(app, "tree-gone")
+        let deadline = Date().addingTimeInterval(30)
+        while !row.exists && Date() < deadline {
+            XCTAssertFalse(gone.exists, "it said No Longer Here on the way back")
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertTrue(row.exists, "the level didn't come back: \(app.debugDescription)")
         XCTAssertTrue(app.navigationBars["Visual language"].exists)
-        XCTAssertFalse(element(app, "tree-gone").exists, "it said No Longer Here")
+        XCTAssertFalse(gone.exists, "it said No Longer Here")
     }
 
     // MARK: Captures

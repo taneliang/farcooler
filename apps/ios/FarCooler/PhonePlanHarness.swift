@@ -14,6 +14,8 @@ import Foundation
 //                         and `plan.events` from the file
 //   -phone-plan-fails     it advertises `board_plan` and refuses `plan.get`
 //   -phone-plan-hangs     it advertises `board_plan` and never answers `plan.get`
+//   -phone-plan-lags      it answers `plan.get` six seconds late, as a runner over a slow link
+//                         does: a level restored on a relaunch arrives before its plan (ov-300)
 //   a Darwin notification `com.farcooler.harness.plan-news` (or `.task-news`) delivers
 //                         a `plan` (or `task`) notice for Billing's board, as the client core
 //                         queues one, and the plan the runner answers with from then on is
@@ -168,6 +170,9 @@ struct HarnessPlan {
         case "plan.get":
             if CommandLine.arguments.contains("-phone-plan-hangs") {
                 try await Task.sleep(for: .seconds(3600))
+            }
+            if CommandLine.arguments.contains("-phone-plan-lags") {
+                try await Task.sleep(for: .seconds(6))
             }
             if CommandLine.arguments.contains("-phone-plan-fails") {
                 throw ClientCore.CoreError.rejected("unavailable", word: "unavailable")
