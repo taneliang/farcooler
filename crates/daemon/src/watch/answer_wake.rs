@@ -68,10 +68,11 @@
 //! on claude 2.1.290: the box is the same box, a paste and Enter go in, and
 //! the message arrives as the next prompt. So a working claude is typed into
 //! under the same checks, and what it's sent waits in its own queue, not in
-//! this one. The Enter goes in only once neither the screen nor the
-//! session's hooks say a dialog is up or coming (`mid_turn`), since an Enter
-//! on one would answer it; a dialog is "Paste left in the composer; not
-//! sent". That the queue took it is confirmed after, by the `enqueue` record
+//! this one. An Enter on a dialog would answer it, so the Enter goes in
+//! under the session's fence, which claude's `PreToolUse` hook must pass
+//! before any dialog is drawn, and only with no tool call in flight and
+//! nothing on the screen (`mid_turn`); a dialog in the way is "Paste left in
+//! the composer; not sent". That the queue took it is confirmed after, by the `enqueue` record
 //! claude writes to its transcript; unconfirmed is "Couldn't confirm". A
 //! claude whose session can't be found, or that no hook was ever heard from,
 //! waits for the turn to end, as every agent did before; so does codex,
