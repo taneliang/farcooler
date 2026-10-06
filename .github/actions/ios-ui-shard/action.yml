@@ -11,11 +11,15 @@ inputs:
   shard:
     description: A key of SHARDS in scripts/ios-ui-shards.py.
     required: true
+# `shell: bash -e {0}` and not `bash`: a composite step must name its shell, and
+# plain `bash` adds `pipefail`, which the jobs' default shell does not. With it
+# `xcodebuild -version | head -1 | grep -q` aborts with 134 when `grep -q`
+# closes the pipe early (run 37538062330, shard phone, 13 s in).
 runs:
   using: composite
   steps:
     - name: Check the runner has Xcode 27
-      shell: bash
+      shell: bash -e {0}
       run: |
         xcodebuild -version
         xcodebuild -version | head -1 | grep -q '^Xcode 27\.'
@@ -25,7 +29,7 @@ runs:
         name: ios-ui-products
         path: ${{ runner.temp }}
     - name: Unpack them
-      shell: bash
+      shell: bash -e {0}
       run: |
         set -euo pipefail
         mkdir -p "$RUNNER_TEMP/ios-dd"
@@ -42,7 +46,7 @@ runs:
     # was measured on it — and otherwise the first iPhone on that runtime,
     # said out loud. No iPhone at all is a hard stop with the list printed.
     - name: Pick a simulator
-      shell: bash
+      shell: bash -e {0}
       run: |
         pick=$(xcrun simctl list devices available -j | python3 -c '
         import json, sys
@@ -80,14 +84,14 @@ runs:
     # first launch after an install has still taken over a minute, which is
     # what each test's `launchDrawn` (180 s for the first frame) is for.
     - name: Start booting the simulator
-      shell: bash
+      shell: bash -e {0}
       run: xcrun simctl boot "$SIMULATOR_ID"
 
     # The script, never xcodebuild directly: it fails a run where every test
     # skipped, and one where a test skipped for want of a runner. XCTESTRUN,
     # set above, makes it `test-without-building` against those products.
     - name: Run the runnerless UI tests
-      shell: bash
+      shell: bash -e {0}
       env:
         SHARD: ${{ inputs.shard }}
       run: |
