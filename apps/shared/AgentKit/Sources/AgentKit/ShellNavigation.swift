@@ -1777,27 +1777,38 @@ enum PhoneRoute: Hashable, Codable, Sendable {
     /// A theme's or lane's page of the plan layer on that workspace's board
     /// (ov-274). Not reopened by a relaunch: the workspace is.
     case plan(PhoneWorkspace, page: PhonePlanPage)
+    /// One level of the workspace's One tree (ov-300): the children of the
+    /// node with this id (`OneTreeNode.id`, its path from the root).
+    /// Not reopened by a relaunch: the workspace is.
+    case tree(PhoneWorkspace, node: String)
     /// One worktree, scoped: its panes and nothing else. By the runner's id
     /// and the daemon's own worktree id.
     case worktree(runner: String, worktree: String, landing: WorktreeLanding)
 }
 
 /// The three things a workspace screen shows, one at a time.
+///
+/// A workspace with an orchestrator shows it, its One tree (Themes, ov-300)
+/// and its Board. The tree took the Worktrees segment's place there: a lane
+/// is its worktree, so every worktree is in the tree, under its card or
+/// under Main Checkout and Loose Worktrees. A repository's one board on a
+/// runner without workspaces has no orchestrator and no plan, so it keeps
+/// Board and Worktrees.
 enum WorkspaceSegment: String, CaseIterable, Hashable, Sendable {
-    case orchestrator, board, worktrees
+    case orchestrator, board, worktrees, tree
 
     var title: String {
         switch self {
         case .orchestrator: "Orchestrator"
         case .board: "Board"
         case .worktrees: "Worktrees"
+        case .tree: "Themes"
         }
     }
 
-    /// The segments a workspace has. An implicit one, on a runner without
-    /// workspaces, can't have an orchestrator, so it has no such segment.
+    /// The segments a workspace has, in the control's order.
     static func offered(implicit: Bool) -> [WorkspaceSegment] {
-        implicit ? [.board, .worktrees] : allCases
+        implicit ? [.board, .worktrees] : [.orchestrator, .tree, .board]
     }
 
     /// Where one workspace's choice is kept on this device.
@@ -1805,15 +1816,29 @@ enum WorkspaceSegment: String, CaseIterable, Hashable, Sendable {
         "workspace.segment.\(workspace.runner).\(workspace.workspace)"
     }
 
-    /// The segment last chosen for `workspace`, or its first when none was,
-    /// or when the one chosen isn't offered any more.
+    /// The segment `chosen` stands for on a workspace that offers
+    /// `offered(implicit:)`: itself, or the one that took its place (the
+    /// tree is where the worktrees went, and back), else the first.
+    static func shown(_ chosen: WorkspaceSegment?, implicit: Bool) -> WorkspaceSegment {
+        let offered = offered(implicit: implicit)
+        guard let chosen else { return offered[0] }
+        if offered.contains(chosen) { return chosen }
+        let successor: WorkspaceSegment? =
+            switch chosen {
+            case .worktrees: .tree
+            case .tree: .worktrees
+            default: nil
+            }
+        if let successor, offered.contains(successor) { return successor }
+        return offered[0]
+    }
+
+    /// The segment last chosen for `workspace`, or its first when none was;
+    /// one no longer offered reads as the one that took its place.
     static func remembered(
         _ workspace: PhoneWorkspace, implicit: Bool, in defaults: UserDefaults = .standard
     ) -> WorkspaceSegment {
-        let offered = offered(implicit: implicit)
-        let chosen = defaults.string(forKey: key(workspace)).flatMap(WorkspaceSegment.init(rawValue:))
-        if let chosen, offered.contains(chosen) { return chosen }
-        return offered[0]
+        shown(defaults.string(forKey: key(workspace)).flatMap(WorkspaceSegment.init(rawValue:)), implicit: implicit)
     }
 
     func remember(for workspace: PhoneWorkspace, in defaults: UserDefaults = .standard) {

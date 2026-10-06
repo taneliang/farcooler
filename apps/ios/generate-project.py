@@ -592,6 +592,15 @@ AGENTKIT_SOURCES = [
     "PlanThemeTrack.swift",
     "PlanThemeBrief.swift",
     "PlanTrackViews.swift",
+    # The One tree (ov-321) and the plan strip, on the phone too (ov-300): the
+    # Mac's sidebar rules, its glyphs and the Needs You count it shares with
+    # the title bar, the strip's words, and the phone's own mapping onto
+    # them (`PhoneTree`): its fleet types in, push navigation out.
+    "OneTree.swift",
+    "OneTreeGlyphs.swift",
+    "OneTreeKeys.swift",
+    "PlanStrip.swift",
+    "PhoneTree.swift",
     # Orchestrator pages (ov-269): the document, its live references, the
     # layout rules and the renderer, one SwiftUI implementation the Mac and
     # the phone share (ov-284, ov-285). Experimental, and removable with pages.
