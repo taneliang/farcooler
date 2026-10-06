@@ -317,54 +317,62 @@ public struct MarkdownText: View {
     /// 8 pt rhythm (ov-98).
     public var spacing: MarkdownSpacing = .reply
 
+    /// Still being written: the reply at the tail of a running turn. Its
+    /// last paragraph is drawn apart from the rest, so a delta redraws only
+    /// that paragraph (`Markdown.streamingRuns`).
+    public var streaming: Bool = false
+
     /// The task keys its text links (ov-196), and where they go.
     @Environment(\.taskKeyLinker) private var linker
 
-    @ScaledMetric(relativeTo: .body)
-    private var h1Size = MarkdownTypeScale.h1
-    @ScaledMetric(relativeTo: .body)
-    private var h2Size = MarkdownTypeScale.h2
-    @ScaledMetric(relativeTo: .body)
-    private var h3Size = MarkdownTypeScale.h3
-
-    public init(text: String, secondary: Bool = false, spacing: MarkdownSpacing = .reply) {
+    public init(
+        text: String, secondary: Bool = false, spacing: MarkdownSpacing = .reply, streaming: Bool = false
+    ) {
         self.text = text
         self.secondary = secondary
         self.spacing = spacing
+        self.streaming = streaming
     }
 
     public var body: some View {
-        let runs = Markdown.cachedRuns(text, spacing: spacing)
+        let pieces = Self.pieces(text, secondary: secondary, spacing: spacing, streaming: streaming)
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(runs.enumerated()), id: \.offset) { index, run in
-                view(for: run)
-                    .padding(
-                        .top,
-                        index == 0
-                            ? 0
-                            : MarkdownBlockSpacing.gap(
-                                after: role(for: runs[index - 1]),
-                                before: role(for: run), style: spacing))
+            ForEach(pieces.indices, id: \.self) { index in
+                pieces[index].equatable()
             }
         }
         .font(secondary ? .caption : .body)
         .foregroundStyle(secondary ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
-        .textSelection(.enabled)
         // A second line of defense behind `Markdown.inline`'s filter, and
         // the way a task key's link reaches its task.
         .environment(\.openURL, Markdown.openGuard(linker))
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    @ViewBuilder
-    private func view(for run: Markdown.Run) -> some View {
-        switch run {
-        case let .prose(paragraphs):
-            TaskKeyText(linker.linked(Self.merged(paragraphs)))
-                .fixedSize(horizontal: false, vertical: true)
-                .lineSpacing(3)
-        case let .block(block):
-            view(for: block)
+    /// What `body` draws, a piece per run.
+    ///
+    /// Settled, it's the runs as `Markdown.cachedRuns` gathers them, every
+    /// one selectable, a selection free to cross a prose run's paragraphs.
+    /// Streaming, the last prose run is split by paragraph and the last
+    /// piece is open (`MarkdownPiece.open`), so a delta changes one piece.
+    @MainActor
+    static func pieces(
+        _ text: String, secondary: Bool = false, spacing: MarkdownSpacing = .reply, streaming: Bool = false
+    ) -> [MarkdownPiece] {
+        // A streaming reply's text is new on every delta, so it skips the
+        // memo: each prefix would take a slot, and a turn's worth of them
+        // evicts every settled row a reader is looking at.
+        let runs =
+            streaming
+            ? Markdown.streamingRuns(Markdown.runs(Markdown.blocks(text)))
+            : Markdown.cachedRuns(text, spacing: spacing)
+        return runs.indices.map { index in
+            MarkdownPiece(
+                run: runs[index], secondary: secondary, open: streaming && index == runs.count - 1,
+                gap: index == 0
+                    ? 0
+                    : MarkdownBlockSpacing.gap(
+                        after: role(for: runs[index - 1]), before: role(for: runs[index]), style: spacing))
         }
     }
 
@@ -402,92 +410,16 @@ public struct MarkdownText: View {
         return out
     }
 
-    @ViewBuilder
-    private func view(for block: Markdown.Block) -> some View {
-        switch block {
-        case let .paragraph(text):
-            TaskKeyText(linker.linked(Markdown.inline(text)))
-                .fixedSize(horizontal: false, vertical: true)
-                .lineSpacing(3)
-
-        case let .heading(level, text):
-            TaskKeyText(linker.linked(Markdown.inline(text)))
-                .font(headingFont(level))
-                .fixedSize(horizontal: false, vertical: true)
-                .lineSpacing(2)
-
-        case let .bullet(text, depth):
-            marker("•", text: text, depth: depth)
-
-        case let .numbered(number, text, depth):
-            marker("\(number).", text: text, depth: depth)
-
-        case let .code(text, _):
-            // The same box a tool's output gets: one way of showing
-            // monospaced text, not two.
-            DetailBox(text: text)
-
-        case let .quote(text):
-            HStack(spacing: 8) {
-                Rectangle().fill(.quaternary).frame(width: 2)
-                TaskKeyText(linker.linked(Markdown.inline(text)))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .lineSpacing(3)
-            }
-
-        case .rule:
-            Divider()  // style-exempt: a Markdown rule is the author's content
-
-        case let .table(header, rows):
-            MarkdownTable(header: header, rows: rows)
-        }
-    }
-
-    /// A marker and its text, aligned so a wrapped line does not slide back
-    /// under the bullet.
-    private func marker(_ symbol: String, text: String, depth: Int) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(symbol)
-                .foregroundStyle(.secondary)
-                .frame(minWidth: 14, alignment: .trailing)
-            TaskKeyText(linker.linked(Markdown.inline(text)))
-                .fixedSize(horizontal: false, vertical: true)
-                .lineSpacing(3)
-            Spacer(minLength: 0)
-        }
-        .padding(.leading, CGFloat(depth) * 14)
-    }
-
-    private func headingFont(_ level: Int) -> Font {
-        // A heading must be distinct from both body and inline bold. Semantic
-        // `.headline` is the same point size as body on Apple platforms, so a
-        // weight-only H3 looked exactly like a bold phrase. This small custom
-        // ramp keeps all three levels legible without turning chat into a title
-        // page; `@ScaledMetric` preserves accessibility scaling.
-        if secondary {
-            switch level {
-            case 1, 2: return .caption.weight(.semibold)
-            default: return .caption.weight(.medium)
-            }
-        }
-
-        switch level {
-        case 1: return .system(size: h1Size, weight: .semibold)
-        case 2: return .system(size: h2Size, weight: .semibold)
-        default: return .system(size: h3Size, weight: .semibold)
-        }
-    }
-
     /// A prose run is paragraphs and nothing else, so it relates to its
     /// neighbors exactly as the single paragraph at its edge used to.
-    private func role(for run: Markdown.Run) -> MarkdownBlockRole {
+    private static func role(for run: Markdown.Run) -> MarkdownBlockRole {
         switch run {
         case .prose: .paragraph
         case let .block(block): role(for: block)
         }
     }
 
-    private func role(for block: Markdown.Block) -> MarkdownBlockRole {
+    private static func role(for block: Markdown.Block) -> MarkdownBlockRole {
         switch block {
         case .paragraph: .paragraph
         case let .heading(level, _): .heading(level: level)
@@ -523,14 +455,16 @@ enum MarkdownTypeScale {
 public struct AgentReplyText: View {
     public let text: String
     public let trailingClearance: CGFloat
+    public var streaming: Bool = false
 
-    public init(text: String, trailingClearance: CGFloat) {
+    public init(text: String, trailingClearance: CGFloat, streaming: Bool = false) {
         self.text = text
         self.trailingClearance = trailingClearance
+        self.streaming = streaming
     }
 
     public var body: some View {
-        MarkdownText(text: text)
+        MarkdownText(text: text, streaming: streaming)
             // Keep long desktop panes in a comfortable reading measure. The
             // phone is narrower than this and therefore remains full width.
             .frame(maxWidth: 680, alignment: .leading)
@@ -637,7 +571,7 @@ enum MarkdownBlockSpacing {
 /// height of its tallest wrapping cell. Most importantly, the `VStack` owns
 /// row placement. There is no separately calculated Y coordinate that can
 /// become stale when UIKit and AppKit produce different text metrics.
-private struct MarkdownTable: View {
+struct MarkdownTable: View {
     let header: [String]
     let rows: [[String]]
     @Environment(\.taskKeyLinker) private var linker
