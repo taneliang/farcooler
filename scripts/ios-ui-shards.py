@@ -43,6 +43,7 @@ SHARDS = {
         "TerminalLigatureTests",  # -terminal-ligature; 12 s
         "TaskScreenTests",  # -phone-harness; 152 s
         "ReadScopeTests",  # -phone-harness (TaskScreenTests.swift); 24 s
+        "PlanRulingsUITests",  # -phone-harness -phone-plan -phone-rulings (ov-304); moved from phone at 76% of budget (37409958732)
     ],
     "agent": [
         "AgentEmptyStateTests",  # -agent-layout-harness (KeyboardTabStripTests.swift); 165 s
@@ -59,7 +60,6 @@ SHARDS = {
     ],
     "phone": [
         "PagesUITests",  # -phone-harness -phone-plan -phone-pages (ov-285); 650 s
-        "PlanRulingsUITests",  # -phone-harness -phone-plan -phone-rulings (ov-304)
         "WorkspaceScreenTests",  # -phone-harness; 221 s
         "PhoneReopenTests",  # -phone-harness; 129 s
     ],

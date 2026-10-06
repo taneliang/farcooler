@@ -127,8 +127,9 @@ struct TerminalKeyHoverTests {
     func waitsForTheDelay() async throws {
         let (view, window) = Self.pane("ov-190 x")
         defer { window.close() }
-        // Longer than any loaded machine takes to settle, so "not yet" holds.
-        view.keyHover.delay = .seconds(60)
+        // Longer than any loaded machine takes to settle, so "not yet" holds:
+        // 60 s was not (main CI 37409958732 took 86 s to settle on 4db7160e).
+        view.keyHover.delay = .seconds(3600)
         try Self.move(view, row: 0, column: 2)
         await Self.settle(view)
         #expect(view.keyHover.shown == nil, "not before the delay")
