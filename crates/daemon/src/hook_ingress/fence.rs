@@ -53,6 +53,11 @@ pub(super) fn ended(asks: &HookAsks, session: &str, event: &str, payload: &serde
 /// (`wire::GATES`), or a `Notification` for a permission or an MCP
 /// elicitation. Either keeps a mid-turn Enter off the session for a while
 /// (`HookAsks::heard`).
+///
+/// The notice is late: on 2.1.290 the permission one came 6.0 s after the
+/// dialog was drawn (twice, against a stand-in API), so it adds nothing for
+/// a dialog's first seconds, which the fence and `PermissionRequest` cover.
+/// It covers a dialog that's still up after that, as a second signal.
 pub(super) fn raises_dialog(agent: Agent, event: &str, payload: &serde_json::Value) -> bool {
     is_gate(agent, event)
         || (agent == Agent::Claude
