@@ -88,6 +88,7 @@ SOURCES = [
     "PhonePlanStrip.swift",
     "PhoneTreeScreens.swift",
     "PadWorkspace.swift",
+    "ComposerField.swift",
     "PlanTrainRow.swift",
     "PlanRulingsSection.swift",
     "PlanPageScreens.swift",

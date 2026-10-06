@@ -163,48 +163,86 @@ final class PadWorkspaceUITests: XCTestCase {
             nil, nil, true)
     }
 
+    /// The composer by its own two ends, its field and its Send, found
+    /// anywhere in the app, so one drawn outside the column is found too. By
+    /// label: inside the pane, the pane's identifier is laid over theirs
+    /// (`orchestrator-pane`).
+    private func composer(_ app: XCUIApplication) -> (field: XCUIElement, send: XCUIElement) {
+        (app.textViews.firstMatch, app.buttons.matching(NSPredicate(format: "label == 'Send'")).firstMatch)
+    }
+
     /// **A chat's composer is the chat column's own**, in three columns and
     /// in two: pinned to the column's foot, never the keyboard's accessory,
     /// which is as wide as the window and lay across the tree and the plan.
-    /// A draft typed in it survives a turn, and with the keyboard up the
-    /// composer rests above it, still inside the column.
+    /// With the software keyboard up it rests on the keyboard, still inside
+    /// the column, and a draft typed in it survives a turn.
+    ///
+    /// The keyboard must come up for this to mean anything, so its absence
+    /// fails the test, saying so. An iPad simulator can come to treat a
+    /// hardware keyboard as attached (Simulator's I/O › Keyboard, or after
+    /// key events a test sent; seen once on fc-lanes-ipad after ⌘↩ was typed
+    /// into the field), and then the keyboard is there with no height.
+    /// `xcrun simctl erase` on the device puts it back.
     func testTheComposerIsTheChatColumns() {
         let app = openBilling(["-phone-orchestrator-chat"])
         layout(app, is: "threeColumns", "landscape")
         let chat = element(app, "pad-chat")
-        // The composer by its own two ends: its field and its Send, found
-        // anywhere in the app, so one drawn outside the column is found too.
-        // By label: inside the pane, the pane's identifier is laid over
-        // theirs (`orchestrator-pane`).
-        let send = app.buttons.matching(NSPredicate(format: "label == 'Send'")).firstMatch
-        let field = app.textViews.firstMatch
+        let (field, send) = composer(app)
         XCTAssertTrue(send.waitForExistence(timeout: 15), "no composer in the chat: \(app.debugDescription)")
         XCTAssertTrue(field.waitForExistence(timeout: 10), "no field in the composer")
-        func within(_ why: String) {
+        let keyboard = app.keyboards.firstMatch
+        func within(_ why: String, keyboardUp: Bool) {
             let column = chat.frame
             let bar = field.frame.union(send.frame)
             XCTAssertGreaterThanOrEqual(bar.minX, column.minX - 1, "\(why): the composer starts left of the chat (\(bar) in \(column))")
             XCTAssertLessThanOrEqual(bar.maxX, column.maxX + 1, "\(why): the composer runs past the chat (\(bar) in \(column))")
             XCTAssertLessThanOrEqual(bar.maxY, column.maxY + 1, "\(why): the composer is below the chat (\(bar) in \(column))")
-            let keyboard = app.keyboards.firstMatch
-            if keyboard.exists, keyboard.frame.height > 100 {
-                // Up: resting on the keyboard, not under it.
-                XCTAssertLessThanOrEqual(bar.maxY, keyboard.frame.minY + 1, "\(why): the keyboard covers the composer")
+            if keyboardUp {
+                // Resting on the keyboard, not under it, and not far above.
+                XCTAssertLessThanOrEqual(bar.maxY, keyboard.frame.minY + 1, "\(why): the keyboard covers the composer (\(bar), keyboard \(keyboard.frame))")
                 XCTAssertGreaterThan(bar.maxY, keyboard.frame.minY - 80, "\(why): the composer isn't on the keyboard (\(bar), keyboard \(keyboard.frame))")
             } else {
                 XCTAssertGreaterThan(bar.minY, column.midY, "\(why): the composer isn't at the chat's foot (\(bar) in \(column))")
             }
         }
-        within("three columns")
+        within("three columns", keyboardUp: false)
         field.tap()
+        XCTAssertTrue(
+            keyboard.waitForExistence(timeout: 10) && keyboard.frame.height > 100,
+            "no software keyboard (\(app.keyboards.count) keyboards, \(keyboard.exists ? "\(keyboard.frame)" : "none")): is the simulator's hardware keyboard connected?")
         field.typeText("a draft kept")
-        within("typing in three columns")
+        within("typing in three columns", keyboardUp: true)
         XCUIDevice.shared.orientation = .portrait
         layout(app, is: "twoColumns", "portrait")
         XCTAssertTrue(send.waitForExistence(timeout: 10), "no composer in two columns")
-        within("two columns")
+        within("two columns", keyboardUp: keyboard.exists && keyboard.frame.height > 100)
         XCTAssertEqual(field.value as? String, "a draft kept", "the draft didn't survive the turn")
         keep(app, "composer-two-columns")
+    }
+
+    /// **The draft crosses 700 points**: typed in the column's composer, it's
+    /// in the keyboard's composer once the window is compact, and back in the
+    /// column's when it's wide again. Two composers, one draft (the store).
+    /// The words cross; picked photos, the caret and the keyboard's focus
+    /// don't, since each composer is its own field.
+    func testTheDraftCrossesToTheDockedComposerAndBack() {
+        let app = openBilling(["-phone-orchestrator-chat", "-pad-compact-wide"])
+        layout(app, is: "threeColumns", "landscape")
+        let (field, _) = composer(app)
+        XCTAssertTrue(field.waitForExistence(timeout: 15), "no composer")
+        field.tap()
+        field.typeText("kept across")
+        resize(app)
+        layout(app, is: "phone", "compact")
+        let docked = NSPredicate(format: "value == %@", "kept across")
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: docked, object: app.textViews.firstMatch)], timeout: 10),
+            .completed, "the docked composer doesn't have the draft: \(app.textViews.firstMatch.value ?? "")")
+        resize(app)
+        layout(app, is: "threeColumns", "regular again")
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: docked, object: app.textViews.firstMatch)], timeout: 10),
+            .completed, "the column's composer doesn't have the draft back: \(app.textViews.firstMatch.value ?? "")")
     }
 
     // MARK: Picks

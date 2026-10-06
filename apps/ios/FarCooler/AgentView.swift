@@ -2354,6 +2354,9 @@ private struct AgentComposer: View {
                             .contentShape(.circle)
                     }
                     .disabled(!canSend)
+                    // ⌘↩ sends from the iPad's column, where a keyboard is the
+                    // usual way in and Return is a new line (review R2-3).
+                    .keyboardShortcut(inColumn ? KeyboardShortcut(.return, modifiers: .command) : nil)
                     // Named, for VoiceOver and for the tests: a glyph-only
                     // button is read out as its symbol otherwise, and "arrow up
                     // circle fill" is not what this does.
@@ -2388,15 +2391,16 @@ private struct AgentComposer: View {
             // which used to fall through the glass to whatever the conversation
             // had scrolled underneath.
             //
-            // Not in a column (ov-348). There the card is in the screen's own
-            // window rather than the keyboard's, and this catcher won the
-            // field's own tap: measured on an iPad, tapping the field focused
-            // nothing until it was off. Nothing scrolls under a column's card,
-            // so there is nothing for it to keep the taps from.
+            // In a column (ov-348) it still takes the card's dead space, so a
+            // tap there can't reach a link in the transcript scrolling under
+            // the glass, but with no gesture of its own: there the card is in
+            // the screen's window rather than the keyboard's, and the empty
+            // tap gesture won the field's own tap (measured on an iPad: the
+            // field focused nothing until it was gone). A shape with nothing
+            // to recognize stops the hit without competing for it.
             Color.clear
                 .contentShape(Rectangle())
-                .onTapGesture {}
-                .allowsHitTesting(!inColumn)
+                .gesture(TapGesture(), including: inColumn ? .none : .all)
         )
         // Radius.large (16), and no horizontal inset here: `composerStack` hoisted it,
         // so this card and everything stacked above it share one left edge.
@@ -2462,7 +2466,8 @@ private struct AgentComposer: View {
                     .padding(.top, 2)
             }
             ComposerTextView(
-                text: $text, cursor: $cursor, measuredHeight: $fieldHeight, isEditing: $typing)
+                text: $text, cursor: $cursor, measuredHeight: $fieldHeight, isEditing: $typing,
+                onCommandReturn: inColumn ? { send() } : nil)
                 .frame(height: fieldHeight)
         }
     }
@@ -2916,9 +2921,14 @@ private struct ComposerTextView: UIViewRepresentable {
     /// begin and end callbacks, so a resign from anywhere (Hide Keyboard, a
     /// pane switch, `KeyboardDismissal`) reaches it.
     @Binding var isEditing: Bool
+    /// What ⌘↩ does while the field has the keyboard: send, in the iPad's
+    /// column (review R2-3). The field's own key command, because the text
+    /// view took ⌘↩ as a new line before a button's shortcut saw it
+    /// (measured: "ship it\n"). Nil leaves Return's every form to the text.
+    var onCommandReturn: (() -> Void)? = nil
 
     func makeUIView(context: Context) -> UITextView {
-        let view = UITextView()
+        let view = ComposerField()
         view.font = .preferredFont(forTextStyle: .body)
         view.backgroundColor = .clear
         view.isScrollEnabled = true
@@ -2941,6 +2951,7 @@ private struct ComposerTextView: UIViewRepresentable {
     /// `UITextView`'s own undo stack and marked (IME composition) text out
     /// from under whatever is mid-composition.
     func updateUIView(_ uiView: UITextView, context: Context) {
+        (uiView as? ComposerField)?.onCommandReturn = onCommandReturn
         // Measured here as well as on change: at `makeUIView` the view has no
         // width yet, so the first measurement is worthless and an empty field
         // would keep whatever height it was born with.

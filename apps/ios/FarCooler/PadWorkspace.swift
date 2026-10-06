@@ -91,7 +91,13 @@ struct PadTreeColumn: View {
         // Reads only what hasn't been read (`readTree`), so the tree built
         // again on a resize across 1,000 points asks the runner nothing.
         .task { await connection.readTree(summary) }
-        .onAppear { if takesFocus { headerFocused = true } }
+        // A beat after it's in the tree: focus set in the pass that inserts
+        // the element is often dropped, since VoiceOver hasn't seen it yet.
+        .task {
+            guard takesFocus else { return }
+            try? await Task.sleep(for: .milliseconds(150))
+            headerFocused = true
+        }
         .refreshable {
             _ = await connection.readBoard(summary)
             if connection.keepsPlan { await connection.readPlan(summary) }
@@ -169,7 +175,9 @@ private struct PadTreeRow: View {
                 .accessibilityAddTraits(chosen ? .isSelected : [])
                 .accessibilityIdentifier("pad-tree-row-\(node.key.isEmpty ? node.title : node.key)")
         }
-        .padding(.leading, CGFloat(row.depth) * 12)
+        // Tighter than the list's own insets, which spent about 30 points
+        // of a narrow column on the card's margins; the depth is the indent.
+        .listRowInsets(EdgeInsets(top: 4, leading: 6 + CGFloat(row.depth) * 12, bottom: 4, trailing: 10))
         .listRowBackground(chosen ? Fill.selection(active: true, contrast: contrast) : nil)
         .worktreeSwipe(node: node, connection: connection, place: place, failure: $failure)
     }
@@ -195,6 +203,12 @@ private struct PadTreeRow: View {
         }
     }
 
+    private var title: Text {
+        let name = Text(node.title).foregroundStyle(node.quiet ? .secondary : .primary)
+        guard !node.key.isEmpty else { return name }
+        return Text(node.key).font(.subheadline.monospaced()).foregroundStyle(.secondary) + Text(" ") + name
+    }
+
     private var label: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: node.glyph)
@@ -202,22 +216,15 @@ private struct PadTreeRow: View {
                 .frame(width: 20)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                // One line, as the Mac's outline: the key whole, the title
-                // cut at its tail, never a word broken across lines.
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    if !node.key.isEmpty {
-                        Text(node.key)
-                            .font(.subheadline.monospaced())
-                            .foregroundStyle(.secondary)
-                            .fixedSize()
-                    }
-                    Text(node.title)
-                        .foregroundStyle(node.quiet ? .secondary : .primary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
+                // The key and the title as one text, up to two lines broken
+                // between words across the row's whole width (review R2-1):
+                // on one line a 290-point column left a card's title about
+                // ten characters, and two runs side by side broke inside words.
+                title
+                    .lineLimit(2)
+                    .truncationMode(.tail)
                 if !node.also.isEmpty {
-                    Text(node.also).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(node.also).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
                 if !node.caption.isEmpty {
                     Text(node.caption).font(.caption).foregroundStyle(.secondary).lineLimit(2)
