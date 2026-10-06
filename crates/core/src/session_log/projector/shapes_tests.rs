@@ -107,3 +107,21 @@ fn a_subagents_own_tool_hooks_stay_out_of_the_main_turn() {
     p.hook("PostToolUse", &hook, 2);
     assert_eq!(p.rows().len(), before);
 }
+
+#[test]
+fn either_record_of_a_mid_turn_notification_ends_the_agent_alone() {
+    // Claude writes both, but a reader must not need both: the attachment
+    // and the enqueue are each one claude.rs's `notified` reads by itself.
+    for (dropped, kept) in [("\"queue-operation\"", "attachment"), ("\"queued_command\"", "queue-operation")] {
+        let text: String = QUEUED_NOTIFICATION.lines().filter(|l| !l.contains(dropped)).map(|l| format!("{l}\n")).collect();
+        let p = fold(&text);
+        assert_eq!(sub(&p, "sub:toolu_bgq").status, SubagentState::Completed, "by the {kept} alone");
+    }
+}
+
+#[test]
+fn a_second_turn_duration_does_not_retime_a_timed_turn() {
+    let late = r#"{"type":"system","subtype":"turn_duration","durationMs":99999,"timestamp":"2026-10-06T10:00:04.000Z"}"#;
+    let p = fold(&format!("{META_PROMPT}{late}\n"));
+    assert_eq!(turn(&p, "turn:p2").duration_ms, Some(500));
+}
