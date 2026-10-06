@@ -49,6 +49,19 @@ fn a_canary_run_is_found_by_its_name_not_its_sha() {
     assert_eq!(runs[1], ours);
 }
 
+/// The wire-baseline workflow follows Canary (`workflow_run`) and carries the
+/// SHA of main's head when it started, which can be the train's; it is not
+/// the train's CI (ov-341).
+#[test]
+fn a_workflow_run_of_another_workflow_is_not_the_trains() {
+    let wire = run(7, "Canary wire baseline", TRAIN, "workflow_run", "Canary wire baseline", "completed", Some("failure"));
+    let runs = attribute(TRAIN, vec![ci(TRAIN), wire.clone()], vec![]);
+    let names: Vec<&str> = runs.iter().map(|r| r.name.as_str()).collect();
+    assert_eq!(names, ["CI"]);
+    let settled = settle(TRAIN, vec![ci(TRAIN), wire], Some(vec![]), SOON).unwrap();
+    assert!(settled.iter().all(|r| r.name != "Canary wire baseline"));
+}
+
 /// A Canary run from before the change was triggered by the push itself and
 /// carries the commit; it stays.
 #[test]

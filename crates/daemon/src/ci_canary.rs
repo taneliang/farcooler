@@ -44,10 +44,17 @@ pub fn worth_looking(runs: &[GhRun]) -> bool {
 /// `listed` (the runs whose `head_sha` is `sha`) with Canary's runs attributed
 /// by name: a workflow_run Canary run that names another commit is dropped, and
 /// Canary's runs that name this one are added.
+///
+/// Every other workflow_run run is dropped too (ov-341). "Canary wire baseline"
+/// is one: it follows Canary and carries the SHA of main's head when it
+/// started, which can be a train's, and its failure turned that train red. A
+/// workflow that follows another says nothing of this commit.
 pub fn attribute(sha: &str, listed: Vec<GhRun>, canary: Vec<GhRun>) -> Vec<GhRun> {
     let want = title(sha);
-    let mut runs: Vec<GhRun> =
-        listed.into_iter().filter(|r| !(r.name == WORKFLOW && r.event == "workflow_run" && r.display_title != want)).collect();
+    let mut runs: Vec<GhRun> = listed
+        .into_iter()
+        .filter(|r| r.event != "workflow_run" || (r.name == WORKFLOW && r.display_title == want))
+        .collect();
     for run in canary {
         if run.name == WORKFLOW && run.display_title == want && !runs.iter().any(|r| r.id == run.id) {
             runs.push(run);
