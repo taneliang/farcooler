@@ -95,6 +95,14 @@
       "status_since": 1799999998000,
       "workspace": "ws",
       "worktree_id": "wt-parked"
+     },
+     {
+      "id": "t10",
+      "key": "ov-10",
+      "title": "Title t10",
+      "status": "todo",
+      "status_since": 1799999993000,
+      "workspace": "ws"
      }
     ]
    },
@@ -268,6 +276,36 @@
        "runs": 0,
        "unmeasured_agents": 0
       }
+     },
+     {
+      "id": "lane-solo",
+      "short": "solo",
+      "name": "solo",
+      "state": "building",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/solo",
+      "branch": "solo",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t6",
+        "key": "ov-6",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
      }
     ],
     "order": [
@@ -399,6 +437,39 @@
      "workspace": "ws-other"
     },
     {
+     "id": "wt-solo",
+     "short": "wt-solo",
+     "repository": "repo",
+     "task": "solo",
+     "branch": "solo",
+     "worktree": "/repo/.claude/worktrees/solo",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-borrowed",
+     "short": "wt-borrowed",
+     "repository": "repo",
+     "task": "borrowed",
+     "branch": "borrowed",
+     "worktree": "/repo/.claude/worktrees/borrowed",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [
+      {
+       "id": "t2",
+       "key": "ov-2",
+       "title": "t2",
+       "status": "in_progress"
+      }
+     ],
+     "workspace": "ws-other"
+    },
+    {
      "id": "wt-main",
      "short": "wt-main",
      "repository": "repo",
@@ -503,11 +574,13 @@
     "      terminal claude · agent",
     "      terminal shell",
     "  page copy rules",
-    "group no theme · 4",
+    "group no theme · 5",
     "  task ov-6 title t6",
+    "    lane solo · building",
     "  task ov-7 title t7",
     "  task ov-5 title t5",
     "    lane next · queued",
+    "  task ov-10 title t10",
     "  task ov-8 title t8",
     "    subagent subagent · sonnet · no terminal; runs inside the orchestrator",
     "group not on this version · 1 · this runner uses states this far cooler doesn’t have yet.",
@@ -616,6 +689,14 @@
       "status_since": 1799999998000,
       "workspace": "ws",
       "worktree_id": "wt-parked"
+     },
+     {
+      "id": "t10",
+      "key": "ov-10",
+      "title": "Title t10",
+      "status": "todo",
+      "status_since": 1799999993000,
+      "workspace": "ws"
      }
     ]
    },
@@ -789,6 +870,36 @@
        "runs": 0,
        "unmeasured_agents": 0
       }
+     },
+     {
+      "id": "lane-solo",
+      "short": "solo",
+      "name": "solo",
+      "state": "building",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/solo",
+      "branch": "solo",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t6",
+        "key": "ov-6",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
      }
     ],
     "order": [
@@ -917,6 +1028,39 @@
      "isMainCheckout": false,
      "terminals": [],
      "open_tasks": [],
+     "workspace": "ws-other"
+    },
+    {
+     "id": "wt-solo",
+     "short": "wt-solo",
+     "repository": "repo",
+     "task": "solo",
+     "branch": "solo",
+     "worktree": "/repo/.claude/worktrees/solo",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-borrowed",
+     "short": "wt-borrowed",
+     "repository": "repo",
+     "task": "borrowed",
+     "branch": "borrowed",
+     "worktree": "/repo/.claude/worktrees/borrowed",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [
+      {
+       "id": "t2",
+       "key": "ov-2",
+       "title": "t2",
+       "status": "in_progress"
+      }
+     ],
      "workspace": "ws-other"
     },
     {
@@ -1019,8 +1163,7 @@
     "  task ov-9 title t9 · parked",
     "group main checkout · 1 shell",
     "  terminal shell",
-    "group loose worktrees · 4",
-    "  worktree fix",
+    "group loose worktrees · 3",
     "  worktree gone",
     "  worktree parked",
     "  worktree spike",
@@ -1122,6 +1265,14 @@
       "status_since": 1799999998000,
       "workspace": "ws",
       "worktree_id": "wt-parked"
+     },
+     {
+      "id": "t10",
+      "key": "ov-10",
+      "title": "Title t10",
+      "status": "todo",
+      "status_since": 1799999993000,
+      "workspace": "ws"
      }
     ]
    },
@@ -1295,6 +1446,36 @@
        "runs": 0,
        "unmeasured_agents": 0
       }
+     },
+     {
+      "id": "lane-solo",
+      "short": "solo",
+      "name": "solo",
+      "state": "building",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/solo",
+      "branch": "solo",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t6",
+        "key": "ov-6",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
      }
     ],
     "order": [
@@ -1426,6 +1607,39 @@
      "workspace": "ws-other"
     },
     {
+     "id": "wt-solo",
+     "short": "wt-solo",
+     "repository": "repo",
+     "task": "solo",
+     "branch": "solo",
+     "worktree": "/repo/.claude/worktrees/solo",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-borrowed",
+     "short": "wt-borrowed",
+     "repository": "repo",
+     "task": "borrowed",
+     "branch": "borrowed",
+     "worktree": "/repo/.claude/worktrees/borrowed",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [
+      {
+       "id": "t2",
+       "key": "ov-2",
+       "title": "t2",
+       "status": "in_progress"
+      }
+     ],
+     "workspace": "ws-other"
+    },
+    {
      "id": "wt-main",
      "short": "wt-main",
      "repository": "repo",
@@ -1524,6 +1738,7 @@
     "      subagent fixer · opus · no terminal; runs inside the orchestrator",
     "  task ov-2 title t2",
     "    lane gone",
+    "    lane borrowed",
     "  task ov-4 title t4",
     "theme mac · 0/1 •",
     "  task ov-3 title t3 •",
@@ -1531,11 +1746,13 @@
     "      terminal claude · agent",
     "      terminal shell",
     "  page copy rules",
-    "group no theme · 4",
+    "group no theme · 5",
     "  task ov-6 title t6",
+    "    lane solo · building",
     "  task ov-7 title t7",
     "  task ov-5 title t5",
     "    lane next · queued",
+    "  task ov-10 title t10",
     "  task ov-8 title t8",
     "    subagent subagent · sonnet · no terminal; runs inside the orchestrator",
     "group not on this version · 1 · this runner uses states this far cooler doesn’t have yet.",
@@ -1643,6 +1860,14 @@
       "status_since": 1799999998000,
       "workspace": "ws",
       "worktree_id": "wt-parked"
+     },
+     {
+      "id": "t10",
+      "key": "ov-10",
+      "title": "Title t10",
+      "status": "todo",
+      "status_since": 1799999993000,
+      "workspace": "ws"
      }
     ]
    },
@@ -1777,6 +2002,39 @@
      "workspace": "ws-other"
     },
     {
+     "id": "wt-solo",
+     "short": "wt-solo",
+     "repository": "repo",
+     "task": "solo",
+     "branch": "solo",
+     "worktree": "/repo/.claude/worktrees/solo",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [],
+     "workspace": "ws"
+    },
+    {
+     "id": "wt-borrowed",
+     "short": "wt-borrowed",
+     "repository": "repo",
+     "task": "borrowed",
+     "branch": "borrowed",
+     "worktree": "/repo/.claude/worktrees/borrowed",
+     "state": "ready",
+     "isMainCheckout": false,
+     "terminals": [],
+     "open_tasks": [
+      {
+       "id": "t2",
+       "key": "ov-2",
+       "title": "t2",
+       "status": "in_progress"
+      }
+     ],
+     "workspace": "ws-other"
+    },
+    {
      "id": "wt-main",
      "short": "wt-main",
      "repository": "repo",
@@ -1826,10 +2084,11 @@
    "items": [],
    "filter": "open",
    "outline": [
-    "group no theme · 6",
+    "group no theme · 7",
     "  task ov-6 title t6",
     "  task ov-7 title t7",
     "  task ov-5 title t5",
+    "  task ov-10 title t10",
     "  task ov-8 title t8",
     "    subagent subagent · sonnet · no terminal; runs inside the orchestrator",
     "  task ov-1 title t1",
@@ -1843,11 +2102,12 @@
     "  task ov-9 title t9 · parked",
     "group main checkout · 1 shell",
     "  terminal shell",
-    "group loose worktrees · 4",
+    "group loose worktrees · 5",
     "  worktree fix",
     "  worktree gone",
     "  worktree parked",
     "  worktree spike",
+    "  worktree solo",
     "  group hidden · 1",
     "    worktree stash"
    ]
@@ -2026,6 +2286,36 @@
        "runs": 0,
        "unmeasured_agents": 0
       }
+     },
+     {
+      "id": "lane-solo",
+      "short": "solo",
+      "name": "solo",
+      "state": "building",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/solo",
+      "branch": "solo",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t6",
+        "key": "ov-6",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
      }
     ],
     "order": [
@@ -2049,11 +2339,12 @@
     "2 need you",
     "copy building",
     "fix fixing",
+    "+1",
     "next: next"
    ],
    "state": "working",
    "line": "Dispatching ov-321",
-   "label": "orchestrator, working. 2 need you, copy building, fix fixing, next: next."
+   "label": "orchestrator, working. 2 need you, copy building, fix fixing, +1, next: next."
   },
   {
    "name": "blocked",
@@ -2227,6 +2518,36 @@
        "runs": 0,
        "unmeasured_agents": 0
       }
+     },
+     {
+      "id": "lane-solo",
+      "short": "solo",
+      "name": "solo",
+      "state": "building",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/solo",
+      "branch": "solo",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t6",
+        "key": "ov-6",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
      }
     ],
     "order": [
@@ -2251,11 +2572,12 @@
     "1 needs you",
     "copy building",
     "fix fixing",
+    "+1",
     "next: next"
    ],
    "state": "needs you",
    "line": "Run the migration?",
-   "label": "orchestrator, waiting on you. 1 needs you, copy building, fix fixing, next: next."
+   "label": "orchestrator, waiting on you. 1 needs you, copy building, fix fixing, +1, next: next."
   },
   {
    "name": "headline",
@@ -2429,6 +2751,36 @@
        "runs": 0,
        "unmeasured_agents": 0
       }
+     },
+     {
+      "id": "lane-solo",
+      "short": "solo",
+      "name": "solo",
+      "state": "building",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/solo",
+      "branch": "solo",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t6",
+        "key": "ov-6",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
      }
     ],
     "order": [
@@ -2453,11 +2805,12 @@
    "parts": [
     "copy building",
     "fix fixing",
+    "+1",
     "next: next"
    ],
    "state": "working",
    "line": "Read the plan.",
-   "label": "orchestrator, working. copy building, fix fixing, next: next."
+   "label": "orchestrator, working. copy building, fix fixing, +1, next: next."
   },
   {
    "name": "none",
@@ -2647,6 +3000,36 @@
        "runs": 0,
        "unmeasured_agents": 0
       }
+     },
+     {
+      "id": "lane-solo",
+      "short": "solo",
+      "name": "solo",
+      "state": "building",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/solo",
+      "branch": "solo",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799999400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t6",
+        "key": "ov-6",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "runs": 0,
+       "unmeasured_agents": 0
+      }
      }
     ],
     "order": [
@@ -2669,11 +3052,12 @@
     "3 need you",
     "copy building",
     "fix fixing",
+    "+1",
     "next: next"
    ],
    "state": "stopped",
    "line": null,
-   "label": "orchestrator, stopped. 3 need you, copy building, fix fixing, next: next."
+   "label": "orchestrator, stopped. 3 need you, copy building, fix fixing, +1, next: next."
   }
  ]
 }

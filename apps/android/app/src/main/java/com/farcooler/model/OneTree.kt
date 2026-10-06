@@ -362,13 +362,25 @@ object OneTree {
             return Node(id, Kind.GROUP, Words.MAIN_CHECKOUT, detail = Words.shells(terminals.size), target = Target.Worktree(wt.id), children = terminals, worktreeId = wt.id)
         }
 
+        fun owned(wt: Worktree) = if (workspace.isImplicit) wt.repository == workspace.id else wt.workspace == workspace.id
+
+        /** The board's cards [wt] holds: its own task's, its panes' and open tasks', and its lanes'. */
+        fun cardsOf(wt: Worktree): List<Card> {
+            val ids = taskIds(wt).toMutableSet()
+            rows.filter { it.worktreeId == wt.id }.forEach { ids += it.id }
+            lanes.filter { laneWorktrees[it.id]?.id == wt.id }.forEach { l -> ids += l.cards.map { it.task } }
+            return ids.mapNotNull { cards[it] }
+        }
+
         /**
-         * Loose worktrees: the workspace's worktrees no row the tree shows
-         * reaches, a cancelled card's under Not done among them; the hidden
-         * ones in a closed group of their own.
+         * Loose worktrees, leftovers for cleanup: the workspace's own that no
+         * row the tree shows reaches and no card still being worked holds, so
+         * a cancelled card's under Not done is here, another workspace's never
+         * is, and under In review a live card's stays hidden with its card
+         * (ruling R-23). The hidden ones in a closed group of their own.
          */
         fun looseNode(reached: Set<String>): Node? {
-            val unreached = worktrees.filter { it.id !in reached }
+            val unreached = worktrees.filter { owned(it) && it.id !in reached && cardsOf(it).all { c -> c.status.isFinished } }
             if (unreached.isEmpty()) return null
             val id = "group:loose"
             fun row(wt: Worktree, parent: String): Node {

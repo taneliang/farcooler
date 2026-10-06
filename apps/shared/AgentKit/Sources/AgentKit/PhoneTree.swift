@@ -27,15 +27,21 @@ enum PhoneTree {
         let checkout = worktrees.first { $0.isPrimaryCheckout && $0.repository == repository }
         // The workspace's own worktrees, and any elsewhere holding one of its
         // cards, as the Mac's tree reads `taskWorktrees` beside the loose ones.
+        func owned(_ worktree: Worktree) -> Bool {
+            summary.isImplicit ? worktree.repository == summary.id : worktree.workspace == summary.id
+        }
         let kept = worktrees.filter { worktree in
             guard !worktree.isPrimaryCheckout else { return false }
-            let owned = summary.isImplicit ? worktree.repository == summary.id : worktree.workspace == summary.id
-            return owned || taskIDs(of: worktree).contains(where: cards.contains)
+            return owned(worktree) || taskIDs(of: worktree).contains(where: cards.contains)
         }
         return OneTreeInput(
             tasks: rows.map(OneTreeTask.init(row:)),
             plan: plan,
-            worktrees: kept.map(treeWorktree),
+            worktrees: kept.map { worktree in
+                var tree = treeWorktree(worktree)
+                tree.isOwned = owned(worktree)
+                return tree
+            },
             mainCheckout: checkout.map { checkout in
                 OneTreeWorktree(
                     id: checkout.id, name: checkout.task, path: checkout.worktree ?? "", branch: checkout.branch,

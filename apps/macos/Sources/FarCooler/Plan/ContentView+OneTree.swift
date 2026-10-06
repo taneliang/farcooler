@@ -89,7 +89,11 @@ extension ContentView {
         return OneTreeInput(
             tasks: board.board.rows.map(OneTreeTask.init(row:)),
             plan: plan,
-            worktrees: all.map { Self.treeWorktree($0, fleet: store.fleet) },
+            worktrees: all.map { worktree in
+                var tree = Self.treeWorktree(worktree, fleet: store.fleet)
+                tree.isOwned = Self.owns(workspace, worktree, fleet: store.fleet)
+                return tree
+            },
             mainCheckout: checkout.map { checkout in
                 OneTreeWorktree(
                     id: checkout.id, name: checkout.task, path: checkout.path, branch: checkout.branch,
@@ -104,6 +108,15 @@ extension ContentView {
             filter: filter,
             needsYouCount: needsYouCount(
                 host: host, workspace: workspace, client: client, columnCount: board.board.waitingOnYou))
+    }
+
+    /// Whether `worktree` is `workspace`'s own (claimed for it, or unclaimed
+    /// beside its repository's Main board, as `WorkspaceWorktrees.loose`
+    /// says), rather than another's that holds one of its cards: only its
+    /// own can be loose here (ruling R-23).
+    nonisolated static func owns(_ workspace: WorkspaceSummary, _ worktree: Worktree, fleet: Fleet) -> Bool {
+        if let owner = WorkspaceSelection.owner(of: worktree, in: fleet) { return owner == workspace.id }
+        return workspace.isMain && workspace.repository != nil && worktree.repositoryID == workspace.repository
     }
 
     /// A worktree as the tree reads it: its own panes, not an orchestrator

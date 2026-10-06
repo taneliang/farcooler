@@ -104,10 +104,13 @@ public struct OneTreeWorktree: Equatable, Sendable {
     /// The tasks whose panes it holds (`terminals.task_id`) or that it is
     /// the lane of (`open_tasks`), by id.
     public var taskIDs: [String]
+    /// This workspace's own, rather than another's that holds one of its
+    /// cards: only its own can be loose here (ruling R-23).
+    public var isOwned: Bool
 
     public init(
         id: String, name: String, path: String = "", branch: String = "", isMainCheckout: Bool = false,
-        isHidden: Bool = false, terminals: [OneTreeTerminal] = [], taskIDs: [String] = []
+        isHidden: Bool = false, terminals: [OneTreeTerminal] = [], taskIDs: [String] = [], isOwned: Bool = true
     ) {
         self.id = id
         self.name = name
@@ -117,6 +120,7 @@ public struct OneTreeWorktree: Equatable, Sendable {
         self.isHidden = isHidden
         self.terminals = terminals
         self.taskIDs = taskIDs
+        self.isOwned = isOwned
     }
 }
 
@@ -752,14 +756,17 @@ struct OneTreeBuilder {
                 glyph: OneTreeGlyph.mainCheckout, target: .worktree(checkout.id), children: terminals, worktreeID: checkout.id))
     }
 
-    /// Loose Worktrees: the workspace's worktrees no row the tree shows
-    /// reaches (`reached`). Leftovers, for cleanup: closed. A worktree
-    /// whose card the filter leaves out is here too, so a cancelled card's
-    /// checkout under Not Done, or an in-progress card's under In Review,
-    /// can still be found (ov-300 review 2).
+    /// Loose Worktrees: leftovers, for cleanup, closed. The workspace's own
+    /// worktrees that no row the tree shows reaches, and that no card still
+    /// being worked holds: one no card holds, or one whose cards are all
+    /// finished, so a cancelled card's checkout under Not Done can be found
+    /// (ov-300 review 2). Another workspace's never is, and under In Review
+    /// a live card's worktree stays hidden with its card, as a filter does
+    /// (ruling R-23).
     func looseNode(reached: Set<String>) -> OneTreeNode? {
         let unreached = input.worktrees.filter { worktree in
-            !worktree.isMainCheckout && worktree.id != input.mainCheckout?.id && !reached.contains(worktree.id)
+            worktree.isOwned && !worktree.isMainCheckout && worktree.id != input.mainCheckout?.id
+                && !reached.contains(worktree.id) && cards(of: worktree).allSatisfy(\.status.isFinished)
         }
         let loose = unreached.filter { !$0.isHidden }
         // The hidden ones, in a closed group of their own: where Unhide is
@@ -788,6 +795,15 @@ struct OneTreeBuilder {
             OneTreeNode(
                 id: id, kind: .group, title: OneTreeWords.looseWorktrees, detail: "\(loose.count)",
                 glyph: OneTreeGlyph.looseWorktrees, children: children))
+    }
+
+    /// The board's cards `worktree` holds: its own task's, its panes' and
+    /// open tasks', and those of the lanes working in it.
+    func cards(of worktree: OneTreeWorktree) -> [OneTreeTask] {
+        var ids = Set(worktree.taskIDs)
+        for task in input.tasks where task.worktreeID == worktree.id { ids.insert(task.id) }
+        for lane in lanes where laneWorktrees[lane.id]?.id == worktree.id { ids.formUnion(lane.cards.map(\.task)) }
+        return ids.compactMap { tasksByID[$0] }
     }
 
     /// Cards in a status this build doesn't know: said, in a group of
