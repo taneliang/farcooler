@@ -127,6 +127,8 @@ landlock = "0.4"
 
 [dev-dependencies]
 tempfile = "3"
+# To measure a reply's real encoded size against the envelope cap, not an estimate.
+prost.workspace = true
 # Parses `rpc.rs` so `every_method_is_dispatched` reads the arms off the syntax
 # tree rather than scanning the text. Already in the lockfile through the
 # derive macros; a dev-dependency only.

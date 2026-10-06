@@ -36,7 +36,9 @@ const ASK_EVERY: Duration = Duration::from_millis(200);
 /// printed, even empty, because the reader has to drop what it holds. Within
 /// one epoch, an empty batch is news to nobody.
 pub(crate) fn advance(from_seq: u64, epoch: u64, first: bool, batch: &AgentEventBatch) -> (u64, u64, bool) {
-    let next = batch.events.iter().map(|e| e.seq + 1).max().unwrap_or(from_seq);
+    // Never backwards within an epoch: a batch whose newest number is below the
+    // cursor (a Gap numbered under it) must not rewind the next ask.
+    let next = batch.events.iter().map(|e| e.seq + 1).max().unwrap_or(from_seq).max(from_seq);
     let moved = batch.epoch != epoch;
     let next = if moved { batch.events.iter().map(|e| e.seq + 1).max().unwrap_or(0) } else { next };
     (next, batch.epoch, first || moved || !batch.events.is_empty())
@@ -124,6 +126,11 @@ mod tests {
         assert_eq!(advance(0, 0, true, &batch(0, &[])), (0, 0, true));
         assert_eq!(advance(0, 0, false, &batch(0, &[])), (0, 0, false));
         assert_eq!(advance(7, 3, false, &batch(3, &[])), (7, 3, false));
+    }
+
+    #[test]
+    fn a_batch_numbered_under_the_cursor_never_rewinds_it() {
+        assert_eq!(advance(10, 1, false, &batch(1, &[3])), (10, 1, true));
     }
 
     #[test]

@@ -30,13 +30,26 @@ pub(super) fn newest_that_fit(events: Vec<Sequenced>) -> Vec<Sequenced> {
     fit(events, REPLAY_BUDGET_BYTES)
 }
 
+/// What stands in for the part of an event that was cut to make it fit.
+const CUT_MARKER: &str = "\n\n[This part was too long to load here.]";
+
 /// `newest_that_fit` against a budget of the caller's choosing.
 fn fit(mut events: Vec<Sequenced>, budget: usize) -> Vec<Sequenced> {
     // Room for the gap itself.
-    let mut left = budget.saturating_sub(128);
+    let room = budget.saturating_sub(128);
+    let newest = events.last().map(|item| item.seq);
+    // The newest event is the one a reader most needs. When it alone is past
+    // the budget, cut its text rather than hand back nothing at its number.
+    if let Some(last) = events.last_mut()
+        && weight(&last.event) > room
+        && let Some(cut) = shortened(&last.event, room)
+    {
+        last.event = cut;
+    }
+    let mut left = room;
     let mut keep = events.len();
     for (index, item) in events.iter().enumerate().rev() {
-        let weight = encode_line(&item.event).map_or(0, |line| line.len()) + FRAME_OVERHEAD_BYTES;
+        let weight = weight(&item.event);
         if weight > left {
             break;
         }
@@ -52,8 +65,45 @@ fn fit(mut events: Vec<Sequenced>, budget: usize) -> Vec<Sequenced> {
         Some(AgentEvent::Gap { reason: AgentGapReason::RingTrimmed })
     );
     if !already_marked {
-        let seq = fitted.first().map_or(0, |first| first.seq.saturating_sub(1));
+        // With nothing kept, the gap takes the newest number, so a cursor
+        // moves past it rather than sitting where it was (or rewinding).
+        let seq = fitted.first().map_or(newest.unwrap_or(0), |first| first.seq.saturating_sub(1));
         fitted.insert(0, Sequenced { seq, event: AgentEvent::Gap { reason: AgentGapReason::RingTrimmed } });
     }
     fitted
+}
+
+/// What one event adds to a reply.
+fn weight(event: &AgentEvent) -> usize {
+    encode_line(event).map_or(0, |line| line.len()) + FRAME_OVERHEAD_BYTES
+}
+
+/// The text of an event that can carry a long one.
+fn text_of(event: &mut AgentEvent) -> Option<&mut String> {
+    match event {
+        AgentEvent::Message { text, .. } => Some(text),
+        AgentEvent::ToolUpdate { content: Some(text), .. } => Some(text),
+        _ => None,
+    }
+}
+
+/// `event` with its long text halved until it weighs no more than `room`, or
+/// `None` when it has no text to cut or the cut cannot reach it.
+fn shortened(event: &AgentEvent, room: usize) -> Option<AgentEvent> {
+    let mut event = event.clone();
+    let original = text_of(&mut event)?.clone();
+    let mut keep = original.len();
+    while keep > 0 {
+        keep /= 2;
+        let mut end = keep;
+        while !original.is_char_boundary(end) {
+            end -= 1;
+        }
+        let mut candidate = event.clone();
+        *text_of(&mut candidate)? = format!("{}{CUT_MARKER}", &original[..end]);
+        if weight(&candidate) <= room {
+            return Some(candidate);
+        }
+    }
+    None
 }

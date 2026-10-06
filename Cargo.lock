@@ -1028,6 +1028,7 @@ dependencies = [
  "landlock",
  "libc",
  "notify",
+ "prost",
  "prost-types",
  "reqwest",
  "rusqlite",
