@@ -772,15 +772,20 @@ impl AgentSupervisor {
         let mut renumbered: Vec<Sequenced> = Vec::new();
         if let Ok(mut recent) = self.recent.lock() {
             let entry = recent.entry(terminal).or_default();
-            // Numbered by this transcript's own length.
+            // Numbered one past the newest event held, never by length.
             //
             // The daemon is the only thing that numbers these, so a number
             // means one position in one transcript and nothing else. The shim
             // renumbers from zero every time it restarts, which is what made
             // every cursor in the system a lie after a toggle; the epoch above
             // is what tells a reader that happened, and there is nothing left
-            // here to deduplicate against.
-            let base = entry.len() as u64;
+            // here to deduplicate against. A numbering by length would be
+            // renumbered by every trim, and a reader's cursor, which only
+            // moves forward, would then sit past the end of a window that
+            // keeps counting from below it (ov-380). An emptied window starts
+            // at zero because only `Established` empties it, and it moves the
+            // epoch with it.
+            let base = entry.last().map_or(0, |last| last.seq + 1);
             renumbered = events
                 .into_iter()
                 .enumerate()
@@ -791,29 +796,29 @@ impl AgentSupervisor {
             // Oldest first, so trimming the front keeps the most recent
             // `TRANSCRIPT_LIMIT`.
             //
-            // The trim leaves a `Gap` behind, and that is not decoration. This
-            // window is renumbered by position, so dropping the front erases
-            // every trace that anything was there — a client would receive a
-            // shorter transcript with contiguous numbers and no reason to
-            // doubt it. A derived transcript is only defensible because it can
-            // say where it is incomplete; silently losing history is the one
-            // thing this design forbids.
+            // The trim leaves a `Gap` behind, and that is not decoration.
+            // Dropping the front erases every trace that anything was there,
+            // so a client asking from zero would receive a shorter transcript
+            // and no reason to doubt it. A derived transcript is only
+            // defensible because it can say where it is incomplete; silently
+            // losing history is the one thing this design forbids.
+            //
+            // The gap takes the number of the newest event it replaces, so
+            // numbers stay strictly increasing and nothing is renumbered. A
+            // reader past the gap never sees it, and one before it reads it
+            // first, which is what it should do.
             if entry.len() > TRANSCRIPT_LIMIT {
-                let excess = entry.len() - TRANSCRIPT_LIMIT;
-                entry.drain(0..excess);
-                entry[0] = Sequenced {
-                    seq: 0,
-                    event: AgentEvent::Gap { reason: AgentGapReason::RingTrimmed },
-                };
-                // Renumbered from the gap forward, so the numbers still mean
-                // "position in this transcript" — the property every cursor in
-                // the system depends on.
-                for (index, item) in entry.iter_mut().enumerate() {
-                    item.seq = index as u64;
-                }
-                // What was just handed out is renumbered too, or a live
-                // subscriber's next cursor would point past the end.
-                renumbered = entry[entry.len().saturating_sub(renumbered.len())..].to_vec();
+                let dropped = entry.len() - TRANSCRIPT_LIMIT + 1;
+                let seq = entry[dropped - 1].seq;
+                entry.drain(0..dropped);
+                entry.insert(
+                    0,
+                    Sequenced { seq, event: AgentEvent::Gap { reason: AgentGapReason::RingTrimmed } },
+                );
+                // What was just handed out can lose its own head to the trim
+                // when a batch is larger than the window.
+                let oldest = entry[1].seq;
+                renumbered.retain(|item| item.seq >= oldest);
             }
         }
 
@@ -1616,6 +1621,8 @@ mod tests {
 }
 
 mod failure;
+#[cfg(test)]
+mod monotonic_seq_tests;
 mod stranded;
 #[cfg(test)]
 mod stranded_tests;
@@ -1663,11 +1670,11 @@ mod gap_tests {
             "a trimmed transcript must open with the gap that says so, got {:?}",
             events[0].event
         );
-        // Still a position in this transcript, which is what every cursor in
-        // the system counts on.
-        for (index, item) in events.iter().enumerate() {
-            assert_eq!(item.seq, index as u64);
-        }
+        // Numbered by the life of the transcript, not by the window: the
+        // numbers keep climbing across every trim (ov-380), so a cursor that
+        // only moves forward is never left past the end.
+        assert_eq!(events.last().unwrap().seq, sent as u64 - 1);
+        assert!(events.windows(2).all(|pair| pair[0].seq < pair[1].seq));
     }
 
     /// A transcript filled by recorded events is bounded and says so too.
@@ -1706,25 +1713,16 @@ mod gap_tests {
             "a trimmed transcript must open with the gap that says so, got {:?}",
             events[0].event
         );
-        for (index, item) in events.iter().enumerate() {
-            assert_eq!(item.seq, index as u64);
-        }
+        assert_eq!(events.last().unwrap().seq, sent as u64 - 1, "numbers are never reset by a trim");
+        assert!(events.windows(2).all(|pair| pair[0].seq < pair[1].seq));
     }
 
     /// What the fan-out is handed across a trim is numbered like the
-    /// transcript it came out of.
+    /// transcript it came out of, and is all of what was submitted.
     ///
-    /// This exists for one line — `renumbered = entry[entry.len() -
-    /// renumbered.len()..].to_vec()`, the last statement of the trim — and
-    /// that line was previously deletable in silence across the whole
-    /// worktree. Every other sink in this file is `|_, _| {}`, and the one
-    /// that collects is handed two batches of one event that never come near
-    /// `TRANSCRIPT_LIMIT`. Without it a subscriber is handed the numbers the
-    /// batch had BEFORE the front was dropped — positions past the end of the
-    /// transcript it can ask for — and its next cursor sits there, which is
-    /// the same class of failure as a cursor that survived a toggle.
-    ///
-    /// The length assertion is not decoration either: it is what stops
+    /// Numbers are never reassigned by a trim (ov-380), so the batch carries
+    /// the numbers it was given and a replay asked afterwards agrees with it
+    /// event for event. The length assertion is what stops
     /// `on_events(terminal, renumbered)` being narrowed to the last event
     /// alone, which the collecting test above cannot see because every batch
     /// it submits is one event long.
@@ -1752,12 +1750,12 @@ mod gap_tests {
         assert_eq!(last.len(), OVERFLOW, "every event submitted is handed on, not merely the last");
         assert_eq!(
             last.first().unwrap().seq,
-            (TRANSCRIPT_LIMIT - OVERFLOW) as u64,
-            "the batch starts where the trimmed transcript's tail starts"
+            TRANSCRIPT_LIMIT as u64,
+            "the batch starts where the events were numbered, trim or no trim"
         );
         assert_eq!(
             last.last().unwrap().seq,
-            (TRANSCRIPT_LIMIT - 1) as u64,
+            (TRANSCRIPT_LIMIT + OVERFLOW - 1) as u64,
             "and ends at its end: a subscriber's next cursor is built from this number \
              and must not point past a transcript it can ask for"
         );
