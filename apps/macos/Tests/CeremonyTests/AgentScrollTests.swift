@@ -94,8 +94,10 @@ struct AgentScrollTests {
         return best
     }
 
-    /// Waits until `done` holds, up to `seconds`; whether it did.
-    static func until(_ seconds: Double = 10, _ done: () -> Bool) async -> Bool {
+    /// Waits until `done` holds, up to `seconds`; whether it did. Generous,
+    /// since a passing run returns as soon as it holds, and the full suite
+    /// runs this beside two hundred others on a loaded machine.
+    static func until(_ seconds: Double = 30, _ done: () -> Bool) async -> Bool {
         let deadline = ContinuousClock.now + .seconds(seconds)
         while ContinuousClock.now < deadline {
             if done() { return true }
@@ -154,7 +156,9 @@ struct AgentScrollTests {
 
         // Opens at the tail, in view above the composer, with content
         // running under it.
-        #expect(await Self.until { (probe.geometry?.contentSize.height ?? 0) > 2_000 }, "the history never laid out")
+        // Up to a minute: alone it lays out in under a second, and inside the
+        // full suite, with the main actor shared, it has taken 21 s.
+        #expect(await Self.until(60) { (probe.geometry?.contentSize.height ?? 0) > 2_000 }, "the history never laid out")
         await Self.settle()
         let opened = try #require(probe.geometry)
         #expect((probe.tailHiddenBy ?? .infinity) <= 0.5, "opened with the tail \(probe.tailHiddenBy ?? -1) pt under the composer")
@@ -181,7 +185,7 @@ struct AgentScrollTests {
         let scroll = try #require(Self.scrollView(in: host))
         scroll.contentView.scroll(to: NSPoint(x: 0, y: 200))
         scroll.reflectScrolledClipView(scroll.contentView)
-        #expect(await Self.until(3) { !probe.following && probe.showsJump }, "scrolling up didn't stop following")
+        #expect(await Self.until(10) { !probe.following && probe.showsJump }, "scrolling up didn't stop following")
         let offset = try #require(probe.geometry?.contentOffset.y)
         let height = probe.geometry?.contentSize.height
         try standIn.stream([Self.batch([Self.message("Agent", String(repeating: Self.sentence, count: 3))], from: seq)])
@@ -210,7 +214,7 @@ struct AgentScrollTests {
         // Jump to Latest goes back.
         scroll.contentView.scroll(to: NSPoint(x: 0, y: 100))
         scroll.reflectScrolledClipView(scroll.contentView)
-        #expect(await Self.until(3) { probe.showsJump })
+        #expect(await Self.until(10) { probe.showsJump })
         probe.jump?()
         #expect(await Self.until { probe.following && (probe.tailHiddenBy ?? .infinity) <= 0.5 }, "Jump to Latest didn't return to the tail")
         #expect(!probe.showsJump)
@@ -220,6 +224,6 @@ struct AgentScrollTests {
         let tailOffset = try #require(probe.geometry?.contentOffset.y)
         scroll.contentView.scroll(to: NSPoint(x: 0, y: tailOffset - 70))
         scroll.reflectScrolledClipView(scroll.contentView)
-        #expect(await Self.until(3) { probe.showsJump }, "a tail 70 pt under the composer counted as seen")
+        #expect(await Self.until(10) { probe.showsJump }, "a tail 70 pt under the composer counted as seen")
     }
 }
