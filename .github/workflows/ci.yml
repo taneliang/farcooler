@@ -1018,25 +1018,25 @@ jobs:
   # simulator and nothing else. A live-runner test that slipped into a shard
   # would skip with "NO LIVE RUNNER:", and the script turns that red.
   #
-  # Four shards since ov-301; the seconds per class are in
-  # scripts/ios-ui-shards.py. Each runs the products the `ios` job built
-  # (`test-without-building`), so its overhead is the download, the boot and
-  # the first launch, not a compile: about 7 minutes a shard, measured in the
-  # last ten runs on main. 40 is the backstop, not the plan, and the budget
-  # job above goes red at 75% of it.
+  # Four shards since ov-301, about 1,200 s of tests each; the seconds per
+  # class are in scripts/ios-ui-shards.py. Each runs the products the `ios` job
+  # built (`test-without-building`), so its overhead is the download, the boot
+  # and the first launch, not a compile: 440 to 570 s a shard, measured. 40 is
+  # the backstop, and the budget job above goes red at 75% of it, which is why
+  # no shard holds more than about 1,350 s of tests.
   #
   # WHY FOUR JOBS IN TWO PLACES (ov-384). The account has five macOS runners.
   # At the start CI asks for three (`rust` on macOS, `swift`, `ios`), and when
-  # `ios` ends after about five minutes four shards ask for a fourth, fifth,
-  # sixth and seventh. Two slots are free, not four, and which two shards got
-  # them was arbitrary, so the last started when Rust's macOS leg ended, at
-  # about 16 minutes, and ran 27 minutes: 43 to 52 minutes from the push.
-  # Four equal shards cannot fit that. So three shards, `shell`, `agent` and
-  # `phone`, start as soon as `ios` ends and are the big ones, and the fourth,
-  # `phone2` in `ios-ui-late` below, is the small one and is held until `rust`
-  # ends, which is when a slot frees. They end together, near 35 minutes. The
-  # sizes come from the measured seconds in scripts/ios-ui-shards.py.
-  # (Measured in .claude/agent/reports/ov-301/queueing.md.)
+  # `ios` ends after about five minutes four shards ask for four more. Two
+  # slots are free, and which two shards got them was arbitrary, so the last
+  # started when Rust's macOS leg ended at 13 to 16.5 minutes: 38 to 52
+  # minutes from the push depending on which shard it was. `phone2`, in
+  # `ios-ui-late` below, is now always the one held until `rust` ends, so
+  # the order is the same every time. At the sizes the 75% bar allows it ends
+  # near minute 43, about where the old order averaged; smaller big shards
+  # ended earlier but sat over the bar. See
+  # .claude/agent/reports/ci-queueing/report.md for the numbers and the
+  # ways to do better.
   #
   # `!cancelled()` and not the implied `success()`: a red `ios` job that
   # still uploaded its products (one of its script tests failed after the

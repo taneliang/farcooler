@@ -31,36 +31,37 @@ WORKFLOW = ROOT / ".github/workflows/ci.yml"
 # Rebalance by class durations from a CI log ("Test Suite '<Class>' started/passed"),
 # not by test count: PlanRulingsUITests alone is eleven minutes.
 #
-# The shards are NOT the same size, on purpose (ov-384). The account has five
-# macOS runners; `rust` (macOS) and `swift` hold two of them for 16 and 25
-# minutes, so when `ios` ends only three are free. `shell`, `agent` and `phone`
-# start then and are the big ones, about 1,300 s of tests each. `phone2` runs
-# in its own job (`ios-ui-late` in ci.yml), held until `rust` ends, and is the
-# small one, about 800 s, so that all four end together near 35 minutes. Four
-# equal shards started the fourth at 16 minutes and ended it at 43 to 52.
-# Move a class between the big three to level them; change `phone2` only with
-# that in mind. A shard's job costs about 450 s on top of its tests, and the
-# budget job (scripts/ios-ui-shard-budget.py) goes red at 75% of the timeout,
-# so about 1,350 s of tests is the most a big shard can hold.
+# Four shards of about 1,200 s of tests each (ov-384). A shard's job costs 440 to
+# 570 s on top of its tests, and the budget job (scripts/ios-ui-shard-budget.py)
+# goes red at 75% of the timeout (30 minutes), so 1,200 s is about 72% at the
+# worst overhead measured, and 1,350 s is the most any shard can hold.
+#
+# `phone2` runs in its own job (`ios-ui-late` in ci.yml), held until `rust`
+# ends; the other three start when `ios` ends. The account has five macOS
+# runners and `rust` (macOS) and `swift` hold two of them for 16 and 22 to 25
+# minutes, so only three are free at that point, and which of four equal
+# shards got a slot was arbitrary. Holding the same one every time keeps the
+# order deterministic, but it ends near minute 43 because it starts at 15, so
+# the layout alone saves little against the old arbitrary order (see
+# .claude/agent/reports/ci-queueing/report.md). Smaller big shards would end
+# sooner but the 75% bar forbids bigger ones.
 SHARDS = {
     # Seconds are the mean of each class's time in runs 37503739914,
     # 37509877259 and 37523241692 (test start to test end), rounded. Runner
     # variance is large, +/- 25%: PagesUITests took 503 s and 762 s, so
     # rebalance from more than one run when a shard drifts. Shard totals:
-    # shell 1,267 s, agent 1,280 s, phone 1,341 s, phone2 807 s.
+    # shell 1,195 s, agent 1,180 s, phone 1,191 s, phone2 1,220 s. AgentFollowTests
+    # (60 s) and WorkingShimmerTests (30 s) are estimates: not yet timed.
     "shell": [
         "PlanRulingsUITests",  # -phone-harness -phone-plan -phone-rulings (ov-304); 583 s
         "ShellGestureTests",  # -shell-harness; 290 s
         "ShellPaneScrollTests",  # -shell-harness; one live method, in SKIP; 195 s
         "ShellColumnCloseTests",  # -shell-harness; 119 s
-        "TaskUsageUITests",  # -phone-harness (ov-195); 47 s
-        "ReadScopeTests",  # -phone-harness (TaskScreenTests.swift); 24 s
         "TerminalLigatureTests",  # -terminal-ligature; 9 s
     ],
     "agent": [
         "PhoneTreeUITests",  # -phone-harness -phone-plan (ov-300); 298 s
         "ActionFailureTests",  # -phone-harness and -agent-layout-harness; 239 s
-        "TaskScreenTests",  # -phone-harness; 190 s
         "AgentEmptyStateTests",  # -agent-layout-harness (KeyboardTabStripTests.swift); 146 s
         "AgentTranscriptScrollTests",  # -agent-layout-harness (KeyboardTabStripTests.swift); 109 s
         "AgentFollowTests",  # -agent-layout-harness (ov-383); not yet timed, 2 tests
@@ -75,8 +76,9 @@ SHARDS = {
     "phone": [
         "PagesUITests",  # -phone-harness -phone-plan -phone-pages (ov-285); 612 s
         "PlanUITests",  # -phone-harness -phone-plan (ov-274); 395 s
-        "WorkspaceScreenTests",  # -phone-harness; 223 s
         "PhoneReopenTests",  # -phone-harness; 113 s
+        "TaskUsageUITests",  # -phone-harness (ov-195); 47 s
+        "ReadScopeTests",  # -phone-harness (TaskScreenTests.swift); 24 s
     ],
     # The late shard: ci.yml's `ios-ui-late`, not a matrix entry.
     "phone2": [
@@ -89,6 +91,8 @@ SHARDS = {
         "ChangesLfsNoticeTests",  # -changes-layout-harness -lfs-pointers (ov-199); 48 s
         "WorkspaceChromeTests",  # -phone-harness -phone-plan (ov-342); 68 s
         "RunnerReachTests",  # seeded -hosts at an address that never answers; 11 s
+        "TaskScreenTests",  # -phone-harness; 190 s
+        "WorkspaceScreenTests",  # -phone-harness; 223 s
     ],
 }
 
@@ -182,6 +186,21 @@ def check():
             f"{WORKFLOW.name}: `ios-ui-late` must `needs: rust`, which holds it until a macOS "
             "runner frees (ov-384); without it the small shard may take a slot a big one waits for"
         )
+    if late_job:
+        body = late_job.group(1)
+        named = re.search(r"^    name: iOS UI \((\w+)\)\s*$", body, re.M)
+        passed = re.search(r"^          shard:\s*(\S+)\s*$", body, re.M)
+        if not named or not passed or named.group(1) != passed.group(1):
+            problems.append(
+                f"{WORKFLOW.name}: `ios-ui-late` is named for shard "
+                f"{named and named.group(1)} but runs {passed and passed.group(1)}; the budget "
+                "script reads the name, so they must be the same shard"
+            )
+        if not re.search(r"^    if:.*!cancelled\(\)", body, re.M):
+            problems.append(
+                f"{WORKFLOW.name}: `ios-ui-late` needs `!cancelled()` in its `if:`, or a red "
+                "`rust` job skips the UI shard instead of letting it run"
+            )
     first, late = timeouts_in_workflow()
     if first is None or late is None or first != late:
         problems.append(
