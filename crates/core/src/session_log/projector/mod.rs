@@ -13,12 +13,18 @@
 //! - `fold`: transcript records into rows.
 //! - `hooks`: hook payloads into provisional rows.
 //! - `files`: the session's files read as they grow, half-written lines held.
+//! - `follow`: a page of rows, and what changed after a revision (ov-366).
+//! - `asks`: a held permission tied to the one call it holds.
+//! - `nested`: what a subagent's own transcript launches and asks.
 //!
 //! Pure apart from `files`, and that only reads.
 
+mod asks;
 pub mod files;
 pub mod fold;
+mod follow;
 pub mod hooks;
+mod nested;
 pub mod record;
 pub mod rows;
 
@@ -42,3 +48,9 @@ mod parity_tests;
 mod bench_tests;
 #[cfg(test)]
 mod shapes_tests;
+#[cfg(test)]
+mod follow_tests;
+#[cfg(test)]
+mod matching_tests;
+#[cfg(test)]
+mod nested_tests;

@@ -5,8 +5,10 @@
 //! marked provisional, under the id the transcript will later use for it
 //! (`turn:<promptId>`, `tool:<tool_use_id>`), and the transcript's record
 //! confirms it in place. Prose is the one row with no shared id: a
-//! `MessageDisplay` names a message the transcript does not, so the transcript
-//! confirms the oldest waiting prose whose words its own begin with.
+//! `MessageDisplay` names a message the transcript does not (its `message_id`
+//! is a fresh uuid, "not the API msg_ id"), so the transcript confirms the
+//! oldest waiting prose whose words its own begin with, and when the turn
+//! closes any still waiting is paired off or stands (`settle_prose`).
 //!
 //! Registered for every claude pane Far Cooler launches: `SessionStart`,
 //! `UserPromptSubmit`, `Stop`, `StopFailure`, `MessageDisplay`,
@@ -109,18 +111,7 @@ impl Projection {
             "MessageDisplay" => self.message_display(payload, now),
             "PermissionRequest" => {
                 let turn = self.hook_turn(payload, now);
-                let tool = text(payload, "tool_name").unwrap_or("Tool");
-                let summary = super::fold::summarize(&input_of(payload));
-                let ask = Ask {
-                    kind: AskKind::Permission,
-                    text: if summary.is_empty() { tool.to_string() } else { format!("{tool} {summary}") },
-                    tool: Some(tool.to_string()),
-                    asked_ms: at,
-                    answered_ms: None,
-                    answered: false,
-                };
-                let id = format!("perm:{}", self.next_seq());
-                self.push(id, Some(turn), true, RowKind::Ask(ask));
+                self.permission_request(turn, payload, &input_of(payload), now);
             }
             // A subagent's own tool calls carry its `agent_id`; they are its
             // row's business, not the main turn's. Its transcript counts
@@ -149,6 +140,7 @@ impl Projection {
                         self.touch(i);
                     }
                 }
+                self.tool_done(id, at);
             }
             "SubagentStop" => {
                 let Some(agent) = text(payload, "agent_id") else { return HookEffect::None };
@@ -224,17 +216,30 @@ impl Projection {
             return;
         }
         // The transcript may already have written this message; then the hook
-        // has nothing to add, and later flushes of it are dropped too.
+        // has nothing to add, and later flushes of it are dropped too. Its row
+        // is the first in this turn that the transcript wrote, that no other
+        // message has claimed, and whose words BEGIN with these: hooks and
+        // records each arrive in order. Matching these words anywhere inside
+        // a row bound a short first flush ("I'll") to an earlier row that
+        // happened to contain it (ov-363 review 1, finding 10).
         let turn_id = self.rows[turn].id.clone();
         let words = squeeze(delta, usize::MAX);
-        let written = (0..self.rows.len()).rev().find(|&i| {
+        let claimed: std::collections::HashSet<usize> = self.hook_messages.values().map(|&(i, _)| i).collect();
+        let written = (0..self.rows.len()).find(|&i| {
             let row = &self.rows[i];
             !row.provisional
+                && !row.retracted
                 && row.turn.as_deref() == Some(&turn_id)
-                && matches!(&row.kind, RowKind::Prose(p) if squeeze(&p.text, usize::MAX).contains(&words))
+                && !claimed.contains(&i)
+                && matches!(&row.kind, RowKind::Prose(p) if squeeze(&p.text, usize::MAX).starts_with(&words))
         });
+        // A turn the transcript has closed has all its words written: a flush
+        // that matches none of them is not news, and a row for it would wait
+        // for a record that never comes.
+        let closed = !self.rows[turn].provisional && matches!(&self.rows[turn].kind, RowKind::Turn(t) if t.outcome.is_some());
         let i = match written {
             Some(i) => i,
+            None if closed => return,
             None => {
                 let id = format!("hprose:{message}");
                 let prose = Prose { text: delta.to_string(), conclusion: false, at_ms: Some(now) };
@@ -242,6 +247,52 @@ impl Projection {
             }
         };
         self.hook_messages.insert(message.to_string(), (i, index));
+    }
+
+    /// The transcript has closed `turn`, so every word it will write for it
+    /// is in, and a hook's prose still waiting will never be confirmed.
+    ///
+    /// Each such row is paired with a row the transcript wrote in the turn
+    /// that no hook message has claimed: the one whose words hold its words
+    /// or begin them, else the oldest, since both arrive in order. That
+    /// covers a display that changed the words (claude's `MessageDisplay`
+    /// delta is what was drawn, not what was stored). A paired row is
+    /// retracted as a copy. One left over was shown and never written, as
+    /// when a reply is cut off, and stands as the only record of it.
+    pub(super) fn settle_prose(&mut self, turn: usize) {
+        let turn_id = self.rows[turn].id.clone();
+        let in_turn = |row: &Row| row.turn.as_deref() == Some(turn_id.as_str()) && !row.retracted && matches!(row.kind, RowKind::Prose(_));
+        let waiting: Vec<usize> = (0..self.rows.len()).filter(|&i| self.rows[i].provisional && in_turn(&self.rows[i])).collect();
+        if waiting.is_empty() {
+            return;
+        }
+        let claimed: std::collections::HashSet<usize> = self.hook_messages.values().map(|&(i, _)| i).collect();
+        let mut unclaimed: Vec<usize> =
+            (0..self.rows.len()).filter(|&i| !self.rows[i].provisional && in_turn(&self.rows[i]) && !claimed.contains(&i)).collect();
+        let words = |row: &Row| match &row.kind {
+            RowKind::Prose(p) => squeeze(&p.text, usize::MAX),
+            _ => String::new(),
+        };
+        for i in waiting {
+            let shown = words(&self.rows[i]);
+            let by_words = unclaimed.iter().position(|&j| {
+                let written = words(&self.rows[j]);
+                !written.is_empty() && (written.contains(&shown) || shown.starts_with(&written))
+            });
+            match by_words.or((!unclaimed.is_empty()).then_some(0)) {
+                Some(n) => {
+                    let written = unclaimed.remove(n);
+                    self.retract(i);
+                    for entry in self.hook_messages.values_mut().filter(|(row, _)| *row == i) {
+                        entry.0 = written;
+                    }
+                }
+                None => {
+                    self.rows[i].provisional = false;
+                    self.touch(i);
+                }
+            }
+        }
     }
 
     fn session_start(&mut self, payload: &Value, now: i64) -> HookEffect {

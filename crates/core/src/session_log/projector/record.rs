@@ -446,7 +446,7 @@ pub(super) struct CompactMetadata<'a> {
 }
 
 /// A subagent's `agent-<id>.meta.json`, the join onto the parent's `Agent` call.
-#[derive(Debug, Default, serde::Deserialize)]
+#[derive(Debug, Default, Clone, serde::Deserialize)]
 #[serde(default)]
 pub struct SubagentMeta {
     #[serde(rename = "toolUseId")]

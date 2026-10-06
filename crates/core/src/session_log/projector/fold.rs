@@ -133,6 +133,18 @@ pub struct Projection {
     /// Hook `message_id` to the prose row it became or matched,
     /// and the last `index` applied to it.
     pub(super) hook_messages: HashMap<String, (usize, Option<u64>)>,
+    /// Uuid-less lines folded so far, by scope and line hash, as the most
+    /// copies of each met in any one read of its file (see `repeated`).
+    folded_copies: HashMap<u64, u32>,
+    /// The same, for the read of each file now under way, by scope.
+    read_copies: HashMap<String, HashMap<u64, u32>>,
+    /// Held permissions not yet tied to the tool call they hold (`asks.rs`).
+    pub(super) perm_waiting: Vec<super::asks::PermWait>,
+    /// A tool call's id to the permission row that held it.
+    pub(super) tool_asks: HashMap<String, usize>,
+    /// Each subagent's tool calls that have not come back, as id, name and
+    /// summary: what a permission one of its calls asks for is matched to.
+    pub(super) sub_tools: HashMap<String, Vec<(String, String, String)>>,
     seq: u64,
     /// Bumped by every change; a row's `rev` is the value when it last moved.
     revision: u64,
@@ -256,18 +268,6 @@ impl Projection {
         self.revision
     }
 
-    /// Up to `limit` rows before `ord` (or the newest, for `None`), oldest
-    /// first: a page a client opens on, and scrolls back through.
-    pub fn page(&self, before: Option<u64>, limit: usize) -> &[Row] {
-        let end = before.map_or(self.rows.len(), |b| (b as usize).min(self.rows.len()));
-        &self.rows[end.saturating_sub(limit)..end]
-    }
-
-    /// Every row changed after revision `rev`, in row order.
-    pub fn changed_since(&self, rev: u64) -> Vec<&Row> {
-        self.rows.iter().filter(|r| r.rev > rev).collect()
-    }
-
     pub(super) fn touch(&mut self, i: usize) {
         self.revision += 1;
         self.rows[i].rev = self.revision;
@@ -281,9 +281,10 @@ impl Projection {
         let i = self.rows.len();
         let turn = turn.map(|t| self.rows[t].id.clone());
         self.index.insert(id.clone(), i);
-        self.rows.push(Row { ord: i as u64, rev: 0, id, turn, provisional, kind });
+        self.rows.push(Row { ord: i as u64, rev: 0, id, turn, provisional, retracted: false, born: 0, kind });
         self.marked.push(false);
         self.touch(i);
+        self.rows[i].born = self.revision;
         i
     }
 
@@ -317,16 +318,48 @@ impl Projection {
     /// is the same record read again. A record without one (`queue-operation`
     /// above all) can be written twice on purpose: two identical dequeues in
     /// the same millisecond are two dequeues, 44 times in the real corpus.
-    fn repeated(&mut self, scope: &str, record: &Record<'_>, line: &[u8]) -> bool {
-        record.uuid.get().is_some() && self.seen(scope, line)
+    ///
+    /// Those are counted instead: the n-th copy met in a read of a file is a
+    /// repeat when an earlier read already folded n of them. So a `/resume`
+    /// back into a session already shown, which reads its file again from
+    /// the start, adds no second Queued row for each enqueue (ov-366), and
+    /// twin dequeues in one read still both fold.
+    pub(super) fn repeated(&mut self, scope: &str, record: &Record<'_>, line: &[u8]) -> bool {
+        if record.uuid.get().is_some() {
+            return self.seen(scope, line);
+        }
+        let key = Self::line_key(scope, line);
+        let met = self.read_copies.entry(scope.to_string()).or_default().entry(key).or_default();
+        *met += 1;
+        let folded = self.folded_copies.entry(key).or_default();
+        if *met <= *folded {
+            return true;
+        }
+        *folded = *met;
+        false
+    }
+
+    /// A file of this scope is being read again from its start (`None`:
+    /// every file is), so its uuid-less lines are counted afresh.
+    pub fn reread(&mut self, scope: Option<&str>) {
+        match scope {
+            Some(scope) => {
+                self.read_copies.remove(scope);
+            }
+            None => self.read_copies.clear(),
+        }
+    }
+
+    fn line_key(scope: &str, line: &[u8]) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        scope.hash(&mut hasher);
+        line.hash(&mut hasher);
+        hasher.finish()
     }
 
     /// Whether `line` has been folded already, noting it if not.
     fn seen(&mut self, scope: &str, line: &[u8]) -> bool {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        scope.hash(&mut hasher);
-        line.hash(&mut hasher);
-        !self.seen_lines.insert(hasher.finish())
+        !self.seen_lines.insert(Self::line_key(scope, line))
     }
 
     /// A turn that failed, whatever ended it first. The transcript writes a
@@ -409,14 +442,21 @@ impl Projection {
             if self.rows[i].turn.as_deref() != Some(&id) {
                 continue;
             }
-            if let RowKind::Ask(ask) = &mut self.rows[i].kind {
-                if !ask.answered {
-                    ask.answered = true;
-                    ask.answered_ms = at;
+            let row = &mut self.rows[i];
+            if let RowKind::Ask(ask) = &mut row.kind {
+                // Over with its turn, and no record will confirm it after:
+                // the hook that held it is its record.
+                if !ask.answered || row.provisional {
+                    if !ask.answered {
+                        ask.answered = true;
+                        ask.answered_ms = at;
+                    }
+                    row.provisional = false;
                     self.touch(i);
                 }
             }
         }
+        self.perm_waiting.retain(|w| self.rows[w.ask].provisional);
     }
 
     /// Open a turn, or confirm the one a hook already opened for this prompt.
@@ -485,6 +525,7 @@ impl Projection {
         if let Some(previous) = self.turn {
             let end = self.turn_clock.or(at);
             self.end_turn(previous, end, TurnOutcome::Finished);
+            self.settle_prose(previous);
         }
         self.turn = Some(i);
         self.turn_clock = at;
@@ -594,6 +635,7 @@ impl Projection {
         if trimmed.starts_with("[Request interrupted by user") {
             if let Some(turn) = self.turn {
                 self.end_turn(turn, at, TurnOutcome::Interrupted);
+                self.settle_prose(turn);
             }
             return;
         }
@@ -802,17 +844,25 @@ impl Projection {
                     }
                 }
                 self.touch(i);
+                self.tool_confirmed(id);
             }
             return;
         }
+        let summary = match &kind {
+            RowKind::Tool(tool) => Some((tool.name.clone(), tool.summary.clone())),
+            _ => None,
+        };
         self.push(row_id, Some(turn), provisional, kind);
+        if let Some((name, summary)) = summary {
+            self.link_tool(None, id, &name, &summary, !provisional);
+        }
     }
 
     fn tool_result(&mut self, block: &Block<'_>, result: Option<&ToolUseResult<'_>>, at: Option<i64>) {
         let Some(id) = block.tool_use_id.get() else { return };
         let failed = block.is_error.yes();
         if let Some(&i) = self.index.get(&format!("tool:{id}")) {
-            let mut settled_tool = None;
+            let is_tool = matches!(self.rows[i].kind, RowKind::Tool(_));
             if let RowKind::Tool(tool) = &mut self.rows[i].kind {
                 tool.status = if failed { ToolStatus::Failed } else { ToolStatus::Done };
                 tool.ended_ms = clamp_end(tool.started_ms, at);
@@ -834,43 +884,17 @@ impl Projection {
                         tool.file_path = Some(path.to_string());
                     }
                 }
-                settled_tool = Some(tool.name.clone());
             }
             self.rows[i].provisional = false;
             self.touch(i);
-            if let Some(name) = settled_tool {
-                self.settle_permission(&name, at);
+            if is_tool {
+                self.tool_confirmed(id);
+                self.tool_done(id, at);
             }
             return;
         }
         if let Some(&i) = self.index.get(&format!("sub:{id}")) {
-            if let Some(result) = result {
-                if let Some(agent_id) = result.agent_id.get() {
-                    self.join_agent(agent_id, i);
-                }
-                if let RowKind::Subagent(sub) = &mut self.rows[i].kind {
-                    if let Some(count) = result.total_tool_use_count.int() {
-                        sub.tool_count = sub.tool_count.max(count.max(0) as u32);
-                    }
-                    if let Some(kind) = result.agent_type.get() {
-                        sub.agent_type = kind.to_string();
-                    }
-                }
-            }
-            let status = result.and_then(|r| r.status.get());
-            match status {
-                Some("async_launched") => {
-                    if let RowKind::Subagent(sub) = &mut self.rows[i].kind {
-                        sub.background = true;
-                    }
-                    self.touch(i);
-                }
-                _ => {
-                    let state = if failed { SubagentState::Failed } else { subagent_state(status.unwrap_or("completed")) };
-                    self.end_subagent(i, state, at);
-                }
-            }
-            self.count_background(i);
+            self.subagent_result(i, failed, result, at);
             return;
         }
         if let Some(&i) = self.index.get(&format!("ask:{id}")) {
@@ -882,18 +906,35 @@ impl Projection {
         }
     }
 
-    /// A held permission is over once the tool it was for has come back.
-    fn settle_permission(&mut self, tool: &str, at: Option<i64>) {
-        let waiting = (0..self.rows.len()).find(|&i| {
-            matches!(&self.rows[i].kind, RowKind::Ask(a) if a.kind == AskKind::Permission && !a.answered && a.tool.as_deref() == Some(tool))
-        });
-        if let Some(i) = waiting {
-            if let RowKind::Ask(ask) = &mut self.rows[i].kind {
-                ask.answered = true;
-                ask.answered_ms = at;
+    /// The `Agent` call `i` came back: launched in the background, or over.
+    pub(super) fn subagent_result(&mut self, i: usize, failed: bool, result: Option<&ToolUseResult<'_>>, at: Option<i64>) {
+        if let Some(result) = result {
+            if let Some(agent_id) = result.agent_id.get() {
+                self.join_agent(agent_id, i);
             }
-            self.touch(i);
+            if let RowKind::Subagent(sub) = &mut self.rows[i].kind {
+                if let Some(count) = result.total_tool_use_count.int() {
+                    sub.tool_count = sub.tool_count.max(count.max(0) as u32);
+                }
+                if let Some(kind) = result.agent_type.get() {
+                    sub.agent_type = kind.to_string();
+                }
+            }
         }
+        let status = result.and_then(|r| r.status.get());
+        match status {
+            Some("async_launched") => {
+                if let RowKind::Subagent(sub) = &mut self.rows[i].kind {
+                    sub.background = true;
+                }
+                self.touch(i);
+            }
+            _ => {
+                let state = if failed { SubagentState::Failed } else { subagent_state(status.unwrap_or("completed")) };
+                self.end_subagent(i, state, at);
+            }
+        }
+        self.count_background(i);
     }
 
     pub(super) fn end_subagent(&mut self, i: usize, state: SubagentState, at: Option<i64>) {
@@ -908,6 +949,10 @@ impl Projection {
         }
         self.touch(i);
         self.count_background(i);
+        if let RowKind::Subagent(Subagent { agent_id: Some(agent), .. }) = &self.rows[i].kind {
+            let agent = agent.clone();
+            self.subagent_asks_over(&agent, at);
+        }
     }
 
     /// Tie an `agentId` to its row, and give the row whatever its own
@@ -954,7 +999,7 @@ impl Projection {
 
     /// `<task-notification>`: a background agent (or shell) stopped. It may
     /// repeat for one agent, once per stop.
-    fn task_notification(&mut self, body: &str, at: Option<i64>) {
+    pub(super) fn task_notification(&mut self, body: &str, at: Option<i64>) {
         let agent = tag(body, "task-id").map(str::trim);
         let tool = tag(body, "tool-use-id").map(str::trim);
         let status = tag(body, "status").unwrap_or("completed");
@@ -986,6 +1031,7 @@ impl Projection {
                 }
                 self.rows[turn].provisional = false;
                 self.touch(turn);
+                self.settle_prose(turn);
             }
             Some("compact_boundary") => {
                 let trigger = record.compact.0.as_ref().and_then(|c| c.trigger.get()).unwrap_or("");
@@ -1107,6 +1153,7 @@ impl Projection {
             return;
         }
         let at = record.timestamp.get().and_then(parse_iso8601_millis);
+        self.subagent_record(agent_id, &record, at);
         let mut tools = 0u32;
         let mut action = None;
         if record.kind.get() == Some("assistant") {

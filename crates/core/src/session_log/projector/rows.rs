@@ -10,15 +10,17 @@
 //! window on trim, which froze every reader at 4096 events). A row's `ord` is
 //! its position at insertion and `rev` the revision that last changed it; both
 //! only grow, so a page cursor (`ord`) and a follow cursor (`rev`) stay valid
-//! for the life of the session.
+//! for the life of the session. A row a hook put up that the transcript then
+//! showed to be a copy is retracted rather than removed, so `ord` stays its
+//! index (`Row::retracted`).
 
 use serde::Serialize;
 
 /// One row, where it sits, and whether the transcript has confirmed it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Row {
-    /// Insertion order, from 0. Rows are never removed, so this is also the
-    /// row's index, and a page is a range of it.
+    /// Insertion order, from 0. Rows are never removed (a retracted one stays
+    /// in place), so this is also the row's index, and a page is a range of it.
     pub ord: u64,
     /// The projection's revision when this row last changed. Monotonic.
     pub rev: u64,
@@ -30,7 +32,43 @@ pub struct Row {
     pub turn: Option<String>,
     /// Announced by a hook and not yet confirmed by a transcript record.
     pub provisional: bool,
+    /// Taken back: a hook's row the transcript showed to be a copy of one it
+    /// wrote. Kept in place so `ord` stays the row's index; a page skips it,
+    /// and a follow sends its removal (ov-366).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub retracted: bool,
+    /// The revision the row was added at, so a follow can tell a row a
+    /// client has never seen (an insert) from one it may hold (an update).
+    #[serde(skip)]
+    pub born: u64,
     pub kind: RowKind,
+}
+
+/// One entry of a follow: what happened to a row after the follower's
+/// revision. Rows are only ever added at the end, so an insert is always
+/// below every row the client holds.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Change<'r> {
+    Insert(&'r Row),
+    Update(&'r Row),
+    /// A row the client may hold is gone (`Row::retracted`), by id.
+    Remove { id: &'r str, rev: u64 },
+}
+
+impl Change<'_> {
+    pub fn id(&self) -> &str {
+        match self {
+            Change::Insert(row) | Change::Update(row) => &row.id,
+            Change::Remove { id, .. } => id,
+        }
+    }
+
+    pub fn rev(&self) -> u64 {
+        match self {
+            Change::Insert(row) | Change::Update(row) => row.rev,
+            Change::Remove { rev, .. } => *rev,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

@@ -18,6 +18,7 @@ fn lines(reader: &mut LineReader) -> Vec<String> {
     reader.read(|line| match line {
         Line::Complete(b) => out.push(String::from_utf8_lossy(b).into_owned()),
         Line::TooLarge(n) => out.push(format!("<too large: {n}>")),
+        Line::Restart => {}
     });
     out
 }

@@ -52,6 +52,9 @@ pub enum Line<'a> {
     Complete(&'a [u8]),
     /// Skipped for its size, which is given.
     TooLarge(u64),
+    /// The file shrank or was replaced, and what follows is read from its
+    /// start. Handed over before the first line of the new read.
+    Restart,
 }
 
 /// Follows one append-only file, a line at a time.
@@ -113,6 +116,7 @@ impl LineReader {
             self.partial.clear();
             self.skipping = None;
             report.rewritten = true;
+            each(Line::Restart);
         }
         let want = meta.len().saturating_sub(self.offset);
         if want == 0 {
@@ -239,6 +243,9 @@ impl SessionProjector {
         if transcript == self.main.path() {
             return;
         }
+        // Every file is read from its start again, the old one too if this
+        // comes back to it (`/resume`), so lines are counted afresh.
+        self.projection.reread(None);
         let session = transcript.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         self.subagents_dir = transcript.with_file_name(&session).join("subagents");
         self.subagents.clear();
@@ -247,6 +254,44 @@ impl SessionProjector {
 
     /// Read whatever every file gained and fold it. Returns the lines folded.
     pub fn poll(&mut self) -> u64 {
+        let mut folded = self.poll_main();
+        self.discover_subagents();
+        let agents: Vec<String> = self.subagents.keys().cloned().collect();
+        folded += self.poll_subagents(&agents);
+        folded
+    }
+
+    /// Read only the files among `paths` (what a watch said changed), and any
+    /// subagent file that is new. The tick's `poll` still reads every file,
+    /// for a change a watch missed. A session with two thousand subagents
+    /// then costs a watch event one read, not two thousand.
+    pub fn poll_paths(&mut self, paths: &[PathBuf]) -> u64 {
+        let mut folded = 0;
+        if paths.iter().any(|p| p == self.main.path()) {
+            folded += self.poll_main();
+        }
+        let known: std::collections::HashSet<String> = self.subagents.keys().cloned().collect();
+        if paths.iter().any(|p| p.starts_with(&self.subagents_dir)) {
+            self.discover_subagents();
+        }
+        let agents: Vec<String> = self
+            .subagents
+            .iter()
+            .filter(|(agent, file)| !known.contains(*agent) || paths.iter().any(|p| p == file.reader.path() || *p == file.meta_path))
+            .map(|(agent, _)| agent.clone())
+            .collect();
+        folded += self.poll_subagents(&agents);
+        folded
+    }
+
+    /// The directories a watch on this session covers: the main file's, and
+    /// its subagents' (which may not exist yet).
+    pub fn watched_dirs(&self) -> (PathBuf, PathBuf) {
+        let main = self.main.path().parent().map(Path::to_path_buf).unwrap_or_default();
+        (main, self.subagents_dir.clone())
+    }
+
+    fn poll_main(&mut self) -> u64 {
         let mut folded = 0;
         loop {
             let report = Self::drain(&mut self.main, &mut self.projection, None);
@@ -256,8 +301,12 @@ impl SessionProjector {
                 break;
             }
         }
-        self.discover_subagents();
-        for (agent, file) in self.subagents.iter_mut() {
+        folded
+    }
+
+    fn poll_subagents(&mut self, agents: &[String]) -> u64 {
+        let mut folded = 0;
+        for (agent, file) in self.subagents.iter_mut().filter(|(agent, _)| agents.contains(agent)) {
             if file.meta.is_none() {
                 file.meta = std::fs::read(&file.meta_path).ok().and_then(|b| serde_json::from_slice(&b).ok());
             }
@@ -275,6 +324,25 @@ impl SessionProjector {
                 }
             }
         }
+        // A nested agent's meta names an `Agent` call in its parent's file,
+        // which may sort after it and so be read after it: join it now,
+        // rather than a tick later. Again while any joins, for a deeper one.
+        loop {
+            let unjoined: Vec<(String, SubagentMeta)> = self
+                .subagents
+                .iter()
+                .filter(|(agent, _)| !self.projection.is_joined(agent))
+                .filter_map(|(agent, file)| file.meta.clone().map(|m| (agent.clone(), m)))
+                .collect();
+            let before = unjoined.len();
+            for (agent, meta) in &unjoined {
+                self.projection.join_by_meta(agent, meta);
+            }
+            let after = self.subagents.keys().filter(|a| !self.projection.is_joined(a)).count();
+            if after == 0 || after >= before {
+                break;
+            }
+        }
         folded
     }
 
@@ -284,6 +352,7 @@ impl SessionProjector {
             (Line::Complete(bytes), Some((agent, meta))) => projection.fold_subagent_line(agent, meta, bytes),
             (Line::TooLarge(n), None) => projection.fold_too_large(n),
             (Line::TooLarge(_), Some(_)) => {}
+            (Line::Restart, agent) => projection.reread(Some(agent.map_or("", |(a, _)| a))),
         });
         if report.rewritten && agent.is_none() {
             projection.fold_rewritten();
