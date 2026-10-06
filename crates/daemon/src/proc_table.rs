@@ -48,11 +48,15 @@ mod kinfo {
     pub const P_CONTROLT: i32 = 0x2;
 }
 
-/// Every process, from the one `sysctl(KERN_PROC_ALL)` that `ps` itself starts
-/// with. Per-pid `proc_pidinfo` costs about ten times as much per process on
-/// a loaded host; this is a single call.
+/// The name `ps` prints for a terminal's device number (`ttys012`).
+///
+/// `devname_r` finds it by walking `/dev` with an `lstat` per entry, which on a
+/// host with a few thousand ptys cost more than everything else in the walk
+/// put together (profiled: 1,851 of 2,026 samples). A pty slave is major 16,
+/// named by its minor, so that case is arithmetic; the rest (the console and
+/// the like) ask `devname_r` once per walk.
 #[cfg(target_os = "macos")]
-fn walk() -> Option<String> {
+fn tty_name(tdev: i32) -> String {
     unsafe extern "C" {
         // In libSystem; the `libc` crate doesn't declare it.
         fn devname_r(
@@ -62,6 +66,24 @@ fn walk() -> Option<String> {
             len: libc::c_int,
         ) -> *mut libc::c_char;
     }
+    if (tdev >> 24) & 0xff == 16 {
+        return format!("ttys{:03}", tdev & 0xff_ffff);
+    }
+    let mut name = [0 as libc::c_char; 64];
+    // SAFETY: `name` is 64 bytes and `devname_r` writes a NUL-terminated name into at most `len`.
+    let found = unsafe { devname_r(tdev as libc::dev_t, libc::S_IFCHR, name.as_mut_ptr(), 64) };
+    if found.is_null() {
+        return "??".to_string();
+    }
+    // SAFETY: NUL-terminated by `devname_r`.
+    unsafe { std::ffi::CStr::from_ptr(name.as_ptr()) }.to_string_lossy().into_owned()
+}
+
+/// Every process, from the one `sysctl(KERN_PROC_ALL)` that `ps` itself starts
+/// with. Per-pid `proc_pidinfo` costs about ten times as much per process on
+/// a loaded host; this is a single call.
+#[cfg(target_os = "macos")]
+fn walk() -> Option<String> {
     const NODEV: i32 = -1;
 
     let mut mib = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_ALL];
@@ -104,22 +126,7 @@ fn walk() -> Option<String> {
         let (ppid, pgid, tdev, tpgid) =
             (int(rec, kinfo::E_PPID), int(rec, kinfo::E_PGID), int(rec, kinfo::E_TDEV), int(rec, kinfo::E_TPGID));
         saw_myself |= pid == me && ppid == my_parent;
-        let tty = if tdev == NODEV {
-            "??".to_string()
-        } else {
-            ttys.entry(tdev)
-                .or_insert_with(|| {
-                    let mut name = [0 as libc::c_char; 64];
-                    // SAFETY: `name` is 64 bytes and `devname_r` writes a NUL-terminated name into at most `len`.
-                    let found = unsafe { devname_r(tdev as libc::dev_t, libc::S_IFCHR, name.as_mut_ptr(), 64) };
-                    if found.is_null() {
-                        return "??".to_string();
-                    }
-                    // SAFETY: NUL-terminated by `devname_r`.
-                    unsafe { std::ffi::CStr::from_ptr(name.as_ptr()) }.to_string_lossy().into_owned()
-                })
-                .clone()
-        };
+        let tty = if tdev == NODEV { "??".to_string() } else { ttys.entry(tdev).or_insert_with(|| tty_name(tdev)).clone() };
         let foreground = tty != "??" && int(rec, kinfo::P_FLAG) & kinfo::P_CONTROLT != 0 && pgid == tpgid;
         // Arguments only where they are read: `foreground::parse` labels a pane
         // from its foreground rows and from nothing else.
@@ -272,6 +279,14 @@ mod tests {
         buf.extend(b"/usr/bin/pnpm\0\0\0pnpm\0dev\0--port\0PATH=/bin\0HOME=/h\0");
         assert_eq!(parse_procargs2(&buf).as_deref(), Some("pnpm dev --port"));
         assert_eq!(parse_procargs2(&0i32.to_ne_bytes()), None);
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn a_pty_slave_is_named_by_its_minor() {
+        // `ps -o tdev` printed 16/59 for ttys059, read off a live pane.
+        assert_eq!(tty_name(0x1000_003b), "ttys059");
+        assert_eq!(tty_name(0x1000_0000), "ttys000");
     }
 
     #[test]
