@@ -956,16 +956,22 @@ jobs:
         run: ./scripts/ios-ui-shards.py --check
       # Main's successful CI runs, for a push: the base is the nearest one in
       # this commit's history (scripts/ios-ui-plan.py). Without the list, or
-      # with an empty one, everything runs.
+      # with an empty one, everything runs. When gh fails (a 502, a timeout) the
+      # step does not fail the job: it records why in CANDIDATES_ERROR, and the
+      # plan runs every shard with a notice (ov-340).
       - name: List the green CI runs
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=100" \
-            --jq '.workflow_runs[] | {head_sha, created_at}' > "$RUNNER_TEMP/green.ndjson"
-          echo "$(wc -l < "$RUNNER_TEMP/green.ndjson") green CI runs listed"
+          set -uo pipefail
+          if gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=100" \
+            --jq '.workflow_runs[] | {head_sha, created_at}' > "$RUNNER_TEMP/green.ndjson" 2> "$RUNNER_TEMP/gh.err"; then
+            echo "$(wc -l < "$RUNNER_TEMP/green.ndjson") green CI runs listed"
+          else
+            why="$(head -c 200 "$RUNNER_TEMP/gh.err" | tr '\n' ' ')"
+            echo "CANDIDATES_ERROR=${why:-gh exited non-zero}" >> "$GITHUB_ENV"
+          fi
       - name: Decide whether the UI tests run
         id: paths
         env:

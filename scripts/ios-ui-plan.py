@@ -24,8 +24,14 @@ its own green base. CANDIDATES is a file with one successful CI run per line,
 as JSON with a `head_sha`; scripts/canary-plan.py reads the same list and owns
 the nearest-ancestor choice (`base_commit`), shared here rather than copied.
 
-With no green ancestor in the history (a first run, a force push, a list that
-could not be read), or a range that cannot be computed, or an unknown event,
+When GitHub cannot list the green runs (the workflow step's `gh api` exits
+non-zero: a 502, a timeout) the step records why in CANDIDATES_ERROR and
+everything runs, with a `::notice::` saying so (ov-340): an outage must not
+fail the push's CI, and running every shard is the safe side. A list that
+gh returned successfully but that does not parse, and an unknown event, are
+still loud failures: those are bugs, not weather.
+
+With no green ancestor in the history (a first run, a force push), or a range that cannot be computed, or an unknown event,
 everything runs, because a skipped test is the one failure nobody sees.
 
 The owner chose this on Oct 5 (ov-301): main used to run the shards on every
@@ -133,8 +139,10 @@ def git(repo, *args):
     return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
 
 
-def decide(repo, event, after="", base="", head="", candidates=()):
+def decide(repo, event, after="", base="", head="", candidates=(), listing_error=""):
     """(run, why)."""
+    if event == "push" and listing_error:
+        return True, f"could not list the green CI runs ({listing_error}): the UI tests run."
     if event == "pull_request":
         spec = f"{base}...{head}"
     elif event == "push":
@@ -155,12 +163,19 @@ def decide(repo, event, after="", base="", head="", candidates=()):
 
 
 def main():
+    error = os.environ.get("CANDIDATES_ERROR", "").strip()
+    # With the listing failed there is no file to parse; with it listed, a
+    # file that does not parse raises, and the job fails.
+    candidates = [] if error else canary_plan().read_candidates(os.environ.get("CANDIDATES"))
     run, why = decide(
         pathlib.Path.cwd(), os.environ.get("EVENT", ""), os.environ.get("AFTER", ""),
         os.environ.get("BASE", ""), os.environ.get("HEAD", ""),
-        canary_plan().read_candidates(os.environ.get("CANDIDATES")),
+        candidates, error,
     )
-    print(why)
+    if error and os.environ.get("EVENT") == "push":
+        print(f"::notice::{why}")
+    else:
+        print(why)
     out = os.environ.get("GITHUB_OUTPUT")
     if out:
         with open(out, "a") as f:
@@ -266,6 +281,12 @@ def self_test():
         expect("... and runs for an iOS change", decide(repo, "pull_request", base=a, head=d)[0], True)
         expect("a pull request with a bad base runs", decide(repo, "pull_request", base="1" * 40, head=d)[0], True)
 
+        expect("a failed listing runs everything even with a green base to compare with",
+               decide(repo, "push", f, candidates=[e], listing_error="HTTP 502")[0], True)
+        expect("... and says why", "HTTP 502" in decide(repo, "push", f, listing_error="HTTP 502")[1], True)
+        expect("a failed listing does not touch a pull request",
+               decide(repo, "pull_request", base=a, head=c, listing_error="HTTP 502")[0], False)
+
         outputs = repo / "out"
         cands = repo / "cands"
         cands.write_text(json.dumps({"head_sha": e}) + "\n")
@@ -273,6 +294,19 @@ def self_test():
         done = subprocess.run([sys.executable, __file__], cwd=repo, env=env, capture_output=True, text=True)
         expect("the script exits 0", done.returncode, 0)
         expect("and writes the output", outputs.read_text() if outputs.exists() else None, "run=false\n")
+
+        # Through the script: a failed listing runs everything and prints a
+        # notice; a list gh returned that does not parse still fails.
+        outputs.unlink()
+        env["CANDIDATES_ERROR"] = "gh: Server Error (HTTP 502)"
+        done = subprocess.run([sys.executable, __file__], cwd=repo, env=env, capture_output=True, text=True)
+        expect("a failed listing exits 0", done.returncode, 0)
+        expect("with a notice", done.stdout.startswith("::notice::could not list the green CI runs (gh: Server Error (HTTP 502))"), True)
+        expect("and runs the shards", outputs.read_text() if outputs.exists() else None, "run=true\n")
+        del env["CANDIDATES_ERROR"]
+        cands.write_text("<html>502 Bad Gateway</html>\n")
+        done = subprocess.run([sys.executable, __file__], cwd=repo, env=env, capture_output=True, text=True)
+        expect("a malformed list fails loudly", done.returncode != 0, True)
 
     for failure in failures:
         print(f"ios-ui-plan self-test: {failure}", file=sys.stderr)
