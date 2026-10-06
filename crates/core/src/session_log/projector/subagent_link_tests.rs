@@ -98,3 +98,19 @@ fn a_subagents_own_stop_ends_only_its_row() {
     p.hook("Stop", &json!({"prompt_id":"p1"}), ms("10:00:07.000"));
     assert_eq!(turn(&p, "turn:p1").outcome, Some(TurnOutcome::Finished));
 }
+
+/// Tied the wrong way round, a stops before either meta is read: its stop
+/// ended b's row. Undone, the end goes with a, and b's row runs again.
+#[test]
+fn an_end_reached_through_a_wrong_tie_goes_with_its_agent() {
+    let mut p = swapped();
+    p.hook("SubagentStop", &json!({"prompt_id":"p1","agent_id":"a1"}), ms("10:00:09.000"));
+    assert_eq!(sub(&p, "sub:toolu_b").status, SubagentState::Completed, "the swap, before meta");
+    p.join_by_meta("b1", &meta("toolu_b"));
+    p.join_by_meta("a1", &meta("toolu_a"));
+    assert_eq!(sub(&p, "sub:toolu_a").status, SubagentState::Completed, "a ended");
+    assert_eq!(sub(&p, "sub:toolu_a").ended_ms, Some(ms("10:00:09.000")));
+    assert_eq!(sub(&p, "sub:toolu_b").status, SubagentState::Running, "b runs on");
+    assert_eq!(sub(&p, "sub:toolu_b").ended_ms, None);
+    assert_eq!(turn(&p, "turn:p1").background_running, 1);
+}

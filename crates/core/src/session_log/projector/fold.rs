@@ -1281,7 +1281,8 @@ impl Projection {
     }
 
     /// Undo a hook's tie of `agent_id` to row `j`: what its transcript gave
-    /// the row goes back to the agent as an orphan's, for its right row.
+    /// the row, and an end it reached, go back to the agent as an orphan's,
+    /// for its right row.
     fn untie(&mut self, agent_id: &str, j: usize) {
         self.agents.remove(agent_id);
         let seen = self.seen_tools.remove(&j).unwrap_or(0);
@@ -1292,11 +1293,19 @@ impl Projection {
                 orphan.current_action = std::mem::take(&mut sub.current_action);
             }
             orphan.last_ms = orphan.last_ms.max(sub.last_ms);
+            // An end that came by this agent's id (its stop) is its own, not
+            // the row's: it goes with the agent, and the row runs again.
+            if sub.status != SubagentState::Running {
+                orphan.ended = orphan.ended.or(Some((sub.status, sub.ended_ms)));
+                sub.status = SubagentState::Running;
+                sub.ended_ms = None;
+            }
             sub.agent_id = None;
             sub.tool_count = 0;
             sub.last_ms = sub.started_ms;
         }
         self.touch(j);
+        self.count_background(j);
     }
 }
 
