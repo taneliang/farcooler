@@ -1920,6 +1920,12 @@ async fn session_to_adopt(
         );
         return None;
     };
+    // Claude's own registry, when it names this process, is no guess at all.
+    let registry = crate::claude_registry::global();
+    if let Some(found) = crate::registry_binding::session_to_adopt(registry, pid, &worktree.to_string_lossy(), claimed) {
+        tracing::info!(terminal = %terminal, pid, session = %found, "adopting the conversation claude's registry names");
+        return Some(found);
+    }
     let Some(started_after) = foreground::started_at(pid).await else {
         tracing::info!(
             terminal = %terminal,

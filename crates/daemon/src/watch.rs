@@ -43,6 +43,7 @@ mod holds;
 mod workers;
 pub(crate) mod task_notice;
 mod reap;
+mod registry_join;
 use failure_observation::agent_failure_observation;
 
 /// How often to look.
@@ -4457,14 +4458,18 @@ impl Watcher {
         // spawn a process and read files, and the sampling loop is shared with
         // everything else the daemon is doing.
         let log = tokio::task::spawn_blocking(move || {
+            let mut log = log;
+            registry_join::follow_registry(&mut log, registry_join::registered_log(&pane));
             advance_log(log, &pane, now, churn, working, |pane| {
-                crate::log_join::find_session_log(
+                // Claude's registry first; the title-and-files guess only
+                // where it has no answer.
+                registry_join::registered_log(pane).or_else(|| crate::log_join::find_session_log(
                     pane.preset.as_deref()?,
                     pane.pid,
                     &pane.cwd,
                     &pane.title,
                     &claimed,
-                )
+                ))
             })
         })
         .await;

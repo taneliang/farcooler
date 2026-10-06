@@ -34,6 +34,7 @@ pub mod push;
 pub mod read_only_folders;
 pub mod reconcile;
 pub mod refusal;
+pub mod registry_binding;
 pub mod resync;
 pub mod rendezvous;
 pub mod report;

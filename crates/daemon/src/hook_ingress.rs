@@ -211,6 +211,8 @@ pub struct HookIngress {
     /// How long a held ask waits for a device. `LONGEST_HOLD`, except in
     /// tests (`with_hold`).
     hold: std::time::Duration,
+    /// Claude's session registry, which binds a claude session no row names.
+    registry: &'static crate::claude_registry::Registry,
 }
 
 /// Free `terminal`'s `tails` slot, but only while it still holds `mine`,
@@ -250,7 +252,14 @@ impl HookIngress {
             sink,
             claims,
             hold: LONGEST_HOLD,
+            registry: crate::claude_registry::global(),
         }
+    }
+
+    /// The same ingress, reading `registry` rather than this machine's.
+    pub fn with_registry(mut self, registry: &'static crate::claude_registry::Registry) -> Self {
+        self.registry = registry;
+        self
     }
 
     /// The same ingress, holding each ask for `hold` rather than
@@ -339,9 +348,10 @@ impl HookIngress {
     ///
     /// Claude declares its session at launch — `preset_command` passes
     /// `--session-id` and `create_terminal` mints it — so a claude session no
-    /// row claims is a claude somebody started by hand, and guessing a
-    /// worktree-mate for it would be the mistake `session_discovery`'s
-    /// ambiguity refusal exists to avoid. Codex and cursor have no such flag
+    /// row claims is one started by hand, or the new session `/clear` begins
+    /// in the same pane. A worktree-mate is never guessed for it; claude's own
+    /// registry says which pane it is in, and binds the row to it
+    /// (`registry_binding::bind_pane`). Codex and cursor have no such flag
     /// and can only announce, so for those two a worktree match is the only
     /// binding there is.
     ///
@@ -375,7 +385,8 @@ impl HookIngress {
     /// like the live one beside it.
     fn announced_terminal(&self, f: &Facts, agent: Agent) -> Option<Uuid> {
         if agent == Agent::Claude {
-            return None;
+            let snapshot = self.inventory.snapshot();
+            return crate::registry_binding::bind_pane(self.registry, &self.store, &snapshot, f.session_id.as_deref()?);
         }
         let cwd = canonical(f.cwd.as_deref()?);
         // Hidden rows included, deliberately. `hide_worktree` sets a flag and

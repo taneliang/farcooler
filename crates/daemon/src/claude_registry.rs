@@ -240,7 +240,15 @@ pub struct Registry {
     dirty: Arc<AtomicBool>,
     watched: AtomicBool,
     watcher: Mutex<Option<notify::RecommendedWatcher>>,
+    /// Session id to the transcript found for it.
+    transcripts: Mutex<HashMap<String, PathBuf>>,
+    /// Session id to when every project directory was last searched for it.
+    misses: Mutex<HashMap<String, std::time::Instant>>,
 }
+
+/// How often a session with no transcript yet is searched for across every
+/// project directory.
+const SEARCH_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
 
 impl Registry {
     pub fn new(config: PathBuf, procs: Box<dyn Processes>) -> Registry {
@@ -251,6 +259,8 @@ impl Registry {
             dirty: Arc::new(AtomicBool::new(true)),
             watched: AtomicBool::new(false),
             watcher: Mutex::new(None),
+            transcripts: Mutex::new(HashMap::new()),
+            misses: Mutex::new(HashMap::new()),
         };
         registry.watch();
         registry
@@ -318,11 +328,39 @@ impl Registry {
         matches!((self.procs.tty(entry.pid), device_of(tty)), (Some(a), Some(b)) if a == b)
     }
 
-    /// The transcript `entry` is writing, if it exists yet.
+    /// The transcript `entry` is writing, if it exists yet: under the slug of
+    /// the registry's `cwd`, else of `fallback_cwd` (the pane's), else
+    /// whichever project directory holds the session's file. Claude names its
+    /// project directory for the directory it started in, and `cwd` in the
+    /// registry is not promised to stay that. Remembered once found.
     pub fn transcript(&self, entry: &Entry, fallback_cwd: &str) -> Option<PathBuf> {
-        let cwd = entry.cwd.as_ref().map(|c| c.to_string_lossy().into_owned()).unwrap_or_else(|| fallback_cwd.to_string());
-        let path = self.config.join("projects").join(claude_slug(&cwd)).join(format!("{}.jsonl", entry.session_id));
-        path.exists().then_some(path)
+        let file = format!("{}.jsonl", entry.session_id);
+        if let Some(found) = self.transcripts.lock().unwrap_or_else(|e| e.into_inner()).get(&entry.session_id) {
+            return Some(found.clone()).filter(|p| p.exists());
+        }
+        let projects = self.config.join("projects");
+        let fallback = std::fs::canonicalize(fallback_cwd).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| fallback_cwd.to_string());
+        let by_cwd = entry
+            .cwd
+            .iter()
+            .map(|c| c.to_string_lossy().into_owned())
+            .chain([fallback])
+            .map(|cwd| projects.join(claude_slug(&cwd)).join(&file))
+            .find(|p| p.exists());
+        let found = by_cwd.or_else(|| {
+            // The wide search, at most every few seconds per session: before
+            // its first turn a session has no file anywhere, and the watcher
+            // asks every tick.
+            let mut misses = self.misses.lock().unwrap_or_else(|e| e.into_inner());
+            let now = std::time::Instant::now();
+            if misses.get(&entry.session_id).is_some_and(|at| now.duration_since(*at) < SEARCH_EVERY) {
+                return None;
+            }
+            misses.insert(entry.session_id.clone(), now);
+            std::fs::read_dir(&projects).ok()?.flatten().map(|d| d.path().join(&file)).find(|p| p.exists())
+        })?;
+        self.transcripts.lock().unwrap_or_else(|e| e.into_inner()).insert(entry.session_id.clone(), found.clone());
+        Some(found)
     }
 }
 
