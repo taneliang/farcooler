@@ -44,7 +44,8 @@ struct PadLayoutTests {
             #expect(abs(w.tree + w.plan + w.chat - width) < 0.001, "\(width)")
             #expect(w.chat >= 340, "the chat is \(w.chat) at \(width)")
             #expect(w.plan >= 340, "the plan is \(w.plan) at \(width)")
-            if layout == .threeColumns { #expect(w.tree >= 240, "the tree is \(w.tree) at \(width)") }
+            if layout == .threeColumns { #expect(w.tree >= 260, "the tree is \(w.tree) at \(width)") }
+            if layout == .twoColumns { #expect(PadLayout.sidebar(width) >= 300, "the sidebar is narrow at \(width)") }
             if layout == .twoColumns { #expect(w.tree == 0) }
         }
     }

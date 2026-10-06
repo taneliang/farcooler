@@ -172,7 +172,7 @@ private struct PadTreeRow: View {
                 .accessibilityAddTraits(chosen ? .isSelected : [])
                 .accessibilityIdentifier("pad-tree-row-\(node.key.isEmpty ? node.title : node.key)")
         }
-        .padding(.leading, CGFloat(row.depth) * 14)
+        .padding(.leading, CGFloat(row.depth) * 12)
         .listRowBackground(chosen ? Fill.selection(active: true, contrast: contrast) : nil)
         .worktreeSwipe(node: node, connection: connection, place: place, failure: $failure)
     }
@@ -205,23 +205,28 @@ private struct PadTreeRow: View {
                 .frame(width: 20)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
+                // One line, as the Mac's outline: the key whole, the title
+                // cut at its tail, never a word broken across lines.
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     if !node.key.isEmpty {
                         Text(node.key)
                             .font(.subheadline.monospaced())
                             .foregroundStyle(.secondary)
+                            .fixedSize()
                     }
                     Text(node.title)
                         .foregroundStyle(node.quiet ? .secondary : .primary)
-                        .lineLimit(2)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
                 if !node.also.isEmpty {
-                    Text(node.also).font(.caption).foregroundStyle(.secondary)
+                    Text(node.also).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 if !node.caption.isEmpty {
-                    Text(node.caption).font(.caption).foregroundStyle(.secondary)
+                    Text(node.caption).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
             }
+            .layoutPriority(1)
             Spacer(minLength: 4)
             if row.dot {
                 Circle()
@@ -234,6 +239,8 @@ private struct PadTreeRow: View {
                 Text(node.detail)
                     .font(.subheadline.monospacedDigit())
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize()
             }
         }
         .contentShape(.rect)

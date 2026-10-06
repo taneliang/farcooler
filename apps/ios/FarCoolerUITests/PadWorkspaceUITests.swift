@@ -223,4 +223,39 @@ final class PadWorkspaceUITests: XCTestCase {
         XCTAssertFalse(element(app, "pad-canvas").exists, "a plan column at compact width")
         keep(app, "compact")
     }
+
+    // MARK: Captures
+
+    /// Three columns in landscape, with a theme picked; two in portrait,
+    /// with the tree shown on demand; and the compact fallback. Opt-in, as
+    /// `PhoneTreeUITests.testCaptures` is: `TEST_RUNNER_FC_CAPTURES=1`, and
+    /// `TEST_RUNNER_FC_CAPTURE_TAG` names the run's appearance. Set it on the
+    /// device first (`xcrun simctl ui <device> appearance dark`, and
+    /// `increase_contrast enabled`): `XCUIDevice.appearance` left an iPad
+    /// simulator on iOS 27 light.
+    func testCaptures() throws {
+        let environment = ProcessInfo.processInfo.environment
+        try XCTSkipUnless(environment["FC_CAPTURES"] == "1", "capture-only; set TEST_RUNNER_FC_CAPTURES=1 to take the sheets")
+        let tag = environment["FC_CAPTURE_TAG"].map { "-\($0)" } ?? ""
+        XCUIDevice.shared.orientation = .landscapeLeft
+        var app = openBilling(["-phone-orchestrator-chat"])
+        layout(app, is: "threeColumns", "landscape")
+        XCTAssertTrue(element(app, "plan-next-up").waitForExistence(timeout: 10))
+        keep(app, "capture-landscape\(tag)")
+        tap(app, "pad-tree-row-Visual language", "the tree")
+        canvasTitle(app, is: "Visual language", "a theme picked")
+        keep(app, "capture-landscape-theme\(tag)")
+        XCUIDevice.shared.orientation = .portrait
+        layout(app, is: "twoColumns", "portrait")
+        keep(app, "capture-portrait\(tag)")
+        tap(app, "pad-tree-toggle", "the toolbar")
+        XCTAssertTrue(element(app, "pad-tree").waitForExistence(timeout: 10))
+        keep(app, "capture-portrait-tree\(tag)")
+        app.terminate()
+        app = openBilling(["-phone-orchestrator-chat", "-pad-compact"])
+        layout(app, is: "phone", "compact")
+        XCTAssertTrue(app.buttons["plan-strip"].waitForExistence(timeout: 15))
+        keep(app, "capture-compact\(tag)")
+        app.terminate()
+    }
 }

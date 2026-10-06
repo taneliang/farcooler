@@ -52,14 +52,19 @@ enum PadLayout: Equatable, Sendable {
             let plan = Self.clamp(width * 0.45, 340, 480)
             return (0, plan, width - plan)
         case .threeColumns:
-            let tree = Self.sidebar(width)
+            let tree = Self.treeColumn(width)
             let plan = Self.clamp(width * 0.35, 340, 520)
             return (tree, plan, width - tree - plan)
         }
     }
 
-    /// The tree's width, as a column or as the sidebar shown on demand.
-    static func sidebar(_ width: Double) -> Double { clamp(width * 0.22, 240, 320) }
+    /// The tree's width as a column: a card's key and a few words of its
+    /// title on one line, four levels in.
+    static func treeColumn(_ width: Double) -> Double { clamp(width * 0.24, 260, 340) }
+
+    /// The tree's width shown on demand: over the plan, it takes no room
+    /// from the columns, so it's as wide as a column's best.
+    static func sidebar(_ width: Double) -> Double { clamp(width * 0.4, 300, 360) }
 
     private static func clamp(_ value: Double, _ low: Double, _ high: Double) -> Double {
         min(max(value, low), high)
