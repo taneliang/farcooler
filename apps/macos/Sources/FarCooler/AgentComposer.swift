@@ -951,6 +951,10 @@ private struct AgentComposerField: NSViewRepresentable {
             context.coordinator.undo.replace(view, with: text)
             let location = text.utf16Location(ofCharacterOffset: cursor)
             view.setSelectedRange(NSRange(location: location, length: 0))
+            // Set from outside, not typed, so no `textDidChange` measures it:
+            // Edit's message and a handed-off note stayed one line tall, and
+            // a sent multi-line message left the field its height (ov-383).
+            context.coordinator.report(view)
         }
         view.placeholder = placeholder
         apply(view, outOfSight: context.environment.outOfSight)

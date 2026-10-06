@@ -690,3 +690,17 @@ private func seq(_ n: UInt64, _ e: AgentEvent) -> Sequenced { Sequenced(seq: n, 
     ])
     #expect(t.rows.count == 1)
 }
+
+@Test func everySendCountsSoAViewCanBringItIntoView() {
+    // An echo carries no seq, so `cursor` stays put and a view keyed on it
+    // never scrolled the message it had just drawn into view (ov-383).
+    var t = Transcript()
+    t.apply([Sequenced(seq: 0, event: .message(role: .agent, text: "Hi", parent: nil))])
+    let cursor = t.cursor
+    t.appendLocalUserMessage("hello")
+    #expect(t.sends == 1)
+    #expect(t.cursor == cursor)
+    t.resetForNewEpoch()
+    t.appendLocalUserMessage("hello")
+    #expect(t.sends == 2, "a new epoch's first send still differs from the last")
+}

@@ -134,6 +134,11 @@ public struct Transcript: Sendable {
     public private(set) var queue: [QueuedPrompt] = []
     /// The seq to ask for on reconnect: one past the highest seen.
     public private(set) var cursor: UInt64 = 0
+    /// How many messages this client has drawn as sent
+    /// (`appendLocalUserMessage`). What a view watches to bring a message
+    /// it just sent into view (ov-383): an echo moves no `cursor`, since
+    /// no event carried it. Never reset, so every send is a change.
+    public private(set) var sends = 0
 
     /// Whether the next message must start a new row rather than joining the
     /// last one.
@@ -434,6 +439,7 @@ public struct Transcript: Sendable {
         // continuation of what the user just typed.
         breakBeforeNextMessage = true
         unconfirmedEchoes.append(LocalEcho(rowID: rowID, text: text))
+        sends += 1
         return rowID
     }
 

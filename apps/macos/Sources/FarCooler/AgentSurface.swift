@@ -63,6 +63,13 @@ struct AgentSurface: View {
     @State private var tail = TailFollow()
     /// The row the scroll view holds still while heights around it resolve.
     @State private var scrollPosition = ScrollPosition(idType: Int.self)
+    /// Whether Jump to Latest is offered: the reader has scrolled away from
+    /// the tail (ov-383). Unlike `tail`, drawn, so it's written only when
+    /// it flips (`follow`), never per geometry report.
+    @State private var showsJump = false
+    /// What a test reads of the scroll, and the doors it opens. Nil in the
+    /// app. See `AgentScrollProbe`.
+    @Environment(\.agentScrollProbe) private var probe
     /// A sent message on its way back into the composer, via Edit.
     ///
     /// Owned here rather than by the composer or the row: the row that
@@ -214,6 +221,17 @@ struct AgentSurface: View {
                             }
                     }
                 }
+                // The way back, riding just above the composer, and over the
+                // transcript rather than in the inset: appearing, it moves
+                // nothing (ov-383).
+                .overlay(alignment: .top) {
+                    if showsJump {
+                        jumpToLatest
+                            .offset(y: -(Self.jumpDiameter + Spacing.group))
+                            .transition(.scale(scale: 0.6).combined(with: .opacity))
+                    }
+                }
+                .animation(Motion.snap, value: showsJump)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // How the answer to the ask is going, for every `ApprovalControls`
@@ -324,7 +342,11 @@ struct AgentSurface: View {
             // terminal wants makes a paragraph a wall.
             .padding(.horizontal, 16)
             .padding(.top, 14)
-            .padding(.bottom, 4)
+            // Room between the last row and the composer, so a reply at the
+            // tail rests a row's spacing clear of the glass, not against it
+            // (ov-383). The inset the composer makes is its own height; this
+            // is the spacing on top of it.
+            .padding(.bottom, Self.tailClearance)
 
             // The end of the content, and what following the tail targets.
             Color.clear
@@ -358,12 +380,20 @@ struct AgentSurface: View {
         // resolves SHORTER than it was guessed — which walks the offset back
         // while the end stays pinned — cannot be read as scrolling up.
         .onScrollGeometryChange(for: ScrollGeometry.self) { $0 } action: { old, new in
-            if new.contentOffset.y + new.containerSize.height
-                >= new.contentSize.height - 40 {
-                tail.following = true
+            if Self.isAtTail(new) {
+                follow(true)
             } else if new.contentOffset.y < old.contentOffset.y - 0.5 {
-                tail.following = false
+                follow(false)
             }
+            probe?.geometry = new
+        }
+        // THE VIEWPORT MOVED: the composer grew a line, a plan or a queued
+        // message joined it, or it measured for the first time. Its inset
+        // changed, and a transcript that keeps its offset leaves the tail
+        // under the glass (ov-383). Shrinking counts too: new room to fill.
+        .onScrollGeometryChange(for: CGFloat.self) { $0.contentInsets.bottom } action: { _, _ in
+            guard tail.following else { return }
+            scrollToTail()
         }
         // Keyed on the CURSOR, not the row count: a streamed reply coalesces
         // into the row already on screen, so the count does not change while
@@ -388,9 +418,27 @@ struct AgentSurface: View {
             //
             // Unanimated, one event is one settled step. It still reads as
             // continuous, because the steps arrive five times a second.
-            scrollPosition.scrollTo(id: Self.endOfTranscript, anchor: .bottom)
+            scrollToTail()
         }
-        .onAppear { scrollPosition.scrollTo(id: Self.endOfTranscript, anchor: .bottom) }
+        // A message just sent comes into view, wherever the reader was, as
+        // in Messages: what you sent is what you're looking for (ov-383). An
+        // echo is drawn without an event, so the cursor above never moves
+        // for it.
+        .onChange(of: stream.transcript.sends) { _, _ in
+            follow(true)
+            scrollToTail()
+        }
+        // Working… appearing or going is content too, and no event says so.
+        .onChange(of: terminal.agent == .working) { _, _ in
+            guard tail.following else { return }
+            scrollToTail()
+        }
+        .onAppear {
+            scrollToTail()
+            probe?.send = { text in Task { await stream.send(text) } }
+            probe?.prefill = { prefill = $0 }
+            probe?.jump = { jumpToTail() }
+        }
         // The pane is in agent mode with no agent in it, said where the
         // conversation would have been.
         //
@@ -419,6 +467,67 @@ struct AgentSurface: View {
             sending: stream.answering.sending == pending.id,
             failure: stream.answering.sentence(for: pending.id),
             onRetry: { Task { await stream.retryAnswer() } })
+    }
+
+    /// Space between the transcript's last row and the composer's glass.
+    static let tailClearance = Spacing.inset
+
+    /// Whether the end of the conversation is on screen, above the composer.
+    ///
+    /// On the Mac `containerSize` is the viewport less the composer's inset,
+    /// and `visibleRect` is the whole viewport, the part under the glass
+    /// included (measured: 509.5 against 600 with a 90.5 pt composer). So
+    /// offset plus container height is where the composer's top edge is.
+    /// The 40 pt of slack is for a redraw's height corrections.
+    static func isAtTail(_ geometry: ScrollGeometry) -> Bool {
+        tailHiddenBy(geometry) <= 40
+    }
+
+    /// How far the end of the content is below the composer's top edge:
+    /// zero or less when it's in view above it.
+    static func tailHiddenBy(_ geometry: ScrollGeometry) -> CGFloat {
+        geometry.contentSize.height - (geometry.contentOffset.y + geometry.containerSize.height)
+    }
+
+    /// The one writer of following, and of whether the way back is shown.
+    private func follow(_ on: Bool) {
+        tail.following = on
+        if showsJump == on { showsJump = !on }
+        probe?.following = on
+        probe?.showsJump = !on
+    }
+
+    /// Put the end of the conversation back above the composer. Unanimated:
+    /// see the cursor's `onChange`.
+    private func scrollToTail() {
+        scrollPosition.scrollTo(id: Self.endOfTranscript, anchor: .bottom)
+    }
+
+    /// Jump to Latest: following again, and the one scroll worth animating,
+    /// since the reader asked for it.
+    private func jumpToTail() {
+        follow(true)
+        withAnimation(.easeOut(duration: 0.25)) { scrollToTail() }
+    }
+
+    /// Jump to Latest's diameter, which also lifts it clear of the composer.
+    private static let jumpDiameter: CGFloat = 30
+
+    /// The way back to the tail, offered once the reader has scrolled away,
+    /// never taken for them. No count: a reply coalesces into one row, so a
+    /// count would say one for a four-minute answer.
+    private var jumpToLatest: some View {
+        Button(action: jumpToTail) {
+            Image(systemName: "chevron.down")
+                .font(.system(size: 13, weight: .semibold))
+                .frame(width: Self.jumpDiameter, height: Self.jumpDiameter)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .surface(.floating, in: Circle())
+        .help("Jump to Latest")
+        .accessibilityLabel("Jump to Latest")
+        .accessibilityIdentifier("jump-to-latest")
     }
 
     /// The end of the transcript's content.
