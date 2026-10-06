@@ -221,6 +221,9 @@ struct AgentScrollTests {
 
         // A tail scrolled just under the composer isn't the tail: the part
         // of the viewport behind the glass isn't seen.
+        // After Jump to Latest's animation has finished, or what it moves
+        // next undoes the scroll below.
+        await Self.settle()
         let tailOffset = try #require(probe.geometry?.contentOffset.y)
         scroll.contentView.scroll(to: NSPoint(x: 0, y: tailOffset - 70))
         scroll.reflectScrolledClipView(scroll.contentView)
