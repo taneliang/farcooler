@@ -756,6 +756,10 @@ struct AgentView: View {
             // stopped finishing at all: the runner was killed rather than
             // failed, which is what a layout loop looks like from outside.
             .padding(.bottom, keyboardBehindTheBar ? 0 : Self.barClearance)
+            // Its top edge, for `AgentFollowTests`: the line the transcript's
+            // last row has to clear by a row's spacing (ov-383).
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("agent-composer-stack")
         }
     }
 
@@ -3254,7 +3258,7 @@ private struct WorkingRow: View {
             .foregroundStyle(.secondary)
             .overlay(alignment: .leading) {
                 if !reduceMotion {
-                    ShimmerBand(content: label.foregroundStyle(.primary), onSweeping: { sweeping = true })
+                    ShimmerBand(content: label.foregroundStyle(.primary), onSweeping: { sweeping = $0 })
                         .accessibilityHidden(true)
                 }
             }

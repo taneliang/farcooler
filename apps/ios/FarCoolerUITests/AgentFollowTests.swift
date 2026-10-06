@@ -40,13 +40,22 @@ final class AgentFollowTests: XCTestCase {
         return done()
     }
 
-    /// The top of what rests on the transcript: the composer's field, or a
-    /// banner over it, such as the harness's failed send. The banner is
-    /// measured by its Retry, which is the banner's whole height.
+    /// The top of what rests on the transcript: the composer stack, the card
+    /// and anything over it, such as the harness's failed-send banner.
     private func composerTop(_ app: XCUIApplication) -> CGFloat {
-        let retry = app.buttons["Retry"]
-        let field = app.textViews.firstMatch.frame.minY
-        return retry.exists ? min(field, retry.frame.minY) : field
+        app.descendants(matching: .any).matching(identifier: "agent-composer-stack").firstMatch.frame.minY
+    }
+
+    /// The room the last row rests with above the composer: the
+    /// transcript's padding (`PaneMetrics.card`), not a row against the
+    /// glass. Measured 13 pt (the padding and the 1 pt anchor).
+    private static let clearance: CGFloat = 12
+
+    /// The bottom of the transcript's last row: the harness's pane is
+    /// working, so Working… under `message` when it's drawn.
+    private func lastRowBottom(_ app: XCUIApplication, after message: XCUIElement) -> CGFloat {
+        let working = app.descendants(matching: .any).matching(identifier: "agent-working").firstMatch
+        return working.exists ? max(message.frame.maxY, working.frame.maxY) : message.frame.maxY
     }
 
     /// Scrolled up, then a message sent: it comes into view above the
@@ -72,7 +81,7 @@ final class AgentFollowTests: XCTestCase {
         XCTAssertTrue(sent.waitForExistence(timeout: 10), "the sent message was never drawn")
 
         XCTAssertTrue(
-            wait(5) { following(transcript) && sent.isHittable && sent.frame.maxY <= composerTop(app) },
+            wait(5) { following(transcript) && sent.isHittable && composerTop(app) - lastRowBottom(app, after: sent) >= Self.clearance },
             "the sent message is at \(sent.frame), the composer starts at \(composerTop(app)), "
                 + "following: \(following(transcript)); \(transcript.value ?? "")")
         XCTAssertFalse(app.buttons["jump-to-latest"].exists, "Jump to Latest outlived the send")
@@ -94,7 +103,7 @@ final class AgentFollowTests: XCTestCase {
         let sent = app.staticTexts[words]
         XCTAssertTrue(sent.waitForExistence(timeout: 10))
         XCTAssertTrue(
-            wait(5) { sent.frame.maxY <= composerTop(app) },
+            wait(5) { composerTop(app) - lastRowBottom(app, after: sent) >= Self.clearance },
             "the failed send's banner covers the message: it ends at \(sent.frame.maxY), the "
                 + "composer starts at \(composerTop(app)); \(transcript.value ?? "")")
         // Past the send's own settling re-anchors (`settleLadder`, 1 s in
@@ -116,7 +125,7 @@ final class AgentFollowTests: XCTestCase {
             wait(5) { following(transcript) && ended - sent.frame.maxY >= before - composerTop(app) - 5 },
             "the composer grew \(before - composerTop(app)) pt and the last message rose "
                 + "\(ended - sent.frame.maxY) pt")
-        XCTAssertLessThanOrEqual(sent.frame.maxY, composerTop(app))
+        XCTAssertGreaterThanOrEqual(composerTop(app) - lastRowBottom(app, after: sent), Self.clearance)
         capture("3-composer-grown")
     }
 }
