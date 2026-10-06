@@ -306,6 +306,27 @@ pub(super) struct Record<'a> {
     pub error: Obj<ApiError<'a>>,
     #[serde(rename = "compactMetadata", borrow)]
     pub compact: Obj<CompactMetadata<'a>>,
+    /// An `assistant` record that is claude reporting a failed request, not
+    /// the model speaking (`model: "<synthetic>"`, `stop_sequence`).
+    #[serde(rename = "isApiErrorMessage")]
+    pub is_api_error: Bool,
+    #[serde(borrow)]
+    pub attachment: Obj<Attachment<'a>>,
+    /// A `queue-operation remove`'s reason: `absorbed_mid_turn`,
+    /// `delivered_to_agent`.
+    #[serde(borrow)]
+    pub reason: Str<'a>,
+}
+
+/// The one attachment the fold reads: `queued_command`, a queued message
+/// claude took into the turn it was running.
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(default)]
+pub(super) struct Attachment<'a> {
+    #[serde(rename = "type", borrow)]
+    pub kind: Str<'a>,
+    #[serde(borrow)]
+    pub prompt: Str<'a>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]

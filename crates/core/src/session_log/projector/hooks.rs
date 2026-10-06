@@ -102,19 +102,7 @@ impl Projection {
             "StopFailure" => {
                 let turn = self.hook_turn(payload, now);
                 let detail = text(payload, "last_assistant_message").or(text(payload, "error")).unwrap_or("The turn failed");
-                let failed = TurnOutcome::Failed { detail: squeeze(detail, 200) };
-                // The transcript cannot say a turn failed: it writes the error
-                // as a reply and a `turn_duration` like any other. So this
-                // overrides a `Finished` the transcript got to first.
-                let finished = matches!(self.turn_mut(turn), Some(t) if t.outcome == Some(TurnOutcome::Finished));
-                if finished {
-                    if let Some(t) = self.turn_mut(turn) {
-                        t.outcome = Some(failed);
-                    }
-                    self.touch(turn);
-                } else {
-                    self.end_turn(turn, at, failed);
-                }
+                self.fail_turn(turn, detail, at);
             }
             "MessageDisplay" => self.message_display(payload, now),
             "PermissionRequest" => {
@@ -132,6 +120,9 @@ impl Projection {
                 let id = format!("perm:{}", self.next_seq());
                 self.push(id, Some(turn), true, RowKind::Ask(ask));
             }
+            // A subagent's own tool calls carry its `agent_id`; they are its
+            // row's business (from its transcript), not the main turn's.
+            "PreToolUse" | "PostToolUse" | "PostToolUseFailure" if payload.get("agent_id").is_some() => {}
             "PreToolUse" => {
                 let turn = self.hook_turn(payload, now);
                 let block = Block {

@@ -40,3 +40,5 @@ mod hooks_tests;
 mod parity_tests;
 #[cfg(test)]
 mod bench_tests;
+#[cfg(test)]
+mod shapes_tests;

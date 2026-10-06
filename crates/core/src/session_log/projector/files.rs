@@ -137,6 +137,9 @@ impl LineReader {
         chunk.truncate(got);
         self.offset += got as u64;
         report.bytes = got as u64;
+        // A short read (an error, or the file cut while reading) is not "more
+        // waiting": the next poll looks again, rather than this one spinning.
+        report.more = report.more && got == take;
 
         let mut rest = &chunk[..];
         while let Some(newline) = rest.iter().position(|&b| b == b'\n') {
@@ -249,7 +252,7 @@ impl SessionProjector {
             let report = Self::drain(&mut self.main, &mut self.projection, None);
             folded += report.lines;
             self.held_back += u64::from(report.holding);
-            if !report.more {
+            if !report.more || report.bytes == 0 {
                 break;
             }
         }
@@ -267,7 +270,7 @@ impl SessionProjector {
                 let report = Self::drain(&mut file.reader, &mut self.projection, Some((agent, file.meta.as_ref())));
                 folded += report.lines;
                 self.held_back += u64::from(report.holding);
-                if !report.more {
+                if !report.more || report.bytes == 0 {
                     break;
                 }
             }

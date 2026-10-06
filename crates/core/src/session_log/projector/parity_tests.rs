@@ -32,9 +32,29 @@ struct Summary {
 fn old_reader(text: &str) -> Summary {
     let mut s = Summary::default();
     let mut agent_of: BTreeMap<String, String> = BTreeMap::new();
+    // Two differences the projector means to have, taken out here so the
+    // rest can be compared: a line written twice (one real session holds
+    // 24,170 repeated lines) is one record, and a second prompt record with a
+    // promptId already seen continues that prompt's turn rather than starting
+    // another (21 in the same session).
+    let mut lines_seen = std::collections::HashSet::new();
+    let mut prompts_seen = std::collections::HashSet::new();
     for line in text.lines() {
+        if !lines_seen.insert(line) {
+            continue;
+        }
+        let prompt_id = serde_json::from_str::<serde_json::Value>(line)
+            .ok()
+            .and_then(|v| Some(v.get("promptSource")?.is_string().then(|| v.get("promptId")?.as_str().map(str::to_string))??));
+        let repeat_prompt = prompt_id.is_some_and(|p| !prompts_seen.insert(p));
+        // Claude's own error report reads to the old reader as prose; the
+        // projector makes it the turn's failure instead (see
+        // `where_the_projector_knows_more_it_says_so`).
+        let api_error = line.contains("\"isApiErrorMessage\":true");
         for event in claude::parse_line(line) {
             match event {
+                TurnEvent::Said { .. } if api_error => {}
+                TurnEvent::Started { .. } if repeat_prompt => {}
                 TurnEvent::Started { .. } => s.prompts += 1,
                 TurnEvent::Said { text, conclusion } => s.prose.push((text, conclusion)),
                 TurnEvent::Asked { id, .. } => s.questions.push(id),
@@ -65,6 +85,9 @@ fn projector(text: &str) -> (Summary, Projection) {
     let mut s = Summary::default();
     for row in p.rows() {
         match &row.kind {
+            // A prompt with no `promptSource` (a slash command's expansion) is a
+            // turn to the projector and not to the old reader, which keys on
+            // that field; both are counted alike by leaving those out.
             RowKind::Turn(t) if t.origin != TurnOrigin::Other => s.prompts += 1,
             RowKind::Prose(pr) => s.prose.push((pr.text.clone(), pr.conclusion)),
             RowKind::Ask(a) if a.kind == AskKind::Question => s.questions.push(row.id["ask:".len()..].to_string()),
@@ -109,6 +132,10 @@ fn the_projector_agrees_with_the_old_reader_on_every_fixture() {
         ("nonmonotonic", NONMONOTONIC),
         ("unknown", UNKNOWN),
         ("cleared-after", CLEARED_AFTER),
+        ("meta-prompt", META_PROMPT),
+        ("queued-notification", QUEUED_NOTIFICATION),
+        ("queue", QUEUE),
+        ("errors-and-gaps", ERRORS_AND_GAPS),
     ] {
         assert_parity(name, text);
     }
@@ -151,7 +178,10 @@ fn claude_turn_open(text: &str) -> bool {
 #[test]
 #[ignore]
 fn the_projector_agrees_with_the_old_reader_on_a_recorded_corpus() {
-    let Some(root) = std::env::var_os("FARCOOLER_PROJECTOR_CORPUS") else { return };
+    let Some(root) = std::env::var_os("FARCOOLER_PROJECTOR_CORPUS") else {
+        eprintln!("SKIPPED: set FARCOOLER_PROJECTOR_CORPUS to a claude projects/ directory; nothing was compared");
+        return;
+    };
     let mut files = 0;
     for project in std::fs::read_dir(root).unwrap().flatten() {
         for entry in std::fs::read_dir(project.path()).into_iter().flatten().flatten() {

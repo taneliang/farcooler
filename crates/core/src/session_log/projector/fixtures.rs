@@ -28,6 +28,14 @@ pub const UNKNOWN: &str = include_str!("fixtures/unknown.jsonl");
 pub const CLEARED_BEFORE: &str = include_str!("fixtures/cleared-before.jsonl");
 pub const CLEARED_AFTER: &str = include_str!("fixtures/cleared-after.jsonl");
 
+// Synthetic, in the shapes real transcripts take (field names and record
+// order read from ~/.claude/projects, every word invented). One per finding of
+// the first review: real files are the owner's and are never copied here.
+pub const META_PROMPT: &str = include_str!("fixtures/shapes/meta-prompt.jsonl");
+pub const QUEUED_NOTIFICATION: &str = include_str!("fixtures/shapes/queued-notification.jsonl");
+pub const QUEUE: &str = include_str!("fixtures/shapes/queue.jsonl");
+pub const ERRORS_AND_GAPS: &str = include_str!("fixtures/shapes/errors-and-gaps.jsonl");
+
 /// A directory under the system temp dir, removed when dropped.
 pub struct Scratch(pub PathBuf);
 

@@ -81,6 +81,9 @@ pub enum TurnOrigin {
     Notification,
     /// A program driving claude, not a person.
     Sdk,
+    /// Claude woke itself for something no person typed: a scheduled task's
+    /// heartbeat, another session's message (`promptSource: system`).
+    System,
     /// A turn whose start this projection never saw (it began before the file
     /// was read, or the source said something new).
     Other,

@@ -10,7 +10,8 @@
 //! never to sort: claude's timestamps are not monotonic, and a duration that
 //! would come out negative is clamped to zero instead.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 
 use super::record::{decode, Block, Content, Input, Record, SubagentMeta, ToolUseResult};
 use super::rows::*;
@@ -20,7 +21,9 @@ use crate::session_log::SubagentStatus;
 /// Record types claude writes that carry nothing a row is made of. Anything
 /// else unrecognized becomes a `Gap`, so a new record type is seen, not lost.
 const SILENT_TYPES: &[&str] = &[
-    "attachment",
+    "frame-link",
+    "artifact-autoreact-ledger",
+    "artifact-comment-monitor",
     "mode",
     "permission-mode",
     "atis-latch",
@@ -58,6 +61,27 @@ pub(super) struct Orphan {
     stopped: bool,
 }
 
+/// One entry in claude's queue.
+#[derive(Debug, Clone)]
+struct QueueEntry {
+    /// The enqueued text, as written, for `remove`, which names it whole.
+    content: String,
+    /// Its first words, for matching the prompt a dequeue delivered.
+    key: String,
+    /// Its `Queued` row, when it is a person's message.
+    row: Option<usize>,
+}
+
+fn queue_key(text: &str) -> String {
+    squeeze(text, 40)
+}
+
+/// Text claude queues for itself rather than for a person.
+fn machine_queued(text: &str) -> bool {
+    let text = text.trim_start();
+    text.starts_with("<task-notification>") || text.starts_with("<agent-message")
+}
+
 /// Counts for the benchmark and for logs.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct FoldStats {
@@ -90,8 +114,21 @@ pub struct Projection {
     /// the larger of this and the count its launch result reports, which
     /// covers the same calls: adding them would count each one twice.
     seen_tools: HashMap<usize, u32>,
-    /// `Queued` rows still waiting, oldest first.
-    queue: VecDeque<usize>,
+    /// Claude's queue as its `queue-operation` records leave it, oldest
+    /// first: every entry, including the ones that are not a person's message
+    /// and so have no row.
+    queue: Vec<QueueEntry>,
+    /// Dequeues not yet matched to the prompt they delivered. A `dequeue`
+    /// record names no entry, and claude does not take the oldest: replayed
+    /// over 156 real files, a front-of-queue pop was wrong 1,506 times in
+    /// 1,888. The prompt that follows says which it was.
+    pending_dequeues: u32,
+    /// Hashes of every line already folded. A rewrite read again from its
+    /// start, or a `/resume` back into a session already shown, re-reads lines
+    /// this projection has; folding them twice would duplicate their rows.
+    seen_lines: HashSet<u64>,
+    /// Turns a `turn_duration` has already timed. A second one is not theirs.
+    timed: HashSet<usize>,
     /// Hook `message_id` to the prose row it became or matched,
     /// and the last `index` applied to it.
     pub(super) hook_messages: HashMap<String, (usize, Option<u64>)>,
@@ -254,21 +291,46 @@ impl Projection {
         self.seq
     }
 
-    /// A gap, folded into the previous row when that is a gap of the same
-    /// reason, so a run of unreadable lines is one row and not a wall of them.
+    /// A gap: one row per reason per turn, counting. Unknown records are
+    /// scattered among known ones (a coordinator session writes a
+    /// `frame-link` between most of its turns' records), so folding only into
+    /// the row just before would still draw hundreds of them.
     pub(super) fn gap(&mut self, reason: GapReason) {
         self.stats.gaps += 1;
-        if let Some(last) = self.rows.len().checked_sub(1) {
-            if let RowKind::Gap(gap) = &mut self.rows[last].kind {
-                if gap.reason == reason {
-                    gap.count += 1;
-                    self.touch(last);
-                    return;
-                }
+        let turn = self.turn.map_or_else(|| "-".to_string(), |t| self.rows[t].id.clone());
+        let id = format!("gap:{turn}:{reason:?}");
+        if let Some(&i) = self.index.get(&id) {
+            if let RowKind::Gap(gap) = &mut self.rows[i].kind {
+                gap.count += 1;
             }
+            self.touch(i);
+            return;
         }
-        let id = format!("gap:{}", self.next_seq());
         self.push(id, self.turn, false, RowKind::Gap(Gap { reason, count: 1 }));
+    }
+
+    /// Whether `line` has been folded already, noting it if not.
+    fn seen(&mut self, scope: &str, line: &[u8]) -> bool {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        scope.hash(&mut hasher);
+        line.hash(&mut hasher);
+        !self.seen_lines.insert(hasher.finish())
+    }
+
+    /// A turn that failed, whatever ended it first. The transcript writes a
+    /// failure as a reply and a `turn_duration` like any other, so a
+    /// `Finished` already there is overridden.
+    pub(super) fn fail_turn(&mut self, i: usize, detail: &str, at: Option<i64>) {
+        let failed = TurnOutcome::Failed { detail: squeeze(detail, LINE_CHARS) };
+        let finished = matches!(self.turn_mut(i), Some(t) if t.outcome == Some(TurnOutcome::Finished));
+        if finished {
+            if let Some(t) = self.turn_mut(i) {
+                t.outcome = Some(failed);
+            }
+            self.touch(i);
+        } else {
+            self.end_turn(i, at, failed);
+        }
     }
 
     pub(super) fn notice(&mut self, kind: NoticeKind, text: String, at: Option<i64>, provisional: bool) -> usize {
@@ -355,7 +417,11 @@ impl Projection {
         provisional: bool,
     ) -> usize {
         if let Some(&i) = self.index.get(&id) {
-            if !provisional {
+            // The same prompt record a second time (a `/resume` into a
+            // session already shown re-reads it) must not take the
+            // transcript back to a turn it has left.
+            let left = !self.rows[i].provisional && self.turn.is_some_and(|t| t != i);
+            if !provisional && !left {
                 let row = &mut self.rows[i];
                 row.provisional = false;
                 if let RowKind::Turn(turn) = &mut row.kind {
@@ -426,8 +492,13 @@ impl Projection {
     /// The transcript's turn, opening a placeholder when a record arrives with
     /// none: a file read from the middle, or a session that began before the
     /// first prompt was written.
+    ///
+    /// Also when the transcript's turn is over and timed but claude carries
+    /// on with no prompt record (seen in real sessions: a run of replies and
+    /// a second `turn_duration` with no prompt between them). That work is a
+    /// turn of its own, and its `turn_duration` is not the last turn's.
     fn ensure_turn(&mut self, at: Option<i64>) -> usize {
-        if let Some(i) = self.turn {
+        if let Some(i) = self.turn.filter(|i| !self.timed.contains(i)) {
             return i;
         }
         let id = format!("turn:resumed:{}", self.next_seq());
@@ -442,6 +513,9 @@ impl Projection {
     pub fn fold_line(&mut self, line: &[u8]) {
         self.stats.lines += 1;
         self.stats.bytes += line.len() as u64;
+        if self.seen("", line) {
+            return;
+        }
         let Some(record) = decode(line) else {
             self.gap(GapReason::Unparsed);
             return;
@@ -452,6 +526,7 @@ impl Projection {
             Some("assistant") => self.assistant(&record, at),
             Some("system") => self.system(&record, at),
             Some("queue-operation") => self.queue_operation(&record, at),
+            Some("attachment") => self.attachment(&record, at),
             Some(kind) if SILENT_TYPES.contains(&kind) => {}
             Some(kind) => self.gap(GapReason::Unknown(kind.to_string())),
             None => self.gap(GapReason::Unknown(String::new())),
@@ -491,7 +566,14 @@ impl Projection {
             }
             _ => {}
         }
-        if results || record.is_meta.yes() || record.is_compact_summary.yes() {
+        // A companion record (an image's source line) shares its prompt's
+        // promptId and opens nothing. But claude also writes whole prompts as
+        // isMeta: a scheduled heartbeat, a message from another session, each
+        // with its own new promptId and `promptSource: system` (1,707 of them
+        // in 156 real files), and those are turns.
+        let companion = record.is_meta.yes()
+            && record.prompt_id.get().is_none_or(|p| self.index.contains_key(&format!("turn:{p}")) || record.prompt_source.get().is_none());
+        if results || companion || record.is_compact_summary.yes() {
             self.turn_clock = at.or(self.turn_clock);
             return;
         }
@@ -505,7 +587,7 @@ impl Projection {
         }
         if let Some(body) = trimmed.strip_prefix("<task-notification>") {
             self.task_notification(body, at);
-        } else if let Some(name) = tag(trimmed, "command-name") {
+        } else if let Some(name) = trimmed.starts_with("<command-name>").then(|| tag(trimmed, "command-name")).flatten() {
             self.notice(NoticeKind::Command, name.trim().to_string(), at, false);
             return;
         } else if trimmed.starts_with("<local-command-stdout>") || trimmed.starts_with("<local-command-caveat>") {
@@ -523,6 +605,7 @@ impl Projection {
             "typed" | "suggestion_accepted" => TurnOrigin::Typed,
             "queued" => TurnOrigin::Queued,
             "system" if trimmed.starts_with("<task-notification>") => TurnOrigin::Notification,
+            "system" => TurnOrigin::System,
             "sdk" => TurnOrigin::Sdk,
             _ => TurnOrigin::Other,
         };
@@ -535,12 +618,63 @@ impl Projection {
             TurnOrigin::Notification => tag(trimmed, "summary").unwrap_or("A background task finished"),
             _ => text,
         };
+        self.delivered(text);
         self.open_turn(id, origin, prompt, at, false);
+    }
+
+    /// A prompt arrived: if a dequeue is waiting to be matched, this is what
+    /// it took. The entry whose first words are the prompt's, else (claude
+    /// rewrites a peer's `<agent-message>` before delivering it) the newest
+    /// entry that is no person's message.
+    fn delivered(&mut self, prompt: &str) {
+        if self.pending_dequeues == 0 {
+            return;
+        }
+        self.pending_dequeues -= 1;
+        let key = queue_key(prompt);
+        let found = self
+            .queue
+            .iter()
+            .position(|e| e.key == key)
+            .or_else(|| self.queue.iter().rposition(|e| e.row.is_none()));
+        if let Some(n) = found {
+            let entry = self.queue.remove(n);
+            if let Some(i) = entry.row {
+                self.set_queued(i, QueuedState::Sent);
+            }
+        }
+    }
+
+    /// `queued_command`: a queued message claude took into the running turn.
+    /// A background agent's notification is delivered this way when it lands
+    /// mid-turn, and for 834 of 1,164 real async agents it was the only
+    /// record of their end (claude.rs's `notified` reads it too).
+    fn attachment(&mut self, record: &Record<'_>, at: Option<i64>) {
+        let Some(attachment) = record.attachment.0.as_ref() else { return };
+        if attachment.kind.get() != Some("queued_command") {
+            return;
+        }
+        let prompt = attachment.prompt.get().unwrap_or_default().trim_start();
+        if let Some(body) = prompt.strip_prefix("<task-notification>") {
+            self.task_notification(body, at);
+        }
     }
 
     fn assistant(&mut self, record: &Record<'_>, at: Option<i64>) {
         let turn = self.ensure_turn(at);
         let Some(message) = record.message.0.as_ref() else { return };
+        // Claude reporting a failed request in the model's place: the turn
+        // failed, and the text is why, not something the model said.
+        if record.is_api_error.yes() {
+            let detail = match &message.content {
+                Content::Blocks(blocks) => blocks.iter().filter_map(|b| b.0.as_ref()).find_map(|b| b.text.get()),
+                Content::Text(t) => Some(t.as_ref()),
+                Content::None => None,
+            };
+            self.fail_turn(turn, detail.unwrap_or("The request failed"), at);
+            self.turn_clock = at.or(self.turn_clock);
+            return;
+        }
         let ends = message.stop_reason.get() == Some("end_turn");
         let uuid = record.uuid.get().map(str::to_string).unwrap_or_else(|| format!("r{}", self.next_seq()));
         if let Content::Blocks(blocks) = &message.content {
@@ -752,10 +886,13 @@ impl Projection {
 
     pub(super) fn end_subagent(&mut self, i: usize, state: SubagentState, at: Option<i64>) {
         if let RowKind::Subagent(sub) = &mut self.rows[i].kind {
-            sub.status = state;
-            if sub.ended_ms.is_none() || state != SubagentState::Running {
-                sub.ended_ms = clamp_end(sub.started_ms, at);
+            // The first end stands: a notification can repeat, and claude
+            // writes one ending as several records (queue, attachment, prompt).
+            if sub.status != SubagentState::Running && sub.ended_ms.is_some() {
+                return;
             }
+            sub.status = state;
+            sub.ended_ms = clamp_end(sub.started_ms, at);
         }
         self.touch(i);
         self.count_background(i);
@@ -826,6 +963,9 @@ impl Projection {
         match record.subtype.get() {
             Some("turn_duration") => {
                 let Some(turn) = self.turn else { return };
+                if !self.timed.insert(turn) {
+                    return;
+                }
                 self.end_turn(turn, at, TurnOutcome::Finished);
                 if let Some(ms) = record.duration_ms.int() {
                     if let Some(t) = self.turn_mut(turn) {
@@ -858,8 +998,10 @@ impl Projection {
                 }
             }
             Some("local_command") => {
-                let content = record.content.get().unwrap_or_default();
-                let name = tag(content, "command-name").unwrap_or(content).trim();
+                // Only the record that names the command; the one carrying its
+                // output (`<local-command-stdout>`) is not a notice.
+                let content = record.content.get().unwrap_or_default().trim_start();
+                let name = content.starts_with("<command-name>").then(|| tag(content, "command-name")).flatten().unwrap_or("").trim();
                 if !name.is_empty() {
                     self.notice(NoticeKind::Command, name.to_string(), at, false);
                 }
@@ -878,34 +1020,44 @@ impl Projection {
     }
 
     fn queue_operation(&mut self, record: &Record<'_>, at: Option<i64>) {
+        let content = record.content.get().unwrap_or_default();
         match record.operation.get() {
             Some("enqueue") => {
-                let text = record.content.get().unwrap_or_default();
-                // Claude queues its own task notifications the same way; those
-                // are not a person's message.
-                if text.trim_start().starts_with("<task-notification>") {
+                // 131 real files begin with an enqueue that carries nothing.
+                if content.trim().is_empty() {
                     return;
                 }
-                let id = format!("queued:{}", self.next_seq());
-                let queued = Queued { text: squeeze(text, LINE_CHARS), state: QueuedState::Waiting, at_ms: at };
-                let i = self.push(id, self.turn, false, RowKind::Queued(queued));
-                self.queue.push_back(i);
-            }
-            Some("dequeue") => {
-                if let Some(i) = self.queue.pop_front() {
-                    self.set_queued(i, QueuedState::Sent);
+                let row = (!machine_queued(content)).then(|| {
+                    let id = format!("queued:{}", self.next_seq());
+                    let queued = Queued { text: squeeze(content, LINE_CHARS), state: QueuedState::Waiting, at_ms: at };
+                    self.push(id, self.turn, false, RowKind::Queued(queued))
+                });
+                // claude.rs's `notified` reads an enqueued notification as the
+                // agent's end; so does this.
+                if let Some(body) = content.trim_start().strip_prefix("<task-notification>") {
+                    self.task_notification(body, at);
                 }
+                self.queue.push(QueueEntry { content: content.to_string(), key: queue_key(content), row });
             }
+            Some("dequeue") => self.pending_dequeues += 1,
             Some("remove") => {
-                let text = squeeze(record.content.get().unwrap_or_default(), LINE_CHARS);
-                let found = self
-                    .queue
-                    .iter()
-                    .position(|&i| matches!(&self.rows[i].kind, RowKind::Queued(q) if q.text == text));
-                if let Some(n) = found {
-                    let i = self.queue.remove(n).expect("position is in range");
-                    self.set_queued(i, QueuedState::Withdrawn);
+                let Some(n) = self.queue.iter().position(|e| e.content == content) else { return };
+                let entry = self.queue.remove(n);
+                // Absorbed into the running turn, or handed to the agent: sent
+                // either way. Only a remove with no such reason is taken back.
+                let sent = matches!(record.reason.get(), Some("absorbed_mid_turn" | "delivered_to_agent"));
+                if let Some(i) = entry.row {
+                    self.set_queued(i, if sent { QueuedState::Sent } else { QueuedState::Withdrawn });
                 }
+            }
+            // Everything waiting goes back to the input box.
+            Some("popAll") => {
+                for entry in std::mem::take(&mut self.queue) {
+                    if let Some(i) = entry.row {
+                        self.set_queued(i, QueuedState::Withdrawn);
+                    }
+                }
+                self.pending_dequeues = 0;
             }
             _ => {}
         }
@@ -930,6 +1082,9 @@ impl Projection {
     pub fn fold_subagent_line(&mut self, agent_id: &str, meta: Option<&SubagentMeta>, line: &[u8]) {
         self.stats.lines += 1;
         self.stats.bytes += line.len() as u64;
+        if self.seen(agent_id, line) {
+            return;
+        }
         if !self.agents.contains_key(agent_id) {
             if let Some(meta) = meta {
                 self.join_by_meta(agent_id, meta);

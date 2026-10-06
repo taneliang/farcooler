@@ -21,7 +21,8 @@ fn a_recorded_session_folds_into_its_prompts_queued_message_and_replies() {
         "every prompt is a row, in full, line breaks kept (ov-358 finding 4)"
     );
     assert_eq!(t[2].1.origin, TurnOrigin::Queued, "the busy message came off claude's queue");
-    assert!(t.iter().all(|(_, t)| t.outcome == Some(TurnOutcome::Finished)), "{t:?}");
+    let revoked = TurnOutcome::Failed { detail: "OAuth token revoked · Please run /login".into() };
+    assert!(t.iter().all(|(_, t)| t.outcome.as_ref() == Some(&revoked)), "isApiErrorMessage fails the turn: {t:?}");
     assert_eq!(t[1].1.duration_ms, Some(14247), "turn_duration's own number wins over the span");
 
     let queued: Vec<&Queued> = p.rows().iter().filter_map(|r| match &r.kind { RowKind::Queued(q) => Some(q), _ => None }).collect();
@@ -29,8 +30,7 @@ fn a_recorded_session_folds_into_its_prompts_queued_message_and_replies() {
     assert_eq!(queued[0].text, "second message typed while busy");
     assert_eq!(queued[0].state, QueuedState::Sent, "the dequeue sent it");
 
-    let said: Vec<&str> = prose(&p).iter().map(|(_, s)| s.text.as_str()).collect();
-    assert_eq!(said, ["OAuth token revoked · Please run /login"; 5]);
+    assert!(prose(&p).is_empty(), "claude's error report is the outcome, not the model's prose");
     assert_eq!(p.stats().gaps, 0, "nothing in a real session is unreadable");
 }
 
@@ -64,7 +64,7 @@ fn a_background_subagent_ends_after_its_turn_and_the_turn_says_so_until_it_does(
     }
     let bg = sub(&p, "sub:toolu_bg");
     assert_eq!(bg.status, SubagentState::Completed, "the notification ended it");
-    assert_eq!(bg.ended_ms, Some(ms("10:01:00.100")));
+    assert_eq!(bg.ended_ms, Some(ms("10:01:00.000")), "its first end: the enqueued notification");
     assert_eq!(turn(&p, "turn:p1").background_running, 0);
     let t2 = turn(&p, "turn:p2");
     assert_eq!(t2.origin, TurnOrigin::Notification);
