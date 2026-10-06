@@ -109,6 +109,12 @@ const CLAUDE_ONLY_EVENTS: &[(&str, bool)] = &[
     ("StopFailure", false),
 ];
 
+/// The hooks claude runs without waiting (`"async": true`), ov-364: a
+/// call's end, which only ever clears a mark, so arriving late is safe. Each
+/// saved a tool call about one hook's start (ov-364's report). Not a turn's
+/// end, which a late arrival could apply to the next turn's calls.
+const CLAUDE_UNWAITED: &[&str] = &["PostToolUse", "PostToolUseFailure"];
+
 /// What claude's permission hook may take before claude SIGTERMs it, in
 /// seconds (measured: spike run 9, 8.004 s for `timeout: 8`).
 ///
@@ -571,6 +577,8 @@ pub fn claude_settings(socket: &Path) -> Value {
                 "matcher": "*",
                 "hooks": [ { "type": "command", "command": command, "timeout": CLAUDE_GATE_TIMEOUT_S } ]
             })
+        } else if CLAUDE_UNWAITED.contains(event) {
+            json!({ "hooks": [ { "type": "command", "command": command, "async": true } ] })
         } else {
             json!({ "hooks": [ { "type": "command", "command": command } ] })
         };
@@ -1063,16 +1071,6 @@ mod tests {
                 .unwrap_or_else(|| panic!("claude settings carries a command for {event}"));
             assert!(command.contains(&format!("--agent claude --event {event}")), "{event}: {command}");
             assert_eq!(command.contains("--gating"), *gating, "{event}: {command}");
-        }
-    }
-
-    /// ov-364's four reach every claude pane Far Cooler launches, none waiting.
-    #[test]
-    fn claude_gets_the_subagent_and_failure_hooks() {
-        let settings = claude_settings(Path::new("/tmp/h.sock"));
-        for event in ["SubagentStart", "SubagentStop", "Notification", "StopFailure"] {
-            let command = settings["hooks"][event][0]["hooks"][0]["command"].as_str().unwrap_or_default();
-            assert!(command.contains(&format!("--event {event} ")) && !command.contains("--gating"), "{event}");
         }
     }
 
@@ -1624,3 +1622,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "hook_install_claude_tests.rs"]
+mod claude_tests;
