@@ -1883,8 +1883,8 @@ impl Rpc {
 
             // The same payload as a prompt, typed into a TUI pane's box past
             // the answer wake's gate, else refused with nothing typed. Ask the
-            // Orchestrator (ov-184) never sends it (`Watcher::draft_into`); the
-            // Mac title bar's field (ov-214) submits it (`Watcher::tell_into`).
+            // Orchestrator (ov-184) never sends it (`Watcher::draft_into`);
+            // `terminal tell` submits it, or queues it (`Watcher::tell_into`).
             "terminal.draft_prompt" | "terminal.tell" => {
                 let Some(request::Payload::AgentPrompt(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
@@ -1892,10 +1892,10 @@ impl Rpc {
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
                 let text = wire::prompt_text(&p.blocks);
                 if req.method == "terminal.tell" {
-                    self.watcher.tell_into(id, &text).await?;
-                } else {
-                    self.watcher.draft_into(id, &text).await?;
+                    let queued = self.watcher.tell_into(id, &text).await? == crate::watch::answer_wake::Turn::During;
+                    return Ok(result::Value::TerminalTold(farcooler_protocol::v1::TerminalTold { queued }));
                 }
+                self.watcher.draft_into(id, &text).await?;
                 self.terminal_result(id).await
             }
 

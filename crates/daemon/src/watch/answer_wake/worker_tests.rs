@@ -148,14 +148,15 @@ async fn a_hold_that_ended_is_told_to_the_idle_orchestrator() {
     assert_eq!(si.submitted().len(), 1, "told once");
 }
 
-/// Check 1: the watcher reads it working, so the wake waits and says why,
-/// and lands when it goes idle.
+/// Check 1: the watcher can't say what it's doing, so the wake waits and
+/// says why, and lands when it goes idle. (A working claude or codex takes
+/// it into its queue: `mid_turn_tests`.)
 #[tokio::test]
-async fn a_hold_that_ended_waits_for_a_busy_orchestrator() {
+async fn a_hold_that_ended_waits_for_an_orchestrator_in_an_unknown_state() {
     let b = board().await;
     let orchestrator = b.adopted_shell().await;
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
-    b.doing(orchestrator.id, AgentActivity::Working).await;
+    b.doing(orchestrator.id, AgentActivity::Unknown).await;
     b.hold_ended();
     b.pump().await;
     b.hold_untouched(&si);
@@ -238,7 +239,7 @@ async fn a_hold_that_ended_is_dropped_once_the_task_has_started() {
     let b = board().await;
     let orchestrator = b.adopted_shell().await;
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
-    b.doing(orchestrator.id, AgentActivity::Working).await;
+    b.doing(orchestrator.id, AgentActivity::Unknown).await;
     b.hold_ended();
     b.pump().await;
     b.svc.store.set_task_status(b.task.id, TaskStatus::InProgress, Actor::Manager).unwrap();
@@ -254,7 +255,7 @@ async fn a_hold_that_ended_is_given_up_on_after_half_an_hour() {
     let b = board().await;
     let orchestrator = b.adopted_shell().await;
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
-    b.doing(orchestrator.id, AgentActivity::Working).await;
+    b.doing(orchestrator.id, AgentActivity::Unknown).await;
     b.hold_ended();
     b.pump().await;
     farcooler_store::testing::backdate_hold_wakes(&b.svc.store, GIVE_UP_AFTER_MS + 120_000);

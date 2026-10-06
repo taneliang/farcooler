@@ -920,9 +920,9 @@ enum TerminalCmd {
     },
     /// Paste text into a TUI pane's box, never Enter; refused unless safe.
     DraftPrompt { terminal: String, text: String },
-    /// Type a message into an orchestrator's TUI and submit it; refused,
-    /// typing nothing, unless safe. Put `--` before a message that starts
-    /// with a dash.
+    /// Type a message into an orchestrator's TUI and submit it, queued when
+    /// it's working; refused, typing nothing, unless safe. Put `--` before a
+    /// message that starts with a dash.
     Tell { terminal: String, text: String },
     /// Answer a pending agent question, carrying the ids back exactly as the
     /// adapter sent them — inventing one here would make the answer

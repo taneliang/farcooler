@@ -241,8 +241,16 @@ impl Board {
         let si = StandIn { control: dir.join("control"), log: dir.join("log") };
         std::fs::write(&si.control, "idle").unwrap();
         let q = |p: &std::path::Path| format!("'{}'", p.display());
-        let command =
-            format!("{} {} {agent} {} {}", q(&program), q(&dir.join("stand_in.pl")), q(&si.control), q(&si.log));
+        // Its own claude config, never the real one (`mid_turn`).
+        std::fs::create_dir_all(dir.join("config")).unwrap();
+        let command = format!(
+            "env CLAUDE_CONFIG_DIR={} {} {} {agent} {} {}",
+            q(&dir.join("config")),
+            q(&program),
+            q(&dir.join("stand_in.pl")),
+            q(&si.control),
+            q(&si.log)
+        );
         self.run_in(terminal, &command).await;
         self.settle_stand_in(terminal, &si).await;
         si
@@ -453,14 +461,15 @@ async fn an_answer_is_pasted_into_an_idle_codex() {
     assert_eq!(si.submitted(), [b.told("Drill in")], "{}", si.log());
 }
 
-/// While the watcher reads it working the answer waits, and lands once it
-/// reads idle.
+/// While the watcher can't say what the agent is doing the answer waits,
+/// and lands once it reads idle. (Working is no hold for claude or codex,
+/// which queue: `mid_turn_tests`.)
 #[tokio::test]
-async fn an_answer_waits_for_a_working_agent_to_go_idle() {
+async fn an_answer_waits_while_the_agent_is_unknown() {
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
-    b.doing(agent.id, AgentActivity::Working).await;
+    b.doing(agent.id, AgentActivity::Unknown).await;
     b.answer("Drill in");
     b.pump().await;
     b.untouched(&si);
@@ -606,7 +615,7 @@ async fn a_claim_left_by_a_crash_is_never_typed_again() {
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
-    b.doing(agent.id, AgentActivity::Working).await;
+    b.doing(agent.id, AgentActivity::Unknown).await;
     b.answer("Drill in");
     b.pump().await;
     let note = b.pending()[0].note;
@@ -626,7 +635,7 @@ async fn an_answer_is_told_exactly_once_across_a_restart() {
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
-    b.doing(agent.id, AgentActivity::Working).await;
+    b.doing(agent.id, AgentActivity::Unknown).await;
     b.answer("Drill in");
     b.pump().await;
     let Board { dir, svc, watcher, task, .. } = b;
@@ -677,7 +686,7 @@ async fn a_newer_answer_replaces_one_not_yet_told() {
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
-    b.doing(agent.id, AgentActivity::Working).await;
+    b.doing(agent.id, AgentActivity::Unknown).await;
     b.answer("Drill in");
     b.answer("Actually, tabs");
     b.pump().await;
@@ -697,7 +706,7 @@ async fn two_answers_for_one_terminal_go_one_at_a_time() {
     let other = b.svc.store.create_task(b.task.workspace_id, "Tabs or spaces", Actor::Manager).unwrap();
     let orchestrator = b.orchestrator().await;
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
-    b.doing(orchestrator.id, AgentActivity::Working).await;
+    b.doing(orchestrator.id, AgentActivity::Unknown).await;
     b.answer("Drill in");
     b.answer_on(other.id, "Tabs");
     b.pump().await;
@@ -1061,7 +1070,7 @@ async fn a_send_failing_after_the_claim_is_not_retried() {
     let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
-    b.doing(agent.id, AgentActivity::Working).await;
+    b.doing(agent.id, AgentActivity::Unknown).await;
     b.answer("Drill in");
     b.pump().await;
     b.watcher.fail_sends.store(true, Ordering::SeqCst);
@@ -1359,8 +1368,8 @@ async fn a_draft_is_refused_where_an_answer_would_wait() {
     let b = board().await;
     let orchestrator = b.adopted_shell().await;
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
-    // Busy.
-    b.doing(orchestrator.id, AgentActivity::Working).await;
+    // Its state unknown.
+    b.doing(orchestrator.id, AgentActivity::Unknown).await;
     assert!(b.watcher.draft_into(orchestrator.id, "About ov-1: ").await.is_err());
     nothing_typed(&si);
     // A menu.
@@ -1398,102 +1407,8 @@ async fn a_draft_whose_send_fails_is_an_error() {
     assert!(b.watcher.draft_into(orchestrator.id, "About ov-1: ").await.is_err());
 }
 
-// ---- the Mac title bar's field (ov-214): a message typed and submitted ----
+#[path = "tell_tests.rs"]
+mod tell_tests;
 
-/// The refusal's stable word, from a `tell_into` error.
-fn refused_with(result: Result<()>) -> &'static str {
-    match result {
-        Err(e) => e.what(),
-        Ok(()) => panic!("it was typed"),
-    }
-}
-
-/// An idle claude run by hand in the adopted orchestrator's pane: the
-/// message is pasted on one line, read back, and submitted, once.
-#[tokio::test]
-async fn a_message_is_typed_into_an_idle_orchestrator_and_submitted() {
-    let b = board().await;
-    let orchestrator = b.adopted_shell().await;
-    let si = b.stand_in(&orchestrator, "claude", "claude").await;
-    b.doing(orchestrator.id, AgentActivity::Idle).await;
-    b.watcher.tell_into(orchestrator.id, "-x land ov-214\nafter the rebase").await.expect("told");
-    si.pasted().await;
-    assert!(si.log().contains("PASTE "), "a bracketed paste: {}", si.log());
-    si.submits(1).await;
-    assert_eq!(si.submitted(), ["-x land ov-214 after the rebase"], "{}", si.log());
-}
-
-/// Every check that holds an answer refuses a message, typing nothing, and
-/// names why.
-#[tokio::test]
-async fn a_message_is_refused_where_an_answer_would_wait() {
-    let b = board().await;
-    let orchestrator = b.adopted_shell().await;
-    let si = b.stand_in(&orchestrator, "claude", "claude").await;
-    b.doing(orchestrator.id, AgentActivity::Working).await;
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello").await), "busy");
-    nothing_typed(&si);
-    b.doing(orchestrator.id, AgentActivity::Idle).await;
-    si.show("menu").await;
-    b.screen_with(orchestrator.id, "Tab to amend").await;
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello").await), "prompt");
-    nothing_typed(&si);
-    si.show("draft:fix the flaky").await;
-    b.screen_with(orchestrator.id, "fix the flaky").await;
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello").await), "draft");
-    nothing_typed(&si);
-}
-
-/// A process that isn't an agent, drawing a perfect agent screen: refused.
-#[tokio::test]
-async fn a_message_is_refused_for_a_process_that_is_not_an_agent() {
-    let b = board().await;
-    let orchestrator = b.adopted_shell().await;
-    let si = b.stand_in(&orchestrator, "claude", "perl").await;
-    b.doing(orchestrator.id, AgentActivity::Idle).await;
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello").await), "not_an_agent");
-    nothing_typed(&si);
-}
-
-/// Too long is refused before anything is typed, never cut; empty too; and
-/// only an orchestrator in a terminal is typed to.
-#[tokio::test]
-async fn a_message_too_long_empty_or_to_the_wrong_pane_is_refused() {
-    let b = board().await;
-    let orchestrator = b.adopted_shell().await;
-    let si = b.stand_in(&orchestrator, "claude", "claude").await;
-    b.doing(orchestrator.id, AgentActivity::Idle).await;
-    let long = "a".repeat(super::tell::LONGEST_MESSAGE + 1);
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, &long).await), "too_long");
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, " \n\t ").await), "text");
-    nothing_typed(&si);
-    let agent = b.agent("Agent 2", "claude").await;
-    let other = b.stand_in(&agent, "claude", "claude").await;
-    b.doing(agent.id, AgentActivity::Idle).await;
-    assert_eq!(refused_with(b.watcher.tell_into(agent.id, "hello").await), "terminal");
-    nothing_typed(&other);
-}
-
-/// A paste the box doesn't hold exactly gets no Enter, and says so.
-#[tokio::test]
-async fn a_message_the_box_doesnt_hold_is_left_and_not_sent() {
-    let b = board().await;
-    let orchestrator = b.adopted_shell().await;
-    let si = b.stand_in(&orchestrator, "claude", "claude").await;
-    si.show("mangle").await;
-    b.screen_with(orchestrator.id, "stand-in").await;
-    b.doing(orchestrator.id, AgentActivity::Idle).await;
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello").await), "paste_left");
-    assert!(!si.log().contains("ENTER"), "{}", si.log());
-}
-
-/// The words a refusal can name are the ones the Mac knows.
-#[test]
-fn a_held_answer_names_a_word_the_mac_knows() {
-    for held in [Held::Busy, Held::Prompt, Held::Draft, Held::Typing, Held::NotAnAgent, Held::Unfamiliar, Held::Unproven] {
-        assert!(
-            ["busy", "prompt", "draft", "typing", "not_an_agent", "unfamiliar", "unproven"]
-                .contains(&super::tell::held_word(held))
-        );
-    }
-}
+#[path = "mid_turn_tests.rs"]
+mod mid_turn_tests;

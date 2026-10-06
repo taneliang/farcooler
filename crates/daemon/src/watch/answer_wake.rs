@@ -25,10 +25,11 @@
 //!
 //! **The gate, for a TUI pane.** Every check runs on this pass, against the
 //! pane as it is now, and every one fails closed:
-//! 1. The watcher reads the terminal Idle or Done, and this runner hasn't
-//!    told it anything in the last `TOLD_SPACING_MS` (`told`): one answer
-//!    at a time per terminal. Nothing waits on catching a transition; each
-//!    tick looks at the pane as it is, and check 4 is what proves it idle.
+//! 1. The watcher reads the terminal Idle, Done or Working, and this runner
+//!    hasn't told it anything in the last `TOLD_SPACING_MS` (`told`): one
+//!    answer at a time per terminal. Nothing waits on catching a transition;
+//!    each tick looks at the pane as it is, and check 4 is what proves it
+//!    between turns, or mid-turn in an agent that queues (below).
 //! 2. Nobody has typed there lately (`typed_lately`).
 //! 3. The pane's foreground process is the agent its preset names (for an
 //!    adopted orchestrator launched as a shell, any agent), proven by its
@@ -36,10 +37,10 @@
 //!    (`foreground_agent`), never by screen text. Checks 4 and 5 read the
 //!    pane as that proven agent. A shell, or anything not recognized, isn't
 //!    typed into.
-//! 4. A fresh capture classifies as neither Working nor Blocked, AND
-//!    `composer::read` positively recognizes the agent's box and finds it
-//!    empty. A menu, a picker, a prompt, an unfamiliar screen or a draft:
-//!    not typed into.
+//! 4. A fresh capture classifies as Idle, or as Working in an agent that
+//!    queues what's sent mid-turn (`queues_mid_turn`), AND `composer::read`
+//!    positively recognizes the agent's box and finds it empty. A menu, a
+//!    picker, a prompt, an unfamiliar screen or a draft: not typed into.
 //! 5. The agent has bracketed paste on, as tmux reports it. tmux older than
 //!    3.7 (Ubuntu 24.04 has 3.4) can't report it, so there it's read from
 //!    the pane's own output (`paste_mode`), which the daemon follows for
@@ -62,8 +63,21 @@
 //! unfinished (a crash mid-typing), is "Couldn't confirm the agent got the
 //! decision" and is never typed again.
 //!
+//! **Mid-turn** (ov-360). claude and codex take a message submitted while
+//! they work, as the person typing it would: claude queues it for its next
+//! turn, codex for after its next tool call. Measured on claude 2.1.290 and
+//! codex 0.153.4: the box is the same box, a paste and Enter go in, and the
+//! message arrives as the next prompt. So a working agent is typed into
+//! under the same checks, and what it's sent waits in its own queue, not in
+//! this one. That it reached the queue is confirmed after the Enter
+//! (`mid_turn`): claude's transcript gets an `enqueue` record holding the
+//! text; codex draws the text under its queue. Unconfirmed is "Couldn't
+//! confirm". An agent whose queue can't be witnessed (a claude with no
+//! session registry) waits for the turn to end, as before.
+//!
 //! **A chat pane** takes the answer as a prompt on its agent channel, after
-//! check 1: the channel can't reach a shell, a menu or a draft.
+//! check 1: the channel can't reach a shell, a menu or a draft, and a turn
+//! running holds it in the pane's own queue (`ChatSession::prompt`).
 //!
 //! **Superseded.** A newer answer on the same task replaces an older one not
 //! yet told: only the newest is told, and the older is noted "Not
@@ -259,6 +273,29 @@ impl Held {
     }
 }
 
+/// Where the agent was when it was typed to: between turns, so the message
+/// is its next prompt, or mid-turn, so the message waits in its queue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Turn {
+    Between,
+    During,
+}
+
+/// Whether an agent takes a message submitted mid-turn into a queue of its
+/// own (see this module's docs, "Mid-turn").
+pub(crate) fn queues_mid_turn(preset: &str) -> bool {
+    matches!(preset.split(':').next(), Some("claude" | "codex"))
+}
+
+/// The agent in front of a pane, as checks 3 to 5 proved it.
+pub(crate) struct Proven {
+    pub(crate) preset: &'static str,
+    pub(crate) tty: String,
+    /// The agent's process, which names its session (`mid_turn`).
+    pub(crate) pid: i32,
+    pub(crate) turn: Turn,
+}
+
 /// What a wake came to on one pass.
 #[derive(Debug, PartialEq, Eq)]
 enum Pass {
@@ -358,7 +395,7 @@ impl Watcher {
         };
         let pass = match self.ready(&to).await {
             Err(held) => Pass::Waiting(held),
-            Ok(()) => {
+            Ok(turn) => {
                 let text = match wake.kind {
                     WakeKind::Answer => {
                         message_for(&task.key, &task.title, &wake.body, &self.subagents_to_pass_on(&task, &to))
@@ -366,7 +403,7 @@ impl Watcher {
                     WakeKind::HoldEnded => hold_message(&task.key, &task.title, &wake.body),
                 };
                 if to.pane_mode == PaneMode::Agent {
-                    self.prompt(wake, &task, &to, &text).await
+                    self.prompt(wake, &task, &to, &text, turn).await
                 } else {
                     self.type_into(wake, &task, &to, &text).await
                 }
@@ -401,15 +438,19 @@ impl Watcher {
         }
     }
 
-    /// Check 1 and 2 of the gate: the watcher reads it Idle or Done, newly
-    /// since the last answer it was told, and nobody is typing.
-    async fn ready(&self, to: &Terminal) -> std::result::Result<(), Held> {
+    /// Check 1 and 2 of the gate: the watcher reads it Idle, Done or
+    /// Working, newly since the last answer it was told, and nobody is
+    /// typing. Working is only the watcher's word: for a TUI pane, check 4
+    /// decides on a fresh capture whether a turn runs and whether that agent
+    /// queues what it's sent.
+    async fn ready(&self, to: &Terminal) -> std::result::Result<Turn, Held> {
         let (activity, _, _) = self.activity(to.id).await;
-        match activity {
-            AgentActivity::Idle | AgentActivity::Done => {}
+        let turn = match activity {
+            AgentActivity::Idle | AgentActivity::Done => Turn::Between,
+            AgentActivity::Working => Turn::During,
             AgentActivity::Blocked => return Err(Held::Prompt),
             _ => return Err(Held::Busy),
-        }
+        };
         let told = self.told.lock().unwrap_or_else(|e| e.into_inner()).get(&to.id).copied();
         if told.is_some_and(|told| now_millis() - told < TOLD_SPACING_MS) {
             return Err(Held::Busy);
@@ -417,11 +458,12 @@ impl Watcher {
         if self.typed_lately(to.id, now_millis()) {
             return Err(Held::Typing);
         }
-        Ok(())
+        Ok(turn)
     }
 
-    /// A chat pane: the answer as a prompt on its agent channel.
-    async fn prompt(&self, wake: &PendingWake, task: &Task, to: &Terminal, text: &str) -> Pass {
+    /// A chat pane: the answer as a prompt on its agent channel, which holds
+    /// it in the pane's queue while a turn runs.
+    async fn prompt(&self, wake: &PendingWake, task: &Task, to: &Terminal, text: &str, turn: Turn) -> Pass {
         if !matches!(self.service.store.claim_wake(wake), Ok(true)) {
             return Pass::Settled;
         }
@@ -430,16 +472,24 @@ impl Watcher {
             return self.settle(wake, Some(task), Some(couldnt_confirm(wake.kind)));
         }
         self.mark_told(to.id);
-        self.settle(wake, Some(task), Some(told(wake.kind, to)))
+        self.settle(wake, Some(task), Some(told(wake.kind, to, turn)))
     }
 
     /// A TUI pane: checks 3 to 5 (`proven_tui`), then claim, paste, read
     /// back, Enter.
     async fn type_into(&self, wake: &PendingWake, task: &Task, to: &Terminal, text: &str) -> Pass {
-        let (preset, tty) = match self.proven_tui(to).await {
+        let proven = match self.proven_tui(to).await {
             Ok(proven) => proven,
             Err(held) => return Pass::Waiting(held),
         };
+        let witness = match proven.turn {
+            Turn::Between => None,
+            Turn::During => match mid_turn::witness(&proven).await {
+                Some(witness) => Some(witness),
+                None => return Pass::Waiting(Held::Busy),
+            },
+        };
+        let (preset, tty) = (proven.preset, proven.tty.as_str());
         match self.service.store.claim_wake(wake) {
             Ok(true) => {}
             Ok(false) => return Pass::Settled,
@@ -459,7 +509,7 @@ impl Watcher {
             if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started) {
                 break;
             }
-            if let Ok(Ok(now)) = self.box_of(to, preset).await
+            if let Ok(Ok((now, _))) = self.box_of(to, preset).await
                 && composer::holds_exactly(&now, text)
             {
                 held_exactly = true;
@@ -473,7 +523,7 @@ impl Watcher {
         if !held_exactly {
             // The agent may have gone, and a shell taken the pane: say where
             // the text really is.
-            if foreground_agent(&tty).await != Some(preset) {
+            if foreground_agent(tty).await != Some(preset) {
                 return self.settle(wake, Some(task), Some(LEFT_AT_A_SHELL.into()));
             }
             return self.settle(wake, Some(task), Some(PASTE_LEFT.into()));
@@ -482,14 +532,19 @@ impl Watcher {
             return self.settle(wake, Some(task), Some(couldnt_confirm(wake.kind)));
         }
         self.mark_told(to.id);
-        self.settle(wake, Some(task), Some(told(wake.kind, to)))
+        if let Some(witness) = witness
+            && !self.queued(to, preset, &witness, text).await
+        {
+            return self.settle(wake, Some(task), Some(couldnt_confirm(wake.kind)));
+        }
+        self.settle(wake, Some(task), Some(told(wake.kind, to, proven.turn)))
     }
 
     /// Checks 3 to 5 of the gate, for a TUI pane: the agent in front proven
     /// by its process, its box recognized and empty, and bracketed paste on.
-    /// Returns the proven agent's preset and the pane's tty, or why not. Every
-    /// check fails closed.
-    async fn proven_tui(&self, to: &Terminal) -> std::result::Result<(&'static str, String), Held> {
+    /// Returns the proven agent and whether a turn is running, or why not.
+    /// Every check fails closed.
+    async fn proven_tui(&self, to: &Terminal) -> std::result::Result<Proven, Held> {
         let launched = to.command_preset.split(':').next().unwrap_or_default();
         let tty = self
             .service
@@ -502,17 +557,17 @@ impl Watcher {
         // The agent in front, proven by its process. A pane launched as an
         // agent must be running that one. An adopted orchestrator launched
         // as anything else is read as the agent its process proves.
-        let Some(preset) = foreground_agent(&tty).await else { return Err(Held::NotAnAgent) };
+        let Some((preset, pid)) = foreground(&tty).await else { return Err(Held::NotAnAgent) };
         if launched != preset && (is_an_agent_preset(launched) || to.role != TerminalRole::Orchestrator) {
             return Err(Held::NotAnAgent);
         }
         let Ok(composer) = self.box_of(to, preset).await else { return Err(Held::Unfamiliar) };
-        match composer {
-            Ok(Composer::Empty) => {}
-            Ok(Composer::Holds(_)) => return Err(Held::Draft),
-            Ok(Composer::Unrecognized) => return Err(Held::Unfamiliar),
+        let turn = match composer {
+            Ok((Composer::Empty, turn)) => turn,
+            Ok((Composer::Holds(_), _)) => return Err(Held::Draft),
+            Ok((Composer::Unrecognized, _)) => return Err(Held::Unfamiliar),
             Err(held) => return Err(held),
-        }
+        };
         let bracketed = match self.service.pane_bracketed_paste(to.id).await {
             Ok(Some(on)) => on,
             // tmux can't say (older than 3.7): the pane's own output can, if
@@ -528,15 +583,16 @@ impl Watcher {
         if !bracketed {
             return Err(Held::Unfamiliar);
         }
-        Ok((preset, tty))
+        Ok(Proven { preset, tty, pid, turn })
     }
 
     /// Ask the Orchestrator (ov-184): leave `text` in a TUI pane's box as one
     /// bracketed paste, and NEVER press Enter, so the person finishes the
     /// sentence. The same gate as typing an answer (`ready`, then
-    /// `proven_tui`): the pane is a proven agent, idle, nobody is typing, its
-    /// box is empty, and bracketed paste is known to be on. Any failure is
-    /// an error, and nothing is typed; the Mac then copies the text instead.
+    /// `proven_tui`): the pane is a proven agent, between turns or mid-turn
+    /// in one that queues, nobody is typing, its box is empty, and bracketed
+    /// paste is known to be on. Any failure is an error, and nothing is
+    /// typed; the Mac then copies the text instead.
     ///
     /// Not recorded as someone typing (`marks: None`), as an answer isn't.
     pub(crate) async fn draft_into(&self, id: Uuid, text: &str) -> Result<()> {
@@ -565,16 +621,18 @@ impl Watcher {
         runtime.send_bytes_hex(to.id, &paste).await
     }
 
-    /// The pane's box as a fresh capture shows it, or why it's no box to
-    /// type into: the agent working, or a prompt up. `Err` when the screen
-    /// couldn't be read.
-    async fn box_of(&self, to: &Terminal, preset: &str) -> Result<std::result::Result<Composer, Held>> {
+    /// The pane's box as a fresh capture shows it, and whether a turn is
+    /// running, or why it's no box to type into: a prompt up, or the agent
+    /// working when it doesn't queue (`queues_mid_turn`). `Err` when the
+    /// screen couldn't be read.
+    async fn box_of(&self, to: &Terminal, preset: &str) -> Result<std::result::Result<(Composer, Turn), Held>> {
         let (screen, _, _) = self.service.screen(to.id).await?;
         let activity = self.service.registry().classify(preset, &screen);
         Ok(match activity {
+            AgentActivity::Working if queues_mid_turn(preset) => Ok((composer::read(preset, &screen), Turn::During)),
             AgentActivity::Working => Err(Held::Busy),
             AgentActivity::Blocked => Err(Held::Prompt),
-            AgentActivity::Idle => Ok(composer::read(preset, &screen)),
+            AgentActivity::Idle => Ok((composer::read(preset, &screen), Turn::Between)),
             _ => Err(Held::Unfamiliar),
         })
     }
@@ -741,6 +799,11 @@ pub(crate) fn agent_of_process(exe: &str, args: &str) -> Option<&'static str> {
 /// that is only waiting on a child in it. A background job isn't in the
 /// foreground group, so a shell claude backgrounded doesn't count.
 pub(crate) async fn foreground_agent(tty: &str) -> Option<&'static str> {
+    foreground(tty).await.map(|(agent, _)| agent)
+}
+
+/// `foreground_agent`, with the agent's pid.
+pub(crate) async fn foreground(tty: &str) -> Option<(&'static str, i32)> {
     let name = tty.strip_prefix("/dev/").unwrap_or(tty);
     let out = tokio::process::Command::new("ps")
         .args(["-t", name, "-o", "pid=,ppid=,stat=,comm="])
@@ -759,7 +822,7 @@ pub(crate) async fn foreground_agent(tty: &str) -> Option<&'static str> {
         .output()
         .await
         .ok()?;
-    agent_of_process(&exe, String::from_utf8_lossy(&args.stdout).trim())
+    agent_of_process(&exe, String::from_utf8_lossy(&args.stdout).trim()).map(|agent| (agent, pid))
 }
 
 /// The process in front, from `ps -o pid=,ppid=,stat=,comm=` for one tty,
@@ -790,11 +853,16 @@ pub(crate) fn in_front(listing: &str) -> Option<(i32, String)> {
     Some((*pid, comm.clone()))
 }
 
-/// "Told the orchestrator about the decision", or that the hold ended.
-fn told(kind: WakeKind, to: &Terminal) -> String {
-    match kind {
+/// "Told the orchestrator about the decision", or that the hold ended; and
+/// when it was working, that the message waits in its queue.
+fn told(kind: WakeKind, to: &Terminal, turn: Turn) -> String {
+    let told = match kind {
         WakeKind::Answer => format!("Told {} about the decision", spoken_name(to)),
         WakeKind::HoldEnded => format!("Told {} the hold ended", spoken_name(to)),
+    };
+    match turn {
+        Turn::Between => told,
+        Turn::During => format!("{told}. It was working, so it's queued for when it's ready"),
     }
 }
 
@@ -822,6 +890,7 @@ fn spoken_name(t: &Terminal) -> String {
     if title.is_empty() { "the agent".into() } else { title }
 }
 
+mod mid_turn;
 mod tell;
 #[cfg(test)]
 mod tests;

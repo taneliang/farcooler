@@ -375,6 +375,10 @@ message Result {
     // Tag 210, after landing's block (200-209); `Request.ruling_keep_all` keeps
     // 200, which landing never took on the request side.
     RulingsKept rulings_kept = 210;
+    // `terminal.tell` (ov-360): sent as the agent's next prompt, or queued
+    // behind the turn it's in. A daemon from before replies with the
+    // terminal, as `terminal.draft_prompt` does.
+    TerminalTold terminal_told = 310;
   }
   // The rest of rulings' block, kept for them (review 1005a L1).
   reserved 181 to 189;
@@ -384,6 +388,8 @@ message Result {
   reserved 201 to 209;
   // The rest of the owner's marks' block (ov-333).
   reserved 211 to 219;
+  // The rest of `terminal.tell`'s block (ov-360).
+  reserved 311 to 319;
 }
 
 // ---------------------------------------------------------------------------
@@ -4471,6 +4477,13 @@ message RulingKeepAll {
 // The rulings `ruling.keep_all` kept, newest first; empty when none was open.
 message RulingsKept {
   repeated BoardRuling rulings = 1;
+}
+
+// What `terminal.tell` did with a message (ov-360). `queued`: the agent was
+// working, and it holds the message in its own queue for when it's ready;
+// otherwise the message was submitted as its next prompt.
+message TerminalTold {
+  bool queued = 1;
 }
 
 // ---------------------------------------------------------------------------

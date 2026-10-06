@@ -60,6 +60,11 @@ pub fn holds_exactly(held: &Composer, sent: &str) -> bool {
     matches!(held, Composer::Holds(text) if squeeze(text) == squeeze(sent))
 }
 
+/// What `screen` prints, its escape sequences dropped, a line to a line.
+pub fn printed(screen: &str) -> String {
+    screen.lines().map(|line| text(&cells(line))).collect::<Vec<_>>().join("\n")
+}
+
 /// A line's printed characters, each with whether it was drawn dim. Escape
 /// sequences are dropped; SGR 2 turns dim on, 22 and a reset turn it off.
 /// The cursor on a dim placeholder's first character counts as dim (see
