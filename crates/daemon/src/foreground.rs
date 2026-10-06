@@ -5,8 +5,8 @@
 //! idle shell as `zsh`. What distinguishes one pane from another is usually the
 //! arguments — `pnpm dev` from `pnpm test`, `cargo build` from `cargo test`.
 //!
-//! So the foreground process group of each pane's tty is read from `ps`, which
-//! has the argv. One call for the whole host per sample, not one per pane: this
+//! So the foreground process group of each pane's tty is read from the process
+//! table (in-process, `proc_table`; `ps` is the fallback), which has the argv. One call for the whole host per sample, not one per pane: this
 //! sits on the watcher's loop, and a fleet of thirty panes must not mean thirty
 //! processes a second.
 
@@ -124,6 +124,12 @@ impl Foreground {
 /// exactly "the thing you are looking at" — the shell itself is `Ss` and gets
 /// skipped, so an idle pane reports nothing and keeps whatever tmux called it.
 pub async fn read() -> Foreground {
+    // In this process first (`proc_table`): no spawn, so a tick costs the
+    // syscalls and not a `ps` over the whole host.
+    if let Ok(Some(table)) = tokio::task::spawn_blocking(crate::proc_table::snapshot).await {
+        return parse(&table);
+    }
+    // The system can't be read in-process, or the walk came back empty: ask `ps`.
     let out = tokio::process::Command::new("ps")
         .args(["-axo", "pid=,ppid=,pgid=,tty=,stat=,args="])
         .stdin(std::process::Stdio::null())

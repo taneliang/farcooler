@@ -35,6 +35,28 @@ pub fn listening_ports() -> HashMap<i32, Vec<u16>> {
     parse_lsof(&String::from_utf8_lossy(&out.stdout))
 }
 
+/// Listening TCP ports held by these processes only, by owning process.
+///
+/// `lsof -p` over a handful of pids, where `listening_ports` walks every file
+/// descriptor on the host. The sampling loop asks about the processes under its
+/// panes and nothing else; a host with no panes never asks at all.
+///
+/// Same failure rule: empty, never an error. `lsof` exits non-zero when one of
+/// the pids has gone, and still prints the rest, so the exit status is ignored.
+pub fn listening_ports_of(pids: &[i32]) -> HashMap<i32, Vec<u16>> {
+    if pids.is_empty() {
+        return HashMap::new();
+    }
+    let list = pids.iter().map(i32::to_string).collect::<Vec<_>>().join(",");
+    let out = std::process::Command::new("lsof")
+        .args(["-nP", "-a", "-p", &list, "-iTCP", "-sTCP:LISTEN", "-Fpn"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output();
+    let Ok(out) = out else { return HashMap::new() };
+    parse_lsof(&String::from_utf8_lossy(&out.stdout))
+}
+
 /// The wire's `Terminal.ports`: every port a pane serves, lowest first, each
 /// once. Sorted because a client shows the first and compares the list to see
 /// whether anything moved, and `lsof` names sockets in no stable order.

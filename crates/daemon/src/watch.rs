@@ -803,6 +803,8 @@ pub struct Watcher {
     /// This watcher, for the detached tasks that have to come back to it: a
     /// count notice reads the needs-you list when it goes out.
     me: std::sync::Weak<Watcher>,
+    /// What the sampling tick reads of the host, and when it reads nothing.
+    host_walk: crate::hostwalk::HostWalk,
     /// Whether a count notice is already scheduled. See `schedule_count_notice`.
     count_pending: std::sync::atomic::AtomicBool,
     /// The needs-you count the relay was last told, by any notice. A count
@@ -2776,6 +2778,7 @@ impl Watcher {
     fn build(service: Arc<Service>, events: broadcast::Sender<Event>) -> Arc<Self> {
         Arc::new_cyclic(|me| Self {
             me: me.clone(),
+            host_walk: crate::hostwalk::HostWalk::default(),
             count_pending: std::sync::atomic::AtomicBool::new(false),
             last_count: std::sync::Mutex::new(None),
             last_plan: std::sync::Mutex::new(None),
@@ -4552,10 +4555,9 @@ impl Watcher {
             }
         }
 
-        // One `ps` for the whole host, not one per pane: this is the sampling
-        // loop, and a fleet of thirty panes must not mean thirty processes a
-        // second.
-        let foreground = crate::foreground::read().await;
+        // The process table and the sockets under the panes, read in this
+        // process and only while a pane is alive. See `hostwalk`.
+        let (foreground, ports) = self.host_walk.read(&panes).await;
         // Claiming's weakest signal, on the process table this tick already
         // read: where every pane's processes are working. See `claims`.
         crate::claims::scan(&self.service, &fleet, &panes, &foreground);
@@ -4565,21 +4567,6 @@ impl Watcher {
         if self.service.claims().take_changed() {
             self.announce_fleet_changed();
         }
-        // One `lsof` for the whole host, on the same cadence and for the
-        // same reason as the one `ps`.
-        //
-        // Off the executor, because it is a blocking `Command::output` on a
-        // process that can take tens of milliseconds — `foreground::read` gets
-        // the same treatment from `tokio::process` and cannot be copied here,
-        // since `farcooler-core` has no async runtime and must not gain one for
-        // this.
-        let ports = tokio::task::spawn_blocking(farcooler_core::ports::listening_ports)
-            .await
-            .unwrap_or_default();
-        // By GROUP, not by process. `lsof` names the process holding the socket,
-        // which for every wrapped dev server — `pnpm dev`, `npm run dev`, a
-        // shell script — is a child of the one the pane is showing.
-        let ports = foreground.ports_by_group(&ports);
         // Once per tick, not once per pane: every pane compares against the
         // same answer, and a host that renamed itself mid-tick would
         // otherwise name two rows by two different rules.
@@ -5435,6 +5422,9 @@ fn now_millis() -> i64 {
 
 #[cfg(test)]
 mod failed_turn_tests;
+
+#[cfg(test)]
+mod idle_walk_tests;
 
 #[cfg(test)]
 mod review_notice_tests;
