@@ -693,6 +693,8 @@ struct WorkingRow: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Reduce Motion's answer, for a test, which can't set the system's.
     @Environment(\.workingRowStill) private var still
+    /// Stopped behind other windows, as the timeline was (ov-229).
+    @Environment(\.windowVisible) private var windowVisible
 
     var body: some View {
         // A layer animation, not a `TimelineView` or an animated `@State`.
@@ -715,7 +717,7 @@ struct WorkingRow: View {
             .foregroundStyle(.secondary)
             .overlay(alignment: .leading) {
                 if !reduceMotion && !still {
-                    ShimmerBand(content: label.foregroundStyle(.primary))
+                    ShimmerBand(content: label.foregroundStyle(.primary), paused: !windowVisible)
                         .accessibilityHidden(true)
                 }
             }

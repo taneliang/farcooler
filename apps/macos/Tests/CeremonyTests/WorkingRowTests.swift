@@ -47,6 +47,31 @@ struct WorkingRowTests {
         #expect(inked > 20, "the row drew \(inked) inked pixels")
     }
 
+    /// Behind other windows the sweep stops, as the timeline did (ov-229),
+    /// and starts again when the window can be seen.
+    @Test func theSweepStopsWhileTheWindowCantBeSeen() throws {
+        final class Visibility: ObservableObject { @Published var visible = false }
+        struct Hosted: View {
+            @ObservedObject var visibility: Visibility
+            var body: some View { WorkingRow().environment(\.windowVisible, visibility.visible) }
+        }
+        let visibility = Visibility()
+        let row = NSHostingView(rootView: Hosted(visibility: visibility))
+        let window = NSWindow(
+            contentRect: NSRect(x: -9000, y: -9000, width: 200, height: 40), styleMask: [.borderless],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        row.frame = NSRect(origin: .zero, size: row.fittingSize)
+        window.contentView = row
+        row.layoutSubtreeIfNeeded()
+        let band = try #require(Self.bands(in: row).first)
+        #expect(band.layer?.mask?.animation(forKey: ShimmerAnimation.key) == nil, "sweeping behind other windows")
+        visibility.visible = true
+        row.layoutSubtreeIfNeeded()
+        #expect(band.layer?.mask?.animation(forKey: ShimmerAnimation.key) != nil, "still stopped once seen")
+    }
+
     /// Under Reduce Motion, no sweep: the still label alone. Through
     /// `workingRowStill`, which is what a test can set.
     @Test func reduceMotionLeavesTheLabelStill() throws {

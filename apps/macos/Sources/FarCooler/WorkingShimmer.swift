@@ -17,6 +17,10 @@ import SwiftUI
 /// text under it (the caller's, in `.secondary`) shows either side.
 struct ShimmerBand<Content: View>: NSViewRepresentable {
     let content: Content
+    /// Stopped where it is, for a window that can't be seen (ov-229): the
+    /// render server would otherwise go on drawing a frame per tick behind
+    /// other windows.
+    var paused = false
 
     func makeNSView(context: Context) -> ShimmerBandView<Content> {
         ShimmerBandView(content)
@@ -24,6 +28,7 @@ struct ShimmerBand<Content: View>: NSViewRepresentable {
 
     func updateNSView(_ view: ShimmerBandView<Content>, context: Context) {
         view.hosting.rootView = content
+        view.paused = paused
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: ShimmerBandView<Content>, context: Context) -> CGSize? {
@@ -35,6 +40,16 @@ struct ShimmerBand<Content: View>: NSViewRepresentable {
 final class ShimmerBandView<Content: View>: NSView {
     let hosting: NSHostingView<Content>
     private let band = CAGradientLayer()
+
+    var paused = false {
+        didSet {
+            guard paused != oldValue else { return }
+            if paused { band.removeAnimation(forKey: ShimmerAnimation.key) } else { sweep() }
+        }
+    }
+
+    /// Whether the band is sweeping now: what a test reads.
+    var sweeping: Bool { band.animation(forKey: ShimmerAnimation.key) != nil }
 
     init(_ content: Content) {
         hosting = NSHostingView(rootView: content)
@@ -67,7 +82,11 @@ final class ShimmerBandView<Content: View>: NSView {
         super.viewDidMoveToWindow()
         // Added on arrival, as `BreathingView` does: a layer's animations can
         // be dropped while it's out of a window.
-        guard window != nil, band.animation(forKey: ShimmerAnimation.key) == nil else { return }
+        sweep()
+    }
+
+    private func sweep() {
+        guard window != nil, !paused, !sweeping else { return }
         band.add(ShimmerAnimation.make(), forKey: ShimmerAnimation.key)
     }
 }
