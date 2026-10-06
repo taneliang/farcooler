@@ -16,7 +16,9 @@ use crate::session::{Session, SessionError};
 ///   `{epoch, rev, moreBefore, rows: [row]}`.
 /// - `agent.rows_follow {terminal, epoch, afterRev, waitMs?}` answers
 ///   `{epoch, rev, reset, changes: [{kind, id, rev, row?}]}`, `kind` one of
-///   `insert`, `update` and `remove` (which carries no row).
+///   `insert`, `update` and `remove` (which carries no row). Without
+///   `waitMs` the runner holds it `DEFAULT_WAIT_MS`: an app that forgets it
+///   must not poll in a tight loop.
 pub(super) async fn call(session: &Session, method: &str, args: &Value) -> Result<Value, SessionError> {
     let terminal = args
         .get("terminal")
@@ -34,9 +36,17 @@ pub(super) async fn call(session: &Session, method: &str, args: &Value) -> Resul
             "rows": page.rows.iter().map(row_of).collect::<Vec<_>>(),
         }));
     }
-    let wait = number("waitMs").unwrap_or(0).min(u64::from(u32::MAX)) as u32;
+    let wait = wait_of(args);
     let follow = session.agent_rows_follow(terminal, number("epoch").unwrap_or(0), number("afterRev").unwrap_or(0), wait).await?;
     Ok(changes_of(&follow))
+}
+
+/// How long a follow waits when the app doesn't say: inside the 30 s a call
+/// has (`deadlines.rs`), with room for the round trip.
+pub(super) const DEFAULT_WAIT_MS: u32 = 20_000;
+
+fn wait_of(args: &Value) -> u32 {
+    args.get("waitMs").and_then(Value::as_u64).map_or(DEFAULT_WAIT_MS, |ms| ms.min(u64::from(u32::MAX)) as u32)
 }
 
 fn row_of(row: &farcooler_protocol::v1::AgentRow) -> Value {
@@ -62,4 +72,16 @@ pub(super) fn changes_of(follow: &farcooler_protocol::v1::AgentRowChanges) -> Va
         })
         .collect();
     json!({ "epoch": follow.epoch, "rev": follow.rev, "reset": follow.reset, "changes": changes })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_follow_with_no_wait_named_waits_twenty_seconds_and_zero_is_zero() {
+        assert_eq!(wait_of(&json!({})), DEFAULT_WAIT_MS);
+        assert_eq!(wait_of(&json!({ "waitMs": 0 })), 0);
+        assert_eq!(wait_of(&json!({ "waitMs": 5 })), 5);
+    }
 }
