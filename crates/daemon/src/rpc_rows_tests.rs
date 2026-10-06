@@ -68,3 +68,26 @@ fn a_follow_goes_on_the_wire_as_kinds_by_id() {
     let reset = pb_changes(terminal, Follow::Reset { epoch: 8, rev: 3 });
     assert!(reset.reset && reset.changes.is_empty());
 }
+
+/// A follow's wait counts from the call's arrival: an open that took 300 ms
+/// (a rebuild) leaves 200 ms of a 500 ms wait, not another 500.
+#[tokio::test]
+async fn a_follows_wait_counts_from_arrival_not_from_the_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("s.jsonl");
+    std::fs::write(&path, "{\"type\":\"user\",\"promptId\":\"p1\",\"promptSource\":\"typed\",\"uuid\":\"u1\",\"message\":{\"content\":\"hi\"}}\n").unwrap();
+    let projectors = session_projectors::SessionProjectors::default();
+    let terminal = Uuid::now_v7();
+    projectors.open(terminal, path);
+    let page = projectors.read_page(terminal, None, 10).unwrap();
+    let p = pb::AgentRowsFollow { terminal_id: wire::id_bytes(terminal), epoch: page.epoch, after_rev: page.rev, wait_ms: 500 };
+    let arrived = tokio::time::Instant::now();
+    let slow_open = async {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        Ok(true)
+    };
+    let follow = follow_answer(&projectors, terminal, &p, arrived, slow_open).await.unwrap();
+    let took = arrived.elapsed();
+    assert!(matches!(follow, Follow::Changes { ref changes, .. } if changes.is_empty()), "{follow:?}");
+    assert!(took >= Duration::from_millis(480) && took < Duration::from_millis(700), "took {took:?}");
+}

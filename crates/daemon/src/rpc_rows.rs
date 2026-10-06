@@ -57,25 +57,37 @@ pub(crate) async fn dispatch(svc: &Service, req: Request) -> Result<result::Valu
         }
         ("agent.rows_follow", Some(request::Payload::AgentRowsFollow(p))) => {
             let terminal = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-            let deadline = arrived + Duration::from_millis(u64::from(p.wait_ms)).min(MAX_WAIT);
-            let open = ensure_open(svc, terminal).await?;
-            let follow = match open {
-                true => session_projectors::global().follow(terminal, p.epoch, p.after_rev, deadline, session_projectors::MAX_CHANGES).await,
-                false => None,
-            };
-            let follow = match follow {
-                Some(follow) => follow,
-                // No session to follow: nothing changes, after the wait, so
-                // a follower does not spin.
-                None => {
-                    tokio::time::sleep_until(deadline).await;
-                    Follow::Changes { epoch: 0, rev: 0, changes: Vec::new() }
-                }
-            };
+            let follow = follow_answer(session_projectors::global(), terminal, &p, arrived, ensure_open(svc, terminal)).await?;
             Ok(result::Value::AgentRowChanges(pb_changes(terminal, follow)))
         }
         _ => Err(DomainError::InvalidArgument { what: "payload" }),
     }
+}
+
+/// A follow's answer. Its wait is counted from `arrived`, before `open`
+/// (which may rebuild a whole transcript) has run, so the call is answered
+/// inside the client's deadline however long the rebuild took.
+pub(crate) async fn follow_answer(
+    projectors: &session_projectors::SessionProjectors,
+    terminal: Uuid,
+    p: &pb::AgentRowsFollow,
+    arrived: tokio::time::Instant,
+    open: impl std::future::Future<Output = Result<bool>>,
+) -> Result<Follow> {
+    let deadline = arrived + Duration::from_millis(u64::from(p.wait_ms)).min(MAX_WAIT);
+    let follow = match open.await? {
+        true => projectors.follow(terminal, p.epoch, p.after_rev, deadline, session_projectors::MAX_CHANGES).await,
+        false => None,
+    };
+    Ok(match follow {
+        Some(follow) => follow,
+        // No session to follow: nothing changes, after the wait, so a
+        // follower does not spin.
+        None => {
+            tokio::time::sleep_until(deadline).await;
+            Follow::Changes { epoch: 0, rev: 0, changes: Vec::new() }
+        }
+    })
 }
 
 /// Open `terminal`'s projector if it has none, from its transcript on disk.
