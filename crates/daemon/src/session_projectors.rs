@@ -304,8 +304,8 @@ impl SessionProjectors {
                 return;
             }
             let mut building = self.inner.building.lock().unwrap_or_else(|e| e.into_inner());
-            if !building.contains_key(&terminal) {
-                building.insert(terminal, Vec::new());
+            if let std::collections::hash_map::Entry::Vacant(free) = building.entry(terminal) {
+                free.insert(Vec::new());
                 break;
             }
             let Some(left) = BUILD_WAIT.checked_sub(started.elapsed()) else { return };
