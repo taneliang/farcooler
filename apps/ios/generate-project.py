@@ -155,6 +155,8 @@ SOURCES = [
     "ImagePaste.swift",
     "AgentStream.swift",
     "AgentView.swift",
+    # Working…'s sweep on a layer (ov-382), ported from the Mac.
+    "WorkingShimmer.swift",
     # The queued message's row, split out of `AgentView` for its size ceiling.
     "QueuedRow.swift",
     # A claude TUI pane's permission ask, with Allow and Deny, over its
@@ -510,6 +512,8 @@ AGENTKIT_SOURCES = [
     # a streaming reply redraw only its last paragraph (ov-382).
     # `MarkdownView.swift` draws through it.
     "MarkdownPiece.swift",
+    # The Working… sweep's layer animation, shared with the Mac (ov-382).
+    "ShimmerAnimation.swift",
     # Both `MarkdownView.swift` above and `DiffComputation.swift` reference it,
     # so the phone does not build without it. Not optional the way a view is:
     # this is the memo that keeps a transcript row's body from re-parsing its
@@ -877,6 +881,9 @@ UI_TEST_SOURCES = [
     # view, and the follow survives the composer growing. Stands on
     # `-agent-layout-harness`, so it needs no runner either.
     "AgentFollowTests.swift",
+    # Working… sweeping on a layer rather than the main thread (ov-382), on
+    # `-agent-layout-harness`.
+    "WorkingShimmerTests.swift",
     "ShellGestureTests.swift",
     # The phone's workspace screen: its Orchestrator, Board and Worktrees
     # segments, Start Orchestrator, and the board's empty statuses. Needs no

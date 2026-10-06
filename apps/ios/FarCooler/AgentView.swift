@@ -3232,61 +3232,39 @@ private struct ThoughtRow: View {
 
 /// A turn in progress, said where the work is appearing.
 ///
-/// The Mac's `WorkingRow`, ported — including its clock: phase from a
-/// `TimelineView` and a start captured on appear, because a `repeatForever`
-/// animation restarted from zero by every streamed event never visibly moves,
-/// and phase taken from the wall clock starts the sweep mid-word.
-/// Reduce Motion turns the sweep off, and `TimelineView(.animation)` with it.
+/// The Mac's `WorkingRow`, ported, sweep and all: a layer animation
+/// (`ShimmerBand`), since the `TimelineView(.animation)` this used ran SwiftUI's
+/// update at the display's rate, 120 times a second, for the whole of a turn
+/// (ov-382). Reduce Motion turns the sweep off.
 ///
 /// Required rather than polite: this is a repeating decorative animation with
 /// no information in it — the row says "Working…" whether it shimmers or not —
-/// which is exactly what the setting exists to stop. It also runs at DISPLAY
-/// RATE for the entire length of a turn, so on a phone the check doubles as
-/// the escape hatch from 120 layout passes a second while an agent thinks.
+/// which is exactly what the setting exists to stop.
 private struct WorkingRow: View {
-    private static let period: TimeInterval = 1.1
-
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Whether the sweep is running on its layer, for the debug probe below.
+    @State private var sweeping = false
 
-    @State private var start: Date?
-
-    @ViewBuilder
     var body: some View {
-        if reduceMotion {
-            // Secondary rather than the gradient's midpoint: the sweep was the
-            // only thing marking this row as unfinished, so without it the row
-            // has to say so by being quieter than the words above it.
-            Text("Working…")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-        } else {
-            TimelineView(.animation) { context in
-                Text("Working…")
-                    .font(.callout)
-                    .foregroundStyle(
-                        LinearGradient(
-                            stops: stops(at: phase(now: context.date)),
-                            startPoint: .leading,
-                            endPoint: .trailing))
+        // Secondary underneath: with the sweep off it's the whole row, quieter
+        // than the words above it, since the sweep was the only thing marking
+        // it unfinished.
+        let label = Text("Working…").font(.callout)
+        label
+            .foregroundStyle(.secondary)
+            .overlay(alignment: .leading) {
+                if !reduceMotion {
+                    ShimmerBand(content: label.foregroundStyle(.primary), onSweeping: { sweeping = true })
+                        .accessibilityHidden(true)
+                }
             }
-            .onAppear { if start == nil { start = Date() } }
-        }
-    }
-
-    private func phase(now: Date) -> Double {
-        guard let start else { return 0 }
-        return now.timeIntervalSince(start)
-            .truncatingRemainder(dividingBy: Self.period) / Self.period
-    }
-
-    private func stops(at phase: Double) -> [Gradient.Stop] {
-        let center = -0.35 + phase * 1.7
-        let width = 0.3
-        return [
-            .init(color: .secondary, location: min(max(center - width, 0), 1)),
-            .init(color: .primary, location: min(max(center, 0), 1)),
-            .init(color: .secondary, location: min(max(center + width, 0), 1)),
-        ]
+            .accessibilityIdentifier("agent-working")
+            #if DEBUG
+            // Where the motion comes from, for `WorkingShimmerTests`: `layer`
+            // once Core Animation runs it, `none` before or under Reduce
+            // Motion.
+            .accessibilityValue(Text(verbatim: sweeping ? "sweep=layer" : "sweep=none"))
+            #endif
     }
 }
 

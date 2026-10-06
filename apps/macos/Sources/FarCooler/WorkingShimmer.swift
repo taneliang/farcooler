@@ -1,3 +1,4 @@
+import AgentKit
 import AppKit
 import SwiftUI
 
@@ -68,25 +69,5 @@ final class ShimmerBandView<Content: View>: NSView {
         // be dropped while it's out of a window.
         guard window != nil, band.animation(forKey: ShimmerAnimation.key) == nil else { return }
         band.add(ShimmerAnimation.make(), forKey: ShimmerAnimation.key)
-    }
-}
-
-/// What `ShimmerBandView` adds to its mask: the band entering before the
-/// first letter and leaving past the last, once every 1.1 s.
-enum ShimmerAnimation {
-    static let key = "shimmer"
-    /// The band's stops, centered before the text and after it.
-    static let start: [NSNumber] = [-0.65, -0.35, -0.05]
-    static let end: [NSNumber] = [1.05, 1.35, 1.65]
-
-    static func make() -> CABasicAnimation {
-        let sweep = CABasicAnimation(keyPath: "locations")
-        sweep.fromValue = start
-        sweep.toValue = end
-        sweep.duration = 1.1
-        sweep.repeatCount = .infinity
-        sweep.timingFunction = CAMediaTimingFunction(name: .linear)
-        sweep.isRemovedOnCompletion = false
-        return sweep
     }
 }
