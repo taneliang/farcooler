@@ -555,7 +555,7 @@ class TreeWorktreeMenu internal constructor(
     fun actions(node: OneTree.Node): List<com.farcooler.model.WorktreeAction> {
         val wt = worktree(node) ?: return emptyList()
         val (above, below) = tree?.let { OneTree.neighbors(it, node.id) } ?: (null to null)
-        return com.farcooler.model.WorktreeActions.of(wt, above, below)
+        return com.farcooler.model.WorktreeActions.of(wt, above, below, workspace.id)
     }
 
     fun perform(node: OneTree.Node, action: com.farcooler.model.WorktreeAction) {

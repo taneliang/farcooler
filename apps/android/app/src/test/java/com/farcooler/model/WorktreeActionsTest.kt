@@ -27,6 +27,14 @@ class WorktreeActionsTest {
     }
 
     @Test
+    fun `the checkout hides only from the workspace that owns it`() {
+        val checkout = lane.copy(isMainCheckout = true, workspace = "main")
+        assertEquals(true, WorktreeAction.HIDE in WorktreeActions.of(checkout, workspace = "main"))
+        assertEquals(false, WorktreeAction.HIDE in WorktreeActions.of(checkout, workspace = "billing"))
+        assertEquals(true, WorktreeAction.HIDE in WorktreeActions.of(lane.copy(workspace = "main"), workspace = "billing"))
+    }
+
+    @Test
     fun `it moves only where the runner keeps an order and there is a row to pass`() {
         assertEquals(
             listOf(WorktreeAction.NEW_TERMINAL, WorktreeAction.STACK, WorktreeAction.MOVE_UP, WorktreeAction.MOVE_DOWN, WorktreeAction.HIDE, WorktreeAction.REMOVE),

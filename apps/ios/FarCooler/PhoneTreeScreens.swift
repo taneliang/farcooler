@@ -192,7 +192,11 @@ struct TreeLevelScreen: View {
         let summary = connection.workspace(place.workspace)
         let node = summary.flatMap(node)
         Group {
-            switch summary.map({ PhoneTree.level(found: node != nil, board: connection.boardRead($0), plan: connection.planRead($0)) }) ?? .gone {
+            // A workspace missing while its runner isn't answering is a
+            // reconnect, not a level gone (review R2-5).
+            switch summary.map({ PhoneTree.level(found: node != nil, board: connection.boardRead($0), plan: connection.planRead($0)) })
+                ?? (connection.isAnswering ? .gone : .loading)
+            {
             case .node:
                 if let node { level(node) }
             case .loading:

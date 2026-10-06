@@ -23,15 +23,20 @@ object WorktreeActions {
      * runner keeps an order (`ordinal`) and there is a row to pass ([above],
      * [below]: the neighbors in the list it's drawn in, by id). Remove never
      * for the repository's own checkout, which the runner refuses anyway.
+     * [workspace]: the workspace whose row this is, where every workspace on
+     * the repository shows its checkout: Hide and Unhide on the checkout
+     * only in the one that owns it, as on the iPhone (ov-300 review R2-3).
      */
-    fun of(worktree: Worktree, above: String? = null, below: String? = null): List<WorktreeAction> = buildList {
+    fun of(worktree: Worktree, above: String? = null, below: String? = null, workspace: String? = null): List<WorktreeAction> = buildList {
         add(WorktreeAction.NEW_TERMINAL)
         if (worktree.repository != null && worktree.branch.isNotBlank()) add(WorktreeAction.STACK)
         if (worktree.ordinal != null) {
             if (above != null) add(WorktreeAction.MOVE_UP)
             if (below != null) add(WorktreeAction.MOVE_DOWN)
         }
-        add(if (worktree.isHidden) WorktreeAction.UNHIDE else WorktreeAction.HIDE)
+        if (!worktree.isMainCheckout || workspace == null || worktree.workspace == workspace) {
+            add(if (worktree.isHidden) WorktreeAction.UNHIDE else WorktreeAction.HIDE)
+        }
         if (!worktree.isMainCheckout) add(WorktreeAction.REMOVE)
     }
 

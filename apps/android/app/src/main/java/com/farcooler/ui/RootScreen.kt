@@ -398,7 +398,8 @@ private fun OverlayScreen(model: AppModel, route: Route, connections: List<Conne
             } else {
                 val fleet by live.fleet.collectAsStateWithLifecycle()
                 val repositories by live.repositories.collectAsStateWithLifecycle()
-                when (val presence = WorkspacePresence.of(route.workspaceId, fleet, repositories, true)) {
+                val link by live.link.collectAsStateWithLifecycle()
+                when (val presence = WorkspacePresence.of(route.workspaceId, fleet, repositories, link == com.farcooler.model.RunnerLink.ANSWERING)) {
                     is WorkspacePresence.Found -> TreeLevelScreen(
                         connection = live,
                         workspace = presence.workspace,
@@ -406,6 +407,11 @@ private fun OverlayScreen(model: AppModel, route: Route, connections: List<Conne
                         nav = treeNavigation(model, route.hostId, route.workspaceId) { fleet.worktrees },
                         onBack = { model.back() },
                     )
+                    // A runner reconnecting hasn't said yet: wait, rather than
+                    // leave a level that may still be there (review R2-5).
+                    WorkspacePresence.Loading -> androidx.compose.foundation.layout.Box(
+                        Modifier.fillMaxSize(), contentAlignment = Alignment.Center,
+                    ) { androidx.compose.material3.CircularProgressIndicator() }
                     else -> model.back()
                 }
             }

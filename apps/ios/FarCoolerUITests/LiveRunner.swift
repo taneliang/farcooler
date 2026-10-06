@@ -77,7 +77,16 @@ enum LiveRunner {
             // A workspace with an orchestrator has its worktrees in its tree
             // (ov-300): under a card, a lane, or Loose Worktrees, so the
             // whole tree is searched (review 8).
-            if findInTree(app, row, depth: 4) {
+            // A plan lane's worktree is drawn as its lane's row (review R2-4):
+            // into the lane, and its first pane opens the worktree.
+            let lane = app.buttons["tree-row-\(name)"]
+            if findInTree(app, [row, lane], depth: 4) {
+                if !row.exists, lane.exists {
+                    lane.tap()
+                    let pane = app.descendants(matching: .any)["tree-level"].buttons.matching(identifierPrefix: "tree-row-").firstMatch
+                    if pane.waitForExistence(timeout: 5) { pane.tap() }
+                    return try waitForShell(app, name)
+                }
                 row.tap()
                 // A worktree with panes pushes its level first; its own row,
                 // Open Worktree, opens it.
@@ -92,12 +101,12 @@ enum LiveRunner {
             "\(missing) no worktree called '\(name)' on \(address); run ./scripts/demo-host.sh.")
     }
 
-    /// Whether `row` is on the tree's level on screen or one under it,
+    /// Whether any of `rows` is on the tree's level on screen or one under it,
     /// depth first, at most `depth` levels down. Every row is tried; one that
     /// opens something other than a level (a task, a pane) is backed out of.
     /// It comes back up to where it started when it finds nothing.
-    static func findInTree(_ app: XCUIApplication, _ row: XCUIElement, depth: Int) -> Bool {
-        if row.waitForExistence(timeout: 2) { return true }
+    static func findInTree(_ app: XCUIApplication, _ rows: [XCUIElement], depth: Int) -> Bool {
+        if rows.contains(where: { $0.waitForExistence(timeout: 1) }) { return true }
         guard depth > 0 else { return false }
         let ids = app.buttons.matching(identifierPrefix: "tree-row-").allElementsBoundByIndex.map(\.identifier)
         for id in ids {
@@ -105,7 +114,7 @@ enum LiveRunner {
             guard next.exists, next.isHittable else { continue }
             next.tap()
             let level = app.descendants(matching: .any)["tree-level"]
-            if level.waitForExistence(timeout: 3), findInTree(app, row, depth: depth - 1) { return true }
+            if level.waitForExistence(timeout: 3), findInTree(app, rows, depth: depth - 1) { return true }
             let pane = app.buttons["worktree-back"].firstMatch
             if pane.exists { pane.tap() } else { app.navigationBars.buttons["BackButton"].firstMatch.tap() }
         }
