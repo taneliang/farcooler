@@ -1,4 +1,4 @@
-// Shipped by Canary at 4e444e85b88fdb344331a426887411d445b1002e. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 19608e87246e99e87f1d4506c2c75a68687a267a. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -3964,6 +3964,12 @@ message BoardThemeView {
   // last, each lane's days shared out over its cards as `spend` is. Seven
   // values behind `board_cost`, empty without it.
   repeated uint64 trend_tokens = 6;
+  // When it last moved, in ms, by the runner's reckoning (ov-331): the newest
+  // of its story, the lanes on its cards (not dropped ones), its rulings made
+  // or settled, and its cards' status moves. Lets every client agree on when a
+  // theme reads as quiet. Absent from a runner before it; a client then works
+  // it out from what it has.
+  optional int64 last_moved_at = 7;
 }
 
 // A card a lane works, or one slice of it.
@@ -3971,6 +3977,59 @@ message LaneCard {
   bytes task_id = 1;
   // Empty when the lane works the whole card.
   string slice = 2;
+  // Where this card's pull request stands (ov-312), derived on read from the
+  // runner's last read of GitHub and never written. Absent when the runner
+  // has nothing to say: a card with no pull request on a lane that has not
+  // started, or a card already finished. Derived by the runner: ignored on a
+  // request (`lane.create`, `lane.cards`), where a client has nothing to say.
+  optional PrStage stage = 3;
+}
+
+// How far a pull request has come (ov-312): the runner names the stage once so
+// no app re-derives it. `UNKNOWN` is a runner that could not ask GitHub, and is
+// never the same as `BUILDING`, which is a runner that asked and found no
+// pull request.
+enum PrStageKind {
+  PR_STAGE_KIND_UNSPECIFIED = 0;
+  PR_STAGE_KIND_BUILDING = 1;
+  PR_STAGE_KIND_AGENT_REVIEW = 2;
+  PR_STAGE_KIND_FIXING = 3;
+  PR_STAGE_KIND_WAITING_ON_REVIEWER = 4;
+  PR_STAGE_KIND_CHANGES_REQUESTED = 5;
+  PR_STAGE_KIND_APPROVED_CHECKS_RUNNING = 6;
+  PR_STAGE_KIND_APPROVED_CHECKS_FAILING = 7;
+  PR_STAGE_KIND_APPROVED = 8;
+  PR_STAGE_KIND_QUEUED = 9;
+  PR_STAGE_KIND_MERGED = 10;
+  PR_STAGE_KIND_CLOSED = 11;
+  PR_STAGE_KIND_UNKNOWN = 12;
+  // Approved, but GitHub says it cannot merge as it stands (merge conflicts).
+  PR_STAGE_KIND_APPROVED_CONFLICTS = 13;
+}
+
+message PrStage {
+  // What the apps word the stage from, in their own style, with `reviewers`,
+  // `queue_position` and `checks`.
+  PrStageKind kind = 1;
+  // The runner's own words, in sentence case ("Waiting on alice and 2
+  // others"), for the CLI and as a fallback. An app words the stage itself.
+  string label = 2;
+  // Who the pull request waits on, for `WAITING_ON_REVIEWER`: GitHub logins
+  // and team slugs (`org/team`), in GitHub's order; empty when no one was asked.
+  repeated string reviewers = 3;
+  // The merge queue position, from 1 as GitHub counts it, for `QUEUED`.
+  uint32 queue_position = 4;
+  // The pull request this stage is read from; 0 for none. On a lane, the
+  // card pull request that set the rolled-up stage.
+  uint32 pr_number = 5;
+  string pr_url = 6;
+  // Review threads still open, counted only for a pull request in review or
+  // landing, and only the first hundred; absent when not counted.
+  optional uint32 unresolved_threads = 7;
+  // When the runner read GitHub, in unix milliseconds; 0 when it has not.
+  int64 read_at = 8;
+  // The pull request's checks, as `PrStatus` carries them.
+  CheckState checks = 9;
 }
 
 message LaneAgent {
@@ -4035,6 +4094,10 @@ message Lane {
   // Its token budget (ov-307), counted as `spend` is; absent when it has
   // none. Behind `board_cost`.
   optional uint64 budget_tokens = 22;
+  // Where its pull requests stand (ov-312): the least advanced of its cards'
+  // stages, derived on read. Absent for a lane not yet started, and for one
+  // with nothing to say.
+  optional PrStage stage = 23;
 }
 
 // A card a theme or lane names, enough to draw its row.
