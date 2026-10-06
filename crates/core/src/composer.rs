@@ -21,8 +21,12 @@
 //!   (`codex-idle-after-turn.txt`)
 //!
 //! Placeholder text is drawn DIM (SGR 2) and doesn't count as content: a box
-//! showing only a dim suggestion is empty. That needs the screen WITH its
-//! escapes (`capture-pane -e`). Read without them, a placeholder is
+//! showing only a dim suggestion is empty. The cursor sits on a placeholder's
+//! first character, drawn in reverse video (SGR 7) and not dim, so a
+//! reverse-video character followed directly by dim text is the
+//! placeholder's too: claude 2.1.290's `Press up to edit queued messages`
+//! (`claude-2.1.290-working-queued-160x45-e.txt`). That needs the screen WITH
+//! its escapes (`capture-pane -e`). Read without them, a placeholder is
 //! indistinguishable from typing, so it counts as content, which fails closed.
 //! The plain-text captures here are read that way: codex's `› Explain this
 //! codebase` and claude's suggested prompt both read as `Holds`.
@@ -58,14 +62,18 @@ pub fn holds_exactly(held: &Composer, sent: &str) -> bool {
 
 /// A line's printed characters, each with whether it was drawn dim. Escape
 /// sequences are dropped; SGR 2 turns dim on, 22 and a reset turn it off.
+/// The cursor on a dim placeholder's first character counts as dim (see
+/// this module's docs): SGR 7 turns reverse video on, 27 and a reset off.
 fn cells(line: &str) -> Vec<(char, bool)> {
     let mut out = Vec::new();
-    let mut dim = false;
+    let mut reversed = Vec::new();
+    let (mut dim, mut reverse) = (false, false);
     let mut chars = line.chars().peekable();
     while let Some(c) = chars.next() {
         if c != '\x1b' {
             if !c.is_control() {
                 out.push((c, dim));
+                reversed.push(reverse);
             }
             continue;
         }
@@ -87,13 +95,15 @@ fn cells(line: &str) -> Vec<(char, bool)> {
         if last == Some('m') {
             let mut fields = params.split(';').peekable();
             if params.is_empty() {
-                dim = false;
+                (dim, reverse) = (false, false);
             }
             while let Some(f) = fields.next() {
                 match f {
-                    "" | "0" => dim = false,
+                    "" | "0" => (dim, reverse) = (false, false),
                     "2" => dim = true,
                     "22" => dim = false,
+                    "7" => reverse = true,
+                    "27" => reverse = false,
                     // Colors carry their own operands, which are not
                     // attributes: `38;5;2` is a color, not dim.
                     "38" | "48" | "58" => match fields.next() {
@@ -110,6 +120,12 @@ fn cells(line: &str) -> Vec<(char, bool)> {
                     _ => {}
                 }
             }
+        }
+    }
+    for i in 0..out.len().saturating_sub(1) {
+        let (next, next_dim) = out[i + 1];
+        if reversed[i] && next_dim && !next.is_whitespace() {
+            out[i].1 = true;
         }
     }
     out
@@ -180,11 +196,13 @@ fn codex(lines: &[Vec<(char, bool)>]) -> Composer {
     while end < lines.len() && indented(&lines[end]) && !text(&lines[end]).trim().is_empty() {
         end += 1;
     }
-    // A blank line, then the model footer, `<model> · <path>`.
+    // A blank line, then the model footer, `<model> · <path>`; or, while a
+    // turn runs with something in the box, the hint that Tab queues it
+    // (`codex-0.153.4-working-paste-160x45-e.txt`).
     let blank = lines.get(end).is_some_and(|r| text(r).trim().is_empty());
     let footer = lines.get(end + 1).is_some_and(|r| {
         let t = text(r);
-        t.starts_with("  ") && t.contains(" · ")
+        t.starts_with("  ") && (t.contains(" · ") || t.trim_start().starts_with("tab to queue message"))
     });
     if !blank || !footer {
         return Composer::Unrecognized;
@@ -204,6 +222,7 @@ fn codex(lines: &[Vec<(char, bool)>]) -> Composer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use farcooler_protocol::v1::AgentActivity;
 
     fn capture(name: &str) -> String {
         std::fs::read_to_string(format!("{}/captures/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap()
@@ -270,6 +289,38 @@ mod tests {
         assert!(!holds_exactly(&Composer::Empty, ""));
         let normal = idle.replace("manual mode on", "-- NORMAL -- manual mode on");
         assert_eq!(read("claude", &normal), Composer::Unrecognized);
+    }
+
+    /// A message pasted into a working agent's box, from real screens
+    /// (claude 2.1.290, codex 0.153.4, with escapes): the box is read while the
+    /// turn runs, codex's footer then being the hint that Tab queues it.
+    #[test]
+    fn a_working_agents_box_holds_what_was_pasted() {
+        let classify = |preset: &str, screen: &str| crate::activity::Registry::built_in().classify(preset, screen);
+        // claude drops `esc to interrupt` from its footer while its box holds
+        // something, so this one classifies by its box alone.
+        let claude = capture("claude-2.1.290-working-paste-160x45-e.txt");
+        assert_eq!(read("claude", &claude), Composer::Holds("queued note: reply PINEAPPLE".into()));
+        let codex = capture("codex-0.153.4-working-paste-160x45-e.txt");
+        assert_eq!(classify("codex", &codex), AgentActivity::Working);
+        assert_eq!(read("codex", &codex), Composer::Holds("queued note: reply PINEAPPLE".into()));
+        assert_eq!(read("codex", &codex.replace("tab to queue message", "tab to see more")), Composer::Unrecognized);
+    }
+
+    /// Once claude has queued a message its box shows a dim hint with the
+    /// cursor, in reverse video, on the hint's first letter: empty. A
+    /// character someone typed under the cursor is still theirs.
+    #[test]
+    fn the_cursor_on_a_dim_placeholder_is_the_placeholder() {
+        let queued = capture("claude-2.1.290-working-queued-160x45-e.txt");
+        assert_eq!(crate::activity::Registry::built_in().classify("claude", &queued), AgentActivity::Working);
+        assert_eq!(read("claude", &queued), Composer::Empty);
+        let rule = "─".repeat(20);
+        let boxed = |line: &str| format!("{rule}\n{line}\n{rule}\n  ? for shortcuts\n");
+        assert_eq!(read("claude", &boxed("❯\u{a0}\x1b[7mP\x1b[0;2mress up\x1b[0m")), Composer::Empty);
+        assert_eq!(read("claude", &boxed("❯\u{a0}\x1b[7mP\x1b[0mress up")), Composer::Holds("Press up".into()));
+        assert_eq!(read("claude", &boxed("❯\u{a0}fix\x1b[7m \x1b[0m")), Composer::Holds("fix".into()));
+        assert_eq!(read("claude", &boxed("❯\u{a0}\x1b[7mx\x1b[27m\x1b[2m \x1b[0m")), Composer::Holds("x".into()));
     }
 
     /// codex's box is the marker line, a blank line and the model footer;

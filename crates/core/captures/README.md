@@ -142,3 +142,20 @@ Recapture raw before tightening any rule against them.
 The watcher releases a held phone ask on the edge between these two screens.
 The dialog must have been seen, and then be missing for two samples (see
 `crates/daemon/src/hook_asks.rs`).
+
+## The ones with a message going into a working agent (ov-360)
+
+Captured 2026-10-06 with `tmux capture-pane -p -e` (escapes kept, so dim and
+reverse video read) on a 160x45 pane, against claude 2.1.290 and codex-cli
+0.153.4 in a sandbox HOME, each streaming a slow turn from a local stand-in
+for its API. A bracketed paste went into the box mid-turn, then Enter.
+
+| file | what it shows |
+| --- | --- |
+| `claude-2.1.290-working-paste-160x45-e.txt` | the paste in the box; the footer has dropped `esc to interrupt` |
+| `claude-2.1.290-working-queued-160x45-e.txt` | after Enter: the message queued above the spinner, `ctrl+x ctrl+s to send now`, and the box's dim hint with the cursor on its first letter |
+| `codex-0.153.4-working-paste-160x45-e.txt` | the paste in the box; the footer is `tab to queue message`, not the model line |
+
+Both agents took the message as the next prompt once the turn ended: claude
+from its queue (`promptSource: queued` in the transcript), codex as a message
+"submitted after next tool call".
