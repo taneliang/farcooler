@@ -1018,12 +1018,13 @@ jobs:
   # simulator and nothing else. A live-runner test that slipped into a shard
   # would skip with "NO LIVE RUNNER:", and the script turns that red.
   #
-  # Four shards since ov-301, about 1,200 s of tests each; the seconds per
-  # class are in scripts/ios-ui-shards.py. Each runs the products the `ios` job
-  # built (`test-without-building`), so its overhead is the download, the boot
-  # and the first launch, not a compile: 440 to 570 s a shard, measured. 40 is
-  # the backstop, and the budget job above goes red at 75% of it, which is why
-  # no shard holds more than about 1,350 s of tests.
+  # Four shards since ov-301; the seconds per class are in
+  # scripts/ios-ui-shards.py. Each runs the products the `ios` job built
+  # (`test-without-building`), so its overhead is the download, the boot and
+  # the first launch, not a compile: 440 to 570 s a shard, measured. The
+  # timeout is 45 minutes (ov-384; it was 40) and the budget job above goes
+  # red at 75% of it, 33.75 minutes. The three big shards hold 1,270 to 1,370
+  # s of tests, 31.5 minutes at most at a 520 s overhead.
   #
   # WHY FOUR JOBS IN TWO PLACES (ov-384). The account has five macOS runners.
   # At the start CI asks for three (`rust` on macOS, `swift`, `ios`), and when
@@ -1031,12 +1032,11 @@ jobs:
   # slots are free, and which two shards got them was arbitrary, so the last
   # started when Rust's macOS leg ended at 13 to 16.5 minutes: 38 to 52
   # minutes from the push depending on which shard it was. `phone2`, in
-  # `ios-ui-late` below, is now always the one held until `rust` ends, so
-  # the order is the same every time. At the sizes the 75% bar allows it ends
-  # near minute 43, about where the old order averaged; smaller big shards
-  # ended earlier but sat over the bar. See
-  # .claude/agent/reports/ci-queueing/report.md for the numbers and the
-  # ways to do better.
+  # `ios-ui-late` below, is now always the one held until `rust` ends, and it
+  # is the small one (about 810 s of tests), so the four end together near
+  # minute 36. Replayed on three measured runs: 36 to 37, against 41 to 44 for
+  # the old order on average. The 45 minutes is what lets the big three be that
+  # size under the 75% bar. See .claude/agent/reports/ci-queueing/report.md.
   #
   # `!cancelled()` and not the implied `success()`: a red `ios` job that
   # still uploaded its products (one of its script tests failed after the
@@ -1047,7 +1047,7 @@ jobs:
     needs: [ios-ui-plan, ios]
     if: ${{ !cancelled() && needs.ios-ui-plan.outputs.run == 'true' }}
     runs-on: xcode-27
-    timeout-minutes: 40
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -1075,7 +1075,7 @@ jobs:
     needs: [ios-ui-plan, ios, rust]
     if: ${{ !cancelled() && needs.ios-ui-plan.outputs.run == 'true' }}
     runs-on: xcode-27
-    timeout-minutes: 40
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/ios-ui-shard
