@@ -10,7 +10,11 @@
 //! `done_at` set, so enqueueing the same note again is a no-op. A row is
 //! CLAIMED before anything is typed, so a crash mid-typing leaves a claimed
 //! row that is never typed again (at most once, then a note saying it
-//! couldn't be confirmed). Marking a row done and writing the note that says
+//! couldn't be confirmed). A row the text was pasted for, whose Enter a dialog
+//! stopped, is marked PASTED (ov-385): a later pass may press that Enter if
+//! the box still holds exactly the text, and never types the text again. The
+//! mark is taken off before that Enter goes, so a crash then reads as one
+//! mid-typing. Marking a row done and writing the note that says
 //! what happened are one transaction, so the record and the queue can't
 //! disagree. The row is written in the same transaction as the answer itself
 //! (`add_note_waking`), so a crash can't keep an answer and lose its wake.
@@ -59,6 +63,19 @@ pub struct PendingWake {
     /// When typing it began, if it did. Set and not done means it may or may
     /// not have reached the agent.
     pub claimed_at: Option<i64>,
+    /// When its text was pasted and left in the box with the Enter not yet
+    /// pressed, because a dialog came up in between (`mark_wake_pasted`).
+    pub pasted_at: Option<i64>,
+}
+
+/// The pasted mark (ov-385): one nullable column on each queue. An older
+/// build never names it, and reads a row carrying it as claimed, which it
+/// settles as "Couldn't confirm" and never types again.
+pub(crate) fn migration_0038_wake_pasted(tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        "ALTER TABLE answer_wakes ADD COLUMN pasted_at INTEGER;
+         ALTER TABLE hold_wakes ADD COLUMN pasted_at INTEGER;",
+    )
 }
 
 impl Store {
@@ -89,7 +106,7 @@ impl Store {
         let conn = self.conn();
         let mut stmt = conn
             .prepare(&format!(
-                "SELECT w.note_id, w.task_id, n.body, n.actor, w.enqueued_at, w.claimed_at
+                "SELECT w.note_id, w.task_id, n.body, n.actor, w.enqueued_at, w.claimed_at, w.pasted_at
                    FROM {} w JOIN task_notes n ON n.id = w.note_id
                   WHERE w.done_at IS NULL
                   ORDER BY w.enqueued_at, w.rowid",
@@ -109,6 +126,7 @@ impl Store {
                     actor: Actor::parse(&actor).unwrap_or(Actor::User),
                     enqueued_at: r.get(4)?,
                     claimed_at: r.get(5)?,
+                    pasted_at: r.get(6)?,
                 })
             })
             .map_err(map_err)?;
@@ -199,6 +217,43 @@ impl Store {
             )
             .map_err(map_err)?;
         Ok(claimed == 1)
+    }
+
+    /// Say `wake`'s text is in the box, its Enter held back by a dialog, at
+    /// `at` (Unix milliseconds, when the paste began). False unless it's
+    /// claimed and not done.
+    pub fn mark_wake_pasted(&self, wake: &PendingWake, at: i64) -> Result<bool> {
+        let marked = self
+            .conn()
+            .execute(
+                &format!(
+                    "UPDATE {} SET pasted_at = ?2
+                      WHERE note_id = ?1 AND claimed_at IS NOT NULL AND done_at IS NULL",
+                    wake.kind.table()
+                ),
+                params![uuid_blob(wake.note), at],
+            )
+            .map_err(map_err)?;
+        Ok(marked == 1)
+    }
+
+    /// Take the pasted mark off `wake`, just before its Enter is pressed, so
+    /// a crash from here on reads as one mid-typing and nothing is pressed
+    /// again. False when it carried no mark, or is done, and then no Enter
+    /// may be pressed for it.
+    pub fn take_wake_paste(&self, wake: &PendingWake) -> Result<bool> {
+        let taken = self
+            .conn()
+            .execute(
+                &format!(
+                    "UPDATE {} SET pasted_at = NULL
+                      WHERE note_id = ?1 AND pasted_at IS NOT NULL AND done_at IS NULL",
+                    wake.kind.table()
+                ),
+                params![uuid_blob(wake.note)],
+            )
+            .map_err(map_err)?;
+        Ok(taken == 1)
     }
 
     /// Whether any answer is waiting to be told. Cheap enough to ask every
@@ -326,6 +381,27 @@ mod tests {
         assert!(store
             .add_note_waking(task, NoteKind::Answer, Actor::User, "x", serde_json::json!({}), Some(Uuid::now_v7()))
             .is_err());
+    }
+
+    /// The pasted mark (ov-385) goes only on a claimed row, reads back, and
+    /// is taken off once: a second taker presses no Enter.
+    #[test]
+    fn a_paste_is_marked_on_a_claimed_row_and_taken_once() {
+        let (store, task) = board();
+        let (note, _) =
+            store.add_note_waking(task, NoteKind::Answer, Actor::User, "Yes", serde_json::json!({}), None).unwrap();
+        let wake = store.pending_answer_wakes().unwrap().remove(0);
+        assert!(!store.mark_wake_pasted(&wake, 42).unwrap(), "marked before it was claimed");
+        assert!(store.claim_answer_wake(note.id).unwrap());
+        assert!(store.mark_wake_pasted(&wake, 42).unwrap());
+        assert_eq!(store.pending_answer_wakes().unwrap()[0].pasted_at, Some(42));
+        assert!(store.take_wake_paste(&wake).unwrap());
+        assert!(!store.take_wake_paste(&wake).unwrap(), "taken twice");
+        let after = &store.pending_answer_wakes().unwrap()[0];
+        assert_eq!((after.pasted_at, after.claimed_at.is_some()), (None, true), "still claimed: never typed again");
+        store.mark_wake_pasted(&wake, 43).unwrap();
+        store.finish_wake(&wake, None).unwrap();
+        assert!(!store.take_wake_paste(&wake).unwrap(), "taken once done");
     }
 
     /// The runner's note reads back as the runner's: the word round-trips.

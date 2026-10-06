@@ -63,6 +63,14 @@
 //! unfinished (a crash mid-typing), is "Couldn't confirm the agent got the
 //! decision" and is never typed again.
 //!
+//! **A dialog in the way** (ov-385). When a dialog comes up between the paste
+//! and the Enter, nobody having typed, the row is marked pasted and the
+//! answer waits rather than settling. A later pass presses the Enter, and
+//! only the Enter, once the dialog has gone, the box holds exactly the text,
+//! nobody has typed since the paste, and every check the first Enter passed
+//! passes again (`finish`). A box holding anything else is "Paste left in the
+//! composer; not sent", as before; the text is never typed twice.
+//!
 //! **Mid-turn** (ov-360). claude takes a message submitted while it works,
 //! as the person typing it would, and queues it for its next turn. Measured
 //! on claude 2.1.290: the box is the same box, a paste and Enter go in, and
@@ -370,10 +378,14 @@ impl Watcher {
 
     async fn wake(&self, wake: &PendingWake) -> Pass {
         // Claimed and never finished: the daemon stopped mid-typing. It may
-        // have reached the agent, so it's never typed again.
-        if wake.claimed_at.is_some() {
+        // have reached the agent, so it's never typed again. One pasted and
+        // stopped short of its Enter by a dialog may have the Enter pressed
+        // (`finish_paste`), and is never typed again either.
+        if wake.claimed_at.is_some() && wake.pasted_at.is_none() {
             return self.settle(wake, None, Some(couldnt_confirm(wake.kind)));
         }
+        // Whatever ends a pasted one, its text is in a box: say so.
+        let left = |record: Option<String>| if wake.pasted_at.is_some() { Some(PASTE_LEFT.into()) } else { record };
         let store = &self.service.store;
         let task = match store.get_task(wake.task) {
             Ok(task) => task,
@@ -384,7 +396,7 @@ impl Watcher {
         // switch covers a hold that ended: it's what lets this runner type
         // into an agent's pane at all.
         if !store.get_workspace(task.workspace_id).is_ok_and(|w| w.wake_on_answer) {
-            return self.settle(wake, None, None);
+            return self.settle(wake, Some(&task), left(None));
         }
         // A hold that ended is news only while the task is still waiting to be
         // started: one started or closed since has nothing to be told.
@@ -394,10 +406,10 @@ impl Watcher {
         if now_millis() - wake.enqueued_at > GIVE_UP_AFTER_MS {
             let held = self.wake_holds.lock().unwrap_or_else(|e| e.into_inner()).remove(&wake.note);
             let why = held.unwrap_or(Held::Busy).why();
-            return self.settle(wake, Some(&task), Some(format!("Not delivered: {why}.")));
+            return self.settle(wake, Some(&task), left(Some(format!("Not delivered: {why}."))));
         }
         let Some(to) = self.recipient(&task).await else {
-            return self.settle(wake, Some(&task), Some(nobody(wake.kind)));
+            return self.settle(wake, Some(&task), left(Some(nobody(wake.kind))));
         };
         let pass = match self.ready(&to).await {
             Err(held) => Pass::Waiting(held),
@@ -408,7 +420,9 @@ impl Watcher {
                     }
                     WakeKind::HoldEnded => hold_message(&task.key, &task.title, &wake.body),
                 };
-                if to.pane_mode == PaneMode::Agent {
+                if let Some(pasted) = wake.pasted_at {
+                    self.finish_paste(wake, &task, &to, &text, pasted, turn).await
+                } else if to.pane_mode == PaneMode::Agent {
                     self.prompt(wake, &task, &to, &text, turn).await
                 } else {
                     self.type_into(wake, &task, &to, &text).await
@@ -510,20 +524,26 @@ impl Watcher {
         }
         let deadline = tokio::time::Instant::now() + PASTE_SETTLES;
         let mut held_exactly = false;
+        // A dialog drawn over the box before the text showed in it: the text
+        // may be in the box beneath, which a later pass reads (`finish_paste`).
+        let mut dialog = false;
         while tokio::time::Instant::now() < deadline {
             tokio::time::sleep(PASTE_POLL).await;
             if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started) {
                 break;
             }
-            if let Ok(Ok((now, _))) = self.box_of(to, preset).await
-                && composer::holds_exactly(&now, text)
-            {
-                held_exactly = true;
-                break;
+            match self.box_of(to, preset).await {
+                Ok(Ok((now, _))) if composer::holds_exactly(&now, text) => {
+                    held_exactly = true;
+                    break;
+                }
+                Ok(Err(Held::Prompt)) => dialog = true,
+                _ => dialog = false,
             }
         }
         // Someone typed between the matching capture and now: no Enter.
-        if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started) {
+        let typed = last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started);
+        if typed {
             held_exactly = false;
         }
         if !held_exactly {
@@ -531,6 +551,9 @@ impl Watcher {
             // the text really is.
             if foreground_agent(tty).await != Some(preset) {
                 return self.settle(wake, Some(task), Some(LEFT_AT_A_SHELL.into()));
+            }
+            if dialog && !typed {
+                return self.paste_waits(wake, task, started);
             }
             return self.settle(wake, Some(task), Some(PASTE_LEFT.into()));
         }
@@ -541,7 +564,8 @@ impl Watcher {
         match entered {
             Ok(()) => {}
             Err(mid_turn::NoEnter::Failed) => return self.settle(wake, Some(task), Some(couldnt_confirm(wake.kind))),
-            Err(_) => return self.settle(wake, Some(task), Some(PASTE_LEFT.into())),
+            Err(mid_turn::NoEnter::Dialog) => return self.paste_waits(wake, task, started),
+            Err(mid_turn::NoEnter::Moved) => return self.settle(wake, Some(task), Some(PASTE_LEFT.into())),
         }
         self.mark_told(to.id);
         if let Some(witness) = witness
@@ -557,22 +581,7 @@ impl Watcher {
     /// Returns the proven agent and whether a turn is running, or why not.
     /// Every check fails closed.
     async fn proven_tui(&self, to: &Terminal) -> std::result::Result<Proven, Held> {
-        let launched = to.command_preset.split(':').next().unwrap_or_default();
-        let tty = self
-            .service
-            .inventory_snapshot()
-            .claimants(to.id)
-            .into_iter()
-            .find(|p| p.proves_life())
-            .map(|p| p.tty.clone());
-        let Some(tty) = tty else { return Err(Held::NotAnAgent) };
-        // The agent in front, proven by its process. A pane launched as an
-        // agent must be running that one. An adopted orchestrator launched
-        // as anything else is read as the agent its process proves.
-        let Some((preset, pid)) = foreground(&tty).await else { return Err(Held::NotAnAgent) };
-        if launched != preset && (is_an_agent_preset(launched) || to.role != TerminalRole::Orchestrator) {
-            return Err(Held::NotAnAgent);
-        }
+        let (preset, tty, pid) = self.proven_agent(to).await?;
         let Ok(composer) = self.box_of(to, preset).await else { return Err(Held::Unfamiliar) };
         let turn = match composer {
             Ok((Composer::Empty, turn)) => turn,
@@ -596,6 +605,28 @@ impl Watcher {
             return Err(Held::Unfamiliar);
         }
         Ok(Proven { preset, tty, pid, turn })
+    }
+
+    /// Check 3 of the gate: the agent in front of a TUI pane, proven by its
+    /// process, as its preset, its tty and its pid.
+    async fn proven_agent(&self, to: &Terminal) -> std::result::Result<(&'static str, String, i32), Held> {
+        let launched = to.command_preset.split(':').next().unwrap_or_default();
+        let tty = self
+            .service
+            .inventory_snapshot()
+            .claimants(to.id)
+            .into_iter()
+            .find(|p| p.proves_life())
+            .map(|p| p.tty.clone());
+        let Some(tty) = tty else { return Err(Held::NotAnAgent) };
+        // The agent in front, proven by its process. A pane launched as an
+        // agent must be running that one. An adopted orchestrator launched
+        // as anything else is read as the agent its process proves.
+        let Some((preset, pid)) = foreground(&tty).await else { return Err(Held::NotAnAgent) };
+        if launched != preset && (is_an_agent_preset(launched) || to.role != TerminalRole::Orchestrator) {
+            return Err(Held::NotAnAgent);
+        }
+        Ok((preset, tty, pid))
     }
 
     /// Ask the Orchestrator (ov-184): leave `text` in a TUI pane's box as one
@@ -902,6 +933,7 @@ fn spoken_name(t: &Terminal) -> String {
     if title.is_empty() { "the agent".into() } else { title }
 }
 
+mod finish;
 pub(crate) mod mid_turn;
 mod tell;
 #[cfg(test)]

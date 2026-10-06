@@ -80,6 +80,7 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     (crate::plan_cost::migration_0028_plan_budgets, Older::Welcome), // ov-307: one new table (plan_cost.rs says why)
     (crate::landing::migration_0029_workspace_landing, Older::Welcome), // ov-313: one new table (landing.rs says why)
     (crate::rulings::migration_0030_ruling_reversals, Older::Welcome), // ov-333: one column on 0026's own table (rulings.rs says why)
+    (crate::wakes::migration_0038_wake_pasted, Older::Welcome), // ov-385: one nullable column per wake queue (wakes.rs says why)
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;

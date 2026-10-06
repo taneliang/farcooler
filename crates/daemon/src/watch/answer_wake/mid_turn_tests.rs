@@ -103,7 +103,8 @@ async fn a_dialog_announced_during_the_paste_gets_no_enter() {
     assert!(!si.log().contains("ENTER"), "{}", si.log());
 }
 
-/// An answer the same: left in the box, and said so.
+/// An answer the same: no Enter, the text left in the box, and the answer
+/// waits marked pasted (ov-385) rather than settling.
 #[tokio::test]
 async fn an_answer_with_a_dialog_announced_during_the_paste_gets_no_enter() {
     let b = board().await;
@@ -124,9 +125,13 @@ async fn an_answer_with_a_dialog_announced_during_the_paste_gets_no_enter() {
     b.answer("Drill in");
     b.pump().await;
     gate.await.unwrap();
-    assert_eq!(b.settled(), ["Paste left in the composer; not sent"]);
+    assert!(b.settled().is_empty(), "{:?}", b.settled());
+    assert!(b.pending()[0].pasted_at.is_some(), "{:?}", b.pending());
     assert!(!other.log().contains("ENTER"), "{}", other.log());
 }
+
+#[path = "finish_tests.rs"]
+mod finish_tests;
 
 /// The last checks before the Enter, one at a time: a dialog on the screen,
 /// a gate begun since the paste, a tool call written since it, an ask held

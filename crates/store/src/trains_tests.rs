@@ -56,7 +56,7 @@ fn the_migration_is_welcome() {
     let last = &crate::migrate::MIGRATIONS[26];
     assert!(std::ptr::fn_addr_eq(last.0, migration_0027_trains as fn(&Transaction) -> rusqlite::Result<()>));
     assert_eq!(last.1, Older::Welcome);
-    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 30);
+    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 31);
 }
 
 /// A train starts integrating, its lanes say they're on it, and its name is

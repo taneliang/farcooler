@@ -115,6 +115,16 @@ pub(crate) struct Witness {
     pasted_ms: i64,
 }
 
+impl Witness {
+    /// This witness, for a paste that began at `ms` (Unix ms, as `last_input`
+    /// keeps time) rather than now: a key typed since then stops the Enter.
+    /// Gates still count from now, when the checks that made it passed.
+    pub(super) fn pasted_at(mut self, ms: i64) -> Witness {
+        self.pasted_ms = ms;
+        self
+    }
+}
+
 #[cfg(test)]
 impl Witness {
     /// A witness for `session`'s transcript at `path`, the paste beginning now.
