@@ -1,6 +1,8 @@
 //! The agent view's runner side: one normalized event model, and the adapters
 //! that produce it.
 //!
+//! **Feature-frozen pending ov-359 (option b: the CLI-backed native view): crash fixes only. New panes open in the terminal (ov-361).**
+//!
 //! Clients never see a vendor protocol. That is the entire point — the UI is
 //! written once against `event::AgentEvent`, and a new agent is a new adapter
 //! rather than a new screen.

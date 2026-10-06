@@ -4,6 +4,9 @@ import SwiftUI
 /// The agent pane: a chat drawn into the same rectangle a terminal would
 /// occupy.
 ///
+/// **Feature-frozen pending ov-359 (option b: the CLI-backed native view):
+/// crash fixes only.** New panes open in the terminal (ov-361).
+///
 /// `TerminalPane`'s doc comment explains why a terminal grew no header or
 /// footer — both restated what the sidebar already showed. This surface keeps
 /// that rule: no title bar, no permanent status line. What a terminal pane

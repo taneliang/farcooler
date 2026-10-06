@@ -746,9 +746,10 @@ final class DaemonClient: ObservableObject {
     /// two hundred milliseconds later. The preference sets a default, and a
     /// default that cannot be overruled is a policy.
     private func openAsChatIfPreferred(_ terminal: Terminal) {
-        guard Preferences.shared.preferChatMode else { return }
-        guard terminal.canSwitchPaneMode, !terminal.isAgentPane else { return }
-        guard !openedAsChat.contains(terminal.id) else { return }
+        guard AgentOpening.opensAsChat(
+            preferChat: Preferences.shared.preferChatMode, canSwitch: terminal.canSwitchPaneMode,
+            isAgentPane: terminal.isAgentPane, alreadyOffered: openedAsChat.contains(terminal.id))
+        else { return }
         openedAsChat.insert(terminal.id)
 
         // Outside any action: the preference switched it, not the click

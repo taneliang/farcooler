@@ -38,7 +38,7 @@ final class Preferences: ObservableObject {
     /// Far Cooler is terminal-first, and chat is an upgrade a user opts into
     /// once they have seen it. Someone who prefers it should not have to ask
     /// for it a second time in every new pane.
-    @AppStorage("agents.preferChatMode") var preferChatMode = false
+    @AppStorage("agents.preferChatMode") var preferChatMode = AgentOpening.preferChatDefault
 
     /// System, light, or dark.
     ///
