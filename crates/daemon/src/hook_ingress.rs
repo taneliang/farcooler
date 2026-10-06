@@ -798,11 +798,9 @@ impl HookIngress {
                 self.asks.heard(session, is_gate(hook.agent, &hook.event));
             }
             if is_fence(hook.agent, &hook.event) {
-                fence::answer(&self.asks, session, &mut write).await?;
-            } else if let Some(session) = session
-                && matches!(hook.event.as_str(), "PostToolUse" | "PostToolUseFailure" | "Stop" | "UserPromptSubmit")
-            {
-                self.asks.tool_ended(session);
+                fence::answer(&self.asks, session, &hook.payload, &mut write).await?;
+            } else if let Some(session) = session {
+                fence::ended(&self.asks, session, &hook.event, &hook.payload);
             }
             let terminal = self.terminal_for(&f, hook.agent);
             if is_gate(hook.agent, &hook.event) {

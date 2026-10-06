@@ -15,12 +15,27 @@ use crate::hook_asks::{FENCE_HOLD, HookAsks};
 
 /// Mark `session`'s call in flight, wait out any Enter holding its fence,
 /// and answer the hook.
-pub(super) async fn answer(asks: &HookAsks, session: Option<&str>, write: &mut OwnedWriteHalf) -> std::io::Result<()> {
-    if let Some(fence) = session.and_then(|session| asks.mark_tool_starting(session))
+pub(super) async fn answer(
+    asks: &HookAsks,
+    session: Option<&str>,
+    payload: &serde_json::Value,
+    write: &mut OwnedWriteHalf,
+) -> std::io::Result<()> {
+    let call = payload["tool_use_id"].as_str();
+    if let Some(fence) = session.and_then(|session| asks.mark_tool_starting(session, call))
         && fence.try_lock().is_err()
     {
         write_reply(write, &Reply::hold(FENCE_HOLD)).await?;
         let _ = tokio::time::timeout(FENCE_HOLD, fence.lock()).await;
     }
     write_reply(write, &Reply::verdict(None)).await
+}
+
+/// A call's end clears that call; a turn's beginning or end clears them all.
+pub(super) fn ended(asks: &HookAsks, session: &str, event: &str, payload: &serde_json::Value) {
+    match event {
+        "PostToolUse" | "PostToolUseFailure" => asks.tool_ended(session, payload["tool_use_id"].as_str()),
+        "Stop" | "UserPromptSubmit" => asks.turn_bounded(session),
+        _ => {}
+    }
 }

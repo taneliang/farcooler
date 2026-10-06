@@ -490,7 +490,7 @@ impl Watcher {
         };
         let witness = match proven.turn {
             Turn::Between => None,
-            Turn::During => match self.witness(&proven, text).await {
+            Turn::During => match self.witness(&proven, to, text).await {
                 Some(witness) => Some(witness),
                 None => return Pass::Waiting(Held::Busy),
             },

@@ -16,7 +16,7 @@ fn hook(socket: &Path, event: &str, session: &str, patience: std::time::Duration
     let line = HookLine {
         agent: Agent::Claude,
         event: event.to_string(),
-        payload: serde_json::json!({ "session_id": session, "tool_name": "Bash" }),
+        payload: serde_json::json!({ "session_id": session, "tool_name": "Bash", "tool_use_id": "toolu_1" }),
     };
     let frame = encode_line(&line).expect("encode");
     let mut stream = std::os::unix::net::UnixStream::connect(socket).expect("connect");

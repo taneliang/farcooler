@@ -143,8 +143,14 @@ pub struct HookAsks {
 struct Heard {
     at: Instant,
     gate: Option<Instant>,
-    /// A `PreToolUse` came and no end of the call yet.
-    tool_in_flight: bool,
+    /// The calls a `PreToolUse` came for and no end yet, by `tool_use_id`
+    /// (`""` for one that named none). A set, since calls run side by side:
+    /// a subagent's, parallel reads; one call's end says nothing of another.
+    calls: std::collections::HashSet<String>,
+    /// A turn began or ended (`UserPromptSubmit`, `Stop`) since this daemon
+    /// started: before that, a call from before the start may be in flight
+    /// unseen, so the session isn't typed into mid-turn.
+    turn_seen: bool,
     /// The fence's lock.
     fence: Arc<tokio::sync::Mutex<()>>,
 }
@@ -155,6 +161,11 @@ struct Heard {
 /// gives up, and lets go, first. A hook kept waiting is first told so with a
 /// hold (`hook_ingress::fence`), which gives it this long.
 pub const FENCE_HOLD: Duration = Duration::from_secs(10);
+
+/// How long after a gate began a session counts as maybe showing its dialog,
+/// for the check before a paste (`quiet_mid_turn`). The screen check and the
+/// fence cover the rest.
+const GATE_RECENT: Duration = Duration::from_secs(2);
 
 /// Sessions remembered before the oldest are let go: far more than a runner
 /// runs at once.
@@ -185,7 +196,8 @@ impl HookAsks {
         let heard = sessions.entry(session.to_string()).or_insert_with(|| Heard {
             at: now,
             gate: None,
-            tool_in_flight: false,
+            calls: std::collections::HashSet::new(),
+            turn_seen: false,
             fence: Arc::default(),
         });
         heard.at = now;
@@ -200,33 +212,58 @@ impl HookAsks {
         self.sessions.lock().unwrap_or_else(|e| e.into_inner()).get(session).map(|h| h.fence.clone())
     }
 
-    /// A `PreToolUse` from `session`: mark the call in flight, and hand back
-    /// the fence its answer waits for. `None` for a session never heard from.
-    pub fn mark_tool_starting(&self, session: &str) -> Option<Arc<tokio::sync::Mutex<()>>> {
+    /// A `PreToolUse` from `session` for `call`: mark it in flight, and hand
+    /// back the fence its answer waits for. `None` for a session never heard
+    /// from.
+    pub fn mark_tool_starting(&self, session: &str, call: Option<&str>) -> Option<Arc<tokio::sync::Mutex<()>>> {
         let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         let heard = sessions.get_mut(session)?;
-        heard.tool_in_flight = true;
+        heard.calls.insert(call.unwrap_or_default().to_string());
         Some(heard.fence.clone())
     }
 
     /// `mark_tool_starting`, then wait (up to `FENCE_HOLD`) for any Enter
     /// holding the fence to let go. The hook is answered after this returns.
-    pub async fn tool_starting(&self, session: &str) {
-        if let Some(fence) = self.mark_tool_starting(session) {
+    pub async fn tool_starting(&self, session: &str, call: Option<&str>) {
+        if let Some(fence) = self.mark_tool_starting(session, call) {
             let _ = tokio::time::timeout(FENCE_HOLD, fence.lock()).await;
         }
     }
 
-    /// The tool call in flight in `session`, if any, is over.
-    pub fn tool_ended(&self, session: &str) {
+    /// `call` in `session` is over (`PostToolUse`, `PostToolUseFailure`).
+    /// Only that call: one that named none ends only with its turn.
+    pub fn tool_ended(&self, session: &str, call: Option<&str>) {
+        if let (Some(heard), Some(call)) =
+            (self.sessions.lock().unwrap_or_else(|e| e.into_inner()).get_mut(session), call)
+        {
+            heard.calls.remove(call);
+        }
+    }
+
+    /// A turn began or ended in `session`: no call is in flight, and the
+    /// session has been seen at a boundary since this daemon started.
+    pub fn turn_bounded(&self, session: &str) {
         if let Some(heard) = self.sessions.lock().unwrap_or_else(|e| e.into_inner()).get_mut(session) {
-            heard.tool_in_flight = false;
+            heard.calls.clear();
+            heard.turn_seen = true;
         }
     }
 
     /// Whether `session` has a tool call in flight.
     pub fn tool_in_flight(&self, session: &str) -> bool {
-        self.sessions.lock().unwrap_or_else(|e| e.into_inner()).get(session).is_some_and(|h| h.tool_in_flight)
+        self.sessions.lock().unwrap_or_else(|e| e.into_inner()).get(session).is_some_and(|h| !h.calls.is_empty())
+    }
+
+    /// Whether `session` may be typed into mid-turn as far as its hooks say:
+    /// heard from, at a turn boundary since this daemon started, no call in
+    /// flight, and no gate begun in the last `GATE_RECENT`.
+    pub fn quiet_mid_turn(&self, session: &str) -> bool {
+        let sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(heard) = sessions.get(session) else { return false };
+        let recent = Instant::now().checked_sub(GATE_RECENT);
+        heard.turn_seen
+            && heard.calls.is_empty()
+            && !heard.gate.is_some_and(|gate| recent.is_none_or(|recent| gate >= recent))
     }
 
     /// Whether any hook was ever heard from `session` by this daemon.
@@ -957,18 +994,54 @@ mod tests {
         let held = fence.lock().await;
         let starting = tokio::spawn({
             let asks = asks.clone();
-            async move { asks.tool_starting("s1").await }
+            async move { asks.tool_starting("s1", Some("t1")).await }
         });
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(asks.tool_in_flight("s1"), "marked before the wait");
         assert!(!starting.is_finished(), "answered while the Enter held the fence");
         drop(held);
         tokio::time::timeout(Duration::from_secs(1), starting).await.expect("answered once let go").unwrap();
-        asks.tool_ended("s1");
+        asks.tool_ended("s1", Some("t1"));
         assert!(!asks.tool_in_flight("s1"));
         assert!(asks.fence("unheard").is_none());
-        asks.tool_starting("unheard").await;
+        asks.tool_starting("unheard", Some("t1")).await;
         assert!(!asks.tool_in_flight("unheard"));
+    }
+
+    /// Calls side by side: one's end leaves the other in flight; a call that
+    /// named no id ends only with the turn, which ends them all.
+    #[tokio::test]
+    async fn two_calls_in_flight_and_one_ends() {
+        let (asks, _) = ledger();
+        asks.heard("s1", false);
+        asks.turn_bounded("s1");
+        assert!(asks.quiet_mid_turn("s1"));
+        asks.tool_starting("s1", Some("read")).await;
+        asks.tool_starting("s1", Some("write")).await;
+        asks.tool_ended("s1", Some("read"));
+        assert!(asks.tool_in_flight("s1"), "the write's still in flight");
+        assert!(!asks.quiet_mid_turn("s1"));
+        asks.tool_ended("s1", Some("write"));
+        assert!(!asks.tool_in_flight("s1"));
+        asks.tool_starting("s1", None).await;
+        asks.tool_ended("s1", None);
+        assert!(asks.tool_in_flight("s1"), "a call with no id ends only with its turn");
+        asks.turn_bounded("s1");
+        assert!(!asks.tool_in_flight("s1") && asks.quiet_mid_turn("s1"));
+    }
+
+    /// Before a turn boundary since this daemon started, a session isn't
+    /// quiet, whatever else it says; nor is one with a gate just begun.
+    #[test]
+    fn a_session_is_quiet_only_after_a_turn_boundary_and_no_recent_gate() {
+        let (asks, _) = ledger();
+        asks.heard("s1", false);
+        assert!(!asks.quiet_mid_turn("s1"), "no turn boundary yet");
+        asks.turn_bounded("s1");
+        assert!(asks.quiet_mid_turn("s1"));
+        asks.heard("s1", true);
+        assert!(!asks.quiet_mid_turn("s1"), "a gate just begun");
+        assert!(!asks.quiet_mid_turn("unheard"));
     }
 
     #[tokio::test]

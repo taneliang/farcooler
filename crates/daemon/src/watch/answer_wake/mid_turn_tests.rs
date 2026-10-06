@@ -16,10 +16,16 @@ fn config_of(b: &Board, terminal: &Terminal) -> PathBuf {
 /// The session every claude stand-in names in its registry.
 const SESSION: &str = "stand-in";
 
+/// Its hooks heard from, and a turn boundary since the daemon started.
+fn hooked(b: &Board) {
+    b.svc.hooks().asks().heard(SESSION, false);
+    b.svc.hooks().asks().turn_bounded(SESSION);
+}
+
 /// Show the stand-in working, as the watcher reads it too, its session's
 /// hooks heard from.
 async fn working(b: &Board, terminal: &Terminal, si: &StandIn, mode: &str) {
-    b.svc.hooks().asks().heard(SESSION, false);
+    hooked(b);
     si.show(mode).await;
     b.screen_with(terminal.id, "esc to interrupt").await;
     b.doing(terminal.id, AgentActivity::Working).await;
@@ -95,12 +101,15 @@ async fn a_dialog_announced_during_the_paste_gets_no_enter() {
     assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello").await), "dialog");
     assert!(gate.await.unwrap(), "the paste never reached the stand-in");
     assert!(!si.log().contains("ENTER"), "{}", si.log());
+}
 
-    // An answer the same: left in the box, and said so.
+/// An answer the same: left in the box, and said so.
+#[tokio::test]
+async fn an_answer_with_a_dialog_announced_during_the_paste_gets_no_enter() {
+    let b = board().await;
     let agent = b.agent("Agent 2", "claude").await;
     let other = b.stand_in(&agent, "claude", "claude").await;
     working(&b, &agent, &other, "working").await;
-    b.svc.hooks().asks().heard(SESSION, true);
     let asks = b.svc.hooks().asks().clone();
     let log = other.log.clone();
     let gate = tokio::spawn(async move {
@@ -175,7 +184,7 @@ async fn the_enter_holds_the_fence_and_waits_on_a_tool_call() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("t.jsonl");
     let asks = b.svc.hooks().asks().clone();
-    asks.heard(SESSION, false);
+    hooked(&b);
     si.show("draft:hello").await;
     b.screen_with(orchestrator.id, "hello").await;
 
@@ -190,7 +199,7 @@ async fn the_enter_holds_the_fence_and_waits_on_a_tool_call() {
     // A `PreToolUse` arrives: marked at once, answered once the fence is free.
     let starting = tokio::spawn({
         let asks = asks.clone();
-        async move { asks.tool_starting(SESSION).await }
+        async move { asks.tool_starting(SESSION, Some("t1")).await }
     });
     while !asks.tool_in_flight(SESSION) {
         tokio::task::yield_now().await;
@@ -201,7 +210,7 @@ async fn the_enter_holds_the_fence_and_waits_on_a_tool_call() {
     assert!(!si.log().contains("ENTER"), "{}", si.log());
 
     // The call over, the Enter goes in.
-    asks.tool_ended(SESSION);
+    asks.tool_ended(SESSION, Some("t1"));
     assert_eq!(b.watcher.enter(&orchestrator, "claude", &Witness::for_tests(SESSION, &path), "hello").await, Ok(()));
     si.submits(1).await;
 }
@@ -218,7 +227,7 @@ async fn a_slow_enter_keeps_the_fence_until_its_key_is_in() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("t.jsonl");
     let asks = b.svc.hooks().asks().clone();
-    asks.heard(SESSION, false);
+    hooked(&b);
     si.show("draft:hello").await;
     b.screen_with(orchestrator.id, "hello").await;
     b.watcher.slow_enter_ms.store(700, Ordering::SeqCst);
@@ -230,10 +239,11 @@ async fn a_slow_enter_keeps_the_fence_until_its_key_is_in() {
             (entered, std::time::Instant::now())
         }
     });
-    while fence.try_lock().is_ok() {
-        tokio::task::yield_now().await;
-    }
-    asks.tool_starting(SESSION).await;
+    taken(&fence).await;
+    // Past its checks and into the slow send (the capture under the fence
+    // takes tens of milliseconds; the send, 700).
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    asks.tool_starting(SESSION, Some("t1")).await;
     let answered = std::time::Instant::now();
     let (entered, done) = enter.await.unwrap();
     assert_eq!(entered, Ok(()));
@@ -337,7 +347,103 @@ async fn a_working_claude_no_hook_was_heard_from_is_left_to_finish() {
     b.svc.hooks().asks().heard("another-session", false);
     assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello").await), "busy");
     b.svc.hooks().asks().heard(SESSION, false);
+    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello").await), "busy", "no turn boundary yet");
+    nothing_typed(&si);
+    b.svc.hooks().asks().turn_bounded(SESSION);
     assert_eq!(b.watcher.tell_into(orchestrator.id, "hello").await.expect("queued"), Turn::During);
+}
+
+/// Wait, bounded, until something holds `fence`; panics if nothing does.
+async fn taken(fence: &tokio::sync::Mutex<()>) {
+    let since = std::time::Instant::now();
+    while fence.try_lock().is_ok() {
+        assert!(since.elapsed() < Duration::from_secs(5), "nothing took the fence");
+        tokio::task::yield_now().await;
+    }
+}
+
+/// The common case: a tool runs while the message comes. Nothing is claimed
+/// or typed; the answer waits, a tell is refused as busy, and once the call
+/// is over the answer is told.
+#[tokio::test]
+async fn a_message_while_a_tool_runs_waits_with_nothing_typed() {
+    let b = board().await;
+    let agent = b.agent("Agent 2", "claude").await;
+    let si = b.stand_in(&agent, "claude", "claude").await;
+    working(&b, &agent, &si, "working").await;
+    let asks = b.svc.hooks().asks().clone();
+    asks.mark_tool_starting(SESSION, Some("bash-1"));
+    b.answer("Drill in");
+    b.pump().await;
+    b.untouched(&si);
+    assert_eq!(b.progress(), ["Waiting to tell Agent 2 about the decision: it's busy."]);
+    asks.tool_ended(SESSION, Some("bash-1"));
+    b.pump().await;
+    assert_eq!(b.settled(), ["Told Agent 2 about the decision. It was working, so it's queued for when it's ready"]);
+
+    let orchestrator = b.adopted_shell().await;
+    let other = b.stand_in(&orchestrator, "claude", "claude").await;
+    working(&b, &orchestrator, &other, "working").await;
+    asks.mark_tool_starting(SESSION, Some("read-1"));
+    asks.mark_tool_starting(SESSION, Some("write-1"));
+    asks.tool_ended(SESSION, Some("read-1"));
+    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello").await), "busy", "the write's in flight");
+    nothing_typed(&other);
+}
+
+/// Someone types while the Enter waits on the fence behind another: under
+/// the fence, the keyboard and the box are read again, and no Enter goes in.
+#[tokio::test]
+async fn typing_while_the_enter_waits_on_the_fence_stops_it() {
+    use super::mid_turn::{NoEnter, Witness};
+    let b = board().await;
+    let orchestrator = b.adopted_shell().await;
+    let si = b.stand_in(&orchestrator, "claude", "claude").await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("t.jsonl");
+    hooked(&b);
+    si.show("draft:hello").await;
+    b.screen_with(orchestrator.id, "hello").await;
+    let fence = b.svc.hooks().asks().fence(SESSION).expect("a fence");
+    let held = fence.lock().await;
+    let enter = tokio::spawn({
+        let (watcher, to, witness) = (b.watcher.clone(), orchestrator.clone(), Witness::for_tests(SESSION, &path));
+        async move { watcher.enter(&to, "claude", &witness, "hello").await }
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    crate::runtime::mark_input(b.svc.root_dir(), orchestrator.id);
+    drop(held);
+    assert_eq!(enter.await.unwrap(), Err(NoEnter::Moved));
+    assert!(!si.log().contains("ENTER"), "{}", si.log());
+}
+
+/// A caller dropped while its Enter is under way (a client gone during
+/// `terminal.tell`) doesn't let go of the fence early: the Enter finishes on
+/// its own task, and only then is a `PreToolUse` answered.
+#[tokio::test]
+async fn a_dropped_caller_keeps_the_fence_held_until_the_key_is_in() {
+    use super::mid_turn::Witness;
+    let b = board().await;
+    let orchestrator = b.adopted_shell().await;
+    let si = b.stand_in(&orchestrator, "claude", "claude").await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("t.jsonl");
+    hooked(&b);
+    si.show("draft:hello").await;
+    b.screen_with(orchestrator.id, "hello").await;
+    b.watcher.slow_enter_ms.store(700, Ordering::SeqCst);
+    let fence = b.svc.hooks().asks().fence(SESSION).expect("a fence");
+    let caller = tokio::spawn({
+        let (watcher, to, witness) = (b.watcher.clone(), orchestrator.clone(), Witness::for_tests(SESSION, &path));
+        async move { watcher.enter(&to, "claude", &witness, "hello").await }
+    });
+    taken(&fence).await;
+    caller.abort();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(fence.try_lock().is_err(), "the fence was let go with the caller");
+    b.svc.hooks().asks().tool_starting(SESSION, Some("t1")).await;
+    si.submits(1).await;
+    assert_eq!(si.submitted(), ["hello"], "{}", si.log());
 }
 
 /// The watcher behind: it says working, the screen says the turn is over.

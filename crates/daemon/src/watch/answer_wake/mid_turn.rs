@@ -4,16 +4,22 @@
 //! **The Enter.** Mid-turn is when claude raises a dialog: a permission, a
 //! question (`AskUserQuestion`), leaving plan mode. An Enter that lands on
 //! one answers it, with its first option, which is Yes, and that can't be
-//! taken back. So the race is closed by ordering, not by timing (`enter`):
-//! 1. a fresh capture reads the box holding exactly the text, and the pane
-//!    not Blocked;
-//! 2. the session's fence is taken (`HookAsks::fence`). Claude runs its
+//! taken back. So nothing is typed at all while the session's hooks say a
+//! call is in flight, a gate just began, or no turn boundary has been seen
+//! since this daemon started (`witness`, `HookAsks::quiet_mid_turn`): an
+//! answer waits, a tell is refused as busy. Calls are tracked by
+//! `tool_use_id`, since they run side by side. Then the race is closed by
+//! ordering, not by timing (`enter`, on a task of its own, so a dropped
+//! caller can't let go of the fence early):
+//! 1. the session's fence is taken (`HookAsks::fence`). Claude runs its
 //!    `PreToolUse` hook, and waits for it, before it draws any permission
 //!    dialog; the daemon answers that hook only after marking the call in
 //!    flight and taking the same lock (`HookAsks::tool_starting`);
-//! 3. under the fence: no call in flight, none written to the transcript
-//!    since the paste began (`tool_called_since`), no gate begun since then,
-//!    and no ask held on the pane;
+//! 2. under it, a fresh capture reads the box holding exactly the text and
+//!    the pane not Blocked, and nobody has typed since the paste;
+//! 3. no call in flight, none written to the transcript since the paste
+//!    began (`tool_called_since`), no gate begun since then, and no ask held
+//!    on the pane;
 //! 4. Enter, and the fence held `KEY_LANDS` past `tmux send-keys` returning;
 //!    a send that fails or overruns `ENTER_DEADLINE` is killed and the fence
 //!    held `LATE_KEY` more, as its key may still land.
@@ -56,7 +62,7 @@ use farcooler_core::composer;
 use farcooler_store::models::Terminal;
 
 use super::{PASTE_POLL, Proven};
-use crate::runtime::Runtime;
+use crate::runtime::{Runtime, last_input};
 use crate::watch::Watcher;
 
 /// How long the fence is held after `tmux send-keys` returns, for the key to
@@ -86,7 +92,7 @@ const QUEUE_SETTLES: Duration = Duration::from_secs(3);
 const LONGEST_READ: u64 = 1 << 20;
 
 /// What will show a message was queued, set up before it's typed.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Witness {
     /// The session, whose gates say a dialog is coming.
     session: String,
@@ -95,8 +101,10 @@ pub(crate) struct Witness {
     from: u64,
     /// The same text queued already, before the paste.
     queued_before: bool,
-    /// When the paste began: a gate from then on stops the Enter.
+    /// When the paste began: a gate from then on stops the Enter, and so
+    /// does a key someone typed (`pasted_ms`, as `last_input` keeps it).
     pasted: Instant,
+    pasted_ms: i64,
 }
 
 #[cfg(test)]
@@ -104,7 +112,14 @@ impl Witness {
     /// A witness for `session`'s transcript at `path`, the paste beginning now.
     pub(crate) fn for_tests(session: &str, path: &Path) -> Witness {
         let from = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-        Witness { session: session.into(), path: path.into(), from, queued_before: false, pasted: Instant::now() }
+        Witness {
+            session: session.into(),
+            path: path.into(),
+            from,
+            queued_before: false,
+            pasted: Instant::now(),
+            pasted_ms: crate::watch::now_millis(),
+        }
     }
 }
 
@@ -120,35 +135,60 @@ pub(crate) enum NoEnter {
 }
 
 impl Watcher {
-    /// The witness for typing `text` into `proven` mid-turn, or `None` when
-    /// nothing could make the Enter safe or show the message was queued.
-    pub(super) async fn witness(&self, proven: &Proven, text: &str) -> Option<Witness> {
+    /// The witness for typing `text` into `proven`, the pane `to`, mid-turn,
+    /// or `None` when nothing could make the Enter safe or show the message
+    /// was queued, or when the hooks say it wouldn't be safe now: a call in
+    /// flight, a gate just begun, an ask held, or no turn boundary seen since
+    /// this daemon started (`HookAsks::quiet_mid_turn`). Checked before
+    /// anything is claimed or typed, so a message then waits, or is refused
+    /// as busy, with nothing left in the box; the same checks under the
+    /// fence (`enter`) are the last guard, for the race.
+    pub(super) async fn witness(&self, proven: &Proven, to: &Terminal, text: &str) -> Option<Witness> {
         if proven.preset != "claude" {
             return None;
         }
         let config = config_dir(&process_env(proven.pid).await?)?;
         let (session, path) = transcript_in(&config, proven.pid)?;
-        if !self.service.hooks().asks().hooked(&session) {
+        let asks = self.service.hooks().asks();
+        if !asks.quiet_mid_turn(&session) || asks.is_holding(to.id) {
             return None;
         }
         let from = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         let queued_before = enqueued_before(&path, from, text);
-        Some(Witness { session, path, from, queued_before, pasted: Instant::now() })
+        let pasted_ms = crate::watch::now_millis();
+        Some(Witness { session, path, from, queued_before, pasted: Instant::now(), pasted_ms })
     }
 
     /// Press Enter in `to`, mid-turn, past the checks in this module's docs.
+    ///
+    /// On a task of its own, so that a caller dropped mid-way (a client that
+    /// went away during `terminal.tell`) can't let go of the fence while the
+    /// key may still land: the fence is held to the end, `LATE_KEY` included.
     pub(super) async fn enter(&self, to: &Terminal, preset: &str, witness: &Witness, text: &str) -> Result<(), NoEnter> {
-        match self.box_of(to, preset).await {
-            Ok(Ok((now, _))) if composer::holds_exactly(&now, text) => {}
-            Ok(Err(super::Held::Prompt)) => return Err(NoEnter::Dialog),
-            _ => return Err(NoEnter::Moved),
-        }
+        let Some(me) = self.me.upgrade() else { return Err(NoEnter::Failed) };
+        let (to, preset, witness, text) = (to.clone(), preset.to_string(), witness.clone(), text.to_string());
+        tokio::spawn(async move { me.enter_fenced(&to, &preset, &witness, &text).await })
+            .await
+            .unwrap_or(Err(NoEnter::Failed))
+    }
+
+    async fn enter_fenced(&self, to: &Terminal, preset: &str, witness: &Witness, text: &str) -> Result<(), NoEnter> {
         let runtime = Runtime { marks: None, ..self.service.runtime() };
         let asks = self.service.hooks().asks();
         // The fence: no `PreToolUse` is answered, so no dialog drawn, from
         // the checks below until the key has landed.
         let Some(fence) = asks.fence(&witness.session) else { return Err(NoEnter::Dialog) };
         let _fenced = fence.lock().await;
+        // The box and the keyboard as they are now, under the fence: it may
+        // have waited behind another Enter for seconds.
+        match self.box_of(to, preset).await {
+            Ok(Ok((now, _))) if composer::holds_exactly(&now, text) => {}
+            Ok(Err(super::Held::Prompt)) => return Err(NoEnter::Dialog),
+            _ => return Err(NoEnter::Moved),
+        }
+        if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= witness.pasted_ms) {
+            return Err(NoEnter::Moved);
+        }
         if asks.tool_in_flight(&witness.session)
             || tool_called_since(&witness.path, witness.from)
             || asks.gated_since(&witness.session, witness.pasted)

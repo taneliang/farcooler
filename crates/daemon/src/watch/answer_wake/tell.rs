@@ -116,7 +116,7 @@ impl Watcher {
         let proven = self.proven_tui(&to).await.map_err(|held| DomainError::Conflict { what: held_word(held) })?;
         let witness = match proven.turn {
             Turn::Between => None,
-            Turn::During => Some(self.witness(&proven, &text).await.ok_or(DomainError::Conflict { what: "busy" })?),
+            Turn::During => Some(self.witness(&proven, &to, &text).await.ok_or(DomainError::Conflict { what: "busy" })?),
         };
         let (preset, tty) = (proven.preset, proven.tty.as_str());
 
