@@ -658,8 +658,9 @@ final class WatchLinkHost: NSObject {
     /// Three things make the replay affordable:
     ///
     ///   - **One round trip, not a poll loop.** `terminal.agent_subscribe`
-    ///     answers with the daemon's whole retained window in a single reply —
-    ///     bounded at `TRANSCRIPT_LIMIT`, 4096 events, in
+    ///     answers with the newest of the daemon's retained window that fits
+    ///     one reply (about 768 KiB, behind a Gap when older events are left
+    ///     out), from a window bounded at `TRANSCRIPT_LIMIT`, 4096 events, in
     ///     `agent_supervisor.rs`. `AgentStream` calls the same method every
     ///     700ms because it is watching a live conversation; this is asking one
     ///     question once, so it asks once.

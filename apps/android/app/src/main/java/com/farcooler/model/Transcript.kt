@@ -313,8 +313,10 @@ class Transcript {
         for (item in events) {
             // Already folded in, so skipped rather than applied twice.
             //
-            // Within one epoch the daemon numbers by position, so a seq below
-            // the cursor names an event this transcript already holds. It can
+            // Within one epoch the daemon numbers events for the life of the
+            // stream and never reuses a number (a trim leaves a Gap and keeps
+            // the numbering), so a seq below the cursor names an event this
+            // transcript already holds. It can
             // still arrive: anything that re-delivers a batch — a reconnect, a
             // replay racing a push — hands back numbers already seen, and
             // applying them again renders the conversation twice.
