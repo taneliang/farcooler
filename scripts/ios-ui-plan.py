@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Do the iOS UI shards run for this push or pull request? (ov-301)
 
-ci.yml's `ios-ui-plan` job runs this. The shards hold two `xcode-27` runners
-for about half an hour each, so they run only when something the iOS app is
+ci.yml's `ios-ui-plan` job runs this. The four shards hold `xcode-27` runners
+for about half an hour each, out of the account's five, so they run only when something the iOS app is
 built from changed:
 
     EVENT=push AFTER=<sha> CANDIDATES=<file> scripts/ios-ui-plan.py
