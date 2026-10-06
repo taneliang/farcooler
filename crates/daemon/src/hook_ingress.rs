@@ -856,6 +856,9 @@ impl HookIngress {
                 continue;
             };
             let f = facts(hook.agent, &hook.payload);
+            if let Some(session) = f.session_id.as_deref() {
+                self.asks.heard(session, is_gate(hook.agent, &hook.event));
+            }
             let terminal = self.terminal_for(&f, hook.agent);
             if is_gate(hook.agent, &hook.event) {
                 let Some(terminal) = terminal else {

@@ -40,7 +40,10 @@ pub(crate) fn told(value: Option<&result::Value>, terminal: &str) -> String {
 /// This CLI's line for a refusal the runner named, in clap's style.
 pub(crate) fn said_about(what: &str) -> Option<&'static str> {
     Some(match what {
-        "busy" => "the orchestrator is working, and its queue can't be confirmed, so nothing was typed. try again when it's done",
+        "busy" => {
+            "the orchestrator is working, and Far Cooler can't tell whether a question would take the message, \
+             so nothing was typed. try again when it's done"
+        }
         "prompt" => "the orchestrator is showing a question or a menu. answer it first",
         "draft" => "there's a draft in the orchestrator's box. send or clear it first",
         "typing" => "someone is typing in the orchestrator's pane. try again in a few seconds",
@@ -54,6 +57,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "not_running" => "the orchestrator isn't running",
         "paste_left" => "the message never showed in the box as typed, so it was left there, not sent",
         "left_at_shell" => "the agent quit while the message was typed. it's at a shell prompt, not run",
+        "dialog" => "the orchestrator raised a question as the message was typed, so it's left in the box, not sent",
         "unconfirmed" => {
             "the message was submitted while the orchestrator worked, but never showed in its queue. check its pane before sending it again"
         }
@@ -90,7 +94,7 @@ mod tests {
     fn every_refusal_has_a_line() {
         for what in [
             "busy", "prompt", "draft", "typing", "not_an_agent", "unfamiliar", "unproven", "too_long", "command",
-            "not_running", "paste_left", "left_at_shell", "unconfirmed",
+            "not_running", "paste_left", "left_at_shell", "dialog", "unconfirmed",
         ] {
             let said = said_about(what).unwrap_or_else(|| panic!("no line for {what}"));
             assert!(!said.ends_with('.') && said.chars().next().is_some_and(char::is_lowercase), "{said}");

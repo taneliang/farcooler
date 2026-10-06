@@ -14,10 +14,12 @@
 //! 2. the agent in front is proven by its process, its box is recognized and
 //!    empty, and bracketed paste is known to be on (`proven_tui`).
 //!
-//! A working claude or codex is typed into too, as its CLI takes a message
-//! mid-turn: it queues it for when it's ready (ov-360). The reply says which,
-//! `Turn::Between` (sent, its next prompt) or `Turn::During` (queued), and a
-//! queued message is confirmed in the agent's queue first (`mid_turn`).
+//! A working claude is typed into too, as its CLI takes a message mid-turn:
+//! it queues it for its next turn (ov-360). The Enter waits on no dialog
+//! being up or announced (`dialog` if one is: the text is left in the box),
+//! and a queued message is confirmed in claude's queue (`mid_turn`). The
+//! reply says which, `Turn::Between` (sent, its next prompt) or
+//! `Turn::During` (queued).
 //!
 //! A message starting with a character an agent's box reads as a mode or a
 //! command is refused (`command`): in claude a `/` opens the command picker,
@@ -34,8 +36,9 @@
 //! (`DomainError::Conflict`), which the Mac turns into its own sentence:
 //! `busy`, `prompt`, `draft`, `typing`, `not_an_agent`, `unfamiliar`,
 //! `unproven`, `too_long`, `command`, `not_running`, `paste_left`,
-//! `left_at_shell`, `unconfirmed`. `busy` is left only for an agent working
-//! that doesn't queue, or whose queue can't be witnessed.
+//! `left_at_shell`, `dialog`, `unconfirmed`. `busy` is left only for an
+//! agent working that can't be typed into safely mid-turn: codex, or a
+//! claude whose session or hooks can't be found.
 
 use farcooler_core::composer;
 use farcooler_core::{DomainError, Result};
@@ -113,7 +116,7 @@ impl Watcher {
         let proven = self.proven_tui(&to).await.map_err(|held| DomainError::Conflict { what: held_word(held) })?;
         let witness = match proven.turn {
             Turn::Between => None,
-            Turn::During => Some(mid_turn::witness(&proven).await.ok_or(DomainError::Conflict { what: "busy" })?),
+            Turn::During => Some(self.witness(&proven, &text).await.ok_or(DomainError::Conflict { what: "busy" })?),
         };
         let (preset, tty) = (proven.preset, proven.tty.as_str());
 
@@ -146,10 +149,17 @@ impl Watcher {
             }
             return Err(DomainError::Conflict { what: "paste_left" });
         }
-        runtime.send_bytes_hex(to.id, "0d").await?;
+        match &witness {
+            None => runtime.send_bytes_hex(to.id, "0d").await?,
+            Some(witness) => self.enter(&to, preset, witness, &text).await.map_err(|no| match no {
+                mid_turn::NoEnter::Dialog => DomainError::Conflict { what: "dialog" },
+                mid_turn::NoEnter::Moved => DomainError::Conflict { what: "paste_left" },
+                mid_turn::NoEnter::Failed => DomainError::OperationFailed,
+            })?,
+        }
         self.mark_told(to.id);
         if let Some(witness) = witness
-            && !self.queued(&to, preset, &witness, &text).await
+            && !self.queued(&witness, &text).await
         {
             return Err(DomainError::Conflict { what: "unconfirmed" });
         }

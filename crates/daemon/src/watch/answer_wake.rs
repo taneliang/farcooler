@@ -63,17 +63,19 @@
 //! unfinished (a crash mid-typing), is "Couldn't confirm the agent got the
 //! decision" and is never typed again.
 //!
-//! **Mid-turn** (ov-360). claude and codex take a message submitted while
-//! they work, as the person typing it would: claude queues it for its next
-//! turn, codex for after its next tool call. Measured on claude 2.1.290 and
-//! codex 0.153.4: the box is the same box, a paste and Enter go in, and the
-//! message arrives as the next prompt. So a working agent is typed into
+//! **Mid-turn** (ov-360). claude takes a message submitted while it works,
+//! as the person typing it would, and queues it for its next turn. Measured
+//! on claude 2.1.290: the box is the same box, a paste and Enter go in, and
+//! the message arrives as the next prompt. So a working claude is typed into
 //! under the same checks, and what it's sent waits in its own queue, not in
-//! this one. That it reached the queue is confirmed after the Enter
-//! (`mid_turn`): claude's transcript gets an `enqueue` record holding the
-//! text; codex draws the text under its queue. Unconfirmed is "Couldn't
-//! confirm". An agent whose queue can't be witnessed (a claude with no
-//! session registry) waits for the turn to end, as before.
+//! this one. The Enter goes in only once neither the screen nor the
+//! session's hooks say a dialog is up or coming (`mid_turn`), since an Enter
+//! on one would answer it; a dialog is "Paste left in the composer; not
+//! sent". That the queue took it is confirmed after, by the `enqueue` record
+//! claude writes to its transcript; unconfirmed is "Couldn't confirm". A
+//! claude whose session can't be found, or that no hook was ever heard from,
+//! waits for the turn to end, as every agent did before; so does codex,
+//! which queues too but raises approvals no hook tells of.
 //!
 //! **A chat pane** takes the answer as a prompt on its agent channel, after
 //! check 1: the channel can't reach a shell, a menu or a draft, and a turn
@@ -81,7 +83,9 @@
 //!
 //! **Superseded.** A newer answer on the same task replaces an older one not
 //! yet told: only the newest is told, and the older is noted "Not
-//! delivered: a newer answer replaced it."
+//! delivered: a newer answer replaced it." One told is never replaced, even
+//! one that waits in a working agent's own queue: a newer answer is told
+//! after it, and the agent reads them in the order they were told.
 //!
 //! **Waiting, said.** The first pass an answer waits on, its task says so
 //! once: "Waiting to tell the orchestrator about the decision: it's busy."
@@ -282,9 +286,10 @@ pub(crate) enum Turn {
 }
 
 /// Whether an agent takes a message submitted mid-turn into a queue of its
-/// own (see this module's docs, "Mid-turn").
+/// own, and says through a hook when it raises a dialog that would take the
+/// Enter (see this module's docs, "Mid-turn"). codex queues, but doesn't say.
 pub(crate) fn queues_mid_turn(preset: &str) -> bool {
-    matches!(preset.split(':').next(), Some("claude" | "codex"))
+    preset.split(':').next() == Some("claude")
 }
 
 /// The agent in front of a pane, as checks 3 to 5 proved it.
@@ -484,7 +489,7 @@ impl Watcher {
         };
         let witness = match proven.turn {
             Turn::Between => None,
-            Turn::During => match mid_turn::witness(&proven).await {
+            Turn::During => match self.witness(&proven, text).await {
                 Some(witness) => Some(witness),
                 None => return Pass::Waiting(Held::Busy),
             },
@@ -528,12 +533,18 @@ impl Watcher {
             }
             return self.settle(wake, Some(task), Some(PASTE_LEFT.into()));
         }
-        if runtime.send_bytes_hex(to.id, "0d").await.is_err() {
-            return self.settle(wake, Some(task), Some(couldnt_confirm(wake.kind)));
+        let entered = match &witness {
+            None => runtime.send_bytes_hex(to.id, "0d").await.map_err(|_| mid_turn::NoEnter::Failed),
+            Some(witness) => self.enter(to, preset, witness, text).await,
+        };
+        match entered {
+            Ok(()) => {}
+            Err(mid_turn::NoEnter::Failed) => return self.settle(wake, Some(task), Some(couldnt_confirm(wake.kind))),
+            Err(_) => return self.settle(wake, Some(task), Some(PASTE_LEFT.into())),
         }
         self.mark_told(to.id);
         if let Some(witness) = witness
-            && !self.queued(to, preset, &witness, text).await
+            && !self.queued(&witness, text).await
         {
             return self.settle(wake, Some(task), Some(couldnt_confirm(wake.kind)));
         }

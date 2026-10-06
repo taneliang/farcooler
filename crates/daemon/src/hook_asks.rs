@@ -20,6 +20,16 @@
 //! one `settle`, which removes the entry under the lock, so no two of them can
 //! both end the same ask. `settle` is also the only place a `Resolved` is
 //! recorded, which is what tells every surface to stop offering buttons.
+//!
+//! **Sessions heard from** (ov-360). Apart from the held asks, this keeps,
+//! per session id, that a hook arrived from it at all and when its last gate
+//! (`PermissionRequest`, for a tool, a question or a plan alike) began. It's
+//! what lets the daemon press Enter in a working claude: a dialog claude
+//! raises mid-turn takes the Enter meant for a queued message, and the gate
+//! is heard before the dialog is drawn (`answer_wake::mid_turn`). Kept by
+//! session, not terminal: a claude started by hand routes to no terminal,
+//! and its session id is known from its own registry. A session never heard
+//! from has no such signal, and isn't typed into mid-turn.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -106,6 +116,9 @@ pub struct OpenAsk {
 
 pub struct HookAsks {
     held: Mutex<HashMap<Uuid, Held>>,
+    /// Per session id: when a hook was last heard from it, and when its last
+    /// gate began. See this module's docs, "Sessions heard from".
+    sessions: Mutex<HashMap<String, Heard>>,
     /// `HookIngress`'s sink, shared, so a `Resolved` lands in the same ring as
     /// the `Permission` it ends. `None` until `listen` has installed it.
     sink: Arc<Mutex<Option<EventSink>>>,
@@ -115,9 +128,56 @@ pub struct HookAsks {
     changes: watch::Sender<u64>,
 }
 
+/// What was last heard from one session.
+#[derive(Debug, Clone, Copy)]
+struct Heard {
+    at: Instant,
+    gate: Option<Instant>,
+}
+
+/// Sessions remembered before the oldest are let go: far more than a runner
+/// runs at once.
+const SESSIONS_KEPT: usize = 512;
+
 impl HookAsks {
     pub fn new(sink: Arc<Mutex<Option<EventSink>>>) -> Self {
-        Self { held: Mutex::new(HashMap::new()), sink, changes: watch::Sender::new(0) }
+        Self {
+            held: Mutex::new(HashMap::new()),
+            sessions: Mutex::new(HashMap::new()),
+            sink,
+            changes: watch::Sender::new(0),
+        }
+    }
+
+    /// A hook arrived from `session`; `gate` when it's one the agent waits
+    /// on, which it raises as it puts up a dialog. Recorded before anything
+    /// else is done with the hook.
+    pub fn heard(&self, session: &str, gate: bool) {
+        let now = Instant::now();
+        let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+        if sessions.len() >= SESSIONS_KEPT && !sessions.contains_key(session) {
+            let oldest = sessions.iter().min_by_key(|(_, h)| h.at).map(|(k, _)| k.clone());
+            if let Some(oldest) = oldest {
+                sessions.remove(&oldest);
+            }
+        }
+        let heard = sessions.entry(session.to_string()).or_insert(Heard { at: now, gate: None });
+        heard.at = now;
+        if gate {
+            heard.gate = Some(now);
+        }
+    }
+
+    /// Whether any hook was ever heard from `session` by this daemon.
+    pub fn hooked(&self, session: &str) -> bool {
+        self.sessions.lock().unwrap_or_else(|e| e.into_inner()).contains_key(session)
+    }
+
+    /// Whether `session` began a gate at or after `since`: a dialog may be up,
+    /// or about to be drawn.
+    pub fn gated_since(&self, session: &str, since: Instant) -> bool {
+        let sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+        sessions.get(session).and_then(|h| h.gate).is_some_and(|gate| gate >= since)
     }
 
     /// Told whenever an ask is offered or an offered ask ends. What changed
@@ -803,6 +863,25 @@ mod tests {
         assert!(!asks.is_holding(pane));
         assert_eq!(rx.await.expect("an ending arrives").decision, None);
         assert!(resolved(&recorded, &id).is_empty(), "nothing was offered, so nothing is taken back");
+    }
+
+    #[test]
+    fn a_session_is_heard_and_its_gates_dated() {
+        let (asks, _) = ledger();
+        assert!(!asks.hooked("s1"));
+        let before = Instant::now();
+        asks.heard("s1", false);
+        assert!(asks.hooked("s1") && !asks.hooked("s2"));
+        assert!(!asks.gated_since("s1", before), "a hook that isn't a gate");
+        asks.heard("s1", true);
+        assert!(asks.gated_since("s1", before));
+        let after = Instant::now() + Duration::from_millis(1);
+        assert!(!asks.gated_since("s1", after), "a gate from before");
+        assert!(!asks.gated_since("s2", before));
+        for n in 0..SESSIONS_KEPT + 5 {
+            asks.heard(&format!("x{n}"), false);
+        }
+        assert_eq!(asks.sessions.lock().unwrap().len(), SESSIONS_KEPT);
     }
 
     #[tokio::test]
