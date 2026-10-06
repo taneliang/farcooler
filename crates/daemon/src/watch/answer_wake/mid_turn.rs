@@ -26,9 +26,12 @@
 //!
 //! So a dialog drawn after check 3 needs a `PreToolUse` answered after the
 //! fence is let go, by which time the key has been read as typing. Measured
-//! on claude 2.1.290 against a stand-in API, over 25 dialogs: none was drawn
-//! before its `PreToolUse` hook returned, and a hook that sleeps 300 ms
-//! delays the dialog by 300 ms. A `PreToolUse` waits on the fence up to
+//! on claude 2.1.290 against a stand-in API: over 25 Bash permission
+//! dialogs, 10 `AskUserQuestion` and 10 `ExitPlanMode` (plan mode), none was
+//! drawn before its `PreToolUse` hook returned, and a hook that sleeps 300 ms
+//! delays each kind of dialog by 300 ms. A subagent's dialog and an MCP
+//! elicitation weren't measured; the first is a tool call like these, the
+//! second comes inside a call already in flight. A `PreToolUse` waits on the fence up to
 //! `FENCE_HOLD`, above the most the Enter can hold it (`LONGEST_FENCE`), so it
 //! is never answered under an Enter. What's left: a hook that never reaches
 //! the daemon, or a key a killed `tmux` delivers later than `LATE_KEY`. A
