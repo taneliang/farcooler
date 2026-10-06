@@ -421,7 +421,7 @@ impl Projection {
 
     /// Rows that can belong to turn `turn`: a turn's rows are all added after
     /// it, so the walk starts there rather than at the session's start.
-    pub(super) fn from_turn(&self, turn: usize) -> std::ops::Range<usize> {
+    pub(super) fn since_turn(&self, turn: usize) -> std::ops::Range<usize> {
         turn..self.rows.len()
     }
 
@@ -452,7 +452,7 @@ impl Projection {
     /// them, or the turn was cut short.
     fn settle_asks(&mut self, turn: usize, at: Option<i64>) {
         let id = self.rows[turn].id.clone();
-        for i in self.from_turn(turn) {
+        for i in self.since_turn(turn) {
             if self.rows[i].turn.as_deref() != Some(&id) {
                 continue;
             }
@@ -782,7 +782,7 @@ impl Projection {
     fn prose(&mut self, turn: usize, id: String, text: &str, conclusion: bool, at: Option<i64>) {
         let turn_id = self.rows[turn].id.clone();
         let words = squeeze(text, usize::MAX);
-        let waiting = self.from_turn(turn).find(|&i| {
+        let waiting = self.since_turn(turn).find(|&i| {
             let row = &self.rows[i];
             row.provisional
                 && row.turn.as_deref() == Some(&turn_id)
@@ -1001,7 +1001,7 @@ impl Projection {
     fn count_background(&mut self, sub: usize) {
         let Some(turn_id) = self.rows[sub].turn.clone() else { return };
         let Some(&t) = self.index.get(&turn_id) else { return };
-        let running = self.rows[self.from_turn(t)]
+        let running = self.rows[self.since_turn(t)]
             .iter()
             .filter(|r| r.turn.as_deref() == Some(&turn_id))
             .filter(|r| matches!(&r.kind, RowKind::Subagent(s) if s.background && s.status == SubagentState::Running))

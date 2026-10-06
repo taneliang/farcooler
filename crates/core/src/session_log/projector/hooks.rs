@@ -224,7 +224,7 @@ impl Projection {
         // happened to contain it (ov-363 review 1, finding 10).
         let turn_id = self.rows[turn].id.clone();
         let words = squeeze(delta, usize::MAX);
-        let written = self.from_turn(turn).find(|&i| {
+        let written = self.since_turn(turn).find(|&i| {
             let row = &self.rows[i];
             !row.provisional
                 && !row.retracted
@@ -262,12 +262,12 @@ impl Projection {
     pub(super) fn settle_prose(&mut self, turn: usize) {
         let turn_id = self.rows[turn].id.clone();
         let in_turn = |row: &Row| row.turn.as_deref() == Some(turn_id.as_str()) && !row.retracted && matches!(row.kind, RowKind::Prose(_));
-        let waiting: Vec<usize> = self.from_turn(turn).filter(|&i| self.rows[i].provisional && in_turn(&self.rows[i])).collect();
+        let waiting: Vec<usize> = self.since_turn(turn).filter(|&i| self.rows[i].provisional && in_turn(&self.rows[i])).collect();
         if waiting.is_empty() {
             return;
         }
         let mut unclaimed: Vec<usize> =
-            self.from_turn(turn).filter(|&i| !self.rows[i].provisional && in_turn(&self.rows[i]) && !self.claimed.contains(&i)).collect();
+            self.since_turn(turn).filter(|&i| !self.rows[i].provisional && in_turn(&self.rows[i]) && !self.claimed.contains(&i)).collect();
         let words = |row: &Row| match &row.kind {
             RowKind::Prose(p) => squeeze(&p.text, usize::MAX),
             _ => String::new(),
