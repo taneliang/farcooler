@@ -172,6 +172,15 @@ async fn a_subagent_record_reaches_a_waiting_follower_without_a_tick() {
     assert!(got.duration_since(written) < Duration::from_millis(1000), "took {:?}", got.duration_since(written));
 }
 
+/// Until a second open is waiting on the build under way (no clock in it).
+fn until_waiting(projectors: &SessionProjectors) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while projectors.inner.waiters.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+        assert!(Instant::now() < deadline, "the second open never waited: it built its own");
+        std::thread::yield_now();
+    }
+}
+
 /// A second open while a build is under way waits for that build, and keeps
 /// its projector, rather than reading the transcript again.
 #[test]
@@ -181,22 +190,57 @@ fn a_second_open_waits_for_the_build_under_way() {
     let projectors = std::sync::Arc::new(SessionProjectors::default());
     let terminal = Uuid::now_v7();
     let guard = projectors.begin(terminal);
-    let (done, opened) = std::sync::mpsc::channel();
     let second = {
         let (projectors, path) = (projectors.clone(), path.clone());
-        std::thread::spawn(move || {
-            projectors.open(terminal, path);
-            let _ = done.send(());
-        })
+        std::thread::spawn(move || projectors.open(terminal, path))
     };
-    assert!(opened.recv_timeout(Duration::from_millis(300)).is_err(), "the second open built its own");
+    until_waiting(&projectors);
     let mut session = farcooler_core::session_log::projector::SessionProjector::open(canonical(&path));
     session.poll();
     projectors.finish(guard, session);
     let epoch = projectors.read_page(terminal, None, 1).unwrap().epoch;
-    assert!(opened.recv_timeout(Duration::from_secs(5)).is_ok(), "the second open never woke");
     second.join().unwrap();
     assert_eq!(projectors.read_page(terminal, None, 1).unwrap().epoch, epoch, "the build under way is the one kept");
+}
+
+/// An open waiting on a build that a forget ends goes away: it builds
+/// nothing for a terminal that is gone.
+#[test]
+fn an_open_woken_by_a_forget_builds_nothing() {
+    let dir = Dir::new("forget-wake");
+    let path = dir.file("s.jsonl", EDITS);
+    let projectors = std::sync::Arc::new(SessionProjectors::default());
+    let terminal = Uuid::now_v7();
+    let guard = projectors.begin(terminal);
+    let second = {
+        let (projectors, path) = (projectors.clone(), path.clone());
+        std::thread::spawn(move || projectors.open(terminal, path))
+    };
+    until_waiting(&projectors);
+    projectors.forget(terminal);
+    second.join().unwrap();
+    assert!(!projectors.is_open(terminal), "built for a forgotten terminal");
+    assert!(projectors.inner.building.lock().unwrap().is_empty());
+    drop(guard);
+}
+
+/// A build's guard clears only its own entry: after a forget, a later
+/// build of the same terminal is not undone by the first one's end.
+#[test]
+fn a_builds_guard_clears_only_its_own_entry() {
+    let dir = Dir::new("guard-own");
+    let path = dir.file("s.jsonl", EDITS);
+    let projectors = SessionProjectors::default();
+    let terminal = Uuid::now_v7();
+    let first = projectors.begin(terminal);
+    projectors.forget(terminal);
+    let later = projectors.begin(terminal);
+    drop(first);
+    assert!(projectors.inner.building.lock().unwrap().contains_key(&terminal), "the later build's entry went");
+    let mut session = farcooler_core::session_log::projector::SessionProjector::open(canonical(&path));
+    session.poll();
+    projectors.finish(later, session);
+    assert!(projectors.is_open(terminal));
 }
 
 /// A build that dies (a panic in the read) stops holding hooks for its
@@ -216,7 +260,7 @@ fn a_build_that_dies_holds_nothing_and_a_live_one_holds_a_bounded_number() {
     for n in 0..MAX_HELD + 10 {
         projectors.hook(terminal, "UserPromptSubmit", &json!({"prompt_id":format!("h{n}"),"prompt":"x"}));
     }
-    assert_eq!(projectors.inner.building.lock().unwrap()[&terminal].len(), MAX_HELD);
+    assert_eq!(projectors.inner.building.lock().unwrap()[&terminal].held.len(), MAX_HELD);
     let mut session = farcooler_core::session_log::projector::SessionProjector::open(canonical(&path));
     session.poll();
     projectors.finish(guard, session);

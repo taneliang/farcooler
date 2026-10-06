@@ -35,7 +35,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -131,9 +131,16 @@ pub(crate) struct Inner {
     /// the hooks that arrived meanwhile. A `forget` meanwhile takes the
     /// terminal out of here, and the finished build is then dropped rather
     /// than kept for a terminal that is gone.
-    building: Mutex<HashMap<Uuid, Vec<Held>>>,
-    /// Told whenever a build ends, kept or not.
+    building: Mutex<HashMap<Uuid, Build>>,
+    /// Told whenever a build ends, kept or not, and on every forget.
     built: Condvar,
+    /// How many times each terminal was forgotten: an open waiting on a build
+    /// that a forget ended goes away rather than building one for a terminal
+    /// that is gone.
+    forgets: Mutex<HashMap<Uuid, u64>>,
+    /// Opens waiting on another's build, for a test to see one is waiting.
+    waiters: AtomicUsize,
+    next_build: AtomicU64,
     watches: Watches,
     /// Itself, for the watch's thread, which must not keep it alive.
     me: std::sync::Weak<Inner>,
@@ -146,6 +153,9 @@ impl Default for SessionProjectors {
                 open: Mutex::new(HashMap::new()),
                 building: Mutex::new(HashMap::new()),
                 built: Condvar::new(),
+                forgets: Mutex::new(HashMap::new()),
+                waiters: AtomicUsize::new(0),
+                next_build: AtomicU64::new(1),
                 watches: Watches::default(),
                 me: me.clone(),
             }),
@@ -167,13 +177,38 @@ impl Drop for SessionProjectors {
 struct Building {
     inner: Arc<Inner>,
     terminal: Uuid,
+    /// Which build: a forget and a new open can put a later one in the map
+    /// under the same terminal, and that one is not this one's to clear.
+    id: u64,
+}
+
+/// A terminal's build in the map, and the hooks held for it.
+struct Build {
+    id: u64,
+    held: Vec<Held>,
 }
 
 impl Drop for Building {
     fn drop(&mut self) {
         let mut building = self.inner.building.lock().unwrap_or_else(|e| e.into_inner());
-        building.remove(&self.terminal);
+        if building.get(&self.terminal).is_some_and(|b| b.id == self.id) {
+            building.remove(&self.terminal);
+        }
         self.inner.built.notify_all();
+    }
+}
+
+impl Inner {
+    fn forgotten(&self, terminal: Uuid) -> u64 {
+        self.forgets.lock().unwrap_or_else(|e| e.into_inner()).get(&terminal).copied().unwrap_or(0)
+    }
+
+    /// Mark `terminal` as building, if nothing is: the guard of the build.
+    fn claim(self: &Arc<Self>, building: &mut HashMap<Uuid, Build>, terminal: Uuid) -> Option<Building> {
+        let std::collections::hash_map::Entry::Vacant(free) = building.entry(terminal) else { return None };
+        let id = self.next_build.fetch_add(1, Ordering::Relaxed);
+        free.insert(Build { id, held: Vec::new() });
+        Some(Building { inner: self.clone(), terminal, id })
     }
 }
 
@@ -262,16 +297,23 @@ impl Inner {
         if dirs.1.is_dir() {
             want.push(dirs.1);
         }
-        let had = open.watched.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        if had == want {
+        // Held throughout, so two at once (a tick and a hook's rebind) can't
+        // each route a directory and leave one of them unrecorded, and so
+        // `forget`, which takes the list, sees every route made.
+        let mut watched = open.watched.lock().unwrap_or_else(|e| e.into_inner());
+        if *watched == want {
             return true;
         }
-        for dir in had.iter().filter(|d| !want.contains(d)) {
+        // Forgotten meanwhile: route nothing that no forget will let go.
+        if !self.get(terminal).is_some_and(|now| std::ptr::eq(Arc::as_ptr(&now), open)) {
+            return false;
+        }
+        for dir in watched.iter().filter(|d| !want.contains(d)) {
             self.watches.unroute(terminal, dir);
         }
-        let routed: Vec<PathBuf> = want.into_iter().filter(|dir| had.contains(dir) || self.watches.route(self, terminal, dir)).collect();
+        let routed: Vec<PathBuf> = want.into_iter().filter(|dir| watched.contains(dir) || self.watches.route(self, terminal, dir)).collect();
         let main = routed.contains(&dirs.0);
-        *open.watched.lock().unwrap_or_else(|e| e.into_inner()) = routed;
+        *watched = routed;
         main
     }
 }
@@ -291,7 +333,8 @@ impl SessionProjectors {
     pub fn open(&self, terminal: Uuid, transcript: PathBuf) {
         let transcript = canonical(&transcript);
         let started = Instant::now();
-        loop {
+        let forgets = self.inner.forgotten(terminal);
+        let guard = loop {
             if let Some(open) = self.get(terminal) {
                 let dirs = {
                     let mut session = open.lock();
@@ -304,18 +347,19 @@ impl SessionProjectors {
                 return;
             }
             let mut building = self.inner.building.lock().unwrap_or_else(|e| e.into_inner());
-            if let std::collections::hash_map::Entry::Vacant(free) = building.entry(terminal) {
-                free.insert(Vec::new());
-                break;
+            if let Some(guard) = self.inner.claim(&mut building, terminal) {
+                break guard;
             }
             let Some(left) = BUILD_WAIT.checked_sub(started.elapsed()) else { return };
+            self.inner.waiters.fetch_add(1, Ordering::SeqCst);
             let (building, waited) = self.inner.built.wait_timeout(building, left).unwrap_or_else(|e| e.into_inner());
+            self.inner.waiters.fetch_sub(1, Ordering::SeqCst);
             drop(building);
-            if waited.timed_out() {
+            // Woken by a forget: the terminal is gone, so build nothing.
+            if waited.timed_out() || self.inner.forgotten(terminal) != forgets {
                 return;
             }
-        }
-        let guard = Building { inner: self.inner.clone(), terminal };
+        };
         let mut session = SessionProjector::open(transcript);
         session.poll();
         self.finish(guard, session);
@@ -327,7 +371,16 @@ impl SessionProjectors {
         let terminal = guard.terminal;
         let dirs = session.watched_dirs();
         let mut building = self.inner.building.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(held) = building.remove(&terminal) else {
+        // Not this build's entry (a forget took it, or a later open's is
+        // there): this build is dropped.
+        let Some(Build { held, .. }) = building.remove_entry(&terminal).and_then(|(t, b)| {
+            if b.id == guard.id {
+                Some(b)
+            } else {
+                building.insert(t, b);
+                None
+            }
+        }) else {
             drop(building);
             drop(guard);
             return;
@@ -371,7 +424,7 @@ impl SessionProjectors {
     pub fn hook(&self, terminal: Uuid, event: &str, payload: &Value) {
         {
             let mut building = self.inner.building.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(held) = building.get_mut(&terminal) {
+            if let Some(Build { held, .. }) = building.get_mut(&terminal) {
                 if held.len() < MAX_HELD {
                     held.push(Held { event: event.to_string(), payload: payload.clone(), at: now_ms() });
                 } else if held.len() == MAX_HELD {
@@ -479,6 +532,7 @@ impl SessionProjectors {
         let open = {
             let mut building = self.inner.building.lock().unwrap_or_else(|e| e.into_inner());
             building.remove(&terminal);
+            *self.inner.forgets.lock().unwrap_or_else(|e| e.into_inner()).entry(terminal).or_default() += 1;
             self.inner.built.notify_all();
             self.inner.open.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal)
         };
@@ -520,8 +574,8 @@ pub fn global() -> &'static SessionProjectors {
 impl SessionProjectors {
     /// `open`'s first half: `terminal` marked as building.
     fn begin(&self, terminal: Uuid) -> Building {
-        self.inner.building.lock().unwrap().insert(terminal, Vec::new());
-        Building { inner: self.inner.clone(), terminal }
+        let mut building = self.inner.building.lock().unwrap();
+        self.inner.claim(&mut building, terminal).expect("nothing building")
     }
 
     async fn follow_for(&self, terminal: Uuid, epoch: u64, after: u64, wait: Duration) -> Option<Follow> {
