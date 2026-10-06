@@ -18,6 +18,7 @@
 //! stored "running" flag, because none exists.
 
 mod agent_follow;
+mod agent_rows;
 mod agent_host;
 mod app_update;
 mod daemon_link;
@@ -907,6 +908,19 @@ enum TerminalCmd {
         /// Keep asking over one link, and print a JSON line for each batch
         /// that holds something, until the reader goes away. See
         /// `agent_follow`.
+        #[arg(long)]
+        follow: bool,
+    },
+    /// The pane's agent rows (ov-366) as JSON lines: a page, then with
+    /// `--follow` each change. Needs a runner run with FARCOOLER_PROJECTOR=1.
+    Rows {
+        terminal: String,
+        /// Rows before this `ord`; the newest without it.
+        #[arg(long)]
+        before: Option<u64>,
+        /// Rows in the page; the runner's default (100) without it.
+        #[arg(long, default_value_t = 0)]
+        limit: u32,
         #[arg(long)]
         follow: bool,
     },
@@ -2971,6 +2985,11 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
             ))
             .await?;
             println!("{} is now in {mode} mode", short(id));
+        }
+
+        TerminalCmd::Rows { terminal, before, limit, follow } => {
+            let (link, id) = terminal_by_record(runner, &terminal).await?;
+            return agent_rows::run(link, id, before, limit, follow).await;
         }
 
         TerminalCmd::AgentSubscribe { terminal, from_seq, epoch, follow } => {

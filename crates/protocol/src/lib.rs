@@ -592,6 +592,13 @@ pub mod capability {
     /// before sending, saying the runner needs an update to keep budgets.
     /// Needs `board_plan`, since it is read through the plan.
     pub const BOARD_COST: &str = "board_cost";
+    /// Agent rows (ov-366): `agent.rows` and `agent.rows_follow`, a page of a
+    /// terminal's projected agent rows and a follow of them by revision.
+    ///
+    /// **Experimental, behind the runner's `FARCOOLER_PROJECTOR=1`** until a
+    /// client reads it (ov-372): without it both methods are refused as
+    /// unsupported. Its own capability because no earlier runner has either.
+    pub const AGENT_ROWS: &str = "agent_rows";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -606,7 +613,7 @@ pub mod capability {
             AGENTS_FOUND,
             TASK_WAITS, TASK_WORKERS, NOTICE_TASK, BOARD_READS, WORKTREE_FILES, TERMINAL_NAMES, TERMINAL_PORTS,
             READ_ONLY_FOLDERS, AGENT_QUEUE, BOARD_PLAN, LFS_POINTERS, BOARD_PAGES, BOARD_RULINGS,
-            BOARD_TRAINS, BOARD_COST, LANDING, BOARD_RULING_ACTIONS,
+            BOARD_TRAINS, BOARD_COST, LANDING, BOARD_RULING_ACTIONS, AGENT_ROWS,
         ];
 
     /// The capability a method belongs to, or `None` if there is no such
@@ -804,6 +811,8 @@ pub mod method {
         TrainStart = "train.start" => BOARD_TRAINS,
         TrainSet = "train.set" => BOARD_TRAINS,
         RepositoryLanding = "repository.landing" => LANDING,
+        AgentRows = "agent.rows" => AGENT_ROWS,
+        AgentRowsFollow = "agent.rows_follow" => AGENT_ROWS,
     }
 }
 

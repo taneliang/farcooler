@@ -427,7 +427,7 @@ fn scope_of(method: Method) -> Scope {
         | Method::TerminalAgentEditQueued
         | Method::TerminalAgentCancelQueued
         | Method::TerminalAgentSteerQueued
-        | Method::WorktreeFileSearch => Scope::Control,
+        | Method::WorktreeFileSearch | Method::AgentRows | Method::AgentRowsFollow => Scope::Control,
         // Review is `control`, and for exactly the reason the screen above is.
         //
         // A diff IS source. `read` is the scope handed to something that should
@@ -2068,8 +2068,8 @@ impl Rpc {
             "page.list" | "page.get" | "page.set" | "page.remove" | "page.stats" => {
                 crate::rpc_pages::dispatch(svc, &self.watcher, req).await
             }
-
             "repository.landing" => crate::landing_read::handle(svc, req).await, // ov-313
+            "agent.rows" | "agent.rows_follow" => crate::rpc_rows::dispatch(svc, req).await, // ov-366
 
             // ---- workspaces ----
             //

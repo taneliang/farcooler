@@ -1,0 +1,50 @@
+//! A terminal's agent rows on a session (ov-366): a page, and a follow by
+//! revision. EXPERIMENTAL, and served only by a runner that runs with
+//! `FARCOOLER_PROJECTOR=1` until a client reads it (ov-372).
+
+use super::*;
+
+impl Session {
+    /// Up to `limit` of `terminal`'s rows before `before` (`agent.rows`),
+    /// oldest first, with the epoch and revision to follow from.
+    pub async fn agent_rows(
+        &self,
+        terminal: Uuid,
+        before: Option<u64>,
+        limit: u32,
+    ) -> Result<farcooler_protocol::v1::AgentRowPage, SessionError> {
+        require(self.capabilities(), farcooler_protocol::capability::AGENT_ROWS, "agent.rows")?;
+        let payload = request::Payload::AgentRowsPage(farcooler_protocol::v1::AgentRowsPage {
+            terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
+            before,
+            limit,
+        });
+        match self.value("agent.rows", None, Some(payload)).await? {
+            result::Value::AgentRowPage(page) => Ok(page),
+            other => Err(wrong("agent_row_page", &other)),
+        }
+    }
+
+    /// What changed in `terminal`'s rows after `after_rev` of projection
+    /// `epoch` (`agent.rows_follow`), the runner holding the call up to
+    /// `wait_ms` while nothing has.
+    pub async fn agent_rows_follow(
+        &self,
+        terminal: Uuid,
+        epoch: u64,
+        after_rev: u64,
+        wait_ms: u32,
+    ) -> Result<farcooler_protocol::v1::AgentRowChanges, SessionError> {
+        require(self.capabilities(), farcooler_protocol::capability::AGENT_ROWS, "agent.rows_follow")?;
+        let payload = request::Payload::AgentRowsFollow(farcooler_protocol::v1::AgentRowsFollow {
+            terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
+            epoch,
+            after_rev,
+            wait_ms,
+        });
+        match self.value("agent.rows_follow", None, Some(payload)).await? {
+            result::Value::AgentRowChanges(changes) => Ok(changes),
+            other => Err(wrong("agent_row_changes", &other)),
+        }
+    }
+}

@@ -36,7 +36,8 @@ pub(super) fn feed_projector(registry: &Registry, terminal: Uuid, pane: &PaneJoi
     match (&open, registered) {
         (None, None) => return,
         (None, Some(path)) => projectors.open(terminal, path),
-        (Some(current), Some(path)) if *current != path => projectors.open(terminal, path),
+        // The projector names its file as the filesystem does (`canonical`).
+        (Some(current), Some(path)) if *current != crate::session_projectors::canonical(&path) => projectors.open(terminal, path),
         _ => {}
     }
     let claude = pane.preset.as_deref().is_some_and(|p| p.starts_with("claude"));
@@ -118,7 +119,7 @@ mod tests {
         session(config.path(), "s-one");
         let registry = Registry::new(config.path().to_path_buf(), Box::new(fake::Alive(vec![(4242, None)])));
         let id = uuid::Uuid::now_v7();
-        let first = registered_log(&registry, &pane()).unwrap();
+        let first = crate::session_projectors::canonical(&registered_log(&registry, &pane()).unwrap());
         crate::session_projectors::global().open(id, first.clone());
         session(config.path(), "s-two");
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);

@@ -31,6 +31,7 @@ mod notice_task;
 mod pages;
 mod plan;
 mod results;
+mod rows;
 pub use board_reads::{MarkRead, reads_json};
 pub use files::FilesPlace;
 use results::wrong;
@@ -2358,8 +2359,6 @@ pub(crate) fn now_millis() -> i64 {
         .map(|d| d.as_millis() as i64)
         .unwrap_or_default()
 }
-
-
 
 pub fn uuid_of(bytes: &[u8]) -> Uuid {
     Uuid::from_slice(bytes).unwrap_or(Uuid::nil())

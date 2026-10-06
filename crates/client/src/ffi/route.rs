@@ -89,7 +89,10 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // Orchestrator pages (ov-269) are read-only on a phone: the list and
         // one page. The orchestrator is their one writer.
         | Method::PageList
-        | Method::PageGet => Some(method.name()),
+        | Method::PageGet
+        // A terminal's agent rows (ov-366), for the native views (ov-372).
+        | Method::AgentRows
+        | Method::AgentRowsFollow => Some(method.name()),
         // The owner's two marks on a ruling (ov-333): Keep, and Keep All.
         // `ruling.set` is a phone's only as `ruling.keep`: it can't reverse or
         // settle any other way. Reversing is a request to the orchestrator,

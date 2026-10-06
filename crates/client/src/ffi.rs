@@ -2339,6 +2339,8 @@ async fn dispatch(
         "worktree.file_search" | "worktree.list_dir" | "worktree.read_file" => {
             files_args::call(session, method, args).await
         }
+        // A terminal's agent rows, a page and a follow (ov-366).
+        "agent.rows" | "agent.rows_follow" => rows_args::call(session, method, args).await,
 
         // Refused rather than defaulted, so a typo in a client is a visible
         // error instead of a call that silently does nothing.
@@ -3287,6 +3289,7 @@ mod plan_phone_tests;
 mod page_phone_tests;
 mod board_reads_args;
 mod files_args;
+mod rows_args;
 use board_reads_args::mark_read_of;
 mod calls;
 #[cfg(test)]

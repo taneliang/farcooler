@@ -51,5 +51,6 @@ enum class Capability(val wire: String) {
     BOARD_RULINGS("board_rulings"),
     BOARD_RULING_ACTIONS("board_ruling_actions"),
     BOARD_TRAINS("board_trains"),
-    BOARD_COST("board_cost");
+    BOARD_COST("board_cost"),
+    AGENT_ROWS("agent_rows");
 }

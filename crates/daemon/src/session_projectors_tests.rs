@@ -174,7 +174,7 @@ fn a_busy_projector_does_not_hold_up_another_terminals_hooks() {
     projectors.open(a, dir.file("a.jsonl", EDITS));
     projectors.open(b, dir.file("b.jsonl", EDITS));
     let busy = projectors.get(a).unwrap();
-    let _held = busy.lock().unwrap();
+    let _held = busy.lock();
     // A hook for `a` now waits on `a`'s projector; it must wait there and not
     // somewhere every terminal shares.
     let waiting = projectors.clone();
@@ -198,7 +198,7 @@ fn a_projector_built_for_a_terminal_forgotten_meanwhile_is_dropped() {
     let projectors = SessionProjectors::default();
     let terminal = Uuid::now_v7();
     // `open`'s two halves, with `forget` between them.
-    projectors.building.lock().unwrap().insert(terminal);
+    projectors.building.lock().unwrap().insert(terminal, Vec::new());
     let mut session = farcooler_core::session_log::projector::SessionProjector::open(path.clone());
     session.poll();
     projectors.forget(terminal);

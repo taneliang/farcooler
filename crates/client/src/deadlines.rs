@@ -52,6 +52,9 @@ const WORK_METHODS: &[&str] = &[
     "terminal.agent_",
     "workspace.start_orchestrator",
     "usage.report",
+    // The first page of a terminal's agent rows reads its whole transcript
+    // (ov-366). A follow is held at most 25 s, inside the ordinary 30.
+    "agent.rows",
 ];
 
 /// How the session makes a call to `method`.

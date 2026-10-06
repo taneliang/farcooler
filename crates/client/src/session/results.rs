@@ -67,5 +67,7 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::BoardTrain(_) => "board_train",
         result::Value::RepositoryLanding(_) => "repository_landing",
         result::Value::TerminalTold(_) => "terminal_told",
+        result::Value::AgentRowPage(_) => "agent_row_page",
+        result::Value::AgentRowChanges(_) => "agent_row_changes",
     }
 }
