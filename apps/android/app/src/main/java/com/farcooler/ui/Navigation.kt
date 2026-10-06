@@ -249,6 +249,14 @@ sealed interface Route {
     }
 
     /**
+     * One level of a workspace's One tree (ov-300): the children of the node
+     * with this id, its path from the root (`OneTree.Node.id`).
+     */
+    @Serializable
+    @SerialName("tree-level")
+    data class TreeLevel(val hostId: String, val workspaceId: String, val node: String) : Route
+
+    /**
      * Whether this route is drawn OVER the worktree rather than instead of it.
      *
      * Every pushed screen is. The worktree underneath stays composed, which is
@@ -261,7 +269,7 @@ sealed interface Route {
     val isOverlay: Boolean
         get() = when (this) {
             is Settings, is RunnerSettings, is Authorize, is Join, is AddDevice, is Devices,
-            is Worktrees, is BoardTask, is BoardHistory, is Files, is PlanPage -> true
+            is Worktrees, is BoardTask, is BoardHistory, is Files, is PlanPage, is TreeLevel -> true
             is Board -> true
             // The three GROUND routes. A terminal is one of them and not an
             // overlay, even though it is now pushed onto the front door rather
@@ -285,8 +293,16 @@ sealed interface Route {
 @Serializable
 enum class WorkspaceTab(val title: String) {
     @SerialName("orchestrator") ORCHESTRATOR("Orchestrator"),
-    @SerialName("board") BOARD("Board"),
-    @SerialName("worktrees") WORKTREES("Worktrees");
+
+    /**
+     * The One tree's root, titled Themes (ov-300): the workspace's themes, its
+     * cards, their lanes and their terminals, then the main checkout and the
+     * loose worktrees. It took the Worktrees tab's place and keeps its wire
+     * name, so a saved stack and a link that named Worktrees land here: every
+     * worktree is in the tree, under its card or under Loose worktrees.
+     */
+    @SerialName("worktrees") WORKTREES("Themes"),
+    @SerialName("board") BOARD("Board");
 
     companion object {
         /** A remembered tab's name, or null for none this build knows. */

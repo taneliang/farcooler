@@ -714,6 +714,8 @@ class AppModel(
 
         is Route.PlanPage -> hosts.hosts.value.any { it.id == route.hostId }
 
+        is Route.TreeLevel -> hosts.hosts.value.any { it.id == route.hostId }
+
         // Nothing else names anything on a runner, so nothing else can stop
         // naming it.
         else -> true

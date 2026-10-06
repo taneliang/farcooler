@@ -65,8 +65,11 @@ import kotlinx.coroutines.launch
  *   [TerminalPane] a worktree uses — its chat or its terminal. With none,
  *   Start Orchestrator (ruling 8); with a lost one, Restart and Replace.
  * - **Board** is the list form of the workspace's board ([BoardTab]).
- * - **Worktrees** is the workspace's worktrees ([WorktreeList]), with New
- *   Worktree at its head, which claims the new one for this workspace.
+ * - **Themes** is the One tree's root ([ThemesTab], ov-300): the themes, their
+ *   cards, the cards' lanes and terminals, then the main checkout and the
+ *   loose worktrees, each level pushed. It took the Worktrees tab's place.
+ * - The Orchestrator tab carries the plan's strip under the tab row
+ *   ([PlanStripBar]), which opens the plan as a bottom sheet.
  *
  * The tab is in the route, and the screen is keyed on the workspace alone, so
  * a tab tap rebuilds nothing. The orchestrator's pane stays composed while
@@ -233,6 +236,15 @@ fun WorkspaceScreen(
                         )
                     }
                 }
+                // The plan in one line, over the orchestrator's pane (ov-300).
+                if (route.tab == WorkspaceTab.ORCHESTRATOR) {
+                    PlanStripBar(
+                        connection = connection,
+                        workspace = workspace,
+                        orchestrator = live?.terminal,
+                        onOpenPlan = { page -> model.navigate(Route.PlanPage(route.hostId, route.workspaceId, page.kind, page.id)) },
+                    )
+                }
             }
         }
     ) { padding ->
@@ -285,11 +297,12 @@ fun WorkspaceScreen(
                     orchestratorRunning = seat is OrchestratorSeat.Live || seat is OrchestratorSeat.Starting,
                     onShowOrchestrator = { model.selectTab(route, WorkspaceTab.ORCHESTRATOR) },
                 )
-                WorkspaceTab.WORKTREES -> WorktreeList(
+                // The One tree's root (ov-300), where the worktrees list was.
+                WorkspaceTab.WORKTREES -> ThemesTab(
                     model = model,
-                    scope = WorktreeScope.OfWorkspace(route.hostId, workspace),
-                    onSelect = { model.open(it) },
-                    modifier = Modifier.fillMaxSize(),
+                    connection = connection,
+                    workspace = workspace,
+                    nav = treeNavigation(model, route.hostId, route.workspaceId) { fleet.worktrees },
                 )
             }
         }

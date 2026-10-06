@@ -38,7 +38,7 @@ class WorkspaceScreenTest {
             val (labels, selected) = WorkspaceTab.row(route.tab)
             assertEquals("Board", labels[selected])
         }
-        assertEquals(listOf("Orchestrator", "Board", "Worktrees"), WorkspaceTab.row(WorkspaceTab.BOARD).first)
+        assertEquals(listOf("Orchestrator", "Themes", "Board"), WorkspaceTab.row(WorkspaceTab.BOARD).first)
     }
 
     /**

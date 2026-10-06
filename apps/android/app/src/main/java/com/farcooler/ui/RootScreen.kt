@@ -391,6 +391,26 @@ private fun OverlayScreen(model: AppModel, route: Route, connections: List<Conne
             }
         }
 
+        is Route.TreeLevel -> {
+            val live = connections.firstOrNull { it.host.id == route.hostId }
+            if (live == null) {
+                model.back()
+            } else {
+                val fleet by live.fleet.collectAsStateWithLifecycle()
+                val repositories by live.repositories.collectAsStateWithLifecycle()
+                when (val presence = WorkspacePresence.of(route.workspaceId, fleet, repositories, true)) {
+                    is WorkspacePresence.Found -> TreeLevelScreen(
+                        connection = live,
+                        workspace = presence.workspace,
+                        nodeId = route.node,
+                        nav = treeNavigation(model, route.hostId, route.workspaceId) { fleet.worktrees },
+                        onBack = { model.back() },
+                    )
+                    else -> model.back()
+                }
+            }
+        }
+
         // The ground's routes never reach here; `Route.isOverlay` is the one
         // place that split is decided.
         is Route.Onboarding, is Route.NeedsYou, is Route.Workspace, is Route.Terminal -> Unit
