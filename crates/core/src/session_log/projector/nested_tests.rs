@@ -149,3 +149,20 @@ fn twin_uuidless_lines_in_one_read_both_fold() {
     s.poll();
     assert_eq!(queued(s.projection()), 3);
 }
+
+/// A rebuild reads the main transcript before any subagent file, so a nested
+/// agent notified only there (an enqueue in main, 15 of the corpus's 78) is
+/// ended before its row exists. It must still end once the row is joined.
+#[test]
+fn a_nested_agent_notified_only_in_main_ends_on_a_rebuild() {
+    let scratch = Scratch::new("nested-rebuild");
+    let main = write_nested(scratch.path());
+    let notified = json!({"type":"queue-operation","operation":"enqueue","timestamp":"2026-10-06T10:00:40.000Z","content":"<task-notification>\n<task-id>a1nested</task-id>\n<tool-use-id>toolu_nested</tool-use-id>\n<status>completed</status>\n<summary>Agent \"Read the parser\" finished</summary>\n</task-notification>"});
+    let mut file = std::fs::OpenOptions::new().append(true).open(&main).unwrap();
+    std::io::Write::write_all(&mut file, format!("{notified}\n").as_bytes()).unwrap();
+    let mut s = SessionProjector::open(main);
+    s.poll();
+    let nested = sub(s.projection(), "sub:toolu_nested");
+    assert_eq!(nested.status, SubagentState::Completed, "{nested:?}");
+    assert_eq!(nested.ended_ms, Some(ms("10:00:40.000")), "at the notification's time");
+}

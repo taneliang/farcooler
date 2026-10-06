@@ -59,6 +59,10 @@ pub(super) struct Orphan {
     last_ms: Option<i64>,
     /// `SubagentStop` arrived for it.
     stopped: bool,
+    /// A `<task-notification>` ended it, how and when. On a rebuild the main
+    /// transcript is read before any subagent file, so a nested agent's
+    /// notification there comes before the row it ends (ov-366 review 1).
+    ended: Option<(SubagentState, Option<i64>)>,
 }
 
 /// One entry in claude's queue.
@@ -991,8 +995,10 @@ impl Projection {
             }
         }
         self.touch(i);
-        if orphan.is_some_and(|o| o.stopped) {
-            self.end_subagent(i, SubagentState::Completed, None);
+        match orphan {
+            Some(Orphan { ended: Some((state, at)), .. }) => self.end_subagent(i, state, at),
+            Some(Orphan { stopped: true, .. }) => self.end_subagent(i, SubagentState::Completed, None),
+            _ => {}
         }
     }
 
@@ -1030,6 +1036,10 @@ impl Projection {
                 }
             }
             self.end_subagent(i, subagent_state(status), at);
+        } else if let Some(agent) = agent {
+            // No row yet: kept, and applied when the agent is joined.
+            let orphan = self.orphans.entry(agent.to_string()).or_default();
+            orphan.ended = orphan.ended.or(Some((subagent_state(status), at)));
         }
     }
 
