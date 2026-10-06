@@ -37,9 +37,10 @@
 //! elicitation weren't measured; the first is a tool call like these, the
 //! second comes inside a call already in flight. A `PreToolUse` waits on
 //! the fence up to `FENCE_HOLD`, above the most the Enter can hold it
-//! (`LONGEST_FENCE`), so it is never answered under an Enter. What's left: a hook that never reaches
-//! the daemon, or a key a killed `tmux` delivers later than `LATE_KEY`. A
-//! dialog in the way leaves the text in the box, unsent.
+//! (`LONGEST_FENCE`), so it is never answered under an Enter. What's left:
+//! a hook that never reaches the daemon, or a key a killed `tmux` delivers
+//! later than `LATE_KEY`. A dialog in the way leaves the text in the box,
+//! unsent.
 //!
 //! A session this daemon has never heard a hook from is never typed into
 //! mid-turn: its agent waits for the turn to end. Nor is one Far Cooler didn't

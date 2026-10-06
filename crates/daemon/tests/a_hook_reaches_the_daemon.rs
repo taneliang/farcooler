@@ -1321,6 +1321,37 @@ async fn a_stop_from_the_same_session_withdraws_its_held_ask() {
     }
 }
 
+/// A subagent's own `Stop` or `StopFailure` carries its `agent_id`, and ends
+/// only that subagent: the main turn's ask stays held (ov-364 review).
+#[tokio::test]
+async fn a_subagents_stop_leaves_the_turns_held_ask_alone() {
+    for event in ["Stop", "StopFailure"] {
+        let HeldAsk { ingress, terminal, seen, mut asking, socket, _dir, .. } = a_held_ask("/wt/sub-stop", None).await;
+        // Then, on one connection, a frame the sink sees: once it's there,
+        // the subagent's end before it has been acted on.
+        let stop = HookLine {
+            agent: Agent::Claude,
+            event: event.to_string(),
+            payload: serde_json::json!({ "session_id": "sess-1", "agent_id": "a1" }),
+        };
+        let display = HookLine {
+            agent: Agent::Claude,
+            event: "MessageDisplay".to_string(),
+            payload: serde_json::json!({ "session_id": "sess-1", "turn_id": "t", "message_id": "m", "index": 0, "final": true, "delta": "after" }),
+        };
+        let mut stream = tokio::net::UnixStream::connect(&socket).await.expect("connect");
+        let frames = format!("{}{}", encode_line(&stop).unwrap(), encode_line(&display).unwrap());
+        stream.write_all(frames.as_bytes()).await.expect("write");
+        stream.shutdown().await.expect("shutdown");
+        let after = |e: &AgentEvent| matches!(e, AgentEvent::Message { text, .. } if text == "after");
+        eventually(|| seen.lock().unwrap().iter().any(|(_, e)| e.iter().any(after)).then_some(()))
+            .await
+            .expect("the frame after the subagent's end arrived");
+        assert!(ingress.asks().is_holding(terminal), "{event} from a subagent withdrew the turn's ask");
+        assert_eq!(asking.line(Duration::from_millis(100)).await, None, "{event}");
+    }
+}
+
 /// A failed turn ends, failed, for every client: claude sends `StopFailure`
 /// and no `Stop` (ov-364).
 #[tokio::test]

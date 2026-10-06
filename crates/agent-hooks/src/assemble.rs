@@ -69,6 +69,10 @@ impl MessageAssembler {
         event: &str,
         payload: &serde_json::Value,
     ) -> Vec<AgentEvent> {
+        // A subagent's own end names its `agent_id`, and isn't the turn's.
+        if agent == Agent::Claude && matches!(event, "Stop" | "StopFailure") && payload.get("agent_id").is_some() {
+            return Vec::new();
+        }
         match (agent, event) {
             (Agent::Claude, "MessageDisplay") => self.claude_display(payload),
 
@@ -526,6 +530,17 @@ mod tests {
                 }
             }]
         );
+    }
+
+    /// A subagent's `Stop` or `StopFailure` names its `agent_id` and ends
+    /// no turn.
+    #[test]
+    fn a_subagents_stop_ends_no_turn() {
+        let mut a = MessageAssembler::new();
+        for event in ["Stop", "StopFailure"] {
+            let payload = serde_json::json!({ "agent_id": "a1", "error": "rate_limit" });
+            assert_eq!(a.accept(Agent::Claude, event, &payload), Vec::new(), "{event}");
+        }
     }
 
     /// The trap this test exists to avoid: a pattern that has stopped

@@ -171,6 +171,17 @@ async fn the_subagent_and_failure_hooks_move_the_fence() {
     told(&socket, "StopFailure", s(serde_json::json!({ "error": "rate_limit" }))).await;
     assert!(until(|| !asks.tool_in_flight("s1")).await, "a failed turn left its call in flight");
 
+    // A subagent's own Stop or StopFailure ends that subagent's calls, and
+    // leaves the main thread's.
+    told(&socket, "UserPromptSubmit", s(serde_json::json!({}))).await;
+    told(&socket, "PreToolUse", s(serde_json::json!({ "tool_use_id": "main_2" }))).await;
+    told(&socket, "PreToolUse", s(serde_json::json!({ "tool_use_id": "sub_2", "agent_id": "a2" }))).await;
+    told(&socket, "PreToolUse", s(serde_json::json!({ "tool_use_id": "sub_3", "agent_id": "a3" }))).await;
+    told(&socket, "Stop", s(serde_json::json!({ "agent_id": "a2" }))).await;
+    told(&socket, "StopFailure", s(serde_json::json!({ "agent_id": "a3", "error": "rate_limit" }))).await;
+    assert_eq!(asks.calls_for_tests("s1"), ["main_2"], "a subagent's end was read as the turn's");
+    told(&socket, "Stop", s(serde_json::json!({}))).await;
+
     assert!(until(|| asks.quiet_mid_turn("s1")).await);
     told(&socket, "Notification", s(serde_json::json!({ "notification_type": "idle_prompt" }))).await;
     assert!(asks.quiet_mid_turn("s1"), "an idle notice is no dialog");

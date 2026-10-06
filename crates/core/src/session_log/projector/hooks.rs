@@ -96,6 +96,7 @@ impl Projection {
                     }
                 }
             }
+            "Stop" | "StopFailure" if payload.get("agent_id").is_some() => {}
             "Stop" => {
                 let turn = self.hook_turn(payload, now);
                 self.end_turn(turn, at, TurnOutcome::Finished);

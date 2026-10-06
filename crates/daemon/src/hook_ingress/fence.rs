@@ -35,18 +35,25 @@ pub(super) async fn answer(
 }
 
 /// A call's end clears that call; a subagent's end, its calls; a turn's
-/// beginning or end (a failed one's too), the main thread's.
+/// beginning or end (a failed one's too), the main thread's. A `Stop` or
+/// `StopFailure` that names an `agent_id` is a subagent's end, not the
+/// turn's.
 pub(super) fn ended(asks: &HookAsks, session: &str, event: &str, payload: &serde_json::Value) {
-    match event {
-        "PostToolUse" | "PostToolUseFailure" => asks.tool_ended(session, payload["tool_use_id"].as_str()),
-        "SubagentStop" => {
-            if let Some(agent) = payload["agent_id"].as_str() {
-                asks.subagent_ended(session, agent);
-            }
-        }
-        "Stop" | "StopFailure" | "UserPromptSubmit" => asks.turn_bounded(session),
+    match (event, payload["agent_id"].as_str()) {
+        ("PostToolUse" | "PostToolUseFailure", _) => asks.tool_ended(session, payload["tool_use_id"].as_str()),
+        ("SubagentStop" | "Stop" | "StopFailure", Some(agent)) => asks.subagent_ended(session, agent),
+        ("Stop" | "StopFailure" | "UserPromptSubmit", None) => asks.turn_bounded(session),
         _ => {}
     }
+}
+
+/// Whether this hook is the main thread's turn beginning or ending: claude's
+/// `UserPromptSubmit`, `Stop` or `StopFailure`, and not a subagent's, which
+/// carries its `agent_id`.
+pub(super) fn bounds_turn(agent: Agent, event: &str, payload: &serde_json::Value) -> bool {
+    agent == Agent::Claude
+        && matches!(event, "Stop" | "StopFailure" | "UserPromptSubmit")
+        && payload.get("agent_id").is_none()
 }
 
 /// Whether this hook says claude is putting up a dialog: a gate

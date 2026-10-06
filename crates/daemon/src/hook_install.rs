@@ -37,9 +37,8 @@ use serde_json::{Value, json};
 /// `UserPromptSubmit` and `Stop`. `hook_ingress::announced_terminal` binds a
 /// pane from ANY event's `Facts`, not from `SessionStart` by name, but that
 /// early hook still lets a pane bind before its first prompt rather than
-/// waiting for one. `PreToolUse` and `PostToolUse` cost about 15-18 ms per
-/// invocation (measured in the design doc) and buy nothing yet. Whichever
-/// task wires up a consumer for them adds them back. See fix round 1 in
+/// waiting for one. The tool hooks are claude's alone, with consumers of
+/// their own (`CLAUDE_ONLY_EVENTS`). See fix round 1 in
 /// `.superpowers/sdd/2026-09-07-live-agent-sessions/task-9-report.md`.
 ///
 /// No gate is shared. Claude's `PermissionRequest` is claude's alone
@@ -89,7 +88,7 @@ const CLAUDE_CODEX_EVENTS: &[(&str, bool)] = &[
 /// start and a round trip on every tool call (ov-364's measurements are in
 /// its report). The session projector reads all three as tool rows.
 ///
-/// ov-364's four, none waiting, each fired once per subagent or turn, not
+/// ov-364's four, none gating, each fired once per subagent or turn, not
 /// per call. `SubagentStart` joins a subagent's row to its `agent_id` in the
 /// projector. `SubagentStop` ends that subagent's calls on the fence and its
 /// row. `StopFailure` is the end of a turn that failed, in place of `Stop`:
@@ -565,8 +564,9 @@ fn render_command(binary: &str, agent: &str, event: &str, socket: &str, gating: 
 /// Never merged with anything: claude never has a user file touched at all,
 /// so there is nothing to preserve and every call with the same socket
 /// produces the same value. Registers `CLAUDE_CODEX_EVENTS` (shared with
-/// codex) union `CLAUDE_ONLY_EVENTS` (`MessageDisplay`, claude's alone) —
-/// see that constant's doc for why the two are not one table.
+/// codex) union `CLAUDE_ONLY_EVENTS` (claude's alone: prose, the gate, the
+/// tool, subagent and failure hooks) — see that constant's doc for why the
+/// two are not one table.
 pub fn claude_settings(socket: &Path) -> Value {
     let mut hooks = serde_json::Map::new();
     for (event, gating) in CLAUDE_CODEX_EVENTS.iter().chain(CLAUDE_ONLY_EVENTS) {

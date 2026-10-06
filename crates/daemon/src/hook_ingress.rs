@@ -826,7 +826,7 @@ impl HookIngress {
             };
             // A turn cannot end or begin with claude's dialog up, so whatever
             // was asked on this pane has been answered at the keyboard.
-            if hook.agent == Agent::Claude && matches!(hook.event.as_str(), "Stop" | "StopFailure" | "UserPromptSubmit") {
+            if fence::bounds_turn(hook.agent, &hook.event, &hook.payload) {
                 self.asks.turn_boundary(terminal);
             }
             self.start_transcript_tail(terminal, hook.agent, &f);

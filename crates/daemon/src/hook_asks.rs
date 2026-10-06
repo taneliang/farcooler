@@ -155,12 +155,21 @@ struct Heard {
     /// (`""` for one that named none). Keyed, since calls run side by side:
     /// a subagent's, parallel reads; one call's end says nothing of another.
     calls: HashMap<String, Call>,
-    /// A turn began or ended (`UserPromptSubmit`, `Stop`) since this daemon
-    /// started: before that, a call from before the start may be in flight
-    /// unseen, so the session isn't typed into mid-turn.
+    /// A turn began or ended (`UserPromptSubmit`, `Stop`, `StopFailure`)
+    /// since this daemon started: before that, a call from before the start
+    /// may be in flight unseen, so the session isn't typed into mid-turn.
     turn_seen: bool,
     /// The fence's lock.
     fence: Arc<tokio::sync::Mutex<()>>,
+}
+
+impl Heard {
+    /// Whether a call counts as in flight: a subagent's past
+    /// `SUBAGENT_CALL_KEPT` doesn't.
+    fn calling(&self) -> bool {
+        let now = Instant::now();
+        self.calls.values().any(|c| c.agent.is_none() || now.duration_since(c.since) < SUBAGENT_CALL_KEPT)
+    }
 }
 
 /// One tool call in flight.
@@ -172,12 +181,14 @@ struct Call {
     since: Instant,
 }
 
-/// How long a subagent's call outlives turn boundaries with no end heard.
-/// Its `PostToolUse` or its agent's `SubagentStop` normally ends it first;
-/// this bounds one whose end never came (an agent killed mid-call), which
-/// would otherwise keep its session busy until the daemon restarts. A call
-/// this old is long past any dialog of its own: claude draws one before the
-/// tool runs, and the screen check covers one still up.
+/// How long a subagent's call counts as in flight with no end heard. Its
+/// `PostToolUse` or its agent's `SubagentStop` normally ends it first; this
+/// bounds one whose end never came (an agent killed mid-call), which would
+/// otherwise keep its session busy until the daemon restarts. Past it the
+/// call is ignored (`tool_in_flight`, `quiet_mid_turn`) and dropped at the
+/// next boundary. A call this old may still have its dialog up, a
+/// background subagent's permission left unanswered; then the screen check
+/// under the fence is what stops the Enter.
 pub const SUBAGENT_CALL_KEPT: Duration = Duration::from_secs(10 * 60);
 
 /// The longest a `PreToolUse` waits on the fence's lock. Above the longest
@@ -310,9 +321,20 @@ impl HookAsks {
         }
     }
 
-    /// Whether `session` has a tool call in flight.
+    /// The ids of `session`'s calls in flight, sorted, for tests.
+    #[cfg(test)]
+    pub(crate) fn calls_for_tests(&self, session: &str) -> Vec<String> {
+        let sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+        let mut ids: Vec<String> = sessions.get(session).map(|h| h.calls.keys().cloned().collect()).unwrap_or_default();
+        ids.sort();
+        ids
+    }
+
+    /// Whether `session` has a tool call in flight: any of the main
+    /// thread's, or a subagent's younger than `SUBAGENT_CALL_KEPT`.
     pub fn tool_in_flight(&self, session: &str) -> bool {
-        self.sessions.lock().unwrap_or_else(|e| e.into_inner()).get(session).is_some_and(|h| !h.calls.is_empty())
+        let sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+        sessions.get(session).is_some_and(Heard::calling)
     }
 
     /// Whether `session` may be typed into mid-turn as far as its hooks say:
@@ -323,7 +345,7 @@ impl HookAsks {
         let Some(heard) = sessions.get(session) else { return false };
         let recent = Instant::now().checked_sub(GATE_RECENT);
         heard.turn_seen
-            && heard.calls.is_empty()
+            && !heard.calling()
             && !heard.gate.is_some_and(|gate| recent.is_none_or(|recent| gate >= recent))
     }
 
@@ -1105,7 +1127,7 @@ mod tests {
         asks.mark_call("s1", Some("bg-2"), Some("a2"));
         asks.mark_call("s1", None, Some("a2"));
         asks.turn_bounded("s1");
-        assert!(asks.tool_in_flight("s1"), "the turn's Stop ended a background subagent's calls");
+        assert_eq!(asks.calls_for_tests("s1"), ["bg-1", "bg-2"], "the main call and the unnamed one end; named ones stay");
         asks.tool_ended("s1", Some("bg-1"));
         assert!(asks.tool_in_flight("s1"), "a2's call is still in flight");
         asks.subagent_ended("s1", "a2");
@@ -1117,9 +1139,14 @@ mod tests {
         asks.turn_bounded("s1");
         assert!(asks.tool_in_flight("s1"));
         asks.age_calls("s1", SUBAGENT_CALL_KEPT);
-        assert!(asks.tool_in_flight("s1"), "aged out without a boundary");
+        assert!(!asks.tool_in_flight("s1"), "a call whose end never came kept the session busy mid-turn");
+        assert!(asks.quiet_mid_turn("s1"));
         asks.turn_bounded("s1");
-        assert!(!asks.tool_in_flight("s1"), "a call whose end never came kept the session busy");
+        assert!(asks.calls_for_tests("s1").is_empty(), "dropped at the boundary");
+        // The main thread's call never ages out; only its turn ends it.
+        asks.mark_call("s1", Some("main-2"), None);
+        asks.age_calls("s1", SUBAGENT_CALL_KEPT);
+        assert!(asks.tool_in_flight("s1") && !asks.quiet_mid_turn("s1"));
     }
 
     /// Before a turn boundary since this daemon started, a session isn't
