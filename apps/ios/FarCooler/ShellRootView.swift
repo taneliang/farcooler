@@ -1011,6 +1011,26 @@ struct ShellRootView<Pane: View>: View {
         #endif
     }
 
+    /// Whether a gesture is still in this shell's hands: a finger whose
+    /// release `onEnded` has not run yet, or a page turn whose re-seat has not
+    /// landed. `position` and the rest of the probe describe the last gesture
+    /// only once this is false.
+    ///
+    /// **The UI suites wait for it, and that is a fact about XCUITest rather
+    /// than about the shell.** A synthesized drag returns, and the test's next
+    /// query is answered, once XCUITest calls the app idle, and that idle
+    /// check does not wait for a SwiftUI animation's completion — which is
+    /// where `commit` re-seats `position`. Read straight after a return swipe
+    /// under `-shell-slow-frame`, the probe said `tab=1 busy=1` in 15 reads
+    /// of 15, with the release already decided as a commit to tab 0. See
+    /// `ShellPaneScrollTests.state`.
+    ///
+    /// `trackX` and `carryX` rather than a flag of its own: a commit holds
+    /// `trackX` at a full page until its completion re-seats `position`, and
+    /// every other release sets both to zero at once (their springs ease what
+    /// is drawn, not the model value).
+    private var busy: Bool { gestureActive || trackX != 0 || carryX != 0 }
+
     /// The one way a UI test can ask this shell where it is.
     ///
     /// The same technique `TerminalView.swift:387-392` uses and for the same
@@ -1041,7 +1061,7 @@ struct ShellRootView<Pane: View>: View {
                     + "stray=\(Int(strayed.rounded())) "
                     + "lockx=\(Int(lockedOn.width.rounded())) "
                     + "locky=\(Int(lockedOn.height.rounded())) "
-                    + "mount=\(mount)" + slowFrames)
+                    + "mount=\(mount) busy=\(busy ? 1 : 0)" + slowFrames)
     }
 }
 

@@ -39,15 +39,36 @@ final class ShellPaneScrollTests: XCTestCase {
         return app
     }
 
-    /// `ws`, `tab`, and the rest of `ShellRootView.probe`'s value.
+    /// `ws`, `tab`, and the rest of `ShellRootView.probe`'s value, once the
+    /// shell has finished with the last gesture.
+    ///
+    /// **Waits for `busy=0`, because XCUITest does not.** A drag returns, and
+    /// the next query is answered, once XCUITest calls the app idle — and a
+    /// page turn changes `tab` only when its spring's completion re-seats the
+    /// position, which that idle check does not wait for. Read straight after
+    /// the return swipe under `-shell-slow-frame`, the probe said `tab=1
+    /// busy=1` in 15 reads of 15, with the release already decided as a commit
+    /// to tab 0; `testAHorizontalSwipeOverTheDiffTurnsThePage` failed on CI
+    /// (run 37404997172) on exactly that `1`. A shell that never settles — a
+    /// release that never ran — still fails, here, by name.
     private func state(_ app: XCUIApplication) throws -> [String: Int] {
         let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
         guard probe.waitForExistence(timeout: 30) else {
             print(app.debugDescription)
             throw HarnessFailure("The shell never rendered its probe.")
         }
+        let deadline = Date().addingTimeInterval(10)
+        var value = probe.value as? String ?? ""
+        while value.split(separator: " ").contains("busy=1") {
+            guard Date() < deadline else {
+                throw HarnessFailure(
+                    "The shell never let go of the last gesture (\(value)).")
+            }
+            Thread.sleep(forTimeInterval: 0.1)
+            value = probe.value as? String ?? ""
+        }
         var parsed: [String: Int] = [:]
-        for pair in (probe.value as? String ?? "").split(separator: " ") {
+        for pair in value.split(separator: " ") {
             let halves = pair.split(separator: "=")
             guard halves.count == 2, let value = Int(halves[1]) else { continue }
             parsed[String(halves[0])] = value
@@ -166,7 +187,26 @@ final class ShellPaneScrollTests: XCTestCase {
     /// fix, which is exactly why "the horizontal swipes aren't working very
     /// well" was the report rather than "they never work".
     func testAHorizontalSwipeOverTheDiffTurnsThePage() throws {
-        let app = launch(["-shell-harness", "-shell-changes"])
+        try swipeOverTheDiffTurnsThePage(launch(["-shell-harness", "-shell-changes"]))
+    }
+
+    /// **The same, with a slow frame in the middle of each swipe.**
+    ///
+    /// The way the test above failed on CI, made likelier on purpose: the
+    /// release of a swipe that had a slow frame arrives late, so its page turn
+    /// is still settling when XCUITest calls the app idle. Without `state`'s
+    /// wait for `busy=0`, a read straight after the return swipe found the old
+    /// page every time.
+    func testAHorizontalSwipeOverTheDiffTurnsThePageEvenAfterASlowFrame() throws {
+        try swipeOverTheDiffTurnsThePage(
+            launch(["-shell-harness", "-shell-changes", "-shell-slow-frame"]), slowFrame: true)
+    }
+
+    /// `slowFrame` checks the hook fired on both swipes, so the slow-frame
+    /// test can't quietly become a copy of the plain one.
+    private func swipeOverTheDiffTurnsThePage(
+        _ app: XCUIApplication, slowFrame: Bool = false
+    ) throws {
         let start = try state(app)
         XCTAssertEqual(start["tab"], 0)
         XCTAssertTrue(
@@ -179,7 +219,11 @@ final class ShellPaneScrollTests: XCTestCase {
             "a horizontal swipe over the diff's file heading was swallowed by the heading")
 
         swipe(app, at: 0.29, toward: 1)
-        XCTAssertEqual(try state(app)["tab"], 0, "the return swipe did not land where it started")
+        let back = try state(app)
+        XCTAssertEqual(back["tab"], 0, "the return swipe did not land where it started")
+        if slowFrame {
+            XCTAssertEqual(back["stalls"], 2, "a swipe went by without its slow frame")
+        }
     }
 
     /// **And the code itself keeps its own sideways scroll.**
