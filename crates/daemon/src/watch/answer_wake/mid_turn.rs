@@ -77,6 +77,7 @@ pub(crate) const LATE_KEY: Duration = Duration::from_secs(5);
 /// Enter holds it.
 pub(crate) const LONGEST_FENCE: Duration =
     Duration::from_millis(ENTER_DEADLINE.as_millis() as u64 + LATE_KEY.as_millis() as u64 + KEY_LANDS.as_millis() as u64);
+const _: () = assert!(LONGEST_FENCE.as_millis() < crate::hook_asks::FENCE_HOLD.as_millis());
 
 /// How long after the Enter the queue has to show the message.
 const QUEUE_SETTLES: Duration = Duration::from_secs(3);
