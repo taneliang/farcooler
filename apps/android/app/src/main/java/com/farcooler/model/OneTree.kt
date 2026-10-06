@@ -87,6 +87,21 @@ object OneTree {
         data object None : Tap
     }
 
+    /**
+     * The loose worktrees drawn either side of [nodeId]'s row, by worktree id:
+     * what Move up and Move down pass. Only a loose worktree moves; a lane is
+     * where its card puts it.
+     */
+    fun neighbors(tree: Tree, nodeId: String): Pair<String?, String?> {
+        val siblings = tree.all.firstOrNull { p -> p.children.any { it.id == nodeId } }?.children ?: return null to null
+        val row = siblings.firstOrNull { it.id == nodeId } ?: return null to null
+        val loose = siblings.filter { it.kind == Kind.WORKTREE && it.worktreeId != null }
+        val at = loose.indexOf(row)
+        // A lane, a card or a terminal isn't among them, and doesn't move.
+        if (at < 0) return null to null
+        return loose.getOrNull(at - 1)?.worktreeId to loose.getOrNull(at + 1)?.worktreeId
+    }
+
     /** A row with children pushes its level; a leaf opens its target; a subagent opens nothing. */
     fun tap(node: Node): Tap = when {
         node.hasChildren -> Tap.Push(node.id)
@@ -299,7 +314,7 @@ object OneTree {
             val terminals = wt.terminals.filter { !it.isOrchestrator && it.taskId == null && !it.isChangesPane }.map { t ->
                 Node("$id/terminal:${t.id}", Kind.TERMINAL, t.label, target = Target.Terminal(wt.id, t.id), worktreeId = wt.id)
             }
-            return Node(id, Kind.GROUP, Words.MAIN_CHECKOUT, detail = Words.shells(terminals.size), target = Target.Worktree(wt.id), children = terminals)
+            return Node(id, Kind.GROUP, Words.MAIN_CHECKOUT, detail = Words.shells(terminals.size), target = Target.Worktree(wt.id), children = terminals, worktreeId = wt.id)
         }
 
         fun looseNode(): Node? {

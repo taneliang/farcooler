@@ -81,6 +81,8 @@ import com.farcooler.model.GlanceMarkSize
 import com.farcooler.model.RunnerLink
 import com.farcooler.model.fleetReading
 import com.farcooler.model.liveSummary
+import com.farcooler.model.WorktreeAction
+import com.farcooler.model.WorktreeActions
 import com.farcooler.model.WorktreeOrder
 import com.farcooler.model.StateKind
 import com.farcooler.model.Terminal
@@ -900,53 +902,30 @@ private fun WorktreeHeader(
                 Icon(Icons.Filled.MoreVert, contentDescription = "Worktree actions")
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                DropdownMenuItem(
-                    text = { Text("New terminal") },
-                    onClick = {
-                        menu = false
-                        onNewTerminal()
-                    },
-                )
-                // Only offered when the runner said which repository this
-                // worktree belongs to and which branch it is on. An older
-                // daemon's fleet carried neither, and a menu item that cannot
-                // work is worse than one that is not there.
-                if (entry.worktree.repository != null && entry.worktree.branch.isNotBlank()) {
-                    DropdownMenuItem(
-                        text = { Text("Stack and pull request") },
-                        onClick = {
-                            menu = false
-                            onStack()
-                        },
-                    )
-                }
-                DropdownMenuItem(
-                    text = { Text(if (entry.worktree.isHidden) "Unhide" else "Hide") },
-                    onClick = {
-                        menu = false
-                        onHide(!entry.worktree.isHidden)
-                    },
-                )
-                // **Never for the repository's own checkout.** Removing it would
-                // offer to delete the directory the repository itself lives in,
-                // and the daemon refuses it twice — the stored flag, then a path
-                // comparison that deliberately does not trust the flag. Keeping
-                // the item off the menu is not what makes that safe; it is what
-                // keeps nobody walking through a destructive ceremony that could
-                // never have succeeded. See `07e75e8`, which is that story on
-                // iOS, and `RemoveWorktreeCeremony`.
-                if (!entry.worktree.isMainCheckout) {
-                    Separator()
+                // `WorktreeActions.of`: the one rule the tree's rows read too
+                // (ov-300). Stack only where the runner named the repository
+                // and branch; never Remove on the repository's own checkout,
+                // which the daemon refuses twice (`07e75e8`,
+                // `RemoveWorktreeCeremony`). This list reorders by dragging.
+                WorktreeActions.of(entry.worktree).forEach { action ->
+                    if (action == WorktreeAction.REMOVE) Separator()
                     DropdownMenuItem(
                         text = {
                             Text(
-                                "Remove worktree",
-                                color = MaterialTheme.colorScheme.error,
+                                action.title,
+                                color = if (action == WorktreeAction.REMOVE) MaterialTheme.colorScheme.error
+                                else androidx.compose.ui.graphics.Color.Unspecified,
                             )
                         },
                         onClick = {
                             menu = false
-                            onRemove()
+                            when (action) {
+                                WorktreeAction.NEW_TERMINAL -> onNewTerminal()
+                                WorktreeAction.STACK -> onStack()
+                                WorktreeAction.HIDE, WorktreeAction.UNHIDE -> onHide(!entry.worktree.isHidden)
+                                WorktreeAction.REMOVE -> onRemove()
+                                WorktreeAction.MOVE_UP, WorktreeAction.MOVE_DOWN -> Unit
+                            }
                         },
                     )
                 }

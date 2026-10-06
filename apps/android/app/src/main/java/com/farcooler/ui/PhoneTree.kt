@@ -1,6 +1,10 @@
 package com.farcooler.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -250,6 +254,7 @@ fun ThemesTab(model: AppModel, connection: Connection, workspace: WorkspaceSumma
     val key = filterKey(connection.host.id, workspace.id)
     var filter by remember(key) { mutableStateOf(OneTree.Filter.parse(prefs.getString(key, null))) }
     val tree = rememberTree(connection, workspace, filter)
+    val menu = rememberTreeWorktreeMenu(connection, workspace, tree)
     var choosing by remember { mutableStateOf(false) }
     var describing by remember { mutableStateOf(false) }
     var naming by remember { mutableStateOf(false) }
@@ -280,9 +285,9 @@ fun ThemesTab(model: AppModel, connection: Connection, workspace: WorkspaceSumma
                         color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp).testTag("tree-empty"),
                     )
                 }
-                items(tree.work, key = { it.id }) { TreeRow(it, nav) }
+                items(tree.work, key = { it.id }) { TreeRow(it, nav, menu) }
                 if (tree.below.isNotEmpty()) item(key = "divider") { Separator(Modifier.padding(vertical = 8.dp)) }
-                items(tree.below, key = { it.id }) { TreeRow(it, nav) }
+                items(tree.below, key = { it.id }) { TreeRow(it, nav, menu) }
                 // The Worktrees tab's two ways to make one, kept: each claims it
                 // for this workspace.
                 item(key = "new") {
@@ -294,6 +299,7 @@ fun ThemesTab(model: AppModel, connection: Connection, workspace: WorkspaceSumma
             }
         }
     }
+    menu.Sheets()
     if (describing) QuickTaskSheet(model = model, workspace = workspace, hostId = connection.host.id, onDismiss = { describing = false })
     if (naming) NewWorktreeSheet(model = model, workspace = workspace, hostId = connection.host.id, onDismiss = { naming = false })
 }
@@ -307,6 +313,7 @@ fun TreeLevelScreen(connection: Connection, workspace: WorkspaceSummary, nodeId:
     val tree = rememberTree(connection, workspace, filter)
     val all = rememberTree(connection, workspace, OneTree.Filter.ALL)
     val node = tree?.node(nodeId) ?: all?.node(nodeId)
+    val menu = rememberTreeWorktreeMenu(connection, workspace, if (tree?.node(nodeId) != null) tree else all)
     Scaffold(topBar = {
         TopAppBar(
             title = { Text(node?.let { if (it.key.isEmpty()) it.title else "${it.key} ${it.title}" } ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -332,11 +339,12 @@ fun TreeLevelScreen(connection: Connection, workspace: WorkspaceSummary, nodeId:
                         )
                         Separator()
                     }
-                    items(node.children, key = { it.id }) { TreeRow(it, nav) }
+                    items(node.children, key = { it.id }) { TreeRow(it, nav, menu) }
                 }
             }
         }
     }
+    menu.Sheets()
 }
 
 private fun open(target: OneTree.Target, nav: TreeNavigation) {
@@ -350,16 +358,28 @@ private fun open(target: OneTree.Target, nav: TreeNavigation) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun TreeRow(node: OneTree.Node, nav: TreeNavigation) {
+internal fun TreeRow(node: OneTree.Node, nav: TreeNavigation, menu: TreeWorktreeMenu? = null) {
     val tap = OneTree.tap(node)
+    val actions = menu?.actions(node).orEmpty()
+    var menuOpen by remember { mutableStateOf(false) }
     val amber = glanceColor(GlancePalette.amber)
     val spoken = listOfNotNull(node.key.ifEmpty { null }, node.title, node.detail.ifEmpty { null }, node.also.ifEmpty { null }, node.caption.ifEmpty { null }, if (node.showsDot) "Needs you" else null).joinToString(", ")
-    val modifier = when (tap) {
-        is OneTree.Tap.Push -> Modifier.clickable(role = Role.Button) { nav.onOpenLevel(tap.node) }
-        is OneTree.Tap.Open -> Modifier.clickable(role = Role.Button) { open(tap.target, nav) }
-        OneTree.Tap.None -> Modifier
+    val onClick: (() -> Unit)? = when (tap) {
+        is OneTree.Tap.Push -> { { nav.onOpenLevel(tap.node) } }
+        is OneTree.Tap.Open -> { { open(tap.target, nav) } }
+        OneTree.Tap.None -> null
     }
+    // A worktree's menu on a long press, as the Worktrees tab's rows held
+    // theirs behind a press; each action is TalkBack's too.
+    val modifier = when {
+        actions.isNotEmpty() -> Modifier.combinedClickable(role = Role.Button, onClick = onClick ?: {}, onLongClick = { menuOpen = true })
+            .semantics { customActions = actions.map { a -> CustomAccessibilityAction(a.title) { menu?.perform(node, a); true } } }
+        onClick != null -> Modifier.clickable(role = Role.Button, onClick = onClick)
+        else -> Modifier
+    }
+    Box {
     ListItem(
         leadingContent = { Icon(icon(node), null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) },
         headlineContent = {
@@ -386,6 +406,19 @@ internal fun TreeRow(node: OneTree.Node, nav: TreeNavigation) {
         },
         modifier = modifier.testTag("tree-row-${node.key.ifEmpty { node.title }}").semantics(mergeDescendants = true) { contentDescription = spoken },
     )
+    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }, modifier = Modifier.testTag("tree-row-menu")) {
+        actions.forEach { action ->
+            if (action == com.farcooler.model.WorktreeAction.REMOVE) Separator()
+            DropdownMenuItem(
+                text = { Text(action.title, color = if (action == com.farcooler.model.WorktreeAction.REMOVE) MaterialTheme.colorScheme.error else Color.Unspecified) },
+                onClick = {
+                    menuOpen = false
+                    menu?.perform(node, action)
+                },
+            )
+        }
+    }
+    }
 }
 
 private fun icon(node: OneTree.Node): ImageVector = when (node.kind) {
@@ -416,3 +449,70 @@ fun treeNavigation(model: AppModel, hostId: String, workspaceId: String, worktre
     },
     onOpenLevel = { model.navigate(Route.TreeLevel(hostId, workspaceId, it)) },
 )
+
+/**
+ * The worktree menu on the tree's rows (ov-300): what the Worktrees tab's
+ * header offered, kept now that the tree has taken its place. A long press on
+ * a lane's, a loose worktree's or the checkout's row opens it, and TalkBack
+ * reads each as a custom action. The actions are `WorktreeActions.of`, the
+ * rule the Worktrees list reads too.
+ */
+class TreeWorktreeMenu internal constructor(
+    private val connection: Connection,
+    private val workspace: WorkspaceSummary,
+    private val tree: OneTree.Tree?,
+    private val scope: kotlinx.coroutines.CoroutineScope,
+) {
+    internal var newTerminal by mutableStateOf<com.farcooler.model.Worktree?>(null)
+    internal var stack by mutableStateOf<com.farcooler.model.Worktree?>(null)
+    internal var removing by mutableStateOf<com.farcooler.model.Worktree?>(null)
+
+    private fun worktree(node: OneTree.Node): com.farcooler.model.Worktree? {
+        if (node.kind != OneTree.Kind.LANE && node.kind != OneTree.Kind.WORKTREE && node.id != "group:main") return null
+        val id = node.worktreeId ?: return null
+        return connection.fleet.value.worktrees.firstOrNull { it.id == id }
+    }
+
+    fun actions(node: OneTree.Node): List<com.farcooler.model.WorktreeAction> {
+        val wt = worktree(node) ?: return emptyList()
+        val (above, below) = tree?.let { OneTree.neighbors(it, node.id) } ?: (null to null)
+        return com.farcooler.model.WorktreeActions.of(wt, above, below)
+    }
+
+    fun perform(node: OneTree.Node, action: com.farcooler.model.WorktreeAction) {
+        val wt = worktree(node) ?: return
+        when (action) {
+            com.farcooler.model.WorktreeAction.NEW_TERMINAL -> newTerminal = wt
+            com.farcooler.model.WorktreeAction.STACK -> stack = wt
+            com.farcooler.model.WorktreeAction.REMOVE -> removing = wt
+            com.farcooler.model.WorktreeAction.HIDE, com.farcooler.model.WorktreeAction.UNHIDE ->
+                scope.launch { connection.setHidden(wt, !wt.isHidden) }
+            com.farcooler.model.WorktreeAction.MOVE_UP, com.farcooler.model.WorktreeAction.MOVE_DOWN -> {
+                val (above, below) = tree?.let { OneTree.neighbors(it, node.id) } ?: (null to null)
+                val up = action == com.farcooler.model.WorktreeAction.MOVE_UP
+                val beside = (if (up) above else below) ?: return
+                // The runner's order of this workspace's worktrees, as the
+                // Worktrees list sent it from a drag.
+                val fleet = connection.fleet.value
+                val order = fleet.worktrees.filter { com.farcooler.model.WorktreeScope.OfWorkspace(connection.host.id, workspace).includes(it, fleet) }.map { it.id }
+                val next = com.farcooler.model.WorktreeActions.moved(order, wt.id, beside, up)
+                if (next != order) scope.launch { connection.reorderWorktrees(next) }
+            }
+        }
+    }
+
+    @Composable
+    fun Sheets() {
+        newTerminal?.let { NewTerminalSheet(connection = connection, worktree = it, onDismiss = { newTerminal = null }) }
+        stack?.let { wt ->
+            wt.repository?.let { StackSheet(connection = connection, repository = it, branch = wt.branch, onDismiss = { stack = null }) }
+        }
+        removing?.let { RemoveWorktreeCeremony(connection = connection, worktree = it, onFinished = { removing = null }) }
+    }
+}
+
+@Composable
+fun rememberTreeWorktreeMenu(connection: Connection, workspace: WorkspaceSummary, tree: OneTree.Tree?): TreeWorktreeMenu {
+    val scope = rememberCoroutineScope()
+    return remember(connection, workspace, tree) { TreeWorktreeMenu(connection, workspace, tree, scope) }
+}
