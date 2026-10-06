@@ -31,6 +31,9 @@ struct AgentView: View {
     @Environment(\.phoneNavigator) private var navigator
     /// How tall the docked composer measured. Reported up out of `DockedBar`.
     @State private var barHeight: CGFloat = 0
+    /// The composer's state, above the width switch (ov-357). A `@State` class, not
+    /// observed here: a keystroke must not redraw the transcript.
+    @State private var composer = ComposerModel()
     /// A refused switch from the chat back to the terminal.
     @State private var switchFailure: ActionFailure?
     /// Whether this pane is a column beside others (the iPad's, ov-348),
@@ -403,6 +406,9 @@ struct AgentView: View {
                 // None in a column (ov-348), whose composer is the inline one:
                 // the bar's controller holds first responder to keep its
                 // accessory up, and so took every tap meant for the field.
+                #if DEBUG
+                .modifier(ComposerPhotoHarness(model: composer))
+                #endif
                 .background {
                     if !inColumn {
                         DockedBar(height: $barHeight, isActive: isDocked) { composerStack }
@@ -704,6 +710,7 @@ struct AgentView: View {
                     availableCommands: transcript.availableCommands,
                     worktreeID: worktreeID,
                     paneID: terminalID,
+                    model: composer,
                     offers: connection.composerOffers,
                     core: connection.core,
                     onSend: { text, images in
@@ -2192,6 +2199,10 @@ private struct AgentComposer: View {
     /// The terminal's id, which is the same key `PaneDraftStore` is keyed by
     /// and the same one `AgentStream` subscribes with. See `PaneDraft`.
     let paneID: String
+    /// What the pane's composer holds, owned by `AgentView` so the other
+    /// width's composer finds the draft, photos, caret and focus as this one
+    /// left them (ov-357).
+    @ObservedObject var model: ComposerModel
     /// Text another screen left for this pane's composer (ov-241).
     @ObservedObject var offers: ComposerOffers
     let core: ClientCore
@@ -2200,18 +2211,26 @@ private struct AgentComposer: View {
 
     /// In the iPad's chat column, inline rather than on the keyboard.
     @Environment(\.composerInColumn) private var inColumn
-    @State private var text = ""
-    @State private var cursor = 0
+    private var text: String {
+        get { model.text }
+        nonmutating set { model.text = newValue }
+    }
+    private var cursor: Int {
+        get { model.cursor }
+        nonmutating set { model.cursor = newValue }
+    }
+    private var attachments: [ComposerAttachment] {
+        get { model.attachments }
+        nonmutating set { model.attachments = newValue }
+    }
+    private var attachmentError: String? {
+        get { model.attachmentError }
+        nonmutating set { model.attachmentError = newValue }
+    }
     @State private var mentionResults: [String] = []
     @State private var mentionSearch: Task<Void, Never>?
-    @State private var attachments: [ComposerAttachment] = []
     @State private var photoPickerItem: PhotosPickerItem?
-    /// Why the last attachment did not attach. Shown in the composer.
-    @State private var attachmentError: String?
     @State private var fieldHeight: CGFloat = UIFont.preferredFont(forTextStyle: .body).lineHeight
-    /// Whether the message field is being typed in, which is when the
-    /// keyboard is up for it and Hide Keyboard has something to do.
-    @State private var typing = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var token: ComposerToken { activeToken(in: text, cursor: cursor) }
@@ -2331,7 +2350,7 @@ private struct AgentComposer: View {
                     // the keyboard away is the way back to the bar. Only while
                     // the field is being typed in, because with the keyboard
                     // down there is nothing for it to do.
-                    if typing {
+                    if model.isFocused {
                         Button {
                             KeyboardDismissal.now()
                         } label: {
@@ -2488,7 +2507,8 @@ private struct AgentComposer: View {
                     .padding(.top, 2)
             }
             ComposerTextView(
-                text: $text, cursor: $cursor, measuredHeight: $fieldHeight, isEditing: $typing,
+                text: $model.text, selection: $model.selection, measuredHeight: $fieldHeight,
+                isEditing: $model.isFocused,
                 onCommandReturn: inColumn ? { send() } : nil)
                 .frame(height: fieldHeight)
         }
@@ -2777,6 +2797,8 @@ private struct AgentComposer: View {
                                     .font(.system(size: 15))
                                     .foregroundStyle(.white, .black.opacity(0.6))  // style-exempt: the glyph of a remove badge over an attachment thumbnail, on any image
                             }
+                            .accessibilityLabel("Remove Photo")
+                            .accessibilityIdentifier("composer-photo-remove")
                             .offset(x: 5, y: -5)
                         }
                     }
@@ -2799,31 +2821,7 @@ private struct AgentComposer: View {
             // is the usual reason — looked exactly like a picker that did
             // nothing. "Doesn't seem possible to upload images" is what that
             // failure mode sounds like from outside.
-            let loaded = try? await item.loadTransferable(type: Data.self)
-            guard let data = loaded, let image = UIImage(data: data) else {
-                attachmentError = "That photo could not be read. If it lives in "
-                    + "iCloud, open it in Photos first so it downloads."
-                photoPickerItem = nil
-                return
-            }
-            // PNG only when it really is one — a picker hands back HEIC as
-            // often as anything else, and telling the agent the wrong type
-            // fails at the far end.
-            let mime = data.starts(with: [0x89, 0x50, 0x4E, 0x47]) ? "image/png" : "image/jpeg"
-            // Shrunk to fit ONE control envelope, which is what a prompt's
-            // image has to fit inside — see `PromptImageBudget`. Sending the
-            // original bytes is what a picked photo used to do, and the
-            // protocol refused every one of them over a megabyte.
-            guard let (payload, payloadMime) = PromptImageBudget.fit(
-                image, original: data, mime: mime)
-            else {
-                attachmentError = "That photo couldn’t be prepared to send."
-                photoPickerItem = nil
-                return
-            }
-            attachments.append(
-                ComposerAttachment(image: image, data: payload, mime: payloadMime))
-            attachmentError = nil
+            model.attach(try? await item.loadTransferable(type: Data.self))
             photoPickerItem = nil
         }
     }
@@ -2843,23 +2841,6 @@ private struct AgentComposer: View {
         attachments = []
         mentionResults = []
     }
-}
-
-private struct ComposerAttachment: Identifiable {
-    let id = UUID()
-    let image: UIImage
-    /// The bytes to send — the original when it already fits inside one control
-    /// envelope, a resized JPEG when it did not. See `PromptImageBudget`.
-    ///
-    /// The `image` above stays the FULL-size one, because it is what the
-    /// thumbnail is drawn from and shrinking that would show a worse picture
-    /// than was actually sent.
-    /// Formerly the original bytes, kept so the agent gets the picture the user picked
-    /// rather than one re-encoded from a `UIImage` for display.
-    let data: Data
-    let mime: String
-
-    var payload: (mime: String, data: Data)? { (mime, data) }
 }
 
 /// The floating list a slash command or an `@` mention pops open, tap to
@@ -2928,7 +2909,9 @@ private struct SuggestionList: View {
 /// exposes its selection.
 private struct ComposerTextView: UIViewRepresentable {
     @Binding var text: String
-    @Binding var cursor: Int
+    /// The selection in UTF-16 units: where the caret is, for the pickers, and
+    /// what a field built after a width change restores.
+    @Binding var selection: NSRange
     /// How tall the typed text is, reported after it changes rather than
     /// negotiated during layout.
     ///
@@ -2941,7 +2924,9 @@ private struct ComposerTextView: UIViewRepresentable {
     @Binding var measuredHeight: CGFloat
     /// Whether this view is first responder. Written from the delegate's own
     /// begin and end callbacks, so a resign from anywhere (Hide Keyboard, a
-    /// pane switch, `KeyboardDismissal`) reaches it.
+    /// pane switch, `KeyboardDismissal`) reaches it. A field that is taken
+    /// down keeps it true (`ComposerField.isBeingTakenDown`), and a field
+    /// made while it is true takes the focus: the other width's composer.
     @Binding var isEditing: Bool
     /// What ⌘↩ does while the field has the keyboard: send, in the iPad's
     /// column (review R2-3). The field's own key command, because the text
@@ -2959,8 +2944,16 @@ private struct ComposerTextView: UIViewRepresentable {
         // like a three-line one.
         view.textContainerInset = UIEdgeInsets(top: 2, left: 0, bottom: 2, right: 0)
         view.textContainer.lineFragmentPadding = 0
-        view.delegate = context.coordinator
+        // The selection is read before the text goes in, which moves the caret
+        // to the end and tells the delegate, and the delegate is the last
+        // thing set, so that move isn't written back over the saved one.
+        let saved = selection
         view.text = text
+        view.selectedRange = NSRange(
+            location: min(saved.location, view.textStorage.length),
+            length: min(saved.length, max(view.textStorage.length - saved.location, 0)))
+        view.delegate = context.coordinator
+        view.wantsFocusOnArrival = isEditing
         DispatchQueue.main.async { context.coordinator.report(view) }
         return view
     }
@@ -2980,8 +2973,12 @@ private struct ComposerTextView: UIViewRepresentable {
         context.coordinator.report(uiView)
         guard uiView.text != text else { return }
         uiView.text = text
-        let location = ComposerTextView.utf16Offset(forCharacterOffset: cursor, in: text)
-        uiView.selectedRange = NSRange(location: location, length: 0)
+        uiView.selectedRange = NSRange(
+            location: min(selection.location, uiView.textStorage.length), length: 0)
+    }
+
+    static func dismantleUIView(_ uiView: UITextView, coordinator: Coordinator) {
+        (uiView as? ComposerField)?.isBeingTakenDown = true
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -3015,32 +3012,17 @@ private struct ComposerTextView: UIViewRepresentable {
 
         func textViewDidBeginEditing(_ textView: UITextView) { parent.isEditing = true }
 
-        func textViewDidEndEditing(_ textView: UITextView) { parent.isEditing = false }
+        func textViewDidEndEditing(_ textView: UITextView) {
+            // A field leaving the window resigns on its way out, and that is
+            // not the reader putting the keyboard away: the composer for the
+            // other width is waiting to take the focus over (ov-357).
+            guard (textView as? ComposerField)?.isBeingTakenDown != true else { return }
+            parent.isEditing = false
+        }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
-            parent.cursor = ComposerTextView.characterOffset(
-                forUTF16Offset: textView.selectedRange.location, in: textView.text)
+            parent.selection = textView.selectedRange
         }
-    }
-
-    /// `UITextView.selectedRange` is UTF-16 code units; `activeToken` counts
-    /// `Character`s. The two agree for plain ASCII commands and paths — the
-    /// only content these pickers ever match against — and diverge only
-    /// inside a multi-scalar grapheme cluster (an emoji, say), where landing
-    /// mid-cluster falls back to the nearest end rather than crashing.
-    fileprivate static func characterOffset(forUTF16Offset utf16Offset: Int, in text: String) -> Int {
-        guard
-            let utf16Index = text.utf16.index(
-                text.utf16.startIndex, offsetBy: utf16Offset, limitedBy: text.utf16.endIndex),
-            let index = String.Index(utf16Index, within: text)
-        else { return text.count }
-        return text.distance(from: text.startIndex, to: index)
-    }
-
-    fileprivate static func utf16Offset(forCharacterOffset characterOffset: Int, in text: String) -> Int {
-        guard let index = text.index(text.startIndex, offsetBy: characterOffset, limitedBy: text.endIndex)
-        else { return (text as NSString).length }
-        return text.utf16.distance(from: text.utf16.startIndex, to: index.samePosition(in: text.utf16) ?? text.utf16.endIndex)
     }
 }
 

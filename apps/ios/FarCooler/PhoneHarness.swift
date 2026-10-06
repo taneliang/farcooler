@@ -269,10 +269,12 @@ enum HarnessTaps {
     static let pagesNews = Notification.Name("com.farcooler.harness.pages-news")
     /// `PadCompactWindow` on or off.
     static let padCompact = Notification.Name("com.farcooler.harness.pad-compact")
+    /// A photo picked into the composer (`ComposerPhotoHarness`).
+    static let composerPhoto = Notification.Name("com.farcooler.harness.composer-photo")
 
     /// Listen, once per process.
     static let listening: Void = {
-        for name in [agent, decision, planNews, taskNews, pagesNews, padCompact] {
+        for name in [agent, decision, planNews, taskNews, pagesNews, padCompact, composerPhoto] {
             CFNotificationCenterAddObserver(
                 CFNotificationCenterGetDarwinNotifyCenter(), nil,
                 { _, _, name, _, _ in

@@ -89,6 +89,7 @@ SOURCES = [
     "PhoneTreeScreens.swift",
     "PadWorkspace.swift",
     "ComposerField.swift",
+    "ComposerModel.swift",
     "PlanTrainRow.swift",
     "PlanRulingsSection.swift",
     "PlanPageScreens.swift",
@@ -921,6 +922,7 @@ UI_TEST_SOURCES = [
     "PhoneTreeUITests.swift",
     # The iPad's workspace in columns (ov-348), on an iPad simulator.
     "PadWorkspaceUITests.swift",
+    "ComposerWidthUITests.swift",
     "DynamicTypeTests.swift",
     # A task's agent and back, a notification landing with its workspace and
     # task under it, and a decision answered from Needs You. Needs no runner,
