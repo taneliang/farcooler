@@ -232,11 +232,9 @@ impl<R: AsyncRead + Unpin> Connection<R> {
                 // Answered in the handshake so every client knows what this
                 // runner can do before its first request, at no extra round
                 // trip. Built from `capability::ALL`, the same table
-                // `daemon.version` and the dispatcher read.
-                capabilities: farcooler_protocol::capability::ALL
-                    .iter()
-                    .map(|c| (*c).to_string())
-                    .collect(),
+                // `daemon.version` and the dispatcher read, less what this
+                // process withholds (a feature behind a runner's flag).
+                capabilities: farcooler_protocol::capability::advertised(),
             })),
         };
         self.send(&reply).await?;

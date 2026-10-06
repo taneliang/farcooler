@@ -902,10 +902,7 @@ impl Rpc {
                     protocol_versions: vec![farcooler_protocol::PROTOCOL_VERSION],
                     // From the one table, exactly as `ServerHello` is, so the
                     // two cannot disagree about what this daemon can do.
-                    capabilities: farcooler_protocol::capability::ALL
-                        .iter()
-                        .map(|c| (*c).to_string())
-                        .collect(),
+                    capabilities: farcooler_protocol::capability::advertised(),
                 },
             )),
 

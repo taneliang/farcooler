@@ -208,6 +208,7 @@ async fn rows_page_follow_and_survive_a_restart_on_every_transport() {
     let dir = tempfile::tempdir().unwrap();
     let mut first = daemon(dir.path()).await;
     let mut client = socket(dir.path()).await;
+    assert!(client.server_hello().capabilities.iter().any(|c| c == "agent_rows"), "offered where served");
     let worktree = a_worktree(&mut client, dir.path()).await;
     let terminal = a_claude_pane(&mut client, &worktree).await;
     let path = transcript(dir.path(), &worktree, &terminal);
@@ -238,13 +239,16 @@ async fn rows_page_follow_and_survive_a_restart_on_every_transport() {
     the_contract("stdio after restart", &relayed, &terminal, &path, 2).await;
 }
 
-/// Without `FARCOOLER_PROJECTOR=1` the methods are refused, and say what
-/// they need.
+/// Without `FARCOOLER_PROJECTOR=1` the capability is not offered, over the
+/// socket or the relayed stdio, and the methods are refused.
 #[tokio::test]
 async fn without_the_flag_rows_are_refused_as_unsupported() {
     let dir = tempfile::tempdir().unwrap();
     let _daemon = common::listening_daemon(dir.path()).await;
     let client = socket(dir.path()).await;
+    assert!(!client.server_hello().capabilities.iter().any(|c| c == "agent_rows"), "offered and then refused");
+    let (_relay, relayed) = spawn(dir.path()).await;
+    assert!(!relayed.server_hello().capabilities.iter().any(|c| c == "agent_rows"));
     let mut req = call_named("agent.rows");
     req.payload = Some(request::Payload::AgentRowsPage(pb::AgentRowsPage { terminal_id: uuid::Uuid::now_v7().as_bytes().to_vec().into(), before: None, limit: 0 }));
     match client.call_with(req, Default::default()).await {

@@ -70,6 +70,11 @@ async fn run() -> Result<(), i32> {
         return Ok(());
     }
 
+    // Agent rows are offered only where they are served (ov-366).
+    if !farcooler_daemon::session_projectors::shadowing() {
+        farcooler_protocol::capability::withhold(farcooler_protocol::capability::AGENT_ROWS);
+    }
+
     if std::env::args().any(|a| a == "--stdio") {
         return serve_stdio_session().await;
     }

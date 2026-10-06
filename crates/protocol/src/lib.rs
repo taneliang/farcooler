@@ -616,6 +616,25 @@ pub mod capability {
             BOARD_TRAINS, BOARD_COST, LANDING, BOARD_RULING_ACTIONS, AGENT_ROWS,
         ];
 
+    /// Capabilities this process has but does not offer: a feature behind a
+    /// runner's flag (`agent_rows` without `FARCOOLER_PROJECTOR=1`). Set once
+    /// at start, before any connection.
+    static WITHHELD: std::sync::RwLock<Vec<&'static str>> = std::sync::RwLock::new(Vec::new());
+
+    /// Stop offering `capability`, in the hello and in `daemon.version`.
+    pub fn withhold(capability: &'static str) {
+        let mut withheld = WITHHELD.write().unwrap_or_else(|e| e.into_inner());
+        if !withheld.contains(&capability) {
+            withheld.push(capability);
+        }
+    }
+
+    /// What this process offers: `ALL`, less what it withholds.
+    pub fn advertised() -> Vec<String> {
+        let withheld = WITHHELD.read().unwrap_or_else(|e| e.into_inner());
+        ALL.iter().filter(|c| !withheld.contains(c)).map(|c| (*c).to_string()).collect()
+    }
+
     /// The capability a method belongs to, or `None` if there is no such
     /// method.
     ///
