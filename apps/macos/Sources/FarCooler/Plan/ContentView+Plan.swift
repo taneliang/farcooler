@@ -41,7 +41,7 @@ extension ContentView {
         return (
             AnyView(PlanHome(board: board, needsYou: needs, onOpen: open).environment(\.planRulingActions, rulings)),
             AnyView(
-                PlanStrip(
+                PlanStripRow(
                     plan: board.plan,
                     needsYou: needs.items.count + board.plan.plan.shownThemes.filter { !$0.ownerAsk.isEmpty }.count
                 ) { planPeeking = true }),

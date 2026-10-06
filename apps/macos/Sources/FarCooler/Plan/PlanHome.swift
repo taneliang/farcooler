@@ -120,19 +120,21 @@ struct PlanHomeContent: View {
 
 /// The plan in one line, on a row under the chat while the canvas is folded:
 /// "2 need you · mac-ux In review · next: close-cards". A click peeks the
-/// plan; a change washes it, as a changed row does.
-struct PlanStrip: View {
+/// plan; a change washes it, as a changed row does. The words are AgentKit's
+/// `PlanStrip`, the model the phones draw too (ov-343), so a person with both
+/// reads one sentence; this draws them in the Mac's capsule. Named for the
+/// row, because a type of this module called `PlanStrip` would hide AgentKit's.
+struct PlanStripRow: View {
     @ObservedObject var plan: PlanStore
     let needsYou: Int
     let onPeek: () -> Void
 
-    /// The strip's words, or nil with nothing to say.
+    /// The strip's words, or nil with nothing to say. The orchestrator's state
+    /// isn't one of them (this row has no mark for it), so any state gives the
+    /// same words.
     static func words(_ model: PlanModel, needsYou: Int) -> String? {
-        var parts: [String] = []
-        if needsYou > 0 { parts.append(needsYou == 1 ? "1 needs you" : "\(needsYou) need you") }
-        for lane in model.working.prefix(2) { parts.append("\(lane.name) \(PlanWords.state(lane.state))") }
-        if let next = model.nextUp.first { parts.append("next: \(next.name)") }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+        let strip = PlanStrip(plan: model, needsYou: needsYou, orchestrator: .idle)
+        return strip.isEmpty ? nil : strip.text
     }
 
     var body: some View {
