@@ -107,13 +107,19 @@ class TreeNavigation(
 /** The strip, under the tab row while the orchestrator is up, and the sheet it opens. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PlanStripBar(connection: Connection, workspace: WorkspaceSummary, orchestrator: Terminal?, onOpenPlan: (PlanPage) -> Unit) {
+fun PlanStripBar(connection: Connection, workspace: WorkspaceSummary, orchestrator: Terminal?, onOpenPlan: (PlanPage) -> Unit, onNeedsYou: () -> Unit = {}, onJump: (com.farcooler.net.TerminalRef) -> Unit = {}) {
+    var peekingJump by remember { mutableStateOf<com.farcooler.net.TerminalRef?>(null) }
     val planStates by connection.plans.states.collectAsStateWithLifecycle()
     val boards by connection.boards.collectAsStateWithLifecycle()
     val list by connection.needsYou.collectAsStateWithLifecycle()
     val daemon by connection.daemon.collectAsStateWithLifecycle()
     val keepsPlan = daemon?.can(Capability.BOARD_PLAN) == true
     val scope = rememberCoroutineScope()
+    // Keep, Keep all, Reverse and Discuss, as on the Board; a jump to the
+    // orchestrator's pane closes the sheet first.
+    val rulings = rememberRulingsHook(connection, workspace) { ref ->
+        peekingJump = ref
+    }
     LaunchedEffect(workspace.id, keepsPlan) {
         if (boards[workspace.id] == null) connection.readBoard(workspace)
         if (keepsPlan && planStates[workspace.id] == null) connection.plans.read(workspace)
@@ -122,11 +128,25 @@ fun PlanStripBar(connection: Connection, workspace: WorkspaceSummary, orchestrat
     val strip = PlanStrip.of(plan, PlanStrip.needsYouCount(workspace, boards[workspace.id], plan, list), orchestrator)
     var peeking by remember { mutableStateOf(false) }
     if (!strip.isEmpty) PlanStripPill(strip) { peeking = true }
+    LaunchedEffect(peekingJump) {
+        val ref = peekingJump ?: return@LaunchedEffect
+        peeking = false
+        peekingJump = null
+        onJump(ref)
+    }
     if (peeking) {
         val state = rememberModalBottomSheetState(skipPartiallyExpanded = false)
         ModalBottomSheet(onDismissRequest = { peeking = false }, sheetState = state, modifier = Modifier.testTag("plan-sheet")) {
             LazyColumn(Modifier.fillMaxWidth()) {
-                item(key = "orchestrator") { SheetHeader(strip) }
+                item(key = "orchestrator") {
+                    SheetHeader(strip) {
+                        scope.launch {
+                            state.hide()
+                            peeking = false
+                            onNeedsYou()
+                        }
+                    }
+                }
                 if (keepsPlan) {
                     planItems(
                         state = planStates[workspace.id],
@@ -139,6 +159,8 @@ fun PlanStripBar(connection: Connection, workspace: WorkspaceSummary, orchestrat
                             }
                         },
                         onRetry = { scope.launch { connection.plans.read(workspace) } },
+                        // Decided For You's copy, as on the Board (review 5).
+                        rulings = rulings,
                     )
                 } else {
                     item(key = "needs-update") { PlanNotice(com.farcooler.model.PlanWords.NEEDS_UPDATE, null) }
@@ -168,13 +190,21 @@ internal fun PlanStripPill(strip: PlanStrip, onClick: () -> Unit) {
     }
 }
 
+/**
+ * The parts, what needs you first and in weight, behind an amber dot. Not
+ * amber text: on the pill it falls under the 4.5:1 that text needs (review
+ * 17); the dot carries the color, the words the meaning.
+ */
 @Composable
 private fun StripWords(strip: PlanStrip, modifier: Modifier) {
     val amber = glanceColor(GlancePalette.amber)
     val text = androidx.compose.ui.text.buildAnnotatedString {
         var rest = strip.parts
         strip.needsYouWords?.let { needs ->
-            pushStyle(androidx.compose.ui.text.SpanStyle(color = amber, fontWeight = FontWeight.SemiBold))
+            pushStyle(androidx.compose.ui.text.SpanStyle(color = amber))
+            append("● ")
+            pop()
+            pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.SemiBold))
             append(needs)
             pop()
             rest = rest.drop(1)
@@ -186,7 +216,7 @@ private fun StripWords(strip: PlanStrip, modifier: Modifier) {
 }
 
 @Composable
-internal fun SheetHeader(strip: PlanStrip) {
+internal fun SheetHeader(strip: PlanStrip, onNeedsYou: () -> Unit = {}) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp).testTag("plan-sheet-orchestrator"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(stateIcon(strip.orchestrator), null, Modifier.size(20.dp), tint = tone(strip.orchestrator.tone))
@@ -194,11 +224,17 @@ internal fun SheetHeader(strip: PlanStrip) {
             Text("Orchestrator · ${strip.orchestrator.word}", style = MaterialTheme.typography.titleMedium)
         }
         strip.line?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis) }
+        // The way to what needs you (review 12): the flag carries the color,
+        // the words stay the text's own (review 17).
         strip.needsYouWords?.let {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.testTag("plan-sheet-needs-you")) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onNeedsYou).padding(vertical = 6.dp).testTag("plan-sheet-needs-you"),
+            ) {
                 Icon(Icons.Outlined.Flag, null, Modifier.size(18.dp), tint = glanceColor(GlancePalette.amber))
                 Spacer(Modifier.width(8.dp))
-                Text(it, color = glanceColor(GlancePalette.amber))
+                Text(it, modifier = Modifier.weight(1f))
+                Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.outline)
             }
         }
         Separator(Modifier.padding(top = 8.dp))
@@ -252,61 +288,66 @@ private fun rememberTree(connection: Connection, workspace: WorkspaceSummary, fi
     }
 }
 
-/** The Themes tab: the tree's root. */
+/** The Themes tab: the tree's root, under a row of filter chips. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ThemesTab(model: AppModel, connection: Connection, workspace: WorkspaceSummary, nav: TreeNavigation) {
+fun ThemesTab(connection: Connection, workspace: WorkspaceSummary, nav: TreeNavigation) {
     val prefs = LocalContext.current.getSharedPreferences(FILTER_PREFS, android.content.Context.MODE_PRIVATE)
     val key = filterKey(connection.host.id, workspace.id)
     var filter by remember(key) { mutableStateOf(OneTree.Filter.parse(prefs.getString(key, null))) }
     val tree = rememberTree(connection, workspace, filter)
     val menu = rememberTreeWorktreeMenu(connection, workspace, tree)
-    var choosing by remember { mutableStateOf(false) }
-    var describing by remember { mutableStateOf(false) }
-    var naming by remember { mutableStateOf(false) }
+    val unread by connection.unreadBoards.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Showing: ${filter.title.lowercase()}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-            Box {
-                IconButton(onClick = { choosing = true }, modifier = Modifier.testTag("tree-filter")) {
-                    Icon(Icons.Outlined.FilterList, contentDescription = "Show")
-                }
-                DropdownMenu(expanded = choosing, onDismissRequest = { choosing = false }) {
-                    OneTree.Filter.entries.forEach { f ->
-                        DropdownMenuItem(text = { Text(f.title) }, onClick = {
-                            choosing = false
-                            filter = f
-                            prefs.edit().putString(key, f.name).apply()
-                        })
-                    }
-                }
-            }
+        TreeFilterChips(filter) { f ->
+            filter = f
+            prefs.edit().putString(key, f.name).apply()
         }
-        when {
-            tree == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.testTag("tree-loading")) }
-            else -> LazyColumn(Modifier.fillMaxSize().testTag("tree-root")) {
-                if (tree.work.isEmpty()) item(key = "empty") {
-                    Text(
-                        if (filter == OneTree.Filter.IN_REVIEW) "Nothing is in review." else "No cards yet. The orchestrator files them as it plans the work.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp).testTag("tree-empty"),
-                    )
-                }
-                items(tree.work, key = { it.id }) { TreeRow(it, nav, menu) }
-                if (tree.below.isNotEmpty()) item(key = "divider") { Separator(Modifier.padding(vertical = 8.dp)) }
-                items(tree.below, key = { it.id }) { TreeRow(it, nav, menu) }
-                // The Worktrees tab's two ways to make one, kept: each claims it
-                // for this workspace.
-                item(key = "new") {
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        androidx.compose.material3.TextButton(onClick = { describing = true }, modifier = Modifier.testTag("new-worktree")) { Text("New worktree") }
-                        androidx.compose.material3.TextButton(onClick = { naming = true }) { Text("Name a new worktree") }
-                    }
-                }
-            }
+        TreeRootList(tree, filter, failed = tree == null && workspace.id in unread, nav = nav, menu = menu) {
+            scope.launch { connection.readBoard(workspace) }
         }
     }
     menu.Sheets()
-    if (describing) QuickTaskSheet(model = model, workspace = workspace, hostId = connection.host.id, onDismiss = { describing = false })
-    if (naming) NewWorktreeSheet(model = model, workspace = workspace, hostId = connection.host.id, onDismiss = { naming = false })
+}
+
+/** Material's filter chips: one choice of three, kept per workspace (review 18). */
+@Composable
+internal fun TreeFilterChips(filter: OneTree.Filter, onChoose: (OneTree.Filter) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OneTree.Filter.entries.forEach { f ->
+            androidx.compose.material3.FilterChip(
+                selected = f == filter,
+                onClick = { onChoose(f) },
+                label = { Text(f.title) },
+                modifier = Modifier.testTag("tree-filter-${f.name.lowercase()}"),
+            )
+        }
+    }
+}
+
+/** The root's rows, or why there are none. */
+@Composable
+internal fun TreeRootList(tree: OneTree.Tree?, filter: OneTree.Filter, failed: Boolean, nav: TreeNavigation, menu: TreeWorktreeMenu?, onRetry: () -> Unit) {
+    when {
+        // A read that failed says so, with Try again, never a spinner for good (review 15).
+        failed -> Column(Modifier.fillMaxWidth().padding(16.dp).testTag("tree-board-failed")) {
+            Text("Far Cooler couldn’t read this board.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            androidx.compose.material3.TextButton(onClick = onRetry, modifier = Modifier.testTag("tree-board-retry")) { Text(com.farcooler.model.PlanWords.TRY_AGAIN) }
+        }
+        tree == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.testTag("tree-loading")) }
+        else -> LazyColumn(Modifier.fillMaxSize().testTag("tree-root")) {
+            if (tree.work.isEmpty()) item(key = "empty") {
+                Text(
+                    if (filter == OneTree.Filter.IN_REVIEW) "Nothing is in review." else "No cards yet. The orchestrator files them as it plans the work.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp).testTag("tree-empty"),
+                )
+            }
+            items(tree.work, key = { it.id }) { TreeRow(it, nav, menu) }
+            if (tree.below.isNotEmpty()) item(key = "divider") { Separator(Modifier.padding(vertical = 8.dp)) }
+            items(tree.below, key = { it.id }) { TreeRow(it, nav, menu) }
+        }
+    }
 }
 
 /** One level of the tree, pushed: its node's own page first, then its children. */
@@ -319,20 +360,48 @@ fun TreeLevelScreen(connection: Connection, workspace: WorkspaceSummary, nodeId:
     val all = rememberTree(connection, workspace, OneTree.Filter.ALL)
     val node = tree?.node(nodeId) ?: all?.node(nodeId)
     val menu = rememberTreeWorktreeMenu(connection, workspace, if (tree?.node(nodeId) != null) tree else all)
+    val unread by connection.unreadBoards.collectAsStateWithLifecycle()
+    val planStates by connection.plans.states.collectAsStateWithLifecycle()
+    val daemon by connection.daemon.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    val boardRead = when {
+        tree != null -> OneTree.Read.READ
+        workspace.id in unread -> OneTree.Read.FAILED
+        else -> OneTree.Read.PENDING
+    }
+    val planRead = when {
+        daemon?.can(Capability.BOARD_PLAN) != true -> OneTree.Read.NOT_KEPT
+        else -> when (planStates[workspace.id]) {
+            null, PlanReadState.Loading -> OneTree.Read.PENDING
+            PlanReadState.Unavailable -> OneTree.Read.FAILED
+            else -> OneTree.Read.READ
+        }
+    }
+    val state = OneTree.level(node != null, boardRead, planRead)
     Scaffold(topBar = {
         TopAppBar(
-            title = { Text(node?.let { if (it.key.isEmpty()) it.title else "${it.key} ${it.title}" } ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            title = { Text(node?.let { if (it.key.isEmpty()) it.title else "${it.key} ${it.title}" } ?: WorkspaceTab.WORKTREES.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
         )
     }) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            when {
-                tree == null -> CircularProgressIndicator(Modifier.align(Alignment.Center))
-                node == null -> Column(Modifier.align(Alignment.Center).padding(32.dp).testTag("tree-gone"), horizontalAlignment = Alignment.CenterHorizontally) {
+            when (state) {
+                // Restored before the board and the plan were read: it waits (review 1).
+                OneTree.LevelState.LOADING -> CircularProgressIndicator(Modifier.align(Alignment.Center).testTag("tree-level-loading"))
+                OneTree.LevelState.FAILED -> Column(Modifier.align(Alignment.Center).padding(32.dp).testTag("tree-level-failed"), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(com.farcooler.model.PlanWords.COULDNT_READ, style = MaterialTheme.typography.titleMedium)
+                    androidx.compose.material3.TextButton(onClick = {
+                        scope.launch {
+                            connection.readBoard(workspace)
+                            if (daemon?.can(Capability.BOARD_PLAN) == true) connection.plans.read(workspace)
+                        }
+                    }) { Text(com.farcooler.model.PlanWords.TRY_AGAIN) }
+                }
+                OneTree.LevelState.GONE -> Column(Modifier.align(Alignment.Center).padding(32.dp).testTag("tree-gone"), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("No longer here", style = MaterialTheme.typography.titleMedium)
                     Text("It finished or moved since this opened.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                else -> LazyColumn(Modifier.fillMaxSize().testTag("tree-level")) {
+                OneTree.LevelState.NODE -> if (node != null) LazyColumn(Modifier.fillMaxSize().testTag("tree-level")) {
                     val own = OneTree.ownRow(node)
                     if (own != null && node.target != null) item(key = "own") {
                         ListItem(
@@ -397,7 +466,7 @@ internal fun TreeRow(node: OneTree.Node, nav: TreeNavigation, menu: TreeWorktree
                 Text(node.title, maxLines = 2, overflow = TextOverflow.Ellipsis, color = if (node.quiet) MaterialTheme.colorScheme.onSurfaceVariant else Color.Unspecified)
             }
         },
-        supportingContent = listOf(node.also, node.caption).filter { it.isNotEmpty() }.takeIf { it.isNotEmpty() }?.let { lines ->
+        supportingContent = listOf(node.also, node.caption, menu?.worktreeOf(node)?.branch.orEmpty()).filter { it.isNotEmpty() }.takeIf { it.isNotEmpty() }?.let { lines ->
             { Column { lines.forEach { Text(it, style = MaterialTheme.typography.bodySmall) } } }
         },
         trailingContent = {
@@ -473,6 +542,9 @@ class TreeWorktreeMenu internal constructor(
     internal var newTerminal by mutableStateOf<com.farcooler.model.Worktree?>(null)
     internal var stack by mutableStateOf<com.farcooler.model.Worktree?>(null)
     internal var removing by mutableStateOf<com.farcooler.model.Worktree?>(null)
+
+    /** The row's worktree: a lane's, a loose one's, or the checkout. */
+    fun worktreeOf(node: OneTree.Node): com.farcooler.model.Worktree? = worktree(node)
 
     private fun worktree(node: OneTree.Node): com.farcooler.model.Worktree? {
         if (node.kind != OneTree.Kind.LANE && node.kind != OneTree.Kind.WORKTREE && node.id != "group:main") return null

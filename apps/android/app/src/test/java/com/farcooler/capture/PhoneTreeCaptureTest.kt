@@ -16,6 +16,10 @@ import com.farcooler.ui.PlanStripPill
 import com.farcooler.ui.SheetHeader
 import com.farcooler.ui.TreeNavigation
 import com.farcooler.ui.TreeRow
+import com.farcooler.ui.TreeFilterChips
+import com.farcooler.ui.TreeRootList
+import com.farcooler.ui.WorkspaceTab
+import com.farcooler.ui.WorkspaceTabs
 import com.farcooler.ui.planItems
 import java.io.File
 import kotlinx.serialization.json.Json
@@ -41,6 +45,22 @@ class PhoneTreeCaptureTest {
     private val strip = PlanStrip.of(plan, 2, Terminal(id = "o", state = "running", activity = "working", role = "orchestrator", line = "Dispatching plan-phones to its lane"))
     private val tree = OneTree.build(WorkspaceSummary(id = "ws", name = "Billing"), null, plan, emptyList(), emptyList(), OneTree.Filter.OPEN)
     private val nav = TreeNavigation({}, {}, { _, _ -> }, {}, {})
+
+    @Test fun orchestratorTab() = Capture.both("phone-orchestrator-tab") {
+        // In place: the tab row, then the strip over where the pane goes.
+        Column(Modifier.fillMaxSize()) {
+            WorkspaceTabs(WorkspaceTab.ORCHESTRATOR, implicit = false) {}
+            PlanStripPill(strip) {}
+        }
+    }
+
+    @Test fun themesTab() = Capture.both("phone-themes-tab") {
+        Column(Modifier.fillMaxSize()) {
+            WorkspaceTabs(WorkspaceTab.WORKTREES, implicit = false) {}
+            TreeFilterChips(OneTree.Filter.OPEN) {}
+            TreeRootList(tree, OneTree.Filter.OPEN, failed = false, nav = nav, menu = null) {}
+        }
+    }
 
     @Test fun peek() = Capture.both("phone-plan-peek") {
         Column(Modifier.fillMaxSize()) {

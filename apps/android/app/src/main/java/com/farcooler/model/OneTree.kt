@@ -104,6 +104,24 @@ object OneTree {
         return loose.getOrNull(at - 1)?.worktreeId to loose.getOrNull(at + 1)?.worktreeId
     }
 
+    /** Where one read the tree is built from stands. */
+    enum class Read { PENDING, READ, FAILED, NOT_KEPT }
+
+    /** What a pushed level draws. */
+    enum class LevelState { NODE, LOADING, FAILED, GONE }
+
+    /**
+     * A level found draws; one not found waits for the board and the plan,
+     * and is gone only once both have come back without it (ov-300 review 1).
+     * AgentKit's `PhoneTree.level`.
+     */
+    fun level(found: Boolean, board: Read, plan: Read): LevelState = when {
+        found -> LevelState.NODE
+        board == Read.FAILED || plan == Read.FAILED -> LevelState.FAILED
+        board == Read.PENDING || plan == Read.PENDING -> LevelState.LOADING
+        else -> LevelState.GONE
+    }
+
     /** A row with children pushes its level; a leaf opens its target; a subagent opens nothing. */
     fun tap(node: Node): Tap = when {
         node.hasChildren -> Tap.Push(node.id)

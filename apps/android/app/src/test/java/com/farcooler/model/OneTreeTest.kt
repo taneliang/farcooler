@@ -129,6 +129,16 @@ class OneTreeTest {
         assertEquals(tree.work[0], tree.node(tree.work[0].id))
     }
 
+    @Test
+    fun `a level not found waits for the board and the plan, and is gone only once both came back without it`() {
+        assertEquals(OneTree.LevelState.NODE, OneTree.level(true, OneTree.Read.PENDING, OneTree.Read.PENDING))
+        assertEquals(OneTree.LevelState.LOADING, OneTree.level(false, OneTree.Read.READ, OneTree.Read.PENDING))
+        assertEquals(OneTree.LevelState.LOADING, OneTree.level(false, OneTree.Read.PENDING, OneTree.Read.NOT_KEPT))
+        assertEquals(OneTree.LevelState.FAILED, OneTree.level(false, OneTree.Read.READ, OneTree.Read.FAILED))
+        assertEquals(OneTree.LevelState.GONE, OneTree.level(false, OneTree.Read.READ, OneTree.Read.READ))
+        assertEquals(OneTree.LevelState.GONE, OneTree.level(false, OneTree.Read.READ, OneTree.Read.NOT_KEPT))
+    }
+
     // ---- the strip ----
 
     @Test

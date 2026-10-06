@@ -214,9 +214,8 @@ fun BoardTab(
     // Discuss to the orchestrator, which they never start.
     val keepsRulingActions = daemon?.can(Capability.BOARD_RULING_ACTIONS) == true
     val clipboard = LocalClipboard.current
-    var pastRulingsOpen by rememberSaveable(workspace.id) { mutableStateOf(false) }
-    var rulingNotice by remember(workspace.id) { mutableStateOf<String?>(null) }
-    val rulingSeat = AskAboutTask.seat(workspace.id, fleet.worktrees, fleet.workspaces)
+    // Decided For You's actions, which the Plan sheet uses too (ov-300 review 5).
+    val rulingsHook = rememberRulingsHook(connection, workspace, onJump)
 
     // Read on opening, whatever was last read: the row that opened this may
     // be showing a count from before the last reconnect. While it is open, a
@@ -375,48 +374,7 @@ fun BoardTab(
                                     scope.launch { connection.pages.read(workspace) }
                                 }
                             } else null,
-                            rulings = if (keepsRulings) RulingsHook(
-                                copy = { scope.launch { clipboard.writeText("Far Cooler", it) } },
-                                canMark = keepsRulingActions && daemon?.grantedScope != "read",
-                                canAsk = rulingSeat != null,
-                                pastOpen = pastRulingsOpen,
-                                onTogglePast = { pastRulingsOpen = !pastRulingsOpen },
-                                keep = { ruling -> scope.launch { connection.keepRuling(ruling, workspace) } },
-                                keepAll = { scope.launch { connection.keepAllRulings(workspace) } },
-                                reverse = { ruling ->
-                                    val seat = rulingSeat ?: return@RulingsHook
-                                    scope.launch {
-                                        val reversal = RulingActions.reverse(
-                                            ruling, seat.terminal.isAgentPane,
-                                            send = { text -> runCatching { connection.agentPrompt(seat.terminal.id, text) }.isSuccess },
-                                            paste = { text -> connection.draftPrompt(seat.terminal.id, text) },
-                                            copy = { text -> clipboard.writeText("Far Cooler", text) },
-                                        )
-                                        rulingNotice = RulingActions.notice(reversal, ruling)
-                                        if (reversal != RulingActions.Reversal.COPIED && reversal != RulingActions.Reversal.FAILED) {
-                                            onJump(TerminalRef(connection.host.id, seat.worktreeId, seat.terminal.id))
-                                        }
-                                    }
-                                },
-                                discuss = { ruling ->
-                                    val seat = rulingSeat ?: return@RulingsHook
-                                    scope.launch {
-                                        val delivery = RulingActions.discuss(
-                                            ruling, seat.terminal.isAgentPane,
-                                            offer = { connection.composerHandoff.offer(seat.terminal.id, it) },
-                                            paste = { text -> connection.draftPrompt(seat.terminal.id, text) },
-                                            copy = { text -> clipboard.writeText("Far Cooler", text) },
-                                        )
-                                        if (delivery == AskAboutTask.Delivery.COPIED) {
-                                            rulingNotice = "Copied the start of a message about ${ruling.short}. Paste it into the orchestrator."
-                                        } else {
-                                            rulingNotice = null
-                                            onJump(TerminalRef(connection.host.id, seat.worktreeId, seat.terminal.id))
-                                        }
-                                    }
-                                },
-                                notice = rulingNotice,
-                            ) else null,
+                            rulings = rulingsHook,
                         )
                     } else if (board.unreadable.isNotEmpty()) {
                         item(key = "unreadable") {
@@ -1069,4 +1027,66 @@ private fun Section(title: String) {
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 4.dp),
     )
+}
+
+/**
+ * Decided For You's Keep, Keep all, Reverse and Discuss for [workspace]'s
+ * plan, wherever its sections are drawn: the Board's Plan view and the Plan
+ * sheet over the orchestrator (ov-300 review 5). Null on a runner without
+ * `board_rulings`. [onJump] goes to the orchestrator's pane after a send or a
+ * draft.
+ */
+@Composable
+fun rememberRulingsHook(connection: Connection, workspace: WorkspaceSummary, onJump: (TerminalRef) -> Unit): RulingsHook? {
+    val daemon by connection.daemon.collectAsStateWithLifecycle()
+    val fleet by connection.fleet.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboard.current
+    val keepsRulings = daemon?.can(Capability.BOARD_RULINGS) == true
+    val keepsRulingActions = daemon?.can(Capability.BOARD_RULING_ACTIONS) == true
+    var pastRulingsOpen by rememberSaveable(workspace.id) { mutableStateOf(false) }
+    var rulingNotice by remember(workspace.id) { mutableStateOf<String?>(null) }
+    val rulingSeat = AskAboutTask.seat(workspace.id, fleet.worktrees, fleet.workspaces)
+    return if (keepsRulings) RulingsHook(
+        copy = { scope.launch { clipboard.writeText("Far Cooler", it) } },
+        canMark = keepsRulingActions && daemon?.grantedScope != "read",
+        canAsk = rulingSeat != null,
+        pastOpen = pastRulingsOpen,
+        onTogglePast = { pastRulingsOpen = !pastRulingsOpen },
+        keep = { ruling -> scope.launch { connection.keepRuling(ruling, workspace) } },
+        keepAll = { scope.launch { connection.keepAllRulings(workspace) } },
+        reverse = { ruling ->
+            val seat = rulingSeat ?: return@RulingsHook
+            scope.launch {
+                val reversal = RulingActions.reverse(
+                    ruling, seat.terminal.isAgentPane,
+                    send = { text -> runCatching { connection.agentPrompt(seat.terminal.id, text) }.isSuccess },
+                    paste = { text -> connection.draftPrompt(seat.terminal.id, text) },
+                    copy = { text -> clipboard.writeText("Far Cooler", text) },
+                )
+                rulingNotice = RulingActions.notice(reversal, ruling)
+                if (reversal != RulingActions.Reversal.COPIED && reversal != RulingActions.Reversal.FAILED) {
+                    onJump(TerminalRef(connection.host.id, seat.worktreeId, seat.terminal.id))
+                }
+            }
+        },
+        discuss = { ruling ->
+            val seat = rulingSeat ?: return@RulingsHook
+            scope.launch {
+                val delivery = RulingActions.discuss(
+                    ruling, seat.terminal.isAgentPane,
+                    offer = { connection.composerHandoff.offer(seat.terminal.id, it) },
+                    paste = { text -> connection.draftPrompt(seat.terminal.id, text) },
+                    copy = { text -> clipboard.writeText("Far Cooler", text) },
+                )
+                if (delivery == AskAboutTask.Delivery.COPIED) {
+                    rulingNotice = "Copied the start of a message about ${ruling.short}. Paste it into the orchestrator."
+                } else {
+                    rulingNotice = null
+                    onJump(TerminalRef(connection.host.id, seat.worktreeId, seat.terminal.id))
+                }
+            }
+        },
+        notice = rulingNotice,
+    ) else null
 }

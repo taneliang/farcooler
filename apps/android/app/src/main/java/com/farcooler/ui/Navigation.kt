@@ -308,9 +308,14 @@ enum class WorkspaceTab(val title: String) {
         /** A remembered tab's name, or null for none this build knows. */
         fun parse(name: String?): WorkspaceTab? = entries.firstOrNull { it.name == name }
 
-        /** What the tab row draws for [selected]: its labels, in order, and which is selected. */
-        fun row(selected: WorkspaceTab): Pair<List<String>, Int> =
-            entries.map { it.title } to entries.indexOf(selected)
+        /**
+         * What the tab row draws for [selected]: its labels, in order, and
+         * which is selected. A runner without workspaces ([implicit]) has no
+         * plan to make a tree of, so its second tab is still Worktrees, as
+         * on the iPhone (ov-300 review 4).
+         */
+        fun row(selected: WorkspaceTab, implicit: Boolean = false): Pair<List<String>, Int> =
+            entries.map { if (implicit && it == WORKTREES) "Worktrees" else it.title } to entries.indexOf(selected)
     }
 }
 

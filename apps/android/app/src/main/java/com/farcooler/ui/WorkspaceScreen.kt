@@ -9,6 +9,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -178,6 +180,12 @@ fun WorkspaceScreen(
     // is on top, and the app is in front: suppress its banners and mark its
     // finished turn seen, as a worktree's pane does.
     val live = seat as? OrchestratorSeat.Live
+    // The tree's New worktree and Name a new worktree (review 18).
+    var describing by remember(workspace.id) { mutableStateOf(false) }
+    var naming by remember(workspace.id) { mutableStateOf(false) }
+    if (describing) QuickTaskSheet(model = model, workspace = workspace, hostId = route.hostId, onDismiss = { describing = false })
+    if (naming) NewWorktreeSheet(model = model, workspace = workspace, hostId = route.hostId, onDismiss = { naming = false })
+
     val reading = live?.terminal?.id?.takeIf { route.tab == WorkspaceTab.ORCHESTRATOR && onScreen }
     DisposableEffect(reading) {
         if (reading != null) {
@@ -213,6 +221,17 @@ fun WorkspaceScreen(
                         }
                     },
                     actions = {
+                        // The tree's two ways to make a worktree, where the
+                        // Worktrees list had them: actions of the top app bar,
+                        // an icon each (ov-300 review 18).
+                        if (route.tab == WorkspaceTab.WORKTREES && !workspace.isImplicit && mayControl) {
+                            IconButton(onClick = { describing = true }, modifier = Modifier.testTag("new-worktree")) {
+                                Icon(Icons.Filled.AutoAwesome, contentDescription = "New worktree")
+                            }
+                            IconButton(onClick = { naming = true }) {
+                                Icon(Icons.Filled.Add, contentDescription = "Name a new worktree")
+                            }
+                        }
                         if (route.tab == WorkspaceTab.ORCHESTRATOR) {
                             OrchestratorActions(
                                 connection = connection,
@@ -225,17 +244,7 @@ fun WorkspaceScreen(
                         }
                     },
                 )
-                val (labels, selected) = WorkspaceTab.row(route.tab)
-                TabRow(selectedTabIndex = selected) {
-                    WorkspaceTab.entries.forEachIndexed { index, tab ->
-                        Tab(
-                            selected = index == selected,
-                            onClick = { model.selectTab(route, tab) },
-                            text = { Text(labels[index]) },
-                            modifier = Modifier.testTag("workspace-tab-${tab.name.lowercase()}"),
-                        )
-                    }
-                }
+                WorkspaceTabs(route.tab, workspace.isImplicit) { model.selectTab(route, it) }
                 // The plan in one line, over the orchestrator's pane (ov-300).
                 if (route.tab == WorkspaceTab.ORCHESTRATOR) {
                     PlanStripBar(
@@ -243,6 +252,8 @@ fun WorkspaceScreen(
                         workspace = workspace,
                         orchestrator = live?.terminal,
                         onOpenPlan = { page -> model.navigate(Route.PlanPage(route.hostId, route.workspaceId, page.kind, page.id)) },
+                        onNeedsYou = { model.goHome() },
+                        onJump = { model.openFromBoard(it) },
                     )
                 }
             }
@@ -297,13 +308,22 @@ fun WorkspaceScreen(
                     orchestratorRunning = seat is OrchestratorSeat.Live || seat is OrchestratorSeat.Starting,
                     onShowOrchestrator = { model.selectTab(route, WorkspaceTab.ORCHESTRATOR) },
                 )
-                // The One tree's root (ov-300), where the worktrees list was.
-                WorkspaceTab.WORKTREES -> ThemesTab(
-                    model = model,
-                    connection = connection,
-                    workspace = workspace,
-                    nav = treeNavigation(model, route.hostId, route.workspaceId) { fleet.worktrees },
-                )
+                // The One tree's root (ov-300), where the worktrees list was;
+                // on a runner without workspaces, still the list (review 4).
+                WorkspaceTab.WORKTREES -> if (workspace.isImplicit) {
+                    WorktreeList(
+                        model = model,
+                        scope = WorktreeScope.OfWorkspace(route.hostId, workspace),
+                        onSelect = { model.open(it) },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    ThemesTab(
+                        connection = connection,
+                        workspace = workspace,
+                        nav = treeNavigation(model, route.hostId, route.workspaceId) { fleet.worktrees },
+                    )
+                }
             }
         }
     }
@@ -538,6 +558,22 @@ private fun HarnessMenu(
                     onDismiss()
                     onPick(harness)
                 },
+            )
+        }
+    }
+}
+
+/** The workspace's tab row: Orchestrator, Themes (Worktrees without workspaces) and Board. */
+@Composable
+internal fun WorkspaceTabs(selected: WorkspaceTab, implicit: Boolean, onSelect: (WorkspaceTab) -> Unit) {
+    val (labels, index) = WorkspaceTab.row(selected, implicit)
+    TabRow(selectedTabIndex = index) {
+        WorkspaceTab.entries.forEachIndexed { i, tab ->
+            Tab(
+                selected = i == index,
+                onClick = { onSelect(tab) },
+                text = { Text(labels[i]) },
+                modifier = Modifier.testTag("workspace-tab-${tab.name.lowercase()}"),
             )
         }
     }

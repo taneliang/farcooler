@@ -44,7 +44,10 @@ class PlanWiringTest {
     fun `rulings are gated on board_rulings, copied to the clipboard, and drawn after the plan`() {
         val board = source("ui/BoardScreen.kt")
         assertTrue("the capability", "val keepsRulings = daemon?.can(Capability.BOARD_RULINGS) == true" in board)
-        assertTrue("no hook without it", "rulings = if (keepsRulings) RulingsHook(" in board)
+        // The hook is built once, for the Board and the Plan sheet alike (ov-300 review 5).
+        assertTrue("no hook without it", "return if (keepsRulings) RulingsHook(" in board)
+        assertTrue("the board's plan takes it", "rulings = rulingsHook," in board)
+        assertTrue("so does the sheet", "rulings = rulings," in source("ui/PhoneTree.kt"))
         assertTrue("copy goes to the clipboard", "copy = { scope.launch { clipboard.writeText(\"Far Cooler\", it) } }," in board)
         // The owner's marks (ov-333): gated on their own capability, Keep to the runner, Reverse sent.
         assertTrue("its own capability", "val keepsRulingActions = daemon?.can(Capability.BOARD_RULING_ACTIONS) == true" in board)

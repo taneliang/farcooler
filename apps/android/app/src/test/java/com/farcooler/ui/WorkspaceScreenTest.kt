@@ -41,6 +41,12 @@ class WorkspaceScreenTest {
         assertEquals(listOf("Orchestrator", "Themes", "Board"), WorkspaceTab.row(WorkspaceTab.BOARD).first)
     }
 
+    /** A runner without workspaces has no plan to make a tree of: its tab is still Worktrees (ov-300 review 4). */
+    @Test
+    fun `a workspace without an orchestrator keeps its Worktrees tab`() {
+        assertEquals(listOf("Orchestrator", "Worktrees", "Board"), WorkspaceTab.row(WorkspaceTab.BOARD, implicit = true).first)
+    }
+
     /**
      * Owner decision 3: an empty status is never hidden. It's a header
      * reading "Backlog 0" that can't be expanded, and every status is there,
