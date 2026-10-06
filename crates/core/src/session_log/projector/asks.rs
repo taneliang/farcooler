@@ -9,7 +9,8 @@
 //!
 //! Now it is tied to its call by name and summary (the one input field a
 //! person reads first, from the same `summarize` either way), among the calls
-//! that have not come back and are not tied already, newest first. The call
+//! that have not come back and are not tied already, oldest first:
+//! claude asks for its calls in the order it made them. The call
 //! may come before the hook (claude writes the `tool_use` record, then asks)
 //! or after it (a hook beats the file); either order ties them. A tied ask
 //! is confirmed when its call's record is, and answered when that call, and
@@ -53,19 +54,19 @@ impl Projection {
         }
     }
 
-    /// The newest call of `agent` (the main thread for `None`) by this name
+    /// The oldest call of `agent` (the main thread for `None`) by this name
     /// and summary that has not come back and holds no ask yet, and whether
     /// its record is in.
     fn open_call(&self, agent: Option<&str>, tool: &str, summary: &str) -> Option<(String, bool)> {
         match agent {
-            None => self.rows.iter().rev().find_map(|row| match &row.kind {
+            None => self.rows.iter().find_map(|row| match &row.kind {
                 RowKind::Tool(t) if t.status == ToolStatus::Running && t.name == tool && t.summary == summary => {
                     let call = row.id.strip_prefix("tool:")?;
                     (!self.tool_asks.contains_key(call)).then(|| (call.to_string(), !row.provisional))
                 }
                 _ => None,
             }),
-            Some(agent) => self.sub_tools.get(agent)?.iter().rev().find_map(|(call, name, said)| {
+            Some(agent) => self.sub_tools.get(agent)?.iter().find_map(|(call, name, said)| {
                 (name == tool && said == summary && !self.tool_asks.contains_key(call)).then(|| (call.clone(), true))
             }),
         }

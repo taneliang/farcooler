@@ -176,3 +176,19 @@ fn an_untied_ask_is_settled_with_its_turn() {
     let asks = perms(&p);
     assert!(asks[0].1.answered && !asks[0].0.provisional);
 }
+
+/// Two calls alike (the same name and summary) in flight: claude asks in
+/// call order, so the first ask holds the first call, and the first call's
+/// result answers the first ask, not the second.
+#[test]
+fn twin_calls_answer_their_asks_in_call_order() {
+    let mut p = Projection::new();
+    line(&mut p, prompt("p1"));
+    line(&mut p, call("c1", "toolu_a", "make"));
+    line(&mut p, call("c2", "toolu_b", "make"));
+    p.hook("PermissionRequest", &ask("make"), 1);
+    p.hook("PermissionRequest", &ask("make"), 2);
+    line(&mut p, result("r1", "toolu_a"));
+    let answered: Vec<bool> = perms(&p).iter().map(|(_, a)| a.answered).collect();
+    assert_eq!(answered, [true, false]);
+}
