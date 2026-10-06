@@ -898,10 +898,32 @@ public struct OneTreeExpansion: Equatable, Sendable, Codable {
         nodes.contains { $0.hasChildren && (isExpanded($0) || anyExpanded(in: $0.children)) }
     }
 
-    /// Open every node in `ids` (a path's ancestors): what revealing a
-    /// selection does.
-    public mutating func open(_ ids: [String]) {
-        for id in ids { choices[id] = true }
+    /// These choices with every node in `ids` (a selection's ancestors) open,
+    /// for drawing only (ov-345). Revealing a selection must not be stored
+    /// as the person's own choice: a theme the window navigated into would
+    /// stay open after its work landed and never follow the live default
+    /// again. The window keeps the ids beside its choices and draws this.
+    public func revealing(_ ids: Set<String>) -> OneTreeExpansion {
+        var shown = self
+        for id in ids { shown.choices[id] = true }
+        return shown
+    }
+
+    /// The person's choices after they did something to what was drawn:
+    /// `drawn` is what they saw (`revealing`), `next` is it after their
+    /// action. Only what the action changed is recorded, so an ancestor that
+    /// was open only to show the selection stays unrecorded. `touched` is
+    /// the ids the action changed, which are no longer merely revealed.
+    public func recording(_ next: OneTreeExpansion, over drawn: OneTreeExpansion) -> (
+        choices: OneTreeExpansion, touched: Set<String>
+    ) {
+        var kept = self
+        var touched = Set<String>()
+        for id in Set(next.choices.keys).union(drawn.choices.keys) where next.choices[id] != drawn.choices[id] {
+            kept.choices[id] = next.choices[id]
+            touched.insert(id)
+        }
+        return (kept, touched)
     }
 
     /// Kept as text, for a window's own storage.

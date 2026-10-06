@@ -57,6 +57,11 @@ struct OneTreeNavigator: View {
     @SceneStorage private var keptFilter: String
     @State private var heldExpansion: String?
     @State private var heldFilter: String?
+    /// The ancestors of the selection, open so it's in sight, and not the
+    /// person's choices (ov-345): never stored, drawn over `stored`. Replaced
+    /// when a later selection needs its own reveal, and dropped for a node
+    /// the person opens or closes themselves.
+    @State private var revealed: Set<String> = []
     /// The heights the dividers were dragged to (`NavigatorSplit.encode`).
     @SceneStorage private var keptSplit: String
     @State private var heldSplit: String?
@@ -98,7 +103,10 @@ struct OneTreeNavigator: View {
     }
 
     private var filter: OneTreeFilter { OneTreeFilter(rawValue: filterRaw) ?? .open }
-    private var expansion: OneTreeExpansion { OneTreeExpansion(encoded: expansionText) }
+    /// The person's own choices, as kept.
+    private var stored: OneTreeExpansion { OneTreeExpansion(encoded: expansionText) }
+    /// What's drawn: their choices, with the revealed ancestors open.
+    private var expansion: OneTreeExpansion { stored.revealing(revealed) }
     private var narrowing: Bool { !BoardFilter.isEmpty(filterText) }
 
     var body: some View {
@@ -282,7 +290,7 @@ struct OneTreeNavigator: View {
     private func toggle(_ node: OneTreeNode, in tree: OneTree? = nil, event: NSEvent? = nil) {
         guard !narrowing else { return }
         let next = TreeFold.toggled(expansion, node, siblings: tree?.siblings(of: node.id) ?? [], event: event)
-        withAnimation(BoardMotion.list(reduceMotion: reduceMotion)) { expansionText = next.encoded }
+        withAnimation(BoardMotion.list(reduceMotion: reduceMotion)) { record(next) }
     }
 
     /// Every node open or closed (ov-334): the toggle's, and the menu's.
@@ -290,20 +298,29 @@ struct OneTreeNavigator: View {
         guard !narrowing else { return }
         var next = expansion
         next.setAll(expanded, in: tree.roots)
-        withAnimation(BoardMotion.list(reduceMotion: reduceMotion)) { expansionText = next.encoded }
+        withAnimation(BoardMotion.list(reduceMotion: reduceMotion)) { record(next) }
+    }
+
+    /// Keep what the person just did to the drawn tree, and only that: a
+    /// revealed ancestor they didn't touch stays out of their choices.
+    private func record(_ next: OneTreeExpansion) {
+        let kept = stored.recording(next, over: expansion)
+        revealed.subtract(kept.touched)
+        expansionText = kept.choices.encoded
     }
 
     /// Open the nodes over `target`, so what's selected is in sight (as
     /// Xcode's Reveal in Project Navigator), unless one copy of it already is.
+    /// They're open for this view only (`revealed`), not recorded as the
+    /// person's choices, so a theme opened this way follows the live default
+    /// once the selection leaves it (ov-345).
     private func reveal(_ target: OneTreeTarget?, in tree: OneTree) {
         guard let target, !narrowing else { return }
         let rows = OneTree.rows(tree.roots, expansion: expansion)
         if rows.contains(where: { $0.node.stands(for: target) }) { return }
         let ancestors = tree.ancestors(of: target, hint: sidebar.hint)
         guard !ancestors.isEmpty else { return }
-        var next = expansion
-        next.open(ancestors)
-        expansionText = next.encoded
+        revealed = Set(ancestors)
     }
 
     // MARK: Keys
