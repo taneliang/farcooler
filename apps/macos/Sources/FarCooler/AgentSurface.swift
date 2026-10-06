@@ -302,6 +302,7 @@ struct AgentSurface: View {
                     AgentRowView(
                         row: row,
                         isLast: row.id == stream.transcript.rows.last?.id,
+                        turnRunning: terminal.agent == .working,
                         pending: permission(gating: row),
                         onAnswer: { optionID in
                             guard let id = stream.transcript.pendingPermission?.id else { return }

@@ -9,6 +9,14 @@ struct AgentRowView: View {
     /// That needs no extra state in the model: the transcript already knows
     /// the order, and asking "is anything after me" is the same question.
     var isLast: Bool = false
+    /// Whether the turn is still running, so the newest row may still grow.
+    ///
+    /// The newest row stays the newest after its turn ends, so `isLast`
+    /// alone would keep an idle chat's last reply drawn as if it were still
+    /// being written: in paragraphs that can't be selected across
+    /// (`MarkdownText.streaming`). True by default for a subagent's rows,
+    /// whose `isLast` already asks whether the block is running.
+    var turnRunning: Bool = true
     /// The request this row is blocked on, if it is the one being asked about.
     ///
     /// A permission names the tool call it gates, so it can be shown ON that
@@ -31,7 +39,7 @@ struct AgentRowView: View {
         // would say the same thing twice.
         case let .message(role, text, _):
             MessageRow(
-                role: role, text: text, isLive: isLast, rowID: row.id,
+                role: role, text: text, isLive: isLast, streaming: isLast && turnRunning, rowID: row.id,
                 // Only the user's own words are editable — an agent reply or a
                 // thought was never something typed into the composer, so
                 // there is nothing to put back into it.
@@ -218,6 +226,9 @@ private struct MessageRow: View {
     let role: Role
     let text: String
     var isLive: Bool = false
+    /// A reply still being written: drawn so a delta redraws only the
+    /// paragraph it lands in (ov-382).
+    var streaming: Bool = false
     /// The transcript row's id, for a thought's accessibility identifier.
     var rowID = 0
     /// `nil` for every row that is not the user's own — see `AgentRowView`.
@@ -261,7 +272,7 @@ private struct MessageRow: View {
         case .agent:
             // Plain body text, full width. This is the common case and the
             // one that should cost the eye nothing extra to read.
-            AgentReplyText(text: text, trailingClearance: 32)
+            AgentReplyText(text: text, trailingClearance: 32, streaming: streaming)
 
         case .thought:
             // Open while it is being written, closed once it is done.
@@ -679,59 +690,25 @@ private struct GapRow: View {
 /// worth copying does now, and it reads as the agent about to speak rather than
 /// as the app being busy.
 struct WorkingRow: View {
-    /// One pass of the highlight, in seconds.
-    private static let period: TimeInterval = 1.1
-
-    /// When this row appeared, so the sweep starts at the start of the word.
-    ///
-    /// Phase taken straight from the wall clock put the highlight wherever the
-    /// current second happened to land — so the shimmer began mid-word, which
-    /// reads as a glitch rather than as a sweep.
-    @State private var start: Date?
-    @Environment(\.windowVisible) private var windowVisible
-
     var body: some View {
-        // Driven by `TimelineView`, not by an animated `@State`.
+        // A layer animation, not a `TimelineView` or an animated `@State`.
         //
         // The first version started a `repeatForever` animation in `onAppear`,
-        // and this row lives at the end of a `LazyVStack` that is rebuilt on
-        // every streamed event — so the animation was restarted from zero many
-        // times a second and never visibly moved. A timeline owns its own clock
-        // and does not care how often the view is recreated.
-        //
-        // Paused while the window is covered or hidden, and at most thirty
-        // frames a second while it is not (ov-229): an unbounded `.animation`
-        // schedule renders the window at the display's rate for the whole of a
-        // turn — 120 Hz on a ProMotion screen — to move a highlight people
-        // read at a glance, and it went on doing so behind other windows.
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !windowVisible)) { context in
-            Text("Working…")
-                .font(.callout)
-                .foregroundStyle(
-                    LinearGradient(
-                        stops: stops(at: phase(now: context.date)),
-                        startPoint: .leading,
-                        endPoint: .trailing))
-        }
-        .onAppear { if start == nil { start = Date() } }
-    }
-
-    private func phase(now: Date) -> Double {
-        guard let start else { return 0 }
-        return now.timeIntervalSince(start)
-            .truncatingRemainder(dividingBy: Self.period) / Self.period
-    }
-
-    /// The highlight enters from before the first letter and leaves past the
-    /// last, rather than appearing at one edge and vanishing at the other.
-    private func stops(at phase: Double) -> [Gradient.Stop] {
-        let center = -0.35 + phase * 1.7
-        let width = 0.3
-        return [
-            .init(color: .secondary, location: min(max(center - width, 0), 1)),
-            .init(color: .primary, location: min(max(center, 0), 1)),
-            .init(color: .secondary, location: min(max(center + width, 0), 1)),
-        ]
+        // and this row lived at the end of a `LazyVStack` that is rebuilt on
+        // every streamed event, so the animation was restarted from zero many
+        // times a second and never visibly moved. The second drove the sweep
+        // from a 30-frame timeline (ov-229), which ran SwiftUI's update on the
+        // main thread every frame: beside a long reply that stalled it 50-170
+        // ms at a time for the whole of a turn (ov-382). `ShimmerBand` hands
+        // the sweep to Core Animation, which keeps its own clock whatever
+        // happens to the view, and costs the main thread nothing per frame.
+        let label = Text("Working…").font(.callout)
+        label
+            .foregroundStyle(.secondary)
+            .overlay(alignment: .leading) {
+                ShimmerBand(content: label.foregroundStyle(.primary))
+                    .accessibilityHidden(true)
+            }
     }
 }
 

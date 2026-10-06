@@ -257,6 +257,6 @@ struct IdleCostTests {
         let found = try Self.offenders { $0.contains("TimelineView(.animation") && !$0.contains("paused:") }
         #expect(
             found.isEmpty,
-            "Pass `paused: !windowVisible` (see `WorkingRow`):\n\(found.joined(separator: "\n"))")
+            "Pass `paused: !windowVisible`, or move it with a layer (see `ShimmerBand`):\n\(found.joined(separator: "\n"))")
     }
 }
