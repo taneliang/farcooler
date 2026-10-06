@@ -278,7 +278,7 @@ async fn an_answer_does_not_replace_a_hold_that_ended() {
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     tokio::time::sleep(Duration::from_millis(TOLD_SPACING_MS as u64 + 100)).await;
     b.pump().await;
-    si.submits(1).await;
+    si.submits(2).await;
     let said = si.submitted();
     assert_eq!(said.len(), 2, "{said:?}");
     assert!(said.contains(&b.hold_told()) && said.contains(&b.told("Drill in")), "{said:?}");

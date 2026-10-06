@@ -77,7 +77,7 @@ impl StandIn {
     async fn show(&self, mode: &str) {
         let before = self.log().matches(&format!("MODE {mode}\n")).count();
         std::fs::write(&self.control, mode).unwrap();
-        for _ in 0..100 {
+        for _ in 0..750 {
             if self.log().matches(&format!("MODE {mode}\n")).count() > before {
                 return;
             }
@@ -89,7 +89,7 @@ impl StandIn {
     /// Wait, bounded, for the stand-in to log a paste: the bytes reach it a
     /// moment after the daemon sends them, longer on a slow runner.
     async fn pasted(&self) {
-        for _ in 0..250 {
+        for _ in 0..750 {
             if self.log().contains("PASTE ") {
                 return;
             }
@@ -97,9 +97,10 @@ impl StandIn {
         }
     }
 
-    /// Wait, bounded, until the stand-in has logged `n` submissions.
+    /// Wait, up to 15 seconds, until the stand-in has logged `n` submissions:
+    /// it reads the Enter a moment after `pump` returns, longer under load.
     async fn submits(&self, n: usize) {
-        for _ in 0..250 {
+        for _ in 0..750 {
             if self.submitted().len() >= n {
                 return;
             }
@@ -190,10 +191,10 @@ impl Board {
         !tmux_tells_bracketing() && t.pane_mode == PaneMode::Terminal && may_be_typed_to(&t.command_preset, t.role)
     }
 
-    /// Whether, within two seconds, a live record follows the program now
+    /// Whether, within 15 seconds, a live record follows the program now
     /// in `terminal`'s pane.
     async fn followed(&self, terminal: Uuid) -> bool {
-        for _ in 0..100 {
+        for _ in 0..750 {
             if self.svc.paste_mode_followed(terminal).await {
                 return true;
             }
@@ -218,7 +219,7 @@ impl Board {
             return;
         }
         let mut now = None;
-        for _ in 0..100 {
+        for _ in 0..750 {
             now = self.svc.streamed_bracketed_paste(terminal).await;
             if now == known {
                 return;
@@ -253,7 +254,7 @@ impl Board {
     /// is what that costs).
     async fn settle_stand_in(&self, terminal: &Terminal, si: &StandIn) {
         self.screen_with(terminal.id, "stand-in").await;
-        for _ in 0..100 {
+        for _ in 0..750 {
             if si.log().contains("MODE idle") {
                 break;
             }
@@ -304,7 +305,7 @@ impl Board {
 
     /// One pass, after any pass `answered` spawned has finished.
     async fn pump(&self) {
-        for _ in 0..100 {
+        for _ in 0..750 {
             if self.watcher.wake_pump.try_lock().is_ok() {
                 break;
             }
@@ -315,7 +316,7 @@ impl Board {
     }
 
     async fn screen_with(&self, terminal: Uuid, text: &str) -> String {
-        for _ in 0..60 {
+        for _ in 0..300 {
             let screen = self.svc.screen(terminal).await.expect("a screen").0;
             if screen.contains(text) {
                 return screen;
@@ -641,7 +642,7 @@ async fn an_answer_is_told_exactly_once_across_a_restart() {
             // bracketing until its first sample follows the pane and the
             // agent sets it again.
             watcher.sample().await;
-            for _ in 0..100 {
+            for _ in 0..750 {
                 if svc.paste_mode_followed(agent.id).await {
                     break;
                 }
@@ -649,7 +650,7 @@ async fn an_answer_is_told_exactly_once_across_a_restart() {
             }
             si.show("working").await;
             si.show("idle").await;
-            for _ in 0..100 {
+            for _ in 0..750 {
                 if svc.streamed_bracketed_paste(agent.id).await.is_some() {
                     break;
                 }
@@ -1037,7 +1038,7 @@ async fn typing_during_the_read_back_stops_the_enter() {
     b.doing(agent.id, AgentActivity::Idle).await;
     let (root, id, log) = (b.svc.root_dir().to_path_buf(), agent.id, si.log.clone());
     let typist = tokio::spawn(async move {
-        for _ in 0..200 {
+        for _ in 0..1500 {
             if std::fs::read_to_string(&log).unwrap_or_default().contains("PASTE ") {
                 crate::runtime::mark_input(&root, id);
                 return;
@@ -1268,6 +1269,7 @@ async fn control_characters_in_an_answer_arrive_as_text() {
     b.doing(agent.id, AgentActivity::Idle).await;
     b.answer("Red\x1b[31m\x1b]0;owned\x07 please");
     b.pump().await;
+    si.submits(1).await;
     let sent = si.submitted();
     assert_eq!(sent.len(), 1, "{}", si.log());
     assert!(sent[0].contains(r"Red\u{1b}[31m\u{1b}]0;owned\u{7} please. Continue."), "{sent:?}");
