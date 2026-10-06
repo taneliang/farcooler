@@ -240,11 +240,23 @@ pub struct Registry {
     dirty: Arc<AtomicBool>,
     watched: AtomicBool,
     watcher: Mutex<Option<notify::RecommendedWatcher>>,
+    /// When a watch was last tried and could not be made. On Linux a failed
+    /// try still costs a thread (`INotifyWatcher::new` starts its loop before
+    /// `watch` fails), so it is not retried on every lookup.
+    watch_tried: Mutex<Option<std::time::Instant>>,
+    /// Watches made or tried, for the test that the retry is rate-limited.
+    watch_attempts: std::sync::atomic::AtomicU32,
+    /// `false` for a test registry whose cache must move only when the test
+    /// says so: no watch is made, and the cache is treated as watched.
+    may_watch: bool,
     /// Session id to the transcript found for it.
     transcripts: Mutex<HashMap<String, PathBuf>>,
     /// Session id to when every project directory was last searched for it.
     misses: Mutex<HashMap<String, std::time::Instant>>,
 }
+
+/// How often a missing watch is tried again.
+const WATCH_RETRY: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// How often a session with no transcript yet is searched for across every
 /// project directory.
@@ -259,11 +271,32 @@ impl Registry {
             dirty: Arc::new(AtomicBool::new(true)),
             watched: AtomicBool::new(false),
             watcher: Mutex::new(None),
+            watch_tried: Mutex::new(None),
+            watch_attempts: Default::default(),
+            may_watch: true,
             transcripts: Mutex::new(HashMap::new()),
             misses: Mutex::new(HashMap::new()),
         };
         registry.watch();
         registry
+    }
+
+    /// A registry that never watches: its cache is read once and then only
+    /// when something marks it dirty. For tests of what a stale cache does.
+    #[cfg(test)]
+    pub(crate) fn unwatched(config: PathBuf, procs: Box<dyn Processes>) -> Registry {
+        let mut registry = Registry::new(PathBuf::from("/nonexistent-fc-registry"), procs);
+        registry.config = config;
+        registry.may_watch = false;
+        registry.watched.store(false, Ordering::Relaxed);
+        *registry.watcher.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        registry.dirty.store(true, Ordering::Relaxed);
+        registry
+    }
+
+    #[cfg(test)]
+    pub(crate) fn watch_attempts(&self) -> u32 {
+        self.watch_attempts.load(Ordering::Relaxed)
     }
 
     fn sessions_dir(&self) -> PathBuf {
@@ -280,6 +313,19 @@ impl Registry {
         if self.watched.load(Ordering::Relaxed) {
             return;
         }
+        if !self.may_watch {
+            self.watched.store(true, Ordering::Relaxed);
+            return;
+        }
+        {
+            let mut tried = self.watch_tried.lock().unwrap_or_else(|e| e.into_inner());
+            let now = std::time::Instant::now();
+            if tried.is_some_and(|at| now.duration_since(at) < WATCH_RETRY) {
+                return;
+            }
+            *tried = Some(now);
+        }
+        self.watch_attempts.fetch_add(1, Ordering::Relaxed);
         let dirty = self.dirty.clone();
         let Ok(mut watcher) = notify::recommended_watcher(move |_: notify::Result<notify::Event>| {
             dirty.store(true, Ordering::Relaxed);
@@ -296,6 +342,13 @@ impl Registry {
         let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         let unwatched = !self.watched.load(Ordering::Relaxed);
         if self.dirty.swap(false, Ordering::Relaxed) || unwatched {
+            // A watched directory that is gone (deleted, or its volume
+            // unmounted) sends one last event and then nothing: drop the watch
+            // so a directory made again is watched again, and read until then.
+            if !unwatched && self.may_watch && !self.sessions_dir().is_dir() {
+                *self.watcher.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                self.watched.store(false, Ordering::Relaxed);
+            }
             self.watch();
             cache.entries = std::fs::read_dir(self.sessions_dir())
                 .into_iter()
@@ -316,7 +369,19 @@ impl Registry {
     }
 
     /// The live entry for a session id, when exactly one live process has it.
+    ///
+    /// A miss reads the directory once more before answering: `/clear`
+    /// rewrites the pid's file just before the new session's `SessionStart`
+    /// hook fires, and the watch's event can trail the hook.
     pub fn by_session(&self, session: &str) -> Option<Entry> {
+        if let Some(entry) = self.find_session(session) {
+            return Some(entry);
+        }
+        self.dirty.store(true, Ordering::Relaxed);
+        self.find_session(session)
+    }
+
+    fn find_session(&self, session: &str) -> Option<Entry> {
         let cache = self.refresh();
         let mut live = cache.entries.values().filter(|e| e.session_id == session).filter(|e| is_live(e, self.procs.as_ref()));
         let first = live.next()?.clone();
@@ -326,6 +391,16 @@ impl Registry {
     /// Whether `entry`'s process is attached to the terminal device at `tty`.
     pub fn runs_on(&self, entry: &Entry, tty: &str) -> bool {
         matches!((self.procs.tty(entry.pid), device_of(tty)), (Some(a), Some(b)) if a == b)
+    }
+
+    /// The transcript `entry` is writing, under the project directory claude
+    /// keeps for `worktree`, or `None`. What adoption needs: a chat started in
+    /// the worktree resumes only a session filed there, and one started by
+    /// hand in a subdirectory is filed under the subdirectory.
+    pub fn transcript_in(&self, entry: &Entry, worktree: &str) -> Option<PathBuf> {
+        let resolved = std::fs::canonicalize(worktree).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| worktree.to_string());
+        let path = self.config.join("projects").join(claude_slug(&resolved)).join(format!("{}.jsonl", entry.session_id));
+        path.exists().then_some(path)
     }
 
     /// The transcript `entry` is writing, if it exists yet: under the slug of
@@ -376,6 +451,37 @@ pub fn global() -> &'static Registry {
         };
         Registry::new(config, Box::new(Kernel))
     })
+}
+
+/// A registry over made-up processes, for tests anywhere in the crate.
+#[cfg(test)]
+pub(crate) mod fake {
+    use super::*;
+
+    /// `Sun Oct  4 18:06:13 2026` UTC, every fake process's start.
+    pub const STARTED: i64 = 1_791_137_173;
+
+    /// Pids that are alive, and the terminal device each runs on.
+    pub struct Alive(pub Vec<(i32, Option<&'static str>)>);
+
+    impl Processes for Alive {
+        fn started(&self, pid: i32) -> Option<i64> {
+            self.0.iter().any(|(p, _)| *p == pid).then_some(STARTED)
+        }
+        fn tty(&self, pid: i32) -> Option<u64> {
+            self.0.iter().find(|(p, _)| *p == pid).and_then(|(_, t)| device_of((*t)?))
+        }
+    }
+
+    /// Write `<config>/sessions/<pid>.json` naming `session`, started at
+    /// `STARTED`, in pane `%7`.
+    pub fn write(config: &Path, pid: i32, session: &str, cwd: &str) {
+        std::fs::create_dir_all(config.join("sessions")).unwrap();
+        let text = format!(
+            r#"{{"pid":{pid},"sessionId":"{session}","cwd":"{cwd}","procStart":"Sun Oct  4 18:06:13 2026","status":"busy","tmux":"farcooler:@1.%7"}}"#
+        );
+        std::fs::write(config.join("sessions").join(format!("{pid}.json")), text).unwrap();
+    }
 }
 
 #[cfg(test)]

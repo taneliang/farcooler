@@ -212,7 +212,8 @@ pub struct HookIngress {
     /// tests (`with_hold`).
     hold: std::time::Duration,
     /// Claude's session registry, which binds a claude session no row names.
-    registry: &'static crate::claude_registry::Registry,
+    /// Shared by every clone, so a test can swap it under a running service.
+    registry: Arc<std::sync::RwLock<&'static crate::claude_registry::Registry>>,
 }
 
 /// Free `terminal`'s `tails` slot, but only while it still holds `mine`,
@@ -252,14 +253,20 @@ impl HookIngress {
             sink,
             claims,
             hold: LONGEST_HOLD,
-            registry: crate::claude_registry::global(),
+            registry: Arc::new(std::sync::RwLock::new(crate::claude_registry::global())),
         }
     }
 
     /// The same ingress, reading `registry` rather than this machine's.
-    pub fn with_registry(mut self, registry: &'static crate::claude_registry::Registry) -> Self {
-        self.registry = registry;
+    pub fn with_registry(self, registry: &'static crate::claude_registry::Registry) -> Self {
+        *self.registry.write().unwrap_or_else(|e| e.into_inner()) = registry;
         self
+    }
+
+    /// The registry the daemon reads: the watcher's log join and adoption ask
+    /// this one too, so one swap reaches every call site.
+    pub fn claude_registry(&self) -> &'static crate::claude_registry::Registry {
+        *self.registry.read().unwrap_or_else(|e| e.into_inner())
     }
 
     /// The same ingress, holding each ask for `hold` rather than
@@ -386,7 +393,7 @@ impl HookIngress {
     fn announced_terminal(&self, f: &Facts, agent: Agent) -> Option<Uuid> {
         if agent == Agent::Claude {
             let snapshot = self.inventory.snapshot();
-            return crate::registry_binding::bind_pane(self.registry, &self.store, &snapshot, f.session_id.as_deref()?);
+            return crate::registry_binding::bind_pane(self.claude_registry(), &self.store, &snapshot, f.session_id.as_deref()?);
         }
         let cwd = canonical(f.cwd.as_deref()?);
         // Hidden rows included, deliberately. `hide_worktree` sets a flag and

@@ -1906,8 +1906,9 @@ fn identifies_claude(
 /// epoch, which is the bug; a floor recent enough to be safe is a guess about
 /// a process nobody could see. Starting a fresh conversation is the answer
 /// that cannot attach a person to somebody else's thread.
-async fn session_to_adopt(
+pub(crate) async fn session_to_adopt(
     terminal: Uuid,
+    registry: &crate::claude_registry::Registry,
     home: &Path,
     worktree: &Path,
     pid: Option<i32>,
@@ -1921,7 +1922,6 @@ async fn session_to_adopt(
         return None;
     };
     // Claude's own registry, when it names this process, is no guess at all.
-    let registry = crate::claude_registry::global();
     if let Some(found) = crate::registry_binding::session_to_adopt(registry, pid, &worktree.to_string_lossy(), claimed) {
         tracing::info!(terminal = %terminal, pid, session = %found, "adopting the conversation claude's registry names");
         return Some(found);
@@ -4672,7 +4672,8 @@ impl Service {
                     .await
                     .pane(pane.tty.trim_start_matches("/dev/"))
                     .map(|running| running.pid);
-                session_to_adopt(id, &home, Path::new(&ws.worktree_path), pid, &claimed).await
+                let registry = self.hooks.claude_registry();
+                session_to_adopt(id, registry, &home, Path::new(&ws.worktree_path), pid, &claimed).await
             }
             None => None,
         };
@@ -5571,7 +5572,7 @@ mod tests {
 
         let mine = Some(std::process::id() as i32);
         let adopted =
-            session_to_adopt(Uuid::nil(), home.path(), worktree.path(), mine, &[]).await;
+            session_to_adopt(Uuid::nil(), crate::claude_registry::global(), home.path(), worktree.path(), mine, &[]).await;
         assert_eq!(adopted, Option::None, "a file older than the pane is not this pane's");
     }
 
@@ -5591,7 +5592,7 @@ mod tests {
 
         let mine = Some(std::process::id() as i32);
         let adopted =
-            session_to_adopt(Uuid::nil(), home.path(), worktree.path(), mine, &[]).await;
+            session_to_adopt(Uuid::nil(), crate::claude_registry::global(), home.path(), worktree.path(), mine, &[]).await;
         assert_eq!(adopted.as_deref(), Some("this-panes-conversation"));
     }
 
@@ -5610,12 +5611,12 @@ mod tests {
         std::fs::write(projects.join("perfectly-adoptable.jsonl"), "{}").unwrap();
 
         // The `ps` walk named no foreground process for this pane's tty.
-        let none = session_to_adopt(Uuid::nil(), home.path(), worktree.path(), None, &[]).await;
+        let none = session_to_adopt(Uuid::nil(), crate::claude_registry::global(), home.path(), worktree.path(), None, &[]).await;
         assert_eq!(none, Option::None);
 
         // A pid `ps` will not answer for: the process is gone, or never was.
         let gone =
-            session_to_adopt(Uuid::nil(), home.path(), worktree.path(), Some(i32::MAX), &[])
+            session_to_adopt(Uuid::nil(), crate::claude_registry::global(), home.path(), worktree.path(), Some(i32::MAX), &[])
                 .await;
         assert_eq!(gone, Option::None);
     }
@@ -5635,7 +5636,7 @@ mod tests {
         let mine = Some(std::process::id() as i32);
         let claimed = ["pane-ones-conversation".to_string()];
         let adopted =
-            session_to_adopt(Uuid::nil(), home.path(), worktree.path(), mine, &claimed).await;
+            session_to_adopt(Uuid::nil(), crate::claude_registry::global(), home.path(), worktree.path(), mine, &claimed).await;
         assert_eq!(adopted, Option::None);
     }
 

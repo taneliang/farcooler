@@ -12,27 +12,35 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 use super::{LogFormat, PaneJoin, PaneLog};
+use crate::claude_registry::Registry;
 
 /// What the registry says this pane's log is, if it says anything.
-pub(super) fn registered_log(pane: &PaneJoin) -> Option<PathBuf> {
-    let registry = crate::claude_registry::global();
+pub(super) fn registered_log(registry: &Registry, pane: &PaneJoin) -> Option<PathBuf> {
     crate::registry_binding::registered_log(registry, pane.preset.as_deref(), pane.pid, &pane.cwd)
 }
 
 /// The pane's tick for its session projector (`session_projectors`): what its
 /// files gained, and the registry's busy or idle. Opens one for a claude pane
 /// the registry names only while the daemon shadows (`FARCOOLER_PROJECTOR=1`).
-pub(super) fn feed_projector(terminal: Uuid, pane: &PaneJoin) {
+///
+/// An open projector follows the registry too: when the registry names a
+/// different file than the one it reads (a `/clear` whose `SessionStart` was
+/// missed), it is moved there, as the watcher's own log join is.
+pub(super) fn feed_projector(registry: &Registry, terminal: Uuid, pane: &PaneJoin) {
     let projectors = crate::session_projectors::global();
-    if !projectors.is_open(terminal) {
-        if !crate::session_projectors::shadowing() {
-            return;
-        }
-        let Some(path) = registered_log(pane) else { return };
-        projectors.open(terminal, path);
+    let open = projectors.transcript(terminal);
+    if open.is_none() && !crate::session_projectors::shadowing() {
+        return;
+    }
+    let registered = registered_log(registry, pane);
+    match (&open, registered) {
+        (None, None) => return,
+        (None, Some(path)) => projectors.open(terminal, path),
+        (Some(current), Some(path)) if *current != path => projectors.open(terminal, path),
+        _ => {}
     }
     let claude = pane.preset.as_deref().is_some_and(|p| p.starts_with("claude"));
-    let entry = pane.pid.filter(|_| claude).and_then(|pid| crate::claude_registry::global().by_pid(pid));
+    let entry = pane.pid.filter(|_| claude).and_then(|pid| registry.by_pid(pid));
     projectors.tick(terminal, entry.and_then(|e| e.status));
 }
 
@@ -50,12 +58,77 @@ pub(super) fn follow_registry(log: &mut PaneLog, registered: Option<PathBuf>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::claude_registry::{Registry, fake};
+
+    /// A config dir with pid 4242 running session `session`, whose transcript
+    /// holds one prompt.
+    fn session(config: &std::path::Path, session: &str) {
+        fake::write(config, 4242, session, "/nonexistent/fc-registry-join");
+        let project = config.join("projects/-nonexistent-fc-registry-join");
+        std::fs::create_dir_all(&project).unwrap();
+        let prompt = format!(r#"{{"type":"user","promptId":"{session}-p","promptSource":"typed","message":{{"role":"user","content":"hi"}}}}"#);
+        std::fs::write(project.join(format!("{session}.jsonl")), format!("{prompt}\n")).unwrap();
+    }
+
+    fn pane() -> PaneJoin {
+        PaneJoin { preset: Some("claude".into()), pid: Some(4242), cwd: "/nonexistent/fc-registry-join".into(), title: String::new() }
+    }
+
+    /// The call site: `turn_from_log` joins a claude pane's log through the
+    /// service's registry, with nothing for the title-and-files guess to find,
+    /// and follows the pid to its new session after `/clear`.
+    #[tokio::test]
+    async fn the_watcher_joins_and_follows_a_pane_by_the_registry() {
+        let (_dir, svc, _repo) = crate::test_support::fixture().await;
+        let config = tempfile::tempdir().unwrap();
+        session(config.path(), "s-one");
+        let registry: &'static Registry =
+            Box::leak(Box::new(Registry::new(config.path().to_path_buf(), Box::new(fake::Alive(vec![(4242, None)])))));
+        let _ = svc.hooks().clone().with_registry(registry);
+        let watcher = super::super::Watcher::new(svc.clone());
+        let id = uuid::Uuid::now_v7();
+        let (reading, _) = watcher.turn_from_log(id, pane(), 10_000, true, false).await;
+        assert!(reading.turn.is_some_and(|t| t.running), "joined by the registry: {reading:?}");
+
+        session(config.path(), "s-two");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut moved = false;
+        let mut now = 11_000;
+        while !moved && std::time::Instant::now() < deadline {
+            let (_, events) = watcher.turn_from_log(id, pane(), now, true, false).await;
+            moved = !events.is_empty();
+            now += 1_000;
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(moved, "the pane followed its pid to the new session's log");
+    }
     use farcooler_core::session_log::tail::Tail;
 
     fn reading(path: &str, format: LogFormat) -> PaneLog {
         let mut log = PaneLog::new();
         log.tail = Some((Tail::new(PathBuf::from(path)), format));
         log
+    }
+
+    /// An open projector moves when the registry names another file, even
+    /// with the `SessionStart` that would have moved it never seen.
+    #[test]
+    fn an_open_projector_follows_the_registry_to_a_new_session() {
+        let config = tempfile::tempdir().unwrap();
+        session(config.path(), "s-one");
+        let registry = Registry::new(config.path().to_path_buf(), Box::new(fake::Alive(vec![(4242, None)])));
+        let id = uuid::Uuid::now_v7();
+        let first = registered_log(&registry, &pane()).unwrap();
+        crate::session_projectors::global().open(id, first.clone());
+        session(config.path(), "s-two");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while crate::session_projectors::global().transcript(id).as_ref() == Some(&first) && std::time::Instant::now() < deadline {
+            feed_projector(&registry, id, &pane());
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let now = crate::session_projectors::global().transcript(id).unwrap();
+        crate::session_projectors::global().forget(id);
+        assert!(now.ends_with("s-two.jsonl"), "{now:?}");
     }
 
     #[test]

@@ -75,11 +75,12 @@ pub fn registered_log(registry: &Registry, preset: Option<&str>, pid: Option<i32
 }
 
 /// The session to adopt for the process `pid` in a pane switching to chat:
-/// the registry's, when it is live, has a transcript to resume, and no other
-/// terminal claims it.
+/// the registry's, when it is live, has a transcript filed under the
+/// worktree's own project directory (where the chat will look for it), and no
+/// other terminal claims it.
 pub fn session_to_adopt(registry: &Registry, pid: i32, worktree: &str, claimed: &[String]) -> Option<String> {
     let entry = registry.by_pid(pid)?;
-    registry.transcript(&entry, worktree)?;
+    registry.transcript_in(&entry, worktree)?;
     (!claimed.contains(&entry.session_id)).then_some(entry.session_id)
 }
 

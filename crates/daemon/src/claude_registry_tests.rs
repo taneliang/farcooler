@@ -204,3 +204,44 @@ fn this_machines_registry_verifies_against_the_kernel() {
         }
     }
 }
+
+#[test]
+fn a_session_the_cache_has_not_seen_yet_is_read_for_once_more() {
+    // `/clear` rewrites the file just before the new session's first hook;
+    // the watch's event can come after it. A registry that never watches
+    // stands for that moment.
+    let dir = Dir::new("miss");
+    fake::write(&dir.0, 29434, "before", "/tmp");
+    let registry = Registry::unwatched(dir.0.clone(), Box::new(fake::Alive(vec![(29434, None)])));
+    assert_eq!(registry.by_pid(29434).map(|e| e.session_id), Some("before".into()));
+    fake::write(&dir.0, 29434, "after", "/tmp");
+    assert_eq!(registry.by_pid(29434).map(|e| e.session_id), Some("before".into()), "the cache is stale");
+    assert_eq!(registry.by_session("after").map(|e| e.pid), Some(29434), "a miss reads again");
+}
+
+#[test]
+fn a_missing_directory_is_not_watched_again_on_every_lookup() {
+    let dir = Dir::new("nowatch");
+    std::fs::remove_dir_all(dir.0.join("sessions")).unwrap();
+    let registry = Registry::new(dir.0.clone(), Box::new(fake::Alive(vec![])));
+    for _ in 0..50 {
+        registry.by_pid(1);
+    }
+    assert!(registry.watch_attempts() <= 1, "{} tries", registry.watch_attempts());
+}
+
+#[test]
+fn a_deleted_directory_made_again_is_read_again() {
+    let dir = Dir::new("deleted");
+    fake::write(&dir.0, 29434, "first", "/tmp");
+    let registry = Registry::new(dir.0.clone(), Box::new(fake::Alive(vec![(29434, None)])));
+    assert_eq!(registry.by_pid(29434).map(|e| e.session_id), Some("first".into()));
+    std::fs::remove_dir_all(dir.0.join("sessions")).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while registry.by_pid(29434).is_some() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert_eq!(registry.by_pid(29434), None, "the deletion is seen");
+    fake::write(&dir.0, 29434, "second", "/tmp");
+    assert_eq!(registry.by_pid(29434).map(|e| e.session_id), Some("second".into()), "and a new directory is read");
+}

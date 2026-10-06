@@ -154,8 +154,15 @@ fn the_log_and_the_adoption_come_from_the_registry_when_it_answers() {
     assert_eq!(registered_log(&registry, Some("claude"), Some(4242), "/x"), Some(project.join("s-1.jsonl")));
     assert_eq!(registered_log(&registry, Some("codex"), Some(4242), "/x"), None, "claude's registry, claude's panes");
     assert_eq!(registered_log(&registry, Some("claude"), Some(1), "/x"), None, "another pid");
-    assert_eq!(session_to_adopt(&registry, 4242, "/x", &[]), Some("s-1".into()));
-    assert_eq!(session_to_adopt(&registry, 4242, "/x", &["s-1".into()]), None, "another terminal has it");
+    // The log follows the session wherever it is filed; adoption only from
+    // the worktree's own project directory, which is where the chat looks.
+    assert_eq!(session_to_adopt(&registry, 4242, "/x", &[]), None, "filed under another directory than the worktree's");
+    assert_eq!(session_to_adopt(&registry, 4242, "/tmp/fc-t/proj-not-on-disk", &[]), None);
+    let worktree = config.0.join("projects/-nonexistent-wt");
+    std::fs::create_dir_all(&worktree).unwrap();
+    std::fs::write(worktree.join("s-1.jsonl"), "").unwrap();
+    assert_eq!(session_to_adopt(&registry, 4242, "/nonexistent/wt", &[]), Some("s-1".into()));
+    assert_eq!(session_to_adopt(&registry, 4242, "/nonexistent/wt", &["s-1".into()]), None, "another terminal has it");
     let dead = config.registry(false, "/dev/null");
     assert_eq!(registered_log(&dead, Some("claude"), Some(4242), "/x"), None, "a stale file");
 }
@@ -175,4 +182,18 @@ async fn a_hook_from_an_unnamed_session_routes_through_the_registry() {
     assert_eq!(ingress.terminal_for(&facts, Agent::Claude), Some(term));
     let unknown = Facts { session_id: Some("nobody".into()), ..Facts::default() };
     assert_eq!(ingress.terminal_for(&unknown, Agent::Claude), None);
+}
+
+/// The adoption call site in `Service`: the registry answers before the
+/// worktree's files are guessed at.
+#[tokio::test]
+async fn service_adoption_asks_the_registry_first() {
+    let config = Config::new("svc-adopt", "s-adopt", "/nonexistent/wt");
+    let project = config.0.join("projects/-nonexistent-wt");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(project.join("s-adopt.jsonl"), "").unwrap();
+    let registry = config.registry(true, "/dev/null");
+    let home = tempfile::tempdir().unwrap();
+    let found = crate::service::session_to_adopt(Uuid::nil(), &registry, home.path(), std::path::Path::new("/nonexistent/wt"), Some(4242), &[]).await;
+    assert_eq!(found.as_deref(), Some("s-adopt"));
 }

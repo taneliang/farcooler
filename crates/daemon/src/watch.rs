@@ -4457,14 +4457,15 @@ impl Watcher {
         // Off the executor for the same reason `listening_ports` is: this can
         // spawn a process and read files, and the sampling loop is shared with
         // everything else the daemon is doing.
+        let registry = self.service.hooks().claude_registry();
         let log = tokio::task::spawn_blocking(move || {
             let mut log = log;
-            registry_join::follow_registry(&mut log, registry_join::registered_log(&pane));
-            registry_join::feed_projector(id, &pane);
+            registry_join::follow_registry(&mut log, registry_join::registered_log(registry, &pane));
+            registry_join::feed_projector(registry, id, &pane);
             advance_log(log, &pane, now, churn, working, |pane| {
                 // Claude's registry first; the title-and-files guess only
                 // where it has no answer.
-                registry_join::registered_log(pane).or_else(|| crate::log_join::find_session_log(
+                registry_join::registered_log(registry, pane).or_else(|| crate::log_join::find_session_log(
                     pane.preset.as_deref()?,
                     pane.pid,
                     &pane.cwd,
