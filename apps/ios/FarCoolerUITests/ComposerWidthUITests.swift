@@ -61,6 +61,15 @@ final class ComposerWidthUITests: XCTestCase {
             .completed, "\(why): the layout is \(String(describing: probe.value)), not \(expected)")
     }
 
+    /// The screen's, not the app's (the iPad simulator's `app.screenshot()` came
+    /// back turned in landscape; see `PadWorkspaceUITests.keep`).
+    private func keep(_ name: String) {
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = name
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
     private func post(_ name: String) {
         CFNotificationCenterPostNotification(
             CFNotificationCenterGetDarwinNotifyCenter(), CFNotificationName(name as CFString), nil, nil, true)
@@ -130,6 +139,7 @@ final class ComposerWidthUITests: XCTestCase {
         XCTAssertTrue(photo.firstMatch.waitForExistence(timeout: 10), "no photo in the strip: \(app.debugDescription)")
         XCTAssertTrue(hasKeyboardFocus(field), "the column's composer lost the keyboard to the photo")
 
+        keep("1-column-before")
         post("com.farcooler.harness.pad-compact")
         layout(app, is: "phone", "compact")
         let docked = app.textViews.firstMatch
@@ -138,6 +148,7 @@ final class ComposerWidthUITests: XCTestCase {
         XCTAssertEqual(photo.count, 1, "the photo was doubled")
         XCTAssertTrue(hasKeyboardFocus(docked), "the docked composer didn't take the keyboard")
         assertHideKeyboardShown(app, "docked")
+        keep("2-docked-after")
         app.typeText("X")
         waitFor(docked, "value == %@", "hello Xworld", "the caret didn't cross to the docked composer")
 
@@ -149,6 +160,7 @@ final class ComposerWidthUITests: XCTestCase {
         XCTAssertEqual(photo.count, 1, "the photo was doubled coming back")
         XCTAssertTrue(hasKeyboardFocus(column), "the column composer didn't take the keyboard back")
         assertHideKeyboardShown(app, "column again")
+        keep("3-column-again")
         app.typeText("Y")
         waitFor(column, "value == %@", "hello XYworld", "the caret didn't cross back")
     }
