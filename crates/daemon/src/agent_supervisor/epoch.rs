@@ -23,6 +23,11 @@ pub(super) fn boot() -> u64 {
     })
 }
 
+// A clock stepped backwards between two daemon lives could seed a later life
+// below an earlier one's epochs, and a client that held one of those would be
+// matched into the wrong stream. It takes a step back larger than the epochs
+// the earlier life issued, which count toggles; negligible, and not guarded.
+
 /// The epoch after `current`: one past it, and never below this life's start.
 pub(super) fn next(current: u64) -> u64 {
     next_after(current, boot())

@@ -176,3 +176,38 @@ fn epochs_are_never_reused_across_lives() {
     assert!(next_after(0, 0) >= FIRST_ALLOWED);
     assert!(super::epoch::boot() < (1 << 53));
 }
+
+/// No session and nothing to show answers epoch 0, which the phones read as
+/// "no session yet"; an established chat answers non-zero, and so does a
+/// hook-fed one once its window holds events.
+#[test]
+fn epoch_zero_means_no_session_and_nothing_else_does() {
+    let supervisor = AgentSupervisor::new();
+    let unknown = Uuid::now_v7();
+    assert_eq!(supervisor.replay(unknown, 0, 0).0, 0);
+
+    let established_pane = Uuid::now_v7();
+    established(&supervisor, established_pane);
+    assert_ne!(supervisor.replay(established_pane, 0, 0).0, 0);
+
+    let hooked = Uuid::now_v7();
+    supervisor.record(hooked, vec![delta(0)], &|_, _| {});
+    assert_eq!(supervisor.replay(hooked, 0, 0).0, super::epoch::boot());
+}
+
+/// A cut that lands inside a multi-byte character backs up to its start
+/// rather than splitting it.
+#[test]
+fn cutting_a_long_message_never_splits_a_character() {
+    let supervisor = AgentSupervisor::new();
+    let terminal = Uuid::now_v7();
+    // 3,000,003 bytes: the first halving point, 1,500,001, is inside a euro sign.
+    let text = "\u{20ac}".repeat(1_000_001);
+    let huge = AgentEvent::Message { role: Role::Agent, text, parent: None };
+    supervisor.record(terminal, vec![huge], &|_, _| {});
+
+    let (epoch, events) = supervisor.replay(terminal, 0, 0);
+    assert!(encoded(terminal, events.clone(), epoch) < MAX_CONTROL_ENVELOPE_BYTES);
+    let AgentEvent::Message { text, .. } = &events.last().unwrap().event else { panic!() };
+    assert!(text.starts_with('\u{20ac}') && text.contains("too long to load"));
+}

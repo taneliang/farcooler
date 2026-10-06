@@ -335,7 +335,7 @@ impl AgentSupervisor {
         // the whole transcript. The other order could hand a stale window
         // out under the new epoch.
         let epoch = self.sessions.lock().ok().and_then(|s| s.get(&terminal).map(|st| st.epoch));
-        let epoch = epoch.filter(|e| *e != 0).unwrap_or_else(epoch::boot);
+        let epoch = epoch.unwrap_or(0);
         let all: Vec<Sequenced> = self
             .recent
             .lock()
@@ -343,6 +343,10 @@ impl AgentSupervisor {
             .and_then(|r| r.get(&terminal).cloned())
             .unwrap_or_default();
 
+        // 0 stays 0 for a pane with no session and nothing to show: the phones
+        // read it as "no session yet". A hook-fed chat never establishes, so
+        // once its window holds events it answers this life's first epoch.
+        let epoch = if epoch == 0 && !all.is_empty() { epoch::boot() } else { epoch };
         if client_epoch != epoch {
             return (epoch, replay_fit::newest_that_fit(all));
         }

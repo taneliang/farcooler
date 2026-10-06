@@ -89,9 +89,12 @@ fn text_of(event: &mut AgentEvent) -> Option<&mut String> {
 
 /// `event` with its long text halved until it weighs no more than `room`, or
 /// `None` when it has no text to cut or the cut cannot reach it.
+///
+/// The text is taken out once, so each round builds one string and the event is
+/// cloned a single time, however many rounds it takes.
 fn shortened(event: &AgentEvent, room: usize) -> Option<AgentEvent> {
     let mut event = event.clone();
-    let original = text_of(&mut event)?.clone();
+    let original = std::mem::take(text_of(&mut event)?);
     let mut keep = original.len();
     while keep > 0 {
         keep /= 2;
@@ -99,10 +102,9 @@ fn shortened(event: &AgentEvent, room: usize) -> Option<AgentEvent> {
         while !original.is_char_boundary(end) {
             end -= 1;
         }
-        let mut candidate = event.clone();
-        *text_of(&mut candidate)? = format!("{}{CUT_MARKER}", &original[..end]);
-        if weight(&candidate) <= room {
-            return Some(candidate);
+        *text_of(&mut event)? = format!("{}{CUT_MARKER}", &original[..end]);
+        if weight(&event) <= room {
+            return Some(event);
         }
     }
     None
