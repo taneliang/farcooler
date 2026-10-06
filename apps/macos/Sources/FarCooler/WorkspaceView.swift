@@ -691,7 +691,7 @@ struct DrillBreadcrumb: View {
                     caret(piece.kind, segment: crumbs.count, style: piece.style, segments: segments)
                 case .terminalTitle:
                     if let terminal = worktrees?.terminal {
-                        HStack(alignment: .firstTextBaseline, spacing: 3) {
+                        HStack(alignment: .firstTextBaseline, spacing: JumpBar.glyphGap) {
                             Image(systemName: OneTreeGlyph.terminal(isAgent: false)).font(piece.style.font)
                             Text(terminal.title).font(piece.style.font).lineLimit(1)
                         }
@@ -842,7 +842,7 @@ struct DrillBreadcrumb: View {
         // The sidebar's glyph for what it names (ov-328), before the title on
         // the one baseline, in a secondary tint whatever the title's. Hidden
         // from VoiceOver: the label is the title alone.
-        let text = HStack(alignment: .firstTextBaseline, spacing: 3) {
+        let text = HStack(alignment: .firstTextBaseline, spacing: JumpBar.glyphGap) {
             if let glyph = crumb.glyph {
                 Image(systemName: glyph)
                     .font(JumpBar.icon(.ancestor).font)
@@ -894,7 +894,7 @@ struct DrillBreadcrumb: View {
     private func worktreeLabel(_ worktrees: WorktreeCrumb, pieces: [Piece]) -> some View {
         let icon = pieces.first { $0.kind == .menuIcon }?.style ?? JumpBar.icon(.menu)
         let title = pieces.first { $0.kind == .menuTitle }?.style ?? JumpBar.style(.menu)
-        let label = HStack(alignment: .firstTextBaseline, spacing: 3) {
+        let label = HStack(alignment: .firstTextBaseline, spacing: JumpBar.glyphGap) {
             Image(systemName: WorktreeSection.glyph)
                 .font(icon.font)
                 .foregroundStyle(icon.color)

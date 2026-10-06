@@ -183,6 +183,17 @@ struct JumpBarGlyphTests {
         return try await Nav.show(bar, size: CGSize(width: 700, height: 60))
     }
 
+    @Test("A segment's icon column ends JumpBar.glyphGap before its title, the system path control's spacing")
+    func glyphGapIsTheSystemsSpacing() async throws {
+        let (window, seen) = try await Self.bar(glyphs: true)
+        defer { window.close() }
+        let glyph = try #require(seen.views["jump-glyph-1"])
+        let title = try #require(seen.views["jump-label-1-baseline"])
+        // Frames the stack lays out, so exact at any scale; the tolerance is
+        // only float noise in the conversion.
+        #expect(abs((title.minX - glyph.maxX) - JumpBar.glyphGap) < 0.5)
+    }
+
     @Test("Each segment draws its glyph before its text, and a segment with none draws none: the view, not the model")
     func segmentsDrawTheirGlyph() async throws {
         let (window, seen) = try await Self.bar(glyphs: true)

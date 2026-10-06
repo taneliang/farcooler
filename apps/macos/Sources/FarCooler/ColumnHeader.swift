@@ -71,6 +71,10 @@ enum JumpBar {
     /// or narrow, leaves its title at one edge (ov-328): a hair over the
     /// widest of the glyphs `OneTreeGlyph` names at the text's size.
     static let glyphWidth: CGFloat = 14
+    /// Between a segment's icon column and its title (ov-351): 5 pt. An
+    /// `NSPathControl` at 13 pt puts its icon's edge 5.3 pt from the title's
+    /// origin (measured: 6.5 pt ink to ink); 3 pt read as touching.
+    static let glyphGap: CGFloat = 5
 
     /// A segment's icon (the worktree's ⎇): the text's own size and weight.
     static func icon(_ role: Role, isHere: Bool = false) -> Style { style(role, isHere: isHere) }
