@@ -2160,10 +2160,11 @@ final class DaemonClient: ObservableObject {
     /// Ask the daemon to paste `text` into a TUI pane's box and NEVER press
     /// return (`terminal draft-prompt`, ov-184), so the person finishes the
     /// sentence. True only when it did. The daemon refuses, typing nothing,
-    /// unless the pane is provably an idle agent with an empty box and its
-    /// paste mode known (the same gate as typing an answer); a runner that
-    /// doesn't know the command refuses too. Either way the caller copies
-    /// instead.
+    /// unless the pane is provably an agent with an empty box and its paste
+    /// mode known, between turns or in a claude working, whose own queue
+    /// takes what the person then sends (the same gate as typing an answer,
+    /// ov-360); a runner that doesn't know the command refuses too. Either
+    /// way the caller copies instead.
     func draftPrompt(terminal: String, text: String) async -> Bool {
         let (data, _) = await runRaw(["terminal", "draft-prompt", terminal, text], background: true)
         return data != nil

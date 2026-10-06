@@ -119,9 +119,10 @@ async fn a_dialog_announced_during_the_paste_gets_no_enter() {
     assert!(!other.log().contains("ENTER"), "{}", other.log());
 }
 
-/// The last two checks before the Enter, one at a time: a dialog on the
-/// screen, a gate begun since the paste, an ask held on the pane, and a box
-/// that no longer holds the text each stop it; with none, it goes.
+/// The last checks before the Enter, one at a time: a dialog on the screen,
+/// a gate begun since the paste, a tool call written since it, an ask held
+/// on the pane, and a box that no longer holds the text each stop it; with
+/// none, it goes.
 #[tokio::test]
 async fn the_enter_waits_on_the_screen_and_the_hooks() {
     let b = board().await;
@@ -143,6 +144,10 @@ async fn the_enter_waits_on_the_screen_and_the_hooks() {
     let witness = Witness::for_tests(SESSION, &path);
     b.svc.hooks().asks().heard(SESSION, true);
     assert_eq!(enter(witness).await, Err(NoEnter::Dialog), "a gate since the paste");
+    let witness = Witness::for_tests(SESSION, &path);
+    let call = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash"}]}}"#;
+    std::fs::write(&path, format!("{call}\n")).unwrap();
+    assert_eq!(enter(witness).await, Err(NoEnter::Dialog), "a tool call since the paste");
     let (_, _held) = b.svc.hooks().asks().hold(orchestrator.id);
     assert_eq!(enter(Witness::for_tests(SESSION, &path)).await, Err(NoEnter::Dialog), "an ask held");
     b.svc.hooks().asks().forget(orchestrator.id);

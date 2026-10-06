@@ -8,16 +8,26 @@
 //! between the second and the write (`enter`):
 //! 1. a fresh capture reads the box holding exactly the text, and the pane
 //!    not Blocked;
-//! 2. no gate (`PermissionRequest`, which claude raises for all three) has
+//! 2. the transcript has no tool call written since the paste began: every
+//!    one of those dialogs is a tool call (`AskUserQuestion` and
+//!    `ExitPlanMode` are tools too), and claude writes the call before it
+//!    draws the dialog (`tool_called_since`);
+//! 3. no gate (`PermissionRequest`, which claude raises for all three) has
 //!    begun in the session since the paste began (`HookAsks::gated_since`),
 //!    and no ask is held on the pane.
 //!
-//! The gate is heard before its dialog is drawn, so a dialog drawn after
-//! check 1 was announced before check 2, unless it came in the time between
-//! check 2 and the Enter reaching the pane, which is one `tmux send-keys`.
-//! A session this daemon has never heard a hook from has no such signal,
-//! and is never typed into mid-turn: its agent waits for the turn to end.
-//! codex queues too, but raises its approvals with no hook at all, so a
+//! Measured on 2.1.290, five dialogs: the tool call is written 0 to 25 ms
+//! before the dialog is drawn; the hook is started within about 10 ms of the
+//! draw, either side; and an Enter sent the moment the hook started did
+//! approve the dialog. The Enter takes one `tmux send-keys`, 5 to 13 ms. So
+//! check 3 alone can't close the race, and check 2 narrows it to a tool call
+//! written in the few milliseconds between it and the Enter reaching the
+//! pane; neither closes it entirely. A dialog in the way leaves the text in
+//! the box, unsent.
+//!
+//! A session this daemon has never heard a hook from is never typed into
+//! mid-turn: its agent waits for the turn to end. codex queues too, but
+//! raises its approvals with no hook and no transcript record first, so a
 //! working codex waits likewise (`queues_mid_turn`).
 //!
 //! **The queue.** Claude writes `{"type":"queue-operation","operation":
@@ -112,7 +122,10 @@ impl Watcher {
         let runtime = Runtime { marks: None, ..self.service.runtime() };
         let asks = self.service.hooks().asks();
         // From here to the write, nothing is awaited.
-        if asks.gated_since(&witness.session, witness.pasted) || asks.is_holding(to.id) {
+        if tool_called_since(&witness.path, witness.from)
+            || asks.gated_since(&witness.session, witness.pasted)
+            || asks.is_holding(to.id)
+        {
             return Err(NoEnter::Dialog);
         }
         runtime.send_bytes_hex(to.id, "0d").await.map_err(|_| NoEnter::Failed)
@@ -203,6 +216,19 @@ fn said(record: &serde_json::Value) -> Option<(&'static str, &str)> {
         Some("user") => record.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()).map(|c| ("user", c)),
         _ => None,
     }
+}
+
+/// Whether claude wrote a tool call to the transcript at `path` past byte
+/// `from`: a dialog may be coming.
+pub(crate) fn tool_called_since(path: &Path, from: u64) -> bool {
+    records(path, from).iter().any(|record| {
+        record.get("type").and_then(|t| t.as_str()) == Some("assistant")
+            && record
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_array())
+                .is_some_and(|blocks| blocks.iter().any(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_use")))
+    })
 }
 
 /// Whether `text` was queued in the last stretch before byte `from`. A
