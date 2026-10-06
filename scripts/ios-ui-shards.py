@@ -28,57 +28,67 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 TESTS = ROOT / "apps/ios/FarCoolerUITests"
 WORKFLOW = ROOT / ".github/workflows/ci.yml"
 
-# Measured shard times are in the `ios-ui` job's comment in ci.yml. Rebalance by
-# class durations from a CI log ("Test Suite '<Class>' started/passed"), not by
-# test count: PlanUITests alone is six minutes.
+# Rebalance by class durations from a CI log ("Test Suite '<Class>' started/passed"),
+# not by test count: PlanRulingsUITests alone is eleven minutes.
+#
+# The shards are NOT the same size, on purpose (ov-384). The account has five
+# macOS runners; `rust` (macOS) and `swift` hold two of them for 16 and 25
+# minutes, so when `ios` ends only three are free. `shell`, `agent` and `phone`
+# start then and are the big ones, about 1,350 s of tests each. `phone2` runs
+# in its own job (`ios-ui-late` in ci.yml), held until `rust` ends, and is the
+# small one, about 750 s, so that all four end together near 35 minutes. Four
+# equal shards started the fourth at 16 minutes and ended it at 43 to 52.
+# Move a class between the big three to level them; change `phone2` only with
+# that in mind. A shard's job costs about 450 s on top of its tests, and the
+# budget job (scripts/ios-ui-shard-budget.py) goes red at 75% of the timeout,
+# so about 1,350 s of tests is the most a big shard can hold.
 SHARDS = {
-    # Seconds are each class's time in run 37269677267 (agent's from
-    # 37267080552), test start to test end, except those moved in ov-384, which
-    # are the mean of runs 37503739914, 37509877259 and 37523241692. Tests per
-    # shard in those means: shell 1,196 s, agent 1,137 s, phone 1,204 s, phone2
-    # 1,158 s, so all four are within 6%. Runner variance is large: the same
-    # class has taken 276 s and 442 s, so rebalance from more than one run when
-    # a shard drifts.
+    # Seconds are the mean of each class's time in runs 37503739914 and
+    # 37509877259 (test start to test end), rounded. Runner variance is large,
+    # +/- 25%: the same class took 343 s and 275 s, so rebalance from more than
+    # one run when a shard drifts. Shard totals: shell 1,375 s, agent 1,366 s,
+    # phone 1,320 s, phone2 740 s.
     "shell": [
-        "ShellGestureTests",  # -shell-harness; 442 s
-        "ShellPaneScrollTests",  # -shell-harness; one live method, in SKIP; 204 s
-        "ShellColumnCloseTests",  # -shell-harness; 106 s
-        "TerminalLigatureTests",  # -terminal-ligature; 12 s
-        "PlanRulingsUITests",  # -phone-harness -phone-plan -phone-rulings (ov-304); moved from phone at 76% of budget (37409958732)
+        "PlanRulingsUITests",  # -phone-harness -phone-plan -phone-rulings (ov-304); 646 s
+        "ShellGestureTests",  # -shell-harness; 309 s
+        "ShellPaneScrollTests",  # -shell-harness; one live method, in SKIP; 205 s
+        "ShellColumnCloseTests",  # -shell-harness; 132 s
+        "TaskUsageUITests",  # -phone-harness (ov-195); 49 s
+        "ReadScopeTests",  # -phone-harness (TaskScreenTests.swift); 25 s
+        "TerminalLigatureTests",  # -terminal-ligature; 9 s
     ],
     "agent": [
-        "AgentEmptyStateTests",  # -agent-layout-harness (KeyboardTabStripTests.swift); 165 s
-        "AgentEndedSessionTests",  # -agent-layout-harness (KeyboardTabStripTests.swift); 111 s
-        "AgentTranscriptScrollTests",  # -agent-layout-harness (KeyboardTabStripTests.swift); 107 s
-        "AgentDraftTests",  # -agent-layout-harness; 125 s
+        "PhoneTreeUITests",  # -phone-harness -phone-plan (ov-300); 327 s
+        "ActionFailureTests",  # -phone-harness and -agent-layout-harness; 276 s
+        "TaskScreenTests",  # -phone-harness; 196 s
+        "AgentEmptyStateTests",  # -agent-layout-harness (KeyboardTabStripTests.swift); 146 s
+        "AgentTranscriptScrollTests",  # -agent-layout-harness (KeyboardTabStripTests.swift); 114 s
         "AgentFollowTests",  # -agent-layout-harness (ov-383); not yet timed, 2 tests
         "WorkingShimmerTests",  # -agent-layout-harness (ov-382); not yet timed, 1 test
-        "AgentRetrySendTests",  # -agent-layout-harness; 25 s
-        "AgentStoppedTests",  # -agent-layout-harness -stopped; 27 s
-        "ComposerKeyboardTests",  # -agent-layout-harness; 49 s
-        "DynamicTypeTests",  # -agent-layout-harness; 36 s
-        "ActionFailureTests",  # -phone-harness and -agent-layout-harness; 234 s
-        "TaskUsageUITests",  # -phone-harness (ov-195); 67 s
-        "PhoneTreeUITests",  # -phone-harness -phone-plan (ov-300); not yet timed, 11 tests
+        "AgentDraftTests",  # -agent-layout-harness; 102 s
+        "AgentEndedSessionTests",  # -agent-layout-harness (KeyboardTabStripTests.swift); 89 s
+        "ComposerKeyboardTests",  # -agent-layout-harness; 38 s
+        "DynamicTypeTests",  # -agent-layout-harness; 33 s
+        "AgentStoppedTests",  # -agent-layout-harness -stopped; 25 s
+        "AgentRetrySendTests",  # -agent-layout-harness; 20 s
     ],
     "phone": [
-        "PagesUITests",  # -phone-harness -phone-plan -phone-pages (ov-285); 650 s
-        "WorkspaceScreenTests",  # -phone-harness; 221 s
-        "TaskScreenTests",  # -phone-harness; 189 s; moved from shell (ov-384), which was at 85% of budget (37525148773)
-        "WorkspaceChromeTests",  # -phone-harness -phone-plan (ov-342); not yet timed, 3 tests
-        "PhoneReopenTests",  # -phone-harness; 129 s
+        "PagesUITests",  # -phone-harness -phone-plan -phone-pages (ov-285); 536 s
+        "PlanUITests",  # -phone-harness -phone-plan (ov-274); 398 s
+        "WorkspaceScreenTests",  # -phone-harness; 215 s
+        "PhoneReopenTests",  # -phone-harness; 110 s
+        "WorkspaceChromeTests",  # -phone-harness -phone-plan (ov-342); 61 s
     ],
+    # The late shard: ci.yml's `ios-ui-late`, not a matrix entry.
     "phone2": [
-        "PlanUITests",  # -phone-harness -phone-plan (ov-274); 282 s
-        "FirstRunUITests",  # -phone-harness (ov-205 lane P, placed by integ-9); 173 s
-        "ChangesPatchNoticeTests",  # -changes-layout-harness; 53 s
-        "ChangesLfsNoticeTests",  # -changes-layout-harness -lfs-pointers (ov-199); 52 s
-        "ChangesPullRequestTests",  # -changes-layout-harness; 44 s
-        "ReadScopeTests",  # -phone-harness (TaskScreenTests.swift); 24 s; moved from shell (ov-384)
-        "RunnerReachTests",  # seeded -hosts at an address that never answers; 9 s
-        "TerminalTaskKeyTests",  # -phone-harness -phone-terminal-key (ov-215); 53 s
-        "BoardUnreadUITests",  # -phone-harness (ov-113); 127 s
-        "FilesBrowserTests",  # -phone-harness (ov-259); 186 s
+        "FirstRunUITests",  # -phone-harness (ov-205 lane P, placed by integ-9); 206 s
+        "FilesBrowserTests",  # -phone-harness (ov-259); 158 s
+        "BoardUnreadUITests",  # -phone-harness (ov-113); 117 s
+        "ChangesPatchNoticeTests",  # -changes-layout-harness; 82 s
+        "TerminalTaskKeyTests",  # -phone-harness -phone-terminal-key (ov-215); 72 s
+        "ChangesPullRequestTests",  # -changes-layout-harness; 51 s
+        "ChangesLfsNoticeTests",  # -changes-layout-harness -lfs-pointers (ov-199); 44 s
+        "RunnerReachTests",  # seeded -hosts at an address that never answers; 10 s
     ],
 }
 
@@ -98,15 +108,31 @@ SKIP = [
 
 CLASS = re.compile(r"^(?:final )?class (\w+)\s*:\s*XCTestCase", re.M)
 MATRIX = re.compile(r"^\s*shard:\s*\[([^\]]*)\]", re.M)
+LATE = re.compile(r"^    name: iOS UI \((\w+)\)\s*$", re.M)
 
 
 def shards_in_workflow():
-    """The `ios-ui` job's matrix, as ci.yml spells it: a shard named here and
-    missing there would be placed, pass --check, and never run."""
+    """The shards ci.yml runs: the `ios-ui` matrix plus every job named for one
+    shard outright (`ios-ui-late`). A shard named here and missing there would
+    be placed, pass --check, and never run."""
     found = MATRIX.findall(WORKFLOW.read_text())
     if len(found) != 1:
         return None
-    return [name.strip() for name in found[0].split(",") if name.strip()]
+    names = [name.strip() for name in found[0].split(",") if name.strip()]
+    return names + LATE.findall(WORKFLOW.read_text())
+
+
+def timeouts_in_workflow():
+    """`timeout-minutes` of `ios-ui` and `ios-ui-late`, in that order, or None
+    for one that is missing. The budget script reads the first only, so the
+    second must not be allowed a longer one."""
+    text = WORKFLOW.read_text()
+    out = []
+    for job in ("ios-ui", "ios-ui-late"):
+        block = re.search(rf"^  {job}:\n(.*?)(?=^  [\w-]+:\n|\Z)", text, re.M | re.S)
+        found = block and re.search(r"^    timeout-minutes:\s*(\d+)\s*$", block.group(1), re.M)
+        out.append(int(found.group(1)) if found else None)
+    return out
 
 
 def classes_on_disk():
@@ -149,6 +175,18 @@ def check():
         problems.append(
             f"{WORKFLOW.name} runs shards {', '.join(matrix)} but this file has "
             f"{', '.join(SHARDS)}; make the ios-ui matrix match"
+        )
+    late_job = re.search(r"^  ios-ui-late:\n(.*?)(?=^  [\w-]+:\n|\Z)", WORKFLOW.read_text(), re.M | re.S)
+    if not late_job or not re.search(r"^    needs:\s*\[[^\]]*\brust\b", late_job.group(1), re.M):
+        problems.append(
+            f"{WORKFLOW.name}: `ios-ui-late` must `needs: rust`, which holds it until a macOS "
+            "runner frees (ov-384); without it the small shard may take a slot a big one waits for"
+        )
+    first, late = timeouts_in_workflow()
+    if first is None or late is None or first != late:
+        problems.append(
+            f"{WORKFLOW.name}: `ios-ui` has timeout-minutes {first} and `ios-ui-late` {late}; "
+            "they must both exist and match, because the budget script reads only `ios-ui`'s"
         )
     for problem in problems:
         print(f"ios-ui-shards: {problem}", file=sys.stderr)

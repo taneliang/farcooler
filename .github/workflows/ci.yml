@@ -1017,25 +1017,25 @@ jobs:
   # simulator and nothing else. A live-runner test that slipped into a shard
   # would skip with "NO LIVE RUNNER:", and the script turns that red.
   #
-  # Four shards since ov-301, at about 12 minutes of tests each; the seconds
-  # per class are in scripts/ios-ui-shards.py. Each shard now runs the
-  # products the `ios` job built (`test-without-building`), so its overhead
-  # is the download, the boot and the first launch, not a compile. The
-  # history, for the next rebalance: three shards, so none was the slowest
-  # job in CI by a distance. Measured
-  # from run 37250352430 (main at adc85e94, 4 Oct), where the two-shard split
-  # put 927 s of tests (45 tests) in `shell` and 1,842 s (20 classes) in
-  # `phone`; the phone job then hit its 40-minute limit with every test
-  # passing. Per class, the slow ones were PlanUITests 372 s, ShellGestureTests
-  # 285 s, WorkspaceScreenTests 196 s, ActionFailureTests 190 s,
-  # FirstRunUITests 167 s and AgentEmptyStateTests 157 s. Before the tests
-  # start, a shard spends about 3 minutes on setup (Rust frameworks 65 s,
-  # project, boot 60 s) and about 5.5 minutes compiling the test bundle
-  # inside the test step, so about 9 minutes of overhead. Each shard now holds
-  # about 15 minutes of tests (shell 927 s, phone 920 s, phone2 922 s), so
-  # expect about 24 minutes per job; 40 is the backstop, not the plan. Move a
-  # class by its measured seconds when a shard's tests pass 15 minutes.
-  # The iOS job above runs in 3 to 5 (last 12 green runs); its 15 stands.
+  # Four shards since ov-301; the seconds per class are in
+  # scripts/ios-ui-shards.py. Each runs the products the `ios` job built
+  # (`test-without-building`), so its overhead is the download, the boot and
+  # the first launch, not a compile: about 7 minutes a shard, measured in the
+  # last ten runs on main. 40 is the backstop, not the plan, and the budget
+  # job above goes red at 75% of it.
+  #
+  # WHY FOUR JOBS IN TWO PLACES (ov-384). The account has five macOS runners.
+  # At the start CI asks for three (`rust` on macOS, `swift`, `ios`), and when
+  # `ios` ends after about five minutes four shards ask for a fourth, fifth,
+  # sixth and seventh. Two slots are free, not four, and which two shards got
+  # them was arbitrary, so the last started when Rust's macOS leg ended, at
+  # about 16 minutes, and ran 27 minutes: 43 to 52 minutes from the push.
+  # Four equal shards cannot fit that. So three shards, `shell`, `agent` and
+  # `phone`, start as soon as `ios` ends and are the big ones, and the fourth,
+  # `phone2` in `ios-ui-late` below, is the small one and is held until `rust`
+  # ends, which is when a slot frees. They end together, near 35 minutes. The
+  # sizes come from the measured seconds in scripts/ios-ui-shards.py.
+  # (Measured in .claude/agent/reports/ov-301/queueing.md.)
   #
   # `!cancelled()` and not the implied `success()`: a red `ios` job that
   # still uploaded its products (one of its script tests failed after the
@@ -1050,86 +1050,36 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # scripts/ios-ui-shards.py --check fails when this list and its
-        # SHARDS disagree. Four since ov-301: PagesUITests alone takes about
-        # eleven minutes, and three shards ran `phone` into the 40-minute limit.
-        shard: [shell, agent, phone, phone2]
+        # With `ios-ui-late`'s shard, these are SHARDS in
+        # scripts/ios-ui-shards.py, whose `--check` fails when the two
+        # disagree. The big ones; see the comment above.
+        shard: [shell, agent, phone]
     steps:
-      - name: Check the runner has Xcode 27
-        run: |
-          xcodebuild -version
-          xcodebuild -version | head -1 | grep -q '^Xcode 27\.'
-      # Only the scripts: the app comes from the `ios` job.
+      # Only the scripts, and the action below: the app comes from the `ios`
+      # job.
       - uses: actions/checkout@v4
-      - name: Download the products the iOS job built
-        uses: actions/download-artifact@v4
+      - uses: ./.github/actions/ios-ui-shard
         with:
-          name: ios-ui-products
-          path: ${{ runner.temp }}
-      - name: Unpack them
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/ios-dd"
-          tar -C "$RUNNER_TEMP/ios-dd" -xf "$RUNNER_TEMP/ios-ui-products.tar"
-          runs=("$RUNNER_TEMP"/ios-dd/Products/*.xctestrun)
-          [ "${#runs[@]}" -eq 1 ] && [ -f "${runs[0]}" ] || {
-            echo "expected one .xctestrun in the iOS job's products, found: ${runs[*]}" >&2; exit 1; }
-          echo "XCTESTRUN=${runs[0]}" >> "$GITHUB_ENV"
-          echo "Running ${runs[0]}"
+          shard: ${{ matrix.shard }}
 
-      # By UDID, so the destination cannot be ambiguous. `iPhone 17` on the
-      # newest iOS runtime when the image has one — every local timing and
-      # every layout-sensitive assertion (ShellGestureTests, DynamicTypeTests)
-      # was measured on it — and otherwise the first iPhone on that runtime,
-      # said out loud. No iPhone at all is a hard stop with the list printed.
-      - name: Pick a simulator
-        run: |
-          pick=$(xcrun simctl list devices available -j | python3 -c '
-          import json, sys
-          devices = json.load(sys.stdin)["devices"]
-          def version(runtime):
-              tail = runtime.rsplit(".", 1)[-1]
-              return [int(p) for p in tail.split("-")[1:] if p.isdigit()]
-          ios = sorted((r for r in devices if ".SimRuntime.iOS-" in r), key=version, reverse=True)
-          for runtime in ios:
-              phones = [d for d in devices[runtime] if d["name"].startswith("iPhone")]
-              if not phones:
-                  continue
-              exact = [d for d in phones if d["name"] == "iPhone 17"]
-              chosen = (exact or phones)[0]
-              print(chosen["udid"], "exact" if exact else "fallback", chosen["name"], runtime)
-              sys.exit()
-          ')
-          if [ -z "$pick" ]; then
-            xcrun simctl list devices available
-            echo "No available iPhone simulator on this runner." >&2
-            exit 1
-          fi
-          read -r udid how rest <<< "$pick"
-          if [ "$how" = fallback ]; then
-            echo "::warning::No iPhone 17 on this runner; using $rest. Local timings and layouts were measured on iPhone 17."
-          fi
-          echo "Simulator: $rest ($udid)"
-          echo "SIMULATOR_ID=$udid" >> "$GITHUB_ENV"
-
-      # Booted, and waited for, in a step of its own, so the first test does
-      # not pay for the boot inside its probe's timeout. A first launch after
-      # an install has still taken over a minute, which is what each test's
-      # `launchDrawn` (180 s for the first frame) is for.
-      - name: Boot the simulator
-        run: |
-          xcrun simctl boot "$SIMULATOR_ID"
-          xcrun simctl bootstatus "$SIMULATOR_ID" -b
-
-      # The script, never xcodebuild directly: it fails a run where every test
-      # skipped, and one where a test skipped for want of a runner. XCTESTRUN,
-      # set above, makes it `test-without-building` against those products.
-      - name: Run the runnerless UI tests
-        run: |
-          # The class list is split into arguments on purpose.
-          # shellcheck disable=SC2046
-          SKIP_TESTING="$(./scripts/ios-ui-shards.py --skip)" \
-            ./scripts/ios-ui-tests.sh $(./scripts/ios-ui-shards.py ${{ matrix.shard }})
+  # The fourth shard, the small one, held until `rust` ends. Not a matrix
+  # entry of `ios-ui` because `needs` is per job. `!cancelled()` again: a red
+  # `rust` must not stop the app's UI tests from running. It waits for both of
+  # `rust`'s legs; the Linux one ends first, so the wait is the macOS leg's.
+  # Its name is the one the budget script reads (scripts/ios-ui-shard-budget.py)
+  # and its timeout must equal `ios-ui`'s, which `ios-ui-shards.py --check`
+  # holds it to.
+  ios-ui-late:
+    name: iOS UI (phone2)
+    needs: [ios-ui-plan, ios, rust]
+    if: ${{ !cancelled() && needs.ios-ui-plan.outputs.run == 'true' }}
+    runs-on: xcode-27
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/ios-ui-shard
+        with:
+          shard: phone2
 
   android:
     name: Android

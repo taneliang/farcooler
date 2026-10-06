@@ -81,6 +81,7 @@ PATTERNS = [
     r"scripts/ios-ui-plan\.py$",
     r"scripts/build-ios-frameworks\.sh$",
     r"\.github/workflows/ci\.yml$",
+    r"\.github/actions/ios-ui-shard/",
 ]
 
 
@@ -212,6 +213,7 @@ def self_test():
         "scripts/ios-ui-plan.py",
         "scripts/build-ios-frameworks.sh",
         ".github/workflows/ci.yml",
+        ".github/actions/ios-ui-shard/action.yml",
     ]
     for sample in SAMPLES:
         expect(f"{sample} is in the path set", bool(RELEVANT.match(sample)), True)
