@@ -795,7 +795,7 @@ impl HookIngress {
             // the mark.
             let session = f.session_id.as_deref();
             if let Some(session) = session {
-                self.asks.heard(session, is_gate(hook.agent, &hook.event));
+                self.asks.heard(session, fence::raises_dialog(hook.agent, &hook.event, &hook.payload));
             }
             if is_fence(hook.agent, &hook.event) {
                 fence::answer(&self.asks, session, &hook.payload, &mut write).await?;
@@ -826,7 +826,7 @@ impl HookIngress {
             };
             // A turn cannot end or begin with claude's dialog up, so whatever
             // was asked on this pane has been answered at the keyboard.
-            if hook.agent == Agent::Claude && matches!(hook.event.as_str(), "Stop" | "UserPromptSubmit") {
+            if hook.agent == Agent::Claude && matches!(hook.event.as_str(), "Stop" | "StopFailure" | "UserPromptSubmit") {
                 self.asks.turn_boundary(terminal);
             }
             self.start_transcript_tail(terminal, hook.agent, &f);

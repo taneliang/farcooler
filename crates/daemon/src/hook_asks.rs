@@ -37,9 +37,17 @@
 //! answer. The mid-turn Enter takes the same lock, checks the mark, and holds
 //! the lock until its key has landed (`answer_wake::mid_turn`). So an Enter
 //! and a dialog can't overlap: whichever takes the lock first finishes
-//! first. `PostToolUse`, `PostToolUseFailure`, `Stop` and `UserPromptSubmit`
-//! end the mark (`tool_ended`); a turn starting or ending has no tool call
-//! in flight.
+//! first. `PostToolUse` and `PostToolUseFailure` end the mark
+//! (`tool_ended`). A turn's boundary (`UserPromptSubmit`, `Stop`,
+//! `StopFailure`) ends the main thread's calls, since a turn starting or
+//! ending has none in flight; but not a subagent's (ov-364), since a
+//! background subagent keeps calling tools after the turn that launched it
+//! ends. Its calls end with its `PostToolUse`, its `SubagentStop`, or, past
+//! `SUBAGENT_CALL_KEPT`, the next boundary.
+//!
+//! Calls are told apart by `tool_use_id`. A claude that sends none gets one
+//! unnamed mark that only a turn boundary ends, so it is typed into mid-turn
+//! only before its first tool call of the turn.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -144,9 +152,9 @@ struct Heard {
     at: Instant,
     gate: Option<Instant>,
     /// The calls a `PreToolUse` came for and no end yet, by `tool_use_id`
-    /// (`""` for one that named none). A set, since calls run side by side:
+    /// (`""` for one that named none). Keyed, since calls run side by side:
     /// a subagent's, parallel reads; one call's end says nothing of another.
-    calls: std::collections::HashSet<String>,
+    calls: HashMap<String, Call>,
     /// A turn began or ended (`UserPromptSubmit`, `Stop`) since this daemon
     /// started: before that, a call from before the start may be in flight
     /// unseen, so the session isn't typed into mid-turn.
@@ -154,6 +162,23 @@ struct Heard {
     /// The fence's lock.
     fence: Arc<tokio::sync::Mutex<()>>,
 }
+
+/// One tool call in flight.
+#[derive(Debug, Clone)]
+struct Call {
+    /// The subagent making it (the hook's `agent_id`), or `None` for the
+    /// main thread.
+    agent: Option<String>,
+    since: Instant,
+}
+
+/// How long a subagent's call outlives turn boundaries with no end heard.
+/// Its `PostToolUse` or its agent's `SubagentStop` normally ends it first;
+/// this bounds one whose end never came (an agent killed mid-call), which
+/// would otherwise keep its session busy until the daemon restarts. A call
+/// this old is long past any dialog of its own: claude draws one before the
+/// tool runs, and the screen check covers one still up.
+pub const SUBAGENT_CALL_KEPT: Duration = Duration::from_secs(10 * 60);
 
 /// The longest a `PreToolUse` waits on the fence's lock. Above the longest
 /// the mid-turn Enter can hold it (`answer_wake::mid_turn::LONGEST_FENCE`),
@@ -196,7 +221,7 @@ impl HookAsks {
         let heard = sessions.entry(session.to_string()).or_insert_with(|| Heard {
             at: now,
             gate: None,
-            calls: std::collections::HashSet::new(),
+            calls: HashMap::new(),
             turn_seen: false,
             fence: Arc::default(),
         });
@@ -216,9 +241,21 @@ impl HookAsks {
     /// back the fence its answer waits for. `None` for a session never heard
     /// from.
     pub fn mark_tool_starting(&self, session: &str, call: Option<&str>) -> Option<Arc<tokio::sync::Mutex<()>>> {
+        self.mark_call(session, call, None)
+    }
+
+    /// `mark_tool_starting` for a call `agent` makes: a subagent's, by the
+    /// hook's `agent_id`, or the main thread's for `None`.
+    pub fn mark_call(
+        &self,
+        session: &str,
+        call: Option<&str>,
+        agent: Option<&str>,
+    ) -> Option<Arc<tokio::sync::Mutex<()>>> {
         let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         let heard = sessions.get_mut(session)?;
-        heard.calls.insert(call.unwrap_or_default().to_string());
+        let agent = agent.map(str::to_string);
+        heard.calls.insert(call.unwrap_or_default().to_string(), Call { agent, since: Instant::now() });
         Some(heard.fence.clone())
     }
 
@@ -240,12 +277,36 @@ impl HookAsks {
         }
     }
 
-    /// A turn began or ended in `session`: no call is in flight, and the
-    /// session has been seen at a boundary since this daemon started.
+    /// A turn began or ended in `session`: the main thread has no call in
+    /// flight, and the session has been seen at a boundary since this daemon
+    /// started. A subagent's named call stays, unless it's older than
+    /// `SUBAGENT_CALL_KEPT`: a background subagent works on past its turn.
     pub fn turn_bounded(&self, session: &str) {
         if let Some(heard) = self.sessions.lock().unwrap_or_else(|e| e.into_inner()).get_mut(session) {
-            heard.calls.clear();
+            let now = Instant::now();
+            heard.calls.retain(|id, call| {
+                !id.is_empty() && call.agent.is_some() && now.duration_since(call.since) < SUBAGENT_CALL_KEPT
+            });
             heard.turn_seen = true;
+        }
+    }
+
+    /// The subagent `agent` in `session` stopped (`SubagentStop`): none of
+    /// its calls is in flight any more.
+    pub fn subagent_ended(&self, session: &str, agent: &str) {
+        if let Some(heard) = self.sessions.lock().unwrap_or_else(|e| e.into_inner()).get_mut(session) {
+            heard.calls.retain(|_, call| call.agent.as_deref() != Some(agent));
+        }
+    }
+
+    /// Age every call in flight in `session` by `by`, for tests of
+    /// `SUBAGENT_CALL_KEPT`.
+    #[cfg(test)]
+    fn age_calls(&self, session: &str, by: Duration) {
+        if let Some(heard) = self.sessions.lock().unwrap_or_else(|e| e.into_inner()).get_mut(session) {
+            for call in heard.calls.values_mut() {
+                call.since = call.since.checked_sub(by).expect("an instant that far back");
+            }
         }
     }
 
@@ -1028,6 +1089,37 @@ mod tests {
         assert!(asks.tool_in_flight("s1"), "a call with no id ends only with its turn");
         asks.turn_bounded("s1");
         assert!(!asks.tool_in_flight("s1") && asks.quiet_mid_turn("s1"));
+    }
+
+    /// ov-364: a background subagent calls tools after the turn that
+    /// launched it ends, so a turn boundary keeps a subagent's named calls.
+    /// They end with their own `PostToolUse`, their agent's `SubagentStop`,
+    /// or a boundary once they're `SUBAGENT_CALL_KEPT` old. Not a call that
+    /// names no id, which nothing else could end.
+    #[tokio::test]
+    async fn a_subagents_call_outlives_the_turns_end() {
+        let (asks, _) = ledger();
+        asks.heard("s1", false);
+        asks.mark_call("s1", Some("main"), None);
+        asks.mark_call("s1", Some("bg-1"), Some("a1"));
+        asks.mark_call("s1", Some("bg-2"), Some("a2"));
+        asks.mark_call("s1", None, Some("a2"));
+        asks.turn_bounded("s1");
+        assert!(asks.tool_in_flight("s1"), "the turn's Stop ended a background subagent's calls");
+        asks.tool_ended("s1", Some("bg-1"));
+        assert!(asks.tool_in_flight("s1"), "a2's call is still in flight");
+        asks.subagent_ended("s1", "a2");
+        assert!(!asks.tool_in_flight("s1") && asks.quiet_mid_turn("s1"));
+        asks.subagent_ended("unheard", "a2");
+
+        // One whose end never came is let go at a boundary, in time.
+        asks.mark_call("s1", Some("bg-3"), Some("a3"));
+        asks.turn_bounded("s1");
+        assert!(asks.tool_in_flight("s1"));
+        asks.age_calls("s1", SUBAGENT_CALL_KEPT);
+        assert!(asks.tool_in_flight("s1"), "aged out without a boundary");
+        asks.turn_bounded("s1");
+        assert!(!asks.tool_in_flight("s1"), "a call whose end never came kept the session busy");
     }
 
     /// Before a turn boundary since this daemon started, a session isn't

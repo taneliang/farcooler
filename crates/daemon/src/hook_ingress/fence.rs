@@ -7,6 +7,8 @@
 //! which `farcooler hook` honors past its usual 400 ms; the Enter's own
 //! deadline lets go well before that (`answer_wake::mid_turn::LONGEST_FENCE`).
 
+use farcooler_agent_hooks::Agent;
+use farcooler_agent_hooks::ask::is_gate;
 use farcooler_agent_hooks::wire::Reply;
 use tokio::net::unix::OwnedWriteHalf;
 
@@ -22,7 +24,8 @@ pub(super) async fn answer(
     write: &mut OwnedWriteHalf,
 ) -> std::io::Result<()> {
     let call = payload["tool_use_id"].as_str();
-    if let Some(fence) = session.and_then(|session| asks.mark_tool_starting(session, call))
+    let agent = payload["agent_id"].as_str();
+    if let Some(fence) = session.and_then(|session| asks.mark_call(session, call, agent))
         && fence.try_lock().is_err()
     {
         write_reply(write, &Reply::hold(FENCE_HOLD)).await?;
@@ -31,11 +34,28 @@ pub(super) async fn answer(
     write_reply(write, &Reply::verdict(None)).await
 }
 
-/// A call's end clears that call; a turn's beginning or end clears them all.
+/// A call's end clears that call; a subagent's end, its calls; a turn's
+/// beginning or end (a failed one's too), the main thread's.
 pub(super) fn ended(asks: &HookAsks, session: &str, event: &str, payload: &serde_json::Value) {
     match event {
         "PostToolUse" | "PostToolUseFailure" => asks.tool_ended(session, payload["tool_use_id"].as_str()),
-        "Stop" | "UserPromptSubmit" => asks.turn_bounded(session),
+        "SubagentStop" => {
+            if let Some(agent) = payload["agent_id"].as_str() {
+                asks.subagent_ended(session, agent);
+            }
+        }
+        "Stop" | "StopFailure" | "UserPromptSubmit" => asks.turn_bounded(session),
         _ => {}
     }
+}
+
+/// Whether this hook says claude is putting up a dialog: a gate
+/// (`wire::GATES`), or a `Notification` for a permission or an MCP
+/// elicitation. Either keeps a mid-turn Enter off the session for a while
+/// (`HookAsks::heard`).
+pub(super) fn raises_dialog(agent: Agent, event: &str, payload: &serde_json::Value) -> bool {
+    is_gate(agent, event)
+        || (agent == Agent::Claude
+            && event == "Notification"
+            && matches!(payload["notification_type"].as_str(), Some("permission_prompt" | "elicitation_dialog")))
 }

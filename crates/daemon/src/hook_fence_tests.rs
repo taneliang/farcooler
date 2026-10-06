@@ -13,11 +13,13 @@ fn ingress_for_test() -> HookIngress {
 /// A hook connection: write `event` for `session`, and read the answer, if
 /// one comes within `patience`.
 fn hook(socket: &Path, event: &str, session: &str, patience: std::time::Duration) -> Option<String> {
-    let line = HookLine {
-        agent: Agent::Claude,
-        event: event.to_string(),
-        payload: serde_json::json!({ "session_id": session, "tool_name": "Bash", "tool_use_id": "toolu_1" }),
-    };
+    let payload = serde_json::json!({ "session_id": session, "tool_name": "Bash", "tool_use_id": "toolu_1" });
+    hook_with(socket, event, payload, patience)
+}
+
+/// `hook`, with the whole payload given.
+fn hook_with(socket: &Path, event: &str, payload: serde_json::Value, patience: std::time::Duration) -> Option<String> {
+    let line = HookLine { agent: Agent::Claude, event: event.to_string(), payload };
     let frame = encode_line(&line).expect("encode");
     let mut stream = std::os::unix::net::UnixStream::connect(socket).expect("connect");
     stream.set_read_timeout(Some(patience)).expect("timeout");
@@ -29,8 +31,8 @@ fn hook(socket: &Path, event: &str, session: &str, patience: std::time::Duration
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_pre_tool_use_is_marked_and_answered_after_the_fence() {
+/// A listening ingress, and its socket once bound. Keep the directory.
+async fn listening() -> (HookIngress, tempfile::TempDir, std::path::PathBuf) {
     let ingress = ingress_for_test();
     let sock = tempfile::tempdir().expect("dir");
     {
@@ -45,6 +47,12 @@ async fn a_pre_tool_use_is_marked_and_answered_after_the_fence() {
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
+    (ingress, sock, socket)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_pre_tool_use_is_marked_and_answered_after_the_fence() {
+    let (ingress, _sock, socket) = listening().await;
     let asks = ingress.asks().clone();
     let patience = std::time::Duration::from_secs(2);
 
@@ -104,4 +112,68 @@ async fn a_pre_tool_use_is_marked_and_answered_after_the_fence() {
         crate::watch::answer_wake::mid_turn::LONGEST_FENCE < crate::hook_asks::FENCE_HOLD,
         "an Enter can hold the fence past the hook's hold"
     );
+}
+
+/// Send one hook, hang up our side, and wait for the daemon to close its
+/// own: it acts on a frame before it reads the next, so the hook's effect is
+/// in by then.
+async fn told(socket: &Path, event: &str, payload: serde_json::Value) {
+    let socket = socket.to_path_buf();
+    let event = event.to_string();
+    tokio::task::spawn_blocking(move || {
+        let line = HookLine { agent: Agent::Claude, event, payload };
+        let mut stream = std::os::unix::net::UnixStream::connect(&socket).expect("connect");
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).expect("timeout");
+        std::io::Write::write_all(&mut stream, encode_line(&line).expect("encode").as_bytes()).expect("write");
+        stream.shutdown(std::net::Shutdown::Write).expect("shutdown");
+        let mut rest = String::new();
+        let _ = std::io::Read::read_to_string(&mut stream, &mut rest);
+    })
+    .await
+    .unwrap();
+}
+
+/// Poll `asks` until `f` holds, or say it never did.
+async fn until(f: impl Fn() -> bool) -> bool {
+    for _ in 0..400 {
+        if f() {
+            return true;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    false
+}
+
+/// ov-364, over the socket: a background subagent's call outlives the
+/// turn's `Stop` and ends with its `SubagentStop`; a failed turn's
+/// `StopFailure` ends the main thread's call as `Stop` does; and a
+/// `Notification` for a permission is a gate just begun.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_subagent_and_failure_hooks_move_the_fence() {
+    let (ingress, _sock, socket) = listening().await;
+    let asks = ingress.asks().clone();
+    let s = |extra: serde_json::Value| {
+        let mut p = serde_json::json!({ "session_id": "s1", "tool_name": "Bash" });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        p
+    };
+
+    told(&socket, "UserPromptSubmit", s(serde_json::json!({}))).await;
+    told(&socket, "PreToolUse", s(serde_json::json!({ "tool_use_id": "sub_1", "agent_id": "a1" }))).await;
+    assert!(asks.tool_in_flight("s1"));
+    told(&socket, "Stop", s(serde_json::json!({}))).await;
+    assert!(asks.tool_in_flight("s1"), "a background subagent's call ended with the turn");
+    told(&socket, "SubagentStop", s(serde_json::json!({ "agent_id": "a1" }))).await;
+    assert!(until(|| !asks.tool_in_flight("s1")).await, "its SubagentStop left its call in flight");
+
+    told(&socket, "UserPromptSubmit", s(serde_json::json!({}))).await;
+    told(&socket, "PreToolUse", s(serde_json::json!({ "tool_use_id": "main_1" }))).await;
+    told(&socket, "StopFailure", s(serde_json::json!({ "error": "rate_limit" }))).await;
+    assert!(until(|| !asks.tool_in_flight("s1")).await, "a failed turn left its call in flight");
+
+    assert!(until(|| asks.quiet_mid_turn("s1")).await);
+    told(&socket, "Notification", s(serde_json::json!({ "notification_type": "idle_prompt" }))).await;
+    assert!(asks.quiet_mid_turn("s1"), "an idle notice is no dialog");
+    told(&socket, "Notification", s(serde_json::json!({ "notification_type": "permission_prompt" }))).await;
+    assert!(until(|| !asks.quiet_mid_turn("s1")).await, "a permission notice is a gate begun");
 }

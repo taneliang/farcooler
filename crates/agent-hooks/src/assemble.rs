@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 
-use farcooler_agent_core::event::{AgentEvent, EndReason, Role};
+use farcooler_agent_core::event::{AgentEvent, EndReason, Role, classify_error};
 
 use crate::Agent;
 
@@ -109,6 +109,23 @@ impl MessageAssembler {
                 out
             }
 
+            // Claude's turn that failed (ov-364): an API error ends it with
+            // this hook instead of `Stop`, so without it the turn would never
+            // end. `error` is the API's word (`authentication_failed`);
+            // `last_assistant_message` is the notice claude showed for it.
+            (Agent::Claude, "StopFailure") => {
+                let code = payload.get("error").and_then(|v| v.as_str());
+                let detail = payload
+                    .get("last_assistant_message")
+                    .and_then(|v| v.as_str())
+                    .filter(|d| !d.is_empty())
+                    .or(code)
+                    .unwrap_or_default()
+                    .to_string();
+                let kind = classify_error(code, None, &detail);
+                vec![AgentEvent::TurnEnded { reason: EndReason::Failed { kind, detail } }]
+            }
+
             _ => Vec::new(),
         }
     }
@@ -188,6 +205,7 @@ pub const CONSUMED: &[(Agent, &str)] = &[
     (Agent::Claude, "MessageDisplay"),
     (Agent::Claude, "UserPromptSubmit"),
     (Agent::Claude, "Stop"),
+    (Agent::Claude, "StopFailure"),
     (Agent::Codex, "UserPromptSubmit"),
     (Agent::Codex, "Stop"),
     (Agent::Cursor, "beforeSubmitPrompt"),
@@ -489,14 +507,35 @@ mod tests {
         out
     }
 
+    /// A failed turn ends, failed, with the kind its `error` names and the
+    /// notice claude showed. Recorded on 2.1.290 with a revoked login.
+    #[test]
+    fn a_stop_failure_ends_the_turn_failed() {
+        let mut a = MessageAssembler::new();
+        let payload = serde_json::json!({
+            "hook_event_name": "StopFailure",
+            "error": "authentication_failed",
+            "last_assistant_message": "OAuth token revoked · Please run /login",
+        });
+        assert_eq!(
+            a.accept(Agent::Claude, "StopFailure", &payload),
+            vec![AgentEvent::TurnEnded {
+                reason: EndReason::Failed {
+                    kind: farcooler_agent_core::event::FailureKind::Auth,
+                    detail: "OAuth token revoked · Please run /login".to_string(),
+                }
+            }]
+        );
+    }
+
     /// The trap this test exists to avoid: a pattern that has stopped
     /// matching anything compares empty-set to empty-set and passes. So the
     /// extracted count is checked against a literal BEFORE it is compared to
     /// `CONSUMED` at all -- a scraper reading nothing fails here, loudly,
     /// rather than at a silently-vacuous equality below.
     ///
-    /// `accept`'s match has exactly seven `(agent, event)` heads as of this
-    /// writing: `MessageDisplay`/`UserPromptSubmit`/`Stop` for claude,
+    /// `accept`'s match has exactly eight `(agent, event)` heads as of this
+    /// writing: `MessageDisplay`/`UserPromptSubmit`/`Stop`/`StopFailure` for claude,
     /// `UserPromptSubmit`/`Stop` for codex, `beforeSubmitPrompt`/`stop` for
     /// cursor. Update this literal by hand, deliberately, the one time this
     /// test SHOULD need editing: when an arm is added or removed. Every
@@ -504,7 +543,7 @@ mod tests {
     /// drift is the bug.
     #[test]
     fn consumed_matches_accepts_own_match_arms() {
-        const EXPECTED_ARM_COUNT: usize = 7;
+        const EXPECTED_ARM_COUNT: usize = 8;
 
         let source = include_str!("assemble.rs");
         let body = accept_match_body(source);

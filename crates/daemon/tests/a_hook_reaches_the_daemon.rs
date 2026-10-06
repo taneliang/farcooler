@@ -1301,21 +1301,49 @@ async fn a_hook_that_hangs_up_mid_hold_withdraws_its_ask() {
 }
 
 /// A turn cannot end with the dialog up, so a `Stop` means the keyboard
-/// answered, whether or not a screen sample saw it.
+/// answered, whether or not a screen sample saw it. So does a `StopFailure`,
+/// a failed turn's end in place of `Stop` (ov-364).
 #[tokio::test]
 async fn a_stop_from_the_same_session_withdraws_its_held_ask() {
-    let HeldAsk { seen, mut asking, id, socket, _dir, .. } = a_held_ask("/wt/stopped", None).await;
-    send(
-        &socket,
-        &HookLine {
-            agent: Agent::Claude,
-            event: "Stop".to_string(),
-            payload: serde_json::json!({ "session_id": "sess-1" }),
-        },
-    )
-    .await;
-    assert_eq!(asking.line(A_LINE).await.as_deref(), Some("{}\n"));
-    assert_eq!(resolutions(&seen, &id), [""]);
+    for event in ["Stop", "StopFailure"] {
+        let HeldAsk { seen, mut asking, id, socket, _dir, .. } = a_held_ask("/wt/stopped", None).await;
+        send(
+            &socket,
+            &HookLine {
+                agent: Agent::Claude,
+                event: event.to_string(),
+                payload: serde_json::json!({ "session_id": "sess-1" }),
+            },
+        )
+        .await;
+        assert_eq!(asking.line(A_LINE).await.as_deref(), Some("{}\n"), "{event}");
+        assert_eq!(resolutions(&seen, &id), [""], "{event}");
+    }
+}
+
+/// A failed turn ends, failed, for every client: claude sends `StopFailure`
+/// and no `Stop` (ov-364).
+#[tokio::test]
+async fn a_failed_turn_ends_failed() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, terminal) = store_with_terminal("/wt/failed", "claude", Some("sess-1"));
+    let (socket, seen) = listening(store, &[terminal], dir.path()).await;
+    let line = HookLine {
+        agent: Agent::Claude,
+        event: "StopFailure".to_string(),
+        payload: serde_json::json!({ "session_id": "sess-1", "error": "rate_limit", "last_assistant_message": "API Error: Rate limited" }),
+    };
+    send(&socket, &line).await;
+    let got = eventually(|| seen.lock().unwrap().first().cloned()).await.expect("the failure arrived");
+    assert_eq!(got.0, terminal);
+    assert!(
+        matches!(
+            got.1.as_slice(),
+            [AgentEvent::TurnEnded { reason: farcooler_agent::event::EndReason::Failed { kind: farcooler_agent::event::FailureKind::RateLimited, .. } }]
+        ),
+        "{:?}",
+        got.1
+    );
 }
 
 /// Claude's own questions and its plan approval are not tool permissions. A

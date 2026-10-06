@@ -110,9 +110,10 @@ pub const GATES: &[(Agent, &str)] = &[(Agent::Claude, "PermissionRequest")];
 /// Claude's `PreToolUse` only. claude runs it, and waits for it, before it
 /// draws any permission dialog, `AskUserQuestion` and `ExitPlanMode`
 /// included (measured on 2.1.290: over 25, 10 and 10 dialogs, none drawn
-/// before the hook returned; a hook that sleeps 300 ms delays each by 300 ms). So a daemon pressing Enter in claude's box while it
-/// works holds the same lock from its last check until the key has landed,
-/// and a dialog can't be drawn in between. The installer registers these as
+/// before the hook returned; a hook that sleeps 300 ms delays each by
+/// 300 ms). So a daemon pressing Enter in claude's box while it works holds
+/// the same lock from its last check until the key has landed, and a dialog
+/// can't be drawn in between. The installer registers these as
 /// waiting hooks (`--gating`) like the gates.
 pub const FENCES: &[(Agent, &str)] = &[(Agent::Claude, "PreToolUse")];
 

@@ -86,15 +86,27 @@ const CLAUDE_CODEX_EVENTS: &[(&str, bool)] = &[
 /// before any permission dialog, and the daemon answers it only once it has
 /// marked a tool call in flight, under the lock the mid-turn Enter holds.
 /// `PostToolUse` and `PostToolUseFailure` end the mark. Each costs a hook's
-/// start and a round trip on every tool call, about 15–20 ms. ov-364, which
-/// registers the tool hooks for the native view, keeps these three as they
-/// are here, or changes `answer_wake::mid_turn` with them.
+/// start and a round trip on every tool call (ov-364's measurements are in
+/// its report). The session projector reads all three as tool rows.
+///
+/// ov-364's four, none waiting, each fired once per subagent or turn, not
+/// per call. `SubagentStart` joins a subagent's row to its `agent_id` in the
+/// projector. `SubagentStop` ends that subagent's calls on the fence and its
+/// row. `StopFailure` is the end of a turn that failed, in place of `Stop`:
+/// the assembler's failed `TurnEnded`, the fence's turn boundary, a held
+/// ask's end, and the projector's failed turn. `Notification` for a
+/// permission or an elicitation counts as a gate begun (`hook_ingress::
+/// fence::raises_dialog`).
 const CLAUDE_ONLY_EVENTS: &[(&str, bool)] = &[
     ("MessageDisplay", false),
     ("PermissionRequest", true),
     ("PreToolUse", true),
     ("PostToolUse", false),
     ("PostToolUseFailure", false),
+    ("SubagentStart", false),
+    ("SubagentStop", false),
+    ("Notification", false),
+    ("StopFailure", false),
 ];
 
 /// What claude's permission hook may take before claude SIGTERMs it, in
@@ -1051,6 +1063,16 @@ mod tests {
                 .unwrap_or_else(|| panic!("claude settings carries a command for {event}"));
             assert!(command.contains(&format!("--agent claude --event {event}")), "{event}: {command}");
             assert_eq!(command.contains("--gating"), *gating, "{event}: {command}");
+        }
+    }
+
+    /// ov-364's four reach every claude pane Far Cooler launches, none waiting.
+    #[test]
+    fn claude_gets_the_subagent_and_failure_hooks() {
+        let settings = claude_settings(Path::new("/tmp/h.sock"));
+        for event in ["SubagentStart", "SubagentStop", "Notification", "StopFailure"] {
+            let command = settings["hooks"][event][0]["hooks"][0]["command"].as_str().unwrap_or_default();
+            assert!(command.contains(&format!("--event {event} ")) && !command.contains("--gating"), "{event}");
         }
     }
 

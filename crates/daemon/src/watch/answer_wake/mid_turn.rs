@@ -8,9 +8,13 @@
 //! call is in flight, a gate just began, or no turn boundary has been seen
 //! since this daemon started (`witness`, `HookAsks::quiet_mid_turn`): an
 //! answer waits, a tell is refused as busy. Calls are tracked by
-//! `tool_use_id`, since they run side by side. Then the race is closed by
-//! ordering, not by timing (`enter`, on a task of its own, so a dropped
-//! caller can't let go of the fence early):
+//! `tool_use_id`, since they run side by side; a claude that sends none is
+//! typed into mid-turn only before its first tool call of the turn, since
+//! only a turn boundary ends a call with no id. A subagent's calls outlive
+//! the turn's `Stop`, as a background subagent does
+//! (`HookAsks::turn_bounded`). Then the race is closed by ordering, not by
+//! timing (`enter`, on a task of its own, so a dropped caller can't let go
+//! of the fence early):
 //! 1. the session's fence is taken (`HookAsks::fence`). Claude runs its
 //!    `PreToolUse` hook, and waits for it, before it draws any permission
 //!    dialog; the daemon answers that hook only after marking the call in
@@ -31,9 +35,9 @@
 //! drawn before its `PreToolUse` hook returned, and a hook that sleeps 300 ms
 //! delays each kind of dialog by 300 ms. A subagent's dialog and an MCP
 //! elicitation weren't measured; the first is a tool call like these, the
-//! second comes inside a call already in flight. A `PreToolUse` waits on the fence up to
-//! `FENCE_HOLD`, above the most the Enter can hold it (`LONGEST_FENCE`), so it
-//! is never answered under an Enter. What's left: a hook that never reaches
+//! second comes inside a call already in flight. A `PreToolUse` waits on
+//! the fence up to `FENCE_HOLD`, above the most the Enter can hold it
+//! (`LONGEST_FENCE`), so it is never answered under an Enter. What's left: a hook that never reaches
 //! the daemon, or a key a killed `tmux` delivers later than `LATE_KEY`. A
 //! dialog in the way leaves the text in the box, unsent.
 //!

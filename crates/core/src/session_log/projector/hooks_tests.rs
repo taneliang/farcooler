@@ -210,3 +210,37 @@ fn hooks_this_build_does_not_read_change_nothing() {
     p.hook("SomethingNew", &json!({}), 3);
     assert_eq!(p.rows(), &before[..]);
 }
+
+fn launch(p: &mut Projection, id: &str, kind: &str) {
+    p.hook("PreToolUse", &json!({"prompt_id":"p1","tool_use_id":id,"tool_name":"Agent","tool_input":{"subagent_type":kind,"description":"Look around","run_in_background":true}}), ms("10:00:01.000"));
+}
+
+#[test]
+fn a_subagent_start_ties_its_agent_to_the_one_untied_row_of_its_type() {
+    let mut p = Projection::new();
+    p.hook("UserPromptSubmit", &json!({"prompt_id":"p1","prompt":"go"}), ms("10:00:00.000"));
+    launch(&mut p, "toolu_a", "Explore");
+    p.hook("SubagentStart", &json!({"prompt_id":"p1","agent_id":"a1","agent_type":"Explore"}), ms("10:00:01.100"));
+    assert_eq!(sub(&p, "sub:toolu_a").agent_id.as_deref(), Some("a1"));
+    // Its own calls now say what it's doing, ahead of its transcript.
+    p.hook("PreToolUse", &json!({"prompt_id":"p1","agent_id":"a1","tool_use_id":"toolu_r","tool_name":"Grep","tool_input":{"pattern":"fence"}}), ms("10:00:02.000"));
+    assert!(sub(&p, "sub:toolu_a").current_action.starts_with("Grep"), "{:?}", sub(&p, "sub:toolu_a").current_action);
+    assert!(p.row("tool:toolu_r").is_none(), "a subagent's call is not the main turn's row");
+    // And its stop ends it.
+    p.hook("SubagentStop", &json!({"prompt_id":"p1","agent_id":"a1"}), ms("10:00:03.000"));
+    assert_eq!(sub(&p, "sub:toolu_a").status, SubagentState::Completed);
+}
+
+#[test]
+fn two_untied_rows_of_one_type_leave_a_subagent_start_to_the_meta_file() {
+    let mut p = Projection::new();
+    p.hook("UserPromptSubmit", &json!({"prompt_id":"p1","prompt":"go"}), ms("10:00:00.000"));
+    launch(&mut p, "toolu_a", "Explore");
+    launch(&mut p, "toolu_b", "Explore");
+    launch(&mut p, "toolu_c", "Plan");
+    p.hook("SubagentStart", &json!({"prompt_id":"p1","agent_id":"a1","agent_type":"Explore"}), ms("10:00:01.100"));
+    assert!(sub(&p, "sub:toolu_a").agent_id.is_none() && sub(&p, "sub:toolu_b").agent_id.is_none());
+    assert!(sub(&p, "sub:toolu_c").agent_id.is_none(), "not a row of another type");
+    p.hook("SubagentStart", &json!({"prompt_id":"p1","agent_id":"c1","agent_type":"Plan"}), ms("10:00:01.200"));
+    assert_eq!(sub(&p, "sub:toolu_c").agent_id.as_deref(), Some("c1"));
+}

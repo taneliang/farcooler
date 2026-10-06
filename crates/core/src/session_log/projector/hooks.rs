@@ -8,10 +8,11 @@
 //! `MessageDisplay` names a message the transcript does not, so the transcript
 //! confirms the oldest waiting prose whose words its own begin with.
 //!
-//! Today's registered set is `SessionStart`, `UserPromptSubmit`, `Stop`,
-//! `MessageDisplay` and `PermissionRequest`. ov-364 registers the tool,
-//! subagent and failure hooks; they are read here already, so registering
-//! them is the whole of that change on this side.
+//! Registered for every claude pane Far Cooler launches: `SessionStart`,
+//! `UserPromptSubmit`, `Stop`, `StopFailure`, `MessageDisplay`,
+//! `PermissionRequest`, `Notification`, the tool hooks (`PreToolUse`,
+//! `PostToolUse`, `PostToolUseFailure`) and the subagent hooks
+//! (`SubagentStart`, `SubagentStop`). `Notification` changes no row.
 //!
 //! Every hook finds its turn by its own `prompt_id`, never by the
 //! transcript's current turn: the hook for turn 2 routinely arrives while the
@@ -121,8 +122,11 @@ impl Projection {
                 self.push(id, Some(turn), true, RowKind::Ask(ask));
             }
             // A subagent's own tool calls carry its `agent_id`; they are its
-            // row's business (from its transcript), not the main turn's.
+            // row's business, not the main turn's. Its transcript counts
+            // them; a `PreToolUse` names what it's doing now, ahead of it.
+            "PreToolUse" if payload.get("agent_id").is_some() => self.subagent_acting(payload, now),
             "PreToolUse" | "PostToolUse" | "PostToolUseFailure" if payload.get("agent_id").is_some() => {}
+            "SubagentStart" => self.subagent_started(payload),
             "PreToolUse" => {
                 let turn = self.hook_turn(payload, now);
                 let block = Block {
@@ -160,6 +164,39 @@ impl Projection {
             _ => {}
         }
         HookEffect::None
+    }
+
+    /// `SubagentStart`: tie its `agent_id` to the `Agent` call's row, when
+    /// exactly one running row of its type is still untied. The hook names
+    /// no `tool_use_id`, so two of one type launched together wait for their
+    /// meta files instead (`join_by_meta`).
+    fn subagent_started(&mut self, payload: &Value) {
+        let Some(agent) = text(payload, "agent_id") else { return };
+        if self.agents.contains_key(agent) {
+            return;
+        }
+        let kind = text(payload, "agent_type");
+        let mut untied = self.rows.iter().enumerate().filter(|(_, row)| {
+            matches!(&row.kind, RowKind::Subagent(s)
+                if s.status == SubagentState::Running
+                    && s.agent_id.is_none()
+                    && kind.is_none_or(|k| s.agent_type == k))
+        });
+        if let (Some((i, _)), None) = (untied.next(), untied.next()) {
+            self.join_agent(agent, i);
+        }
+    }
+
+    /// A subagent's `PreToolUse`: its row's current action, now.
+    fn subagent_acting(&mut self, payload: &Value, now: i64) {
+        let Some(&i) = text(payload, "agent_id").and_then(|a| self.agents.get(a)) else { return };
+        let summary = super::fold::summarize(&input_of(payload));
+        let name = text(payload, "tool_name").unwrap_or("Tool");
+        if let RowKind::Subagent(sub) = &mut self.rows[i].kind {
+            sub.current_action = if summary.is_empty() { name.to_string() } else { format!("{name} {summary}") };
+            sub.last_ms = sub.last_ms.max(Some(now));
+        }
+        self.touch(i);
     }
 
     fn message_display(&mut self, payload: &Value, now: i64) {
