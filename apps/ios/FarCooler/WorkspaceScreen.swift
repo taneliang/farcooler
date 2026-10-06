@@ -37,6 +37,9 @@ struct WorkspaceScreen: View {
     /// Whether the tree is shown over the plan, where two columns leave no
     /// room for it as a third.
     @State private var treeShown = false
+    /// Whether the tree's column is put away where three fit, as a system
+    /// sidebar can be: the plan and the chat take its room.
+    @State private var treeCollapsed = false
     /// The screen's width, for `PadLayout`.
     @State private var width: Double = 0
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -92,8 +95,26 @@ struct WorkspaceScreen: View {
     /// regular width, the phone's segments otherwise.
     private func layout(_ summary: WorkspaceSummary) -> PadLayout {
         PadLayout.of(
-            isPad: UIDevice.current.userInterfaceIdiom == .pad, regularWidth: sizeClass == .regular,
-            width: width, implicit: summary.isImplicit)
+            isPad: Self.isPad, regularWidth: sizeClass == .regular, width: width, implicit: summary.isImplicit)
+    }
+
+    private static var isPad: Bool { UIDevice.current.userInterfaceIdiom == .pad }
+
+    /// The screen, once its width is known on an iPad. Before that, nothing:
+    /// a width of zero is a phone's, and drawing the phone's segments for a
+    /// frame flashed them, and started their reads, on every push into a
+    /// workspace (review 5). A phone has one layout and needs no width.
+    @ViewBuilder
+    private func content(_ summary: WorkspaceSummary) -> some View {
+        Group {
+            if Self.isPad && width == 0 {
+                Color.clear
+            } else {
+                laidOut(summary)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onGeometryChange(for: Double.self) { $0.size.width } action: { width = $0 }
     }
 
     /// One layout for both, so the orchestrator's pane is the same view in
@@ -102,14 +123,19 @@ struct WorkspaceScreen: View {
     /// again, so its session and its place are kept, as ov-66 keeps them
     /// across segments. The columns, when there are any, come before it.
     @ViewBuilder
-    private func content(_ summary: WorkspaceSummary) -> some View {
+    private func laidOut(_ summary: WorkspaceSummary) -> some View {
         let layout = layout(summary)
+        #if DEBUG
+        let _ = PadProbe.drew(layout, onPad: Self.isPad)
+        #endif
         let columns = layout.hasColumns
-        let widths = layout.widths(width)
+        let treeColumn = layout == .threeColumns && !treeCollapsed
+        // Three columns with the tree put away are two, drawn as two are.
+        let widths = (layout == .threeColumns && treeCollapsed ? PadLayout.twoColumns : layout).widths(width)
         let shown = current(summary)
         let sidebarUp = layout == .twoColumns && treeShown
         HStack(spacing: 0) {
-            if layout == .threeColumns {
+            if treeColumn {
                 tree(summary)
                     .frame(width: widths.tree)
                     .separator(.split, edge: .trailing)
@@ -120,10 +146,15 @@ struct WorkspaceScreen: View {
                 }
                 .frame(width: widths.plan)
                 .separator(.split, edge: .trailing)
+                // Under the sidebar shown on demand, as the chat is, header
+                // and all: VoiceOver reads only the sidebar while it's up.
                 .accessibilityHidden(sidebarUp)
             }
             VStack(spacing: 0) {
-            if columns { PadChatHeader(connection: connection, summary: summary) }
+            if columns {
+                PadChatHeader(connection: connection, summary: summary)
+                    .accessibilityHidden(sidebarUp)
+            }
             ZStack {
                 // Mounted whenever the workspace has the segment, whichever is
                 // up, and live only on its own (ov-66, the owner's ruling 2), as
@@ -134,6 +165,8 @@ struct WorkspaceScreen: View {
                 if WorkspaceSegment.offered(implicit: summary.isImplicit).contains(.orchestrator) {
                     let up = columns || shown == .orchestrator
                     OrchestratorSegment(connection: connection, summary: summary, place: place, shown: up)
+                        // In columns, a chat's composer is the column's own.
+                        .environment(\.composerInColumn, columns)
                         .opacity(up ? 1 : 0)
                         .allowsHitTesting(up)
                         .accessibilityHidden(!up || sidebarUp)
@@ -160,13 +193,12 @@ struct WorkspaceScreen: View {
         .overlay(alignment: .leading) {
             if sidebarUp {
                 PadTreeSidebar(width: PadLayout.sidebar(width), close: { treeShown = false }) {
-                    tree(summary)
+                    tree(summary, takesFocus: true)
                 }
             }
         }
         .animation(.snappy, value: sidebarUp)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onGeometryChange(for: Double.self) { $0.size.width } action: { width = $0 }
         // A bar of the navigation bar's own, so the control sits in its
         // material and takes its touches, rather than under its edge.
         .safeAreaBar(edge: .top) {
@@ -183,18 +215,22 @@ struct WorkspaceScreen: View {
             }
         }
         .toolbar {
-            if layout == .twoColumns {
+            if columns {
+                // In both column layouts, so its key is there whichever the
+                // iPad turned to: in two it shows the tree over the plan, in
+                // three it puts the tree's column away and back.
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
-                        treeShown.toggle()
+                        toggleTree(summary)
                     } label: {
                         Label(WorkspaceSegment.tree.title, systemImage: "sidebar.leading")
                     }
-                    .accessibilityValue(treeShown ? "Shown" : "Hidden")
+                    // The system's Show Sidebar key, so it's in the ⌘ overlay.
+                    .keyboardShortcut("s", modifiers: [.command, .control])
+                    .accessibilityValue(treeColumn || sidebarUp ? "Shown" : "Hidden")
                     .accessibilityIdentifier("pad-tree-toggle")
                 }
-            }
-            if columns {
+
                 // The board, a toolbar item on an iPad (design §4), shown in
                 // the plan column; again, the plan.
                 ToolbarItem(placement: .topBarTrailing) {
@@ -203,6 +239,8 @@ struct WorkspaceScreen: View {
                     } label: {
                         Label(WorkspaceSegment.board.title, systemImage: "checklist")
                     }
+                    // The Mac's Show Board key (⌘B is the sidebar's there).
+                    .keyboardShortcut("b", modifiers: [.command, .shift])
                     .accessibilityAddTraits(canvas == .board ? .isSelected : [])
                     .accessibilityIdentifier("pad-board")
                 }
@@ -217,14 +255,23 @@ struct WorkspaceScreen: View {
         #endif
     }
 
+    /// Show or hide the tree: over the plan in two columns, its own column
+    /// in three. The layout is read when the key is pressed, not when the
+    /// button was drawn: the ⌃⌘S key kept the closure from before a turn,
+    /// and in portrait it put away a column that wasn't there (measured).
+    private func toggleTree(_ summary: WorkspaceSummary) {
+        if layout(summary) == .threeColumns { treeCollapsed.toggle() } else { treeShown.toggle() }
+    }
+
     /// The tree as an outline, its pick shown in the plan column.
-    private func tree(_ summary: WorkspaceSummary) -> some View {
-        PadTreeColumn(connection: connection, summary: summary, place: place, canvas: canvas) { pick in
+    private func tree(_ summary: WorkspaceSummary, takesFocus: Bool = false) -> some View {
+        PadTreeColumn(
+            connection: connection, summary: summary, place: place, canvas: canvas, takesFocus: takesFocus
+        ) { pick in
             treeShown = false
             switch pick {
             case .canvas(let chosen): canvas = chosen
             case .open(let route): navigator?.open(route)
-            case .needsYou: navigator?.go([])
             case .none: break
             }
         }
@@ -262,27 +309,35 @@ struct WorkspaceScreen: View {
                 guard let rows = connection.boards[summary.id]?.rows else { return }
                 connection.markAllRead(rows: rows, latest: latest, workspace: summary.id)
             },
-            plan: planHook(summary))
+            plan: planHook(summary, columns: columns))
         .task { await connection.readBoard(summary) }
     }
 
     #if DEBUG
-    /// `pad-layout`: which layout is drawn, for a UI test to tell columns
-    /// from the phone's screen without measuring.
+    /// `pad-layout`: which layout is drawn, and how many times an iPad drew
+    /// the phone's (`PadProbe`), for a UI test to tell columns from the
+    /// phone's screen without measuring.
     private func layoutProbe(_ layout: PadLayout) -> some View {
         Rectangle()
             .fill(Color.white.opacity(0.001))  // style-exempt: DEBUG probe: a near-invisible hit target the UI tests read, not a fill
             .frame(width: 1, height: 1)  // style-exempt: DEBUG probe: a near-invisible hit target the UI tests read, not a fill
             .accessibilityElement()
             .accessibilityIdentifier("pad-layout")
-            .accessibilityValue("\(layout)")
+            .accessibilityValue(PadProbe.value(layout))
     }
     #endif
 
     /// The board's plan (ov-274): what its Plan view reads and where a lane
     /// or theme opens.
-    private func planHook(_ summary: WorkspaceSummary) -> PlanBoardHook {
-        PlanBoardHook(
+    ///
+    /// In the iPad's plan column a theme or lane shows there too, and a
+    /// ruling's Reverse or Discuss stays: the chat it went to is beside it
+    /// (review 8).
+    private func planHook(_ summary: WorkspaceSummary, columns: Bool = false) -> PlanBoardHook {
+        if columns {
+            return connection.planHomeHook(summary, place: place, onOpen: { canvas = .page($0) }, onRuling: { _ in })
+        }
+        return PlanBoardHook(
             summary: summary, place: place, reads: connection.plans, keeps: connection.keepsPlan,
             read: {
                 await connection.readPlan(summary)

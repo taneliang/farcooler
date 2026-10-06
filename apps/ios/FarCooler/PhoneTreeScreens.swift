@@ -87,29 +87,8 @@ struct TreeRootList: View {
     var body: some View {
         let root = PhoneTree.root(connection.oneTree(summary, filter: filter))
         List {
-            if connection.boardRead(summary) == .failed {
-                Section {
-                    Text("Far Cooler couldn’t read this board.")
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("tree-board-failed")
-                    Button(PlanWords.tryAgain) { Task { _ = await connection.readBoard(summary) } }
-                        .accessibilityIdentifier("tree-board-retry")
-                }
-            } else if connection.boards[summary.id] == nil {
-                Section {
-                    ProgressView()
-                        .frame(maxWidth: .infinity)
-                        .accessibilityLabel("Reading the board")
-                        .accessibilityIdentifier("tree-loading")
-                }
-            } else if root.work.isEmpty {
-                Section {
-                    Text(filter == .inReview ? "Nothing is in review." : "No cards yet. The orchestrator files them as it plans the work.")
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("tree-empty")
-                }
-            } else {
-                Section {
+            Section {
+                TreeWorkRows(connection: connection, summary: summary, filter: filter, isEmpty: root.work.isEmpty) {
                     ForEach(root.work) { node in
                         TreeRow(node: node, connection: connection, place: place, failure: $moveFailure)
                     }
@@ -122,13 +101,7 @@ struct TreeRootList: View {
                     }
                 }
             }
-            if connection.daemon?.mayAct ?? true {
-                Section {
-                    Button("New Worktree…") { composing = true }
-                        .accessibilityIdentifier("new-worktree")
-                    Button("From a Branch…") { fromBranch = true }
-                }
-            }
+            TreeWorktreeActions(connection: connection, composing: $composing, fromBranch: $fromBranch)
         }
         .listStyle(.insetGrouped)
         .accessibilityIdentifier("tree-root")
@@ -154,6 +127,57 @@ struct TreeRootList: View {
         }
         .actionFailureAlert($moveFailure)
         .newWorktreeSheets(composing: $composing, fromBranch: $fromBranch, connection: connection, summary: summary)
+    }
+}
+
+/// The tree's work, or why there's none: the board couldn't be read, is
+/// being read, or has no card under the filter. The phone's root and the
+/// iPad's outline both draw it, so they say the same thing.
+struct TreeWorkRows<Rows: View>: View {
+    @ObservedObject var connection: Connection
+    let summary: WorkspaceSummary
+    let filter: OneTreeFilter
+    /// Whether the filter leaves no work to draw.
+    let isEmpty: Bool
+    @ViewBuilder let rows: () -> Rows
+
+    var body: some View {
+        if connection.boardRead(summary) == .failed {
+            Text("Far Cooler couldn’t read this board.")
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("tree-board-failed")
+            Button(PlanWords.tryAgain) { Task { _ = await connection.readBoard(summary) } }
+                .accessibilityIdentifier("tree-board-retry")
+        } else if connection.boards[summary.id] == nil {
+            ProgressView()
+                .frame(maxWidth: .infinity)
+                .accessibilityLabel("Reading the board")
+                .accessibilityIdentifier("tree-loading")
+        } else if isEmpty {
+            Text(filter == .inReview ? "Nothing is in review." : "No cards yet. The orchestrator files them as it plans the work.")
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("tree-empty")
+        } else {
+            rows()
+        }
+    }
+}
+
+/// New Worktree… and From a Branch…, at the tree's foot. Not below a
+/// Control grant.
+struct TreeWorktreeActions: View {
+    @ObservedObject var connection: Connection
+    @Binding var composing: Bool
+    @Binding var fromBranch: Bool
+
+    var body: some View {
+        if connection.daemon?.mayAct ?? true {
+            Section {
+                Button("New Worktree…") { composing = true }
+                    .accessibilityIdentifier("new-worktree")
+                Button("From a Branch…") { fromBranch = true }
+            }
+        }
     }
 }
 

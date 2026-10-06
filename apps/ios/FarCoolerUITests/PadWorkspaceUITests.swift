@@ -48,7 +48,8 @@ final class PadWorkspaceUITests: XCTestCase {
 
     private func layout(_ app: XCUIApplication, is expected: String, _ why: String) {
         let probe = element(app, "pad-layout")
-        let shown = NSPredicate(format: "value == %@", expected)
+        // The probe says the layout, then how often an iPad drew a phone's.
+        let shown = NSPredicate(format: "value BEGINSWITH %@", expected + " ")
         let met = XCTNSPredicateExpectation(predicate: shown, object: probe)
         XCTAssertEqual(
             XCTWaiter.wait(for: [met], timeout: 10), .completed,
@@ -106,6 +107,8 @@ final class PadWorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.buttons["pad-tree-row-Visual language"].exists, "no theme row")
         XCTAssertFalse(app.buttons["segment-tree"].exists, "the phone's segments are up beside the columns")
         XCTAssertFalse(app.buttons["plan-strip"].exists, "the strip is up beside the plan")
+        // Not even for the first frame, before the width was known (review 5).
+        XCTAssertEqual(element(app, "pad-layout").value as? String, "threeColumns phoneOnPad=0")
         keep(app, "three-columns")
     }
 
@@ -126,6 +129,80 @@ final class PadWorkspaceUITests: XCTestCase {
         XCUIDevice.shared.orientation = .landscapeLeft
         layout(app, is: "threeColumns", "landscape again")
         XCTAssertEqual(mount.value as? String, before, "turning back built the chat again")
+    }
+
+    /// **The chat survives the phone's layout and back**, crossing 700 points
+    /// at run time as a Split View's divider does: columns, then compact (a
+    /// window 800 points wide, so only its size class makes it a phone), then
+    /// columns. The pane keeps its mount, and the plan column's pick, kept
+    /// while it wasn't drawn, is back with the columns.
+    func testTheChatAndThePickSurviveCompactWidth() {
+        let app = openBilling(["-pad-compact-wide"])
+        layout(app, is: "threeColumns", "landscape")
+        let mount = element(app, "orchestrator-mount")
+        XCTAssertTrue(mount.waitForExistence(timeout: 10), "no mount probe")
+        let before = mount.value as? String
+        tap(app, "pad-tree-row-Visual language", "the tree")
+        canvasTitle(app, is: "Visual language", "a theme picked")
+        resize(app)
+        layout(app, is: "phone", "compact at 800 points")
+        XCTAssertTrue(app.buttons["segment-tree"].waitForExistence(timeout: 10), "no segments at compact width")
+        XCTAssertEqual(mount.value as? String, before, "compact width built the chat again")
+        resize(app)
+        layout(app, is: "threeColumns", "regular again")
+        XCTAssertEqual(mount.value as? String, before, "the columns built the chat again")
+        canvasTitle(app, is: "Visual language", "the pick, back with the columns")
+    }
+
+    /// The stand-in window to compact width, or back (`PadCompactWindow`).
+    private func resize(_ app: XCUIApplication) {
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(), CFNotificationName("com.farcooler.harness.pad-compact" as CFString),
+            nil, nil, true)
+    }
+
+    /// **A chat's composer is the chat column's own**, in three columns and
+    /// in two: pinned to the column's foot, never the keyboard's accessory,
+    /// which is as wide as the window and lay across the tree and the plan.
+    /// A draft typed in it survives a turn, and with the keyboard up the
+    /// composer rests above it, still inside the column.
+    func testTheComposerIsTheChatColumns() {
+        let app = openBilling(["-phone-orchestrator-chat"])
+        layout(app, is: "threeColumns", "landscape")
+        let chat = element(app, "pad-chat")
+        // The composer by its own two ends: its field and its Send, found
+        // anywhere in the app, so one drawn outside the column is found too.
+        // By label: inside the pane, the pane's identifier is laid over
+        // theirs (`orchestrator-pane`).
+        let send = app.buttons.matching(NSPredicate(format: "label == 'Send'")).firstMatch
+        let field = app.textViews.firstMatch
+        XCTAssertTrue(send.waitForExistence(timeout: 15), "no composer in the chat: \(app.debugDescription)")
+        XCTAssertTrue(field.waitForExistence(timeout: 10), "no field in the composer")
+        func within(_ why: String) {
+            let column = chat.frame
+            let bar = field.frame.union(send.frame)
+            XCTAssertGreaterThanOrEqual(bar.minX, column.minX - 1, "\(why): the composer starts left of the chat (\(bar) in \(column))")
+            XCTAssertLessThanOrEqual(bar.maxX, column.maxX + 1, "\(why): the composer runs past the chat (\(bar) in \(column))")
+            XCTAssertLessThanOrEqual(bar.maxY, column.maxY + 1, "\(why): the composer is below the chat (\(bar) in \(column))")
+            let keyboard = app.keyboards.firstMatch
+            if keyboard.exists, keyboard.frame.height > 100 {
+                // Up: resting on the keyboard, not under it.
+                XCTAssertLessThanOrEqual(bar.maxY, keyboard.frame.minY + 1, "\(why): the keyboard covers the composer")
+                XCTAssertGreaterThan(bar.maxY, keyboard.frame.minY - 80, "\(why): the composer isn't on the keyboard (\(bar), keyboard \(keyboard.frame))")
+            } else {
+                XCTAssertGreaterThan(bar.minY, column.midY, "\(why): the composer isn't at the chat's foot (\(bar) in \(column))")
+            }
+        }
+        within("three columns")
+        field.tap()
+        field.typeText("a draft kept")
+        within("typing in three columns")
+        XCUIDevice.shared.orientation = .portrait
+        layout(app, is: "twoColumns", "portrait")
+        XCTAssertTrue(send.waitForExistence(timeout: 10), "no composer in two columns")
+        within("two columns")
+        XCTAssertEqual(field.value as? String, "a draft kept", "the draft didn't survive the turn")
+        keep(app, "composer-two-columns")
     }
 
     // MARK: Picks
@@ -183,6 +260,60 @@ final class PadWorkspaceUITests: XCTestCase {
         canvasTitle(app, is: "Plan", "the board put away")
     }
 
+    /// **Needs You picked in the tree shows in the plan column** (R-25), as
+    /// the Mac's canvas shows it, rather than leaving the workspace.
+    func testNeedsYouShowsInThePlanColumn() {
+        let app = openBilling()
+        layout(app, is: "threeColumns", "landscape")
+        tap(app, "pad-tree-row-Needs You", "the tree")
+        canvasTitle(app, is: "Needs You", "Needs You picked")
+        XCTAssertTrue(element(app, "pad-needs-you").waitForExistence(timeout: 10), "no Needs You list")
+        XCTAssertTrue(app.navigationBars["Billing"].exists, "Needs You left the workspace")
+        XCTAssertTrue(app.buttons["pad-tree-row-Needs You"].isSelected, "its row isn't marked")
+    }
+
+    /// **The Board's own Plan view keeps its picks in the column** (review 8):
+    /// a lane there shows beside the tree, not over the columns.
+    func testTheBoardsPlanViewKeepsItsPicksInTheColumn() {
+        let app = openBilling()
+        layout(app, is: "threeColumns", "landscape")
+        tap(app, "pad-board", "the toolbar")
+        canvasTitle(app, is: "Board", "the board chosen")
+        let control = app.segmentedControls["plan-switch"]
+        XCTAssertTrue(control.waitForExistence(timeout: 15), "no Tasks | Plan: \(app.debugDescription)")
+        control.buttons["Plan"].tap()
+        let lane = element(app, "plan-lane-plan-phones")
+        XCTAssertTrue(lane.waitForExistence(timeout: 10), "no Next Up lane in the board's plan")
+        lane.tap()
+        canvasTitle(app, is: "plan-phones", "a lane picked in the board's plan")
+        XCTAssertTrue(app.navigationBars["Billing"].exists, "the lane was pushed over the columns")
+    }
+
+    /// **The keys**: ⇧⌘B shows the board and again the plan, ⌥⌘P goes back to
+    /// the plan, and ⌃⌘S, the system's sidebar key, puts the tree's column
+    /// away and back in three columns and shows and hides it in two.
+    func testTheKeysShowTheBoardThePlanAndTheTree() {
+        let app = openBilling()
+        layout(app, is: "threeColumns", "landscape")
+        XCTAssertTrue(element(app, "pad-tree").waitForExistence(timeout: 10))
+        app.typeKey("b", modifierFlags: [.command, .shift])
+        canvasTitle(app, is: "Board", "⇧⌘B")
+        app.typeKey("p", modifierFlags: [.command, .option])
+        canvasTitle(app, is: "Plan", "⌥⌘P")
+        app.typeKey("s", modifierFlags: [.command, .control])
+        XCTAssertFalse(element(app, "pad-tree").waitForExistence(timeout: 2), "⌃⌘S didn't put the tree's column away")
+        app.typeKey("s", modifierFlags: [.command, .control])
+        XCTAssertTrue(element(app, "pad-tree").waitForExistence(timeout: 10), "⌃⌘S didn't bring the tree's column back")
+        XCUIDevice.shared.orientation = .portrait
+        layout(app, is: "twoColumns", "portrait")
+        XCTAssertTrue(app.buttons["pad-tree-toggle"].waitForExistence(timeout: 10), "no tree button")
+        XCTAssertFalse(element(app, "pad-tree").waitForExistence(timeout: 2), "the tree is up unasked in two columns")
+        app.typeKey("s", modifierFlags: [.command, .control])
+        XCTAssertTrue(element(app, "pad-tree").waitForExistence(timeout: 10), "⌃⌘S didn't show the tree")
+        app.typeKey("s", modifierFlags: [.command, .control])
+        XCTAssertFalse(element(app, "pad-tree").waitForExistence(timeout: 2), "⌃⌘S didn't hide the tree")
+    }
+
     // MARK: Two columns
 
     /// **Two columns show the tree on demand**: in portrait the plan and the
@@ -208,6 +339,37 @@ final class PadWorkspaceUITests: XCTestCase {
         XCTAssertTrue(scrim.exists, "no scrim")
         scrim.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
         XCTAssertFalse(element(app, "pad-tree").waitForExistence(timeout: 2), "the scrim left the tree up")
+    }
+
+    /// **Cancel puts the sidebar away**, as the scrim does: ⌘., the iPad's
+    /// cancel key. (Escape is bound to the same `.cancelAction`, but the
+    /// simulator never delivered XCUITest's Escape to the app, so ⌘. is what
+    /// a test can press.) The scrim names what it closes.
+    func testCancelPutsTheSidebarAway() {
+        XCUIDevice.shared.orientation = .portrait
+        let app = openBilling()
+        layout(app, is: "twoColumns", "portrait")
+        tap(app, "pad-tree-toggle", "the toolbar")
+        XCTAssertTrue(element(app, "pad-tree").waitForExistence(timeout: 10), "the tree didn't show")
+        XCTAssertEqual(app.buttons["pad-tree-scrim"].label, "Close Themes")
+        app.typeKey(".", modifierFlags: [.command])
+        XCTAssertFalse(element(app, "pad-tree").waitForExistence(timeout: 2), "⌘. left the tree up")
+    }
+
+    /// **A new layout puts the sidebar away**: turned to landscape the tree
+    /// is a column, and turned back it isn't shown again unasked.
+    func testANewLayoutPutsTheSidebarAway() {
+        XCUIDevice.shared.orientation = .portrait
+        let app = openBilling()
+        layout(app, is: "twoColumns", "portrait")
+        tap(app, "pad-tree-toggle", "the toolbar")
+        XCTAssertTrue(app.buttons["pad-tree-scrim"].waitForExistence(timeout: 10), "the tree didn't show")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        layout(app, is: "threeColumns", "landscape")
+        XCTAssertFalse(app.buttons["pad-tree-scrim"].exists, "the tree is still over the plan in three columns")
+        XCUIDevice.shared.orientation = .portrait
+        layout(app, is: "twoColumns", "portrait again")
+        XCTAssertFalse(element(app, "pad-tree").waitForExistence(timeout: 2), "the tree came back unasked")
     }
 
     // MARK: Compact

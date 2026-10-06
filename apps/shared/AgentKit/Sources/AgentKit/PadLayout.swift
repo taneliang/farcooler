@@ -78,6 +78,9 @@ enum PadCanvas: Hashable, Sendable {
     case plan
     /// The board, the toolbar's item (design §4).
     case board
+    /// This workspace's Needs You, answerable here, as the Mac's canvas
+    /// shows it (ruling R-25).
+    case needsYou
     case page(PhonePlanPage)
     case task(String)
 }
@@ -89,17 +92,16 @@ enum PadPick: Equatable, Sendable {
     /// Open it as the phone does: a worktree, or a terminal in one, covers
     /// the stack, the shell being a screen of its own.
     case open(PhoneRoute)
-    /// The app's Needs You, which is the stack's root.
-    case needsYou
     /// Nothing to show: a subagent, which runs inside the orchestrator, and
     /// the chat column is already that.
     case none
 }
 
 extension PadPick {
-    /// Where `target` goes on an iPad, in `place`'s workspace: a page or a
-    /// task in the plan column, beside the tree it was picked from; a
-    /// worktree or terminal over everything, as on the phone.
+    /// Where `target` goes on an iPad, in `place`'s workspace: a page, a
+    /// task or the workspace's Needs You in the plan column, beside the tree
+    /// it was picked from; a worktree or terminal over everything, as on the
+    /// phone.
     static func of(_ target: OneTreeTarget, in place: PhoneWorkspace) -> PadPick {
         switch target {
         case .plan: .canvas(.plan)
@@ -107,7 +109,7 @@ extension PadPick {
         case .lane(let id): .canvas(.page(.lane(id)))
         case .page(let slot): .canvas(.page(.page(slot)))
         case .task(let id): .canvas(.task(id))
-        case .needsYou: .needsYou
+        case .needsYou: .canvas(.needsYou)
         case .orchestrator: .none
         case .worktree, .terminal: PhoneTree.route(target, in: place).map(PadPick.open) ?? .none
         }
@@ -118,6 +120,7 @@ extension PadPick {
         switch canvas {
         case .plan: .plan
         case .board: nil
+        case .needsYou: .needsYou
         case .page(.theme(let id)): .theme(id)
         case .page(.lane(let id)): .lane(id)
         case .page(.page(let slot)): .page(slot)

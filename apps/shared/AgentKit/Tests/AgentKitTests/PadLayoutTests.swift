@@ -53,8 +53,8 @@ struct PadLayoutTests {
     // MARK: Picks
 
     /// **A pick shows in the plan column**: a theme, a lane, a page, a task
-    /// and the plan itself. A worktree or terminal covers the stack as on the
-    /// phone; Needs You is the stack's root; a subagent goes nowhere.
+    /// the plan itself and the workspace's Needs You (R-25). A worktree or
+    /// terminal covers the stack as on the phone; a subagent goes nowhere.
     @Test func aPickShowsInThePlanColumn() {
         let place = Self.place
         #expect(PadPick.of(.plan, in: place) == .canvas(.plan))
@@ -62,7 +62,7 @@ struct PadLayoutTests {
         #expect(PadPick.of(.lane("l1"), in: place) == .canvas(.page(.lane("l1"))))
         #expect(PadPick.of(.page("p1"), in: place) == .canvas(.page(.page("p1"))))
         #expect(PadPick.of(.task("bil-9"), in: place) == .canvas(.task("bil-9")))
-        #expect(PadPick.of(.needsYou, in: place) == .needsYou)
+        #expect(PadPick.of(.needsYou, in: place) == .canvas(.needsYou))
         #expect(PadPick.of(.orchestrator, in: place) == .none)
         #expect(
             PadPick.of(.worktree("w1"), in: place)
@@ -75,7 +75,7 @@ struct PadLayoutTests {
     /// **The chosen row is the canvas's**: each canvas a pick can show maps
     /// back to the target it came from, and the board, a toolbar item, to none.
     @Test func theChosenRowIsTheCanvass() {
-        for target: OneTreeTarget in [.plan, .theme("t1"), .lane("l1"), .page("p1"), .task("bil-9")] {
+        for target: OneTreeTarget in [.plan, .needsYou, .theme("t1"), .lane("l1"), .page("p1"), .task("bil-9")] {
             guard case .canvas(let canvas) = PadPick.of(target, in: Self.place) else {
                 Issue.record("\(target) isn't a canvas")
                 continue

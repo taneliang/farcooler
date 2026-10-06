@@ -53,7 +53,9 @@ import SwiftUI
 //                            Changes chosen in it (ov-233); implies -phone-keep-stack
 //   -phone-no-kept-focus     with -phone-reopen-worktree, nothing was chosen in it: the rule decides
 //   -pad-compact             on an iPad, the app as a one-third Split View draws it: 375 points
-//                            wide at compact width (ov-348, `PadCompactWindow`)
+//                            wide at compact width (ov-348, `PadCompactWindow`); the
+//                            com.farcooler.harness.pad-compact notice turns it on and off
+//   -pad-compact-wide        that window 800 points wide instead: compact by its size class alone
 //   -phone-files-old         the runner is older than Files: no worktree_files, no read_only_folders
 //   -phone-plan, -phone-plan-fails, -phone-plan-hangs, -phone-plan-timeout N,
 //                            -phone-plan-file <path>: the plan layer (ov-274), see
@@ -141,6 +143,9 @@ struct PhoneHarness: View {
         {
             UserDefaults.standard.removeObject(forKey: key)
         }
+        // The orchestrator chat's draft, which outlives the process: the
+        // last test's words aren't this one's empty composer.
+        PaneDraftStore.clear(pane: HarnessRunner.billingOrchestrator)
         if CommandLine.arguments.contains("-phone-plan-was-chosen") {
             // Plan was chosen on Billing's board before this runner lost the layer.
             PlanChoice.set(
@@ -262,10 +267,12 @@ enum HarnessTaps {
     static let planNews = Notification.Name("com.farcooler.harness.plan-news")
     static let taskNews = Notification.Name("com.farcooler.harness.task-news")
     static let pagesNews = Notification.Name("com.farcooler.harness.pages-news")
+    /// `PadCompactWindow` on or off.
+    static let padCompact = Notification.Name("com.farcooler.harness.pad-compact")
 
     /// Listen, once per process.
     static let listening: Void = {
-        for name in [agent, decision, planNews, taskNews, pagesNews] {
+        for name in [agent, decision, planNews, taskNews, pagesNews, padCompact] {
             CFNotificationCenterAddObserver(
                 CFNotificationCenterGetDarwinNotifyCenter(), nil,
                 { _, _, name, _, _ in

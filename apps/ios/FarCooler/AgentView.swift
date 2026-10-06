@@ -33,6 +33,9 @@ struct AgentView: View {
     @State private var barHeight: CGFloat = 0
     /// A refused switch from the chat back to the terminal.
     @State private var switchFailure: ActionFailure?
+    /// Whether this pane is a column beside others (the iPad's, ov-348),
+    /// where the composer is the column's own rather than the keyboard's.
+    @Environment(\.composerInColumn) private var inColumn
     // MARK: What a conversation's scrolling has to do
     //
     // Rebuilt from these, rather than grown one guard at a time. The behavior
@@ -259,7 +262,15 @@ struct AgentView: View {
     /// Whether the composer docks: this pane is the one at rest. An input
     /// accessory lives in the keyboard's window, over everything, so only the
     /// pane in front may have one.
-    private var isDocked: Bool { isVisible }
+    ///
+    /// Never in a column (ov-348): an input accessory is as wide as the
+    /// window, so on an iPad in columns it lay across the tree and the plan.
+    /// There the composer is pinned to the bottom of this pane instead
+    /// (`inlineComposer`), and the keyboard is the framework's to avoid.
+    private var isDocked: Bool { isVisible && !inColumn }
+
+    /// The composer in the pane, at the foot of the transcript: a column's.
+    private var isInline: Bool { isVisible && inColumn }
 
 
     /// Whether the scroll view is parked at the end of the conversation.
@@ -387,11 +398,17 @@ struct AgentView: View {
                 // here; it is a zero-size representable whose only job is to
                 // exist in the hierarchy so its controller can hold first
                 // responder and vend the bar.
-                .background(
-                    DockedBar(height: $barHeight, isActive: isDocked) { composerStack }
-                        .frame(width: 0, height: 0)
-                        .accessibilityHidden(true)
-                )
+                //
+                // None in a column (ov-348), whose composer is the inline one:
+                // the bar's controller holds first responder to keep its
+                // accessory up, and so took every tap meant for the field.
+                .background {
+                    if !inColumn {
+                        DockedBar(height: $barHeight, isActive: isDocked) { composerStack }
+                            .frame(width: 0, height: 0)
+                            .accessibilityHidden(true)
+                    }
+                }
                 // Automatic avoidance off, and the room made by hand.
                 //
                 // A docked accessory covers the bottom of the screen with the
@@ -425,14 +442,23 @@ struct AgentView: View {
                     // BOTTOM one card above the strip's top edge; the strip
                     // stays exactly `obstruction` tall, so what the transcript
                     // reserves is unchanged.
-                    Color.clear
-                        .frame(height: obstruction)
-                        .overlay(alignment: .top) {
-                            if !pinnedToTail {
-                                jumpToLatest
-                                    .offset(y: -(Self.jumpDiameter + PaneMetrics.card))
+                    //
+                    // In a column the strip is nothing (`obstruction` is zero
+                    // with no bar docked) and the composer itself rests here,
+                    // so the button rides on the composer's top edge instead.
+                    VStack(spacing: 0) {
+                        Color.clear
+                            .frame(height: obstruction)
+                            .overlay(alignment: .top) {
+                                if !pinnedToTail {
+                                    jumpToLatest
+                                        .offset(y: -(Self.jumpDiameter + PaneMetrics.card))
+                                }
                             }
+                        if isInline {
+                            composerStack
                         }
+                    }
                 }
                 // THE HOME INDICATOR, COUNTED ONCE.
                 //
@@ -464,7 +490,11 @@ struct AgentView: View {
                 // is what a floating composer does on this platform — it is a
                 // card over content, not a bar with a floor — but it is a real
                 // change and nobody has looked at it on a device.
-                .ignoresSafeArea(.all, edges: .bottom)
+                //
+                // Not in a column: there the composer is in this pane's own
+                // bottom inset, so the home indicator and the keyboard are
+                // the framework's to keep it clear of, as for any bar.
+                .ignoresSafeArea(isInline ? [] : .all, edges: .bottom)
                 .animation(.spring(response: 0.28, dampingFraction: 0.86), value: pinnedToTail)
                 // How the conversation MEETS the glass over it.
                 //
@@ -2146,6 +2176,8 @@ private struct AgentComposer: View {
     let onSend: (String, [(mime: String, data: Data)]) -> Void
     let onSetMode: (String) -> Void
 
+    /// In the iPad's chat column, inline rather than on the keyboard.
+    @Environment(\.composerInColumn) private var inColumn
     @State private var text = ""
     @State private var cursor = 0
     @State private var mentionResults: [String] = []
@@ -2355,9 +2387,16 @@ private struct AgentComposer: View {
             // catches only what they did not want: the dead space between them,
             // which used to fall through the glass to whatever the conversation
             // had scrolled underneath.
+            //
+            // Not in a column (ov-348). There the card is in the screen's own
+            // window rather than the keyboard's, and this catcher won the
+            // field's own tap: measured on an iPad, tapping the field focused
+            // nothing until it was off. Nothing scrolls under a column's card,
+            // so there is nothing for it to keep the taps from.
             Color.clear
                 .contentShape(Rectangle())
                 .onTapGesture {}
+                .allowsHitTesting(!inColumn)
         )
         // Radius.large (16), and no horizontal inset here: `composerStack` hoisted it,
         // so this card and everything stacked above it share one left edge.
