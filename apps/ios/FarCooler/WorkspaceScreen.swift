@@ -55,6 +55,7 @@ struct WorkspaceScreen: View {
     }
 
     @Environment(\.phoneNavigator) private var navigator
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         Group {
@@ -83,6 +84,13 @@ struct WorkspaceScreen: View {
     private func title(_ summary: WorkspaceSummary) -> String {
         guard summary.isImplicit else { return summary.name }
         return connection.repositoryNames[summary.id] ?? summary.name
+    }
+
+    /// The scheme of what the chrome sits on: the terminal theme's while the
+    /// orchestrator's pane is up, which paints the theme's ground, and nothing
+    /// to say for a segment drawn on the system's own background.
+    private func groundScheme(_ shown: WorkspaceSegment) -> ColorScheme? {
+        shown == .orchestrator ? Themes.shared.current.colorScheme : nil
     }
 
     /// The segment to draw: the one chosen, unless this workspace doesn't
@@ -212,6 +220,10 @@ struct WorkspaceScreen: View {
                         PhonePlanStrip(connection: connection, summary: summary, place: place)
                     }
                 }
+                // Over the orchestrator's pane the ground is the terminal
+                // theme's, so the text on it follows the theme and not the
+                // phone's appearance (ov-342): black on Nord was 1.6:1.
+                .environment(\.colorScheme, groundScheme(shown) ?? scheme)
             }
         }
         .toolbar {
@@ -246,6 +258,9 @@ struct WorkspaceScreen: View {
                 }
             }
         }
+        // The navigation bar's title and Back, over the same ground. Nil
+        // elsewhere, so the other segments keep the system's own.
+        .toolbarColorScheme(columns ? nil : groundScheme(shown), for: .navigationBar)
         .onChange(of: segment) { _, chosen in chosen.remember(for: place) }
         // The sidebar shown on demand is a passing thing: a new layout puts
         // it away, as a pick does.

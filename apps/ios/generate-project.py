@@ -881,6 +881,9 @@ UI_TEST_SOURCES = [
     # its worktrees that every live-runner suite starts with.
     "LiveRunner.swift",
     "WorkspaceScreenTests.swift",
+    # The workspace screen's title, segments and plan strip read over the
+    # terminal theme's ground, measured in pixels (ov-342). Over the canned runner.
+    "WorkspaceChromeTests.swift",
     # The board's Unread section over the canned runner that keeps read state
     # (ov-113): listing, opening a ticket, and Mark All as Read asking first.
     "BoardUnreadUITests.swift",
