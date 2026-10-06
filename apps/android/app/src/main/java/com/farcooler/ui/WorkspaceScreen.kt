@@ -35,6 +35,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -187,7 +188,10 @@ fun WorkspaceScreen(
     if (naming) NewWorktreeSheet(model = model, workspace = workspace, hostId = route.hostId, onDismiss = { naming = false })
 
     // The wide layout (ov-347) has the chat up whichever rail place is selected.
-    val wide = WorkspaceLayout.current(workspace.isImplicit) == WorkspaceLayout.Kind.WIDE
+    val layout = WorkspaceLayout.current(workspace.isImplicit)
+    val wide = layout != WorkspaceLayout.Kind.PHONE
+    // The tree's panel over the plan, where it isn't a column.
+    var treeOpen by rememberSaveable(workspace.id) { mutableStateOf(false) }
     val reading = live?.terminal?.id?.takeIf { (wide || route.tab == WorkspaceTab.ORCHESTRATOR) && onScreen }
     DisposableEffect(reading) {
         if (reading != null) {
@@ -201,8 +205,11 @@ fun WorkspaceScreen(
 
     if (wide) {
         WideWorkspaceFrame(
+            kind = layout,
             destination = WideDestination.of(route.tab),
-            onSelect = { model.selectTab(route, it.tab) },
+            treeOpen = treeOpen,
+            onSelect = { treeOpen = false; model.selectTab(route, it.tab) },
+            onToggleTree = { treeOpen = !treeOpen },
             onBack = onBack,
             onNeedsYou = { model.goHome() },
             topBar = {

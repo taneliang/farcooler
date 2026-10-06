@@ -76,11 +76,15 @@ class WideWorkspaceCaptureTest {
 
     /** What `WorkspaceScreen` does: the frame past 840 dp, the phone's tab and strip below. */
     @Composable
-    private fun Host(destination: WideDestination = WideDestination.PLAN) {
-        if (WorkspaceLayout.current(implicit = false) == WorkspaceLayout.Kind.WIDE) {
+    private fun Host(destination: WideDestination = WideDestination.PLAN, treeOpen: Boolean = false) {
+        val kind = WorkspaceLayout.current(implicit = false)
+        if (kind != WorkspaceLayout.Kind.PHONE) {
             WideWorkspaceFrame(
+                kind = kind,
                 destination = destination,
+                treeOpen = treeOpen,
                 onSelect = {},
+                onToggleTree = {},
                 onBack = {},
                 onNeedsYou = {},
                 topBar = { TopAppBar(title = { Text("Billing") }) },
@@ -115,25 +119,50 @@ class WideWorkspaceCaptureTest {
 
     @Test
     @Config(qualifiers = "w1280dp-h800dp-xhdpi")
-    fun `a tablet shows the rail, the tree, the plan and the chat`() {
+    fun `1280 dp shows the rail, the tree, the plan and the chat`() {
         val tags = drawn { Host() }
         for (tag in listOf("wide-rail", "wide-pane-list", "wide-pane-main", "wide-pane-supporting", "plan-sheet-orchestrator")) {
             assertTrue("$tag is drawn: ${tags.keys}", tag in tags)
         }
         assertFalse("the strip is the phone's", "plan-strip" in tags)
-        // Left to right: rail, tree, plan, chat, with the plan taking what the others leave.
         val order = listOf("wide-rail", "wide-pane-list", "wide-pane-main", "wide-pane-supporting").map { tags.getValue(it).left }
         assertEquals(order.sorted(), order)
-        assertTrue(tags.getValue("wide-pane-main").width > tags.getValue("wide-pane-list").width)
-        assertTrue(tags.getValue("wide-pane-main").width > tags.getValue("wide-pane-supporting").width)
+        // The plan keeps 360 dp or more (xhdpi: 2 px a dp, so 720 px).
+        assertTrue(tags.getValue("wide-pane-main").width >= 360 * 2)
+        // The chat's pane runs to the bottom of the window, where its composer sits.
+        assertEquals(tags.getValue("wide-pane-main").bottom, tags.getValue("wide-pane-supporting").bottom, 1f)
+    }
+
+    @Test
+    @Config(qualifiers = "w1199dp-h800dp-xhdpi")
+    fun `1199 dp folds the tree into the plan place`() {
+        val tags = drawn { Host() }
+        assertFalse("wide-pane-list" in tags)
+        assertTrue("wide-pane-supporting" in tags)
+        assertTrue(tags.getValue("wide-pane-main").width >= 360 * 2)
+    }
+
+    @Test
+    @Config(qualifiers = "w1200dp-h800dp-xhdpi")
+    fun `1200 dp shows the tree as a column`() {
+        val tags = drawn { Host() }
+        assertTrue("wide-pane-list" in tags)
+        assertTrue(tags.getValue("wide-pane-main").width >= 360 * 2)
     }
 
     @Test
     @Config(qualifiers = "w840dp-h700dp-xhdpi")
-    fun `an unfolded foldable at 840 dp is wide`() {
+    fun `840 dp is the rail, the plan and the chat`() {
         val tags = drawn { Host() }
         assertTrue("wide-pane-supporting" in tags)
-        assertTrue("the plan keeps a column of its own", tags.getValue("wide-pane-main").width > 150)
+        assertFalse("wide-pane-list" in tags)
+        assertTrue("the plan keeps 360 dp", tags.getValue("wide-pane-main").width >= 360 * 2)
+        // Opened from the rail's Plan place, the tree is a panel over the plan.
+        val open = drawn { Host(treeOpen = true) }
+        assertTrue("wide-pane-list" in open)
+        assertTrue("wide-tree-scrim" in open)
+        assertTrue(open.getValue("wide-pane-list").left >= open.getValue("wide-pane-main").left)
+        assertTrue(open.getValue("wide-pane-list").right <= open.getValue("wide-pane-main").right)
     }
 
     @Test
@@ -164,15 +193,27 @@ class WideWorkspaceCaptureTest {
 
     @Test
     @Config(qualifiers = "w1280dp-h800dp-xhdpi")
-    fun tablet() = Capture.both("tablet-workspace") { Host() }
+    fun tablet1280() = Capture.both("tablet-1280") { Host() }
 
     @Test
     @Config(qualifiers = "w1280dp-h800dp-xhdpi")
-    fun tabletBoard() = Capture.both("tablet-workspace-board") { Host(WideDestination.BOARD) }
+    fun tablet1280Board() = Capture.both("tablet-1280-board") { Host(WideDestination.BOARD) }
+
+    @Test
+    @Config(qualifiers = "w1000dp-h700dp-xhdpi")
+    fun tablet1000() = Capture.both("tablet-1000") { Host() }
+
+    @Test
+    @Config(qualifiers = "w1000dp-h700dp-xhdpi")
+    fun tablet1000TreeOpen() = Capture.both("tablet-1000-tree-open") { Host(treeOpen = true) }
+
+    @Test
+    @Config(qualifiers = "w840dp-h700dp-xhdpi")
+    fun tablet840() = Capture.both("tablet-840") { Host() }
 
     @Test
     @Config(qualifiers = "w411dp-h891dp-xxhdpi")
-    fun phone() = Capture.both("tablet-workspace-on-phone") { Host() }
+    fun phone() = Capture.both("tablet-phone-width") { Host() }
 
     private fun repositoryFile(relative: String): String {
         var directory: File? = File(System.getProperty("user.dir") ?: ".").absoluteFile

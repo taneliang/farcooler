@@ -2,11 +2,14 @@
 
 package com.farcooler.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Flag
@@ -14,8 +17,10 @@ import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.ViewKanban
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.layout.AnimatedPane
@@ -31,14 +36,19 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
- * Which workspace layout a window gets (ov-347): the phone's tabs, or the wide
- * one with a rail, the tree, the plan and the orchestrator's chat side by side.
+ * Which workspace layout a window gets (ov-347): the phone's tabs, a rail with
+ * the plan and the chat, or all three columns with the tree as well.
  *
- * The line is Material's expanded width, 840 dp. A tablet is past it in either
- * orientation it is held in a hand, and a foldable is past it only unfolded:
- * folded, the window is narrow and this says [Kind.PHONE], which is what the
- * design asks of it. The width read is the WINDOW's, not the screen's, so a
- * tablet in split screen is a phone for as long as it is narrow.
+ * Two lines, both Material's own width breakpoints. At 840 dp (expanded) the
+ * rail, the plan and the chat fit, and a tablet is past it in either
+ * orientation it is held in a hand; a foldable is past it only unfolded.
+ * Folded, the window is narrow and this says [Kind.PHONE]. At 1200 dp (extra
+ * large) the tree fits as a column as well. Between them the tree is folded
+ * into the rail's Plan place, so that the plan keeps at least [MIN_PLAN_DP]
+ * (owner ruling): at 840 dp it gets 440, and at 1200 dp 560.
+ *
+ * The width read is the WINDOW's, not the screen's, so a tablet in split
+ * screen is a phone for as long as it is narrow.
  *
  * A runner without workspaces has no orchestrator and no plan to put beside a
  * tree, so its workspace stays the phone's Board and Worktrees however wide
@@ -48,10 +58,27 @@ object WorkspaceLayout {
     /** Material's expanded window width class begins here. */
     const val EXPANDED_DP = 840
 
-    enum class Kind { PHONE, WIDE }
+    /** Material's extra-large width class begins here: room for the tree as a column. */
+    const val THREE_PANE_DP = 1200
 
-    fun of(widthDp: Int, implicit: Boolean): Kind =
-        if (!implicit && widthDp >= EXPANDED_DP) Kind.WIDE else Kind.PHONE
+    /** What the plan pane is never given less than. */
+    const val MIN_PLAN_DP = 360
+
+    enum class Kind {
+        PHONE,
+
+        /** Rail, plan and chat; the tree opens over the plan from the rail's Plan place. */
+        TWO_PANE,
+
+        /** Rail, tree, plan and chat. */
+        THREE_PANE,
+    }
+
+    fun of(widthDp: Int, implicit: Boolean): Kind = when {
+        implicit || widthDp < EXPANDED_DP -> Kind.PHONE
+        widthDp < THREE_PANE_DP -> Kind.TWO_PANE
+        else -> Kind.THREE_PANE
+    }
 
     /** The current window's, read the way the adaptive library reads it. */
     @Composable
@@ -61,9 +88,9 @@ object WorkspaceLayout {
     }
 }
 
-/** The three panes of the wide workspace, in the scaffold's roles. */
+/** The panes of the wide workspace, in the scaffold's roles. */
 enum class WidePane(val tag: String) {
-    /** The leading column. */
+    /** The leading column, or the panel that opens over the plan. */
     LIST("wide-pane-list"),
 
     /** The middle, taking whatever width the other two leave. */
@@ -77,23 +104,30 @@ enum class WidePane(val tag: String) {
 enum class WideContent { TREE, PLAN, BOARD, CHAT }
 
 /**
- * The rail's two places. The tree and the chat are in both: the rail changes
- * only what the main pane is, which is the plan's home or the board.
+ * The rail's two places. The chat is in both, and the tree is reachable from
+ * both layouts; the rail changes only what the main pane is, which is the
+ * plan's home or the board.
  *
  * Needs You and Back are the rail's own actions rather than places in this
  * workspace, so they aren't here.
  */
 enum class WideDestination(val title: String, val tab: WorkspaceTab) {
-    /** The Orchestrator and Themes tabs both fold into this one: the chat and the tree are always up. */
+    /** The Orchestrator and Themes tabs both fold into this one: the chat and the tree are always reachable. */
     PLAN("Plan", WorkspaceTab.ORCHESTRATOR),
     BOARD("Board", WorkspaceTab.BOARD);
 
-    /** What each pane holds while this destination is selected. */
-    fun contents(): Map<WidePane, WideContent> = mapOf(
-        WidePane.LIST to WideContent.TREE,
-        WidePane.MAIN to if (this == PLAN) WideContent.PLAN else WideContent.BOARD,
-        WidePane.SUPPORTING to WideContent.CHAT,
-    )
+    /**
+     * What each pane holds while this destination is selected, at [kind]. The
+     * chat is always shown. The tree is a column in [WorkspaceLayout.Kind.THREE_PANE]
+     * and, in [WorkspaceLayout.Kind.TWO_PANE], a panel over the plan while
+     * [treeOpen]. The phone has no panes.
+     */
+    fun contents(kind: WorkspaceLayout.Kind, treeOpen: Boolean = false): Map<WidePane, WideContent> = buildMap {
+        if (kind == WorkspaceLayout.Kind.PHONE) return@buildMap
+        if (kind == WorkspaceLayout.Kind.THREE_PANE || treeOpen) put(WidePane.LIST, WideContent.TREE)
+        put(WidePane.MAIN, if (this@WideDestination == PLAN) WideContent.PLAN else WideContent.BOARD)
+        put(WidePane.SUPPORTING, WideContent.CHAT)
+    }
 
     companion object {
         /** The place a remembered or pushed tab lands on a wide screen. */
@@ -102,19 +136,19 @@ enum class WideDestination(val title: String, val tab: WorkspaceTab) {
 }
 
 /**
- * The scaffold's value for the wide layout: every pane expanded. Constant on
- * purpose. The chat is "always shown", and the layout is only used past 840 dp,
- * where the three columns fit; nothing here navigates between panes.
+ * The scaffold's value: the chat and the plan expanded, and the list pane too
+ * only when it is a column. Constant per layout, on purpose: nothing here
+ * navigates between panes.
  */
-internal val WideScaffoldValue = ThreePaneScaffoldValue(
+internal fun wideScaffoldValue(kind: WorkspaceLayout.Kind) = ThreePaneScaffoldValue(
     primary = PaneAdaptedValue.Expanded,
-    secondary = PaneAdaptedValue.Expanded,
+    secondary = if (kind == WorkspaceLayout.Kind.THREE_PANE) PaneAdaptedValue.Expanded else PaneAdaptedValue.Hidden,
     tertiary = PaneAdaptedValue.Expanded,
 )
 
-/** Three horizontal partitions, no gutter between them: each pane is its own surface. */
-internal val WideScaffoldDirective = PaneScaffoldDirective(
-    maxHorizontalPartitions = 3,
+/** Horizontal partitions as many as the columns shown, with no gutter: a separator divides them. */
+internal fun wideScaffoldDirective(kind: WorkspaceLayout.Kind) = PaneScaffoldDirective(
+    maxHorizontalPartitions = if (kind == WorkspaceLayout.Kind.THREE_PANE) 3 else 2,
     horizontalPartitionSpacerSize = 0.dp,
     maxVerticalPartitions = 1,
     verticalPartitionSpacerSize = 0.dp,
@@ -126,11 +160,18 @@ internal val WideScaffoldDirective = PaneScaffoldDirective(
 internal val WideListWidth: Dp = 240.dp
 internal val WideChatWidth: Dp = 320.dp
 
+/** The rail's width, Material's. */
+internal const val WideRailDp = 80
+
 /**
  * The wide workspace's frame: a navigation rail, and beside it Material's
- * list-detail scaffold with the tree as the list pane, the plan (or the
- * board) as the detail, and the orchestrator's chat as the extra pane, which
- * is the supporting pane of the design.
+ * list-detail scaffold with the plan (or the board) as the detail pane and
+ * the orchestrator's chat as the extra pane, which is the supporting pane of
+ * the design. At [WorkspaceLayout.Kind.THREE_PANE] the tree is the list pane;
+ * at [WorkspaceLayout.Kind.TWO_PANE] it is a panel over the plan's leading
+ * edge, opened by tapping the rail's Plan place while it is selected.
+ *
+ * Panes are divided by the theme's separator, drawn as vertical rules.
  *
  * What goes in each pane is [WideDestination.contents]; [content] draws it.
  * The frame knows nothing about connections, so the tests and the captures
@@ -138,15 +179,19 @@ internal val WideChatWidth: Dp = 320.dp
  */
 @Composable
 fun WideWorkspaceFrame(
+    kind: WorkspaceLayout.Kind,
     destination: WideDestination,
+    treeOpen: Boolean,
     onSelect: (WideDestination) -> Unit,
+    onToggleTree: () -> Unit,
     onBack: () -> Unit,
     onNeedsYou: () -> Unit,
     topBar: @Composable () -> Unit,
     modifier: Modifier = Modifier,
     content: @Composable (WideContent) -> Unit,
 ) {
-    val contents = destination.contents()
+    val contents = destination.contents(kind, treeOpen)
+    val columns = kind == WorkspaceLayout.Kind.THREE_PANE
     Row(modifier.fillMaxSize().testTag("wide-workspace")) {
         NavigationRail(
             header = {
@@ -165,7 +210,8 @@ fun WideWorkspaceFrame(
             )
             NavigationRailItem(
                 selected = destination == WideDestination.PLAN,
-                onClick = { onSelect(WideDestination.PLAN) },
+                // Tapping the place that is already up opens the tree, where the tree isn't a column.
+                onClick = { if (destination == WideDestination.PLAN && !columns) onToggleTree() else onSelect(WideDestination.PLAN) },
                 icon = { Icon(Icons.Outlined.AccountTree, contentDescription = null) },
                 label = { Text(WideDestination.PLAN.title) },
                 modifier = Modifier.testTag("wide-rail-plan"),
@@ -178,19 +224,45 @@ fun WideWorkspaceFrame(
                 modifier = Modifier.testTag("wide-rail-board"),
             )
         }
+        VerticalSeparator()
         Column(Modifier.weight(1f).fillMaxHeight()) {
             topBar()
             ListDetailPaneScaffold(
-                directive = WideScaffoldDirective,
-                value = WideScaffoldValue,
+                directive = wideScaffoldDirective(kind),
+                value = wideScaffoldValue(kind),
                 listPane = {
                     AnimatedPane(Modifier.preferredWidth(WideListWidth)) {
-                        Box(Modifier.fillMaxSize().testTag(WidePane.LIST.tag)) { content(contents.getValue(WidePane.LIST)) }
+                        Row(Modifier.fillMaxSize().testTag(WidePane.LIST.tag)) {
+                            Box(Modifier.weight(1f).fillMaxHeight()) { content(contents.getValue(WidePane.LIST)) }
+                            VerticalSeparator()
+                        }
                     }
                 },
                 detailPane = {
                     AnimatedPane {
-                        Box(Modifier.fillMaxSize().testTag(WidePane.MAIN.tag)) { content(contents.getValue(WidePane.MAIN)) }
+                        Row(Modifier.fillMaxSize()) {
+                            Box(Modifier.weight(1f).fillMaxHeight().testTag(WidePane.MAIN.tag)) {
+                                content(contents.getValue(WidePane.MAIN))
+                                // The tree over the plan's leading edge, with a scrim that closes it.
+                                if (!columns && WidePane.LIST in contents) {
+                                    Box(
+                                        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
+                                            .clickable(onClick = onToggleTree).testTag("wide-tree-scrim"),
+                                    )
+                                    Surface(
+                                        modifier = Modifier.width(WideListWidth).fillMaxHeight().testTag(WidePane.LIST.tag),
+                                        tonalElevation = 3.dp,
+                                        shadowElevation = 6.dp,
+                                    ) {
+                                        Row(Modifier.fillMaxSize()) {
+                                            Box(Modifier.weight(1f).fillMaxHeight()) { content(contents.getValue(WidePane.LIST)) }
+                                            VerticalSeparator()
+                                        }
+                                    }
+                                }
+                            }
+                            VerticalSeparator()
+                        }
                     }
                 },
                 extraPane = {

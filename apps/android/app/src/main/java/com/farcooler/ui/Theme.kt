@@ -130,6 +130,12 @@ fun Separator(modifier: Modifier = Modifier) {
     HorizontalDivider(modifier, color = MaterialTheme.colorScheme.outlineVariant)
 }
 
+/** [Separator] turned to stand between side-by-side panes. */
+@Composable
+fun VerticalSeparator(modifier: Modifier = Modifier) {
+    androidx.compose.material3.VerticalDivider(modifier, color = MaterialTheme.colorScheme.outlineVariant)
+}
+
 /**
  * The terminal's typeface.
  *
