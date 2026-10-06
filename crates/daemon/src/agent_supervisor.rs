@@ -342,9 +342,9 @@ impl AgentSupervisor {
             .unwrap_or_default();
 
         if client_epoch != epoch {
-            return (epoch, all);
+            return (epoch, replay_fit::newest_that_fit(all));
         }
-        (epoch, all.into_iter().filter(|e| e.seq >= from_seq).collect())
+        (epoch, replay_fit::newest_that_fit(all.into_iter().filter(|e| e.seq >= from_seq).collect()))
     }
 
     /// Call `f` whenever an ask appears or ends in any terminal's ring.
@@ -779,12 +779,11 @@ impl AgentSupervisor {
             // renumbers from zero every time it restarts, which is what made
             // every cursor in the system a lie after a toggle; the epoch above
             // is what tells a reader that happened, and there is nothing left
-            // here to deduplicate against. A numbering by length would be
-            // renumbered by every trim, and a reader's cursor, which only
-            // moves forward, would then sit past the end of a window that
-            // keeps counting from below it (ov-380). An emptied window starts
-            // at zero because only `Established` empties it, and it moves the
-            // epoch with it.
+            // here to deduplicate against. Numbering by length renumbered
+            // every trim, leaving a reader's forward-only cursor past the end
+            // of a window counting from below it (ov-380). An emptied window
+            // restarts at zero: only `Established` empties it, and it moves
+            // the epoch too.
             let base = entry.last().map_or(0, |last| last.seq + 1);
             renumbered = events
                 .into_iter()
@@ -1623,6 +1622,9 @@ mod tests {
 mod failure;
 #[cfg(test)]
 mod monotonic_seq_tests;
+mod replay_fit;
+#[cfg(test)]
+mod replay_fit_tests;
 mod stranded;
 #[cfg(test)]
 mod stranded_tests;
