@@ -45,7 +45,8 @@ fn old_reader(text: &str) -> Summary {
         }
         let prompt_id = serde_json::from_str::<serde_json::Value>(line)
             .ok()
-            .and_then(|v| Some(v.get("promptSource")?.is_string().then(|| v.get("promptId")?.as_str().map(str::to_string))??));
+            .filter(|v| v.get("promptSource").is_some_and(|s| s.is_string()))
+            .and_then(|v| v.get("promptId")?.as_str().map(str::to_string));
         let repeat_prompt = prompt_id.is_some_and(|p| !prompts_seen.insert(p));
         // Claude's own error report reads to the old reader as prose; the
         // projector makes it the turn's failure instead (see
