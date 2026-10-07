@@ -121,11 +121,17 @@ struct ConfigFile {
 /// Where the config file is, if the environment can say.
 ///
 /// `$FARCOOLER_CONFIG` names the file itself; the others name its directory.
+///
+/// A test binary that names none gets a file of its own under the temp
+/// directory, never this machine's (`test_binary_config`).
 pub fn config_path() -> Option<PathBuf> {
     if let Ok(explicit) = std::env::var("FARCOOLER_CONFIG") {
         if !explicit.trim().is_empty() {
             return Some(PathBuf::from(explicit));
         }
+    }
+    if let Some(isolated) = test_binary_config() {
+        return Some(isolated);
     }
     if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
         if !xdg.trim().is_empty() {
@@ -277,6 +283,25 @@ pub fn load_adapter_names() -> Vec<String> {
         Some(path) => adapter_names_from(&path),
         None => Vec::new(),
     }
+}
+
+/// A config file of the process's own when it is a test binary: one cargo
+/// put in `target/<profile>/deps/`, where only test harnesses live, and
+/// never an installed or built `farcooler` or `farcoolerd`.
+///
+/// `cfg(test)` can't do this: it is set only for the crate under test, and
+/// a daemon or client test reads this crate's `config_path` from a build of
+/// it without the flag. One that ran with no `FARCOOLER_CONFIG` read and
+/// wrote this machine's shared config.toml, whose `[agents] projector`
+/// (ov-372) changed what those tests saw. Debug builds only.
+fn test_binary_config() -> Option<PathBuf> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+    let exe = std::env::current_exe().ok()?;
+    let parent = exe.parent()?;
+    (parent.file_name()? == "deps")
+        .then(|| std::env::temp_dir().join(format!("farcooler-test-config-{}.toml", std::process::id())))
 }
 
 /// The runner's branch prefix, found the same way the registry is.
@@ -585,6 +610,16 @@ fn parse_hex(text: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A test binary reads its own config file, not this machine's.
+    #[test]
+    fn a_test_binary_never_reads_this_machines_config() {
+        let isolated = test_binary_config().expect("a test harness, under target/*/deps");
+        assert!(isolated.starts_with(std::env::temp_dir()), "{isolated:?}");
+        if std::env::var_os("FARCOOLER_CONFIG").is_none() {
+            assert_eq!(config_path(), Some(isolated));
+        }
+    }
 
     fn scratch(tag: &str) -> std::path::PathBuf {
         let p = std::env::temp_dir().join(format!(

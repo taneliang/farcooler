@@ -122,6 +122,9 @@ mod tests {
     /// with the `SessionStart` that would have moved it never seen.
     #[test]
     fn an_open_projector_follows_the_registry_to_a_new_session() {
+        // With the setting off an open projector is let go (ov-372), so on.
+        // Nothing else in this binary reads the flag off.
+        crate::session_projectors::set_shadowing(true);
         let config = tempfile::tempdir().unwrap();
         session(config.path(), "s-one");
         let registry = Registry::new(config.path().to_path_buf(), Box::new(fake::Alive(vec![(4242, None)])));
