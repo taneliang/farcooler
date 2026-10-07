@@ -25,14 +25,14 @@
 //! through the session's fence (`mid_turn`), so it can't land on a dialog;
 //! claude puts the message in its own queue (R-29).
 //!
-//! **The confirmation.** Queued only once claude's transcript has its
-//! `enqueue` record; Sent only once the session's `UserPromptSubmit` hook
-//! names the prompt as a turn of its own. On claude 2.1.290 a message
-//! submitted mid-turn fires that hook too, at once, naming the running
-//! turn's `prompt_id`, so a hook for a turn already named is a queued one
-//! (`HookAsks::prompted`), never a Sent. A session no hook was ever heard
-//! from is confirmed by the prompt's record in the transcript. None of these
-//! within `CONFIRM_SETTLES`: `unconfirmed`.
+//! **The confirmation.** Queued once claude's transcript has its `enqueue`
+//! record, or its `UserPromptSubmit` hook names the prompt in the turn
+//! running; Sent once that hook names it as a turn of its own. On claude
+//! 2.1.290 a message submitted mid-turn fires the hook at once, naming the
+//! running turn's `prompt_id`, so a hook for a turn already named is a
+//! queued one (`HookAsks::prompted`), never a Sent. A session no hook was
+//! ever heard from is confirmed by the prompt's record in the transcript.
+//! None of these within `CONFIRM_SETTLES`: `unconfirmed`.
 //!
 //! **Not typed.** A text starting with `!`, which turns claude's box into a
 //! shell (`command`); a command whose name isn't one (a path); claude's
@@ -401,9 +401,13 @@ impl Watcher {
                 return Some(Turn::During);
             }
             // A hook for a message claude queued names the running turn
-            // (`HookAsks::prompted`): only its `enqueue` record says Queued.
-            if hooked && asks.prompted_since(&took.session, took.since, &took.submitted) == Some(false) {
-                return Some(Turn::Between);
+            // (`HookAsks::prompted`): Queued, as its `enqueue` record would
+            // say. Answered unconfirmed instead, a person sends it again and
+            // claude runs it twice.
+            match hooked.then(|| asks.prompted_since(&took.session, took.since, &took.submitted)).flatten() {
+                Some(false) => return Some(Turn::Between),
+                Some(true) => return Some(Turn::During),
+                None => {}
             }
             if recorded.is_some() && !hooked {
                 return Some(Turn::Between);

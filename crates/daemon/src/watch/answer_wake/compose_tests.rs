@@ -203,18 +203,21 @@ async fn busy_is_queued_once_the_enqueue_record_holds_it() {
     assert_eq!(si.submitted(), [five.replace('\n', "\\n")], "{}", si.log());
 }
 
-/// Working with no `enqueue` record written: no Queued, and no Sent for the
-/// hook that names the running turn.
+/// Working with no `enqueue` record written: claude's hook naming the
+/// running turn is what says it was queued, never a Sent. With no hook
+/// either, unconfirmed.
 #[tokio::test]
-async fn busy_with_no_enqueue_record_is_unconfirmed() {
+async fn busy_with_only_the_hook_is_queued_and_with_nothing_unconfirmed() {
     let b = board().await;
     let (agent, si) = idle_claude(&b).await;
     si.show("working-quiet").await;
     b.screen_with(agent.id, "esc to interrupt").await;
     b.doing(agent.id, AgentActivity::Working).await;
-    let _hook = hook_on_submit(&b, &si);
     assert_eq!(refused(b.watcher.compose_into(agent.id, "a\nb", &[]).await), "unconfirmed");
     assert!(si.log().contains("QUEUED a\\nb"), "{}", si.log());
+    let _hook = hook_on_submit(&b, &si);
+    b.screen_with(agent.id, "ress up to edit queued messages").await;
+    assert_eq!(b.watcher.compose_into(agent.id, "c\nd", &[]).await.expect("queued"), Turn::During);
 }
 
 /// codex is refused: none of its drawn forms was measured.
