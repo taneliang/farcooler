@@ -32,14 +32,18 @@ pub(crate) async fn run(
     let mut blocks = vec![pb::AgentPromptBlock { content: Some(Content::Text(text)) }];
     blocks.extend(super::images::image_blocks(&images)?);
     let (mut link, id) = terminal_by_record(runner, terminal).await?;
-    if !link.daemon_capabilities().iter().any(|c| c == farcooler_protocol::capability::COMPOSE) {
+    use farcooler_protocol::capability::{AGENT_COMPOSE, COMPOSE};
+    if ![AGENT_COMPOSE, COMPOSE].iter().all(|need| link.daemon_capabilities().iter().any(|c| c == need)) {
         return Err("this runner can't compose into a terminal yet. update it".into());
     }
     let mut ask = with(
         req("terminal.compose"),
         request::Payload::AgentPrompt(pb::AgentPrompt { terminal_id: id_bytes(id), blocks, hold_behind_dialog: false }),
     );
-    ask.required_capabilities = vec![farcooler_protocol::capability::COMPOSE.into()];
+    ask.required_capabilities = vec![AGENT_COMPOSE.into(), COMPOSE.into()];
+    // Targeted, as the apps' compose is: its order kept against the pane's
+    // other input, beside every other pane's calls.
+    ask.target_resource_id = Some(id_bytes(id));
     let answer = link.call(ask).await.map_err(refused)?;
     let queued = matches!(answer.value, Some(pb::result::Value::TerminalTold(pb::TerminalTold { queued: true })));
     if json {

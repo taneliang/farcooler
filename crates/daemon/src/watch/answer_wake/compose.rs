@@ -217,16 +217,15 @@ impl Watcher {
             return Err(DomainError::Conflict { what: "not_running" });
         }
         let composed = composition(raw, images)?;
-        // One at a time with a draft's paste, which types into the same box.
-        // The seam for a per-terminal typing lock: `compose_locked` is
-        // everything from the gate to the confirmation.
-        let _one_pass = self.draft_pump.lock().await;
+        // Nothing else types into this box, an answer, a draft or another
+        // send, from the gate's first check through the confirmation
+        // (`Watcher::typing`, ov-372).
+        let _typing = self.typing(to.id).await;
         self.compose_locked(&to, &composed).await
     }
 
-    /// `compose_into` past its checks of the request, under the lock that
-    /// keeps anything else from typing into `to` meanwhile: the gate, the
-    /// pastes, the Enter and the confirmation.
+    /// `compose_into` past its checks of the request, under `to`'s typing
+    /// lock: the gate, the pastes, the Enter and the confirmation.
     async fn compose_locked(&self, to: &Terminal, composed: &Composition) -> Result<Turn> {
         let told = self.told.lock().unwrap_or_else(|e| e.into_inner()).get(&to.id).copied();
         if let Some(left) = told.map(|at| TOLD_SPACING_MS - (now_millis() - at)).filter(|left| *left > 0) {
