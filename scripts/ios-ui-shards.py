@@ -65,7 +65,6 @@ SHARDS = {
     ],
     "agent": [
         "PhoneTreeUITests",  # -phone-harness -phone-plan (ov-300); 298 s
-        "ActionFailureTests",  # -phone-harness and -agent-layout-harness; 239 s
         "AgentEmptyStateTests",  # -agent-layout-harness (KeyboardTabStripTests.swift); 146 s
         "AgentTranscriptScrollTests",  # -agent-layout-harness (KeyboardTabStripTests.swift); 109 s
         "AgentFollowTests",  # -agent-layout-harness (ov-383); not yet timed, 2 tests
@@ -86,6 +85,7 @@ SHARDS = {
     ],
     # The late shard: ci.yml's `ios-ui-late`, not a matrix entry.
     "phone2": [
+        "ActionFailureTests",  # -phone-harness and -agent-layout-harness; 239 s; moved from agent at 78% of 45 min (run 37619557826)
         "FirstRunUITests",  # -phone-harness (ov-205 lane P, placed by integ-9); 213 s
         "FilesBrowserTests",  # -phone-harness (ov-259); 159 s
         "BoardUnreadUITests",  # -phone-harness (ov-113); 112 s
