@@ -101,7 +101,7 @@ public enum AgentConversation {
             switch what {
             case "prompt", "dialog": return .handoff
             case "draft": return .draftInTerminal
-            case "typing": return .said("Someone is typing in the terminal. Try again in a moment.")
+            case "typing": return .said("Someone typed in the terminal in the last 15 seconds, so the message wasn’t sent. Try again once they stop.")
             case "busy": return .said("Claude is working and can’t take a message from here right now.")
             case "too_long": return .said(tooLong)
             case "command": return .said(command)

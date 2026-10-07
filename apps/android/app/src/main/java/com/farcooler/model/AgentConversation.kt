@@ -112,7 +112,7 @@ object AgentConversation {
         } else when (failure.what) {
             "prompt", "dialog" -> SendIssue.Handoff
             "draft" -> SendIssue.DraftInTerminal
-            "typing" -> SendIssue.Said("Someone is typing in the terminal. Try again in a moment.")
+            "typing" -> SendIssue.Said("Someone typed in the terminal in the last 15 seconds, so the message wasn’t sent. Try again once they stop.")
             "busy" -> SendIssue.Said("Claude is working and can’t take a message from here right now.")
             "too_long" -> SendIssue.Said(TOO_LONG)
             "command" -> SendIssue.Said(COMMAND)

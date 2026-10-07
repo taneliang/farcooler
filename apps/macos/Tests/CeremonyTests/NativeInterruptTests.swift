@@ -162,7 +162,7 @@ struct NativeInterruptTests {
         model.store.apply(try await model.store.ledger.page(NativeAgentTests.page([Self.turn(working: true)])))
         await keys.set(.failure(refused("typing")))
         await model.stop()
-        #expect(model.issue == .said("Someone is typing in the terminal. Try again in a moment."))
+        #expect(model.issue == .said("Someone typed in the terminal in the last 2 seconds. Try again in a moment."))
         await keys.set(.failure(refused("prompt")))
         await model.sendNow()
         #expect(model.issue == .handoff)

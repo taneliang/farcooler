@@ -120,6 +120,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "unconfirmed" => "the message was submitted, but claude never said it took it. check its pane before sending it again",
         "prompt" => "the agent is showing a question, a menu or a panel. answer it in the terminal first",
         "draft" => "there's a draft in the agent's box. send or clear it first, or bring it here",
+        "typing" => "someone typed in the agent's pane in the last 15 seconds, so nothing was sent. try again once they stop",
         other => return tell::said_about(other),
     })
 }

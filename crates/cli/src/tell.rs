@@ -47,7 +47,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         }
         "prompt" => "the orchestrator is showing a question or a menu. answer it first",
         "draft" => "there's a draft in the orchestrator's box. send or clear it first",
-        "typing" => "someone is typing in the orchestrator's pane. try again in a few seconds",
+        "typing" => "someone typed in the orchestrator's pane in the last 15 seconds. try again once they stop",
         "not_an_agent" => "no agent is running in the orchestrator's pane",
         "unfamiliar" => "the orchestrator's screen isn't one Far Cooler recognizes, so nothing was typed",
         "unproven" => {
