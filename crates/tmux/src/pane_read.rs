@@ -114,6 +114,11 @@ impl TmuxServer {
     /// is running and the last read said so.
     pub(crate) async fn read_panes_once(&self) -> Result<PaneRead> {
         if self.server_is_known_absent() {
+            // Still a place where other tasks run, as the spawn it replaces was.
+            // The seat's read of tmux is ordered against a start that confirms
+            // while it is out (`an_orchestrator_confirmed_during_the_seats_read_keeps_it`),
+            // and a read that never awaits is a read nothing can interleave with.
+            tokio::task::yield_now().await;
             return Ok(PaneRead::default());
         }
         let out = self.run(&["list-panes", "-a", "-F", &list_format()]).await?;
