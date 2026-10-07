@@ -691,8 +691,9 @@ private struct GapRow: View {
 /// as the app being busy.
 struct WorkingRow: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Reduce Motion's answer, for a test, which can't set the system's.
-    @Environment(\.workingRowStill) private var still
+    /// Reduce Motion's answer given outright, for a test, which can't set
+    /// the system's: nil follows the system.
+    @Environment(\.workingRowStill) private var stillOverride
     /// Stopped behind other windows, as the timeline was (ov-229).
     @Environment(\.windowVisible) private var windowVisible
 
@@ -716,7 +717,7 @@ struct WorkingRow: View {
         label
             .foregroundStyle(.secondary)
             .overlay(alignment: .leading) {
-                if !reduceMotion && !still {
+                if !(stillOverride ?? reduceMotion) {
                     ShimmerBand(content: label.foregroundStyle(.primary), paused: !windowVisible)
                         .accessibilityHidden(true)
                 }
@@ -725,8 +726,11 @@ struct WorkingRow: View {
 }
 
 extension EnvironmentValues {
-    /// Draw `WorkingRow` as Reduce Motion draws it, without its sweep.
-    @Entry var workingRowStill = false
+    /// Whether `WorkingRow` is drawn still, as Reduce Motion draws it, in
+    /// place of what Reduce Motion says; nil follows the setting. A test
+    /// sets it both ways: CI's Mac has Reduce Motion on, and a test that
+    /// left it to the host found no sweep there.
+    @Entry var workingRowStill: Bool? = nil
 }
 
 /// A message written but not yet sent.

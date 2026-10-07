@@ -17,7 +17,10 @@ struct WorkingRowTests {
     }
 
     @Test func theRowIsTheLabelAndItsBandSweepsOnALayer() throws {
-        let row = NSHostingView(rootView: WorkingRow())
+        // Reduce Motion off and the window seen, whatever the host's are:
+        // CI's Mac has Reduce Motion on.
+        let row = NSHostingView(
+            rootView: WorkingRow().environment(\.workingRowStill, false).environment(\.windowVisible, true))
         let label = NSHostingView(rootView: Text("Working…").font(.callout))
         let size = row.fittingSize
         #expect(abs(size.width - label.fittingSize.width) < 1, "\(size) against \(label.fittingSize)")
@@ -53,7 +56,9 @@ struct WorkingRowTests {
         final class Visibility: ObservableObject { @Published var visible = false }
         struct Hosted: View {
             @ObservedObject var visibility: Visibility
-            var body: some View { WorkingRow().environment(\.windowVisible, visibility.visible) }
+            var body: some View {
+                WorkingRow().environment(\.workingRowStill, false).environment(\.windowVisible, visibility.visible)
+            }
         }
         let visibility = Visibility()
         let row = NSHostingView(rootView: Hosted(visibility: visibility))
