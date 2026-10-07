@@ -1,0 +1,248 @@
+{
+  "follow": {
+    "changes": [
+      {
+        "id": "prose:2",
+        "kind": "insert",
+        "rev": 10,
+        "row": {
+          "id": "prose:2",
+          "kind": {
+            "Prose": {
+              "at_ms": 10000,
+              "conclusion": true,
+              "text": "Done."
+            }
+          },
+          "ord": 10,
+          "provisional": false,
+          "rev": 10,
+          "turn": "turn:p1"
+        }
+      },
+      {
+        "id": "tool:toolu_1",
+        "kind": "update",
+        "rev": 11,
+        "row": {
+          "id": "tool:toolu_1",
+          "kind": {
+            "Tool": {
+              "diff": [
+                {
+                  "lines": [
+                    "-a",
+                    "+b"
+                  ],
+                  "new_lines": 1,
+                  "new_start": 3,
+                  "old_lines": 1,
+                  "old_start": 3
+                }
+              ],
+              "ended_ms": null,
+              "file_path": "/w/src/main.rs",
+              "name": "Edit",
+              "started_ms": 5000,
+              "status": "Running",
+              "summary": "src/main.rs"
+            }
+          },
+          "ord": 3,
+          "provisional": false,
+          "rev": 11,
+          "turn": "turn:p1"
+        }
+      },
+      {
+        "id": "queued:1",
+        "kind": "remove",
+        "rev": 12
+      }
+    ],
+    "epoch": 4,
+    "reset": false,
+    "rev": 12
+  },
+  "page": {
+    "epoch": 4,
+    "moreBefore": true,
+    "rev": 9,
+    "rows": [
+      {
+        "id": "turn:p1",
+        "kind": {
+          "Turn": {
+            "activity": "Busy",
+            "background_running": 1,
+            "duration_ms": 60000,
+            "ended_ms": 61000,
+            "origin": "Typed",
+            "outcome": {
+              "Failed": {
+                "detail": "API error"
+              }
+            },
+            "prompt": "Fix the build\nand the tests",
+            "started_ms": 1000
+          }
+        },
+        "ord": 0,
+        "provisional": false,
+        "rev": 9,
+        "turn": null
+      },
+      {
+        "id": "prose:1",
+        "kind": {
+          "Prose": {
+            "at_ms": 2000,
+            "conclusion": false,
+            "text": "Looking at **main.rs**."
+          }
+        },
+        "ord": 1,
+        "provisional": false,
+        "rev": 2,
+        "turn": "turn:p1"
+      },
+      {
+        "id": "think:1",
+        "kind": {
+          "Thinking": {
+            "ended_ms": 4500,
+            "started_ms": 2500
+          }
+        },
+        "ord": 2,
+        "provisional": false,
+        "rev": 3,
+        "turn": "turn:p1"
+      },
+      {
+        "id": "tool:toolu_1",
+        "kind": {
+          "Tool": {
+            "diff": [
+              {
+                "lines": [
+                  "-a",
+                  "+b"
+                ],
+                "new_lines": 1,
+                "new_start": 3,
+                "old_lines": 1,
+                "old_start": 3
+              }
+            ],
+            "ended_ms": 5400,
+            "file_path": "/w/src/main.rs",
+            "name": "Edit",
+            "started_ms": 5000,
+            "status": "Done",
+            "summary": "src/main.rs"
+          }
+        },
+        "ord": 3,
+        "provisional": false,
+        "rev": 4,
+        "turn": "turn:p1"
+      },
+      {
+        "id": "sub:toolu_2",
+        "kind": {
+          "Subagent": {
+            "agent_id": "a1",
+            "agent_type": "Explore",
+            "background": true,
+            "current_action": "Grep fn main",
+            "description": "Find the callers",
+            "ended_ms": null,
+            "last_ms": 9000,
+            "started_ms": 6000,
+            "status": "Killed",
+            "tool_count": 7,
+            "tool_use_id": "toolu_2"
+          }
+        },
+        "ord": 4,
+        "provisional": false,
+        "rev": 8,
+        "turn": "turn:p1"
+      },
+      {
+        "id": "ask:1",
+        "kind": {
+          "Ask": {
+            "answered": false,
+            "answered_ms": null,
+            "asked_ms": 7000,
+            "kind": "Permission",
+            "text": "Bash: rm -rf target",
+            "tool": "Bash"
+          }
+        },
+        "ord": 5,
+        "provisional": false,
+        "rev": 5,
+        "turn": "turn:p1"
+      },
+      {
+        "id": "queued:1",
+        "kind": {
+          "Queued": {
+            "at_ms": 8000,
+            "state": "Waiting",
+            "text": "and then the docs"
+          }
+        },
+        "ord": 6,
+        "provisional": false,
+        "rev": 6,
+        "turn": "turn:p1"
+      },
+      {
+        "id": "notice:1",
+        "kind": {
+          "Notice": {
+            "at_ms": null,
+            "kind": "Compacted",
+            "text": "Context compacted"
+          }
+        },
+        "ord": 7,
+        "provisional": false,
+        "rev": 7,
+        "turn": "turn:p1"
+      },
+      {
+        "id": "handoff:1",
+        "kind": {
+          "Handoff": {
+            "at_ms": 9500,
+            "reason": "A panel is open"
+          }
+        },
+        "ord": 8,
+        "provisional": false,
+        "rev": 9,
+        "turn": "turn:p1"
+      },
+      {
+        "id": "gap:1",
+        "kind": {
+          "Gap": {
+            "count": 2,
+            "reason": {
+              "Unknown": "x-new"
+            }
+          }
+        },
+        "ord": 9,
+        "provisional": false,
+        "rev": 9,
+        "turn": "turn:p1"
+      }
+    ]
+  }
+}

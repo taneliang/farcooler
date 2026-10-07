@@ -3297,6 +3297,8 @@ mod plan_phone_tests;
 mod page_phone_tests;
 #[cfg(test)]
 mod rows_phone_tests;
+#[cfg(test)]
+mod rows_fixture_tests;
 mod board_reads_args;
 mod files_args;
 mod rows_args;
