@@ -1,3 +1,4 @@
+import AgentKit
 import Foundation
 import Testing
 
@@ -82,6 +83,7 @@ struct EventResyncTests {
             id: "t-156", short: "new", worktree: "w-156", title: "new title", preset: "claude",
             program: "claude", state: "running", activity: "working", chatCapable: true, exitCode: 3, exitSignal: 9,
             activitySince: 1234, turnStartedAt: 5678, blockedQuestion: "Allow touch x?",
+            draftHold: DraftHold(id: "hold-1", state: .waiting, expiresMs: 99),
             feed: ["a line"], line: "3/7 · Testing", subagents: ["Explore"], turnFailed: true,
             noticeTaskId: "task-1", said: "Added the retry.", paneMode: "agent", rank: 7,
             taskId: "task-9", ports: [3000, 8080], agentSessionId: "sess-1", agentMode: "plan",
