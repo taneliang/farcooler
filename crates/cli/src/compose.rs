@@ -55,7 +55,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
     Some(match what {
         "handoff" => "that command opens a panel or acts at once in claude, so it's for the terminal. open the pane and type it there",
         "unsupported" => "only claude can be composed into. use terminal draft-prompt for this agent",
-        "no_session" => "the agent's session can't be found, so a send couldn't be confirmed. nothing was typed",
+        "unconfirmable" => "the agent's session can't be found, so a send couldn't be confirmed. nothing was typed",
         "command" => "a message can't start with !, which claude reads as a shell command, or with a / that isn't a command",
         "too_long" => "that message is over 100,000 characters. shorten it",
         "busy" => {
@@ -87,7 +87,7 @@ mod tests {
     fn every_refusal_has_a_line() {
         for what in [
             "busy", "prompt", "draft", "typing", "not_an_agent", "unfamiliar", "unproven", "too_long", "command",
-            "not_running", "paste_left", "left_at_shell", "dialog", "unconfirmed", "handoff", "unsupported", "no_session",
+            "not_running", "paste_left", "left_at_shell", "dialog", "unconfirmed", "handoff", "unsupported", "unconfirmable",
         ] {
             let said = said_about(what).unwrap_or_else(|| panic!("no line for {what}"));
             assert!(!said.ends_with('.') && said.chars().next().is_some_and(char::is_lowercase), "{said}");

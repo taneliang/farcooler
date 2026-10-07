@@ -49,7 +49,7 @@
 //! `tell`'s (`busy`, `prompt`, `draft`, `typing`, `not_an_agent`,
 //! `unfamiliar`, `unproven`, `too_long`, `command`, `not_running`,
 //! `paste_left`, `left_at_shell`, `dialog`, `unconfirmed`), and `handoff`,
-//! `unsupported` and `no_session`.
+//! `unsupported` and `unconfirmable`.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -236,13 +236,13 @@ impl Watcher {
         // pane's foreground is the hook's process, and the watcher reads no
         // agent there for a sample. Held as busy for that alone, the send
         // goes on if claude's registry says it's working (below).
-        let ready = self.ready(&to).await;
+        let ready = self.ready(to).await;
         if let Err(held) = ready
             && held != super::Held::Busy
         {
             return Err(DomainError::Conflict { what: held_word(held) });
         }
-        let proven = self.proven_tui(&to).await.map_err(|held| DomainError::Conflict { what: held_word(held) })?;
+        let proven = self.proven_tui(to).await.map_err(|held| DomainError::Conflict { what: held_word(held) })?;
         if !queues_mid_turn(proven.preset) {
             return Err(DomainError::Conflict { what: "unsupported" });
         }
@@ -252,7 +252,7 @@ impl Watcher {
         // claude's footer says `paste again to expand`, working or not, and
         // the screen reads idle (`claude-2.1.290-working-queued-long-paste`).
         let Some((session, transcript, busy)) = session_of(proven.pid).await else {
-            return Err(DomainError::Conflict { what: "no_session" });
+            return Err(DomainError::Conflict { what: "unconfirmable" });
         };
         if ready.is_err() && (!busy || self.typed_lately(to.id, now_millis())) {
             return Err(DomainError::Conflict { what: if busy { "typing" } else { "busy" } });
@@ -265,11 +265,11 @@ impl Watcher {
         let witness = match proven.turn {
             Turn::Between => None,
             Turn::During => Some(
-                self.witness(&proven, &to, &composed.submitted(&[])).await.ok_or(DomainError::Conflict { what: "busy" })?,
+                self.witness(&proven, to, &composed.submitted(&[])).await.ok_or(DomainError::Conflict { what: "busy" })?,
             ),
         };
         let from = std::fs::metadata(&transcript).map(|m| m.len()).unwrap_or(0);
-        let paths = self.write_images(&composed)?;
+        let paths = self.write_images(composed)?;
 
         let preset = proven.preset;
         let runtime = Runtime { marks: None, ..self.service.runtime() };
@@ -287,19 +287,19 @@ impl Watcher {
         for path in &paths {
             paste(quoted(path)).await?;
             expected = expected.then_image();
-            held = self.shown(&to, preset, started, &expected, None).await.left(&proven.tty, preset).await?;
+            held = self.shown(to, preset, started, &expected, None).await.left(&proven.tty, preset).await?;
         }
         let placeholders = composer::drawn::images(&held);
         if let Some(name) = &composed.command {
             paste(name.clone()).await?;
             expected = expected.then_paste(name);
-            self.shown(&to, preset, started, &expected, Some(name)).await.left(&proven.tty, preset).await?;
+            self.shown(to, preset, started, &expected, Some(name)).await.left(&proven.tty, preset).await?;
         }
         if !composed.text.is_empty() {
             let text = if paths.is_empty() { composed.text.clone() } else { format!(" {}", composed.text) };
             paste(text.clone()).await?;
             expected = expected.then_paste(&text);
-            self.shown(&to, preset, started, &expected, None).await.left(&proven.tty, preset).await?;
+            self.shown(to, preset, started, &expected, None).await.left(&proven.tty, preset).await?;
         }
         let submitted = composed.submitted(&placeholders);
         if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started) {
@@ -311,7 +311,7 @@ impl Watcher {
             None => runtime.send_bytes_hex(to.id, "0d").await?,
             Some(witness) => {
                 let witness = witness.clone().pasted_at(started);
-                self.enter_expecting(&to, preset, &witness, &expected).await.map_err(|no| match no {
+                self.enter_expecting(to, preset, &witness, &expected).await.map_err(|no| match no {
                     mid_turn::NoEnter::Dialog => DomainError::Conflict { what: "dialog" },
                     mid_turn::NoEnter::Moved => DomainError::Conflict { what: "paste_left" },
                     mid_turn::NoEnter::Failed => DomainError::OperationFailed,
