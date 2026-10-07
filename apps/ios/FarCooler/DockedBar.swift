@@ -176,6 +176,26 @@ final class KeyboardInset: ObservableObject {
         // remaining accessory is measured independently.
         cover.frame(overlap: overlap, screenHeight: screen.bounds.height)
         height = cover.height
+        askAccessoryAgain()
+    }
+
+    /// A keyboard frame carries the accessory's height as it was when UIKit
+    /// built the frame, which is not always the height it has now (ov-402).
+    ///
+    /// Measured on an iPhone 17: the frame that ended the keyboard rising
+    /// arrived 0.4 s after the accessory settled at 128 pt, saying 490 pt of
+    /// cover for the 162 pt it had been, and nothing said 456 again. Every
+    /// later report was right, so the cover sat 34 pt too high, and the
+    /// composer growing by 66 pt moved it by 32. A frame is a statement about
+    /// the keyboard; where the accessory's top is, only the accessory can say.
+    /// So after a frame, it says it again, and its answer is the last word.
+    ///
+    /// Only a chat's own inset: it names its composer. The shell's takes
+    /// every composer's reports, and asking them all would be a layout pass
+    /// per docked pane for nothing it reads.
+    private func askAccessoryAgain() {
+        guard let scope else { return }
+        NotificationCenter.default.post(name: AccessoryHostView.reportAgain, object: scope)
     }
 }
 

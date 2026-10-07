@@ -184,10 +184,9 @@ final class AgentFollowTests: XCTestCase {
     /// With the keys up the composer growing sends no keyboard frame, so the
     /// cover follows what the composer itself reports: through the scope
     /// `AgentView` gives `DockedBar` and the report's `reportCover` (ov-386).
-    /// The cover must rise by within 40 pt of how far the composer's top did.
-    /// Not exactly: measured 32 of 66 pt on iPhone 17 (the report is read at
-    /// layout, as the accessory settles), against none at all when the report
-    /// doesn't reach the inset.
+    /// The cover must rise by how far the composer's top did, within 2 pt
+    /// (ov-402: it once rose 32 pt of 66, the report read at layout while
+    /// UIKit had resized the accessory but not yet moved it).
     func testTheCoverFollowsTheComposerGrowingWithTheKeysUp() throws {
         let app = launch()
         let transcript = app.scrollViews["agent-transcript"]
@@ -205,7 +204,13 @@ final class AgentFollowTests: XCTestCase {
         Thread.sleep(forTimeInterval: 1)
         let grew = Int(before - composerTop(app))
         XCTAssertTrue(
-            wait(30) { insets(transcript).map { $0.keyboard - coverBefore >= min(grew - 40, 20) } == true },
+            wait(30) { insets(transcript).map { abs(($0.keyboard - coverBefore) - grew) <= 2 } == true },
             "the composer's top rose \(grew) pt but the cover went from \(coverBefore) to \(transcript.value ?? "")")
+        // And it stays: nothing late moves it off the composer's top.
+        Thread.sleep(forTimeInterval: 2)
+        let after = try XCTUnwrap(insets(transcript))
+        XCTAssertLessThanOrEqual(
+            abs((after.keyboard - coverBefore) - Int(before - composerTop(app))), 2,
+            "a late report moved the cover: \(transcript.value ?? "")")
     }
 }
