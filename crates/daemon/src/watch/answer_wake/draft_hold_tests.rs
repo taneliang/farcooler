@@ -168,19 +168,80 @@ async fn a_draft_expires_once_someone_types_after_the_dialog_closes() {
     nothing_typed(&si);
 }
 
-/// While an answer may be typed into a pane (`wake_pump` held), no held
-/// draft is pasted: the two can't both go in after one dialog.
+
+/// A second dialog answered with a key (re-review F1): the key went to the
+/// dialog, not the box, so the draft isn't expired for it. Held behind menu
+/// 1, answered with a key; menu 2 up for a pass, answered with a key; then
+/// the box is free again and the draft still waits to go in.
 #[tokio::test]
-async fn a_held_draft_waits_while_answers_are_typed() {
+async fn answering_a_second_dialog_keeps_the_draft_waiting() {
+    let b = board().await;
+    let (orchestrator, si, _) = held(&b).await;
+    // Menu 1 answered with a key: the next pass sees no dialog, and a key.
+    crate::runtime::mark_input(b.svc.root_dir(), orchestrator.id);
+    si.show("idle").await;
+    b.screen_with(orchestrator.id, "? for shortcuts").await;
+    b.watcher.pump_draft_holds().await;
+    // Menu 2, read for one pass, then answered with a key.
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    si.show("menu").await;
+    b.screen_with(orchestrator.id, "Tab to amend").await;
+    b.doing(orchestrator.id, AgentActivity::Blocked).await;
+    b.watcher.pump_draft_holds().await;
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    crate::runtime::mark_input(b.svc.root_dir(), orchestrator.id);
+    si.show("idle").await;
+    b.screen_with(orchestrator.id, "? for shortcuts").await;
+    b.doing(orchestrator.id, AgentActivity::Idle).await;
+    b.watcher.pump_draft_holds().await;
+    assert_eq!(b.watcher.draft_hold(orchestrator.id).unwrap().state, DraftHoldState::Waiting as i32);
+    nothing_typed(&si);
+}
+
+/// An answer pass in progress (`wake_pump` held) delays the drafts' pass
+/// rather than skipping it (re-review F2): the draft lands once the answers
+/// are done.
+#[tokio::test]
+async fn a_held_draft_lands_after_an_answer_pass_in_progress() {
     let b = board().await;
     let (orchestrator, si, _) = held(&b).await;
     si.show("idle").await;
     b.screen_with(orchestrator.id, "? for shortcuts").await;
     let answering = b.watcher.wake_pump.lock().await;
-    b.watcher.pump_draft_holds().await;
+    let drafts = tokio::spawn({
+        let watcher = b.watcher.clone();
+        async move { watcher.pump_draft_holds().await }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
     nothing_typed(&si);
     drop(answering);
-    b.watcher.pump_draft_holds().await;
+    drafts.await.unwrap();
     si.pasted().await;
     assert_eq!(b.watcher.draft_hold(orchestrator.id).unwrap().state, DraftHoldState::Sent as i32);
+}
+
+/// An answer waiting on another pane for several ticks never keeps a held
+/// draft out: the tick runs both pumps in one task (`spawn_pumps`).
+#[tokio::test]
+async fn a_held_draft_lands_while_an_answer_waits_on_another_pane() {
+    let b = board().await;
+    let (orchestrator, si, _) = held(&b).await;
+    let agent = b.agent("Agent 2", "claude").await;
+    let other = b.stand_in(&agent, "claude", "claude").await;
+    other.show("menu").await;
+    b.screen_with(agent.id, "Tab to amend").await;
+    b.doing(agent.id, AgentActivity::Blocked).await;
+    b.answer("Drill in");
+    si.show("idle").await;
+    b.screen_with(orchestrator.id, "? for shortcuts").await;
+    // Starting the second stand-in sampled every pane, the menu included.
+    b.doing(orchestrator.id, AgentActivity::Idle).await;
+    for _ in 0..3 {
+        b.watcher.wakes_hint.store(true, Ordering::SeqCst);
+        b.watcher.spawn_pumps();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    si.pasted().await;
+    assert_eq!(b.watcher.draft_hold(orchestrator.id).unwrap().state, DraftHoldState::Sent as i32, "{}", si.log());
+    assert!(!b.pending().is_empty() && !other.log().contains("PASTE"), "the answer still waits on its own pane: {:?}", b.pending());
 }

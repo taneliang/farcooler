@@ -150,14 +150,24 @@ impl Watcher {
         }
     }
 
-    /// `pump_draft_holds` off the caller's path, when there is a hold.
-    pub(crate) fn spawn_draft_pump(&self) {
-        if self.draft_holds.lock().unwrap_or_else(|e| e.into_inner()).is_empty() {
+    /// A tick's two pumps, off the caller's path and in one task: the
+    /// answers (`pump_wakes`, when any may wait), then the held drafts. One
+    /// after the other rather than racing for `wake_pump`, so neither can
+    /// starve the other: whichever was spawned first used to win the lock.
+    pub(crate) fn spawn_pumps(&self) {
+        let wakes = self.wakes_hint.load(std::sync::atomic::Ordering::SeqCst);
+        let drafts = !self.draft_holds.lock().unwrap_or_else(|e| e.into_inner()).is_empty();
+        if !wakes && !drafts {
             return;
         }
         let Some(me) = self.me.upgrade() else { return };
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-            runtime.spawn(async move { me.pump_draft_holds().await });
+            runtime.spawn(async move {
+                if wakes {
+                    me.pump_wakes().await;
+                }
+                me.pump_draft_holds().await;
+            });
         }
     }
 
@@ -169,8 +179,9 @@ impl Watcher {
             return;
         }
         let Ok(_one_pass) = self.draft_pump.try_lock() else { return };
-        // Not while an answer may be typed into the same pane: next tick.
-        let Ok(_no_answer) = self.wake_pump.try_lock() else { return };
+        // Never while an answer may be typed into the same pane: after it.
+        // `draft_pump` is taken first, so passes queue here one deep.
+        let _no_answer = self.wake_pump.lock().await;
         let now = now_millis();
         let waiting: Vec<(Uuid, DraftHold)> = {
             let mut holds = self.draft_holds.lock().unwrap_or_else(|e| e.into_inner());
@@ -179,27 +190,35 @@ impl Watcher {
         };
         for (terminal, hold) in waiting {
             let typed_since = |closed: i64| last_input(self.service.root_dir(), terminal).is_some_and(|at| at >= closed);
+            let set_closed = |closed: Option<i64>| {
+                if let Some(held) = self.draft_holds.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&terminal) {
+                    held.closed_ms = closed;
+                }
+            };
             let ended = match self.service.store.get_terminal(terminal) {
                 Err(_) => Some(DraftHoldState::Expired),
                 Ok(_) if now - hold.held_ms > GIVE_UP_AFTER_MS => Some(DraftHoldState::Expired),
-                Ok(_) if hold.closed_ms.is_some_and(typed_since) => Some(DraftHoldState::Expired),
                 Ok(to) => match self.paste_draft(&to, &hold.text).await {
                     Ok(Ok(())) => Some(DraftHoldState::Sent),
                     // Past the gate, and the send failed: it may have reached
                     // the box, so it's never pasted again.
                     Ok(Err(_)) => Some(DraftHoldState::Failed),
-                    Err(Held::Prompt) => None,
-                    // The dialog is gone, and something else is in the way:
-                    // from now, a key typed is the person moving on.
-                    Err(_) => {
-                        if hold.closed_ms.is_none()
-                            && let Some(held) =
-                                self.draft_holds.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&terminal)
-                        {
-                            held.closed_ms = Some(now_millis());
-                        }
+                    // A dialog again: a key typed now answers it, not the box.
+                    Err(Held::Prompt) => {
+                        set_closed(None);
                         None
                     }
+                    // No dialog, and something else in the way. A key typed
+                    // since the pass that first saw the dialog gone is the
+                    // person moving on; from that pass, a key will be.
+                    Err(_) => match hold.closed_ms {
+                        Some(closed) if typed_since(closed) => Some(DraftHoldState::Expired),
+                        Some(_) => None,
+                        None => {
+                            set_closed(Some(now_millis()));
+                            None
+                        }
+                    },
                 },
             };
             let Some(state) = ended else { continue };

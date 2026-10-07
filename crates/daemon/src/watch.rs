@@ -4413,12 +4413,10 @@ impl Watcher {
                     self.release_due_holds(now_millis());
                     // The subagents recorded on tasks (ov-213).
                     self.follow_workers(now_millis()).await;
-                    // After the sample, so an agent that just went idle is
-                    // told on the tick that saw it.
-                    self.spawn_wake_pump();
-                    // Drafts held behind a dialog (ov-385): a map lookup
-                    // when there are none.
-                    self.spawn_draft_pump();
+                    // The answers, after the sample, so an agent that just
+                    // went idle is told on the tick that saw it; then, in the
+                    // same task, the drafts held behind a dialog (ov-385).
+                    self.spawn_pumps();
                     // Gated: a drained set lookup per repository, and a git
                     // process only for repositories the filesystem says
                     // actually gained or lost a worktree. The separate forced
