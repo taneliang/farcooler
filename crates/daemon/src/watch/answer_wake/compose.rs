@@ -168,8 +168,8 @@ pub(crate) fn composition(raw: &str, images: &[(String, Vec<u8>)]) -> Result<Com
     Ok(Composition { text: args, command: Some(format!("/{name}")), images: kept })
 }
 
-/// `raw` as it's typed: CR LF and CR as LF, since claude counts a CR as a
-/// line break of its own; every other control character, and every
+/// `raw` as it's typed: CR LF and CR as LF, each one break to claude as to
+/// `composer::drawn`, which counts LFs; every other control character, and every
 /// invisible one, written out (`one_line`'s rule) rather than sent; trailing
 /// whitespace and leading blank lines dropped.
 pub(crate) fn normalized(raw: &str) -> String {

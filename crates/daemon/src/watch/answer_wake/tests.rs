@@ -1415,3 +1415,6 @@ mod mid_turn_tests;
 
 #[path = "draft_hold_tests.rs"]
 mod draft_hold_tests;
+
+#[path = "compose_tests.rs"]
+mod compose_tests;

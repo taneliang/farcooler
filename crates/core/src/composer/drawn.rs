@@ -9,7 +9,9 @@
 //!   collapse), or `[Pasted text #N +K lines]` when it has three or more
 //!   line breaks, K being how many (four lines show `+3 lines`). Both rules
 //!   hold whatever the pane's width; a long paste with one break shows
-//!   `+1 lines`. A CR LF counts as two breaks. Three lines stay as typed.
+//!   `+1 lines`. A CR LF is one break, and so is a CR alone. Three lines
+//!   stay as typed. (tmux's `paste-buffer` turns each LF into a CR, so a CR
+//!   LF it pastes is two: the daemon sends the bytes as they are.)
 //! - **An image's path** pasted on its own, or several separated by spaces,
 //!   becomes `[Image #N]` each; a path with other text stays text.
 //! - **N** counts both kinds from the session's start, so it can't be known
