@@ -49,13 +49,34 @@ final class NativePaneModel: ObservableObject {
     @Published private(set) var queued: [String] = []
     /// Whether this pane shows the native view; remembered per pane.
     @Published var showsNative: Bool {
-        didSet { NativePaneModel.remember(showsNative, for: terminal) }
+        didSet {
+            NativePaneModel.remember(showsNative, for: terminal)
+            followIfShown()
+        }
     }
 
     /// Where sends go: the runner's connection, replaced on a reconnect.
     var sink: (any ComposeSink)?
-    /// Where older pages come from, once the pane is following.
-    var source: (any AgentRowSource)?
+    /// Where rows come from, once the runner is connected.
+    var source: (any AgentRowSource)? {
+        didSet { if source != nil { following = false } }
+    }
+    /// Whether `store` follows `source` now.
+    private var following = false
+
+    /// Follow while the view shows, and stop when it doesn't: one held
+    /// follow per pane on screen, not per claude pane in the app. The rows
+    /// stay in the store, and a return follows from where it left off.
+    func followIfShown() {
+        guard let source else { return }
+        if showsNative, !following {
+            following = true
+            store.start(source)
+        } else if !showsNative, following {
+            following = false
+            store.stop()
+        }
+    }
 
     init(terminal: String, store: AgentRowStore, sink: (any ComposeSink)?) {
         self.terminal = terminal
@@ -81,7 +102,7 @@ final class NativePaneModel: ObservableObject {
 
     var canSend: Bool {
         let text = draft.trimmingCharacters(in: .whitespaces)
-        return !sending && !text.isEmpty && text.count <= Self.longest && sink != nil
+        return !sending && !text.isEmpty && text.count <= Self.longest && sink != nil && !store.isStale
     }
 
     /// Send the draft. Enter's action.
@@ -144,13 +165,22 @@ final class NativePaneModel: ObservableObject {
         case "not_running", "not_an_agent": return .said("Claude isn’t running in this pane.")
         case "unfamiliar", "unproven": return .said("Far Cooler can’t read this terminal’s box, so nothing was typed.")
         default:
-            if case .lost = failure { return .said("The runner didn’t answer. The message may not have been sent.") }
-            return .said("The message wasn’t sent.")
+            switch failure {
+            // Never "wasn't sent" for a call that may have arrived: the
+            // runner may type it yet, and a second send would go in twice.
+            case .timedOut?, .lost(_, notSent: false)?:
+                return .said(mayHaveBeenSent)
+            case .lost(_, notSent: true)?, .notConnected?:
+                return .said("The runner isn’t connected, so the message wasn’t sent.")
+            default:
+                return .said("The message wasn’t sent.")
+            }
         }
     }
 
     static let tooLong = "That message is over \(longest) characters. Shorten it, or paste it in the terminal."
-    static let command = "Messages can’t start with / or !, which Claude reads as a command. Use the terminal for commands."
+    static let command = "A message can’t start with a symbol Claude reads as a command, such as / or !. Use the terminal for commands."
+    static let mayHaveBeenSent = "The runner didn’t answer in time. The message may have been sent, so check the terminal before sending it again."
 
     // MARK: - The view each pane remembers (R-27)
 

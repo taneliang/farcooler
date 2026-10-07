@@ -54,14 +54,17 @@ struct NativeSwitch<Surface: View>: View {
                     model.showsNative.toggle()
                 } label: {
                     Image(systemName: showing ? "terminal" : "text.bubble")
+                        .foregroundStyle(.primary)
                         .frame(width: 16, height: 16)
                 }
                 .buttonStyle(.borderless)
                 .padding(Spacing.group)
-                .surface(.floating, in: .floating)
+                // Opaque paper, so the glyph reads over a dark terminal in a
+                // light window as well as over the conversation.
+                .surface(.content, in: .floating)
                 .padding(Spacing.group)
-                .help(showing ? "Show Terminal" : "Show Native View")
-                .accessibilityLabel(showing ? "Show Terminal" : "Show Native View")
+                .help(showing ? "Show Terminal" : "Show Conversation")
+                .accessibilityLabel(showing ? "Show Terminal" : "Show Conversation")
                 .identified("native-switch")
             }
         }

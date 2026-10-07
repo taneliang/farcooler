@@ -96,6 +96,16 @@ public final class AgentRowStore {
 
     public func box(_ id: String) -> AgentRowBox? { boxes[id] }
 
+    /// The rows held may be out of date: the last call failed, or the runner
+    /// stopped serving them. A view says so over them rather than letting
+    /// them look live.
+    public var isStale: Bool {
+        switch phase {
+        case .trouble, .unavailable: true
+        case .loading, .cached, .live: false
+        }
+    }
+
     public var isFollowing: Bool { feed != nil }
 
     /// Put `delta` on screen. The only main-thread work an update costs.
@@ -185,7 +195,7 @@ public final class AgentRowStore {
         var store: AgentRowStore? { weakly.store }
         if let seed {
             _ = await ledger.restore(seed)
-        } else if let disk = cache?.onDisk(key), !disk.rows.isEmpty {
+        } else if await ledger.cursor == nil, let disk = cache?.onDisk(key), !disk.rows.isEmpty {
             let delta = await ledger.restore(disk)
             await MainActor.run {
                 store?.apply(delta)

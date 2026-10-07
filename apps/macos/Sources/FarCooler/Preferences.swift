@@ -406,8 +406,9 @@ struct SettingsView: View {
                 // Off by default until it matches the terminal (ov-372).
                 Setting("Adds a view of each Claude pane you can read and reply in, beside its terminal. On this Mac’s runner only.") {
                     Toggle(
-                        "Native view for Claude panes",
+                        "Conversation view for Claude panes",
                         isOn: Binding(get: { native.enabled }, set: { on in Task { await native.setEnabled(on) } }))
+                        .disabled(native.changing)
                     if let trouble = native.settingTrouble {
                         Text(trouble).font(.callout).foregroundStyle(.secondary)
                     }

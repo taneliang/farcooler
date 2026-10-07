@@ -45,6 +45,11 @@ struct NativeAgentView: View {
         .overlay {
             if store.ids.isEmpty { emptyState(store.phase) }
         }
+        // Rows held and the runner not answering: said over them, so stale
+        // rows never pass for live ones, and the box waits (`canSend`).
+        .overlay(alignment: .top) {
+            if !store.ids.isEmpty, store.isStale { staleBanner(store.phase) }
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             NativeComposer(model: model, isFocused: isFocused, showTerminal: showTerminal)
                 .padding(Spacing.inset)
@@ -52,6 +57,24 @@ struct NativeAgentView: View {
         .background(WorkspaceStyle.paper)
         .onChange(of: store.ids.count) { _, _ in model.settleQueued() }
         .identified("native-agent-view")
+    }
+
+    private func staleBanner(_ phase: AgentRowStore.Phase) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
+            Text(phase == .unavailable
+                ? "This session isn’t being read anymore. The terminal has it."
+                : "Can’t reach the runner, so this may be out of date. Trying again…")
+            Spacer(minLength: Spacing.group)
+            Button("Show Terminal", action: showTerminal)
+        }
+        .font(.callout)
+        .padding(.horizontal, Spacing.inset)
+        .padding(.vertical, Spacing.group)
+        .attentionSurface(in: .card)
+        .surface(.content, in: .card)
+        .padding(.horizontal, Spacing.section)
+        .padding(.top, 40)
+        .identified("native-stale")
     }
 
     @ViewBuilder
@@ -97,11 +120,13 @@ struct NativeComposer: View {
                 Button {
                     Task { await model.send() }
                 } label: {
-                    Image(systemName: "arrow.up")
-                        .fontWeight(.semibold)
+                    // A filled circle either way, so it reads on light paper
+                    // when it can't send yet as well as when it can.
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(model.canSend ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
                 }
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.circle)
+                .buttonStyle(.plain)
                 .disabled(!model.canSend)
                 .help("Send")
                 .accessibilityLabel("Send")

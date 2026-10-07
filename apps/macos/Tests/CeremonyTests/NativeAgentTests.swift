@@ -241,6 +241,75 @@ struct NativeAgentTests {
         #expect(model.issue == .draftInTerminal)
     }
 
+    /// A runner that answers a page, then fails every follow.
+    struct FailingAfterAPage: AgentRowSource {
+        let page: Data
+        func page(before: UInt64?, limit: Int) async throws -> Data { page }
+        func follow(epoch: UInt64, afterRev: UInt64, waitMs: Int) async throws -> Data {
+            throw RunnerCore.Failure.lost("gone")
+        }
+    }
+
+    @Test("Rows held when the runner stops answering are marked stale, and the box waits")
+    func staleRowsAreSaidAndTheBoxWaits() async throws {
+        let sink = StandInSink()
+        let model = Self.model(try Self.terminal(), sink: sink)
+        let seen = Seen()
+        let window = Self.window(Probe(seen: seen, content: NativeAgentView(model: model, isFocused: true, showTerminal: {})))
+        defer {
+            window.close()
+            model.store.stop()
+        }
+        model.store.start(FailingAfterAPage(page: Self.page([Self.row(0, "prose:1", ["Prose": ["text": "Earlier.", "conclusion": false, "at_ms": 1]])])))
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !model.store.isStale, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        await Self.settle(window)
+        #expect(seen.ids.contains("native-row-prose:1") && seen.ids.contains("native-stale"))
+        model.draft = "carry on"
+        #expect(!model.canSend)
+    }
+
+    @Test("A pane follows its runner only while its conversation shows")
+    func onlyAShownPaneFollows() throws {
+        let model = Self.model(try Self.terminal())
+        model.source = FailingAfterAPage(page: Self.page([]))
+        model.followIfShown()
+        #expect(!model.store.isFollowing, "a pane on its terminal holds a follow")
+        model.showsNative = true
+        #expect(model.store.isFollowing)
+        model.showsNative = false
+        #expect(!model.store.isFollowing)
+    }
+
+    @Test("A send that may have arrived never says it wasn't sent")
+    func aTimedOutSendMayHaveBeenSent() {
+        #expect(NativePaneModel.issue(for: RunnerCore.Failure.timedOut("late")) == .said(NativePaneModel.mayHaveBeenSent))
+        #expect(NativePaneModel.issue(for: RunnerCore.Failure.lost("dropped")) == .said(NativePaneModel.mayHaveBeenSent))
+        #expect(NativePaneModel.issue(for: RunnerCore.Failure.lost("never left", notSent: true)) != .said(NativePaneModel.mayHaveBeenSent))
+    }
+
+    @Test("Only a runner that serves rows and compose is offered the view")
+    func theViewNeedsRowsAndCompose() {
+        #expect(NativeAgents.serves(["agent_rows", "agent_compose"]))
+        #expect(!NativeAgents.serves(["agent_rows"]), "rows from before compose: every send would fail")
+        #expect(!NativeAgents.serves(["agent_compose"]))
+    }
+
+    @Test("A turn nobody typed is a notice, never the person's message")
+    func aNotificationTurnIsANotice() async throws {
+        let model = Self.model(try Self.terminal())
+        let seen = Seen()
+        let window = Self.window(Probe(seen: seen, content: NativeAgentView(model: model, isFocused: true, showTerminal: {})))
+        defer { window.close() }
+        model.store.apply(try await model.store.ledger.page(Self.page([
+            Self.row(0, "turn:n1", ["Turn": ["prompt": "Agent \"Count the lines\" finished", "origin": "Notification", "started_ms": 1, "ended_ms": 2, "duration_ms": 1, "outcome": "Finished", "background_running": 0, "activity": NSNull()]]),
+        ])))
+        await Self.settle(window)
+        #expect(seen.ids.contains("native-notice-turn"))
+        #expect(NativeCopy.agentType("general-purpose") == "General purpose")
+        #expect(NativeCopy.short(ms: 42_000) == "0:42" && NativeCopy.short(ms: 220_000) == "3:40")
+    }
+
     nonisolated static func row(_ ord: Int, _ id: String, _ kind: [String: Any]) -> [String: Any] {
         ["id": id, "ord": ord, "rev": 1, "turn": NSNull(), "provisional": false, "kind": kind]
     }

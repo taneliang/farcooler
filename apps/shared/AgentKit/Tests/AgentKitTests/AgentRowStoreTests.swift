@@ -272,3 +272,21 @@ func aReturningPaneFollowsFromTheCache() async throws {
     await waitFor("the catch-up follow") { await source.calls.count >= 2 }
     #expect(await source.calls.first == .follow(epoch: 7, afterRev: 40, waitMs: 0))
 }
+
+@MainActor
+@Test("Starting again replaces the running follow: the first source is asked nothing more")
+func startingAgainReplacesTheFollow() async throws {
+    let quick = (0..<400).map { _ in ScriptedRows.Answer.data(RowFixture.follow(rev: 1, [])) }
+    let first = ScriptedRows(pages: [.data(RowFixture.page(rev: 1, rows: 1))], follows: quick, delay: .milliseconds(5))
+    let second = ScriptedRows(pages: [], follows: [.hang])
+    let store = AgentRowStore(key: "again", cache: nil)
+    store.start(first)
+    defer { store.stop() }
+    await waitFor("the first source following") { await first.calls.count >= 4 }
+    store.start(second)
+    await waitFor("the second source asked") { await second.calls.count >= 1 }
+    let asked = await first.calls.count
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(await first.calls.count <= asked + 1, "the old loop kept following")
+    #expect(store.isStale == false)
+}

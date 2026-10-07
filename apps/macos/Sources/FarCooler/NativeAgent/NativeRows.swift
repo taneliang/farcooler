@@ -42,14 +42,26 @@ enum NativeCopy {
         gap.count > 1 ? "Some of this session couldn’t be read." : "A line of this session couldn’t be read."
     }
 
-    /// "4s", "1m 12s", "2h 3m".
+    /// "0:04", "1:12", "2:03:09": the format a running timer counts in, so
+    /// a finished time reads like the running one did.
     static func short(ms: Int64) -> String {
         let seconds = max(0, ms / 1000)
-        switch seconds {
-        case ..<60: return "\(seconds)s"
-        case ..<3600: return "\(seconds / 60)m \(seconds % 60)s"
-        default: return "\(seconds / 3600)h \((seconds % 3600) / 60)m"
-        }
+        let (h, m, s) = (seconds / 3600, (seconds % 3600) / 60, seconds % 60)
+        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
+    }
+
+    /// A subagent's type as words: `general-purpose` reads "General purpose".
+    static func agentType(_ raw: String) -> String {
+        let words = raw.replacingOccurrences(of: "-", with: " ").replacingOccurrences(of: "_", with: " ")
+        guard let first = words.first else { return "Agent" }
+        return first.uppercased() + words.dropFirst()
+    }
+
+    /// A turn nobody typed: a background task finishing, or claude waking
+    /// itself (`TurnOrigin::Notification`, `System`). Drawn as a notice,
+    /// never as the person's message.
+    static func isNotice(_ turn: AgentRow.Turn) -> Bool {
+        turn.origin == "Notification" || turn.origin == "System"
     }
 
     static func outcome(_ turn: AgentRow.Turn) -> String? {
@@ -94,8 +106,14 @@ private struct TurnRow: View {
     var body: some View {
         VStack(alignment: .trailing, spacing: Spacing.tight) {
             // A turn whose prompt the projection never saw (a resume) has
-            // only its outcome to show.
-            if !turn.prompt.isEmpty {
+            // only its outcome to show; one nobody typed is a notice.
+            if NativeCopy.isNotice(turn), !turn.prompt.isEmpty {
+                Text(turn.prompt.replacingOccurrences(of: "\"", with: ""))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .identified("native-notice-turn")
+            } else if !turn.prompt.isEmpty {
                 Text(turn.prompt)
                     .textSelection(.enabled)
                     .padding(.horizontal, Spacing.inset)
@@ -212,7 +230,7 @@ private struct SubagentRow: View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
                 StatusMark(status: subagent.status)
-                Text(subagent.agentType.isEmpty ? "Agent" : subagent.agentType).fontWeight(.medium)
+                Text(NativeCopy.agentType(subagent.agentType)).fontWeight(.medium)
                 Text(subagent.description).foregroundStyle(.secondary).lineLimit(1)
                 Spacer(minLength: Spacing.group)
                 Text(subagent.toolCount == 1 ? "1 tool" : "\(subagent.toolCount) tools")

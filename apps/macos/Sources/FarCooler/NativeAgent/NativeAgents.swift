@@ -30,6 +30,9 @@ final class NativeAgents: ObservableObject {
     @Published private(set) var rowsServed = false
     /// What went wrong turning the setting on or off, for Settings to show.
     @Published private(set) var settingTrouble: String?
+    /// A change to the setting is on its way to the runner: the switch waits
+    /// for it, so two flips can't land out of order.
+    @Published private(set) var changing = false
 
     private(set) var core: RunnerCore?
     private var panes: [String: NativePaneModel] = [:]
@@ -62,6 +65,9 @@ final class NativeAgents: ObservableObject {
 
     /// The setting's switch.
     func setEnabled(_ on: Bool) async {
+        guard !changing else { return }
+        changing = true
+        defer { changing = false }
         settingTrouble = nil
         if let trouble = await setProjector(on) {
             settingTrouble = trouble
@@ -73,6 +79,9 @@ final class NativeAgents: ObservableObject {
             reconnect()
             await connecting?.value
         } else {
+            // A reconnect still on its way would otherwise set `core` after.
+            connecting?.cancel()
+            connecting = nil
             for pane in panes.values { pane.store.stop() }
             panes = [:]
             core = nil
@@ -99,7 +108,10 @@ final class NativeAgents: ObservableObject {
             guard let self, !Task.isCancelled else { return }
             self.settingTrouble = trouble
             self.core = core
-            self.rowsServed = offered.contains("agent_rows")
+            // Rows to read and a way to send: a runner with rows from
+            // before `terminal.compose` gets the terminal, not a view whose
+            // every send would fail.
+            self.rowsServed = Self.serves(offered)
             // Panes opened on the old connection follow on the new one.
             for pane in self.panes.values where self.rowsServed {
                 self.follow(pane, on: core)
@@ -112,6 +124,11 @@ final class NativeAgents: ObservableObject {
     /// running in a terminal-mode pane.
     func offers(_ terminal: Terminal, target: String) -> Bool {
         enabled && rowsServed && core != nil && target.isEmpty && Self.isClaudeInATerminal(terminal)
+    }
+
+    /// Whether a hello offers the view: rows to read and compose to send.
+    static func serves(_ offered: Set<String>) -> Bool {
+        offered.contains("agent_rows") && offered.contains("agent_compose")
     }
 
     static func isClaudeInATerminal(_ terminal: Terminal) -> Bool {
@@ -129,11 +146,13 @@ final class NativeAgents: ObservableObject {
         return model
     }
 
+    /// Give `model` this connection. It follows only while its view shows
+    /// (`NativePaneModel.showsNative`): a pane on its terminal holds no
+    /// follow on the runner.
     private func follow(_ model: NativePaneModel, on core: RunnerCore) {
-        let source = CoreRowSource(core: core, terminal: model.terminal)
-        model.source = source
+        model.source = CoreRowSource(core: core, terminal: model.terminal)
         model.sink = core
-        model.store.start(source)
+        model.followIfShown()
     }
 
     /// A model a test made, under the registry's rules.

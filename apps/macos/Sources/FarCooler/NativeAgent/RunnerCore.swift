@@ -23,13 +23,16 @@ actor RunnerCore {
         /// The runner understood and said no: its error code's word, and the
         /// conflict or argument it named, if any.
         case refused(String, word: String?, what: String?)
-        /// The link is gone.
-        case lost(String)
+        /// The link is gone. `notSent` when the call provably never left
+        /// this Mac; otherwise it may have reached the runner.
+        case lost(String, notSent: Bool = false)
+        /// No answer by the call's deadline: it may still be done.
+        case timedOut(String)
         case notConnected
 
         var errorDescription: String? {
             switch self {
-            case .refused(let message, _, _), .lost(let message): message
+            case .refused(let message, _, _), .lost(let message, _), .timedOut(let message): message
             case .notConnected: "The runner isn't connected."
             }
         }
@@ -119,8 +122,10 @@ actor RunnerCore {
                     returning: (try? JSONSerialization.data(withJSONObject: result, options: [.fragmentsAllowed])) ?? Data("{}".utf8))
             } else {
                 let message = object["error"] as? String ?? "The runner refused the request."
-                if object["disconnected"] as? Bool == true || object["trouble"] != nil {
-                    continuation.resume(throwing: Failure.lost(message))
+                if object["timed_out"] as? Bool == true {
+                    continuation.resume(throwing: Failure.timedOut(message))
+                } else if object["disconnected"] as? Bool == true || object["trouble"] != nil || object["not_sent"] as? Bool == true {
+                    continuation.resume(throwing: Failure.lost(message, notSent: object["not_sent"] as? Bool == true))
                 } else {
                     continuation.resume(
                         throwing: Failure.refused(
