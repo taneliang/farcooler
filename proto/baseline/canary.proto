@@ -1,4 +1,4 @@
-// Shipped by Canary at 3778741f77331470d49d384f597fa8db4c722184. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 992f1bebb459601714c3017b5fd9db5b19259320. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -247,6 +247,11 @@ message Request {
     // (180-189) was reserved whole and a reserved tag is never reused. The
     // rest of this block, 201-209, is held by `reserved` below.
     RulingKeepAll ruling_keep_all = 200;
+    // Agent rows (ov-366), behind `agent_rows`: a page of a terminal's
+    // projected rows, and a follow of what changed after a revision. 360-369
+    // are theirs, the rest held by `reserved` below.
+    AgentRowsPage agent_rows_page = 360;
+    AgentRowsFollow agent_rows_follow = 361;
   }
   // The rest of rulings' block, kept for them (review 1005a L1).
   reserved 182 to 189;
@@ -254,6 +259,8 @@ message Request {
   reserved 192 to 199;
   // The rest of the owner's marks' block (ov-333).
   reserved 201 to 209;
+  // The rest of agent rows' block (ov-366).
+  reserved 362 to 369;
 }
 
 message Response {
@@ -380,6 +387,9 @@ message Result {
     // behind the turn it's in. A daemon from before replies with the
     // terminal, as `terminal.draft_prompt` does.
     TerminalTold terminal_told = 310;
+    // `agent.rows` and `agent.rows_follow` (ov-366), behind `agent_rows`.
+    AgentRowPage agent_row_page = 370;
+    AgentRowChanges agent_row_changes = 371;
   }
   // The rest of rulings' block, kept for them (review 1005a L1).
   reserved 181 to 189;
@@ -391,6 +401,8 @@ message Result {
   reserved 211 to 219;
   // The rest of `terminal.tell`'s block (ov-360).
   reserved 311 to 319;
+  // The rest of agent rows' block (ov-366).
+  reserved 372 to 379;
 }
 
 // ---------------------------------------------------------------------------
@@ -419,6 +431,92 @@ message AgentSubscribe {
   // which stream it means. Send back what the last batch reported; a mismatch
   // returns the whole transcript instead of a slice.
   uint64 epoch = 3;
+}
+
+// Agent rows (ov-366): what a native view draws for a terminal's agent
+// session, folded on the runner from the agent's own transcript and hooks
+// (`session_log::projector`). A client attaches with a page of the newest
+// rows, scrolls back with `before`, and follows by revision. Every row has an
+// id that never changes, so a follow names rows by id and a client applies it
+// to the row it already drew.
+//
+// Experimental: served only while the runner runs with FARCOOLER_PROJECTOR=1,
+// until a client reads it (ov-372); otherwise both methods are refused as
+// unsupported.
+
+// `agent.rows`: up to `limit` rows before `before`, oldest first.
+message AgentRowsPage {
+  bytes terminal_id = 1;
+  // Rows before this `ord`; absent for the newest.
+  optional uint64 before = 2;
+  // 0 is the runner's default, 100. Capped at 500.
+  uint32 limit = 3;
+}
+
+// `agent.rows_follow`: what changed after `after_rev`, held open up to
+// `wait_ms` while nothing has.
+message AgentRowsFollow {
+  bytes terminal_id = 1;
+  // The projection the follower's rows came from, as its page said.
+  uint64 epoch = 2;
+  // The revision the follower has applied through.
+  uint64 after_rev = 3;
+  // How long the runner may hold the call while nothing changes. 0 answers
+  // at once; capped at 25 s.
+  uint32 wait_ms = 4;
+}
+
+message AgentRow {
+  string id = 1;
+  // Its place, never renumbered: a page's cursor.
+  uint64 ord = 2;
+  // The revision that last changed it.
+  uint64 rev = 3;
+  // The row itself as JSON, `projector::Row` serialized: its turn, whether
+  // it is provisional, and a kind (Turn, Prose, Tool, Subagent, Ask, Queued,
+  // Notice, Handoff, Gap) with that kind's fields.
+  string row_json = 4;
+}
+
+message AgentRowPage {
+  bytes terminal_id = 1;
+  // The projection these rows are from. A daemon restart, or a pane opened
+  // on another conversation, starts another.
+  uint64 epoch = 2;
+  // The projection's revision when this page was read: follow from here.
+  uint64 rev = 3;
+  repeated AgentRow rows = 4;
+  // Whether there are rows to draw before the first one here.
+  bool more_before = 5;
+}
+
+enum AgentRowChangeKind {
+  AGENT_ROW_CHANGE_KIND_UNSPECIFIED = 0;
+  // A row the follower has never seen, always after every row it holds.
+  AGENT_ROW_CHANGE_KIND_INSERT = 1;
+  // A row it may hold, changed.
+  AGENT_ROW_CHANGE_KIND_UPDATE = 2;
+  // A row it may hold, taken back. `row` is absent.
+  AGENT_ROW_CHANGE_KIND_REMOVE = 3;
+}
+
+message AgentRowChange {
+  AgentRowChangeKind kind = 1;
+  string id = 2;
+  uint64 rev = 3;
+  optional AgentRow row = 4;
+}
+
+message AgentRowChanges {
+  bytes terminal_id = 1;
+  uint64 epoch = 2;
+  // The revision these changes bring the follower to.
+  uint64 rev = 3;
+  repeated AgentRowChange changes = 4;
+  // The follower's epoch is not this projection's (the runner restarted, or
+  // the pane moved to another conversation), or it is too far behind for a
+  // follow to be cheaper than a page: page again from the newest.
+  bool reset = 5;
 }
 
 message ImageBlock {
