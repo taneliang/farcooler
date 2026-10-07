@@ -142,16 +142,34 @@ struct NativeAgentRunnerTests {
 
             // A send goes over the wire and comes back with the runner's word
             // for why a stand-in pane can't be typed into.
+            var word: String?
             do {
                 _ = try await fresh.compose(terminal: terminal, text: "and the docs")
                 Issue.record("a stand-in pane took a message")
             } catch let failure as RunnerCore.Failure {
                 print("NATIVE-RUNNER compose refused: \(failure)")
+                word = failure.what
                 #expect(failure.what != nil, "\(failure)")
                 if case .said(let words) = NativePaneModel.issue(for: failure) {
                     #expect(words != "The message wasn’t sent.", "a word the composer has no sentence for: \(failure)")
                 }
             }
+
+            // With a 2 MB image, twice what one request carries: the core
+            // uploads it first (ov-393), so the pane refuses it for the same
+            // reason, never as too large, and the upload is gone after.
+            var png = Data([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+            png.append(Data(repeating: 0x5a, count: 2 * 1024 * 1024))
+            do {
+                _ = try await fresh.compose(terminal: terminal, text: "and this", images: [ComposeImage(mime: "image/png", data: png)])
+                Issue.record("a stand-in pane took a message")
+            } catch let failure as RunnerCore.Failure {
+                print("NATIVE-RUNNER compose with an image refused: \(failure)")
+                #expect(failure.what == word, "\(failure)")
+            }
+            let staged = FileManager.default.enumerator(atPath: home + "/h")?.compactMap { $0 as? String }
+                .filter { $0.contains("pastes/.staged/") } ?? []
+            #expect(staged.isEmpty, "\(staged)")
         }
     }
 
