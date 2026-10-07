@@ -328,8 +328,9 @@ while (1) {
                 $composer = "";
             }
         } elsif (substr($buf, 0, 1) eq "\e") {
-            # An escape that isn't a paste: drop it whole.
-            $buf =~ s/^\e\[?[0-9;]*[A-Za-z~]?//;
+            # An escape that isn't a paste: drop it whole, a mouse report
+            # (`ESC [ < 0 ; 41 ; 13 M`) or a reply (`ESC [ ? 6 c`) too.
+            $buf =~ s/^\e\[?[<?>]?[0-9;]*\$?[A-Za-z~]?//;
         } else {
             $buf =~ s/^([^\e\r]+)//;
             take(decode_utf8($1));

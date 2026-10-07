@@ -1428,5 +1428,8 @@ mod hidden_turn_tests;
 #[path = "typing_tests.rs"]
 mod typing_tests;
 
+#[path = "input_mark_tests.rs"]
+mod input_mark_tests;
+
 #[path = "interrupt_tests.rs"]
 mod interrupt_tests;

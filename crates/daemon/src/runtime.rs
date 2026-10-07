@@ -17,6 +17,8 @@ use uuid::Uuid;
 
 use crate::paths;
 
+mod typed;
+
 /// A handle to the live runtime, with no database behind it.
 ///
 /// Cloning shares the same inventory view rather than making a second one, so
@@ -146,7 +148,9 @@ impl Runtime {
             .ok_or(DomainError::NotFound)?
             .pane_id
             .clone();
-        self.mark(id);
+        if typed::typed_hex(hex) {
+            self.mark(id);
+        }
         self.tmux.send_bytes_hex(&pane, hex).await
     }
 
@@ -622,6 +626,11 @@ impl Runtime {
     /// typist actually feels. This resolves the pane ONCE and then forwards,
     /// so the steady-state cost of a keystroke is one `send-keys`.
     pub async fn input_channel(&self, id: Uuid) -> Result<()> {
+        self.input_from(id, tokio::io::stdin()).await
+    }
+
+    /// `input_channel`, its lines read from `input`.
+    pub(crate) async fn input_from(&self, id: Uuid, input: impl tokio::io::AsyncRead + Unpin) -> Result<()> {
         use tokio::io::{AsyncBufReadExt, BufReader};
 
         let snapshot = self.inventory.snapshot();
@@ -633,8 +642,9 @@ impl Runtime {
             .pane_id
             .clone();
 
-        let mut lines = BufReader::new(tokio::io::stdin()).lines();
-        // At most one mark a second: a typist sends a line per key.
+        let mut lines = BufReader::new(input).lines();
+        // At most one mark a second: a typist sends a line per key. Only
+        // for what a person typed, not a click or a reply (`typed`).
         let mut marked: Option<std::time::Instant> = None;
 
         while let Ok(Some(line)) = lines.next_line().await {
@@ -642,7 +652,7 @@ impl Runtime {
             if hex.is_empty() {
                 continue;
             }
-            if marked.is_none_or(|at| at.elapsed() >= std::time::Duration::from_secs(1)) {
+            if marked.is_none_or(|at| at.elapsed() >= std::time::Duration::from_secs(1)) && typed::typed_hex(hex) {
                 self.mark(id);
                 marked = Some(std::time::Instant::now());
             }
