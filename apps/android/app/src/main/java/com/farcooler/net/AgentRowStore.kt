@@ -165,8 +165,9 @@ class AgentRowStore(
             try {
                 val oldest = ledger.oldestOrd
                 if (oldest != null) {
-                    val delta = ledger.older(AgentRowPage.decode(source.page(oldest, PAGE_SIZE)))
-                    if (!delta.isEmpty) publish()
+                    // Published even when no row came: the page also says whether more exist.
+                    ledger.older(AgentRowPage.decode(source.page(oldest, PAGE_SIZE)))
+                    publish()
                 }
             } catch (e: CancellationException) {
                 throw e
