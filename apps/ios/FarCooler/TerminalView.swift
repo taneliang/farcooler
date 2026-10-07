@@ -1753,6 +1753,8 @@ private struct KeystrokeField: UIViewRepresentable {
     /// the same reason `focusRequest` is one: what matters is that a fresh
     /// request happened, not what state anything is in.
     var dismissRequest: Int
+    /// A conversation covers the terminal: VoiceOver mustn't reach this (ov-373).
+    @Environment(\.terminalCovered) private var covered
     /// The height, in points, one terminal row is actually drawn at right
     /// now — what a drag on this view is converted to lines against. Passed
     /// in rather than measured here, because only `TerminalView` knows the
@@ -1839,6 +1841,7 @@ private struct KeystrokeField: UIViewRepresentable {
         // sits beside changes every second. Only actually re-focus when
         // `focusRequest` itself moved, or an on-screen keyboard the user
         // deliberately dismissed would be pulled back up on the next tick.
+        uiView.accessibilityElementsHidden = covered
         if context.coordinator.lastDismissRequest != dismissRequest {
             context.coordinator.lastDismissRequest = dismissRequest
             DispatchQueue.main.async { uiView.resignFirstResponder() }

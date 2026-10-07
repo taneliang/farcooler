@@ -18,6 +18,14 @@ import UIKit
 ///   `-native-dialog` refuses it for a dialog, `-native-draft` for a draft in
 ///   the terminal's box.
 /// - `-native-flag-off`: a runner whose projector is off, so no `agent_rows`.
+/// - `-native-reconnect`: on the fourth follow, the link comes up again, so
+///   the build is unread for two seconds.
+/// - `-native-off-on`: on the fourth follow, the projector is turned off
+///   (rows refused, a hello without `agent_rows`), and back on a few seconds
+///   later.
+/// - `-native-stale`: from the fourth follow on, every rows call is lost.
+/// - Compose's text picks a failure: "time out", "garble" (an unreadable
+///   answer) and "read only" (a grant that may not type).
 /// - `-native-terminal`: the pane last switched to its terminal (R-27).
 ///
 /// `native-harness` reads back what was sent, and how many follows were
@@ -65,16 +73,27 @@ struct NativeAgentHarness: View {
     private func stand() async {
         let runner = runner
         await connection.core.standIn { method, args in try await runner.answer(method, args) }
-        let flagOff = CommandLine.arguments.contains("-native-flag-off")
         connection.standIn(
             on: Fleet(runtimeHealthy: true, livePanes: 2, worktrees: [Self.worktree]),
             repositories: [],
-            build: DaemonBuild(
-                version: "harness", matches: true, platform: "harness",
-                capabilities: Set(
-                    ["workspaces", "terminals", "agent", "projector_setting"]
-                        + (flagOff ? [] : ["agent_rows", "agent_compose"]))))
+            build: Self.build(rows: !CommandLine.arguments.contains("-native-flag-off")))
         fleetStore.republish()
+        let connection = connection
+        runner.links = { rows in
+            // A link coming up again: no build for a round trip, then the
+            // new hello's.
+            connection.standInLinkCameUp()
+            try? await Task.sleep(for: .seconds(2))
+            connection.standInBuildLanded(Self.build(rows: rows))
+        }
+    }
+
+    /// The runner's build: with its projector on, `agent_rows` and compose.
+    static func build(rows: Bool) -> DaemonBuild {
+        DaemonBuild(
+            version: "harness", matches: true, platform: "harness",
+            capabilities: Set(
+                ["workspaces", "terminals", "agent", "projector_setting"] + (rows ? ["agent_rows", "agent_compose"] : [])))
     }
 
     private static var worktree: Worktree {
@@ -104,6 +123,12 @@ final class NativeHarnessRunner: ObservableObject {
     /// Messages sent and not yet shown by a follow.
     private var unshown: [String] = []
     private var rev: UInt64 = 10
+    /// The link coming up again, with or without rows on the new hello.
+    var links: ((Bool) async -> Void)?
+    /// The projector is off: rows are refused.
+    private var off = false
+    /// The link is down for rows.
+    private var lost = false
     /// Whether the reply's change has been sent.
     private var updated = false
     /// The follow that changes it: about five seconds after the pane first
@@ -116,6 +141,7 @@ final class NativeHarnessRunner: ObservableObject {
     nonisolated func answer(_ method: String, _ args: [String: Any]) async throws -> Data {
         switch method {
         case "agent.rows":
+            try await MainActor.run { try refuseIfOff() }
             return try await MainActor.run { try json(page()) }
         case "agent.rows_follow":
             return try await follow()
@@ -137,8 +163,37 @@ final class NativeHarnessRunner: ObservableObject {
         said = "follows=\(follows) background=\(background) changed=\(updated) sent=\(sent.joined(separator: "|"))"
     }
 
+    private func refuseIfOff() throws {
+        if off { throw ClientCore.CoreError.rejected("Rows aren't served.", word: "capability-unsupported") }
+        if lost { throw ClientCore.CoreError.disconnected("The link dropped.") }
+    }
+
+    /// What the fourth follow sets off, under its flag.
+    private func onFourth() {
+        let args = CommandLine.arguments
+        if args.contains("-native-reconnect") {
+            Task { await links?(true) }
+        } else if args.contains("-native-off-on") {
+            off = true
+            Task {
+                await links?(false)
+                try? await Task.sleep(for: .seconds(3))
+                off = false
+                await links?(true)
+            }
+        } else if args.contains("-native-stale") {
+            lost = true
+        }
+    }
+
     private func compose(_ text: String) throws -> Data {
         let args = CommandLine.arguments
+        switch text {
+        case "time out": throw ClientCore.CoreError.timedOut("No answer in time.")
+        case "garble": throw ClientCore.CoreError.malformed
+        case "read only": throw ClientCore.CoreError.rejected("Not with this grant.", word: "scope-denied")
+        default: break
+        }
         if args.contains("-native-dialog") {
             throw ClientCore.CoreError.rejected("A dialog is open.", word: "resource-conflict", what: "dialog")
         }
@@ -153,10 +208,12 @@ final class NativeHarnessRunner: ObservableObject {
     }
 
     private func follow() async throws -> Data {
-        await MainActor.run {
+        try await MainActor.run {
             follows += 1
             if UIApplication.shared.applicationState != .active { background += 1 }
             report()
+            if follows == 4 { onFourth() }
+            try refuseIfOff()
         }
         try await Task.sleep(for: .milliseconds(700))
         return try await MainActor.run {

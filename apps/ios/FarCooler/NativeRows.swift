@@ -81,6 +81,14 @@ private struct TurnRow: View {
                     .padding(.leading, 48)
                     .accessibilityIdentifier("native-prompt")
             }
+            // A notice's own turn says no time of its own: it's the line
+            // above, not a message the person sent.
+            if !AgentConversation.isNotice(turn) { status }
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    private var status: some View {
             HStack(spacing: Spacing.group) {
                 if turn.origin == "Queued" { Text("From the queue") }
                 if turn.backgroundRunning > 0 {
@@ -98,8 +106,6 @@ private struct TurnRow: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     private var failed: Bool {

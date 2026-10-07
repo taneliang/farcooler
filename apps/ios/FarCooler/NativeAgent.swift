@@ -58,9 +58,21 @@ struct CoreRowSource: AgentRowSource {
 /// pane's draft and rows outlive the views that show them: a tab swiped
 /// away, a layout change, the pane switched to its terminal and back.
 @MainActor
-final class NativePanes {
+final class NativePanes: ObservableObject {
     static let shared = NativePanes()
     private var panes: [String: NativePaneModel] = [:]
+    /// The panes whose conversation covers their terminal now, for the
+    /// pane's bar: its terminal-only controls (Send an Image types a path
+    /// into the covered box) go while it does.
+    @Published private(set) var covered: Set<String> = []
+
+    func cover(_ terminal: String, _ on: Bool) {
+        if on, !covered.contains(terminal) {
+            covered.insert(terminal)
+        } else if !on, covered.contains(terminal) {
+            covered.remove(terminal)
+        }
+    }
 
     /// The pane's model, made once and kept.
     func model(for terminal: String, core: ClientCore) -> NativePaneModel {
@@ -170,6 +182,9 @@ final class NativePaneModel: ObservableObject {
 
     private func followIfDue() {
         let due = onScreen && showing
+        // A loop that ended because the runner stopped serving rows isn't
+        // following, whatever was set when it started.
+        if due, following, store.phase == .unavailable { following = false }
         if due, !following {
             following = true
             store.start(source)
@@ -177,6 +192,20 @@ final class NativePaneModel: ObservableObject {
             following = false
             stops += 1
             store.stop()
+        }
+    }
+
+    /// The conversation stopped being offered: the runner's setting turned
+    /// off, its build lost, claude exited. Stop following, and forget that
+    /// the runner said it had no rows, so the pane starts afresh when it's
+    /// offered again. A follow left running here, or ended `.unavailable`
+    /// with `following` still set, held the pane on "isn't being read" until
+    /// a relaunch (ov-373 review 1).
+    func release() {
+        setOnScreen(false)
+        if unavailable {
+            unavailable = false
+            updateShowing()
         }
     }
 
@@ -235,11 +264,14 @@ final class NativePaneModel: ObservableObject {
 
     static func failure(_ error: Error) -> AgentConversation.SendFailure {
         switch error as? ClientCore.CoreError {
-        case .rejected(_, _, let what)?: .refused(what: what)
-        case .timedOut?: .timedOut
+        case .rejected(_, let word, let what)?: .refused(what: what, word: word)
+        // An answer that couldn't be read is still an answer: the runner may
+        // have typed it, so it says what a timeout says.
+        case .timedOut?, .malformed?: .timedOut
         case .disconnected(_, let notSent)?: .lost(notSent: notSent)
         case .notStarted?: .lost(notSent: true)
-        case .unreached?, .malformed?, nil: .refused(what: nil)
+        // A connect's answer, never a call's.
+        case .unreached?, nil: .refused(what: nil)
         }
     }
 }

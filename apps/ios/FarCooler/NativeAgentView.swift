@@ -22,9 +22,17 @@ struct NativeSwitch<Content: View>: View {
 
     @Environment(\.scenePhase) private var scenePhase
 
+    /// The pane's model, where the conversation is offered.
+    ///
+    /// Gated on the build the LAYOUT reads (`daemon ?? lastDaemon`), never
+    /// on `daemon` alone: every reconnect clears `daemon` until the new
+    /// link's `host` answers, and a view gated on it came down for that round
+    /// trip, showed the terminal and raised its keyboard, then came back
+    /// (ov-373 review 1). Sends still go through the runner's own gate.
     private var model: NativePaneModel? {
-        guard AgentConversation.served(by: connection.knownBuild),
-            AgentConversation.isClaudeInATerminal(paneMode: terminal.paneMode, preset: terminal.preset)
+        guard AgentConversation.served(by: connection.daemon ?? connection.lastDaemon ?? connection.knownBuild),
+            AgentConversation.isClaudeInATerminal(paneMode: terminal.paneMode, preset: terminal.preset),
+            AgentConversation.isRunning(state: terminal.state)
         else { return nil }
         return NativePanes.shared.model(for: terminal.id, core: connection.core)
     }
@@ -32,13 +40,14 @@ struct NativeSwitch<Content: View>: View {
     var body: some View {
         let model = model
         NativeSwitchBody(
-            model: model, isOnScreen: isVisible && scenePhase == .active, isVisible: isVisible,
+            terminal: terminal.id, model: model, isOnScreen: isVisible && scenePhase == .active, isVisible: isVisible,
             toConversation: toConversation, content: content)
     }
 }
 
 /// `NativeSwitch` with its model resolved, observed where there is one.
 private struct NativeSwitchBody<Content: View>: View {
+    let terminal: String
     let model: NativePaneModel?
     let isOnScreen: Bool
     let isVisible: Bool
@@ -46,8 +55,27 @@ private struct NativeSwitchBody<Content: View>: View {
     let content: () -> Content
 
     /// The model's `showing`, mirrored so this view, which holds the
-    /// terminal, redraws when it changes.
-    @State private var showing = false
+    /// terminal, redraws when it changes. Seeded from the model, so the
+    /// first frame already knows the terminal is covered (`ArrivalFocus`).
+    @State private var showing: Bool
+    /// The model this view last followed through, so one that stops being
+    /// offered (the setting turned off, claude exited) stops its follow and
+    /// starts afresh when it's offered again.
+    @State private var held: NativePaneModel?
+
+    init(
+        terminal: String, model: NativePaneModel?, isOnScreen: Bool, isVisible: Bool,
+        toConversation: @escaping () -> Void, content: @escaping () -> Content
+    ) {
+        self.terminal = terminal
+        self.model = model
+        self.isOnScreen = isOnScreen
+        self.isVisible = isVisible
+        self.toConversation = toConversation
+        self.content = content
+        _showing = State(initialValue: model?.showing ?? false)
+        _held = State(initialValue: model)
+    }
 
     var body: some View {
         ZStack {
@@ -66,17 +94,23 @@ private struct NativeSwitchBody<Content: View>: View {
                     .opacity(showing ? 1 : 0)
                     .allowsHitTesting(showing)
                     .accessibilityHidden(!showing)
+                    // VoiceOver stays in the conversation and never wanders
+                    // into the terminal under it.
+                    .accessibilityAddTraits(showing ? .isModal : [])
             }
         }
         #if DEBUG
         // Which of the two shows, for the UI tests: both stay in the
         // accessibility tree XCUITest reads, so neither's presence says.
+        // `left` counts the times the conversation stopped showing.
         .overlay(alignment: .bottomTrailing) {
             Color.clear
                 .frame(width: 1, height: 1)  // style-exempt: DEBUG probe: a 1 pt element the UI tests read, nothing drawn
                 .accessibilityElement()
                 .accessibilityIdentifier("native-showing")
-                .accessibilityValue(model == nil ? "terminal-only" : (showing ? "conversation" : "terminal"))
+                .accessibilityValue(
+                    (model == nil ? "terminal-only" : (showing ? "conversation" : "terminal"))
+                        + " left=\(NativeProbe.left[terminal] ?? 0)")
         }
         #endif
         .toolbar {
@@ -99,13 +133,40 @@ private struct NativeSwitchBody<Content: View>: View {
             }
             for await value in model.$showing.values { showing = value }
         }
-        .onChange(of: showing) { _, now in
+        .onChange(of: showing) { was, now in
+            NativePanes.shared.cover(terminal, now)
             if now { toConversation() }
+            #if DEBUG
+            if was, !now { NativeProbe.left[terminal, default: 0] += 1 }
+            #endif
         }
         .onChange(of: isOnScreen, initial: true) { _, now in model?.setOnScreen(now) }
-        .onChange(of: model.map(ObjectIdentifier.init)) { _, _ in model?.setOnScreen(isOnScreen) }
+        .onChange(of: model.map(ObjectIdentifier.init)) { _, _ in
+            if let held, held !== model { held.release() }
+            held = model
+            model?.setOnScreen(isOnScreen)
+        }
+        .onAppear {
+            NativePanes.shared.cover(terminal, showing)
+            model?.setOnScreen(isOnScreen)
+        }
+        // A pane closed, or the shell left: no `isVisible` change says so,
+        // and the model outlives the view, so its follow would go on holding
+        // a call on the runner.
+        .onDisappear {
+            NativePanes.shared.cover(terminal, false)
+            model?.setOnScreen(false)
+        }
     }
 }
+
+#if DEBUG
+/// What the UI tests read about a pane's switch.
+@MainActor
+enum NativeProbe {
+    static var left: [String: Int] = [:]
+}
+#endif
 
 extension EnvironmentValues {
     /// The pane's conversation covers its terminal (ov-373).
@@ -218,6 +279,9 @@ struct NativeAgentView: View {
             .padding(Spacing.section)
         }
         .defaultScrollAnchor(.bottom, for: .initialOffset)
+        // A session shorter than the screen sits on the composer, as in
+        // Messages, not at the top with a gap under it.
+        .defaultScrollAnchor(.bottom, for: .alignment)
         .scrollDismissesKeyboard(.interactively)
         .scrollPosition($position, anchor: .bottom)
         .onScrollPhaseChange { _, phase, context in
@@ -256,7 +320,10 @@ struct NativeAgentView: View {
         .onAppear { anchor(settling: true) }
         .onDisappear { settle?.cancel() }
         .accessibilityIdentifier("native-transcript")
+        #if DEBUG
+        // For the UI tests only: VoiceOver mustn't read it.
         .accessibilityValue(String("tail=\(pinned) rows=\(store.ids.count) following=\(model.following)"))
+        #endif
         .overlay {
             if store.ids.isEmpty { emptyState(store.phase) }
         }
@@ -364,6 +431,11 @@ struct NativeComposer: View {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.title)
                         .foregroundStyle(model.canSend ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
+                        // An edge while it can't send, so it still reads on
+                        // light paper.
+                        .overlay {
+                            if !model.canSend { Circle().strokeBorder(.secondary, lineWidth: 1) }  // style-exempt: the disabled Send's edge on light paper
+                        }
                 }
                 .buttonStyle(.plain)
                 .disabled(!model.canSend)

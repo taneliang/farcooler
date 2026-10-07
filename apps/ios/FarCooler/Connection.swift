@@ -2279,5 +2279,19 @@ final class Connection: ObservableObject {
         daemon = build
         lastDaemon = build
     }
+
+    /// A link coming up again, as `reconnect` has it: the build forgotten
+    /// until the new link's `host` answers. `NativeAgentHarness` only.
+    func standInLinkCameUp() {
+        forgetDaemonBuild()
+        standInBuild = nil
+    }
+
+    /// The new link's build landing. `NativeAgentHarness` only.
+    func standInBuildLanded(_ build: DaemonBuild) {
+        standInBuild = build
+        daemon = build
+        lastDaemon = build
+    }
     #endif
 }

@@ -161,6 +161,7 @@ struct ShellPaneChromeModifier: ViewModifier {
     let onCreated: (String) -> Void
 
     @Environment(\.phoneNavigator) private var navigator
+    @ObservedObject private var nativePanes = NativePanes.shared
 
     @State private var showPhotoPicker = false
     @State private var pickedImage: PhotosPickerItem?
@@ -206,7 +207,9 @@ struct ShellPaneChromeModifier: ViewModifier {
                     if let changes {
                         ChangesToolbarMenu(store: changes)
                     }
-                    if let live, !live.isAgentPane, !live.isChangesPane {
+                    // Not while a conversation covers the terminal (ov-373):
+                    // the path would land in a box nobody can see.
+                    if let live, !live.isAgentPane, !live.isChangesPane, !nativePanes.covered.contains(live.id) {
                         imageMenu(live)
                     }
                     if hasOverflow {

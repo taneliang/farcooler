@@ -94,7 +94,7 @@ SHARDS = {
         "ChangesLfsNoticeTests",  # -changes-layout-harness -lfs-pointers (ov-199); 48 s
         "WorkspaceChromeTests",  # -phone-harness -phone-plan (ov-342); 68 s
         "RunnerReachTests",  # seeded -hosts at an address that never answers; 11 s
-        "NativeAgentViewTests",  # -native-agent-harness (ov-373); not yet timed, 9 tests
+        "NativeAgentViewTests",  # -native-agent-harness (ov-373); 13 tests, about 230 s on this Mac
     ],
 }
 

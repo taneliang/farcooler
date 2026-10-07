@@ -56,7 +56,8 @@ final class NativeAgentViewTests: XCTestCase {
     }
 
     /// Which of the pane's two views shows: `conversation`, `terminal`, or
-    /// `terminal-only` where the conversation isn't offered.
+    /// `terminal-only` where the conversation isn't offered, then
+    /// `left=N`, the times the conversation stopped showing.
     private func showing(_ app: XCUIApplication) -> String {
         element(app, "native-showing").value as? String ?? ""
     }
@@ -64,7 +65,7 @@ final class NativeAgentViewTests: XCTestCase {
     private func conversation(_ app: XCUIApplication) -> XCUIElement {
         let transcript = element(app, "native-transcript")
         XCTAssertTrue(transcript.waitForExistence(timeout: 60), "the conversation never showed")
-        XCTAssertTrue(wait(10) { showing(app) == "conversation" }, "the pane shows \(showing(app))")
+        XCTAssertTrue(wait(10) { showing(app).hasPrefix("conversation") }, "the pane shows \(showing(app))")
         return transcript
     }
 
@@ -91,6 +92,7 @@ final class NativeAgentViewTests: XCTestCase {
         let mounted = mount.value as? String
         XCTAssertNotNil(mounted)
 
+        XCTAssertFalse(app.buttons["Send an image"].exists, "Send an Image would type into the covered terminal")
         let field = element(app, "native-composer")
         field.tap()
         app.typeText("Half a thought")
@@ -98,11 +100,12 @@ final class NativeAgentViewTests: XCTestCase {
 
         element(app, "native-switch").tap()
         XCTAssertTrue(element(app, "terminal-surface").waitForExistence(timeout: 5), "Show Terminal didn't show it")
-        XCTAssertTrue(wait(5) { showing(app) == "terminal" }, "the conversation still shows")
+        XCTAssertTrue(wait(5) { showing(app).hasPrefix("terminal ") }, "the conversation still shows")
+        XCTAssertTrue(app.buttons["Send an image"].waitForExistence(timeout: 5), "the terminal's own controls didn't come back")
         capture("terminal")
 
         element(app, "native-switch").tap()
-        XCTAssertTrue(wait(5) { showing(app) == "conversation" })
+        XCTAssertTrue(wait(5) { showing(app).hasPrefix("conversation") })
         XCTAssertEqual(element(app, "native-composer").value as? String, "Half a thought", "the draft was lost")
         XCTAssertEqual(mount.value as? String, mounted, "switching built the terminal again")
     }
@@ -163,7 +166,7 @@ final class NativeAgentViewTests: XCTestCase {
         XCTAssertTrue(element(app, "native-handoff").waitForExistence(timeout: 10), "no Handoff row")
         capture("handoff")
         element(app, "native-handoff-show-terminal").tap()
-        XCTAssertTrue(wait(5) { showing(app) == "terminal" }, "Show Terminal didn't show it")
+        XCTAssertTrue(wait(5) { showing(app).hasPrefix("terminal ") }, "Show Terminal didn't show it")
     }
 
     /// R-28: a draft in the terminal's box refuses, with Show Terminal.
@@ -175,7 +178,7 @@ final class NativeAgentViewTests: XCTestCase {
         XCTAssertTrue(issue.waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["The terminal’s box already holds a draft. Send or clear it there first."].exists)
         issue.buttons["Show Terminal"].tap()
-        XCTAssertTrue(wait(5) { showing(app) == "terminal" }, "Show Terminal didn't show it")
+        XCTAssertTrue(wait(5) { showing(app).hasPrefix("terminal ") }, "Show Terminal didn't show it")
     }
 
     /// A runner whose projector is off: the terminal, and no switch.
@@ -184,7 +187,7 @@ final class NativeAgentViewTests: XCTestCase {
         XCTAssertTrue(element(app, "terminal-surface").waitForExistence(timeout: 60), "no terminal")
         Thread.sleep(forTimeInterval: 2)
         XCTAssertFalse(element(app, "native-switch").exists, "a switch to a view the runner doesn't serve")
-        XCTAssertEqual(showing(app), "terminal-only")
+        XCTAssertTrue(showing(app).hasPrefix("terminal-only"), showing(app))
         XCTAssertFalse(element(app, "native-transcript").exists)
         XCTAssertEqual(follows(app), 0, "rows read from a runner that doesn't serve them")
     }
@@ -202,6 +205,67 @@ final class NativeAgentViewTests: XCTestCase {
             prompts.allElementsBoundByIndex.contains { $0.label.contains("Count the lines") },
             "a notification drawn as a message the person typed")
         XCTAssertTrue(prompts.allElementsBoundByIndex.contains { $0.label == "Tidy the parser, please." })
+        XCTAssertFalse(
+            element(app, "native-row-turn:n1").staticTexts["Took 0:42"].exists,
+            "a notice says a time as if it were a message sent")
+    }
+
+    /// A link coming up again leaves the build unread for a round trip: the
+    /// conversation stays, and so does the keyboard on its box.
+    func testAReconnectKeepsTheConversationAndTheKeyboard() {
+        let app = launch(["-native-reconnect"])
+        _ = conversation(app)
+        let field = element(app, "native-composer")
+        field.tap()
+        app.typeText("Mid-sentence")
+        XCTAssertTrue(wait(20) { follows(app) >= 9 }, "the reconnect never finished: \(harness(app))")
+        XCTAssertEqual(showing(app), "conversation left=0", "the conversation came down for the reconnect")
+        XCTAssertEqual(field.value as? String, "Mid-sentence")
+        XCTAssertTrue(field.value(forKey: "hasKeyboardFocus") as? Bool == true, "the box lost the keyboard")
+    }
+
+    /// The setting turned off and on again: the pane shows its terminal while
+    /// it's off, and follows again once it's on, with no relaunch.
+    func testOffThenOnFollowsAgain() {
+        let app = launch(["-native-off-on"])
+        _ = conversation(app)
+        XCTAssertTrue(wait(15) { showing(app).hasPrefix("terminal-only") }, "off didn't show the terminal: \(showing(app))")
+        XCTAssertTrue(wait(15) { showing(app).hasPrefix("conversation") }, "on didn't bring the conversation back: \(showing(app))")
+        let back = follows(app)
+        XCTAssertTrue(wait(10) { follows(app) >= back + 2 }, "it never followed again: \(harness(app))")
+        XCTAssertFalse(element(app, "native-stale").exists, "still says it isn't being read")
+    }
+
+    /// Rows held and the runner not answering: said over them, and Send waits.
+    func testStaleRowsSaySoAndSendWaits() {
+        let app = launch(["-native-stale"])
+        _ = conversation(app)
+        let banner = element(app, "native-stale")
+        XCTAssertTrue(banner.waitForExistence(timeout: 20), "no stale banner")
+        XCTAssertTrue(app.staticTexts["Can’t reach the runner, so this may be out of date. Trying again…"].exists)
+        element(app, "native-composer").tap()
+        app.typeText("Anything")
+        XCTAssertFalse(element(app, "native-send").isEnabled, "Send went on over stale rows")
+        capture("stale")
+    }
+
+    /// A send that may have arrived never says it wasn't sent; a device that
+    /// may not type is told so.
+    func testSendFailuresSayWhatTheyMean() {
+        let app = launch()
+        _ = conversation(app)
+        let mayHave = "The runner didn’t answer in time. The message may have been sent, so check the terminal before sending it again."
+        for words in ["time out", "garble"] {
+            send(app, words)
+            XCTAssertTrue(app.staticTexts[mayHave].waitForExistence(timeout: 10), "\(words): \(app.staticTexts.allElementsBoundByIndex.map(\.label))")
+            element(app, "native-send-issue").buttons["Dismiss"].tap()
+            XCTAssertTrue(wait(5) { !app.staticTexts[mayHave].exists })
+            let field = element(app, "native-composer")
+            field.tap()
+            for _ in 0..<words.count { app.typeText(XCUIKeyboardKey.delete.rawValue) }
+        }
+        send(app, "read only")
+        XCTAssertTrue(app.staticTexts["This device can’t send messages to this runner."].waitForExistence(timeout: 10))
     }
 
     /// The follow runs only while the conversation is on screen: not behind
@@ -212,7 +276,7 @@ final class NativeAgentViewTests: XCTestCase {
         XCTAssertTrue(wait(10) { follows(app) >= 2 }, harness(app))
 
         element(app, "native-switch").tap()
-        XCTAssertTrue(wait(5) { showing(app) == "terminal" })
+        XCTAssertTrue(wait(5) { showing(app).hasPrefix("terminal ") })
         Thread.sleep(forTimeInterval: 1)
         let behind = follows(app)
         Thread.sleep(forTimeInterval: 3)
