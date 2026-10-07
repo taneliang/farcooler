@@ -193,6 +193,8 @@ extension ContentView {
             onTogglePaneMode: {
                 if let seat { Task { await togglePaneMode(seat.terminal, in: seat.worktree) } }
             },
+            target: seat.flatMap { store.client(for: $0.worktree)?.target } ?? "",
+            opensAsChat: preferences.preferChatMode,
             onRestart: {
                 if let seat { Task { await run(.restart, on: seat.terminal, in: seat.worktree) } }
             },

@@ -90,6 +90,12 @@ struct OrchestratorMenu: View {
     var onReplace: (OrchestratorHarness) -> Void
     var onShowCharter: (URL) -> Void
     var onTogglePaneMode: () -> Void
+    /// The runner, as `DaemonClient.target` names it: empty for this Mac's,
+    /// the only one whose panes get the conversation view.
+    var target = ""
+    /// Whether Settings has coding agents open as the old chat
+    /// (`Preferences.preferChatMode`), the only way to its Show as Chat.
+    var opensAsChat = false
     var onRestart: () -> Void
     /// Stop Being Orchestrator: the terminal keeps running as an ordinary
     /// one (`OrchestratorAdoption.steppedDown`).
@@ -116,8 +122,9 @@ struct OrchestratorMenu: View {
             ForEach(Self.menu(hasSeat: seat != nil, charter: charter, wakeOnAnswer: wakeOnAnswer), id: \.self) { item in
                 menuItem(item)
             }
-            if seat?.terminal.canSwitchPaneMode == true || seat?.terminal.isAgentPane == true {
-                Button(seat?.terminal.isAgentPane == true ? "Show as Terminal" : "Show as Chat", action: onTogglePaneMode)
+            if let seat {
+                OrchestratorViewItem(
+                    terminal: seat.terminal, target: target, opensAsChat: opensAsChat, onTogglePaneMode: onTogglePaneMode)
             }
             if seat != nil {
                 Divider()  // style-exempt: menu
@@ -290,5 +297,83 @@ struct CardIf: ViewModifier {
 
     @ViewBuilder func body(content: Content) -> some View {
         if on { content.contentCard() } else { content }
+    }
+}
+
+/// The view switch the orchestrator's menu names (ov-411). The conversation
+/// view where it's offered (`NativeAgents.offers`), the same switch the pane's
+/// own button and ⌃⌘T make; the old chat only through its setting, or to leave
+/// it from where it is.
+enum OrchestratorViewSwitch: Equatable {
+    /// From the terminal to the conversation view, and back.
+    case showConversation, showTerminalFromConversation
+    /// The old chat: in (only with its setting) and out.
+    case showChat, showTerminalFromChat
+
+    var title: String {
+        switch self {
+        case .showConversation: return "Show Conversation"
+        case .showTerminalFromConversation: return "Show Terminal"
+        case .showChat: return "Show as Chat"
+        case .showTerminalFromChat: return "Show as Terminal"
+        }
+    }
+
+    /// The one switch for `terminal`, or none. In the old chat the way out is
+    /// always there; the conversation view, where offered, stands in for Show
+    /// as Chat; and Show as Chat is left for a runner that can't offer the
+    /// view, with its setting on.
+    static func of(terminal: Terminal, offersConversation: Bool, conversationShown: Bool, opensAsChat: Bool)
+        -> OrchestratorViewSwitch?
+    {
+        if terminal.isAgentPane { return .showTerminalFromChat }
+        if offersConversation { return conversationShown ? .showTerminalFromConversation : .showConversation }
+        if terminal.canSwitchPaneMode && opensAsChat { return .showChat }
+        return nil
+    }
+}
+
+/// The orchestrator menu's view switch, drawn. Reads the pane's model itself,
+/// so its title is true when the menu opens, whichever way the pane was
+/// switched last.
+struct OrchestratorViewItem: View {
+    let terminal: Terminal
+    let target: String
+    let opensAsChat: Bool
+    let onTogglePaneMode: () -> Void
+    @ObservedObject private var agents = NativeAgents.shared
+
+    var body: some View {
+        if agents.offers(terminal, target: target) {
+            ConversationSwitchItem(
+                model: agents.model(for: terminal.id), terminal: terminal, opensAsChat: opensAsChat,
+                onTogglePaneMode: onTogglePaneMode)
+        } else if let item = OrchestratorViewSwitch.of(
+            terminal: terminal, offersConversation: false, conversationShown: false, opensAsChat: opensAsChat)
+        {
+            Button(item.title, action: onTogglePaneMode)
+        }
+    }
+}
+
+/// The item once the view is offered: it watches the pane's model, so its
+/// title follows the switch.
+struct ConversationSwitchItem: View {
+    @ObservedObject var model: NativePaneModel
+    let terminal: Terminal
+    let opensAsChat: Bool
+    let onTogglePaneMode: () -> Void
+
+    var body: some View {
+        if let item = OrchestratorViewSwitch.of(
+            terminal: terminal, offersConversation: true, conversationShown: model.showsNative, opensAsChat: opensAsChat)
+        {
+            Button(item.title) {
+                switch item {
+                case .showConversation, .showTerminalFromConversation: model.showsNative.toggle()
+                case .showChat, .showTerminalFromChat: onTogglePaneMode()
+                }
+            }
+        }
     }
 }
