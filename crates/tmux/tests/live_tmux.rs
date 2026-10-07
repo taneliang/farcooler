@@ -794,14 +794,14 @@ async fn one_read_carries_the_panes_the_stamp_and_the_unfinished_opens() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_server_born_during_a_read_is_never_skipped() {
     let Some(srv) = live_server("a_server_born_during_a_read_is_never_skipped").await else { return };
-    for i in 0..200u64 {
+    for i in 0..400u64 {
         srv.kill_server().await.unwrap();
-        // Settle into the state the daemon idles in: the empty socket, believed.
-        for _ in 0..3 {
-            srv.read_panes().await.unwrap();
-        }
+        // No settling reads: the racing read below must be the first to fail, or
+        // the socket is already believed silent and that read never spawns.
         let reader: TmuxServer = (*srv).clone();
-        let delay = std::time::Duration::from_micros(i * 137 % 25_000);
+        // Swept across the window where the client has failed and the server is
+        // about to bind: with trust forced on, rounds 4 to 8 ms in got stuck.
+        let delay = std::time::Duration::from_micros(i * 53 % 10_000);
         let racing = tokio::spawn(async move {
             tokio::time::sleep(delay).await;
             reader.read_panes().await
