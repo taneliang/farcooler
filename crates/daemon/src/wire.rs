@@ -103,7 +103,9 @@ pub fn host(
         // bytes of TOML is not a cost worth a staleness bug.
         settings: Some(wire::HostSettings {
             branch_prefix: farcooler_core::config::load_branch_prefix(),
-            projector: crate::session_projectors::shadowing(),
+            // The config's word, which is what a settings switch shows; the
+            // environment's override isn't a setting anyone can change.
+            projector: farcooler_core::config::load_projector(),
         }),
         // The same identity `id` already carries, as text. Derived from it
         // rather than computed a second time from the install id, so the two

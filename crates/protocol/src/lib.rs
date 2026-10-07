@@ -610,6 +610,10 @@ pub mod capability {
     /// `settings.set_projector` (ov-372): turn the runner's projector, and so
     /// `agent_rows`, on or off from a client's settings, without a restart.
     pub const PROJECTOR_SETTING: &str = "projector_setting";
+    /// `terminal.compose` (ov-372): the native view's send. Its own word, so
+    /// a runner that serves rows from before compose isn't offered a view
+    /// whose send would fail.
+    pub const AGENT_COMPOSE: &str = "agent_compose";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -625,7 +629,7 @@ pub mod capability {
             TASK_WAITS, TASK_WORKERS, NOTICE_TASK, BOARD_READS, WORKTREE_FILES, TERMINAL_NAMES, TERMINAL_PORTS,
             READ_ONLY_FOLDERS, AGENT_QUEUE, BOARD_PLAN, LFS_POINTERS, BOARD_PAGES, BOARD_RULINGS,
             BOARD_TRAINS, BOARD_COST, LANDING, BOARD_RULING_ACTIONS, AGENT_ROWS, DRAFT_HOLD,
-            PROJECTOR_SETTING,
+            PROJECTOR_SETTING, AGENT_COMPOSE,
         ];
 
     /// Capabilities this process has but does not offer: a feature behind a
@@ -751,7 +755,7 @@ pub mod method {
         TerminalDraftPrompt = "terminal.draft_prompt" => AGENT,
         TerminalTell = "terminal.tell" => AGENT,
         TerminalDraftWithdraw = "terminal.draft_withdraw" => DRAFT_HOLD,
-        TerminalCompose = "terminal.compose" => AGENT_ROWS,
+        TerminalCompose = "terminal.compose" => AGENT_COMPOSE,
         TerminalAgentAnswer = "terminal.agent_answer" => AGENT,
         TerminalAgentSetMode = "terminal.agent_set_mode" => AGENT,
         TerminalAgentSetModel = "terminal.agent_set_model" => AGENT,

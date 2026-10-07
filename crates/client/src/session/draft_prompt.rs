@@ -60,13 +60,15 @@ impl Session {
     /// `terminal tell`, or refused with nothing typed. True when the agent
     /// was working and its own queue took it.
     pub async fn compose(&self, terminal: Uuid, text: &str) -> Result<bool, SessionError> {
-        require(self.capabilities(), farcooler_protocol::capability::AGENT_ROWS, "terminal.compose")?;
+        require(self.capabilities(), farcooler_protocol::capability::AGENT_COMPOSE, "terminal.compose")?;
         let payload = request::Payload::AgentPrompt(pb::AgentPrompt {
             terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
             blocks: vec![pb::AgentPromptBlock { content: Some(Content::Text(text.to_string())) }],
             hold_behind_dialog: false,
         });
-        match self.value("terminal.compose", None, Some(payload)).await? {
+        // Targeted, so it keeps its order against this terminal's other
+        // input and runs beside every other pane's calls.
+        match self.value("terminal.compose", Some(terminal), Some(payload)).await? {
             result::Value::TerminalTold(told) => Ok(told.queued),
             other => Err(wrong("terminal_told", &other)),
         }

@@ -150,7 +150,7 @@ uint64_t farcooler_client_connect(void *handle, const char *config);
  *                                                    on one line and submitted,
  *                                                    or refused with a `what`
  *                                                    (`terminal tell`'s words);
- *                                                    needs `agent_rows`
+ *                                                    needs `agent_compose`
  *   agent.rows             {terminal, before?, limit?}
  *                          -> {"epoch", "rev", "moreBefore", "rows"}
  *   agent.rows_follow      {terminal, epoch, afterRev, waitMs?}

@@ -361,6 +361,25 @@ pub const MAX_REQUESTS_IN_FLIGHT: usize = 32;
 /// naming the same target. See `serve_connection`.
 type Lane = Option<Bytes>;
 
+/// The lane `request` runs in: its target, except for the methods that need
+/// no order at all, which each get a lane of their own.
+///
+/// `agent.rows` and `agent.rows_follow` (ov-366) read; a follow is held up to
+/// 25 s waiting for something to change. In the untargeted lane one pane's
+/// held follow stalled every other pane's page and every untargeted call
+/// behind it (ov-372 review: 4.9 s against 0.8 ms). Read-only, so nothing
+/// depends on their order, and each runs alongside everything else.
+fn lane_of(request: &Request) -> Lane {
+    match request.method.as_str() {
+        "agent.rows" | "agent.rows_follow" => {
+            let mut own = b"\0unordered:".to_vec();
+            own.extend_from_slice(&request.request_id);
+            Some(Bytes::from(own))
+        }
+        _ => request.target_resource_id.clone(),
+    }
+}
+
 /// Rules 2 + 3 end to end: handshake first, then dispatch only `Request`
 /// frames to `handler`, echoing `request_id` on the way out. Any codec or
 /// protocol error returned by `recv`/`send` closes the connection before
@@ -393,7 +412,9 @@ type Lane = Option<Bytes>;
 ///   other, in the order they were sent. Everything that acts on one terminal
 ///   names it — write, paste, resize, attach, the agent calls — so those keep
 ///   their order.
-/// - Two requests with no target run in the order they were sent.
+/// - Two requests with no target run in the order they were sent, except
+///   `agent.rows` and `agent.rows_follow`, which are ordered against
+///   nothing (`lane_of`).
 /// - Nothing else is ordered. A create targets its PARENT (the repository or
 ///   worktree), not what it creates; stopping a terminal and then removing its
 ///   worktree name two different targets; two attaches to two terminals race
@@ -497,7 +518,7 @@ where
                     _ => break (Err(ConnectionError::UnexpectedFrame), Ending::NoMoreRequests),
                 };
                 in_flight += 1;
-                let lane: Lane = request.target_resource_id.clone();
+                let lane = lane_of(&request);
                 match lanes.get_mut(&lane) {
                     Some(waiting) => waiting.push_back(request),
                     None => {

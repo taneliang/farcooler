@@ -55,6 +55,10 @@ const WORK_METHODS: &[&str] = &[
     // The first page of a terminal's agent rows reads its whole transcript
     // (ov-366). A follow is held at most 25 s, inside the ordinary 30.
     "agent.rows",
+    // A send waits out the spacing after the last, a paste's read-back and,
+    // mid-turn, the queue's confirmation: give up early and the person sends
+    // again what the runner then types anyway (ov-372 review).
+    "terminal.compose",
 ];
 
 /// How the session makes a call to `method`.
@@ -109,7 +113,7 @@ mod tests {
 
     #[test]
     fn git_and_agents_get_the_long_deadline_and_reads_the_short_one() {
-        for method in ["changes.file_diff", "changes.commit_files", "pr.refresh", "terminal.agent_prompt"] {
+        for method in ["changes.file_diff", "changes.commit_files", "pr.refresh", "terminal.agent_prompt", "terminal.compose"] {
             assert_eq!(for_method(method).deadline, Some(WORK), "{method}");
             assert!(!for_method(method).urgent, "{method}");
         }

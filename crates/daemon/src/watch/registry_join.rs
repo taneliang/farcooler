@@ -29,7 +29,14 @@ pub(super) fn registered_log(registry: &Registry, pane: &PaneJoin) -> Option<Pat
 pub(super) fn feed_projector(registry: &Registry, terminal: Uuid, pane: &PaneJoin) {
     let projectors = crate::session_projectors::global();
     let open = projectors.transcript(terminal);
-    if open.is_none() && !crate::session_projectors::shadowing() {
+    // Off means off (ov-372 review): a projector opened before the setting
+    // went off is let go on its pane's next tick, not followed until a
+    // restart. Turned on again, the pane's next `agent.rows` rebuilds it in
+    // a new epoch, and a follower pages again.
+    if !crate::session_projectors::shadowing() {
+        if open.is_some() {
+            projectors.forget(terminal);
+        }
         return;
     }
     let registered = registered_log(registry, pane);

@@ -172,6 +172,25 @@ where
     assert_eq!(row["id"], "turn:p1", "{name}: the oldest row is the first prompt: {row}");
     assert_eq!(row["kind"]["Turn"]["prompt"], "Tidy the parser.", "{name}");
 
+    // A follow held with nothing to say holds only itself: a page, and
+    // another pane's follow, answer meanwhile (ov-372 review: one held
+    // follow used to stall every untargeted call on the connection).
+    let lonely = follow(client, terminal, newest.epoch, newest.rev, 3_000);
+    let beside = async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let started = Instant::now();
+        let again = page(client, terminal, None, 1).await;
+        let other = follow(client, terminal, newest.epoch, 0, 0).await;
+        assert_eq!(again.rows.len(), 1);
+        assert!(!other.changes.is_empty(), "{name}: {other:?}");
+        started.elapsed()
+    };
+    let held_since = Instant::now();
+    let (nothing, quick) = tokio::join!(lonely, beside);
+    assert!(nothing.changes.is_empty(), "{name}: {nothing:?}");
+    assert!(held_since.elapsed() >= Duration::from_millis(2_500), "{name}: the follow wasn't held");
+    assert!(quick < Duration::from_secs(1), "{name}: a page and a follow waited behind a held follow: {quick:?}");
+
     let id = format!("p-{name}-{n}");
     let writer = {
         let (path, id) = (path.to_path_buf(), id.clone());
@@ -321,4 +340,67 @@ async fn measure_follow_latency_and_attach_cost() {
         attach.rows.len(),
         bytes
     );
+}
+
+/// The setting turned off lets go of a projector already open (ov-372
+/// review): on again, the pane's rows are rebuilt in a new epoch, so the
+/// one before was dropped rather than followed in the background.
+#[tokio::test]
+async fn turning_the_setting_off_lets_open_projectors_go() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("config.toml").to_string_lossy().into_owned();
+    let claude = dir.path().join("claude").to_string_lossy().into_owned();
+    let _daemon = common::listening_daemon_with_env(dir.path(), &[("FARCOOLER_CONFIG", &config), ("CLAUDE_CONFIG_DIR", &claude)]).await;
+    let mut client = socket(dir.path()).await;
+    let set = |on: bool| request::Payload::HostSettings(pb::HostSettings { branch_prefix: String::new(), projector: on });
+    call(&client, "settings.set_projector", set(true)).await;
+    let worktree = a_worktree(&mut client, dir.path()).await;
+    let terminal = a_claude_pane(&mut client, &worktree).await;
+    append(&transcript(dir.path(), &worktree, &terminal), prompt("p1", "Tidy the parser."));
+    let before = page(&client, &terminal, None, 10).await;
+    assert!(!before.rows.is_empty() && before.epoch != 0, "{before:?}");
+
+    call(&client, "settings.set_projector", set(false)).await;
+    // A few of the watcher's ticks.
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    call(&client, "settings.set_projector", set(true)).await;
+    let client = socket(dir.path()).await;
+    let after = page(&client, &terminal, None, 10).await;
+    assert_ne!(after.epoch, before.epoch, "the projector was kept while off");
+    assert_eq!(ids(&after), ids(&before), "and rebuilt the same from the file");
+}
+
+/// Over the wire, `terminal.tell` still reaches only an orchestrator, and
+/// `terminal.compose` any claude pane (ov-372 review: the method check in
+/// `rpc.rs` could open `tell` to workers with every test green). The stub
+/// in the pane is no proven agent, so compose is refused by the gate,
+/// which is past the check this pins.
+#[tokio::test]
+async fn tell_refuses_a_worker_and_compose_takes_it_to_the_gate() {
+    let dir = tempfile::tempdir().unwrap();
+    let _daemon = daemon(dir.path()).await;
+    let mut client = socket(dir.path()).await;
+    let worktree = a_worktree(&mut client, dir.path()).await;
+    let terminal = a_claude_pane(&mut client, &worktree).await;
+    let said = |method: &'static str| {
+        let mut req = call_named(method);
+        req.target_resource_id = Some(terminal.id.clone());
+        req.payload = Some(request::Payload::AgentPrompt(pb::AgentPrompt {
+            terminal_id: terminal.id.clone(),
+            blocks: vec![pb::AgentPromptBlock { content: Some(pb::agent_prompt_block::Content::Text("carry on".into())) }],
+            hold_behind_dialog: false,
+        }));
+        let client = &client;
+        async move {
+            match client.call_with(req, Default::default()).await {
+                Err(farcooler_transport::ClientError::Daemon { code, what, .. }) => (code, what),
+                other => panic!("{method}: {other:?}"),
+            }
+        }
+    };
+    let (code, what) = said("terminal.tell").await;
+    assert_eq!((code, what.as_str()), (pb::ErrorCode::InvalidArgument as i32, "terminal"), "tell to a worker");
+    let (code, what) = said("terminal.compose").await;
+    assert_ne!(what, "terminal", "compose refused as tell is: {code}");
+    assert_eq!(code, pb::ErrorCode::ResourceConflict as i32, "compose reached the gate: {what}");
 }
