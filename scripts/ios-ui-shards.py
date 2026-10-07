@@ -53,6 +53,15 @@ SHARDS = {
     # rebalance from more than one run when a shard drifts. Shard totals:
     # shell 1,267 s, agent 1,370 s, phone 1,342 s, phone2 808 s. AgentFollowTests
     # (60 s) and WorkingShimmerTests (30 s) are estimates: not yet timed.
+    #
+    # ov-401, from runs 37614866658 and 37619557826: the seconds above had
+    # drifted. Measured, the shards held shell 1,244 and 1,346 s, agent 1,631
+    # and 1,718, phone 1,414 and 1,630, phone2 930 and 771. With
+    # ActionFailureTests (163 and 293 s) since moved to phone2, ov-401 put
+    # NativeAgentViewTests (about 440 s) in phone2 and FirstRunUITests (197
+    # and 448 s) in shell: shell about 1,550 s, agent about 1,450, phone2
+    # about 1,270, so phone2 is no longer the small one and ends several
+    # minutes after the others.
     "shell": [
         "PlanRulingsUITests",  # -phone-harness -phone-plan -phone-rulings (ov-304); 583 s
         "ShellGestureTests",  # -shell-harness; 290 s
@@ -62,6 +71,7 @@ SHARDS = {
         "HarnessRetryTests",  # no app (ov-397); 1 s
         "TaskUsageUITests",  # -phone-harness (ov-195); 47 s
         "ReadScopeTests",  # -phone-harness (TaskScreenTests.swift); 24 s
+        "FirstRunUITests",  # -phone-harness (ov-205 lane P, placed by integ-9); 197 and 448 s; from phone2 for ov-401
     ],
     "agent": [
         "PhoneTreeUITests",  # -phone-harness -phone-plan (ov-300); 298 s
@@ -86,7 +96,6 @@ SHARDS = {
     # The late shard: ci.yml's `ios-ui-late`, not a matrix entry.
     "phone2": [
         "ActionFailureTests",  # -phone-harness and -agent-layout-harness; 239 s; moved from agent at 78% of 45 min (run 37619557826)
-        "FirstRunUITests",  # -phone-harness (ov-205 lane P, placed by integ-9); 213 s
         "FilesBrowserTests",  # -phone-harness (ov-259); 159 s
         "BoardUnreadUITests",  # -phone-harness (ov-113); 112 s
         "ChangesPatchNoticeTests",  # -changes-layout-harness; 80 s
@@ -95,6 +104,9 @@ SHARDS = {
         "ChangesLfsNoticeTests",  # -changes-layout-harness -lfs-pointers (ov-199); 48 s
         "WorkspaceChromeTests",  # -phone-harness -phone-plan (ov-342); 68 s
         "RunnerReachTests",  # seeded -hosts at an address that never answers; 11 s
+        # -native-agent-harness (ov-373). Back from LOCAL (ov-401): about
+        # 440 s in runs 37612748019 and 37616804607.
+        "NativeAgentViewTests",
     ],
 }
 
@@ -102,7 +114,6 @@ SHARDS = {
 LOCAL = {
     "ComposerWidthUITests": "needs an iPad simulator (fc-lanes-ipad); CI's shards run on an iPhone",
     "KeyboardTabStripTests": "needs a real iPhone; skips on any simulator",
-    "NativeAgentViewTests": "times out on CI's simulator but not locally (runs 37585430997, 37597338762); off CI until ov-401 finds why",
     "NewTerminalTests": "needs the demo runner",
     "PadWorkspaceUITests": "needs an iPad simulator (fc-lanes-ipad); CI's shards run on an iPhone",
     "TerminalPermissionTests": "needs the demo runner",
