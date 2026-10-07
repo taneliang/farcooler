@@ -320,6 +320,9 @@ struct AgentScrollTests {
         /// Armed at least once: the jump has begun.
         var began = false
         var armed = false
+        /// The step was taken, and the jump's animation, still in flight,
+        /// then put the chat following again by itself.
+        var carried = false
         func arm(
             _ probe: AgentScrollProbe, _ scroll: NSScrollView, back points: CGFloat, after moved: CGFloat = 20,
             before: @escaping @MainActor () -> Void = {}
@@ -333,6 +336,7 @@ struct AgentScrollTests {
             // inside it.
             let start = scroll.contentView.bounds.origin.y
             probe.onGeometry = { [self] geometry in
+                if steps == 1, probe.following, probe.jumping { carried = true }
                 guard armed, AgentSurface.tailHiddenBy(geometry) > 400, geometry.contentOffset.y > start + moved else { return }
                 armed = false
                 // A later turn: not from inside the chat's own observer.
@@ -513,8 +517,8 @@ struct AgentScrollTests {
             #expect(await Self.until { !probe.following && probe.showsJump }, "a flick of 1,200 pt didn't stop following")
             // The animation's completion runs, with the reader away. If the
             // animation carried them back first, there's nothing to check.
-            let ended = await Self.until { !probe.jumping || probe.following }
-            guard ended, !probe.following else { return false }
+            #expect(await Self.until { !probe.jumping }, "the jump never ended")
+            guard !stepper.carried else { return false }
             // What the completion would do is applied by the next update, so
             // flush it, and give it a moment to show.
             Self.flush(host, window)
