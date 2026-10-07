@@ -43,6 +43,7 @@ struct Dialog {
     seen: Seen,
     asking: Asking,
     id: String,
+    socket: std::path::PathBuf,
     _dir: tempfile::TempDir,
 }
 
@@ -66,7 +67,7 @@ async fn a_held_dialog(worktree: &str, line: &HookLine, hold: Option<Duration>) 
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
     let id = id.expect("the ledger holds it");
-    Dialog { ingress, terminal, seen, asking, id, _dir: dir }
+    Dialog { ingress, terminal, seen, asking, id, socket, _dir: dir }
 }
 
 fn answers(pairs: &[(&str, &str)]) -> HashMap<String, String> {
@@ -169,4 +170,21 @@ async fn a_hook_that_prints_no_updated_input_is_left_to_the_keyboard() {
         assert!(!ingress.asks().is_holding(terminal), "{tool} was held for a hook that can't print its answer");
         assert_eq!(got, only_the_sentinel(terminal), "{tool} reached the phones");
     }
+}
+
+/// The keyboard answered while the hook was held: claude takes it at once,
+/// and its `PostToolUse` follows (measured on 2.1.290, review 1 M4). That ends
+/// the hold, so a device's answer after it is refused rather than told it
+/// landed.
+#[tokio::test]
+async fn a_dialog_answered_at_the_keyboard_ends_its_hold() {
+    let line = a_dialog_request("AskUserQuestion", question_input());
+    let Dialog { ingress, terminal, mut asking, id, socket, _dir, .. } = a_held_dialog("/wt/keyboard", &line, None).await;
+    let mut after = line.clone();
+    after.event = "PostToolUse".to_string();
+    after.payload["hook_event_name"] = serde_json::json!("PostToolUse");
+    send(&socket, &after).await;
+    assert_eq!(asking.line(PATIENCE).await.as_deref(), Some("{}\n"), "the hook is let go with no decision");
+    let given = answers(&[("Which color should the button be?", "Blue")]);
+    assert_eq!(ingress.asks().answer_with(terminal, &id, "answer", &given, "Mac").await, Err(AnswerRefused::NotHeld));
 }

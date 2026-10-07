@@ -824,6 +824,9 @@ impl HookIngress {
             if fence::bounds_turn(hook.agent, &hook.event, &hook.payload) {
                 self.asks.turn_boundary(terminal);
             }
+            if let ("PostToolUse" | "PostToolUseFailure", Some(tool)) = (hook.event.as_str(), hook.payload["tool_name"].as_str()) {
+                self.asks.dialog_call_ended(terminal, tool);
+            }
             self.start_transcript_tail(terminal, hook.agent, &f);
             // A store read, and a write when it claims. Nothing waits on it
             // here: a hook that isn't gating hangs up once it has written. The

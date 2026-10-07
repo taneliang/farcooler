@@ -643,6 +643,23 @@ impl HookAsks {
         self.settle(terminal, None, Settled { decision: None, ack: None }, "", true, "turn boundary");
     }
 
+    /// `tool`'s call came back on `terminal` (`PostToolUse`,
+    /// `PostToolUseFailure`). A question or a plan held there was answered:
+    /// measured on claude 2.1.290 (review 1 M4), a keyboard answer while the
+    /// hook is held is taken at once, the tool's result follows, and the
+    /// hook's later verdict is ignored. So the hold ends here, and a device's
+    /// answer after it is `not_held`, not an Ok claude never took. A
+    /// permission's isn't touched: claude runs calls of one tool side by side.
+    pub fn dialog_call_ended(&self, terminal: Uuid, tool: &str) {
+        let dialog = self
+            .lock()
+            .get(&terminal)
+            .is_some_and(|held| !held.shape.is_permission() && held.tool.as_deref() == Some(tool));
+        if dialog {
+            self.settle(terminal, None, Settled { decision: None, ack: None }, "", true, "its call came back");
+        }
+    }
+
     /// `serve` giving up on its own ask: the hold ran out, or the hook went
     /// away.
     pub fn withdraw(&self, terminal: Uuid, id: &str) {
