@@ -385,10 +385,12 @@ struct AgentSurface: View {
         .onScrollGeometryChange(for: ScrollGeometry.self) { $0 } action: { old, new in
             if Self.isAtTail(new) {
                 follow(true)
-            } else if new.contentOffset.y < old.contentOffset.y - 0.5, !tail.jumping {
-                // Not while Jump to Latest is on its way: a lazy stack
-                // correcting its height mid-flight walks the offset back, and
-                // that is not the reader scrolling away (ov-386).
+            } else if new.contentOffset.y < old.contentOffset.y - 0.5,
+                !(tail.jumping && old.contentOffset.y - new.contentOffset.y < Self.correctionCeiling)
+            {
+                // A small step back while Jump to Latest is on its way is a
+                // lazy stack correcting its height, not the reader scrolling
+                // away (ov-386). A big one is the reader.
                 follow(false)
             }
             probe?.geometry = new
@@ -521,21 +523,36 @@ struct AgentSurface: View {
     private func jumpToTail() {
         follow(true)
         tail.jumping = true
+        tail.jump += 1
+        let jump = tail.jump
         let tail = tail
         withAnimation(.easeOut(duration: 0.25), completionCriteria: .logicallyComplete) {
             scrollToTail()
         } completion: {
+            guard tail.jump == jump else { return }
             tail.jumping = false
-            follow(true)
-            scrollToTail()
+            // A reader who flicked away mid-flight, by more than a
+            // correction, has already stopped following (the geometry
+            // observer): they're left where they went, not pulled back.
+            if tail.following { scrollToTail() }
         }
         // Backstop: a completion that never comes would leave a reader who
         // scrolls up unable to detach.
+        Self.scheduleBackstop { if tail.jump == jump { tail.jumping = false } }
+    }
+
+    /// Runs `body` a second from now: a jump's backstop. A test replaces it
+    /// to run one jump's backstop at a moment it chooses.
+    nonisolated(unsafe) static var scheduleBackstop: (@escaping @MainActor () -> Void) -> Void = { body in
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(1))
-            tail.jumping = false
+            body()
         }
     }
+
+    /// The most a step back counts as a height correction while Jump to
+    /// Latest animates; more is the reader.
+    private static let correctionCeiling: CGFloat = 150
 
     /// Jump to Latest's diameter, which also lifts it clear of the composer.
     private static let jumpDiameter: CGFloat = 30
@@ -614,6 +631,9 @@ struct AgentSurface: View {
         var following = true
         /// Jump to Latest is animating (ov-386).
         var jumping = false
+        /// Which jump: a backstop or completion from an earlier one mustn't
+        /// end a later one.
+        var jump = 0
     }
 
     /// Everything that changes what this view's size is worth in cells.

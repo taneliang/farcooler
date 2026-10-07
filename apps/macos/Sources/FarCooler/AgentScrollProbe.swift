@@ -11,7 +11,12 @@ import SwiftUI
 /// never changes what the chat does.
 @MainActor
 final class AgentScrollProbe {
-    var geometry: ScrollGeometry?
+    var geometry: ScrollGeometry? {
+        didSet { if let geometry { onGeometry?(geometry) } }
+    }
+    /// Called with each geometry the chat decides from, after it has decided.
+    /// A test steps the scroll from here, on a known event (ov-386).
+    var onGeometry: ((ScrollGeometry) -> Void)?
     /// The transcript's last row, in the scroll view's visible coordinates.
     var lastRow: CGRect?
     var following = true

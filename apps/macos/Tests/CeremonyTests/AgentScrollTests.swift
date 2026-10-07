@@ -287,12 +287,34 @@ struct AgentScrollTests {
         #expect(await Self.until(10) { probe.showsJump }, "a tail 70 pt under the composer counted as seen")
     }
 
-    /// Jump to Latest doesn't flicker (ov-386). A lazy stack correcting its
-    /// height mid-flight walks the offset back, which the chat read as the
-    /// reader scrolling up: following stopped and the button came back until
-    /// the scroll landed. Here the correction is a 3 pt step back, made in
-    /// the same turn as the click, so it arrives while the animation runs.
-    @Test func jumpToLatestDoesNotFlickerAgainstAHeightCorrection() async throws {
+    /// A jump in flight with one step back made on the first geometry event
+    /// after the click that finds the end still far off, so it can't land
+    /// early on a fast runner without the step having been taken.
+    @MainActor
+    final class Stepper {
+        var steps = 0
+        var armed = false
+        func arm(
+            _ probe: AgentScrollProbe, _ scroll: NSScrollView, back points: CGFloat, before: @escaping @MainActor () -> Void = {}
+        ) {
+            armed = true
+            probe.onGeometry = { [self] geometry in
+                guard armed, AgentSurface.tailHiddenBy(geometry) > 400 else { return }
+                armed = false
+                // A later turn: not from inside the chat's own observer.
+                DispatchQueue.main.async { [self] in
+                    before()
+                    let origin = scroll.contentView.bounds.origin
+                    scroll.contentView.scroll(to: NSPoint(x: origin.x, y: origin.y - points))
+                    scroll.reflectScrolledClipView(scroll.contentView)
+                    steps += 1
+                }
+            }
+        }
+    }
+
+    /// Scrolled up and Jump to Latest clicked, in a chat that's laid out.
+    private func jumping(_ body: (AgentScrollProbe, NSScrollView, NSView, NSWindow) async throws -> Void) async throws {
         var history: [String] = []
         for turn in 0..<24 {
             history.append(Self.message("User", "Question \(turn)?"))
@@ -320,29 +342,79 @@ struct AgentScrollTests {
         scroll.reflectScrolledClipView(scroll.contentView)
         #expect(await Self.until(10) { probe.showsJump }, "scrolling up didn't offer Jump to Latest")
         await Self.settle()
+        try await body(probe, scroll, host, window)
+    }
 
-        let detached = probe.detaches
-        let container = try #require(probe.geometry?.containerSize.height)
-        Self.click(host, at: NSPoint(x: 350, y: container - Spacing.group - 15), in: window)
-        // Mid-flight: the offset has moved but the end is still far off.
-        let start = scroll.contentView.bounds.origin.y
-        #expect(
-            await Self.until { scroll.contentView.bounds.origin.y > start + 50 || (probe.tailHiddenBy ?? 0) <= 0.5 },
-            "the jump never moved")
-        // The correction: a step back that a lazy stack's height estimate
-        // resolving makes, larger than a frame's travel so it's a net
-        // decrease between two geometry events. Skipped if the jump has
-        // already landed on a slow runner, where stepping back would be a
-        // reader scrolling up.
-        if (probe.tailHiddenBy ?? 0) > 400 {
-            let origin = scroll.contentView.bounds.origin
-            scroll.contentView.scroll(to: NSPoint(x: origin.x, y: origin.y - 150))
-            scroll.reflectScrolledClipView(scroll.contentView)
+    private static func clickJump(_ probe: AgentScrollProbe, _ host: NSView, _ window: NSWindow) {
+        let container = probe.geometry?.containerSize.height ?? 0
+        click(host, at: NSPoint(x: 350, y: container - Spacing.group - 15), in: window)
+    }
+
+    /// Jump to Latest doesn't flicker (ov-386). A lazy stack correcting its
+    /// height mid-flight walks the offset back, which the chat read as the
+    /// reader scrolling up: following stopped and the button came back until
+    /// the scroll landed.
+    @Test func jumpToLatestDoesNotFlickerAgainstAHeightCorrection() async throws {
+        try await jumping { probe, scroll, host, window in
+            let detached = probe.detaches
+            let stepper = Stepper()
+            stepper.arm(probe, scroll, back: 100)
+            Self.clickJump(probe, host, window)
+            #expect(await Self.until { stepper.steps == 1 }, "the correction step was never taken")
+            #expect(await Self.until { probe.following && (probe.tailHiddenBy ?? .infinity) <= 0.5 }, "Jump to Latest didn't return to the tail")
+            await Self.settle()
+            #expect(probe.detaches == detached, "the height correction stopped following \(probe.detaches - detached) time(s) mid-jump")
+            #expect(probe.following && !probe.showsJump)
         }
+    }
 
-        #expect(await Self.until { probe.following && (probe.tailHiddenBy ?? .infinity) <= 0.5 }, "Jump to Latest didn't return to the tail")
-        await Self.settle()
-        #expect(probe.detaches == detached, "the height correction stopped following \(probe.detaches - detached) time(s) mid-jump")
-        #expect(probe.following && !probe.showsJump)
+    /// A second Jump to Latest isn't ended by the first one's backstop
+    /// (the jump generation, ov-386). Backstops are held, and the first's
+    /// is run inside the second jump's flight, just before the step back
+    /// that only the second jump's own guard absorbs.
+    @Test func aSecondJumpIsNotEndedByTheFirstOnesBackstop() async throws {
+        let held = Held()
+        let original = AgentSurface.scheduleBackstop
+        AgentSurface.scheduleBackstop = { held.bodies.append($0) }
+        defer { AgentSurface.scheduleBackstop = original }
+        try await jumping { probe, scroll, host, window in
+            Self.clickJump(probe, host, window)
+            #expect(await Self.until { probe.following && (probe.tailHiddenBy ?? .infinity) <= 0.5 })
+            await Self.settle()
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: 100))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            #expect(await Self.until(10) { probe.showsJump })
+            await Self.settle()
+            let detached = probe.detaches
+            let stepper = Stepper()
+            stepper.arm(probe, scroll, back: 100) {
+                // Jump 1's backstop; jump 2's own stays held.
+                #expect(held.bodies.count == 2, "expected one backstop per jump, got \(held.bodies.count)")
+                held.bodies.first?()
+            }
+            Self.clickJump(probe, host, window)
+            #expect(await Self.until { stepper.steps == 1 }, "the correction step was never taken")
+            #expect(await Self.until { probe.following && (probe.tailHiddenBy ?? .infinity) <= 0.5 })
+            await Self.settle()
+            #expect(probe.detaches == detached, "the second jump flickered: \(probe.detaches - detached)")
+        }
+    }
+
+    @MainActor final class Held {
+        var bodies: [@MainActor () -> Void] = []
+    }
+
+    /// A reader who flicks away mid-flight by more than a correction is not
+    /// pulled back when the animation ends.
+    @Test func aReaderWhoFlicksAwayMidJumpIsNotPulledBack() async throws {
+        try await jumping { probe, scroll, host, window in
+            let stepper = Stepper()
+            stepper.arm(probe, scroll, back: 1_200)
+            Self.clickJump(probe, host, window)
+            #expect(await Self.until { stepper.steps == 1 }, "the flick was never made")
+            #expect(await Self.until(10) { !probe.following && probe.showsJump }, "a flick of 1,200 pt didn't stop following")
+            await Self.settle()
+            #expect(!probe.following && probe.showsJump, "the reader was pulled back to the tail")
+        }
     }
 }
