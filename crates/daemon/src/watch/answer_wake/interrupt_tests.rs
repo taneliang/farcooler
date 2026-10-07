@@ -76,8 +76,9 @@ async fn nothing_is_pressed_between_turns() {
     assert!(!si.log().contains("ESC") && !si.log().contains("SENDNOW"), "{}", si.log());
 }
 
-/// A dialog the registry says is up (`waiting`), and one the screen shows
-/// while the registry still says busy: an Esc would answer it No. Nothing.
+/// A dialog the registry says is up (`waiting`), drawn or not yet, and one
+/// the screen shows while the registry still says busy: an Esc would answer
+/// it No. Nothing.
 #[tokio::test]
 async fn nothing_is_pressed_on_a_dialog() {
     let b = board().await;
@@ -85,6 +86,8 @@ async fn nothing_is_pressed_on_a_dialog() {
     si.show("menu").await;
     b.screen_with(agent.id, "Tab to amend").await;
     assert_eq!(refused(b.watcher.press(agent.id, Key::Interrupt).await), "prompt", "the registry's waiting");
+    si.show("working-waiting").await;
+    assert_eq!(refused(b.watcher.press(agent.id, Key::Interrupt).await), "prompt", "not drawn yet");
     si.show("working-menu").await;
     assert_eq!(refused(b.watcher.press(agent.id, Key::Interrupt).await), "prompt", "the screen's dialog");
     assert_eq!(refused(b.watcher.press(agent.id, Key::SendNow).await), "prompt");

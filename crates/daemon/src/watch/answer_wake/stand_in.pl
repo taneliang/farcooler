@@ -10,7 +10,8 @@
 # bracketed paste, appends a paste or typed characters to its box, and on
 # Enter logs `SUBMIT <box>` and clears it. The control file picks what it
 # shows: idle, working, menu (a permission prompt; working-menu, one the
-# registry still calls busy), picker (a menu with no
+# registry still calls busy; working-waiting, the registry's dialog not
+# drawn yet), picker (a menu with no
 # box), mangle (a paste shows as `[Pasted text #1]`), slow (a paste shows
 # a second late), nobracket (bracketed paste off), draft:<text> (a box
 # already holding <text>), or <mode>-on-paste (idle until a paste arrives,
@@ -98,12 +99,14 @@ sub record {
 # for working-menu (a dialog drawn before the registry says so).
 sub status_of {
     my ($m) = @_;
+    return "waiting" if $m eq 'working-waiting';
     return "busy" if $m eq 'working-menu' || (working($m) && $m ne 'working-lagging');
     return $m eq 'menu' ? "waiting" : "idle";
 }
 
 # working-lagging: the screen works, the registry still says idle.
-sub working { return $_[0] =~ /^working(-quiet|-hidden|-long|-lagging)?$/ }
+# working-waiting: the screen works, the registry says a dialog is up.
+sub working { return $_[0] =~ /^working(-quiet|-hidden|-long|-lagging|-waiting)?$/ }
 
 # The command claude's popup highlights for the box, or undef with no popup.
 sub highlighted {
