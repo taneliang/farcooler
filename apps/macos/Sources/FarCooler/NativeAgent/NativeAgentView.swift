@@ -25,9 +25,10 @@ struct NativeAgentView: View {
                 }
                 let last = store.ids.last
                 let sendNow: (() -> Void)? = model.offersSendNow ? { Task { await model.sendNow() } } : nil
+                let answer = model.nativeAnswer
                 ForEach(store.ids, id: \.self) { id in
                     if let box = store.box(id) {
-                        NativeRowView(box: box, isLast: id == last, showTerminal: showTerminal, sendNow: sendNow)
+                        NativeRowView(box: box, isLast: id == last, showTerminal: showTerminal, sendNow: sendNow, answer: answer)
                     }
                 }
                 ForEach(model.queued.indices, id: \.self) { i in

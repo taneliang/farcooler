@@ -89,6 +89,12 @@ final class NativePaneModel: ObservableObject {
     @Published var keys: (any InterruptSink)?
     /// A Stop or a Send Now on its way, until the runner answers.
     @Published var pressing: PaneKey?
+    /// Where a held ask's answer goes (ov-370): the runner's connection.
+    @Published var answers: (any AgentAnswerSink)?
+    /// The held ask whose answer is on its way, by its id.
+    @Published var answering: String?
+    /// Why an ask's answer didn't land, by the ask's id.
+    @Published var answerIssues: [String: String] = [:]
     /// Where rows come from, once the runner is connected.
     var source: (any AgentRowSource)? {
         didSet { if source != nil { following = false } }

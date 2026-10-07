@@ -199,6 +199,9 @@ final class NativeAgents: ObservableObject {
         model.rich = offered.contains(Capability.compose.rawValue)
         // Stop and Send Now where the runner presses them (ov-368).
         model.keys = offered.contains(Capability.terminalInterrupt.rawValue) ? core : nil
+        // A held ask's buttons (ov-370). A runner from before them holds no
+        // ask on a row, so none is offered there.
+        model.answers = core
         model.followIfShown()
     }
 

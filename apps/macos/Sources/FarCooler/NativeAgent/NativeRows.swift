@@ -12,6 +12,8 @@ struct NativeRowView: View {
     let showTerminal: () -> Void
     /// A waiting Queued row's Send Now (ov-368), where it's offered.
     var sendNow: (() -> Void)?
+    /// A held ask's buttons (ov-370), where the runner takes answers.
+    var answer: NativeAnswer?
 
     var body: some View {
         let row = box.row
@@ -25,7 +27,7 @@ struct NativeRowView: View {
             case .thinking(let thinking): ThinkingRow(thinking: thinking)
             case .tool(let tool): ToolRow(tool: tool)
             case .subagent(let subagent): SubagentRow(subagent: subagent)
-            case .ask(let ask): AskRow(ask: ask, showTerminal: showTerminal)
+            case .ask(let ask): NativeAskRow(ask: ask, answer: answer, showTerminal: showTerminal)
             case .queued(let queued): QueuedLine(text: queued.text, state: queued.state, sendNow: sendNow)
             case .notice(let notice): NoticeLine(text: notice.text)
             case .handoff(let handoff): HandoffRow(reason: handoff.reason, showTerminal: showTerminal)
@@ -251,34 +253,6 @@ private struct SubagentRow: View {
         .font(.callout)
         .padding(Spacing.group)
         .surface(.inset, in: .card)
-    }
-}
-
-private struct AskRow: View {
-    let ask: AgentRow.Ask
-    let showTerminal: () -> Void
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
-            Image(systemName: ask.answered ? "checkmark" : "questionmark.bubble")
-            VStack(alignment: .leading, spacing: Spacing.tight) {
-                Text(ask.answered ? "Answered" : title).fontWeight(.medium)
-                Text(ask.text).foregroundStyle(.secondary).lineLimit(3)
-            }
-            Spacer(minLength: Spacing.group)
-            if !ask.answered { Button("Show Terminal", action: showTerminal) }
-        }
-        .font(.callout)
-        .padding(Spacing.group)
-        .attentionSurface(in: .card, when: !ask.answered)
-    }
-
-    private var title: String {
-        switch ask.kind {
-        case "Permission": "Claude is asking for permission"
-        case "PlanExit": "Claude has a plan for you to review"
-        default: "Claude is asking a question"
-        }
     }
 }
 
