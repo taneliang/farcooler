@@ -27,7 +27,7 @@ struct PlanSpecimenTests {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: bin)
         process.arguments = args
-        process.environment = ProcessInfo.processInfo.environment.merging(["FARCOOLER_HOME": home]) { _, new in new }
+        process.environment = ProcessInfo.processInfo.environment.merging(["FARCOOLER_HOME": home, "FARCOOLER_CONFIG": home + "/config.toml"]) { _, new in new }
         let out = Pipe()
         process.standardOutput = out
         process.standardError = Pipe()

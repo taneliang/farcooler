@@ -544,7 +544,9 @@ struct WorktreeCallsTests {
         process.executableURL = URL(fileURLWithPath: cli)
         process.arguments = line
         var environment = ProcessInfo.processInfo.environment
-        environment["FARCOOLER_HOME"] = "/tmp/fc-t/ui-2/h-\(UUID().uuidString.prefix(8))"
+        let home = "/tmp/fc-t/ui-2/h-\(UUID().uuidString.prefix(8))"
+        environment["FARCOOLER_HOME"] = home
+        environment["FARCOOLER_CONFIG"] = home + "/config.toml"
         process.environment = environment
         let err = Pipe()
         process.standardOutput = FileHandle.nullDevice
@@ -591,8 +593,10 @@ struct WorktreeCallsTests {
         arguments.insert("--help", at: line.firstIndex(of: "--") ?? line.endIndex)
         process.arguments = arguments
         var environment = ProcessInfo.processInfo.environment
-        environment["FARCOOLER_HOME"] = FileManager.default.temporaryDirectory
+        let home = FileManager.default.temporaryDirectory
             .appendingPathComponent("fc-worktree-calls-\(UUID().uuidString)").path
+        environment["FARCOOLER_HOME"] = home
+        environment["FARCOOLER_CONFIG"] = home + "/config.toml"
         process.environment = environment
         let err = Pipe()
         process.standardOutput = FileHandle.nullDevice

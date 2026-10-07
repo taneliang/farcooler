@@ -47,6 +47,7 @@ struct PaneHeaderProgramTests {
     private func farcooler(_ args: [String], home: String) async -> (ok: Bool, out: Data, err: String) {
         var environment = ProcessInfo.processInfo.environment
         environment["FARCOOLER_HOME"] = home + "/h"
+        environment["FARCOOLER_CONFIG"] = home + "/h/config.toml"
         let ran = await ProcessRunner.run(Self.cli!, args, environment: environment, deadline: 60)
         return (ran.succeeded, ran.stdout, String(decoding: ran.stderr, as: UTF8.self))
     }

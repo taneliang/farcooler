@@ -12,6 +12,7 @@ enum ScratchDaemon {
     static func stop(cli: String, farcoolerHome: String) async {
         var environment = ProcessInfo.processInfo.environment
         environment["FARCOOLER_HOME"] = farcoolerHome
+        environment["FARCOOLER_CONFIG"] = farcoolerHome + "/config.toml"
         let status = await ProcessRunner.run(cli, ["status"], environment: environment, deadline: 30)
         _ = await ProcessRunner.run(cli, ["daemon", "stop"], environment: environment, deadline: 30)
         let said = String(decoding: status.stdout, as: UTF8.self)

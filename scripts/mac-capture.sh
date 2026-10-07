@@ -48,7 +48,8 @@ lane="${FARCOOLER_CAPTURE_LANE:-capture}"
 home="${FARCOOLER_HOME:-/tmp/fc-t/$lane}"
 bin="${FARCOOLER_BIN:-$root/target/debug/farcooler}"
 
-fc() { FARCOOLER_HOME="$home" "$bin" "$@"; }
+# Its own config.toml, never this Mac's shared one (ov-394).
+fc() { FARCOOLER_HOME="$home" FARCOOLER_CONFIG="$home/config.toml" "$bin" "$@"; }
 
 if [ "${1:-}" = "stop" ]; then
     # The daemon, then its tmux server, which `daemon stop` leaves running.
@@ -141,7 +142,7 @@ cd "$root/apps/macos"
 # Built Rust cores first, as test.sh does: a stale library fails to link.
 ./build-vt.sh >/dev/null
 env -u FARCOOLER_WORKSPACE \
-    FARCOOLER_HOME="$home" FARCOOLER_BIN="${FARCOOLER_CAPTURE_APP_BIN:-$bin}" \
+    FARCOOLER_HOME="$home" FARCOOLER_CONFIG="$home/config.toml" FARCOOLER_BIN="${FARCOOLER_CAPTURE_APP_BIN:-$bin}" \
     FARCOOLER_CAPTURE_OUT="$out" FARCOOLER_CAPTURE_STAGE="$stage" FARCOOLER_CAPTURE_SEED="$seed" \
     swift test -j "${SWIFT_JOBS:-3}" --filter RealWindowCaptures
 echo "mac-capture: wrote $(ls "$out" | grep -c "^$stage-") images to $out" >&2
