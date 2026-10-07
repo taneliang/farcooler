@@ -59,7 +59,8 @@ public struct AgentRow: Sendable, Equatable, Identifiable, Codable {
         /// Nil while the turn is open.
         public var outcome: Outcome?
         public var backgroundRunning: Int
-        /// `Busy`, `Idle` or `Shell`, on the newest turn only.
+        /// `Busy`, `Idle`, `Shell` or `Waiting` (a dialog up, ov-368), on the
+        /// newest turn only.
         public var activity: String?
 
         public enum Outcome: Sendable, Equatable, Codable {

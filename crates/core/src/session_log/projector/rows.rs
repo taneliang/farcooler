@@ -145,6 +145,9 @@ pub enum Activity {
     Idle,
     /// Running a `!` shell command. Seen live as `"shell"`; not in the brief.
     Shell,
+    /// A permission dialog up: claude 2.1.290 writes `"waiting"` (ov-368).
+    /// A view offers no Stop then: one Esc would answer the dialog No.
+    Waiting,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

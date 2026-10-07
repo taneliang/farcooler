@@ -58,6 +58,8 @@ fn a_registry_file_reads_as_its_session_status_and_pane() {
     assert_eq!(e.messaging_socket, Some(PathBuf::from("/tmp/cc-socks/29434.sock")));
     let shell = file(1, "s", "Sun Oct  4 18:06:13 2026").replace("\"busy\"", "\"shell\"");
     assert_eq!(parse(shell.as_bytes()).unwrap().status, Some(Activity::Shell), "seen live; not only busy and idle");
+    let waiting = file(1, "s", "Sun Oct  4 18:06:13 2026").replace("\"busy\"", "\"waiting\"");
+    assert_eq!(parse(waiting.as_bytes()).unwrap().status, Some(Activity::Waiting), "under a dialog (ov-368)");
 }
 
 #[test]

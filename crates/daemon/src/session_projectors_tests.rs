@@ -65,6 +65,11 @@ fn an_opened_projector_is_rebuilt_from_disk_and_follows_hooks_then_the_file() {
     let newest = projectors.page(terminal, None, 1000).unwrap().into_iter().find(|r| r.id == "turn:p3").unwrap();
     let RowKind::Turn(turn) = newest.kind else { panic!() };
     assert_eq!(turn.activity, Some(Activity::Busy), "the registry's status, on the newest turn");
+    // Under a dialog the row says so, and a view offers no Stop (ov-368).
+    projectors.tick(terminal, Some(Activity::Waiting));
+    let newest = projectors.page(terminal, None, 1000).unwrap().into_iter().find(|r| r.id == "turn:p3").unwrap();
+    let RowKind::Turn(turn) = newest.kind else { panic!() };
+    assert_eq!(turn.activity, Some(Activity::Waiting));
 }
 
 #[test]

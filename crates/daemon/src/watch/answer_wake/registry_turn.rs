@@ -61,7 +61,7 @@ pub(crate) fn status(config: &Path, pid: i32) -> Status {
         Some(entry) if entry.pid == pid && claude_registry::is_live(&entry, &Kernel) => match entry.status {
             Some(Activity::Busy) => Status::Busy,
             Some(Activity::Idle | Activity::Shell) => Status::Idle,
-            None => Status::Waiting,
+            Some(Activity::Waiting) | None => Status::Waiting,
         },
         _ => Status::Nothing,
     }

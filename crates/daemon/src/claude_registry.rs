@@ -19,7 +19,7 @@
 //!   UTC-7).
 //! - `status` is `busy`, `idle`, or `shell` (running a `!` command), not only
 //!   the two the design names; and `waiting` while a permission dialog is up
-//!   (2.1.290, ov-368), which reads here as no status.
+//!   (2.1.290, ov-368).
 //! - `tmux` names a session, a window and a pane (`farcooler:@0.%0`) but not
 //!   the server. Every Far Cooler daemon calls its session `farcooler`, and the
 //!   owner runs two (Far Cooler and Canary), so `%0` alone is two panes. A
@@ -120,6 +120,7 @@ pub fn parse(bytes: &[u8]) -> Option<Entry> {
             Some("busy") => Some(Activity::Busy),
             Some("idle") => Some(Activity::Idle),
             Some("shell") => Some(Activity::Shell),
+            Some("waiting") => Some(Activity::Waiting),
             _ => None,
         },
         tmux: text("tmux").and_then(parse_tmux),
