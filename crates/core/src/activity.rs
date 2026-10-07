@@ -1920,3 +1920,7 @@ use spinner::spinning;
 #[cfg(test)]
 #[path = "activity_spinner_tests.rs"]
 mod spinner_tests;
+
+#[cfg(test)]
+#[path = "activity_capture_tests.rs"]
+mod capture_tests;

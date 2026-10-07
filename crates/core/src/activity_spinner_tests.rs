@@ -43,3 +43,22 @@ fn a_spinner_looking_row_with_no_box_below_is_not_working() {
     assert_eq!(classify("⏺ ok\n✻ Zigzagging…\n  ? for shortcuts\n"), Idle);
     assert_eq!(classify(&format!("✻ Zigzagging…\n{RULE}\n  ? for shortcuts\n")), Idle, "a rule but no prompt");
 }
+
+/// What claude draws under its spinner besides a tip, in the shapes the
+/// review of ov-394 named. Built by hand from those shapes, not captured: no
+/// capture of a todo list under a spinner exists yet, so a real one should
+/// replace these when one is taken.
+#[test]
+fn rows_claude_indents_under_its_spinner_are_skipped() {
+    let todo = ["✶ Zigzagging… (12s · ↑ 1.2k tokens)", "  ⎿  ☐ First task", "     ☐ Second task", "     ☒ Third task", ""];
+    assert_eq!(classify(&screen(&todo)), Working, "a todo list");
+    let tip = ["✻ Zigzagging…", "  ⎿  Tip: Use /memory to view and manage Claude memory and the", "     notes it keeps for you", ""];
+    assert_eq!(classify(&screen(&tip)), Working, "a tip that wraps");
+    let wrapped = ["✻ Zigzagging… (123s · ↑ 12.3k tokens · esc", "  to interrupt)", ""];
+    assert_eq!(classify(&screen(&wrapped)), Working, "a spinner line that wraps");
+    let subagent = ["✢ Delegating…", "  ⎿  Agent \"Count the lines\"", "     ⏺ Read(src/main.rs)", "     ⏺ Bash(wc -l src/*.rs)", ""];
+    assert_eq!(classify(&screen(&subagent)), Working, "a subagent's progress");
+    // Indented rows are not a way past a transcript's own rows.
+    let behind = ["* Building…", "⏺ ok", "  ⎿  done", ""];
+    assert_eq!(classify(&screen(&behind)), Idle);
+}

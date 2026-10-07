@@ -1,45 +1,50 @@
 //! The spinner row of a working agent (ov-394).
 
-use super::{AgentRules, footer_lines};
+use super::{AgentRules, strip_ansi};
 
-/// Whether the row drawn just above the box is a spinner row
-/// (`AgentRules::spinner`): a glyph, a space, and a first word ending in `…`.
-/// A done line (`✻ Worked for 3s`) has no ellipsis.
+/// How many rows up from the box's top rule the spinner may be.
+const SEARCH_ROWS: usize = 12;
+
+/// Whether the spinner row (`AgentRules::spinner`) of a working agent is
+/// drawn above the box: a glyph, a space, and a first word ending in `…`. A
+/// done line (`✻ Worked for 3s`) has no ellipsis.
 ///
-/// Only that row counts: the box is the `❯` line with a rule of `─` above it,
-/// and the spinner is the row above that rule, with one blank row allowed
-/// between (claude draws it so), and the `⎿` tip rows it draws under it. A
-/// prose line in the transcript that happens to start with `·` or `*` and a
-/// word ending in `…` (`* Building…`) sits further up, or has no box beneath
-/// it, and is not read as Working (ov-394).
+/// The box is the `❯` line with a rule of `─` above it. From that rule, walk
+/// up past what claude draws under its spinner: one blank row, `⎿` rows (a
+/// tip), and any indented row (a todo list, a tip or the spinner's own line
+/// wrapped, a subagent's progress). The first row that isn't one of those is
+/// the one that must be the spinner. A prose line in the transcript that
+/// happens to start with `·` or `*` and a word ending in `…` (`* Building…`)
+/// has the transcript's own rows (`⏺ …`, `✻ Worked for …`, at column 0)
+/// between it and the box, or no box beneath it, and is not read as Working.
 pub(super) fn spinning(rules: &AgentRules, screen: &str) -> bool {
     if rules.spinner.is_empty() {
         return false;
     }
-    let lines = footer_lines(screen, usize::MAX);
+    let plain = strip_ansi(screen);
+    let mut lines: Vec<&str> = plain.lines().map(str::trim_end).collect();
+    while lines.last().is_some_and(|l| l.is_empty()) {
+        lines.pop();
+    }
     // The last prompt line: the box is drawn below everything.
     let Some(prompt) = lines.iter().rposition(|l| l.starts_with('❯')) else { return false };
-    let is_rule = |l: &String| l.chars().count() >= 10 && l.chars().all(|c| c == '─');
-    if prompt == 0 || !is_rule(&lines[prompt - 1]) {
+    let is_rule = |l: &str| l.chars().count() >= 10 && l.chars().all(|c| c == '─');
+    if prompt == 0 || !is_rule(lines[prompt - 1]) {
         return false;
     }
-    // Up from the rule, past one blank row and any `⎿` rows (the tip claude
-    // draws under its spinner: `claude-2.1.290-working-long-paste`).
-    let mut row = prompt - 1;
     let mut blank = false;
-    while let Some(above) = row.checked_sub(1) {
-        row = above;
-        let line = &lines[row];
-        if line.starts_with('⎿') {
-            continue;
-        }
+    for row in (0..prompt - 1).rev().take(SEARCH_ROWS) {
+        let line = lines[row];
         if line.is_empty() {
             if std::mem::replace(&mut blank, true) {
                 return false;
             }
             continue;
         }
-        let mut words = line.split(' ');
+        if line.starts_with(char::is_whitespace) || line.starts_with('⎿') {
+            continue;
+        }
+        let mut words = line.split_whitespace();
         let glyph = words.next().unwrap_or_default();
         return rules.spinner.iter().any(|g| g == glyph)
             && words.next().is_some_and(|w| w.chars().count() > 1 && w.ends_with('…'));
