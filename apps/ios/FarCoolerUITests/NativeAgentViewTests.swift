@@ -74,9 +74,19 @@ final class NativeAgentViewTests: XCTestCase {
     private func type(_ app: XCUIApplication, _ words: String) {
         let field = element(app, "native-composer")
         XCTAssertTrue(field.waitForExistence(timeout: 60))
-        if field.value(forKey: "hasKeyboardFocus") as? Bool != true { field.tap() }
+        // Tapped again every 5 s while it hasn't the keyboard: a tap just
+        // after launch on CI's runner can come to nothing (PR 7's first
+        // run: one tap, then 30 s without focus).
+        var tapped = Date.distantPast
         XCTAssertTrue(
-            wait(30) { field.value(forKey: "hasKeyboardFocus") as? Bool == true }, "the box never took the keyboard")
+            wait(60) {
+                if field.value(forKey: "hasKeyboardFocus") as? Bool == true { return true }
+                if Date().timeIntervalSince(tapped) >= 5 {
+                    field.tap()
+                    tapped = Date()
+                }
+                return false
+            }, "the box never took the keyboard")
         app.typeText(words)
     }
 
