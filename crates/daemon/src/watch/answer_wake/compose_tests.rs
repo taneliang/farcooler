@@ -220,6 +220,18 @@ async fn busy_with_only_the_hook_is_queued_and_with_nothing_unconfirmed() {
     assert_eq!(b.watcher.compose_into(agent.id, "c\nd", &[]).await.expect("queued"), Turn::During);
 }
 
+/// A backslash before Enter is a line break to claude, never a send: refused
+/// untyped, a command's arguments too. codex sends it as typed
+/// (`compose_codex_tests`).
+#[tokio::test]
+async fn a_backslash_at_the_end_is_refused_for_claude() {
+    let b = board().await;
+    let (agent, si) = idle_claude(&b).await;
+    assert_eq!(refused(b.watcher.compose_into(agent.id, "see C:\\ \n", &[]).await), "backslash");
+    assert_eq!(refused(b.watcher.compose_into(agent.id, "/init the docs\\", &[]).await), "backslash");
+    nothing_typed(&si);
+}
+
 /// What's typed: line breaks as LF, other controls written out, trailing
 /// whitespace and leading blank lines gone; a command split from its
 /// arguments; images sniffed.
@@ -241,9 +253,8 @@ fn a_composition_is_checked_before_anything_is_typed() {
     assert_eq!(composition("/init", std::slice::from_ref(&png)).unwrap_err().what(), "images");
     assert_eq!(composition("", &[png]).unwrap().images.len(), 1, "an image alone is a message");
     assert_eq!(composition(&"x".repeat(100_001), &[]).unwrap_err().what(), "too_long");
-    // A backslash before Enter is a line break to claude, never a send.
-    assert_eq!(composition("see C:\\ \n", &[]).unwrap_err().what(), "backslash");
-    assert_eq!(composition("/init the docs\\", &[]).unwrap_err().what(), "backslash");
+    // A backslash at the end is the agent's to judge (`a_backslash_at_the_end_…`).
+    assert!(composition("see C:\\ \n", &[]).is_ok());
     assert!(composition("a \\ in the middle", &[]).is_ok());
     // Every image together, past what one compose takes, uploaded first
     // (ov-393): what one request carries is held before this.

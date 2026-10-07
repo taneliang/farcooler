@@ -72,6 +72,17 @@ async fn multi_line_text_is_sent_once_the_rollout_records_it() {
     assert_eq!(si.submitted(), ["fix the flaky test\\n\\nthen land it"], "{}", si.log());
 }
 
+/// A backslash at the end, which claude would take as a line break: codex
+/// 0.153.4 sends it as typed.
+#[tokio::test]
+async fn a_backslash_at_the_end_is_sent() {
+    let b = board().await;
+    let path = rollout(&b);
+    let (agent, si) = idle_codex(&b, &path, false).await;
+    assert_eq!(b.watcher.compose_into(agent.id, "look in C:\\", &[]).await.expect("sent"), Turn::Between, "{}", si.log());
+    assert_eq!(si.submitted(), ["look in C:\\"], "{}", si.log());
+}
+
 /// Typed and entered, but no record of it in the rollout: not Sent.
 #[tokio::test]
 async fn a_send_the_rollout_never_records_is_unconfirmed() {

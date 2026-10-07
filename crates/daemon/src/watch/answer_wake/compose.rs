@@ -128,8 +128,7 @@ impl Composition {
 /// `images_too_large` past `MAX_COMPOSE_UPLOAD_BYTES` together (those the
 /// request carried are held to `MAX_COMPOSE_IMAGE_BYTES` before this, by
 /// `pastes::staged::images`),
-/// `too_long`, `backslash` for a text ending in one, which claude would
-/// take as a line break rather than a send, `command` for a shell escape or
+/// `too_long`, `command` for a shell escape or
 /// a command that isn't one, and `handoff` for one of claude's own that isn't a prompt.
 pub(crate) fn composition(raw: &str, images: &[(String, Vec<u8>)]) -> Result<Composition> {
     let text = normalized(raw);
@@ -138,11 +137,6 @@ pub(crate) fn composition(raw: &str, images: &[(String, Vec<u8>)]) -> Result<Com
     }
     if text.chars().count() > LONGEST_TEXT {
         return Err(DomainError::Conflict { what: "too_long" });
-    }
-    // claude reads a backslash before Enter as a line break, not a send: the
-    // text would be left in its box, unconfirmed (ov-393 review 8).
-    if text.ends_with('\\') {
-        return Err(DomainError::Conflict { what: "backslash" });
     }
     if images.len() > MOST_IMAGES {
         return Err(DomainError::InvalidArgument { what: "images" });
@@ -272,6 +266,12 @@ impl Watcher {
         }
         if !queues_mid_turn(proven.preset) {
             return Err(DomainError::Conflict { what: "unsupported" });
+        }
+        // claude reads a backslash before Enter as a line break, not a send:
+        // the text would be left in its box, unconfirmed (ov-393 review 8).
+        // codex 0.153.4 sends it as typed.
+        if composed.text.ends_with('\\') {
+            return Err(DomainError::Conflict { what: "backslash" });
         }
         // Where claude will say it took the message: its session's hooks and
         // transcript, found before anything is typed. Its registry says too

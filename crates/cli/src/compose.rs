@@ -105,7 +105,9 @@ where
 pub(crate) fn said_about(what: &str) -> Option<&'static str> {
     Some(match what {
         "handoff" => "that command opens a panel or acts at once in claude, so it's for the terminal. open the pane and type it there",
-        "unsupported" => "only claude can be composed into. use terminal draft-prompt for this agent",
+        "unsupported" => "only claude and codex can be composed into. use terminal draft-prompt for this agent",
+        "picker" => "codex would open a picker for a last word that starts with @ or $, so it wasn't sent. add a word after it",
+        "too_tall" => "that message has more lines than codex's box shows, so it couldn't be checked and wasn't sent. shorten it",
         "images_too_large" => "the images are too large to send together. send fewer, or smaller ones",
         "image_too_large" => "that image is over 16 MB, too large to send. use a smaller one",
         "images" => "a message takes at most 10 images, and a slash command none",
@@ -117,7 +119,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "busy" => {
             "the agent is working, and either can't be typed to safely now or the message is a command, which waits for the turn to end. try again when it's done"
         }
-        "unconfirmed" => "the message was submitted, but claude never said it took it. check its pane before sending it again",
+        "unconfirmed" => "the message was submitted, but the agent never said it took it. check its pane before sending it again",
         "prompt" => "the agent is showing a question, a menu or a panel. answer it in the terminal first",
         "draft" => "there's a draft in the agent's box. send or clear it first, or bring it here",
         "typing" => "someone typed in the agent's pane in the last 15 seconds, so nothing was sent. try again once they stop",
@@ -145,7 +147,7 @@ mod tests {
         for what in [
             "busy", "prompt", "draft", "typing", "not_an_agent", "unfamiliar", "unproven", "too_long", "command",
             "not_running", "paste_left", "left_at_shell", "dialog", "unconfirmed", "handoff", "unsupported", "unconfirmable",
-            "images_too_large", "image_too_large", "images", "image", "backslash",
+            "images_too_large", "image_too_large", "images", "image", "backslash", "picker", "too_tall",
         ] {
             let said = said_about(what).unwrap_or_else(|| panic!("no line for {what}"));
             assert!(!said.ends_with('.') && said.chars().next().is_some_and(char::is_lowercase), "{said}");

@@ -624,6 +624,13 @@ pub mod capability {
     /// ctrl+x ctrl+s, pressed in a terminal-mode claude pane past the typing gate.
     /// Its own word, so a client offers Stop and Send Now only where they're served.
     pub const TERMINAL_INTERRUPT: &str = "terminal_interrupt";
+    /// A codex pane's conversation (ov-416): `agent.rows` projects its rows
+    /// from its rollout (ov-378), and `terminal.compose` types into its box
+    /// between turns, confirmed by the rollout, and refuses `picker` and
+    /// `too_tall`. No method of its own. Its own word because a runner from
+    /// before refused every send into codex as `unsupported`: a client that
+    /// reads it absent offers the view on claude panes alone.
+    pub const CODEX_VIEW: &str = "codex_view";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -640,7 +647,7 @@ pub mod capability {
             READ_ONLY_FOLDERS, AGENT_QUEUE, BOARD_PLAN, LFS_POINTERS, BOARD_PAGES, BOARD_RULINGS,
             BOARD_TRAINS, BOARD_COST, LANDING, BOARD_RULING_ACTIONS, AGENT_ROWS, DRAFT_HOLD,
             PROJECTOR_SETTING, AGENT_COMPOSE,
-            COMPOSE, COMPOSE_UPLOAD, TERMINAL_INTERRUPT,
+            COMPOSE, COMPOSE_UPLOAD, TERMINAL_INTERRUPT, CODEX_VIEW,
         ];
 
     /// Capabilities this process has but does not offer: a feature behind a
