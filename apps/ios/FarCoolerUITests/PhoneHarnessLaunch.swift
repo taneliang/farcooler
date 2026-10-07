@@ -22,6 +22,22 @@ extension XCUIApplication {
     /// it would have failed the build for it.
     static let firstFrame: TimeInterval = 180
 
+    /// Launch without os_log copied to the app's stderr (ov-401). Every UI
+    /// test launch goes through here.
+    ///
+    /// XCTest evaluates each query inside the app, on its main thread, and
+    /// logs every element it visits. xcodebuild sets OS_ACTIVITY_DT_MODE, so
+    /// libtrace also writes each line to the app's stderr, a pty xcodebuild
+    /// drains. One NativeAgentViewTests test wrote 6.5 MB there, a
+    /// FirstRunUITests test 0.6 MB. On CI's 3-core runner xcodebuild falls
+    /// behind and the app's main thread waits in `writev` (30 to 94% of its
+    /// samples in run 37616804607), while a query waits at most 30 s for that
+    /// thread: "Timed out while evaluating UI query". The lines still reach
+    /// the unified log.
+    func withoutLogMirroring() {
+        launchEnvironment["OS_ACTIVITY_DT_MODE"] = "NO"
+    }
+
     /// Launch, and wait until the app has drawn anything that names itself.
     ///
     /// Every harness screen carries accessibility identifiers, so the first
@@ -29,6 +45,7 @@ extension XCUIApplication {
     /// probe, right after this, is the check, and it no longer races the cold
     /// launch. Returns at once on a warm launch.
     func launchDrawn() {
+        withoutLogMirroring()
         HarnessRetry.run("launch") { launch() }
         _ = descendants(matching: .any)
             .matching(NSPredicate(format: "identifier != ''"))

@@ -27,6 +27,7 @@ enum LiveRunner {
     static func launch(_ extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments += extra + ["-farcoolerDemoHost", address]
+        app.withoutLogMirroring()
         app.launch()
         return app
     }
