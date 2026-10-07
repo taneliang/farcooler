@@ -513,27 +513,30 @@ struct TilePane: View {
             // rebuilds everything) appears to fix it.
             .id("\(terminal.id)#\(terminal.paneMode ?? "terminal")")
         } else if isLive {
-            TerminalSurface(
-                terminal: terminal.short,
-                binary: binary,
-                environment: environment,
-                hostArguments: hostArguments,
-                linkGeneration: linkGeneration,
-                // Deliberately empty. A pane's size is a property of the layout
-                // it is in, so a pane reporting its own grid would resize the
-                // whole tmux window to fit itself and squash its neighbours —
-                // which is exactly what happened while each pane was its own
-                // window and the call survived the change. The view tells tmux
-                // its total size once, in `TileView.send(viewport:for:)`, and
-                // every pane's size falls out of that.
-                onResize: { _, _ in },
-                fontRevision: preferences.revision,
-                isFocused: isFocused,
-                // And falls back IN here, which is the other half of that
-                // deal. Without it the pane's emulator sized itself from its
-                // own pixels and held a grid tmux does not have.
-                grid: grid
-            )
+            // With its native view beside it, for claude (ov-372).
+            NativeSwitch(terminal: terminal, target: hostArguments.joined(separator: " "), isFocused: isFocused) { focused in
+                TerminalSurface(
+                    terminal: terminal.short,
+                    binary: binary,
+                    environment: environment,
+                    hostArguments: hostArguments,
+                    linkGeneration: linkGeneration,
+                    // Deliberately empty. A pane's size is a property of the layout
+                    // it is in, so a pane reporting its own grid would resize the
+                    // whole tmux window to fit itself and squash its neighbours —
+                    // which is exactly what happened while each pane was its own
+                    // window and the call survived the change. The view tells tmux
+                    // its total size once, in `TileView.send(viewport:for:)`, and
+                    // every pane's size falls out of that.
+                    onResize: { _, _ in },
+                    fontRevision: preferences.revision,
+                    isFocused: focused,
+                    // And falls back IN here, which is the other half of that
+                    // deal. Without it the pane's emulator sized itself from its
+                    // own pixels and held a grid tmux does not have.
+                    grid: grid
+                )
+            }
             // Identity includes the PANE MODE, not just the terminal.
             //
             // A mode switch respawns the pane: new process, new epoch, new

@@ -79,7 +79,7 @@ public final class AgentRowStore {
 
     @ObservationIgnored public let key: String
     @ObservationIgnored private var boxes: [String: AgentRowBox] = [:]
-    @ObservationIgnored let ledger = AgentRowLedger()
+    @ObservationIgnored public let ledger = AgentRowLedger()
     @ObservationIgnored private let cache: AgentRowCache?
     @ObservationIgnored private var seeded: AgentRowSnapshot?
     @ObservationIgnored private var feed: Task<Void, Never>?

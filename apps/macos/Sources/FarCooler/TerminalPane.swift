@@ -102,17 +102,21 @@ struct TerminalPane: View {
                 // rebuilds everything) appears to fix it.
                 .id("\(terminal.id)#\(terminal.paneMode ?? "terminal")")
             } else if isLive {
-                TerminalSurface(
-                    terminal: terminal.short,
-                    binary: binary,
-                    environment: environment,
-                    hostArguments: hostArguments,
-                    linkGeneration: linkGeneration,
-                    onResize: onGeometry,
-                    fontRevision: preferences.revision,
-                    // One pane, so it always owns the keyboard.
-                    isFocused: hasKeyboard
-                )
+                // With its native view beside it, for claude (ov-372).
+                NativeSwitch(terminal: terminal, target: hostArguments.joined(separator: " "), isFocused: hasKeyboard) { focused in
+                    TerminalSurface(
+                        terminal: terminal.short,
+                        binary: binary,
+                        environment: environment,
+                        hostArguments: hostArguments,
+                        linkGeneration: linkGeneration,
+                        onResize: onGeometry,
+                        fontRevision: preferences.revision,
+                        // One pane, so it always owns the keyboard, unless
+                        // its native view is showing.
+                        isFocused: focused
+                    )
+                }
                 // Identity includes the PANE MODE, not just the terminal.
                 //
                 // A mode switch respawns the pane: new process, new epoch, new

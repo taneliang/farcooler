@@ -309,7 +309,11 @@ final class DaemonClient: ObservableObject {
             // A daemon going away is also the moment another build could
             // take the socket, so the app claims it back before reading
             // anything through it.
-            if self.target.isEmpty { await LocalDaemon.shared.ensure() }
+            if self.target.isEmpty {
+                await LocalDaemon.shared.ensure()
+                // A new daemon is a new connection for the native view.
+                NativeAgents.shared.start()
+            }
             guard !Task.isCancelled else { return }
             // Anything that changed while we were deaf is only visible in a
             // full read. This may itself call `scheduleRetry()` again on
