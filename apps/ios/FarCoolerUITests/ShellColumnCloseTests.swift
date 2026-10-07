@@ -180,7 +180,7 @@ final class ShellColumnCloseTests: XCTestCase {
             control.buttons["Close"].waitForExistence(timeout: 5),
             "the control failed: no row in this column swipes to Close over the same "
                 + "sixty points, so the assertion below would prove nothing")
-        control.terminate()
+        control.terminateRetrying()
 
         let app = launch()
         try pinColumn(app)

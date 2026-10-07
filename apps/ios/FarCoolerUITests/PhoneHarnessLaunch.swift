@@ -29,7 +29,7 @@ extension XCUIApplication {
     /// probe, right after this, is the check, and it no longer races the cold
     /// launch. Returns at once on a warm launch.
     func launchDrawn() {
-        launch()
+        HarnessRetry.run("launch") { launch() }
         _ = descendants(matching: .any)
             .matching(NSPredicate(format: "identifier != ''"))
             .firstMatch

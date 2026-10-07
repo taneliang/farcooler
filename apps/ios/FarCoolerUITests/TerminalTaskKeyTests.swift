@@ -84,7 +84,7 @@ final class TerminalTaskKeyTests: XCTestCase {
             shot.name = "capture-task-key-card-\(name)"
             shot.lifetime = .keepAlways
             add(shot)
-            app.terminate()
+            app.terminateRetrying()
         }
     }
 

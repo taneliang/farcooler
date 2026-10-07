@@ -92,7 +92,7 @@ final class AgentDraftTests: XCTestCase {
             "The composer did not take the typing at all, so nothing was persisted: "
                 + "\(text(of: field))")
 
-        first.terminate()
+        first.terminateRetrying()
 
         let second = launch(keepingDrafts: true)
         let restored = try composer(in: second)
@@ -122,7 +122,7 @@ final class AgentDraftTests: XCTestCase {
             waitFor(field, toRead: "", timeout: 10),
             "Send left the message in the field: \(text(of: field))")
 
-        first.terminate()
+        first.terminateRetrying()
 
         let second = launch(keepingDrafts: true)
         let restored = try composer(in: second)
@@ -144,7 +144,7 @@ final class AgentDraftTests: XCTestCase {
         let field = try composer(in: first)
         try focus(field, in: first)
         first.typeText("left behind by the previous test")
-        first.terminate()
+        first.terminateRetrying()
 
         let second = launch(keepingDrafts: false)
         let fresh = try composer(in: second)

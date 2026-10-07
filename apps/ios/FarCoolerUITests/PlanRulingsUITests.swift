@@ -226,7 +226,7 @@ final class PlanRulingsUITests: XCTestCase {
             let app = openPlan()
             _ = reveal(app, "plan-ruling-R-2")
             keep(app, "capture-rulings-\(name)")
-            app.terminate()
+            app.terminateRetrying()
         }
     }
 }

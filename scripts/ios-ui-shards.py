@@ -59,6 +59,7 @@ SHARDS = {
         "ShellPaneScrollTests",  # -shell-harness; one live method, in SKIP; 195 s
         "ShellColumnCloseTests",  # -shell-harness; 119 s
         "TerminalLigatureTests",  # -terminal-ligature; 9 s
+        "HarnessRetryTests",  # no app (ov-397); 1 s
         "TaskUsageUITests",  # -phone-harness (ov-195); 47 s
         "ReadScopeTests",  # -phone-harness (TaskScreenTests.swift); 24 s
     ],

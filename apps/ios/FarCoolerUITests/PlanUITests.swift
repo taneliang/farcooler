@@ -324,7 +324,7 @@ final class PlanUITests: XCTestCase {
             lane.tap()
             XCTAssertTrue(element(app, "plan-lane-page").waitForExistence(timeout: 10))
             keep(app, "capture-lane-page-\(name)")
-            app.terminate()
+            app.terminateRetrying()
         }
     }
 }

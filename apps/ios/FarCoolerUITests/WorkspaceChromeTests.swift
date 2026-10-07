@@ -49,7 +49,7 @@ final class WorkspaceChromeTests: XCTestCase {
             "-phone-empty-inbox", "-phone-billing-led", "-phone-plan", "-phone-plan-file",
             Self.fixture, "-app.theme", theme,
         ])
-        defer { app.terminate() }
+        defer { app.terminateRetrying() }
         let row = app.buttons["workspace-row-Billing"]
         XCTAssertTrue(row.waitForExistence(timeout: 30), "no Billing row")
         row.tap()
