@@ -19,6 +19,7 @@
 
 mod agent_follow;
 mod agent_rows;
+mod projector_setting;
 mod agent_host;
 mod app_update;
 mod daemon_link;
@@ -573,15 +574,8 @@ enum SettingsCmd {
     Show,
     /// Set what a derived branch name starts with. Empty opts out entirely.
     SetBranchPrefix { prefix: String },
-    /// Turn the agent row projector, which the native agent view reads, on
-    /// or off. Takes effect at once.
-    SetProjector { state: OnOff },
-}
-
-#[derive(Clone, Copy, clap::ValueEnum)]
-enum OnOff {
-    On,
-    Off,
+    /// Turn the agent row projector, which the native view reads, on or off.
+    SetProjector { state: projector_setting::OnOff },
 }
 
 #[derive(Subcommand)]
@@ -1668,11 +1662,7 @@ async fn settings(runner: Option<&str>, cmd: SettingsCmd, json: bool) -> Fallibl
     match cmd {
         SettingsCmd::Show => {
             let facts = host_get(&mut link).await?;
-            let prefix = facts
-                .settings
-                .as_ref()
-                .map(|s| s.branch_prefix.clone())
-                .unwrap_or_default();
+            let prefix = facts.settings.as_ref().map(|s| s.branch_prefix.clone()).unwrap_or_default();
             let projector = facts.settings.as_ref().is_some_and(|s| s.projector);
             if json {
                 println!("{}", serde_json::json!({ "branchPrefix": prefix, "projector": projector }));
@@ -1703,20 +1693,7 @@ async fn settings(runner: Option<&str>, cmd: SettingsCmd, json: bool) -> Fallibl
                 println!("branch prefix is now \"{stored}\"");
             }
         }
-        SettingsCmd::SetProjector { state } => {
-            let on = matches!(state, OnOff::On);
-            let mut ask = with(
-                req("settings.set_projector"),
-                request::Payload::HostSettings(farcooler_protocol::v1::HostSettings { branch_prefix: String::new(), projector: on }),
-            );
-            ask.required_capabilities.push(farcooler_protocol::capability::PROJECTOR_SETTING.to_string());
-            expect_value(link.call(ask).await?.value)?;
-            if json {
-                println!("{}", serde_json::json!({ "projector": on }));
-            } else {
-                println!("projector is now {}", if on { "on" } else { "off" });
-            }
-        }
+        SettingsCmd::SetProjector { state } => projector_setting::set(&mut link, state, json).await?,
     }
     Ok(())
 }

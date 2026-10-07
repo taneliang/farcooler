@@ -64,6 +64,7 @@ impl Session {
         let payload = request::Payload::AgentPrompt(pb::AgentPrompt {
             terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
             blocks: vec![pb::AgentPromptBlock { content: Some(Content::Text(text.to_string())) }],
+            hold_behind_dialog: false,
         });
         match self.value("terminal.compose", None, Some(payload)).await? {
             result::Value::TerminalTold(told) => Ok(told.queued),
