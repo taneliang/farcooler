@@ -1424,6 +1424,9 @@ mod draft_hold_tests;
 #[path = "compose_tests.rs"]
 mod compose_tests;
 
+#[path = "compose_codex_tests.rs"]
+mod compose_codex_tests;
+
 #[path = "compose_upload_tests.rs"]
 mod compose_upload_tests;
 

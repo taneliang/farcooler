@@ -40,16 +40,16 @@
 //! never reach the hook (`/model`, `/usage`, `/config`, `/resume`,
 //! `/agents`, `/status`, `/clear`, `/compact`, …): `handoff`, and the view
 //! opens the terminal. A command mid-turn is refused as `busy`. codex is
-//! refused as `unsupported`: nothing of its box's drawn forms, images or
-//! popup was measured, and a working codex raises approvals no hook tells of
-//! (ov-360). Only claude in a terminal pane; a chat pane has a prompt
-//! channel of its own (`terminal.agent_prompt`).
+//! typed into between turns only, with its own drawn forms and refusals
+//! (`codex`, ov-416); any other agent is refused as `unsupported`. Only a
+//! terminal pane; a chat pane has a prompt channel of its own
+//! (`terminal.agent_prompt`).
 //!
 //! Each refusal is a `DomainError::Conflict` naming why with a stable word:
 //! `tell`'s (`busy`, `prompt`, `draft`, `typing`, `not_an_agent`,
 //! `unfamiliar`, `unproven`, `too_long`, `command`, `not_running`,
 //! `paste_left`, `left_at_shell`, `dialog`, `unconfirmed`), and `handoff`,
-//! `unsupported` and `unconfirmable`.
+//! `unsupported` and `unconfirmable`; for codex, `picker` and `too_tall`.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -64,6 +64,8 @@ use super::tell::held_word;
 use super::{PASTE_POLL, PASTE_SETTLES, TOLD_SPACING_MS, Turn, foreground_agent, may_be_typed_to, mid_turn, queues_mid_turn, registry_turn};
 use crate::runtime::{Runtime, last_input};
 use crate::watch::{Watcher, now_millis};
+
+mod codex;
 
 /// The longest text composed, in characters: far past anything typed, short
 /// of what a paste through tmux should carry.
@@ -261,6 +263,13 @@ impl Watcher {
             return Err(DomainError::Conflict { what: held_word(held) });
         }
         let proven = self.proven_tui(to).await.map_err(|held| DomainError::Conflict { what: held_word(held) })?;
+        // codex: between turns only, and its own drawn forms (`codex`).
+        if proven.preset == "codex" {
+            if ready.is_err() {
+                return Err(DomainError::Conflict { what: "busy" });
+            }
+            return self.compose_codex(to, composed, &proven, &paths, &mut unpasted).await;
+        }
         if !queues_mid_turn(proven.preset) {
             return Err(DomainError::Conflict { what: "unsupported" });
         }

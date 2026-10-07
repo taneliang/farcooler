@@ -38,6 +38,15 @@
 # with `/` opens a command popup above it, its best match highlighted (an
 # alias too: `/cost` highlights `/usage`), and Enter on it runs that and logs
 # `COMMAND /usage`. A submitted line break is logged as `\n`.
+#
+# A codex stand-in draws a paste as codex 0.153.4 does (ov-416): an image's
+# path alone as `[Image #N] `, N from 1 in each message, and a paste past
+# 1,000 characters as `[Pasted Content N chars]`, sent whole. With
+# STAND_IN_ROLLOUT set it records each message it takes, between turns, in
+# that rollout as codex does (`task_started`, the `UserMessage`,
+# `task_complete`), holding the file open; with STAND_IN_ROLLOUT_LATE too, it
+# opens the file only at its first message, as codex does, its head from
+# `<rollout>.head`.
 use strict;
 use warnings;
 use utf8;
@@ -57,6 +66,8 @@ my ($pasted, %whole) = (0);
 my @commands = (["/init", "", "Initialize a new CLAUDE.md file"], ["/usage", "cost", "Show session cost"],
     ["/model", "", "Set the AI model"], ["/compact", "", "Free up context"]);
 my ($transcript, $registry, $registry_cwd);
+my ($rollout, $turns, @images) = (undef, 0);
+open_rollout() if $agent eq 'codex' && ($ENV{STAND_IN_ROLLOUT} // '') ne '' && !$ENV{STAND_IN_ROLLOUT_LATE};
 # This process's start in UTC, as claude writes `procStart`.
 my $started = `TZ=UTC ps -o lstart= -p $$`;
 $started =~ s/^\s+|\s+$//g;
@@ -87,6 +98,37 @@ sub json {
     $s =~ s/(["\\])/\\$1/g;
     $s =~ s/([\x00-\x1f])/sprintf("\\u%04x", ord($1))/ge;
     return "\"$s\"";
+}
+
+# codex's rollout, opened to append and held open; late, with its head.
+sub open_rollout {
+    my $path = $ENV{STAND_IN_ROLLOUT};
+    if ($ENV{STAND_IN_ROLLOUT_LATE} && open(my $h, '<', "$path.head")) {
+        local $/;
+        my $head = <$h>;
+        close $h;
+        open(my $f, '>', $path) or die;
+        print $f $head;
+        close $f;
+    }
+    open($rollout, '>>:utf8', $path) or die "can't open $path";
+    $rollout->autoflush(1);
+}
+
+# A message codex took between turns, as a turn of its own in its rollout.
+sub codex_turn {
+    my ($text) = @_;
+    return if ($ENV{STAND_IN_ROLLOUT} // '') eq '';
+    open_rollout() unless defined $rollout;
+    use POSIX qw(strftime);
+    my $at = strftime("%Y-%m-%dT%H:%M:%S.000Z", gmtime);
+    my $turn = "stand-in-turn-" . ++$turns;
+    my $parts = join(",", (map { '{"type":"local_image","path":' . json($_) . '}' } @images),
+        '{"type":"text","text":' . json($text) . ',"text_elements":[]}');
+    print $rollout '{"timestamp":"' . $at . '","type":"event_msg","payload":{"type":"task_started","turn_id":"' . $turn . '"}}' . "\n";
+    print $rollout '{"timestamp":"' . $at . '","type":"event_msg","payload":{"type":"item_completed","turn_id":"' . $turn
+        . '","item":{"type":"UserMessage","id":"u' . $turns . '","content":[' . $parts . ']}}}' . "\n";
+    print $rollout '{"timestamp":"' . $at . '","type":"event_msg","payload":{"type":"task_complete","turn_id":"' . $turn . '"}}' . "\n";
 }
 
 sub record {
@@ -127,7 +169,7 @@ sub highlighted {
 # The box with each placeholder's whole paste back in it, as claude sends it.
 sub whole {
     my ($text) = @_;
-    $text =~ s/(\[Pasted text #\d+(?: \+\d+ lines)?\])/exists $whole{$1} ? $whole{$1} : $1/ge;
+    $text =~ s/(\[Pasted (?:text #\d+(?: \+\d+ lines)?|Content \d+ chars)\])/exists $whole{$1} ? $whole{$1} : $1/ge;
     return $text;
 }
 
@@ -274,6 +316,13 @@ while (1) {
             } elsif ($agent eq 'claude' && $mode ne 'mangle' && $text =~ m{^'?(/.*\.(?:png|jpe?g|gif|webp))'?$} && -f $1) {
                 $pasted++;
                 take("[Image #$pasted]");
+            } elsif ($agent eq 'codex' && $mode ne 'mangle' && $text =~ m{^'?(/.*\.(?:png|jpe?g|gif|webp))'?$} && -f $1) {
+                push @images, $1;
+                take("[Image #" . scalar(@images) . "] ");
+            } elsif ($agent eq 'codex' && $mode ne 'mangle' && length($text) > 1000) {
+                my $shown = "[Pasted Content " . length($text) . " chars]";
+                $whole{$shown} = $text;
+                take($shown);
             } elsif ($agent eq 'claude' && $mode ne 'mangle' && ((() = $text =~ /\n/g) >= 3 || units($text) > 800)) {
                 $pasted++;
                 my $breaks = () = $text =~ /\n/g;
@@ -307,6 +356,10 @@ while (1) {
             } elsif ($composer ne "") {
                 logit("SUBMIT " . logged($sent));
                 record('{"type":"user","message":{"role":"user","content":' . json($sent) . '}}');
+                if ($agent eq 'codex') {
+                    codex_turn($sent);
+                    @images = ();
+                }
                 (my $shown = $composer) =~ s/\n/ /g;
                 push @said, $shown;
                 $composer = "";

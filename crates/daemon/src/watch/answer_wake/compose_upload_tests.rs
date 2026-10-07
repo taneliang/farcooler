@@ -81,7 +81,7 @@ async fn a_ten_megabyte_screenshot_composes_over_the_socket() {
 }
 
 /// A send refused at the gate, after its images were written and before a
-/// path was pasted (codex: `unsupported`), leaves nothing behind: not the
+/// path was pasted (codex, a last word that opens its picker), leaves nothing behind: not the
 /// upload, not the copy.
 #[tokio::test]
 async fn a_refused_compose_leaves_no_image_behind() {
@@ -90,9 +90,9 @@ async fn a_refused_compose_leaves_no_image_behind() {
     let si = b.stand_in(&agent, "codex", "codex").await;
     b.doing(agent.id, AgentActivity::Idle).await;
     let (_socket, session) = served(&b).await;
-    let refused = session.compose(agent.id, "look", &[("image/png".into(), png(2 * 1024 * 1024))]).await;
+    let refused = session.compose(agent.id, "look at @src", &[("image/png".into(), png(2 * 1024 * 1024))]).await;
     match refused {
-        Err(farcooler_client::session::SessionError::Refused { what, .. }) => assert_eq!(what, "unsupported"),
+        Err(farcooler_client::session::SessionError::Refused { what, .. }) => assert_eq!(what, "picker"),
         other => panic!("{other:?}"),
     }
     nothing_typed(&si);

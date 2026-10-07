@@ -220,17 +220,6 @@ async fn busy_with_only_the_hook_is_queued_and_with_nothing_unconfirmed() {
     assert_eq!(b.watcher.compose_into(agent.id, "c\nd", &[]).await.expect("queued"), Turn::During);
 }
 
-/// codex is refused: none of its drawn forms was measured.
-#[tokio::test]
-async fn codex_is_unsupported() {
-    let b = board().await;
-    let agent = b.agent("Agent 2", "codex").await;
-    let si = b.stand_in(&agent, "codex", "codex").await;
-    b.doing(agent.id, AgentActivity::Idle).await;
-    assert_eq!(refused(b.watcher.compose_into(agent.id, "hello", &[]).await), "unsupported");
-    nothing_typed(&si);
-}
-
 /// What's typed: line breaks as LF, other controls written out, trailing
 /// whitespace and leading blank lines gone; a command split from its
 /// arguments; images sniffed.
