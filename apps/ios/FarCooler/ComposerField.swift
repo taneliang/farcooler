@@ -1,4 +1,5 @@
 import UIKit
+import UniformTypeIdentifiers
 
 /// The agent composer's text view (`ComposerTextView`), which also answers
 /// ⌘↩ when it's asked to: the iPad's column composer sends with it (ov-348
@@ -42,6 +43,48 @@ final class ComposerField: UITextView {
             shouldTakeFocus = nil
             if ask() { becomeFirstResponder() }
         }
+    }
+
+    /// Told when a paste is images, with each one's bytes (ov-404): the
+    /// conversation composer takes them as chips. Nil leaves a paste to the
+    /// text view, which is the agent composer's.
+    var onPasteImages: (([Data]) -> Void)?
+
+    /// The bytes of the images on `pasteboard`, or none when it holds words
+    /// to paste instead: any text but a lone web address, which a browser's
+    /// Copy Image may put beside the image it copied (as the Mac does).
+    static func images(on pasteboard: UIPasteboard) -> [Data] {
+        if pasteboard.hasStrings {
+            let words = pasteboard.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let lone = !words.contains(where: \.isWhitespace) && ["http", "https"].contains(URL(string: words)?.scheme ?? "")
+            if !(lone && pasteboard.hasImages) { return [] }
+        }
+        guard pasteboard.hasImages else { return [] }
+        // The bytes as they were copied: a screenshot's PNG, a photo's JPEG
+        // or HEIC, rather than a UIImage encoded again.
+        let types: [UTType] = [.png, .jpeg, .heic, .gif, .webP, .tiff]
+        var found: [Data] = []
+        for item in pasteboard.items {
+            if let data = types.lazy.compactMap({ item[$0.identifier] as? Data }).first { found.append(data) }
+        }
+        if found.isEmpty, let data = pasteboard.image?.pngData() { found = [data] }
+        return found
+    }
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(paste(_:)), onPasteImages != nil, !Self.images(on: .general).isEmpty { return true }
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    override func paste(_ sender: Any?) {
+        if let onPasteImages {
+            let images = Self.images(on: .general)
+            if !images.isEmpty {
+                onPasteImages(images)
+                return
+            }
+        }
+        super.paste(sender)
     }
 
     override var keyCommands: [UIKeyCommand]? {

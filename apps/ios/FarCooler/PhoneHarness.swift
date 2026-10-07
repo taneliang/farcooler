@@ -275,10 +275,15 @@ enum HarnessTaps {
     static let padCompact = Notification.Name("com.farcooler.harness.pad-compact")
     /// A photo picked into the composer (`ComposerPhotoHarness`).
     static let composerPhoto = Notification.Name("com.farcooler.harness.composer-photo")
+    /// A small photo, a 10 MB one, and an image pasted, into the conversation
+    /// composer (`NativeAgentHarness`, ov-404).
+    static let nativePhoto = Notification.Name("com.farcooler.harness.native-photo")
+    static let nativeBigPhoto = Notification.Name("com.farcooler.harness.native-big-photo")
+    static let nativePaste = Notification.Name("com.farcooler.harness.native-paste")
 
     /// Listen, once per process.
     static let listening: Void = {
-        for name in [agent, decision, planNews, taskNews, pagesNews, padCompact, composerPhoto] {
+        for name in [agent, decision, planNews, taskNews, pagesNews, padCompact, composerPhoto, nativePhoto, nativeBigPhoto, nativePaste] {
             CFNotificationCenterAddObserver(
                 CFNotificationCenterGetDarwinNotifyCenter(), nil,
                 { _, _, name, _, _ in

@@ -17,6 +17,16 @@ import UIKit
 ///   turn; `-native-busy` answers that claude's queue took it,
 ///   `-native-dialog` refuses it for a dialog, `-native-draft` for a draft in
 ///   the terminal's box.
+/// - The runner has `compose` and `terminal_interrupt` unless
+///   `-native-no-compose` (one line, no photos) or `-native-no-interrupt`
+///   (no Stop, no Send Now). The reply's turn is `Busy`, so Stop shows, unless
+///   `-native-waiting` (a dialog is up: `Waiting`, and Stop is hidden).
+///   `terminal.interrupt` and `terminal.send_now` are recorded, and refused
+///   as `settling` under `-native-settling`.
+/// - Photos: `native-photo`, `native-big-photo` (a real 10 MB JPEG of noise)
+///   and `native-paste` (an image on the pasteboard, pasted into the box)
+///   are what a UI test posts for the system's picker and paste menu, which
+///   it can't drive. Each goes through the composer's own path.
 /// - `-native-flag-off`: a runner whose projector is off, so no `agent_rows`.
 /// - `-native-reconnect`: once the box holds a draft, the link comes up
 ///   again, so the build is unread for two seconds.
@@ -28,7 +38,8 @@ import UIKit
 ///   with `agent_rows`) the first time something is typed in the terminal,
 ///   so the conversation covers a terminal that holds the keyboard.
 /// - Compose's text picks a failure: "time out", "garble" (an unreadable
-///   answer) and "read only" (a grant that may not type).
+///   answer), "read only" (a grant that may not type), "image too large" and
+///   "backslash" (the runner's `image_too_large` and `backslash`).
 /// - `-native-terminal`: the pane last switched to its terminal (R-27).
 /// - `-native-held-ask question|plan|permission` (ov-370): the page ends on
 ///   that ask, held by the runner's hook; `terminal.agent_answer` takes the
@@ -74,6 +85,7 @@ struct NativeAgentHarness: View {
 
         init() {
             _ = NativeAgentHarness.preparedOnce
+            _ = HarnessTaps.listening
             connection = Connection()
             fleetStore = FleetStore.standIn(on: connection, host: NativeAgentHarness.harnessRunner)
         }
@@ -86,6 +98,7 @@ struct NativeAgentHarness: View {
             // In a view of its own, so a follow's report redraws one probe
             // and not the whole shell.
             .overlay(alignment: .topLeading) { NativeHarnessProbe(runner: runner) }
+            .modifier(NativePhotoHarness(pane: Self.pane))
 
             .task { await stand() }
     }
@@ -115,7 +128,10 @@ struct NativeAgentHarness: View {
         DaemonBuild(
             version: "harness", matches: true, platform: "harness",
             capabilities: Set(
-                ["workspaces", "terminals", "agent", "projector_setting"] + (rows ? ["agent_rows", "agent_compose"] : [])))
+                ["workspaces", "terminals", "agent", "projector_setting"]
+                    + (rows ? ["agent_rows", "agent_compose"] : [])
+                    + (CommandLine.arguments.contains("-native-no-compose") ? [] : ["compose", "compose_upload"])
+                    + (CommandLine.arguments.contains("-native-no-interrupt") ? [] : ["terminal_interrupt"])))
     }
 
     private static var worktree: Worktree {
@@ -130,6 +146,76 @@ struct NativeAgentHarness: View {
                     id: "native-shell", short: "shell", title: "shell", preset: "shell", state: "running", epoch: 1,
                     paneMode: "terminal"),
             ])
+    }
+}
+
+/// A photo into the conversation composer, as the system's picker and paste
+/// menu can't be driven from a test (ov-404). Each takes the path a picked or
+/// pasted photo takes once the system has loaded it: `attach(picked:)`, which
+/// reads and converts it, draws its chip and sends it with the message. The
+/// paste goes through the field's own `paste(_:)`, from the pasteboard.
+private struct NativePhotoHarness: ViewModifier {
+    let pane: String
+
+    private var model: NativePaneModel? { NativePanes.shared.existing(pane) }
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: HarnessTaps.nativePhoto)) { _ in
+                guard let model else { return }
+                Task { await model.attach(picked: [Self.small()]) }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: HarnessTaps.nativeBigPhoto)) { _ in
+                guard let model else { return }
+                Task {
+                    let photo = await Task.detached { Self.tenMegabytePhoto() }.value
+                    await model.attach(picked: [photo])
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: HarnessTaps.nativePaste)) { _ in
+                UIPasteboard.general.setData(Self.small(), forPasteboardType: "public.png")
+                UIApplication.shared.sendAction(#selector(UIResponder.paste(_:)), to: nil, from: nil, for: nil)
+            }
+    }
+
+    /// A small teal PNG.
+    private nonisolated static func small() -> Data {
+        let size = CGSize(width: 64, height: 64)
+        return UIGraphicsImageRenderer(size: size).pngData { context in
+            UIColor.systemTeal.setFill()  // style-exempt: a test photo's pixels, not UI
+            context.fill(CGRect(origin: .zero, size: size))
+        }
+    }
+
+    /// A JPEG of noise past 10 MiB and under the runner's 16 MiB: noise
+    /// doesn't compress, so a camera's photo of a busy scene is its nearest
+    /// stand-in. Made larger until it's the size the card names.
+    private nonisolated static func tenMegabytePhoto() -> Data {
+        var width = 3_500
+        var height = 2_500
+        while true {
+            let photo = noise(width: width, height: height)
+            if photo.count >= 10 * 1024 * 1024 || width > 6_000 { return photo }
+            width += 250
+            height += 180
+        }
+    }
+
+    private nonisolated static func noise(width: Int, height: Int) -> Data {
+        guard
+            let context = CGContext(
+                data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue),
+            let base = context.data
+        else { return Data() }
+        let pixels = base.assumingMemoryBound(to: UInt8.self)
+        var seed: UInt64 = 0x9E37_79B9_7F4A_7C15
+        for i in 0..<(context.bytesPerRow * height) {
+            seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            pixels[i] = UInt8(truncatingIfNeeded: seed >> 33)
+        }
+        guard let image = context.makeImage() else { return Data() }
+        return UIImage(cgImage: image).jpegData(compressionQuality: 0.98) ?? Data()
     }
 }
 
@@ -150,8 +236,10 @@ private struct NativeHarnessProbe: View {
 @MainActor
 final class NativeHarnessRunner: ObservableObject {
     /// What the tests read: `follows=N background=N changed=B linked=N
-    /// sent=a|b answered=<ask> <option> <answers>|…`.
-    @Published private(set) var said = "follows=0 background=0 changed=false linked=0 sent= answered="
+    /// sent=a|b images=mime:bytes,mime:bytes pressed=stop,sendnow
+    /// answered=<ask> <option> <answers>|…`. A line break in a sent message
+    /// reads `⏎`.
+    @Published private(set) var said = "follows=0 background=0 changed=false linked=0 sent= images= pressed= answered="
     /// Each answer the held ask was given (ov-370).
     private var answered: [String] = []
     /// The held ask was answered, and the next follow is to say so.
@@ -162,6 +250,10 @@ final class NativeHarnessRunner: ObservableObject {
     /// Follows asked for while the app wasn't in front.
     private var background = 0
     private var sent: [String] = []
+    /// The images of each message sent, as `mime:bytes`.
+    private var images: [String] = []
+    /// The keys pressed, in order: `stop`, `sendnow`.
+    private var pressed: [String] = []
     /// Messages sent and not yet shown by a follow.
     private var unshown: [String] = []
     private var rev: UInt64 = 10
@@ -187,7 +279,15 @@ final class NativeHarnessRunner: ObservableObject {
             return try await follow()
         case "terminal.compose":
             let text = args["text"] as? String ?? ""
-            return try await MainActor.run { try compose(text) }
+            // What reached the runner: each image's type and its decoded size,
+            // as the core would stage it.
+            let images = (args["images"] as? [[String: Any]] ?? []).map { image in
+                "\(image["mime"] as? String ?? "?"):\(Data(base64Encoded: image["base64"] as? String ?? "")?.count ?? -1)"
+            }
+            return try await MainActor.run { try compose(text, images: images) }
+        case "terminal.interrupt", "terminal.send_now":
+            let key = method == "terminal.interrupt" ? "stop" : "sendnow"
+            return try await MainActor.run { try press(key) }
         case "terminal.agent_answer":
             let ask = args["requestId"] as? String ?? ""
             let option = args["optionId"] as? String ?? ""
@@ -209,8 +309,10 @@ final class NativeHarnessRunner: ObservableObject {
     }
 
     private func report() {
-        said = "follows=\(follows) background=\(background) changed=\(updated) linked=\(linked) sent=\(sent.joined(separator: "|"))"
-            + " answered=\(answered.joined(separator: "|"))"
+        said = "follows=\(follows) background=\(background) changed=\(updated) linked=\(linked) "
+            + "sent=\(sent.joined(separator: "|").replacingOccurrences(of: "\n", with: "⏎")) "
+            + "images=\(images.joined(separator: ",")) pressed=\(pressed.joined(separator: ",")) "
+            + "answered=\(answered.joined(separator: "|"))"
     }
 
     /// The held ask under `-native-held-ask`, or nil.
@@ -302,12 +404,25 @@ final class NativeHarnessRunner: ObservableObject {
         }
     }
 
-    private func compose(_ text: String) throws -> Data {
+    private func press(_ key: String) throws -> Data {
+        if CommandLine.arguments.contains("-native-settling") {
+            throw ClientCore.CoreError.rejected("Claude is starting a step.", word: "resource-conflict", what: "settling")
+        }
+        pressed.append(key)
+        report()
+        return try json([:])
+    }
+
+    private func compose(_ text: String, images sentImages: [String] = []) throws -> Data {
         let args = CommandLine.arguments
         switch text {
         case "time out": throw ClientCore.CoreError.timedOut("No answer in time.")
         case "garble": throw ClientCore.CoreError.malformed
         case "read only": throw ClientCore.CoreError.rejected("Not with this grant.", word: "scope-denied")
+        case "image too large":
+            throw ClientCore.CoreError.rejected("The image is over 16 MB.", word: "resource-conflict", what: "image_too_large")
+        case "backslash":
+            throw ClientCore.CoreError.rejected("A backslash ends it.", word: "resource-conflict", what: "backslash")
         case "change the reply":
             due = true
             return try json(["queued": false])
@@ -320,6 +435,7 @@ final class NativeHarnessRunner: ObservableObject {
             throw ClientCore.CoreError.rejected("The box holds a draft.", word: "resource-conflict", what: "draft")
         }
         sent.append(text)
+        images.append(contentsOf: sentImages)
         report()
         let busy = args.contains("-native-busy")
         if !busy { unshown.append(text) }
@@ -399,7 +515,7 @@ final class NativeHarnessRunner: ObservableObject {
         var turn: [String: Any] = ["prompt": prompt, "origin": origin, "background_running": 0]
         if open {
             // No start time: see the thinking row.
-            turn["activity"] = "Busy"
+            turn["activity"] = CommandLine.arguments.contains("-native-waiting") ? "Waiting" : "Busy"
         } else {
             turn["started_ms"] = now - 50000
             turn["ended_ms"] = now - 8000

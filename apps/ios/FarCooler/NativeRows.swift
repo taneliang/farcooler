@@ -13,6 +13,8 @@ struct NativeRowView: View {
     let showTerminal: () -> Void
     /// A held ask's buttons (ov-370), where the runner takes answers.
     var answer: NativeAskAnswer?
+    /// A waiting Queued row's Send Now (ov-368), where it's offered.
+    var sendNow: (() -> Void)?
 
     var body: some View {
         let row = box.row
@@ -24,7 +26,7 @@ struct NativeRowView: View {
             case .tool(let tool): NativeToolRow(tool: tool)
             case .subagent(let subagent): SubagentRow(subagent: subagent)
             case .ask(let ask): NativeAskRow(ask: ask, answer: answer, showTerminal: showTerminal)
-            case .queued(let queued): QueuedLine(text: queued.text, state: queued.state)
+            case .queued(let queued): QueuedLine(text: queued.text, state: queued.state, sendNow: sendNow)
             case .notice(let notice): NoticeLine(text: notice.text)
             case .handoff(let handoff): HandoffRow(reason: handoff.reason, showTerminal: showTerminal)
             case .gap(let gap): NoticeLine(text: AgentConversation.gap(gap))
@@ -244,6 +246,9 @@ private struct SubagentRow: View {
 struct QueuedLine: View {
     let text: String
     var state: String = "Waiting"
+    /// Send Now (ov-368): claude takes every waiting message now, rather than
+    /// when its turn ends. Offered on a waiting message only.
+    var sendNow: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .trailing, spacing: Spacing.tight) {
@@ -251,13 +256,24 @@ struct QueuedLine: View {
                 .padding(.horizontal, Spacing.inset)
                 .padding(.vertical, Spacing.group)
                 .surface(.inset, in: .card)
-            Text(AgentConversation.queuedLabel(state))
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
+            HStack(spacing: Spacing.group) {
+                Text(AgentConversation.queuedLabel(state))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                if state == "Waiting", let sendNow {
+                    Button("Send Now", action: sendNow)
+                        .font(.caption.weight(.semibold))
+                        // A 44 pt band around a caption's button: the
+                        // guideline's floor, with no visible chrome.
+                        .frame(minHeight: 44)
+                        .accessibilityIdentifier("native-send-now")
+                }
+            }
         }
         .padding(.leading, 48)
         .frame(maxWidth: .infinity, alignment: .trailing)
-        .accessibilityElement(children: .combine)
+        // Contained, not combined: Send Now is a button of its own.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("native-queued")
     }
 }

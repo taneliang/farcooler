@@ -1,20 +1,30 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 /// Where the conversation view's message goes (ov-373): `terminal.compose`,
-/// which types it into claude's box on one line and presses Enter past the
-/// same gate as `terminal tell`, or refuses with a word and types nothing.
-/// True when claude was working and its own queue took it (R-29).
+/// which types it into claude's box and presses Enter past the same gate as
+/// `terminal tell`, or refuses with a word and types nothing. With the
+/// runner's `compose` (ov-367), its line breaks, images and slash command
+/// too; the client core uploads the images first where the runner takes that
+/// (ov-393). True when claude was working and its own queue took it (R-29).
 protocol ConversationSink: Sendable {
-    func compose(terminal: String, text: String) async throws -> Bool
+    func compose(terminal: String, text: String, images: [OutgoingImage]) async throws -> Bool
 }
 
 /// The runner's `terminal.compose`, over this phone's client core.
 struct CoreComposeSink: ConversationSink {
     let core: ClientCore
 
-    func compose(terminal: String, text: String) async throws -> Bool {
-        let data = try await core.call("terminal.compose", ["terminal": terminal, "text": text])
+    func compose(terminal: String, text: String, images: [OutgoingImage]) async throws -> Bool {
+        var args: [String: Any] = ["terminal": terminal, "text": text]
+        // The core stages each image on a runner that takes uploads
+        // (`compose_upload`), in chunks, and carries a small one inside the
+        // compose on one that doesn't; either way it's handed the bytes here.
+        if !images.isEmpty {
+            args["images"] = images.map { ["mime": $0.mime, "base64": $0.data.base64EncodedString()] }
+        }
+        let data = try await core.call("terminal.compose", args)
         let object = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
         return object["queued"] as? Bool ?? false
     }
@@ -29,6 +39,28 @@ struct CoreAnswerSink: AgentAnswerSink {
         var args: [String: Any] = ["terminal": terminal, "requestId": ask, "optionId": option]
         if !answers.isEmpty { args["answers"] = answers }
         _ = try await core.call("terminal.agent_answer", args)
+    }
+}
+
+/// Stop and Send Now (ov-368): the runner presses one Esc, or claude's ctrl+x
+/// ctrl+s, in the pane's TUI, past the same gate as a send, and answers once
+/// claude took it; or it refuses with a word and presses nothing.
+protocol InterruptSink: Sendable {
+    func interrupt(terminal: String) async throws
+    func sendNow(terminal: String) async throws
+}
+
+/// The runner's `terminal.interrupt` and `terminal.send_now`, over this
+/// phone's client core.
+struct CoreInterruptSink: InterruptSink {
+    let core: ClientCore
+
+    func interrupt(terminal: String) async throws {
+        _ = try await core.call("terminal.interrupt", ["terminal": terminal])
+    }
+
+    func sendNow(terminal: String) async throws {
+        _ = try await core.call("terminal.send_now", ["terminal": terminal])
     }
 }
 
@@ -94,6 +126,7 @@ final class NativePanes: ObservableObject {
             source: CoreRowSource(core: core, terminal: terminal), sink: CoreComposeSink(core: core),
             answers: CoreAnswerSink(core: core))
         model.core = core
+        model.interruptSink = CoreInterruptSink(core: core)
         panes[terminal] = model
         return model
     }
@@ -130,11 +163,13 @@ final class NativePaneModel: ObservableObject {
     /// on another connection gets a model of its own.
     weak var core: ClientCore?
 
-    /// The composer's text, one line: line breaks become spaces as they
-    /// arrive, so what you see is what's sent. Return typed at the end sends,
-    /// as the keyboard's Send key says.
+    /// The composer's text. Against a runner without `compose`, one line:
+    /// line breaks become spaces as they arrive, so what you see is what's
+    /// sent, and Return typed at the end sends, as the keyboard's Send key
+    /// says. With it, as typed: Return is a new line, and Send sends.
     @Published var draft = "" {
         didSet {
+            guard !rich else { return }
             if draft.hasSuffix("\n"), draft.dropLast() == oldValue {
                 draft = oldValue
                 Task { await send() }
@@ -144,6 +179,20 @@ final class NativePaneModel: ObservableObject {
             if flat != draft { draft = flat }
         }
     }
+    /// Whether the runner takes line breaks, images and slash commands
+    /// (`compose`, ov-367), as its hello said. Without it, one line.
+    @Published private(set) var rich = false
+    /// Images to send with the text, in order (ov-404). Only with `rich`.
+    @Published var images: [OutgoingImage] = []
+    /// Each image's chip picture, made once as it's added.
+    var thumbnails: [UUID: UIImage] = [:]
+    /// Where Stop and Send Now go (ov-368): the runner's connection, where
+    /// it serves `terminal_interrupt`; nil, and neither is offered, where not.
+    @Published private(set) var keys: (any InterruptSink)?
+    /// A Stop or a Send Now on its way, until the runner answers.
+    @Published var pressing: AgentConversation.PaneKey?
+    /// The connection's interrupt sink, handed to `keys` where it's offered.
+    var interruptSink: (any InterruptSink)?
     @Published private(set) var sending = false
     /// What stopped the last send, until the next one or a dismissal.
     @Published var issue: AgentConversation.SendIssue?
@@ -245,19 +294,52 @@ final class NativePaneModel: ObservableObject {
         }
     }
 
-    var canSend: Bool {
-        let text = draft.trimmingCharacters(in: .whitespaces)
-        return !sending && !text.isEmpty && text.count <= AgentConversation.longest && !store.isStale
+    /// What the runner offers this pane, from its hello's capabilities: line
+    /// breaks, images and commands with `compose` (ov-367), Stop and Send Now
+    /// with `terminal_interrupt` (ov-368).
+    func offer(rich: Bool, interrupts: Bool) {
+        if self.rich != rich {
+            self.rich = rich
+            if !rich { images = []; thumbnails = [:] }
+            // The draft was kept as typed, or flattened as it came in.
+            let held = draft
+            draft = held
+        }
+        let sink: (any InterruptSink)? = interrupts ? interruptSink : nil
+        if (keys == nil) != (sink == nil) { keys = sink }
     }
 
-    /// Send the draft.
+    /// The longest message the box takes now.
+    var longestNow: Int { AgentConversation.longest(rich: rich) }
+
+    /// The draft as it's sent: trimmed of spaces at the ends on one line;
+    /// with `compose`, as typed, the runner trimming the ends but keeping an
+    /// indent.
+    private var outgoing: String {
+        rich ? draft : draft.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Whether the draft has anything but white space in it.
+    private var hasText: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var canSend: Bool {
+        !sending && (hasText || !images.isEmpty) && outgoing.count <= longestNow && !store.isStale
+    }
+
+    /// Send the draft and its images.
     func send() async {
-        let text = draft.trimmingCharacters(in: .whitespaces)
+        let text = outgoing
+        let images = self.images
         guard canSend else {
-            if text.count > AgentConversation.longest { issue = .said(AgentConversation.tooLong) }
+            if outgoing.count > longestNow { issue = .said(AgentConversation.tooLong(rich: rich)) }
             return
         }
-        if AgentConversation.isCommand(text) {
+        // Without `compose`, a slash or a bang would open claude's command
+        // picker or its shell, which Enter would then run. With it, the
+        // runner drives the picker, and refuses what it can't.
+        if !rich, AgentConversation.isCommand(text) {
             issue = .said(AgentConversation.command)
             return
         }
@@ -265,12 +347,14 @@ final class NativePaneModel: ObservableObject {
         issue = nil
         defer { sending = false }
         do {
-            let wasQueued = try await sink.compose(terminal: terminal, text: text)
-            if draft.trimmingCharacters(in: .whitespaces) == text { draft = "" }
-            if wasQueued { queued.append(text) }
+            let wasQueued = try await sink.compose(terminal: terminal, text: text, images: images)
+            if outgoing == text { draft = "" }
+            for image in images { detach(image.id) }
+            if wasQueued { queued.append(AgentConversation.echo(text, images: images.count)) }
             sent += 1
         } catch {
-            issue = AgentConversation.issue(for: Self.failure(error))
+            issue = AgentConversation.issue(
+                for: Self.failure(error), command: text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/"))
         }
     }
 

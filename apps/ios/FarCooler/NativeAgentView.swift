@@ -30,18 +30,34 @@ struct NativeSwitch<Content: View>: View {
     /// trip, showed the terminal and raised its keyboard, then came back
     /// (ov-373 review 1). Sends still go through the runner's own gate.
     private var model: NativePaneModel? {
-        guard AgentConversation.served(by: connection.daemon ?? connection.lastDaemon ?? connection.knownBuild),
+        guard AgentConversation.served(by: build),
             AgentConversation.isClaudeInATerminal(paneMode: terminal.paneMode, preset: terminal.preset),
             AgentConversation.isRunning(state: terminal.state)
         else { return nil }
         return NativePanes.shared.model(for: terminal.id, core: connection.core)
     }
 
+    /// The build the layout reads: see `model`.
+    private var build: DaemonBuild? { connection.daemon ?? connection.lastDaemon ?? connection.knownBuild }
+
     var body: some View {
         let model = model
         NativeSwitchBody(
-            terminal: terminal.id, model: model, isOnScreen: isVisible && scenePhase == .active, isVisible: isVisible,
-            toConversation: toConversation, content: content)
+            terminal: terminal.id, model: model, offer: NativeOffer(build), isOnScreen: isVisible && scenePhase == .active,
+            isVisible: isVisible, toConversation: toConversation, content: content)
+    }
+}
+
+/// What the runner's hello offers the composer beyond rows and a way to send
+/// (ov-404): line breaks, photos and commands with `compose`; Stop and Send
+/// Now with `terminal_interrupt`.
+struct NativeOffer: Equatable {
+    var rich = false
+    var interrupts = false
+
+    init(_ build: DaemonBuild?) {
+        rich = build?.can(.compose) == true
+        interrupts = build?.can(.terminalInterrupt) == true
     }
 }
 
@@ -49,6 +65,7 @@ struct NativeSwitch<Content: View>: View {
 private struct NativeSwitchBody<Content: View>: View {
     let terminal: String
     let model: NativePaneModel?
+    let offer: NativeOffer
     let isOnScreen: Bool
     let isVisible: Bool
     let toConversation: () -> Void
@@ -64,11 +81,12 @@ private struct NativeSwitchBody<Content: View>: View {
     @State private var held: NativePaneModel?
 
     init(
-        terminal: String, model: NativePaneModel?, isOnScreen: Bool, isVisible: Bool,
+        terminal: String, model: NativePaneModel?, offer: NativeOffer, isOnScreen: Bool, isVisible: Bool,
         toConversation: @escaping () -> Void, content: @escaping () -> Content
     ) {
         self.terminal = terminal
         self.model = model
+        self.offer = offer
         self.isOnScreen = isOnScreen
         self.isVisible = isVisible
         self.toConversation = toConversation
@@ -142,12 +160,14 @@ private struct NativeSwitchBody<Content: View>: View {
             #endif
         }
         .onChange(of: isOnScreen, initial: true) { _, now in model?.setOnScreen(now) }
+        .onChange(of: offer, initial: true) { _, now in model?.offer(rich: now.rich, interrupts: now.interrupts) }
         .onChange(of: model.map(ObjectIdentifier.init)) { _, _ in
             #if DEBUG
             if held != nil, model == nil { NativeProbe.dropped[terminal, default: 0] += 1 }
             #endif
             if let held, held !== model { held.release() }
             held = model
+            model?.offer(rich: offer.rich, interrupts: offer.interrupts)
             model?.setOnScreen(isOnScreen)
         }
         .onAppear {
@@ -268,16 +288,20 @@ struct NativeAgentView: View {
                 }
                 let last = store.ids.last
                 let answer = model.nativeAskAnswer
+                let sendNow: (() -> Void)? = model.offersSendNow ? { Task { await model.sendNow() } } : nil
                 ForEach(store.ids, id: \.self) { id in
                     if let box = store.box(id) {
-                        NativeRowView(box: box, isLast: id == last, showTerminal: showTerminal, answer: answer)
+                        NativeRowView(
+                            box: box, isLast: id == last, showTerminal: showTerminal, answer: answer, sendNow: sendNow)
                     }
                 }
                 ForEach(model.queued.indices, id: \.self) { i in
-                    QueuedLine(text: model.queued[i])
+                    QueuedLine(text: model.queued[i], sendNow: sendNow)
                 }
                 if model.issue == .handoff {
                     HandoffRow(reason: AgentConversation.handoff, showTerminal: showTerminal)
+                } else if model.issue == .panel {
+                    HandoffRow(reason: AgentConversation.panel, showTerminal: showTerminal)
                 }
                 // An anchor rather than the last row's id: the last row
                 // changes in place while it streams.
@@ -409,81 +433,5 @@ struct NativeAgentView: View {
         case .unavailable: Text("This pane’s session can’t be shown here. Use the terminal.").foregroundStyle(.secondary)
         case .trouble: Text("Can’t reach the runner. Trying again…").foregroundStyle(.secondary)
         }
-    }
-}
-
-/// The conversation's box (ov-373). Send goes through `terminal.compose`:
-/// typed into claude's own box and submitted, or taken by claude's queue
-/// while it works (R-29).
-///
-/// Seams for what comes later, as on the Mac: attachments and slash commands
-/// (ov-367), interrupt and Send Now (ov-368).
-struct NativeComposer: View {
-    @ObservedObject var model: NativePaneModel
-    let showTerminal: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.group) {
-            if let issue = model.issue, issue != .handoff {
-                issueLine(issue)
-            }
-            HStack(alignment: .bottom, spacing: Spacing.group) {
-                TextField("Message Claude", text: $model.draft, axis: .vertical)
-                    .lineLimit(1...6)
-                    .submitLabel(.send)
-                    .accessibilityIdentifier("native-composer")
-                Button {
-                    Task { await model.send() }
-                } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.title)
-                        .foregroundStyle(model.canSend ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
-                        // An edge while it can't send, so it still reads on
-                        // light paper.
-                        .overlay {
-                            if !model.canSend { Circle().strokeBorder(.secondary, lineWidth: 1) }  // style-exempt: the disabled Send's edge on light paper
-                        }
-                }
-                .buttonStyle(.plain)
-                .disabled(!model.canSend)
-                .accessibilityLabel("Send")
-                .accessibilityIdentifier("native-send")
-            }
-            .padding(.leading, Spacing.section)
-            .padding(.trailing, Spacing.tight)
-            .padding(.vertical, Spacing.tight)
-            .frame(minHeight: 44)
-            .surface(.floating, in: .capsule)
-        }
-        .padding(.horizontal, Spacing.inset)
-        .padding(.vertical, Spacing.group)
-        // Its top edge, for `NativeAgentViewTests`: the line the last row
-        // has to clear (ov-383's composer report).
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("native-composer-stack")
-    }
-
-    @ViewBuilder
-    private func issueLine(_ issue: AgentConversation.SendIssue) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
-            switch issue {
-            case .draftInTerminal:
-                Text(AgentConversation.draftInTerminal)
-                Spacer(minLength: Spacing.group)
-                Button("Show Terminal", action: showTerminal)
-            case .said(let words):
-                Text(words)
-                Spacer(minLength: Spacing.group)
-            case .handoff:
-                EmptyView()
-            }
-            Button("Dismiss") { model.issue = nil }
-        }
-        .font(.callout)
-        .padding(.horizontal, Spacing.inset)
-        .padding(.vertical, Spacing.group)
-        .surface(.floating, in: .card)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("native-send-issue")
     }
 }

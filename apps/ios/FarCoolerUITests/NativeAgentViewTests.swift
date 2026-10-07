@@ -170,8 +170,8 @@ final class NativeAgentViewTests: XCTestCase {
         send(app, "After this, the tests")
         let queued = element(app, "native-queued")
         XCTAssertTrue(queued.waitForExistence(timeout: 30), "no Queued row")
-        XCTAssertTrue(queued.label.contains("Queued"), queued.label)
-        XCTAssertTrue(queued.label.contains("After this, the tests"), queued.label)
+        XCTAssertTrue(queued.staticTexts["Queued"].exists, "\(queued.debugDescription)")
+        XCTAssertTrue(queued.staticTexts["After this, the tests"].exists, "\(queued.debugDescription)")
         capture("queued")
     }
 

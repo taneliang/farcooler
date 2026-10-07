@@ -198,6 +198,10 @@ SOURCES = [
     # A held ask answered from its row (ov-370).
     "NativeAskRow.swift",
     "NativeAgentHarness.swift",
+    # The composer's box and what it sends and presses (ov-404): photos,
+    # lines, Stop and Send Now.
+    "NativeComposer.swift",
+    "NativeComposeModel.swift",
 ]
 
 # The enrollment ceremony, in `Far Cooler/Ceremony/`.
@@ -994,6 +998,7 @@ UI_TEST_SOURCES = [
     # `-native-agent-harness`: no runner.
     "NativeAgentViewTests.swift",
     "NativeAnswersUITests.swift",
+    "NativeComposerTests.swift",
 ]
 
 FRAMEWORKS = ["farcooler_vt.xcframework", "farcooler_client.xcframework"]
