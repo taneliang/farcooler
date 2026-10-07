@@ -31,6 +31,8 @@
 //! The plain-text captures here are read that way: codex's `› Explain this
 //! codebase` and claude's suggested prompt both read as `Holds`.
 
+pub mod drawn;
+
 /// What an input box holds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Composer {
