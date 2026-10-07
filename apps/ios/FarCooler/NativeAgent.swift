@@ -85,6 +85,11 @@ final class NativePanes: ObservableObject {
         return model
     }
 
+    #if DEBUG
+    /// The pane's model if this launch made one. `NativeAgentHarness` only.
+    func existing(_ terminal: String) -> NativePaneModel? { panes[terminal] }
+    #endif
+
     /// A model a harness made, under the same rules.
     func adopt(_ model: NativePaneModel) {
         panes[model.terminal] = model

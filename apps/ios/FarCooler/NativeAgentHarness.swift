@@ -11,18 +11,18 @@ import UIKit
 /// What the canned runner does, and the flags that change it:
 /// - `agent.rows` answers a page of every row kind, in the client core's
 ///   JSON. A follow waits a moment and answers what's new: the reply
-///   (`prose:a1:0`) changed in place on the eighth, and a turn for each
-///   message sent.
+///   (`prose:a1:0`) changed in place once "change the reply" is sent, and a
+///   turn for each other message sent.
 /// - `terminal.compose` takes the message and the next follow shows it as a
 ///   turn; `-native-busy` answers that claude's queue took it,
 ///   `-native-dialog` refuses it for a dialog, `-native-draft` for a draft in
 ///   the terminal's box.
 /// - `-native-flag-off`: a runner whose projector is off, so no `agent_rows`.
-/// - `-native-reconnect`: on the fourth follow, the link comes up again, so
-///   the build is unread for two seconds.
+/// - `-native-reconnect`: once the box holds a draft, the link comes up
+///   again, so the build is unread for two seconds.
 /// - `-native-off-on`: on the fourth follow, the projector is turned off
-///   (rows refused, a hello without `agent_rows`), and back on a few seconds
-///   later.
+///   (rows refused, a hello without `agent_rows`), and back on once the pane
+///   has shown its terminal for it.
 /// - `-native-stale`: from the fourth follow on, every rows call is lost.
 /// - Compose's text picks a failure: "time out", "garble" (an unreadable
 ///   answer) and "read only" (a grant that may not type).
@@ -33,23 +33,42 @@ import UIKit
 struct NativeAgentHarness: View {
     static var isRequested: Bool { CommandLine.arguments.contains("-native-agent-harness") }
 
-    @StateObject private var connection: Connection
+    @StateObject private var world = NativeHarnessWorld()
     @StateObject private var hosts = RunnerStore()
-    @StateObject private var fleetStore: FleetStore
-    @StateObject private var runner = NativeHarnessRunner()
     private static let harnessRunner = Runner(label: "Conversation harness", address: "harness.invalid", user: "harness")
     static let pane = "11111111-2222-4333-8444-555555555555"
 
-    init() {
-        let connection = Connection()
-        _connection = StateObject(wrappedValue: connection)
-        _fleetStore = StateObject(wrappedValue: FleetStore.standIn(on: connection, host: Self.harnessRunner))
-        // Each launch starts on the pane's default view unless a flag says
-        // otherwise, and with no draft or cached rows from the last.
+    private var connection: Connection { world.connection }
+    private var fleetStore: FleetStore { world.fleetStore }
+    private var runner: NativeHarnessRunner { world.runner }
+
+    /// Each launch starts on the pane's default view unless a flag says
+    /// otherwise, and with no cached rows from the last. Once per launch,
+    /// never in `init`: this view is built again whenever the app's body is,
+    /// and a defaults write there changes every `@AppStorage` reader, which
+    /// rebuilds the app's body, which builds this again: a loop that held the
+    /// main thread at about 70% and timed out UI queries on CI.
+    private static let preparedOnce: Void = {
         AgentConversation.remember(
-            conversation: !CommandLine.arguments.contains("-native-terminal"), for: Self.pane)
+            conversation: !CommandLine.arguments.contains("-native-terminal"), for: pane)
         if let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
-            try? FileManager.default.removeItem(at: caches.appendingPathComponent("agent-rows/phone-\(Self.pane).json"))
+            try? FileManager.default.removeItem(at: caches.appendingPathComponent("agent-rows/phone-\(pane).json"))
+        }
+    }()
+
+    /// What the harness stands on, made once for the view's life. A
+    /// `Connection` built in `init` started a client core, a whole runtime,
+    /// every time the app's body ran.
+    @MainActor
+    final class NativeHarnessWorld: ObservableObject {
+        let connection: Connection
+        let fleetStore: FleetStore
+        let runner = NativeHarnessRunner()
+
+        init() {
+            _ = NativeAgentHarness.preparedOnce
+            connection = Connection()
+            fleetStore = FleetStore.standIn(on: connection, host: NativeAgentHarness.harnessRunner)
         }
     }
 
@@ -57,15 +76,9 @@ struct NativeAgentHarness: View {
         ShellScreen(
             fleet: fleetStore, hosts: hosts, pendingTerminal: .constant(nil),
             scope: ShellScope(runner: Self.harnessRunner.id, worktree: Self.worktree.id, landing: .terminal(Self.pane)))
-            .overlay(alignment: .topLeading) {
-                VStack(spacing: 0) {
-                    Color.clear
-                        .frame(width: 1, height: 1)  // style-exempt: DEBUG probe: a 1 pt element the UI tests read, nothing drawn
-                        .accessibilityElement()
-                        .accessibilityIdentifier("native-harness")
-                        .accessibilityValue(runner.said)
-                }
-            }
+            // In a view of its own, so a follow's report redraws one probe
+            // and not the whole shell.
+            .overlay(alignment: .topLeading) { NativeHarnessProbe(runner: runner) }
 
             .task { await stand() }
     }
@@ -111,11 +124,26 @@ struct NativeAgentHarness: View {
     }
 }
 
+/// What the canned runner has been asked, for the tests.
+private struct NativeHarnessProbe: View {
+    @ObservedObject var runner: NativeHarnessRunner
+
+    var body: some View {
+        Color.clear
+            .frame(width: 1, height: 1)  // style-exempt: DEBUG probe: a 1 pt element the UI tests read, nothing drawn
+            .accessibilityElement()
+            .accessibilityIdentifier("native-harness")
+            .accessibilityValue(runner.said)
+    }
+}
+
 /// The canned runner behind `NativeAgentHarness`.
 @MainActor
 final class NativeHarnessRunner: ObservableObject {
-    /// What the tests read: `follows=N background=N sent=a|b`.
-    @Published private(set) var said = "follows=0 background=0 sent="
+    /// What the tests read: `follows=N background=N changed=B linked=N sent=a|b`.
+    @Published private(set) var said = "follows=0 background=0 changed=false linked=0 sent="
+    /// Links that came up again and whose build has landed.
+    private var linked = 0
     private var follows = 0
     /// Follows asked for while the app wasn't in front.
     private var background = 0
@@ -129,12 +157,10 @@ final class NativeHarnessRunner: ObservableObject {
     private var off = false
     /// The link is down for rows.
     private var lost = false
-    /// Whether the reply's change has been sent.
+    /// Whether the reply's change is due (a test sent "change the reply",
+    /// once it had seen the reply as it was), and whether it's been sent.
+    private var due = false
     private var updated = false
-    /// The follow that changes it: about five seconds after the pane first
-    /// showed, since a pane follows only while its conversation shows, so
-    /// a test has seen the reply as it was.
-    private static let changingFollow = 8
 
     private static let epoch: UInt64 = 7
 
@@ -160,7 +186,7 @@ final class NativeHarnessRunner: ObservableObject {
     }
 
     private func report() {
-        said = "follows=\(follows) background=\(background) changed=\(updated) sent=\(sent.joined(separator: "|"))"
+        said = "follows=\(follows) background=\(background) changed=\(updated) linked=\(linked) sent=\(sent.joined(separator: "|"))"
     }
 
     private func refuseIfOff() throws {
@@ -168,18 +194,40 @@ final class NativeHarnessRunner: ObservableObject {
         if lost { throw ClientCore.CoreError.disconnected("The link dropped.") }
     }
 
+    /// A link coming up again, counted once its build lands.
+    private func link(rows: Bool) async {
+        await links?(rows)
+        linked += 1
+        report()
+    }
+
+    /// Wait for the app to reach `state`, polling, for up to a minute: a
+    /// barrier, so nothing here races the view it's testing.
+    private func until(_ state: @MainActor () -> Bool) async {
+        for _ in 0..<600 where !state() {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
     /// What the fourth follow sets off, under its flag.
     private func onFourth() {
         let args = CommandLine.arguments
+        let pane = NativeAgentHarness.pane
         if args.contains("-native-reconnect") {
-            Task { await links?(true) }
+            // Once the person is mid-sentence in the box.
+            Task {
+                await until { !(NativePanes.shared.existing(pane)?.draft.isEmpty ?? true) }
+                await link(rows: true)
+            }
         } else if args.contains("-native-off-on") {
             off = true
             Task {
-                await links?(false)
-                try? await Task.sleep(for: .seconds(3))
+                await link(rows: false)
+                // On again only once the pane has shown its terminal for
+                // being off.
+                await until { (NativeProbe.dropped[pane] ?? 0) >= 1 }
                 off = false
-                await links?(true)
+                await link(rows: true)
             }
         } else if args.contains("-native-stale") {
             lost = true
@@ -192,6 +240,9 @@ final class NativeHarnessRunner: ObservableObject {
         case "time out": throw ClientCore.CoreError.timedOut("No answer in time.")
         case "garble": throw ClientCore.CoreError.malformed
         case "read only": throw ClientCore.CoreError.rejected("Not with this grant.", word: "scope-denied")
+        case "change the reply":
+            due = true
+            return try json(["queued": false])
         default: break
         }
         if args.contains("-native-dialog") {
@@ -218,7 +269,7 @@ final class NativeHarnessRunner: ObservableObject {
         try await Task.sleep(for: .milliseconds(700))
         return try await MainActor.run {
             var changes: [[String: Any]] = []
-            if follows >= Self.changingFollow, !updated {
+            if due, !updated {
                 updated = true
                 rev += 1
                 changes.append([
@@ -263,19 +314,21 @@ final class NativeHarnessRunner: ObservableObject {
             Self.row("ask:q1", ord: 7, rev: 7, kind: ["Ask": ["kind": "Question", "text": "Keep the old names?", "answered": true]]),
             Self.row("gap:g1", ord: 8, rev: 8, kind: ["Gap": ["reason": "Unparsed", "count": 2]]),
             Self.row("turn:p2", ord: 9, rev: 9, kind: ["Turn": Self.turn("And the lexer.", origin: "Typed", open: true)]),
-            Self.row("thinking:k1", ord: 10, rev: 10, kind: ["Thinking": ["started_ms": now - 4000]]),
+            // No start time, so no timer ticks: a tree that changes every
+            // second makes every XCUITest query slow on a loaded runner.
+            Self.row("thinking:k1", ord: 10, rev: 10, kind: ["Thinking": [String: Any]()]),
         ]
         return ["epoch": Self.epoch, "rev": rev, "moreBefore": false, "rows": rows]
     }
 
     private static func turn(_ prompt: String, origin: String, open: Bool = false) -> [String: Any] {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
-        var turn: [String: Any] = [
-            "prompt": prompt, "origin": origin, "started_ms": now - 50000, "background_running": 0,
-        ]
+        var turn: [String: Any] = ["prompt": prompt, "origin": origin, "background_running": 0]
         if open {
+            // No start time: see the thinking row.
             turn["activity"] = "Busy"
         } else {
+            turn["started_ms"] = now - 50000
             turn["ended_ms"] = now - 8000
             turn["duration_ms"] = 42000
             turn["outcome"] = "Finished"

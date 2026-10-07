@@ -102,7 +102,8 @@ private struct NativeSwitchBody<Content: View>: View {
         #if DEBUG
         // Which of the two shows, for the UI tests: both stay in the
         // accessibility tree XCUITest reads, so neither's presence says.
-        // `left` counts the times the conversation stopped showing.
+        // `left` counts the times the conversation stopped showing, and
+        // `dropped` the times it stopped being offered.
         .overlay(alignment: .bottomTrailing) {
             Color.clear
                 .frame(width: 1, height: 1)  // style-exempt: DEBUG probe: a 1 pt element the UI tests read, nothing drawn
@@ -110,7 +111,7 @@ private struct NativeSwitchBody<Content: View>: View {
                 .accessibilityIdentifier("native-showing")
                 .accessibilityValue(
                     (model == nil ? "terminal-only" : (showing ? "conversation" : "terminal"))
-                        + " left=\(NativeProbe.left[terminal] ?? 0)")
+                        + " left=\(NativeProbe.left[terminal] ?? 0) dropped=\(NativeProbe.dropped[terminal] ?? 0)")
         }
         #endif
         .toolbar {
@@ -142,6 +143,9 @@ private struct NativeSwitchBody<Content: View>: View {
         }
         .onChange(of: isOnScreen, initial: true) { _, now in model?.setOnScreen(now) }
         .onChange(of: model.map(ObjectIdentifier.init)) { _, _ in
+            #if DEBUG
+            if held != nil, model == nil { NativeProbe.dropped[terminal, default: 0] += 1 }
+            #endif
             if let held, held !== model { held.release() }
             held = model
             model?.setOnScreen(isOnScreen)
@@ -165,6 +169,8 @@ private struct NativeSwitchBody<Content: View>: View {
 @MainActor
 enum NativeProbe {
     static var left: [String: Int] = [:]
+    /// The times the conversation stopped being offered.
+    static var dropped: [String: Int] = [:]
 }
 #endif
 
