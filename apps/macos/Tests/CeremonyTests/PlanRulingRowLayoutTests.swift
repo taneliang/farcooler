@@ -83,4 +83,28 @@ struct PlanRulingRowLayoutTests {
             #expect(decision.maxX <= width, "the decision stays inside the row at \(width)")
         }
     }
+
+    @Test("In a short row the actions sit on their own line under the decision; in a wide one they share its first line")
+    func shortRowsMoveTheActionsDown() async throws {
+        let wide = await Self.frames(width: 1400)
+        let wideDecision = try #require(wide["plan-ruling-R-34-decision"])
+        for id in ["keep", "reverse", "discuss"] {
+            let button = try #require(wide["plan-ruling-R-34-\(id)"])
+            // The same line: the top of a button is within a line of the decision's top.
+            #expect(button.minY < wideDecision.minY + wideDecision.height, "\(id) shares the line at 1400")
+        }
+        for width in [240.0, 300, 360] {
+            let narrow = await Self.frames(width: width)
+            let decision = try #require(narrow["plan-ruling-R-34-decision"])
+            let copy = try #require(narrow["plan-ruling-R-34-copy"])
+            for id in ["keep", "reverse", "discuss"] {
+                let button = try #require(narrow["plan-ruling-R-34-\(id)"])
+                #expect(button.minY >= decision.maxY - 1, "\(id) under the decision at \(width): \(button.minY) vs \(decision.maxY)")
+                #expect(button.maxX <= width, "\(id) inside the row at \(width)")
+            }
+            // With the actions gone from beside it, the decision has the row but the copy icon.
+            #expect(decision.maxX <= copy.minX + 1, "the decision stops before the copy icon at \(width)")
+            #expect(decision.width >= (width - 24) * 0.6, "the decision gets most of the row at \(width): \(decision.width)")
+        }
+    }
 }

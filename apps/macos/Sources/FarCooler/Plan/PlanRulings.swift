@@ -149,6 +149,25 @@ struct PlanRulingRow: View {
     /// Reverse asks first (ruling R-18): it sends the orchestrator off to change
     /// things. Keep and Discuss don't.
     @State private var confirming = false
+    @State private var rowWidth: CGFloat = 0
+    @State private var actionsWidth: CGFloat = 0
+    @State private var copyWidth: CGFloat = 0
+
+    /// The share of the row the controls may take beside the decision.
+    static let controlsShare: CGFloat = 0.4
+
+    /// Whether the row is too short for the controls beside the decision:
+    /// they'd take more than `controlsShare` of it. Measured from the
+    /// controls' own natural widths, never a constant.
+    var compact: Bool {
+        rowWidth > 0 && actionsWidth + copyWidth + Spacing.group > rowWidth * Self.controlsShare
+    }
+
+    private var actionButtons: some View {
+        RulingRowActions(ruling: ruling, onReverse: { confirming = true })
+            .opacity(hovering || actions.alwaysShown ? 1 : 0)
+            .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { actionsWidth = $0 }
+    }
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 0) {
@@ -172,13 +191,17 @@ struct PlanRulingRow: View {
                     // letter to a line. The actions keep their room while
                     // hidden, so the hover never reflows the decision.
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
-                        RulingRowActions(ruling: ruling, onReverse: { confirming = true })
-                            .opacity(hovering || actions.alwaysShown ? 1 : 0)
+                        if !compact { actionButtons }
                         CopyReferenceButton(ruling: ruling, copy: copy)
+                            .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { copyWidth = $0 }
                     }
                     .fixedSize()
                     .layoutPriority(2)
                 }
+                // In a short row the actions would take a third of the width
+                // and leave the decision a few words a line (ov-412): they
+                // go on their own line under it instead.
+                if compact { actionButtons }
                 line(PlanWords.rulingWhy, ruling.why)
                 line(PlanWords.rulingReversal, ruling.reversal)
                 if let touches = PlanWords.rulingTouches(ruling) {
@@ -192,6 +215,7 @@ struct PlanRulingRow: View {
         }
         .padding(.vertical, NavigatorRhythm.lineGap * 2)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { rowWidth = $0 }
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .contextMenu {
