@@ -597,26 +597,29 @@ impl Watcher {
             Ok((Composer::Unrecognized, _)) => return Err(Held::Unfamiliar),
             Err(held) => return Err(held),
         };
-        let bracketed = match self.service.pane_bracketed_paste(to.id).await {
-            Ok(Some(on)) => on,
-            // tmux can't say (older than 3.7): the pane's own output can, if
-            // this daemon has followed it since the agent last set the mode.
-            // Not known yet: it may be once the agent sets it again (a
-            // respawn, a stream followed afresh), so the answer waits.
-            Ok(None) => match self.service.streamed_bracketed_paste(to.id).await {
-                Some(on) => on,
-                None => return Err(Held::Unproven),
-            },
-            Err(_) => false,
-        };
-        if !bracketed {
-            return Err(Held::Unfamiliar);
-        }
+        self.bracketed(to.id).await?;
         // A screen that reads between turns while claude's registry says it
         // works (ov-392): mid-turn, so an Enter goes in only under the fence.
         let not_idle = || async { registry_turn::said_of(pid).await == registry_turn::Said::NotIdle };
         let turn = if preset == "claude" && turn == Turn::Between && not_idle().await { Turn::During } else { turn };
         Ok(Proven { preset, tty, pid, turn })
+    }
+
+    /// Check 5 of the gate: bracketed paste known to be on in `terminal`.
+    pub(super) async fn bracketed(&self, terminal: Uuid) -> std::result::Result<(), Held> {
+        let bracketed = match self.service.pane_bracketed_paste(terminal).await {
+            Ok(Some(on)) => on,
+            // tmux can't say (older than 3.7): the pane's own output can, if
+            // this daemon has followed it since the agent last set the mode.
+            // Not known yet: it may be once the agent sets it again (a
+            // respawn, a stream followed afresh), so the answer waits.
+            Ok(None) => match self.service.streamed_bracketed_paste(terminal).await {
+                Some(on) => on,
+                None => return Err(Held::Unproven),
+            },
+            Err(_) => false,
+        };
+        if bracketed { Ok(()) } else { Err(Held::Unfamiliar) }
     }
 
     /// Check 3 of the gate: the agent in front of a TUI pane, proven by its

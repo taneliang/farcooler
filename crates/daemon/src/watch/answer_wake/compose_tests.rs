@@ -341,3 +341,26 @@ async fn a_key_typed_after_the_read_back_gets_no_enter() {
     assert_eq!(refused(b.watcher.compose_into(agent.id, "one\ntwo", &[]).await), "paste_left");
     assert!(si.log().contains("PASTE ") && !si.log().contains("ENTER"), "{}", si.log());
 }
+
+/// Bracketed paste turned off between the gate and the first paste (a
+/// shell taking the pane would): the paste is refused, nothing typed, so a
+/// multi-line text's lines never run.
+#[tokio::test]
+async fn bracketed_paste_off_before_the_paste_gets_nothing() {
+    let b = board().await;
+    let (agent, si) = idle_claude(&b).await;
+    let (control, log) = (si.control.clone(), si.log.clone());
+    *b.watcher.before_paste.lock().unwrap() = Some(Box::new(move || {
+        std::fs::write(&control, "nobracket").unwrap();
+        for _ in 0..750 {
+            if std::fs::read_to_string(&log).unwrap_or_default().contains("MODE nobracket") {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }));
+    let refusal = refused(b.watcher.compose_into(agent.id, "rm -rf build\nls", &[]).await);
+    assert!(["unfamiliar", "unproven"].contains(&refusal), "{refusal}");
+    nothing_typed(&si);
+}

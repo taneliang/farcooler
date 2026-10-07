@@ -233,6 +233,9 @@ impl Watcher {
     /// `compose_into` past its checks of the request, under `to`'s typing
     /// lock: the gate, the pastes, the Enter and the confirmation.
     async fn compose_locked(&self, to: &Terminal, composed: &Composition) -> Result<Turn> {
+        // Written before the gate, so nothing slow sits between its checks
+        // and the first paste (review finding 8).
+        let paths = self.write_images(composed)?;
         let told = self.told.lock().unwrap_or_else(|e| e.into_inner()).get(&to.id).copied();
         if let Some(left) = told.map(|at| TOLD_SPACING_MS - (now_millis() - at)).filter(|left| *left > 0) {
             tokio::time::sleep(Duration::from_millis(left as u64)).await;
@@ -274,17 +277,15 @@ impl Watcher {
             ),
         };
         let from = std::fs::metadata(&transcript).map(|m| m.len()).unwrap_or(0);
-        let paths = self.write_images(composed)?;
-
         let preset = proven.preset;
         let runtime = Runtime { marks: None, ..self.service.runtime() };
         let started = now_millis();
         let mut expected = Expected::default();
         let mut held = Composer::Empty;
-        let paste = |text: String| {
-            let hex: String = crate::pastes::encode_paste(true, &text).iter().map(|b| format!("{b:02x}")).collect();
-            let runtime = &runtime;
-            async move { runtime.send_bytes_hex(to.id, &hex).await }
+        let mut first = true;
+        let mut paste = |text: String| {
+            let (runtime, tty, was_first) = (&runtime, proven.tty.as_str(), std::mem::replace(&mut first, false));
+            async move { self.paste_checked(to, runtime, tty, preset, was_first, &text).await }
         };
         if self.fail_sends_for_tests() {
             return Err(DomainError::OperationFailed);
@@ -330,6 +331,28 @@ impl Watcher {
         self.mark_told(to.id);
         let took = Confirm { session, transcript, from, queued_before, since, submitted };
         self.took(&took).await.ok_or(DomainError::Conflict { what: "unconfirmed" })
+    }
+
+    /// One paste into `to`, right after proving again what the gate proved
+    /// before it: the agent in front (`foreground_agent`) and bracketed paste
+    /// on. Between the gate and a paste, claude may have exited and a shell
+    /// with no bracketed paste taken the pane, which would run a multi-line
+    /// text's lines. Refused before the `first` paste as the gate would be;
+    /// after one, the text so far is left at a shell or in the box.
+    async fn paste_checked(&self, to: &Terminal, runtime: &Runtime, tty: &str, preset: &str, first: bool, text: &str) -> Result<()> {
+        #[cfg(test)]
+        if let Some(run) = self.before_paste.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            run();
+        }
+        let agent = foreground_agent(tty).await == Some(preset);
+        let held = if agent { self.bracketed(to.id).await.err() } else { Some(super::Held::NotAnAgent) };
+        match (held, first) {
+            (None, _) => {}
+            (Some(held), true) => return Err(DomainError::Conflict { what: held_word(held) }),
+            (Some(_), false) => return Err(DomainError::Conflict { what: if agent { "paste_left" } else { "left_at_shell" } }),
+        }
+        let hex: String = crate::pastes::encode_paste(true, text).iter().map(|b| format!("{b:02x}")).collect();
+        runtime.send_bytes_hex(to.id, &hex).await
     }
 
     /// The last check before a between-turns Enter, which goes in with no
