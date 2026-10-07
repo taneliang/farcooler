@@ -41,14 +41,14 @@ import kotlinx.coroutines.launch
  */
 @Composable
 fun HeldDraftBar(hold: DraftHold?, withdraw: suspend (DraftHold) -> Boolean) {
-    var tracked by remember { mutableStateOf<String?>(null) }
+    var watch by remember { mutableStateOf(HeldDraft.Watch()) }
     var withdrawing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(hold) {
-        if (hold != null && hold.isWaiting) tracked = hold.id
+        watch = watch.observe(hold)
         withdrawing = false
     }
-    val status = tracked?.let { HeldDraft.status(it, hold) } ?: return
+    val status = watch.status(hold) ?: return
     val title = HeldDraft.title(status) ?: return
     Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth().testTag("held-draft")) {
         Row(
@@ -78,7 +78,7 @@ fun HeldDraftBar(hold: DraftHold?, withdraw: suspend (DraftHold) -> Boolean) {
                     modifier = Modifier.testTag("held-draft-withdraw"),
                 ) { Text(HeldDraft.WITHDRAW) }
             } else {
-                IconButton(onClick = { tracked = null }) { Icon(Icons.Outlined.Close, contentDescription = "Dismiss") }
+                IconButton(onClick = { watch = HeldDraft.Watch() }) { Icon(Icons.Outlined.Close, contentDescription = "Dismiss") }
             }
         }
     }

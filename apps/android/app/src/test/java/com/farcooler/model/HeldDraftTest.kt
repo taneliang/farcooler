@@ -27,7 +27,7 @@ class HeldDraftTest {
     fun aFleetRowsHoldDecodesAndAnUnknownStateIsNeverWaiting() {
         val hold = json.decodeFromString<DraftHold>("""{"id":"h","state":"sent","heldMs":1,"expiresMs":2,"endedMs":3}""")
         assertEquals(DraftHold("h", "sent", 2), hold)
-        assertEquals(HeldDraft.Status.EXPIRED, HeldDraft.status("h", DraftHold("h", "parked")))
+        assertEquals(HeldDraft.Status.EXPIRED, HeldDraft.status("h", DraftHold("h", "parked"), "waiting"))
     }
 
     @Test
@@ -44,12 +44,25 @@ class HeldDraftTest {
 
     @Test
     fun thePaneSaysWaitingThenSentAndLetsGoOfAWithdrawnOne() {
-        assertEquals(HeldDraft.Status.WAITING, HeldDraft.status("h", DraftHold("h", "waiting")))
+        assertEquals(HeldDraft.Status.WAITING, HeldDraft.status("h", DraftHold("h", "waiting"), "waiting"))
         assertEquals("Waiting for the dialog to close", HeldDraft.title(HeldDraft.Status.WAITING))
-        assertEquals("Sent", HeldDraft.title(HeldDraft.status("h", DraftHold("h", "sent"))))
-        assertEquals(HeldDraft.Status.GONE, HeldDraft.status("h", DraftHold("h", "withdrawn")))
-        assertEquals(HeldDraft.Status.GONE, HeldDraft.status("h", DraftHold("newer", "waiting")))
-        assertEquals(HeldDraft.Status.LOST, HeldDraft.status("h", null))
+        assertEquals("Sent", HeldDraft.title(HeldDraft.status("h", DraftHold("h", "sent"), "waiting")))
+        assertEquals(HeldDraft.Status.GONE, HeldDraft.status("h", DraftHold("h", "withdrawn"), "waiting"))
+        assertEquals(HeldDraft.Status.GONE, HeldDraft.status("h", DraftHold("newer", "waiting"), "waiting"))
+        assertEquals(HeldDraft.Status.LOST, HeldDraft.status("h", null, "waiting"))
+        assertEquals(HeldDraft.Status.FAILED, HeldDraft.status("h", DraftHold("h", "failed"), "waiting"))
+        assertEquals("It couldn’t go in within half an hour.", HeldDraft.detail(HeldDraft.Status.EXPIRED))
         assertNull(HeldDraft.title(HeldDraft.Status.GONE))
+    }
+
+    /** The runner forgets a hold ten minutes after it ends (review 1, M1). */
+    @Test
+    fun anEndedHoldTheRunnerForgetsKeepsSayingHowItEnded() {
+        val sent = HeldDraft.Watch().observe(DraftHold("h", "waiting")).observe(DraftHold("h", "sent")).observe(null)
+        assertEquals(HeldDraft.Status.SENT, sent.status(null))
+        val withdrawn = HeldDraft.Watch().observe(DraftHold("h", "waiting")).observe(DraftHold("h", "withdrawn"))
+        assertNull(withdrawn.status(null))
+        val restarted = HeldDraft.Watch().observe(DraftHold("h", "waiting"))
+        assertEquals(HeldDraft.Status.LOST, restarted.status(null))
     }
 }

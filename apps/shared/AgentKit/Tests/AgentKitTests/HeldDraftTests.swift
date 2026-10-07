@@ -66,11 +66,33 @@ private let heldAnswer = Data(
 
 @Test func aHeldDraftThatEndsAnotherWayIsSaidOrLetGo() {
     let ids = "h"
-    #expect(HeldDraft.status(of: ids, current: DraftHold(id: ids, state: .expired), seen: true) == .expired)
-    #expect(HeldDraft.status(of: ids, current: DraftHold(id: ids, state: .withdrawn), seen: true) == .gone)
-    #expect(HeldDraft.status(of: ids, current: DraftHold(id: "newer", state: .waiting), seen: true) == .gone)
-    #expect(HeldDraft.status(of: ids, current: nil, seen: true) == .lost)
-    #expect(HeldDraft.status(of: ids, current: nil, seen: false) == .waiting)
+    #expect(HeldDraft.status(of: ids, current: DraftHold(id: ids, state: .expired), last: .waiting) == .expired)
+    #expect(HeldDraft.status(of: ids, current: DraftHold(id: ids, state: .failed), last: .waiting) == .failed)
+    #expect(HeldDraft.status(of: ids, current: DraftHold(id: ids, state: .withdrawn), last: .waiting) == .gone)
+    #expect(HeldDraft.status(of: ids, current: DraftHold(id: "newer", state: .waiting), last: .waiting) == .gone)
+    #expect(HeldDraft.status(of: ids, current: nil, last: .waiting) == .lost)
+    #expect(HeldDraft.status(of: ids, current: nil, last: nil) == .waiting)
     #expect(HeldDraft.title(.gone) == nil)
     #expect(HeldDraft.title(.expired) == "Not sent")
+    #expect(HeldDraft.detail(.expired) == "It couldn’t go in within half an hour.")
+}
+
+/// The runner forgets a hold ten minutes after it ends (review 1, M1): "Sent"
+/// stays "Sent", a withdrawn one says nothing, and only one last seen
+/// waiting reads as lost.
+@Test func anEndedHoldTheRunnerForgetsKeepsSayingHowItEnded() {
+    var watch = HeldDraft.Watch()
+    watch.observe(DraftHold(id: "h", state: .waiting))
+    watch.observe(DraftHold(id: "h", state: .sent))
+    watch.observe(nil)
+    #expect(watch.status(nil) == .sent)
+
+    var withdrawn = HeldDraft.Watch()
+    withdrawn.observe(DraftHold(id: "h", state: .waiting))
+    withdrawn.observe(DraftHold(id: "h", state: .withdrawn))
+    #expect(withdrawn.status(nil) == nil)
+
+    var restarted = HeldDraft.Watch()
+    restarted.observe(DraftHold(id: "h", state: .waiting))
+    #expect(restarted.status(nil) == .lost)
 }

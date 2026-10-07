@@ -20,7 +20,11 @@ struct HeldDraftBar: View {
             }
         }
         .onAppear { watch.observe(terminal.draftHold) }
-        .onChange(of: terminal.draftHold) { _, hold in watch.observe(hold) }
+        .onChange(of: terminal.draftHold) { _, hold in
+            watch.observe(hold)
+            // A newer hold, or this one ended: Withdraw is pressable again.
+            withdrawing = false
+        }
     }
 
     private func bar(_ status: HeldDraft.Status, title: String) -> some View {

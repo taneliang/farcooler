@@ -15,7 +15,7 @@ import Foundation
 /// says the same sentences from `model/HeldDraft.kt`.
 public struct DraftHold: Hashable, Sendable, Decodable {
     public enum State: String, Hashable, Sendable {
-        case waiting, sent, withdrawn, expired
+        case waiting, sent, withdrawn, expired, failed
     }
 
     /// Names the hold to `terminal.draft_withdraw`, and tells this screen's
@@ -62,8 +62,10 @@ public enum HeldDraft {
         case waiting
         /// In the orchestrator's box, unsent.
         case sent
-        /// Not pasted within half an hour.
+        /// Not pasted within half an hour, or the person moved on.
         case expired
+        /// The paste itself failed.
+        case failed
         /// The runner no longer has it: it restarted.
         case lost
         /// Withdrawn, or replaced by a newer draft: nothing to say.
@@ -71,17 +73,26 @@ public enum HeldDraft {
     }
 
     /// `tracked`, the hold this screen sent, as `current` (the terminal's hold
-    /// now) says it is. `seen` says the screen has read its hold on the
-    /// terminal before, so a terminal with none means the runner lost it,
-    /// rather than a read from before the hold.
-    public static func status(of tracked: String, current: DraftHold?, seen: Bool) -> Status {
-        guard let current else { return seen ? .lost : .waiting }
+    /// now) says it is. With none on the terminal, `last` is the state this
+    /// screen last saw it in: the runner forgets a hold some minutes after it
+    /// ends, so only one last seen waiting was lost (a restart); one that had
+    /// ended keeps saying how.
+    public static func status(of tracked: String, current: DraftHold?, last: DraftHold.State?) -> Status {
+        guard let current else {
+            guard let last, last != .waiting else { return last == nil ? .waiting : .lost }
+            return status(last)
+        }
         guard current.id == tracked else { return .gone }
-        switch current.state {
-        case .waiting: return .waiting
-        case .sent: return .sent
-        case .withdrawn: return .gone
-        case .expired: return .expired
+        return status(current.state)
+    }
+
+    private static func status(_ state: DraftHold.State) -> Status {
+        switch state {
+        case .waiting: .waiting
+        case .sent: .sent
+        case .withdrawn: .gone
+        case .expired: .expired
+        case .failed: .failed
         }
     }
 
@@ -90,7 +101,7 @@ public enum HeldDraft {
         switch status {
         case .waiting: "Waiting for the dialog to close"
         case .sent: "Sent"
-        case .expired, .lost: "Not sent"
+        case .expired, .lost, .failed: "Not sent"
         case .gone: nil
         }
     }
@@ -100,7 +111,8 @@ public enum HeldDraft {
         switch status {
         case .waiting: "Your draft goes into the orchestrator’s box when the dialog in its pane closes."
         case .sent: "Your draft is in the orchestrator’s box. Finish it there and press Return."
-        case .expired: "The dialog stayed open for half an hour. Answer it, then try again."
+        case .expired: "It couldn’t go in within half an hour."
+        case .failed: "Far Cooler couldn’t paste it. Try again."
         case .lost: "The runner restarted before the dialog closed. Try again."
         case .gone: nil
         }
@@ -122,20 +134,32 @@ public enum HeldDraft {
     /// `status` is what to show, nil for nothing.
     public struct Watch: Equatable, Sendable {
         public private(set) var tracked: String?
+        /// The state this screen last saw its hold in.
+        public private(set) var last: DraftHold.State?
 
         public init() {}
 
         public mutating func observe(_ hold: DraftHold?) {
-            if let hold, hold.state == .waiting { tracked = hold.id }
+            guard let hold else { return }
+            if hold.state == .waiting {
+                tracked = hold.id
+                last = .waiting
+            } else if hold.id == tracked {
+                // Withdrawn has nothing to say: let it go.
+                if hold.state == .withdrawn { dismiss() } else { last = hold.state }
+            }
         }
 
         public func status(_ current: DraftHold?) -> Status? {
             guard let tracked else { return nil }
-            let status = HeldDraft.status(of: tracked, current: current, seen: true)
+            let status = HeldDraft.status(of: tracked, current: current, last: last)
             return status == .gone ? nil : status
         }
 
         /// The person closed what it said.
-        public mutating func dismiss() { tracked = nil }
+        public mutating func dismiss() {
+            tracked = nil
+            last = nil
+        }
     }
 }
