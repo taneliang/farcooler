@@ -38,6 +38,10 @@ pub struct TmuxServer {
     /// how one puts a deliberately slow tmux in front of a real server without
     /// touching the process-wide lookup every other test shares.
     program: Option<PathBuf>,
+    /// A deadline that replaces the verb's own, for a test whose subject is
+    /// what tmux answers, not how fast. See `patient`.
+    #[cfg(test)]
+    deadline: Option<std::time::Duration>,
     /// How many times each tmux verb has been spawned, for the life of this
     /// server handle. A process per call is what tmux costs this daemon, so it
     /// is counted at the one place that spawns. See `call_counts`.
@@ -163,6 +167,8 @@ impl TmuxServer {
             config_path,
             unsettled_exits: Arc::default(),
             program: None,
+            #[cfg(test)]
+            deadline: None,
             calls: Arc::default(),
             absent_socket: Arc::default(),
         }
@@ -194,6 +200,16 @@ impl TmuxServer {
     #[cfg(test)]
     pub(crate) fn with_program(mut self, program: PathBuf) -> Self {
         self.program = Some(program);
+        self
+    }
+
+    /// This server with every command given 60 s, not a second. For a test of
+    /// what a no-server `list-panes` answers: through a wrapper the spawn is
+    /// two processes, and on a loaded runner that alone passed the second
+    /// (ov-403). The tests of the deadline itself do not use this.
+    #[cfg(test)]
+    pub(crate) fn patient(mut self) -> Self {
+        self.deadline = Some(std::time::Duration::from_secs(60));
         self
     }
 
@@ -303,6 +319,8 @@ impl TmuxServer {
         // request rather than the session. Opening a pane is the exception, and
         // gets longer: see `deadline_for`.
         let deadline = deadline_for(args);
+        #[cfg(test)]
+        let deadline = self.deadline.unwrap_or(deadline);
         let out = match tokio::time::timeout(deadline, child.wait_with_output()).await {
             Ok(result) => result.map_err(|e| {
                 tracing::warn!(error = %e, "tmux failed");
@@ -734,7 +752,8 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn no_server_means_no_unfinished_opens() {
-        let Some(tmux) = SlowTmux::wrapping("no_server_means_no_unfinished_opens", "").await else { return };
+        let Some(mut tmux) = SlowTmux::wrapping("no_server_means_no_unfinished_opens", "").await else { return };
+        tmux.server = tmux.server.clone().patient();
         assert_eq!(tmux.server.unfinished_opens().await.expect("no server is not an error"), Vec::new());
     }
 
