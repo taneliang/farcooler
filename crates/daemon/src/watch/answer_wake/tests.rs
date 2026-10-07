@@ -1421,3 +1421,6 @@ mod compose_tests;
 
 #[path = "hidden_turn_tests.rs"]
 mod hidden_turn_tests;
+
+#[path = "typing_tests.rs"]
+mod typing_tests;
