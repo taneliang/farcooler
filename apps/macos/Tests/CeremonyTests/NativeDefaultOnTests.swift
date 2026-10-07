@@ -47,9 +47,10 @@ struct NativeDefaultOnTests {
         model.source = NativeAgentTests.FailingAfterAPage(page: NativeAgentTests.page([]))
         model.showsNative = true
         #expect(!model.store.isFollowing, "remembered as the conversation, and nobody can see it")
-        model.onScreen = true
+        let view = UUID()
+        model.setOnScreen(true, by: view)
         #expect(model.store.isFollowing)
-        model.onScreen = false
+        model.setOnScreen(false, by: view)
         #expect(!model.store.isFollowing)
     }
 
@@ -80,6 +81,74 @@ struct NativeDefaultOnTests {
         }
     }
 
+    @Test("Unmounting a pane's view stops its follow")
+    func unmountingStopsTheFollow() async throws {
+        let terminal = try NativeAgentTests.terminal()
+        let model = NativeAgentTests.model(terminal)
+        model.source = NativeAgentTests.FailingAfterAPage(page: NativeAgentTests.page([]))
+        model.showsNative = true
+        let agents = NativeAgentTests.agents(model: model)
+        let life = NativeAgentTests.SurfaceLife()
+        let window = NativeAgentTests.window(
+            NativeSwitch(terminal: terminal, target: "", isFocused: true, agents: agents) { focused in
+                NativeAgentTests.StandInSurface(life: life, focused: focused)
+            })
+        defer {
+            window.close()
+            model.store.stop()
+            NativePaneModel.remember(false, for: terminal.id)
+        }
+        try await Self.until { model.store.isFollowing }
+        #expect(model.store.isFollowing, "never followed while mounted")
+        // The pane closed, or its layout went: the view leaves the tree.
+        window.contentView = NSHostingView(rootView: Color.clear)
+        try await Self.until { !model.store.isFollowing }
+        #expect(!model.store.isFollowing, "an unmounted pane still holds its follow on the runner")
+    }
+
+    @Test("One mount saying it is hidden doesn't turn off another that shows the pane")
+    func oneHiddenMountDoesntTurnOffAnother() throws {
+        let model = NativeAgentTests.model(try NativeAgentTests.terminal())
+        model.source = NativeAgentTests.FailingAfterAPage(page: NativeAgentTests.page([]))
+        model.showsNative = true
+        defer { model.store.stop() }
+        let (shown, hidden) = (UUID(), UUID())
+        model.setOnScreen(true, by: shown)
+        model.setOnScreen(false, by: hidden)
+        #expect(model.store.isFollowing, "the hidden mount won")
+        model.setOnScreen(false, by: shown)
+        #expect(!model.store.isFollowing)
+    }
+
+    @Test("A pane mounted twice follows while either mount shows it")
+    func twoMountsDontOverwriteEachOther() async throws {
+        let terminal = try NativeAgentTests.terminal()
+        let model = NativeAgentTests.model(terminal)
+        model.source = NativeAgentTests.FailingAfterAPage(page: NativeAgentTests.page([]))
+        model.showsNative = true
+        let agents = NativeAgentTests.agents(model: model)
+        let life = NativeAgentTests.SurfaceLife()
+        let window = NativeAgentTests.window(
+            // The hidden mount is built last, so a single flag would end up off.
+            VStack {
+                NativeSwitch(terminal: terminal, target: "", isFocused: true, agents: agents) { focused in
+                    NativeAgentTests.StandInSurface(life: life, focused: focused)
+                }
+                NativeSwitch(terminal: terminal, target: "", isFocused: false, agents: agents) { focused in
+                    NativeAgentTests.StandInSurface(life: life, focused: focused)
+                }
+                .environment(\.outOfSight, true)
+            })
+        defer {
+            window.close()
+            model.store.stop()
+            NativePaneModel.remember(false, for: terminal.id)
+        }
+        try await Self.until { model.store.isFollowing }
+        await NativeAgentTests.settle(window, 400)
+        #expect(model.store.isFollowing, "the hidden mount turned off the visible one's follow")
+    }
+
     // MARK: - A blink of the runner
 
     /// The iOS review's finding 1, as the Mac has it: a reconnect that finds
@@ -92,13 +161,36 @@ struct NativeDefaultOnTests {
         let agents = NativeAgentTests.agents()
         let before = agents.core
         agents.socket = { "/tmp/fc-t/no-such-runner/farcoolerd.sock" }
+        agents.retryDelay = .seconds(3600)
         agents.reconnect()
         try await Self.until { agents.settingTrouble != nil }
         #expect(agents.settingTrouble != nil, "the reconnect never finished")
+        #expect(agents.settingTrouble?.contains("show the terminal") == false, "says the terminal shows, and the view is kept")
         #expect(agents.rowsServed, "the view was hidden for a blink")
         #expect(agents.core === before)
         let terminal = try NativeAgentTests.terminal()
         #expect(agents.offers(terminal, target: ""))
+    }
+
+    /// Nothing else calls `start()` when the runner's daemon is up for the
+    /// rest of the app and only this connect failed, so a kept view retries on
+    /// its own, and past N failures it's dropped for the terminal.
+    @Test("A kept view retries by itself and drops after the failures it's kept through")
+    func aKeptViewDropsAfterItsRetries() async throws {
+        let agents = NativeAgentTests.agents()
+        var attempts = 0
+        agents.socket = {
+            attempts += 1
+            return "/tmp/fc-t/no-such-runner/farcoolerd.sock"
+        }
+        agents.keepThroughFailures = 3
+        agents.retryDelay = .milliseconds(1)
+        agents.reconnect()
+        try await Self.until { !agents.rowsServed }
+        #expect(!agents.rowsServed, "a runner that never answers kept its view for ever")
+        #expect(attempts == 4, "kept through 3 failures, dropped on the 4th: \(attempts) attempts")
+        #expect(!agents.offers(try NativeAgentTests.terminal(), target: ""))
+        #expect(agents.settingTrouble?.contains("show the terminal") == true)
     }
 
     @Test("A runner that was never reached offers nothing")
@@ -120,7 +212,7 @@ struct NativeDefaultOnTests {
     func anUnavailableFollowComesBack() async throws {
         let model = NativeAgentTests.model(try NativeAgentTests.terminal())
         let source = Switchable()
-        model.onScreen = true
+        model.setOnScreen(true, by: UUID())
         model.source = source
         model.showsNative = true
         defer { model.store.stop() }

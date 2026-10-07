@@ -64,14 +64,26 @@ final class NativePaneModel: ObservableObject {
     /// Whether `store` follows `source` now.
     private var following = false
 
+    /// The views that say they show this pane, one token per mount.
+    private var screens: Set<UUID> = []
+
     /// Whether this pane is on screen: mounted, not behind a zoomed pane or
     /// another workspace's, in a window somebody can see
     /// (`NativeSwitch.onScreen`). Off until its view says so, and off again
     /// when the view goes. A pane whose view is only remembered as the
     /// conversation holds no follow: each is a held call on the runner, and
     /// the runner takes 32 connections.
-    var onScreen = false {
-        didSet { if onScreen != oldValue { followIfShown() } }
+    ///
+    /// A terminal can be mounted twice (a hidden layer and a tile): it's on
+    /// screen while any mount says so, and one going away can't turn off
+    /// another's.
+    var onScreen: Bool { !screens.isEmpty }
+
+    /// `view` says whether it shows this pane.
+    func setOnScreen(_ shown: Bool, by view: UUID) {
+        let before = onScreen
+        if shown { screens.insert(view) } else { screens.remove(view) }
+        if onScreen != before { followIfShown() }
     }
 
     /// Follow while the conversation is on screen, and stop when it isn't:

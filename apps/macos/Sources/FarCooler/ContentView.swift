@@ -16,6 +16,10 @@ struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.windowVisible) var windowVisible
+    /// Whether the conversation view is offered (ov-394): Switch Between
+    /// Terminal and Conversation reads it for its enabled state, so a
+    /// reconnect or the Settings switch must redraw the menu focus.
+    @ObservedObject var nativeAgents = NativeAgents.shared
     @Environment(\.markReadConfirmation) var markReadConfirmation
     @State var selection: Selection?
 

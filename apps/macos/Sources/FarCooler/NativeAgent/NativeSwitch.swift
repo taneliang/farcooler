@@ -33,6 +33,8 @@ struct NativeSwitch<Surface: View>: View {
     /// The model's `showsNative`, mirrored so this view, which holds the
     /// terminal, redraws when it changes.
     @State private var native = false
+    /// This mount's say in whether the pane is on screen (`NativePaneModel.onScreen`).
+    @State private var mount = UUID()
     /// Not behind a zoomed pane or an unselected conversation's own layer
     /// (`outOfSight`), and in a window somebody can see (`windowVisible`).
     @Environment(\.outOfSight) private var outOfSight
@@ -72,6 +74,7 @@ struct NativeSwitch<Surface: View>: View {
                 .identified("native-switch")
             }
         }
+        .onDisappear { agents.model(ifMade: terminal.id)?.setOnScreen(false, by: mount) }
         .task(id: model.map(ObjectIdentifier.init)) {
             guard let model else {
                 native = false
@@ -80,13 +83,13 @@ struct NativeSwitch<Surface: View>: View {
             // Says whether this pane is on screen, then follows if it should:
             // a model whose view came back, as the runner started serving
             // rows again, restarts a follow that ended `.unavailable`.
-            model.onScreen = !outOfSight && windowVisible
+            model.setOnScreen(!outOfSight && windowVisible, by: mount)
             model.followIfShown()
             for await value in model.$showsNative.values { native = value }
         }
         .onChange(of: !outOfSight && windowVisible) { _, visible in
-            if model != nil { model?.onScreen = visible }
+            model?.setOnScreen(visible, by: mount)
         }
-        .onDisappear { agents.model(ifMade: terminal.id)?.onScreen = false }
+        
     }
 }

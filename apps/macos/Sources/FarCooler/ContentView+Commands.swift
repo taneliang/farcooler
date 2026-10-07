@@ -253,7 +253,7 @@ extension ContentView {
                 group: screen?.group, here: here, layouts: screen?.groups ?? [],
                 switchesMode: target.map { $0.canSwitchPaneMode || $0.isAgentPane } ?? false,
                 switchesConversation: target.map {
-                    NativeAgents.shared.offers($0, target: store.client(for: worktree)?.target ?? "")
+                    nativeAgents.offers($0, target: store.client(for: worktree)?.target ?? "")
                 } ?? false)
         }
         return focus

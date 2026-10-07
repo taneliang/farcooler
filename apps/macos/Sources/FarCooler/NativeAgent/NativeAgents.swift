@@ -38,6 +38,15 @@ final class NativeAgents: ObservableObject {
     private var panes: [String: NativePaneModel] = [:]
     private let defaults: UserDefaults
     private var connecting: Task<Void, Never>?
+    /// The retry waiting out its backoff, while a kept view's runner doesn't answer.
+    private var retrying: Task<Void, Never>?
+    /// Reconnects in a row the runner didn't answer.
+    private var failures = 0
+    /// How many of them a view is kept through before it's dropped for the
+    /// terminal, and how long the first retry waits (doubling, to a minute).
+    /// A test sets these near zero.
+    var keepThroughFailures = 4
+    var retryDelay: Duration = .seconds(2)
 
     /// How the setting reaches the runner. The real CLI in the app; a test
     /// passes its own.
@@ -82,6 +91,9 @@ final class NativeAgents: ObservableObject {
             // A reconnect still on its way would otherwise set `core` after.
             connecting?.cancel()
             connecting = nil
+            retrying?.cancel()
+            retrying = nil
+            failures = 0
             for pane in panes.values { pane.store.stop() }
             panes = [:]
             core = nil
@@ -92,6 +104,7 @@ final class NativeAgents: ObservableObject {
     /// A fresh connection, so the hello says what the runner offers now.
     func reconnect() {
         connecting?.cancel()
+        retrying?.cancel()
         let core = RunnerCore()
         let socket = socket()
         connecting = Task { [weak self] in
@@ -100,21 +113,30 @@ final class NativeAgents: ObservableObject {
             do {
                 offered = try await core.connect(socket: socket)
             } catch {
-                // Said in Settings, beside the switch; the panes show their
-                // terminals meanwhile.
                 offered = []
                 trouble = "Far Cooler can’t reach this Mac’s runner, so Claude panes show the terminal."
             }
             guard let self, !Task.isCancelled else { return }
             self.settingTrouble = trouble
-            // The runner didn't answer this once, but it did before: keep what
-            // that hello said. Tearing the view down for a blink would put the
-            // terminal up, with the keyboard, and bring the view back a retry
-            // later; the panes' own banner says the runner isn't answering
-            // (`AgentRowStore.isStale`), and `start()` runs again on every
-            // retry. A runner that answers and doesn't serve rows is another
-            // matter, and still hides the view.
-            if trouble != nil, self.rowsServed, self.core != nil { return }
+            if trouble == nil {
+                self.failures = 0
+            } else {
+                self.failures += 1
+                // The runner didn't answer this once, but it did before: keep
+                // what that hello said for a few tries. Tearing the view down
+                // for a blink would put the terminal up, with the keyboard,
+                // and bring the view back a retry later; the panes' own
+                // banner says the runner isn't answering
+                // (`AgentRowStore.isStale`). A kept view is retried here, with
+                // backoff, rather than waiting for something to call
+                // `start()`, and past `keepThroughFailures` it's dropped:
+                // a connection nobody can reach shows the terminal.
+                if self.rowsServed, self.core != nil, self.failures <= self.keepThroughFailures {
+                    self.settingTrouble = "Far Cooler can’t reach this Mac’s runner right now. The conversation view may be out of date until it answers."
+                    self.scheduleRetry()
+                    return
+                }
+            }
             self.core = core
             // Rows to read and a way to send: a runner with rows from
             // before `terminal.compose` gets the terminal, not a view whose
@@ -124,6 +146,16 @@ final class NativeAgents: ObservableObject {
             for pane in self.panes.values where self.rowsServed {
                 self.follow(pane, on: core)
             }
+        }
+    }
+
+    /// Try again after a backoff: `retryDelay`, doubling per failure.
+    private func scheduleRetry() {
+        let wait = min(retryDelay * (1 << min(failures - 1, 5)), .seconds(60))
+        retrying = Task { [weak self] in
+            try? await Task.sleep(for: wait)
+            guard let self, !Task.isCancelled else { return }
+            self.reconnect()
         }
     }
 
