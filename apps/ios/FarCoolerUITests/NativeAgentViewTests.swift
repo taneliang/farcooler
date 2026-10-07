@@ -245,6 +245,21 @@ final class NativeAgentViewTests: XCTestCase {
         XCTAssertFalse(element(app, "native-stale").exists, "still says it isn't being read")
     }
 
+    /// The conversation coming to cover a terminal that holds the keyboard,
+    /// other than by the switch (here, the runner's projector coming on as
+    /// the person types in the terminal): the terminal lets the keyboard go,
+    /// so keys never go on into a terminal nobody can see.
+    func testCoveringTheTerminalTakesItsKeyboardAway() {
+        let app = launch(["-native-on-later"])
+        XCTAssertTrue(wait(60) { showing(app).hasPrefix("terminal-only") }, showing(app))
+        let sinkFocused = { app.textViews.matching(NSPredicate(format: "hasKeyboardFocus == true")).count > 0 }
+        if !sinkFocused() { element(app, "terminal-surface").tap() }
+        XCTAssertTrue(wait(30) { sinkFocused() }, "the terminal never took the keyboard")
+        app.typeText("claude")
+        XCTAssertTrue(wait(60) { showing(app).hasPrefix("conversation") }, "the conversation never came: \(showing(app)) \(harness(app))")
+        XCTAssertTrue(wait(30) { !sinkFocused() }, "the covered terminal kept the keyboard")
+    }
+
     /// Rows held and the runner not answering: said over them, and Send waits.
     func testStaleRowsSaySoAndSendWaits() {
         let app = launch(["-native-stale"])

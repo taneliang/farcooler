@@ -24,6 +24,9 @@ import UIKit
 ///   (rows refused, a hello without `agent_rows`), and back on once the pane
 ///   has shown its terminal for it.
 /// - `-native-stale`: from the fourth follow on, every rows call is lost.
+/// - `-native-on-later`: the projector starts off, and comes on (a new link
+///   with `agent_rows`) the first time something is typed in the terminal,
+///   so the conversation covers a terminal that holds the keyboard.
 /// - Compose's text picks a failure: "time out", "garble" (an unreadable
 ///   answer) and "read only" (a grant that may not type).
 /// - `-native-terminal`: the pane last switched to its terminal (R-27).
@@ -89,7 +92,9 @@ struct NativeAgentHarness: View {
         connection.standIn(
             on: Fleet(runtimeHealthy: true, livePanes: 2, worktrees: [Self.worktree]),
             repositories: [],
-            build: Self.build(rows: !CommandLine.arguments.contains("-native-flag-off")))
+            build: Self.build(
+                rows: !CommandLine.arguments.contains("-native-flag-off")
+                    && !CommandLine.arguments.contains("-native-on-later")))
         fleetStore.republish()
         let connection = connection
         runner.links = { rows in
@@ -174,6 +179,9 @@ final class NativeHarnessRunner: ObservableObject {
         case "terminal.compose":
             let text = args["text"] as? String ?? ""
             return try await MainActor.run { try compose(text) }
+        case "terminal.write":
+            await MainActor.run { typedInTerminal() }
+            return try json([:])
         case "terminal.screen":
             let text = "claude is running in this terminal\r\n> "
             return try json([
@@ -192,6 +200,14 @@ final class NativeHarnessRunner: ObservableObject {
     private func refuseIfOff() throws {
         if off { throw ClientCore.CoreError.rejected("Rows aren't served.", word: "capability-unsupported") }
         if lost { throw ClientCore.CoreError.disconnected("The link dropped.") }
+    }
+
+    /// Typed in the terminal: under `-native-on-later`, the projector comes on.
+    private var turnedOn = false
+    private func typedInTerminal() {
+        guard CommandLine.arguments.contains("-native-on-later"), !turnedOn else { return }
+        turnedOn = true
+        Task { await link(rows: true) }
     }
 
     /// A link coming up again, counted once its build lands.
