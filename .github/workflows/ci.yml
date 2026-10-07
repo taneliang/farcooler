@@ -1220,6 +1220,56 @@ jobs:
         working-directory: apps/android
         run: ./gradlew assembleRelease
 
+      # The Robolectric UI tests: everything in `com.farcooler.capture`, which
+      # the plain `Test` step above excludes (app/build.gradle.kts) because they
+      # need the merged resources and a newer JVM than the build's. That
+      # includes `NativeAgentViewTest`, the conversation view's UI tests, so a
+      # regression there (reconnect, off to on) failed no job until now (ov-398).
+      #
+      # Robolectric's sandbox for SDK 37 needs JDK 21, while the build stays on
+      # 17. So this installs 21 as a second JDK and hands its path to the test
+      # task alone, through `farcooler.captureJdk`; Gradle itself keeps running
+      # on 17. This is last, so the JDK 21 step cannot change what the builds
+      # above ran on. Animation scale stays 0 in the harness; nothing here
+      # touches it.
+      - uses: actions/setup-java@v4
+        id: jdk21
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: UI tests (Robolectric)
+        working-directory: apps/android
+        env:
+          CAPTURE_JDK: ${{ steps.jdk21.outputs.path }}
+        run: |
+          ./gradlew testInstrumentedUnitTest \
+            -Pfarcooler.captures \
+            "-Pfarcooler.captureJdk=$CAPTURE_JDK" \
+            --max-workers=2
+      # Gradle prints no test count, and a filter that matches nothing passes.
+      # Read the result files, print the count, and fail on none, or on a
+      # missing `NativeAgentViewTest`, which is the one that must run.
+      - name: Count the UI tests that ran
+        if: success() || failure()
+        working-directory: apps/android/app/build/test-results/testInstrumentedUnitTest
+        run: |
+          python3 - <<'PY'
+          import glob, xml.etree.ElementTree as ET
+          total = failed = skipped = 0
+          classes = []
+          for f in sorted(glob.glob("TEST-com.farcooler.capture.*.xml")):
+              r = ET.parse(f).getroot()
+              n = int(r.get("tests"))
+              total += n
+              failed += int(r.get("failures")) + int(r.get("errors"))
+              skipped += int(r.get("skipped"))
+              classes.append(r.get("name").rsplit(".", 1)[-1])
+              print(f"{r.get('name')}: {n} tests")
+          print(f"UI tests that ran: {total} in {len(classes)} classes, {failed} failed, {skipped} skipped")
+          if total == 0 or "NativeAgentViewTest" not in classes:
+              raise SystemExit("The capture/UI tests did not run; NativeAgentViewTest must.")
+          PY
+
   relay:
     name: Relay
     runs-on: ubuntu-latest
