@@ -1418,3 +1418,6 @@ mod draft_hold_tests;
 
 #[path = "compose_tests.rs"]
 mod compose_tests;
+
+#[path = "hidden_turn_tests.rs"]
+mod hidden_turn_tests;

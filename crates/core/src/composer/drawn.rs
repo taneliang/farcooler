@@ -227,15 +227,24 @@ mod tests {
     }
 
     /// After a long paste was queued, claude 2.1.290 keeps `paste again to
-    /// expand` where `esc to interrupt` was, so its screen reads idle while it
-    /// works (a spinner line shows `Working…`): the turn has to be read from
-    /// its registry instead (`answer_wake::compose`).
+    /// expand` where `esc to interrupt` was. It still works, and says so with
+    /// its spinner row (`✻ Working…`) and the queued rows' `ctrl+x ctrl+s to
+    /// send now`: either alone reads Working (ov-392). A turn's done line
+    /// (`✻ Worked for 3s`) has no ellipsis and doesn't.
     #[test]
-    fn a_queued_long_paste_hides_the_turn_from_the_screen() {
+    fn a_queued_long_paste_still_reads_working() {
+        use farcooler_protocol::v1::AgentActivity::{Idle, Working};
+        let classify = |screen: &str| crate::activity::Registry::built_in().classify("claude", screen);
         let screen = capture("claude-2.1.290-working-queued-long-paste-120x45-e.txt");
-        let classify = crate::activity::Registry::built_in().classify("claude", &screen);
-        assert_eq!(classify, farcooler_protocol::v1::AgentActivity::Idle);
-        assert_eq!(read("claude", &screen), Composer::Empty);
         assert!(crate::composer::printed(&screen).contains("paste again to expand"));
+        assert_eq!(read("claude", &screen), Composer::Empty);
+        assert_eq!(classify(&screen), Working);
+        let no_spinner = screen.replace("Working… ", "");
+        assert!(!crate::composer::printed(&no_spinner).contains("Working"));
+        assert_eq!(classify(&no_spinner), Working, "the queued rows alone");
+        let no_queue = screen.replace("ctrl+x ctrl+s to send now", "");
+        assert_eq!(classify(&no_queue), Working, "the spinner alone");
+        let done = no_queue.replace("Working… ", "Worked for 3s · done");
+        assert_eq!(classify(&done), Idle, "a done line");
     }
 }

@@ -96,6 +96,11 @@ pub struct AgentRules {
     /// Actively doing something.
     pub working: Vec<String>,
 
+    /// Glyphs that open a working spinner row: one of these, a space, then a
+    /// word ending in `…` (claude's `✻ Working…`, `✢ Puttering…`), on a footer
+    /// line. A word and not a needle, because the word changes every second.
+    pub spinner: Vec<String>,
+
     /// How many lines from the bottom `blocked` and `working` may look at.
     ///
     /// The fix for an agent that read `Working` for thirty-three hours because
@@ -312,7 +317,14 @@ impl Registry {
                         // hazard rather than offered as evidence.
                         "· ↓ to manage",
                         "◯ ",
+                        // A message queued mid-turn, drawn above the spinner
+                        // until the turn ends (2.1.290). After a long paste the
+                        // footer keeps `paste again to expand` where `esc to
+                        // interrupt` was, so this and the spinner are what say
+                        // it works (`claude-2.1.290-working-queued-long-paste`).
+                        "ctrl+x ctrl+s to send now",
                     ]),
+                    spinner: s(&["✻", "✢", "✳", "✶", "✽", "·", "*"]),
                     footer_lines: DEFAULT_FOOTER_LINES,
                     adapter: npx("@agentclientprotocol/claude-agent-acp"),
                 },
@@ -339,6 +351,7 @@ impl Registry {
                         "(y/N)",
                     ]),
                     working: s(&["esc to interrupt", "Working ("]),
+                    spinner: Vec::new(),
                     footer_lines: DEFAULT_FOOTER_LINES,
                     // NOT `@zed-industries/codex-acp`: npm reports it deprecated
                     // and replaced by this one, and it stalled at 0.16.0 against
@@ -415,6 +428,7 @@ impl Registry {
                     // and gone the moment it finishes (captures/opencode-working2.txt
                     // has it, captures/opencode-idle2.txt right after does not).
                     working: s(&["esc interrupt"]),
+                    spinner: Vec::new(),
                     footer_lines: DEFAULT_FOOTER_LINES,
                     // Native ACP subcommand, so no npm package to be renamed
                     // or deprecated out from under it — unlike every other
@@ -455,6 +469,7 @@ impl Registry {
                     // that is sometimes there is worse than none: it makes the
                     // absence of the string mean nothing at all.
                     working: s(&["ctrl+c to stop"]),
+                    spinner: Vec::new(),
                     footer_lines: DEFAULT_FOOTER_LINES,
                     // Best-effort, and knowingly so. `cursor-agent-acp` is
                     // third-party, sits at 0.1.1 and was last published in
@@ -638,6 +653,7 @@ impl Registry {
                     identity: cfg.identity,
                     blocked: cfg.blocked,
                     working: cfg.working,
+                    spinner: Vec::new(),
                     footer_lines: DEFAULT_FOOTER_LINES,
                     adapter: Some(spec),
                 }),
@@ -761,6 +777,17 @@ pub fn footer_lines(screen: &str, lines: usize) -> Vec<String> {
         .collect()
 }
 
+/// Whether a footer line is a spinner row (`AgentRules::spinner`): a glyph,
+/// a space, and a first word ending in `…`. A done line (`✻ Worked for 3s`)
+/// has no ellipsis.
+fn spinning(rules: &AgentRules, screen: &str) -> bool {
+    footer_lines(screen, rules.footer_lines).iter().any(|line| {
+        let mut words = line.split(' ');
+        let glyph = words.next().unwrap_or_default();
+        rules.spinner.iter().any(|g| g == glyph) && words.next().is_some_and(|w| w.chars().count() > 1 && w.ends_with('…'))
+    })
+}
+
 /// The bottom `lines` lines as one string, for substring matching.
 ///
 /// Joined with a space rather than a newline so a signature that wrapped across
@@ -801,7 +828,7 @@ impl Registry {
         if rules.blocked.iter().any(|needle| footer.contains(needle.as_str())) {
             return AgentActivity::Blocked;
         }
-        if rules.working.iter().any(|needle| footer.contains(needle.as_str())) {
+        if rules.working.iter().any(|needle| footer.contains(needle.as_str())) || spinning(rules, screen) {
             return AgentActivity::Working;
         }
         // Identified, not asking, not busy: it is sitting there. Requiring positive

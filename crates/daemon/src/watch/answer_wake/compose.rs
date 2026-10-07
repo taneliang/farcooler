@@ -61,7 +61,7 @@ use farcooler_store::models::{PaneMode, Terminal};
 use uuid::Uuid;
 
 use super::tell::held_word;
-use super::{PASTE_POLL, PASTE_SETTLES, TOLD_SPACING_MS, Turn, foreground_agent, may_be_typed_to, mid_turn, queues_mid_turn};
+use super::{PASTE_POLL, PASTE_SETTLES, TOLD_SPACING_MS, Turn, foreground_agent, may_be_typed_to, mid_turn, queues_mid_turn, registry_turn};
 use crate::runtime::{Runtime, last_input};
 use crate::watch::{Watcher, now_millis};
 
@@ -418,15 +418,18 @@ struct Confirm {
 }
 
 /// claude's session and transcript, from its process (`mid_turn`), and
-/// whether its registry says a turn is running (`"status":"busy"`, as
-/// claude 2.1.290 writes it; `"idle"` between turns).
+/// whether its registry says anything but idle (`registry_turn`): `busy`,
+/// `shell`, no status. `None` without a live registry entry, read through
+/// `claude_registry` with its `procStart` check, so a stale file is nothing.
 async fn session_of(pid: i32) -> Option<(String, PathBuf, bool)> {
-    let config = mid_turn::config_dir(&mid_turn::process_env(pid).await?)?;
+    let config = registry_turn::config_of(pid).await?;
+    let not_idle = match registry_turn::said(&config, pid) {
+        registry_turn::Said::Idle => false,
+        registry_turn::Said::NotIdle => true,
+        registry_turn::Said::Nothing => return None,
+    };
     let (session, transcript) = mid_turn::transcript_in(&config, pid)?;
-    let registry = std::fs::read_to_string(config.join("sessions").join(format!("{pid}.json"))).ok();
-    let registry: Option<serde_json::Value> = registry.and_then(|r| serde_json::from_str(&r).ok());
-    let busy = registry.is_some_and(|r| r.get("status").and_then(|s| s.as_str()) == Some("busy"));
-    Some((session, transcript, busy))
+    Some((session, transcript, not_idle))
 }
 
 /// An image's path as pasted: as is, or in single quotes when it has a

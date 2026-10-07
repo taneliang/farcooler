@@ -585,8 +585,9 @@ impl Watcher {
 
     /// Checks 3 to 5 of the gate, for a TUI pane: the agent in front proven
     /// by its process, its box recognized and empty, and bracketed paste on.
-    /// Returns the proven agent and whether a turn is running, or why not.
-    /// Every check fails closed.
+    /// Returns the proven agent and whether a turn is running, or why not:
+    /// for claude, running whenever its registry says anything but idle,
+    /// whatever the screen says (`registry_turn`). Every check fails closed.
     async fn proven_tui(&self, to: &Terminal) -> std::result::Result<Proven, Held> {
         let (preset, tty, pid) = self.proven_agent(to).await?;
         let Ok(composer) = self.box_of(to, preset).await else { return Err(Held::Unfamiliar) };
@@ -611,6 +612,10 @@ impl Watcher {
         if !bracketed {
             return Err(Held::Unfamiliar);
         }
+        // A screen that reads between turns while claude's registry says it
+        // works (ov-392): mid-turn, so an Enter goes in only under the fence.
+        let not_idle = || async { registry_turn::said_of(pid).await == registry_turn::Said::NotIdle };
+        let turn = if preset == "claude" && turn == Turn::Between && not_idle().await { Turn::During } else { turn };
         Ok(Proven { preset, tty, pid, turn })
     }
 
@@ -965,6 +970,7 @@ mod compose;
 pub(crate) mod draft_hold;
 mod finish;
 pub(crate) mod mid_turn;
+pub(crate) mod registry_turn;
 mod tell;
 #[cfg(test)]
 mod tests;

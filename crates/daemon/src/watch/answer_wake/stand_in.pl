@@ -45,6 +45,9 @@ my ($pasted, %whole) = (0);
 my @commands = (["/init", "", "Initialize a new CLAUDE.md file"], ["/usage", "cost", "Show session cost"],
     ["/model", "", "Set the AI model"], ["/compact", "", "Free up context"]);
 my ($transcript, $registry, $registry_cwd);
+# This process's start in UTC, as claude writes `procStart`.
+my $started = `TZ=UTC ps -o lstart= -p $$`;
+$started =~ s/^\s+|\s+$//g;
 if ($agent eq 'claude' && ($ENV{CLAUDE_CONFIG_DIR} // '') ne '') {
     use Cwd qw(getcwd);
     my ($config, $cwd) = ($ENV{CLAUDE_CONFIG_DIR}, getcwd());
@@ -62,7 +65,8 @@ if ($agent eq 'claude' && ($ENV{CLAUDE_CONFIG_DIR} // '') ne '') {
 sub registry {
     return unless defined $registry;
     open(my $f, '>:utf8', $registry) or die;
-    print $f '{"pid":' . $$ . ',"sessionId":"stand-in","cwd":' . json($registry_cwd) . ',"status":"' . $_[0] . '"}';
+    print $f '{"pid":' . $$ . ',"sessionId":"stand-in","cwd":' . json($registry_cwd) . ',"procStart":' . json($started)
+        . ',"status":"' . $_[0] . '"}';
     close $f;
 }
 
@@ -80,7 +84,7 @@ sub record {
     close $f;
 }
 
-sub working { return $_[0] eq 'working' || $_[0] eq 'working-quiet' || $_[0] eq 'working-hidden' }
+sub working { return $_[0] =~ /^working(-quiet|-hidden|-long)?$/ }
 
 # The command claude's popup highlights for the box, or undef with no popup.
 sub highlighted {
@@ -163,8 +167,9 @@ sub draw {
             push @rows, $rule, "❯\x{a0}" . $first, (map { "  $_" } @box), $rule;
             # claude drops `esc to interrupt` while its box holds something.
             # After a long paste claude 2.1.290 keeps `paste again to expand`
-            # there, working or not (`working-hidden`).
-            push @rows, $mode eq 'working-hidden' ? "  paste again to expand"
+            # there, working or not: `working-long`, with its spinner row
+            # above the box, as claude draws it; `working-hidden`, with none.
+            push @rows, $mode =~ /^working-(hidden|long)$/ ? "  paste again to expand"
                 : working($mode) && $composer eq "" ? "  ⏸ manual mode on · esc to interrupt"
                 : working($mode) ? "  ⏸ manual mode on" : "  ⏸ manual mode on · ? for shortcuts";
         }
