@@ -5,6 +5,7 @@
 //! implies. See `initialize_request` and `version_of`.
 
 use farcooler_agent_core::backend::{BackendError, Launch};
+use farcooler_agent_core::stderr::{drain, why};
 
 /// The version this crate's understanding of the protocol was generated
 /// against.
@@ -111,9 +112,6 @@ pub fn check_version(found: &str, expected: &str) -> Result<(), BackendError> {
     Err(BackendError::Incompatible { found: found.to_string(), expected: expected.to_string() })
 }
 
-/// How long a failed handshake waits for a dead codex's stderr to end.
-const STDERR_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
-
 /// Start `codex app-server`, send `initialize`, and read until it answers.
 ///
 /// Blocking, like the ACP handshake it sits beside, and for the same reason:
@@ -147,8 +145,8 @@ pub fn handshake(launch: &Launch, timeout: std::time::Duration) -> Result<String
         let _ = child.wait();
         // A broken pipe here is the same death as "closed without
         // answering", only quicker, so it says why the same way.
-        let said = stderr.recv_timeout(STDERR_GRACE).ok();
-        return Err(match said.as_deref().and_then(reason_in) {
+        let said = why(&stderr);
+        return Err(match said {
             Some(reason) => format!("could not talk to `{shown}`: {e}: {reason}"),
             None => format!("could not talk to `{shown}`: {e}"),
         });
@@ -192,8 +190,8 @@ pub fn handshake(launch: &Launch, timeout: std::time::Duration) -> Result<String
     // ended and the wait is for the drain thread to notice — bounded all the
     // same, because a grandchild could still hold the pipe open.
     let value = answer.map_err(|e| {
-        let said = closed.then(|| stderr.recv_timeout(STDERR_GRACE).ok()).flatten();
-        match said.as_deref().and_then(reason_in) {
+        let said = closed.then(|| why(&stderr)).flatten();
+        match said {
             Some(reason) => format!("{e}: {reason}"),
             None => e,
         }
@@ -218,51 +216,6 @@ pub fn handshake(launch: &Launch, timeout: std::time::Duration) -> Result<String
     check_version(&version, PINNED_CODEX_VERSION).map_err(|e| e.to_string())?;
 
     Ok(format!("codex app-server {version}"))
-}
-
-/// The one line of a dead codex's stderr that says why it died.
-///
-/// Node's uncaught-error report opens with the source line and a caret and
-/// closes with a stack and the node version, so neither the first nor the last
-/// line is the reason: the line starting `Error:` is. A Rust codex that refuses
-/// its arguments says `error: …` instead. Anything else falls back to the last
-/// thing said. Capped, because this ends up in a one-line status.
-fn reason_in(stderr: &str) -> Option<String> {
-    let lines = || stderr.lines().map(str::trim).filter(|l| !l.is_empty());
-    let line = lines()
-        .find(|l| l.starts_with("Error:") || l.starts_with("error:"))
-        .or_else(|| lines().next_back())?;
-    const CAP: usize = 300;
-    if line.chars().count() > CAP {
-        Some(line.chars().take(CAP).chain(['…']).collect())
-    } else {
-        Some(line.to_string())
-    }
-}
-
-/// Read a child's stderr to its end on a thread of its own, keeping the head.
-///
-/// Read to the end rather than stopping at the cap, so a chatty child never
-/// blocks on a full pipe; only the first 64 KiB is kept, which is where a
-/// startup failure puts its reason.
-fn drain(stderr: std::process::ChildStderr) -> std::sync::mpsc::Receiver<String> {
-    use std::io::Read;
-    const KEEP: usize = 64 * 1024;
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let mut stderr = stderr;
-        let mut kept = Vec::new();
-        let mut chunk = [0u8; 4096];
-        while let Ok(n) = stderr.read(&mut chunk) {
-            if n == 0 {
-                break;
-            }
-            let room = KEEP.saturating_sub(kept.len());
-            kept.extend_from_slice(&chunk[..n.min(room)]);
-        }
-        let _ = tx.send(String::from_utf8_lossy(&kept).into_owned());
-    });
-    rx
 }
 
 #[cfg(test)]
@@ -379,22 +332,6 @@ mod tests {
             "and says why, in codex's words: {e}"
         );
         assert!(!e.contains("findCodexExecutable"), "but not node's stack: {e}");
-    }
-
-    #[test]
-    fn the_reason_is_the_error_line_or_else_the_last_thing_said() {
-        assert_eq!(
-            reason_in("file:///x.js:1\n\nError: it broke\n    at f (x.js:1)\n\nNode.js v24\n")
-                .as_deref(),
-            Some("Error: it broke")
-        );
-        assert_eq!(
-            reason_in("starting\nerror: unexpected argument 'app-server'\n").as_deref(),
-            Some("error: unexpected argument 'app-server'")
-        );
-        assert_eq!(reason_in("first\nlast words\n\n").as_deref(), Some("last words"));
-        assert_eq!(reason_in(" \n\n"), None);
-        assert_eq!(reason_in(&"x".repeat(1000)).map(|r| r.chars().count()), Some(301));
     }
 
     #[test]

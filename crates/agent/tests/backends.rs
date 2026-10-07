@@ -32,6 +32,50 @@ fn npm_package(spec: &farcooler_core::activity::AdapterSpec) -> Option<&str> {
         .map(|s| s.as_str())
 }
 
+/// The adapter versions the handshake test runs, from `.github/acp-adapters.txt`
+/// (ov-414), as `(package, version)`.
+///
+/// An unpinned `npx -y <package>` takes whatever npm calls newest, so a publish
+/// made minutes before a CI run, with a platform binary or a dependency still
+/// missing, turned main red for reasons no commit caused. The file is the only
+/// record of the pins: the workflows read it too.
+fn pins() -> Vec<(String, String)> {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../.github/acp-adapters.txt");
+    let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("reading {path}: {e}"));
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(|spec| match spec.rsplit_once('@') {
+            Some((package, version)) if !package.is_empty() => {
+                (package.to_string(), version.to_string())
+            }
+            _ => panic!("{path}: `{spec}` is not package@version"),
+        })
+        .collect()
+}
+
+/// The spec to run: the pinned version of its package, or the newest when
+/// `FARCOOLER_ACP_LATEST` is set (the daily run of `agent-clis-latest.yml`).
+///
+/// Panics on an npx adapter with no pin, because a package that silently runs
+/// unpinned is the failure the pins are for.
+fn pinned(
+    spec: &farcooler_core::activity::AdapterSpec,
+    pins: &[(String, String)],
+    latest: bool,
+) -> farcooler_core::activity::AdapterSpec {
+    let mut spec = spec.clone();
+    let Some(package) = npm_package(&spec).map(str::to_string) else { return spec };
+    let Some((_, version)) = pins.iter().find(|(p, _)| *p == package) else {
+        panic!("{package} is launched with npx but has no line in .github/acp-adapters.txt")
+    };
+    if !latest {
+        let at = spec.args.iter().position(|a| *a == package).expect("found by npm_package");
+        spec.args[at] = format!("{package}@{version}");
+    }
+    spec
+}
+
 /// Build the tree `npx` runs, before the handshake starts timing it.
 ///
 /// The handshake's 90-second bound is there to catch an adapter that starts and
@@ -161,9 +205,14 @@ fn every_built_in_backend_completes_a_handshake() {
     // dependency graph.
     use farcooler_agent::dispatch::{HANDSHAKE_TIMEOUT, handshake};
 
+    let pins = pins();
+    let latest = std::env::var_os("FARCOOLER_ACP_LATEST").is_some();
+    let mut seen = Vec::new();
     let mut failures = Vec::new();
     for rules in Registry::built_in().all() {
         let Some(spec) = &rules.adapter else { continue };
+        seen.extend(npm_package(spec).map(str::to_string));
+        let spec = &pinned(spec, &pins, latest);
         // Installing is npm's to be slow at; the handshake below is timing the
         // adapter. An adapter that cannot be installed is still a failure, so
         // nothing here can pass by being unable to try — it just says which of
@@ -178,6 +227,8 @@ fn every_built_in_backend_completes_a_handshake() {
             failures.push(format!("{}: {e}", rules.preset));
         }
     }
+    let stale: Vec<_> = pins.iter().filter(|(p, _)| !seen.contains(p)).collect();
+    assert!(stale.is_empty(), "acp-adapters.txt pins packages no preset launches: {stale:?}");
     assert!(
         failures.is_empty(),
         "adapters that could not handshake:\n{}",
@@ -238,4 +289,50 @@ fn the_claude_native_backend_handshakes_against_the_installed_binary() {
     let reported = handshake("claude", &spec, HANDSHAKE_TIMEOUT)
         .unwrap_or_else(|e| panic!("claude stream-json handshake failed: {e}"));
     assert!(reported.contains("stream-json"), "names what answered: {reported}");
+}
+
+// The pins are checked on every run, not only the live one: this needs no
+// network, so a preset added without a pin fails the ordinary test run rather
+// than waiting for the live handshake to find it.
+
+#[test]
+fn every_built_in_npx_adapter_has_a_pin_and_every_pin_a_preset() {
+    let pins = pins();
+    let mut launched = Vec::new();
+    for rules in Registry::built_in().all() {
+        let Some(spec) = &rules.adapter else { continue };
+        let Some(package) = npm_package(spec) else { continue };
+        let pinned_spec = pinned(spec, &pins, false);
+        let shown = npm_package(&pinned_spec).unwrap().to_string();
+        assert!(shown.starts_with(&format!("{package}@")), "{} runs {shown}", rules.preset);
+        launched.push(package.to_string());
+    }
+    assert!(!launched.is_empty(), "no npx adapter found: the check is not looking");
+    for (package, version) in &pins {
+        assert!(launched.contains(package), "{package} is pinned and no preset launches it");
+        assert!(!version.is_empty(), "{package} has an empty version");
+    }
+}
+
+#[test]
+fn the_latest_run_leaves_the_package_unpinned() {
+    let pins = pins();
+    for rules in Registry::built_in().all() {
+        let Some(spec) = &rules.adapter else { continue };
+        if let Some(package) = npm_package(spec) {
+            let spec = pinned(spec, &pins, true);
+            assert_eq!(npm_package(&spec), Some(package), "{}", rules.preset);
+        }
+    }
+}
+
+#[test]
+#[should_panic(expected = "has no line in .github/acp-adapters.txt")]
+fn an_npx_adapter_with_no_pin_is_refused_rather_than_run_newest() {
+    let spec = farcooler_core::activity::AdapterSpec {
+        program: "npx".into(),
+        args: vec!["-y".into(), "some-new-acp".into()],
+        ..Default::default()
+    };
+    pinned(&spec, &pins(), false);
 }

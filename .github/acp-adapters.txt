@@ -1,0 +1,19 @@
+# The npx ACP adapters the live handshake test runs, pinned (ov-414).
+#
+# One package@version per line; `#` starts a comment. The built-in presets in
+# crates/core/src/activity.rs launch these with `npx -y <package>`, which takes
+# whatever npm calls newest, so the test `every_built_in_backend_completes_a_
+# handshake` runs these versions instead and a bad publish cannot turn main red.
+# The test also fails when a built-in npx adapter has no line here, or a line
+# names a package no preset launches.
+#
+# agent-clis-latest.yml sets FARCOOLER_ACP_LATEST=1 and runs the same test on
+# the newest versions once a day, and opens an issue when that fails. The
+# product itself stays unpinned on purpose: users should get an adapter fix
+# the day it ships, and a pin would strand them on a stale one.
+#
+# To move a pin: wait for the scheduled run to go green on the new version (or
+# run it by hand), then change the line here.
+@agentclientprotocol/claude-agent-acp@0.86.0
+@agentclientprotocol/codex-acp@2.1.1
+cursor-agent-acp@0.1.1

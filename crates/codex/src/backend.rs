@@ -14,6 +14,8 @@ impl From<CodexError> for BackendError {
             CodexError::Spawn => BackendError::Spawn,
             CodexError::Closed => BackendError::Closed,
             CodexError::Refused(message) => BackendError::Refused(message),
+            // Died at startup: the agent's own words, which a refusal carries.
+            e @ CodexError::Died(_) => BackendError::Refused(e.to_string()),
         }
     }
 }

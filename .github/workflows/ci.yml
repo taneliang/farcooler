@@ -590,6 +590,9 @@ jobs:
       # in crates/agent. They need the binaries and no sign-in. Run by target
       # so nothing else that is `#[ignore]` comes along.
       #
+      # The npx adapters run at the versions pinned in .github/acp-adapters.txt
+      # (ov-414), as the CLIs above do; agent-clis-latest.yml runs the newest.
+      #
       # Not here, because they need a signed-in agent and this runner has none:
       # the `live_turn` tests in crates/claude and crates/codex, and
       # `crates/core/tests/live_agents.rs`. The live_turn tests used to run

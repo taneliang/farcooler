@@ -6,6 +6,7 @@
 //! learned rather than assumed.
 
 use farcooler_agent_core::backend::{BackendError, Launch};
+use farcooler_agent_core::stderr::{drain, why};
 
 /// The CLI version this crate's understanding of the protocol was confirmed
 /// against.
@@ -126,7 +127,9 @@ pub fn handshake(launch: &Launch, timeout: std::time::Duration) -> Result<String
         .current_dir(std::env::temp_dir())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        // Piped, not discarded: a claude that dies before answering says why
+        // on stderr and nowhere else (ov-414, as codex's handshake does).
+        .stderr(Stdio::piped());
     for var in NESTING_VARS {
         command.env_remove(var);
     }
@@ -134,6 +137,7 @@ pub fn handshake(launch: &Launch, timeout: std::time::Duration) -> Result<String
     let mut child = command
         .spawn()
         .map_err(|e| format!("could not start `{shown}`: {e}"))?;
+    let stderr = drain(child.stderr.take().expect("piped"));
 
     let mut stdin = child.stdin.take().expect("piped");
     let sent = writeln!(stdin, "{}", control_request("1", "initialize"))
@@ -142,7 +146,10 @@ pub fn handshake(launch: &Launch, timeout: std::time::Duration) -> Result<String
     if let Err(e) = sent {
         let _ = child.kill();
         let _ = child.wait();
-        return Err(format!("could not talk to `{shown}`: {e}"));
+        return Err(match why(&stderr) {
+            Some(reason) => format!("could not talk to `{shown}`: {e}: {reason}"),
+            None => format!("could not talk to `{shown}`: {e}"),
+        });
     }
 
     let stdout = child.stdout.take().expect("piped");
@@ -197,13 +204,18 @@ pub fn handshake(launch: &Launch, timeout: std::time::Duration) -> Result<String
         let _ = tx.send(result);
     });
 
-    let answer = rx
-        .recv_timeout(timeout)
-        .unwrap_or_else(|_| Err("claude started and then went silent".to_string()));
+    // `closed`: stdout ended on its own, as opposed to the bound running out.
+    let (answer, closed) = match rx.recv_timeout(timeout) {
+        Ok(answer) => (answer, true),
+        Err(_) => (Err("claude started and then went silent".to_string()), false),
+    };
     let _ = child.kill();
     let _ = child.wait();
 
-    let version = answer?;
+    let version = answer.map_err(|e| match closed.then(|| why(&stderr)).flatten() {
+        Some(reason) => format!("{e}: {reason}"),
+        None => e,
+    })?;
     check_version(&version, PINNED_CLAUDE_VERSION).map_err(|e| e.to_string())?;
     Ok(format!("claude stream-json {version}"))
 }
@@ -211,6 +223,29 @@ pub fn handshake(launch: &Launch, timeout: std::time::Duration) -> Result<String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_claude_that_exits_unanswered_is_reported_in_its_own_words() {
+        // The codex failure of Oct 7 (ov-410) had one cause: stderr went to
+        // /dev/null. The same must not be true of claude (ov-414).
+        use std::os::unix::fs::PermissionsExt;
+        // A script file, because `handshake` puts the stream-json flags before
+        // anything else, and `sh -c` would take them for its own options.
+        let path = std::env::temp_dir()
+            .join(format!("farcooler-claude-handshake-{}-unanswered", std::process::id()));
+        std::fs::write(
+            &path,
+            "#!/bin/sh\nread request\necho 'error: unknown option --verbose' >&2\nexit 2\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let launch = Launch { program: path.clone(), args: Vec::new(), env: Default::default() };
+        let result = handshake(&launch, std::time::Duration::from_secs(60));
+        let _ = std::fs::remove_file(&path);
+        let e = result.expect_err("died");
+        assert!(e.contains("closed without answering"), "{e}");
+        assert!(e.contains("error: unknown option --verbose"), "{e}");
+    }
 
     #[test]
     fn the_launch_flags_are_the_ones_the_sdk_uses() {

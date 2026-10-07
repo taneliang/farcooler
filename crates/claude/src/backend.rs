@@ -14,6 +14,8 @@ impl From<ClaudeError> for BackendError {
             ClaudeError::Spawn => BackendError::Spawn,
             ClaudeError::Closed => BackendError::Closed,
             ClaudeError::Refused(message) => BackendError::Refused(message),
+            // Died at startup: the agent's own words, which a refusal carries.
+            e @ ClaudeError::Died(_) => BackendError::Refused(e.to_string()),
         }
     }
 }

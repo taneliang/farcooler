@@ -11,4 +11,5 @@ pub mod event;
 pub mod fs_guard;
 pub mod markup;
 pub mod permission;
+pub mod stderr;
 pub mod usage;

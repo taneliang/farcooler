@@ -11,6 +11,7 @@
 //! still ONE implementation rather than two that agree today.
 
 use farcooler_agent_core::backend::Launch;
+use farcooler_agent_core::stderr::{drain, why};
 
 /// How long to wait for `initialize` to answer before treating the adapter as
 /// wedged, when the caller has no reason to pick a different bound.
@@ -83,9 +84,12 @@ pub fn handshake(
         .current_dir(std::env::temp_dir())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        // Piped, not discarded: an adapter that dies before answering says why
+        // on stderr and nowhere else (ov-414, as codex's handshake does).
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("could not start `{shown}`: {e}"))?;
+    let stderr = drain(child.stderr.take().expect("piped"));
 
     let request = serde_json::json!({
         "jsonrpc": "2.0", "id": 1, "method": "initialize",
@@ -96,7 +100,12 @@ pub fn handshake(
     if let Err(e) = sent {
         let _ = child.kill();
         let _ = child.wait();
-        return Err(format!("could not talk to `{shown}`: {e}"));
+        // A broken pipe is the same death as "closed without answering", only
+        // quicker, so it says why the same way.
+        return Err(match why(&stderr) {
+            Some(reason) => format!("could not talk to `{shown}`: {e}: {reason}"),
+            None => format!("could not talk to `{shown}`: {e}"),
+        });
     }
 
     let stdout = child.stdout.take().expect("piped");
@@ -123,13 +132,21 @@ pub fn handshake(
         let _ = tx.send(result);
     });
 
-    let answer = rx.recv_timeout(timeout).unwrap_or_else(|_| {
-        Err("the adapter started and then went silent".to_string())
-    });
+    // `closed`: the reader finished on its own, so stdout ended, as opposed to
+    // the bound running out on an adapter that is still alive.
+    let (answer, closed) = match rx.recv_timeout(timeout) {
+        Ok(answer) => (answer, true),
+        Err(_) => (Err("the adapter started and then went silent".to_string()), false),
+    };
     let _ = child.kill();
     let _ = child.wait();
 
-    let value = answer?;
+    // Only when stdout closed on its own, which is how an adapter that died at
+    // startup looks. The child is reaped, so its stderr has ended.
+    let value = answer.map_err(|e| match closed.then(|| why(&stderr)).flatten() {
+        Some(reason) => format!("{e}: {reason}"),
+        None => e,
+    })?;
     // An `error` member is a well-formed refusal, not a success. Reported as the
     // adapter's own words rather than as "handshake failed", because the message
     // is the only clue about which parameter it disliked.
@@ -229,6 +246,27 @@ mod tests {
         );
         let failure = handshake(&launch, std::time::Duration::from_secs(10)).expect_err("refused");
         assert_eq!(failure, "unsupported protocolVersion");
+    }
+
+    #[test]
+    fn an_adapter_that_exits_unanswered_is_reported_in_its_own_words() {
+        // The shape of the codex failure of Oct 7 (ov-410), for an npx adapter
+        // (ov-414): node's report on stderr, nothing on stdout, exit 1.
+        let launch = Launch {
+            program: "/bin/sh".into(),
+            args: vec![
+                "-c".into(),
+                "read line; echo 'file:///x/index.js:9' >&2; echo >&2; \
+                 echo 'Error: Cannot find module zod' >&2; \
+                 echo '    at load (file:///x/index.js:9:1)' >&2; echo 'Node.js v24' >&2; exit 1"
+                    .into(),
+            ],
+            env: Default::default(),
+        };
+        let failure = handshake(&launch, std::time::Duration::from_secs(60)).expect_err("died");
+        assert!(failure.contains("closed without answering"), "{failure}");
+        assert!(failure.contains("Error: Cannot find module zod"), "{failure}");
+        assert!(!failure.contains("at load"), "not node's stack: {failure}");
     }
 
     #[test]

@@ -14,9 +14,10 @@
 use std::path::PathBuf;
 use std::process::Stdio;
 
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
-use tokio::sync::mpsc;
+use farcooler_agent_core::stderr::{GRACE, Head, reason_in};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
+use tokio::sync::{mpsc, oneshot};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CodexError {
@@ -24,6 +25,12 @@ pub enum CodexError {
     Spawn,
     #[error("codex app-server closed its connection")]
     Closed,
+    /// Closed during startup, with the reason it left on stderr (ov-414).
+    ///
+    /// Its own variant so `Closed` keeps meaning what `adapter_is_gone` takes
+    /// it to mean; it reaches a caller as a refusal, in the agent's words.
+    #[error("codex app-server closed its connection: {0}")]
+    Died(String),
     /// The server answered with a JSON-RPC error. Carries its own words.
     #[error("codex app-server refused: {0}")]
     Refused(String),
@@ -152,6 +159,10 @@ pub struct CodexConnection {
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
     child: Child,
+    /// What the process said on stderr, once it ends. Read only to explain a
+    /// death during startup; after `split` nothing reads it, and the task
+    /// that fills it ends with the process.
+    stderr: Option<oneshot::Receiver<String>>,
     next_id: u64,
     pub worktree: PathBuf,
     /// Notifications seen while waiting for a response, kept in order.
@@ -162,7 +173,34 @@ pub struct CodexConnection {
     pending: Vec<(String, serde_json::Value)>,
 }
 
+/// Read a child's stderr to its end on a task of its own, keeping the head.
+fn keep_stderr(mut stderr: ChildStderr) -> oneshot::Receiver<String> {
+    let (tx, rx) = oneshot::channel();
+    tokio::spawn(async move {
+        let mut head = Head::default();
+        let mut chunk = [0u8; 4096];
+        while let Ok(n) = stderr.read(&mut chunk).await {
+            if n == 0 {
+                break;
+            }
+            head.push(&chunk[..n]);
+        }
+        let _ = tx.send(head.text());
+    });
+    rx
+}
+
 impl CodexConnection {
+    /// The error for a pipe that has closed during startup: codex's own
+    /// stderr reason when it left one, waited for up to `GRACE`.
+    async fn closed(&mut self) -> CodexError {
+        let Some(stderr) = self.stderr.take() else { return CodexError::Closed };
+        match tokio::time::timeout(GRACE, stderr).await {
+            Ok(Ok(text)) => reason_in(&text).map(CodexError::Died).unwrap_or(CodexError::Closed),
+            _ => CodexError::Closed,
+        }
+    }
+
     pub async fn spawn(
         program: &std::path::Path,
         args: &[String],
@@ -175,16 +213,20 @@ impl CodexConnection {
             .current_dir(&worktree)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            // Piped, not discarded: a process that dies during startup says why
+            // on stderr and nowhere else (ov-410, ov-414).
+            .stderr(Stdio::piped())
             .kill_on_drop(true)
             .spawn()
             .map_err(|_| CodexError::Spawn)?;
         let stdin = child.stdin.take().ok_or(CodexError::Spawn)?;
         let stdout = child.stdout.take().ok_or(CodexError::Spawn)?;
+        let stderr = child.stderr.take().map(keep_stderr);
         Ok(CodexConnection {
             stdin,
             stdout: BufReader::new(stdout),
             child,
+            stderr,
             next_id: 1,
             worktree,
             pending: Vec::new(),
@@ -192,11 +234,16 @@ impl CodexConnection {
     }
 
     async fn write(&mut self, value: serde_json::Value) -> Result<(), CodexError> {
-        self.stdin
-            .write_all(format!("{value}\n").as_bytes())
-            .await
-            .map_err(|_| CodexError::Closed)?;
-        self.stdin.flush().await.map_err(|_| CodexError::Closed)
+        let line = format!("{value}\n");
+        let sent = match self.stdin.write_all(line.as_bytes()).await {
+            Ok(()) => self.stdin.flush().await,
+            Err(e) => Err(e),
+        };
+        match sent {
+            Ok(()) => Ok(()),
+            // A broken pipe is a death, and the reason is on stderr.
+            Err(_) => Err(self.closed().await),
+        }
     }
 
     pub async fn notify(
@@ -222,9 +269,9 @@ impl CodexConnection {
 
         loop {
             let mut line = String::new();
-            let read = self.stdout.read_line(&mut line).await.map_err(|_| CodexError::Closed)?;
-            if read == 0 {
-                return Err(CodexError::Closed);
+            match self.stdout.read_line(&mut line).await {
+                Ok(n) if n > 0 => {}
+                _ => return Err(self.closed().await),
             }
             let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
                 continue;
@@ -333,5 +380,54 @@ mod tests {
         };
         assert_eq!(id, serde_json::json!(3));
         assert_eq!(message, "unauthorized: run `codex login`");
+    }
+
+    /// A stand-in codex that does what npm's launcher did on Oct 7 (ov-410):
+    /// takes the first request, prints node's report on stderr, and exits.
+    async fn spawn_a_dying_codex() -> (CodexConnection, std::path::PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let path = std::env::temp_dir()
+            .join(format!("farcooler-codex-conn-{}-dying", std::process::id()));
+        std::fs::write(
+            &path,
+            concat!(
+                "#!/bin/sh\nread request\n",
+                "echo 'file:///x/codex.js:107' >&2\n",
+                "echo 'Error: Missing optional dependency @x/codex-linux-x64' >&2\n",
+                "echo '    at find (file:///x/codex.js:107:9)' >&2\n",
+                "exit 1\n",
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let conn = CodexConnection::spawn(&path, &[], &Default::default(), std::env::temp_dir())
+            .await
+            .unwrap();
+        (conn, path)
+    }
+
+    #[tokio::test]
+    async fn a_codex_that_dies_during_startup_is_reported_in_its_own_words() {
+        let (mut conn, path) = spawn_a_dying_codex().await;
+        let result = conn.request("initialize", serde_json::json!({})).await;
+        let _ = std::fs::remove_file(&path);
+        let Err(CodexError::Died(reason)) = result else {
+            panic!("a death during startup must carry its reason, got {result:?}")
+        };
+        assert_eq!(reason, "Error: Missing optional dependency @x/codex-linux-x64");
+    }
+
+    #[tokio::test]
+    async fn a_codex_that_dies_silently_is_just_closed() {
+        use std::os::unix::fs::PermissionsExt;
+        let path = std::env::temp_dir()
+            .join(format!("farcooler-codex-conn-{}-mute", std::process::id()));
+        std::fs::write(&path, "#!/bin/sh\nread request\nexit 1\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut conn =
+            CodexConnection::spawn(&path, &[], &Default::default(), std::env::temp_dir()).await.unwrap();
+        let result = conn.request("initialize", serde_json::json!({})).await;
+        let _ = std::fs::remove_file(&path);
+        assert!(matches!(result, Err(CodexError::Closed)), "{result:?}");
     }
 }
