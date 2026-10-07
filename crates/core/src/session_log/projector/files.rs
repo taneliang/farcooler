@@ -15,7 +15,9 @@
 //!
 //! The files are claude's: `<project>/<session>.jsonl`, and beside it
 //! `<session>/subagents/agent-<id>.jsonl` with `agent-<id>.meta.json`. Main
-//! file first, then each subagent file, each in its own line order.
+//! file first, then each subagent file, each in its own line order. Or a codex
+//! rollout, `rollout-<time>-<thread>.jsonl` (ov-378), one file with no
+//! subagent files followed (`codex.rs`).
 
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -197,6 +199,8 @@ struct SubagentFile {
 #[derive(Debug)]
 pub struct SessionProjector {
     projection: Projection,
+    /// A codex rollout rather than a claude transcript.
+    codex: bool,
     main: LineReader,
     subagents_dir: PathBuf,
     /// By agent id, so the fold order is the same on every run.
@@ -207,12 +211,12 @@ pub struct SessionProjector {
 }
 
 impl SessionProjector {
-    /// `transcript` is `<project>/<session>.jsonl`.
+    /// `transcript` is `<project>/<session>.jsonl`, or a codex rollout.
     pub fn open(transcript: PathBuf) -> SessionProjector {
-        let session = transcript.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-        let subagents_dir = transcript.with_file_name(&session).join("subagents");
+        let (session, subagents_dir) = session_of(&transcript);
         SessionProjector {
             projection: Projection::for_session(&session),
+            codex: is_codex_rollout(&transcript),
             main: LineReader::new(transcript),
             subagents_dir,
             subagents: BTreeMap::new(),
@@ -232,6 +236,19 @@ impl SessionProjector {
         self.main.path()
     }
 
+    /// Whether this reads a codex rollout.
+    pub fn is_codex(&self) -> bool {
+        self.codex
+    }
+
+    /// One hook, folded the way this session's agent writes them.
+    pub fn hook(&mut self, event: &str, payload: &serde_json::Value, now: i64) -> super::HookEffect {
+        match self.codex {
+            true => self.projection.codex_hook(event, payload, now),
+            false => self.projection.hook(event, payload, now),
+        }
+    }
+
     /// What the main transcript's reader is holding for an unfinished line.
     pub fn main_held_bytes(&self) -> usize {
         self.main.held_bytes()
@@ -246,8 +263,8 @@ impl SessionProjector {
         // Every file is read from its start again, the old one too if this
         // comes back to it (`/resume`), so lines are counted afresh.
         self.projection.reread(None);
-        let session = transcript.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-        self.subagents_dir = transcript.with_file_name(&session).join("subagents");
+        self.subagents_dir = session_of(&transcript).1;
+        self.codex = is_codex_rollout(&transcript);
         self.subagents.clear();
         self.main = LineReader::new(transcript);
     }
@@ -296,7 +313,7 @@ impl SessionProjector {
     fn poll_main(&mut self) -> u64 {
         let mut folded = 0;
         loop {
-            let report = Self::drain(&mut self.main, &mut self.projection, None);
+            let report = Self::drain(&mut self.main, &mut self.projection, None, self.codex);
             folded += report.lines;
             self.held_back += u64::from(report.holding);
             if !report.more || report.bytes == 0 {
@@ -318,7 +335,7 @@ impl SessionProjector {
                 self.projection.join_by_meta(agent, meta);
             }
             loop {
-                let report = Self::drain(&mut file.reader, &mut self.projection, Some((agent, file.meta.as_ref())));
+                let report = Self::drain(&mut file.reader, &mut self.projection, Some((agent, file.meta.as_ref())), false);
                 folded += report.lines;
                 self.held_back += u64::from(report.holding);
                 if !report.more || report.bytes == 0 {
@@ -348,8 +365,9 @@ impl SessionProjector {
         folded
     }
 
-    fn drain(reader: &mut LineReader, projection: &mut Projection, agent: Option<(&str, Option<&SubagentMeta>)>) -> ReadReport {
+    fn drain(reader: &mut LineReader, projection: &mut Projection, agent: Option<(&str, Option<&SubagentMeta>)>, codex: bool) -> ReadReport {
         let report = reader.read(|line| match (line, agent) {
+            (Line::Complete(bytes), None) if codex => projection.fold_codex_line(bytes),
             (Line::Complete(bytes), None) => projection.fold_line(bytes),
             (Line::Complete(bytes), Some((agent, meta))) => projection.fold_subagent_line(agent, meta, bytes),
             (Line::TooLarge(n), None) => projection.fold_too_large(n),
@@ -379,4 +397,23 @@ impl SessionProjector {
             );
         }
     }
+}
+
+/// Whether `path` is a codex rollout: `rollout-<time>-<thread>.jsonl`.
+/// claude names its transcripts by session id alone.
+pub fn is_codex_rollout(path: &Path) -> bool {
+    path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("rollout-") && n.ends_with(".jsonl"))
+}
+
+/// A file's session id, and where its subagents' files would be. A codex
+/// rollout's id is the thread id that ends its name, and its subagents are
+/// not followed: the directory named is one that never exists.
+fn session_of(transcript: &Path) -> (String, PathBuf) {
+    let stem = transcript.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    if is_codex_rollout(transcript) {
+        let thread = stem.get(stem.len().saturating_sub(36)..).unwrap_or(&stem).to_string();
+        return (thread, transcript.with_extension("no-subagents"));
+    }
+    let subagents = transcript.with_file_name(&stem).join("subagents");
+    (stem, subagents)
 }

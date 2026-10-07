@@ -17,10 +17,12 @@
 //! - `asks`: a held permission tied to the one call it holds.
 //! - `held`: the id a view answers a held ask with, on its row (ov-370).
 //! - `nested`: what a subagent's own transcript launches and asks.
+//! - `codex`: a codex rollout and codex's hooks, into the same rows (ov-378).
 //!
 //! Pure apart from `files`, and that only reads.
 
 mod asks;
+mod codex;
 pub mod held;
 pub mod files;
 pub mod fold;
@@ -60,3 +62,5 @@ mod matching_tests;
 mod nested_tests;
 #[cfg(test)]
 mod subagent_link_tests;
+#[cfg(test)]
+mod codex_tests;

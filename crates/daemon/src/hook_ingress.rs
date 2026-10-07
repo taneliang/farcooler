@@ -403,8 +403,11 @@ impl HookIngress {
         let first = !assemblers.contains_key(&terminal);
         let events = assemblers.entry(terminal).or_default().accept(agent, event, payload);
         drop(assemblers);
-        if agent == Agent::Claude {
-            crate::session_projectors::global().hook(terminal, event, payload);
+        // claude's and codex's hooks both have a projection to move (ov-378).
+        match agent {
+            Agent::Claude => crate::session_projectors::global().hook(terminal, event, payload),
+            Agent::Codex => crate::session_projectors::global().codex_hook(terminal, event, payload),
+            Agent::Cursor => {}
         }
         if first {
             tracing::info!(

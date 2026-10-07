@@ -40,7 +40,10 @@
 //! 4. A fresh capture classifies as Idle, or as Working in an agent that
 //!    queues what's sent mid-turn (`queues_mid_turn`), AND `composer::read`
 //!    positively recognizes the agent's box and finds it empty. A menu, a
-//!    picker, a prompt, an unfamiliar screen or a draft: not typed into.
+//!    picker, a prompt, an unfamiliar screen or a draft: not typed into. A
+//!    screen between turns is mid-turn all the same when the agent's own
+//!    record says a turn runs: claude's session registry (`registry_turn`),
+//!    codex's rollout (`codex_turn`).
 //! 5. The agent has bracketed paste on, as tmux reports it. tmux older than
 //!    3.7 (Ubuntu 24.04 has 3.4) can't report it, so there it's read from
 //!    the pane's own output (`paste_mode`), which the daemon follows for
@@ -574,6 +577,12 @@ impl Watcher {
             }
             return self.settle(wake, Some(task), Some(PASTE_LEFT.into()));
         }
+        // codex's rollout again, just before the Enter: the read-back can
+        // take seconds, and a turn begun meanwhile waits for its end
+        // (`finish_paste`, review 1, L1).
+        if preset == "codex" && witness.is_none() && codex_turn::said_of(proven.pid).await == registry_turn::Said::NotIdle {
+            return self.paste_waits(wake, task, started);
+        }
         let entered = match &witness {
             None => runtime.send_bytes_hex(to.id, "0d").await.map_err(|_| mid_turn::NoEnter::Failed),
             Some(witness) => self.enter(to, preset, witness, text).await,
@@ -612,6 +621,12 @@ impl Watcher {
         // works (ov-392): mid-turn, so an Enter goes in only under the fence.
         let not_idle = || async { registry_turn::said_of(pid).await == registry_turn::Said::NotIdle };
         let turn = if preset == "claude" && turn == Turn::Between && not_idle().await { Turn::During } else { turn };
+        // codex's rollout likewise (ov-378): mid-turn, and codex waits.
+        let turn = if preset == "codex" && turn == Turn::Between && codex_turn::said_of(pid).await == registry_turn::Said::NotIdle {
+            Turn::During
+        } else {
+            turn
+        };
         Ok(Proven { preset, tty, pid, turn })
     }
 
@@ -994,6 +1009,7 @@ fn spoken_name(t: &Terminal) -> String {
     if title.is_empty() { "the agent".into() } else { title }
 }
 
+pub(crate) mod codex_turn;
 mod compose;
 pub(crate) mod draft_hold;
 mod finish;

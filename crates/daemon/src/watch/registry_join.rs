@@ -27,6 +27,10 @@ pub(super) fn registered_log(registry: &Registry, pane: &PaneJoin) -> Option<Pat
 /// different file than the one it reads (a `/clear` whose `SessionStart` was
 /// missed), it is moved there, as the watcher's own log join is.
 pub(super) fn feed_projector(registry: &Registry, terminal: Uuid, pane: &PaneJoin) {
+    // codex's own (`feed_codex_projector`).
+    if is_codex(pane) {
+        return;
+    }
     let projectors = crate::session_projectors::global();
     let open = projectors.transcript(terminal);
     // Off means off (ov-372 review): a projector opened before the setting
@@ -50,6 +54,44 @@ pub(super) fn feed_projector(registry: &Registry, terminal: Uuid, pane: &PaneJoi
     let claude = pane.preset.as_deref().is_some_and(|p| p.starts_with("claude"));
     let entry = pane.pid.filter(|_| claude).and_then(|pid| registry.by_pid(pid));
     projectors.tick(terminal, entry.and_then(|e| e.status));
+}
+
+fn is_codex(pane: &PaneJoin) -> bool {
+    pane.preset.as_deref().is_some_and(|p| p.starts_with("codex"))
+}
+
+/// A codex pane's projector (ov-378): opened on the rollout the pane's codex
+/// process holds open, joined afresh (at most `JOIN_KEPT` old) rather than
+/// through the watcher's own join (`log`, the fallback with no pid), which
+/// moves only after its log has been quiet for half a minute; and moved
+/// when that changes (`/new` starts a thread and a rollout of its own).
+/// Joined so, a hook's rebind to the new thread and the next tick agree,
+/// rather than taking turns (review 1, M2). Read on every tick. Its activity
+/// is the rollout's own, so the tick passes none. Only while the daemon
+/// shadows, as `feed_projector`.
+pub(super) fn feed_codex_projector(terminal: Uuid, pane: &PaneJoin, log: &PaneLog) {
+    if !is_codex(pane) {
+        return;
+    }
+    let projectors = crate::session_projectors::global();
+    let open = projectors.transcript(terminal);
+    if !crate::session_projectors::shadowing() {
+        if open.is_some() {
+            projectors.forget(terminal);
+        }
+        return;
+    }
+    let rollout = match pane.pid {
+        Some(pid) => super::answer_wake::codex_turn::rollout_of(pid),
+        None => log.tail.as_ref().filter(|(_, format)| *format == LogFormat::Codex).map(|(tail, _)| tail.path().to_path_buf()),
+    };
+    match (&open, rollout) {
+        (None, None) => return,
+        (None, Some(path)) => projectors.open(terminal, path),
+        (Some(current), Some(path)) if *current != crate::session_projectors::canonical(&path) => projectors.open(terminal, path),
+        _ => {}
+    }
+    projectors.tick(terminal, None);
 }
 
 /// Move a claude pane that is reading one session's log onto the one the
@@ -140,6 +182,127 @@ mod tests {
         let now = crate::session_projectors::global().transcript(id).unwrap();
         crate::session_projectors::global().forget(id);
         assert!(now.ends_with("s-two.jsonl"), "{now:?}");
+    }
+
+    const ROLLOUT: &str = include_str!(
+        "../../../core/fixtures/session-logs/codex-tui-0.153.4/rollout-2026-10-07T12-22-14-01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d.jsonl"
+    );
+    const NEW_ROLLOUT: &str = include_str!(
+        "../../../core/fixtures/session-logs/codex-tui-0.153.4/rollout-2026-10-07T12-28-45-01a117d6-f550-7013-a939-b02d182c0321.jsonl"
+    );
+
+    /// A codex pane's projector opens on the rollout the watcher's join reads,
+    /// its rows and its activity the rollout's own, and moves with `/new`.
+    #[test]
+    fn a_codex_pane_s_projector_follows_its_rollout() {
+        crate::session_projectors::set_shadowing(true);
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join("rollout-2026-10-07T12-22-14-01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d.jsonl");
+        let second = dir.path().join("rollout-2026-10-07T12-28-45-01a117d6-f550-7013-a939-b02d182c0321.jsonl");
+        std::fs::write(&first, ROLLOUT).unwrap();
+        std::fs::write(&second, NEW_ROLLOUT).unwrap();
+        // No pid: the watcher's own join is what it follows.
+        let pane = PaneJoin { preset: Some("codex".into()), pid: None, cwd: "/nonexistent".into(), title: String::new() };
+        let id = uuid::Uuid::now_v7();
+        let projectors = crate::session_projectors::global();
+
+        feed_codex_projector(id, &pane, &reading(first.to_str().unwrap(), LogFormat::Codex));
+        let turns = |rows: Vec<farcooler_core::session_log::projector::Row>| {
+            rows.into_iter()
+                .filter_map(|r| match r.kind {
+                    farcooler_core::session_log::projector::RowKind::Turn(t) => Some((t.prompt, t.activity)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let rows = turns(projectors.page(id, None, 500).expect("opened"));
+        assert_eq!(rows.len(), 11, "{rows:?}");
+        assert_eq!(rows.last().unwrap().1, Some(farcooler_core::session_log::projector::Activity::Idle), "the rollout's own");
+
+        feed_codex_projector(id, &pane, &reading(second.to_str().unwrap(), LogFormat::Codex));
+        let now = projectors.transcript(id).unwrap();
+        let rows = turns(projectors.page(id, None, 500).unwrap());
+        projectors.forget(id);
+        assert!(now.ends_with(second.file_name().unwrap()), "{now:?}");
+        assert_eq!(rows.last().map(|r| r.0.as_str()), Some("SLOW 3"), "the new thread's turns follow: {rows:?}");
+
+        // A claude pane's log is never a codex projector's.
+        let claude = PaneJoin { preset: Some("claude".into()), ..pane };
+        feed_codex_projector(id, &claude, &reading(first.to_str().unwrap(), LogFormat::Codex));
+        assert!(projectors.transcript(id).is_none());
+    }
+
+    /// The call site: the watcher's own tick opens a codex pane's projector
+    /// on the rollout its process holds open.
+    #[tokio::test]
+    async fn the_watcher_opens_a_codex_pane_s_projector_on_the_rollout_it_holds() {
+        crate::session_projectors::set_shadowing(true);
+        let (_dir, svc, _repo) = crate::test_support::fixture().await;
+        let root = tempfile::tempdir().unwrap();
+        let rollout = root.path().join(".codex/sessions/2026/10/07/rollout-2026-10-07T12-22-14-01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d.jsonl");
+        std::fs::create_dir_all(rollout.parent().unwrap()).unwrap();
+        std::fs::write(&rollout, ROLLOUT).unwrap();
+        let mut codex = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!("exec 3<'{}'\nsleep 30\n", rollout.display()))
+            .spawn()
+            .unwrap();
+        let watcher = super::super::Watcher::new(svc.clone());
+        let id = uuid::Uuid::now_v7();
+        let pane = || PaneJoin { preset: Some("codex".into()), pid: Some(codex.id() as i32), cwd: "/nonexistent".into(), title: String::new() };
+        let projectors = crate::session_projectors::global();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let mut now = 10_000;
+        while projectors.transcript(id).is_none() && std::time::Instant::now() < deadline {
+            watcher.turn_from_log(id, pane(), now, true, false).await;
+            now += 1_000;
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        let _ = codex.kill();
+        let _ = codex.wait();
+        let opened = projectors.transcript(id);
+        let rows = projectors.page(id, None, 500).unwrap_or_default().len();
+        projectors.forget(id);
+        assert!(opened.is_some_and(|t| t.ends_with(rollout.file_name().unwrap())), "never opened");
+        assert!(rows > 20, "{rows} rows");
+    }
+
+    /// With a pid, the projector follows what the process holds, not the
+    /// watcher's join, which lags after `/new` (review 1, M2); and a hook's
+    /// rebind to that file is not undone by the next tick.
+    #[test]
+    fn a_codex_projector_follows_the_process_not_the_watcher_s_lagging_join() {
+        crate::session_projectors::set_shadowing(true);
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = dir.path().join(".codex/sessions/2026/10/07");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let old = sessions.join("rollout-2026-10-07T12-22-14-01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d.jsonl");
+        let new = sessions.join("rollout-2026-10-07T12-28-45-01a117d6-f550-7013-a939-b02d182c0321.jsonl");
+        std::fs::write(&old, ROLLOUT).unwrap();
+        std::fs::write(&new, NEW_ROLLOUT).unwrap();
+        let mut codex = std::process::Command::new("sh").arg("-c").arg(format!("exec 3<'{}'\nsleep 30\n", new.display())).spawn().unwrap();
+        let pane = PaneJoin { preset: Some("codex".into()), pid: Some(codex.id() as i32), cwd: "/nonexistent".into(), title: String::new() };
+        let id = uuid::Uuid::now_v7();
+        let projectors = crate::session_projectors::global();
+        // The hook's rebind put it on the new thread; the watcher still reads the old.
+        projectors.open(id, new.clone());
+        let lagging = reading(old.to_str().unwrap(), LogFormat::Codex);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut stayed = true;
+        while std::time::Instant::now() < deadline && stayed {
+            feed_codex_projector(id, &pane, &lagging);
+            stayed = projectors.transcript(id).is_some_and(|t| t.ends_with(new.file_name().unwrap()));
+            if super::super::answer_wake::codex_turn::rollout_of(pane.pid.unwrap()).is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        feed_codex_projector(id, &pane, &lagging);
+        let now = projectors.transcript(id);
+        let _ = codex.kill();
+        let _ = codex.wait();
+        projectors.forget(id);
+        assert!(stayed && now.is_some_and(|t| t.ends_with(new.file_name().unwrap())), "moved back to the old thread");
     }
 
     #[test]

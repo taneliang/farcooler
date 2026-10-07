@@ -327,6 +327,12 @@ fn find_codex(pid: Option<i32>) -> Option<PathBuf> {
     pick_codex_rollout(&open_files_for_pid(pid?))
 }
 
+/// The rollout codex process `pid` (or a process under it) holds open: the
+/// proof that a rollout is a live process's own (`codex_turn`, ov-378).
+pub fn codex_rollout_of(pid: i32) -> Option<PathBuf> {
+    find_codex(Some(pid))
+}
+
 /// The pane's process and everything descended from it.
 ///
 /// The pane's pid is its top process, which is the user's SHELL: Far Cooler
@@ -432,23 +438,46 @@ fn open_files_for_pid(pid: i32) -> Vec<PathBuf> {
 /// finished writing the first line) is taken only when no rollout has said
 /// it is the main one, so the one moment the answer is unknowable cannot
 /// hand the pane to a guardian that happened to be listed first.
+///
+/// codex's home needn't be `~/.codex`: `CODEX_HOME` can put its sessions
+/// anywhere (ov-378 review 1, M3). A rollout outside `/.codex/sessions/` is
+/// taken only once its own head says it is a session's main thread, never
+/// on its name alone, so a wrapper's `rollout-*.jsonl` that isn't codex's
+/// is still passed over.
+///
+/// And after `/new` codex still holds the old thread's rollout open beside
+/// the new one (measured on 0.153.4, fd 44 and fd 67), so of two main
+/// threads the one written last is the pane's (ov-378 review 1, M2).
 fn pick_codex_rollout(open_files: &[PathBuf]) -> Option<PathBuf> {
     let mut unsaid = None;
+    let mut main: Option<(std::time::SystemTime, &PathBuf)> = None;
     for path in open_files.iter().filter(|p| is_codex_rollout(p)) {
         match rollout_is_subagent(path) {
-            Some(false) => return Some(path.clone()),
+            Some(false) => {
+                let written = std::fs::metadata(path).and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+                if main.is_none_or(|(newest, _)| written > newest) {
+                    main = Some((written, path));
+                }
+            }
             Some(true) => {}
-            None => {
+            None if in_default_home(path) => {
                 unsaid.get_or_insert(path);
             }
+            None => {}
         }
     }
-    unsaid.cloned()
+    main.map(|(_, path)| path).or(unsaid).cloned()
 }
 
+/// `<home>/sessions/…/rollout-*.jsonl`, whatever `<home>` is.
 fn is_codex_rollout(path: &Path) -> bool {
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    (name.starts_with("rollout-") && name.ends_with(".jsonl")) && path.to_string_lossy().contains("/.codex/sessions/")
+    (name.starts_with("rollout-") && name.ends_with(".jsonl")) && path.to_string_lossy().contains("/sessions/")
+}
+
+/// Under `~/.codex`, codex's own default home.
+fn in_default_home(path: &Path) -> bool {
+    path.to_string_lossy().contains("/.codex/sessions/")
 }
 
 /// Whether a rollout is a subagent's thread rather than a session someone
@@ -959,6 +988,57 @@ mod tests {
         // sides rather than assert on a symlink this test does not control.
         let canonical_rollout = rollout.canonicalize().unwrap();
         assert_eq!(found.map(|p| p.canonicalize().unwrap()), Some(canonical_rollout));
+    }
+
+    /// A codex whose `CODEX_HOME` is elsewhere (review 1, M3) is joined to
+    /// its rollout there, once the file's head says it's a main thread; a
+    /// wrapper's file of the same name and no such head is not.
+    #[test]
+    fn codex_finds_a_rollout_under_another_codex_home() {
+        let root = scratch("codex-home-elsewhere");
+        let sessions = root.join("codex/sessions/2026/10/07");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let decoy_dir = root.join("wrapper/sessions");
+        std::fs::create_dir_all(&decoy_dir).unwrap();
+        let rollout = sessions.join("rollout-2026-10-07T12-22-14-01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d.jsonl");
+        std::fs::write(&rollout, with_real_prompt_size(MAIN_ROLLOUT_META)).unwrap();
+        let decoy = decoy_dir.join("rollout-shadow.jsonl");
+        std::fs::write(&decoy, "{}\n").unwrap();
+
+        let mut child = hold_files_open(&[&decoy]);
+        let alone = poll_until(Duration::from_secs(2), || find_codex(Some(child.id() as i32)));
+        let _ = child.kill();
+        let _ = child.wait();
+        assert_eq!(alone, None, "a file named like a rollout, saying nothing, outside codex's default home");
+
+        let mut child = hold_files_open(&[&decoy, &rollout]);
+        let found = poll_until(Duration::from_secs(5), || find_codex(Some(child.id() as i32)));
+        let _ = child.kill();
+        let _ = child.wait();
+        assert_eq!(found.map(|p| p.canonicalize().unwrap()), Some(rollout.canonicalize().unwrap()));
+    }
+
+    /// After `/new` codex holds both threads' rollouts: the one written last
+    /// is the pane's, whichever its descriptor order lists first.
+    #[test]
+    fn codex_after_new_picks_the_thread_written_last() {
+        let root = scratch("codex-after-new");
+        let sessions = root.join(".codex/sessions/2026/10/07");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let old = sessions.join("rollout-2026-10-07T13-15-48-01a11802-07e1-7ca3-bfce-b553cb29fa89.jsonl");
+        let new = sessions.join("rollout-2026-10-07T13-31-40-01a11810-8d87-7863-bbcd-66bebe1d4089.jsonl");
+        for path in [&old, &new] {
+            std::fs::write(path, with_real_prompt_size(MAIN_ROLLOUT_META)).unwrap();
+        }
+        let an_hour_ago = std::time::SystemTime::now() - Duration::from_secs(3600);
+        std::fs::File::options().write(true).open(&old).unwrap().set_modified(an_hour_ago).unwrap();
+        for order in [[&old, &new], [&new, &old]] {
+            let mut child = hold_files_open(&[order[0].as_path(), order[1].as_path()]);
+            let found = poll_until(Duration::from_secs(5), || find_codex(Some(child.id() as i32)));
+            let _ = child.kill();
+            let _ = child.wait();
+            assert_eq!(found.map(|p| p.canonicalize().unwrap()), Some(new.canonicalize().unwrap()), "{order:?}");
+        }
     }
 
     /// A file open in two processes of the pane's subtree -- a parent and a

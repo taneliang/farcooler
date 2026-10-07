@@ -153,6 +153,11 @@ impl Watcher {
             }
             return Err(DomainError::Conflict { what: "paste_left" });
         }
+        // As `type_into`: a codex turn begun during the read-back gets no
+        // Enter, and the text stays in the box (review 1, L1).
+        if preset == "codex" && witness.is_none() && super::codex_turn::said_of(proven.pid).await == super::registry_turn::Said::NotIdle {
+            return Err(DomainError::Conflict { what: "paste_left" });
+        }
         match &witness {
             None => runtime.send_bytes_hex(to.id, "0d").await?,
             Some(witness) => self.enter(&to, preset, witness, &text).await.map_err(|no| match no {

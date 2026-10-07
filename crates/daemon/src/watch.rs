@@ -4520,7 +4520,7 @@ impl Watcher {
             let mut log = log;
             registry_join::follow_registry(&mut log, registry_join::registered_log(registry, &pane));
             registry_join::feed_projector(registry, id, &pane);
-            advance_log(log, &pane, now, churn, working, |pane| {
+            let advanced = advance_log(log, &pane, now, churn, working, |pane| {
                 // Claude's registry first; the title-and-files guess only
                 // where it has no answer.
                 registry_join::registered_log(registry, pane).or_else(|| crate::log_join::find_session_log(
@@ -4530,7 +4530,9 @@ impl Watcher {
                     &pane.title,
                     &claimed,
                 ))
-            })
+            });
+            registry_join::feed_codex_projector(id, &pane, &advanced.0);
+            advanced
         })
         .await;
         // A join error loses the file offset, and the next tick re-attaches at

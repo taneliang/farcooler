@@ -44,6 +44,9 @@ use utf8;
 use Encode qw(decode_utf8);
 
 my ($agent, $control, $log) = @ARGV;
+# STAND_IN_HOLD names a file to hold open, as codex holds its rollout.
+my $held;
+open($held, '<', $ENV{STAND_IN_HOLD}) or die "can't hold $ENV{STAND_IN_HOLD}" if $ENV{STAND_IN_HOLD};
 binmode STDOUT, ':utf8';
 $| = 1;
 system("stty raw -echo 2>/dev/null");

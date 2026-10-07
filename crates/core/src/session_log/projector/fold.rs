@@ -45,10 +45,10 @@ const SILENT_TYPES: &[&str] = &[
 pub(super) const PROMPT_CHARS: usize = 16_000;
 
 /// The longest one-line text a queued message, notice or ask keeps.
-const LINE_CHARS: usize = 200;
+pub(super) const LINE_CHARS: usize = 200;
 
 /// The longest summary a `Tool` row or a subagent's action line keeps.
-const SUMMARY_CHARS: usize = 80;
+pub(super) const SUMMARY_CHARS: usize = 80;
 
 /// What a subagent's own transcript said before anything joined it to the
 /// `Agent` call that launched it.
@@ -169,6 +169,8 @@ pub struct Projection {
     pub(super) activity: Option<Activity>,
     pub(super) session_id: Option<String>,
     stats: FoldStats,
+    /// What only a codex rollout's fold keeps (`codex.rs`).
+    pub(super) codex: super::codex::CodexState,
 }
 
 /// Collapses whitespace, and cuts to `max` characters.
@@ -227,7 +229,7 @@ fn tag<'t>(text: &'t str, name: &str) -> Option<&'t str> {
     Some(&text[from..from + len])
 }
 
-fn clamp_end(started: Option<i64>, at: Option<i64>) -> Option<i64> {
+pub(super) fn clamp_end(started: Option<i64>, at: Option<i64>) -> Option<i64> {
     match (started, at) {
         (Some(s), Some(a)) => Some(a.max(s)),
         (_, a) => a,
@@ -376,7 +378,7 @@ impl Projection {
     }
 
     /// Whether `line` has been folded already, noting it if not.
-    fn seen(&mut self, scope: &str, line: &[u8]) -> bool {
+    pub(super) fn seen(&mut self, scope: &str, line: &[u8]) -> bool {
         !self.seen_lines.insert(Self::line_key(scope, line))
     }
 
@@ -613,6 +615,12 @@ impl Projection {
             Some(kind) => self.gap(GapReason::Unknown(kind.to_string())),
             None => self.gap(GapReason::Unknown(String::new())),
         }
+    }
+
+    /// Count one line read, for `stats`.
+    pub(super) fn count_line(&mut self, bytes: usize) {
+        self.stats.lines += 1;
+        self.stats.bytes += bytes as u64;
     }
 
     /// A line the reader skipped for its size.

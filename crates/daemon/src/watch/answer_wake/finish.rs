@@ -18,7 +18,8 @@
 //!   A claude whose session or hooks can't be found waits, and in the end
 //!   settles as a paste left in the box;
 //! - for codex, which says nothing through hooks, between turns as both the
-//!   watcher and a fresh capture read it, as any Enter into codex is. codex
+//!   watcher and a fresh capture read it, and as its rollout says
+//!   (`codex_turn`), as any Enter into codex is. codex
 //!   keeps "esc to interrupt" with text in its box (measured on 0.153.4), so
 //!   that reading holds. Any other agent's screen with text in the box was
 //!   never measured, so its answer settles as a paste left in the box.
@@ -80,6 +81,11 @@ impl Watcher {
             Ok(Err(held)) => return Pass::Waiting(held),
             Err(_) => return Pass::Waiting(Held::Unfamiliar),
             Ok(Ok(_)) => return self.settle(wake, Some(task), Some(PASTE_LEFT.into())),
+        };
+        // A screen between turns while codex's rollout says one runs: wait.
+        let turn = match (preset, turn) {
+            ("codex", Turn::Between) if super::codex_turn::said_of(pid).await == super::registry_turn::Said::NotIdle => Turn::During,
+            _ => turn,
         };
         if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= pasted) {
             return self.settle(wake, Some(task), Some(PASTE_LEFT.into()));

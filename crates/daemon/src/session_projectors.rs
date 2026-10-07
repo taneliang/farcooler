@@ -1,5 +1,7 @@
-//! The daemon's session projectors: one per claude pane that has one open
-//! (ov-363), read a page at a time and followed by revision (ov-366).
+//! The daemon's session projectors: one per claude or codex pane that has
+//! one open (ov-363, ov-378), read a page at a time and followed by revision
+//! (ov-366). A codex pane's is its rollout, joined by the file its process
+//! holds open, and its activity comes from the rollout itself.
 //!
 //! A projector is opened for a terminal and rebuilt from the transcript on
 //! disk (design decision D8: rebuild, no checkpoint), so after a daemon
@@ -112,6 +114,7 @@ fn next_epoch() -> u64 {
 
 /// A hook that arrived while its terminal's projector was being built.
 struct Held {
+    codex: bool,
     event: String,
     payload: Value,
     at: i64,
@@ -264,10 +267,15 @@ pub fn canonical(path: &Path) -> PathBuf {
 /// One hook, on a projector whose file is read up to now first, so a hook
 /// that arrives after its own record is checked against it rather than put
 /// up as news.
-fn apply(session: &mut SessionProjector, event: &str, payload: &Value, at: i64) {
+fn apply(session: &mut SessionProjector, codex: bool, event: &str, payload: &Value, at: i64) {
+    // A hook is folded only by its own agent's projection: codex's hooks
+    // carry no `prompt_id`, claude's no `turn_id`.
+    if session.is_codex() != codex {
+        return;
+    }
     let main = session.transcript().to_path_buf();
     session.poll_paths(&[main]);
-    if let HookEffect::Rebind { transcript_path: Some(path), .. } = session.projection_mut().hook(event, payload, at) {
+    if let HookEffect::Rebind { transcript_path: Some(path), .. } = session.hook(event, payload, at) {
         session.rebind(canonical(&path));
         session.poll();
     }
@@ -419,7 +427,7 @@ impl SessionProjectors {
         drop(building);
         drop(guard);
         for hook in held {
-            apply(&mut session, &hook.event, &hook.payload, hook.at);
+            apply(&mut session, hook.codex, &hook.event, &hook.payload, hook.at);
         }
         open.publish(&session);
         drop(session);
@@ -448,11 +456,20 @@ impl SessionProjectors {
     /// A claude hook routed to `terminal`. Held while its projector is being
     /// built; nothing when none is open.
     pub fn hook(&self, terminal: Uuid, event: &str, payload: &Value) {
+        self.hook_from(terminal, false, event, payload);
+    }
+
+    /// A codex hook routed to `terminal` (ov-378), as `hook` is claude's.
+    pub fn codex_hook(&self, terminal: Uuid, event: &str, payload: &Value) {
+        self.hook_from(terminal, true, event, payload);
+    }
+
+    fn hook_from(&self, terminal: Uuid, codex: bool, event: &str, payload: &Value) {
         {
             let mut building = self.inner.building.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(Build { held, .. }) = building.get_mut(&terminal) {
                 if held.len() < MAX_HELD {
-                    held.push(Held { event: event.to_string(), payload: payload.clone(), at: now_ms() });
+                    held.push(Held { codex, event: event.to_string(), payload: payload.clone(), at: now_ms() });
                 } else if held.len() == MAX_HELD {
                     tracing::warn!(terminal = %terminal, "a projector's build is holding too many hooks; dropping the rest");
                 }
@@ -463,7 +480,7 @@ impl SessionProjectors {
         let dirs = {
             let mut session = open.lock();
             let before = session.transcript().to_path_buf();
-            apply(&mut session, event, payload, now_ms());
+            apply(&mut session, codex, event, payload, now_ms());
             open.publish(&session);
             (session.transcript() != before).then(|| session.watched_dirs())
         };

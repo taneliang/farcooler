@@ -233,6 +233,11 @@ impl Board {
     /// `as_name`: `agent` itself, or anything else for a process that
     /// isn't one.
     async fn stand_in(&self, terminal: &Terminal, agent: &str, as_name: &str) -> StandIn {
+        self.stand_in_with(terminal, agent, as_name, "").await
+    }
+
+    /// `stand_in`, with `env` (`NAME='value' …`) in its environment.
+    async fn stand_in_with(&self, terminal: &Terminal, agent: &str, as_name: &str, env: &str) -> StandIn {
         let dir = self.dir.path().join(format!("si-{}", terminal.id.simple()));
         std::fs::create_dir_all(&dir).unwrap();
         let program = dir.join(as_name);
@@ -244,7 +249,7 @@ impl Board {
         // Its own claude config, never the real one (`mid_turn`).
         std::fs::create_dir_all(dir.join("config")).unwrap();
         let command = format!(
-            "env CLAUDE_CONFIG_DIR={} {} {} {agent} {} {}",
+            "env {env} CLAUDE_CONFIG_DIR={} {} {} {agent} {} {}",
             q(&dir.join("config")),
             q(&program),
             q(&dir.join("stand_in.pl")),
@@ -1433,3 +1438,6 @@ mod input_mark_tests;
 
 #[path = "interrupt_tests.rs"]
 mod interrupt_tests;
+
+#[path = "codex_turn_tests.rs"]
+mod codex_turn_tests;

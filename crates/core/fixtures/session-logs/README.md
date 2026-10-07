@@ -133,6 +133,26 @@ dropped from the other fixtures.
 | `codex-item-completed-turn.jsonl` | a complete turn in the shape 0.147.0 writes | 0.147.0 |
 | `codex-subagents.jsonl` | agents spawned, interacted with, and one listed as finished | 0.144.6 + 0.147.0 |
 | `codex-token-counts.jsonl` | two turns' running token totals, for spend | 0.153.4 |
+| `codex-tui-0.153.4/` | a TUI session's two rollouts and its hooks: approvals, a steer, a queue, `!cmd`, `/new` | 0.153.4 |
+
+**`codex-tui-0.153.4/`** (ov-378) is whole, not an excerpt: an interactive
+`codex` TUI run in a scratch tmux socket with `HOME` and `CODEX_HOME` under
+`/tmp/fc-t`, pointed at a local stand-in Responses API, and driven by keys.
+Both rollouts are as codex wrote them (`/new` started the second), and each
+`hooks-*.jsonl` is every hook codex fired over part of the run, one line per
+hook with the logger's clock (`at_ms`) and codex's payload. Its turns:
+a plain prompt; a slow one; an approval granted, and one denied with Esc;
+`request_user_input` (refused in Default mode); Enter while busy (a steer)
+and Tab while busy (a queued turn); `!sleep 2`; a commentary reply around a
+command; a command that fails. The ids are a throwaway sandbox's and are kept
+as written, since hooks join records by them. Every string over 400
+characters (codex's instructions, its developer messages) is replaced by
+`<omitted: N chars>`, and `world_state` payloads by a placeholder. The
+stand-in was restarted once mid-run, so its message ids repeat (`msg_1`);
+real ids don't, and the fold copes either way. A third rollout (`rollout-2026-10-07T13-15-48-…`, ov-378 review 1) is a
+codex killed with SIGKILL during a slow turn and then `codex resume`d: it
+ends on that turn's records with no end, because the resumed process writes
+nothing until the next prompt.
 
 **`codex-complete-turn.jsonl`** (11 lines) is a real "say hi" session from
 `~/.codex/sessions/`, `session_meta.originator: "codex_exec"`,

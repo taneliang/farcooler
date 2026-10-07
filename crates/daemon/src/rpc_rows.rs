@@ -110,7 +110,10 @@ pub(crate) async fn follow_answer(
 }
 
 /// Open `terminal`'s projector if it has none, from its transcript on disk.
-/// `false` for a terminal that runs no claude session.
+/// `false` for a terminal that runs no claude session. A codex pane's is
+/// opened by the watcher's tick, on the rollout its process holds open
+/// (`registry_join::feed_codex_projector`, ov-378): until then, `false`, and
+/// a follower that waited pages again once it has one.
 async fn ensure_open(svc: &Service, terminal: Uuid) -> Result<bool> {
     let projectors = session_projectors::global();
     if projectors.is_open(terminal) {

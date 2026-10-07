@@ -19,6 +19,8 @@ pub mod claude;
 
 pub mod codex;
 
+pub mod codex_turn;
+
 pub mod cursor;
 
 pub mod projector;

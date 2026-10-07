@@ -169,6 +169,24 @@ fn the_ingress_feeds_a_claude_hook_to_the_open_projector() {
     assert!(!global().is_open(terminal), "forgetting the terminal closes its projector");
 }
 
+/// And a codex hook reaches a codex pane's projector (ov-378), where a
+/// claude hook does not.
+#[test]
+fn the_ingress_feeds_a_codex_hook_to_a_codex_projector() {
+    let dir = Dir::new("ingress-codex");
+    let path = dir.file("rollout-2026-10-07T12-22-14-01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d.jsonl", "");
+    let terminal = Uuid::now_v7();
+    global().open(terminal, path);
+    let store = Arc::new(farcooler_store::Store::open_in_memory().unwrap());
+    let inventory: Arc<dyn farcooler_core::inventory::RuntimeInventory> = Arc::new(farcooler_core::inventory::FakeInventory::default());
+    let ingress = crate::hook_ingress::HookIngress::new(store, inventory, Default::default());
+    ingress.accept(terminal, Agent::Codex, "UserPromptSubmit", &json!({"turn_id":"tc","prompt":"codex"}), None);
+    ingress.accept(terminal, Agent::Claude, "UserPromptSubmit", &json!({"prompt_id":"pk","prompt":"claude"}), None);
+    let ids: Vec<String> = global().page(terminal, None, 1000).unwrap().into_iter().map(|r| r.id).collect();
+    ingress.forget(terminal);
+    assert_eq!(ids, ["turn:tc"]);
+}
+
 /// One terminal's projector busy (a rebuild, say) holds up no other
 /// terminal's hooks.
 #[test]

@@ -71,7 +71,7 @@ fn input_of(payload: &Value) -> Input<'static> {
 
 impl Projection {
     /// The turn a hook belongs to: its own `prompt_id`'s row, else the newest.
-    fn hook_turn(&mut self, payload: &Value, now: i64) -> usize {
+    pub(super) fn hook_turn(&mut self, payload: &Value, now: i64) -> usize {
         if let Some(i) = text(payload, "prompt_id").and_then(|p| self.index.get(&format!("turn:{p}")).copied()) {
             return i;
         }
@@ -319,7 +319,7 @@ impl Projection {
         }
     }
 
-    fn session_start(&mut self, payload: &Value, now: i64) -> HookEffect {
+    pub(super) fn session_start(&mut self, payload: &Value, now: i64) -> HookEffect {
         let source = text(payload, "source").unwrap_or("startup");
         let session = text(payload, "session_id");
         let at = Some(now);
