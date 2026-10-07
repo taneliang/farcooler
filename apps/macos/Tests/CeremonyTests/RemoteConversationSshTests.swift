@@ -71,7 +71,7 @@ struct RemoteConversationSshTests {
     /// The sshd, its keys, the wrapper; the port it listens on.
     func stage() async throws -> Int {
         let fm = FileManager.default
-        for dir in ["home/.ssh", "home/.local/bin", "sshd", "bin", "mac", "claude", "repos/demo"] {
+        for dir in ["home/.ssh", "home/.local/bin", "sshd", "bin", "mac/.ssh", "claude", "repos/demo"] {
             try fm.createDirectory(atPath: "\(base)/\(dir)", withIntermediateDirectories: true)
         }
         for name in ["farcoolerd", "farcoolerd-local", "farcoolerd-canary", "farcoolerd-preview"] {
@@ -207,7 +207,7 @@ struct RemoteConversationSshTests {
         let cli = cli
         pairing.cli = { args in
             let ran = await ProcessRunner.run(cli, args, environment: mac, deadline: 60)
-            print("SSH-E2E farcooler \(args.prefix(6).joined(separator: " ")) -> \(ran.succeeded)")
+            print("SSH-E2E farcooler \(args.prefix(6).joined(separator: " ")) -> \(ran.succeeded) \(String(decoding: ran.stderr, as: UTF8.self).prefix(600))")
             return CLI.Result(
                 ok: ran.succeeded, output: String(decoding: ran.stdout, as: UTF8.self), errors: String(decoding: ran.stderr, as: UTF8.self))
         }

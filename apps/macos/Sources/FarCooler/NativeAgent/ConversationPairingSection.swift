@@ -33,7 +33,7 @@ struct ConversationPairingSection: View {
             } footer: {
                 Text(
                     "To show Claude panes on other runners as a conversation, this Mac adds a key it keeps in the Keychain "
-                        + "to each runner. It can read and reply in Far Cooler, and can’t open a shell."
+                        + "to each runner. The key can read and reply in Far Cooler, and can’t open a shell."
                 )
                 .fixedSize(horizontal: false, vertical: true)
             }
