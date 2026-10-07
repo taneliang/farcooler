@@ -279,8 +279,10 @@ struct AgentScrollTests {
         // A tail scrolled just under the composer isn't the tail: the part
         // of the viewport behind the glass isn't seen.
         // After Jump to Latest's animation has finished, or what it moves
-        // next undoes the scroll below.
-        await Self.settle()
+        // next undoes the scroll below. Waited for, not slept through: a
+        // loaded machine overruns any delay, and until it lands the chat
+        // reads a step up as a height correction, not the reader.
+        #expect(await Self.until { !probe.jumping }, "Jump to Latest never landed")
         let tailOffset = try #require(probe.geometry?.contentOffset.y)
         scroll.contentView.scroll(to: NSPoint(x: 0, y: tailOffset - 70))
         scroll.reflectScrolledClipView(scroll.contentView)
@@ -345,6 +347,13 @@ struct AgentScrollTests {
         try await body(probe, scroll, host, window)
     }
 
+    /// A jump's animation, stretched for the tests that step the scroll
+    /// mid-flight: the step is then mid-flight however long a loaded machine
+    /// takes to reach it, since the animation runs on the clock and not on
+    /// the test. The landing is waited for (`probe.jumping`), never slept
+    /// through.
+    private static let longFlight = 6.0
+
     private static func clickJump(_ probe: AgentScrollProbe, _ host: NSView, _ window: NSWindow) {
         let container = probe.geometry?.containerSize.height ?? 0
         click(host, at: NSPoint(x: 350, y: container - Spacing.group - 15), in: window)
@@ -356,19 +365,24 @@ struct AgentScrollTests {
     /// the scroll landed.
     @Test func jumpToLatestDoesNotFlickerAgainstAHeightCorrection() async throws {
         let original = AgentSurface.scheduleBackstop
-        defer { AgentSurface.scheduleBackstop = original }
+        let duration = AgentSurface.jumpDuration
+        defer {
+            AgentSurface.scheduleBackstop = original
+            AgentSurface.jumpDuration = duration
+        }
         try await jumping { probe, scroll, host, window in
             let detached = probe.detaches
             let stepper = Stepper()
-            // Armed as the jump begins, not before the click.
-            AgentSurface.scheduleBackstop = { body in
-                stepper.arm(probe, scroll, back: 100)
-                original(body)
-            }
+            // Armed as the jump begins, not before the click. The backstop
+            // is held, not run: a second of the clock would end the jump
+            // mid-flight on a slow runner, and only the animation's own
+            // completion should.
+            AgentSurface.jumpDuration = Self.longFlight
+            AgentSurface.scheduleBackstop = { _ in stepper.arm(probe, scroll, back: 100) }
             Self.clickJump(probe, host, window)
             #expect(await Self.until { stepper.steps == 1 }, "the correction step was never taken")
             #expect(await Self.until { probe.following && (probe.tailHiddenBy ?? .infinity) <= 0.5 }, "Jump to Latest didn't return to the tail")
-            await Self.settle()
+            #expect(await Self.until { !probe.jumping }, "Jump to Latest never landed")
             #expect(probe.detaches == detached, "the height correction stopped following \(probe.detaches - detached) time(s) mid-jump")
             #expect(probe.following && !probe.showsJump)
         }
@@ -382,7 +396,11 @@ struct AgentScrollTests {
         let held = Held()
         let stepper = Stepper()
         let original = AgentSurface.scheduleBackstop
-        defer { AgentSurface.scheduleBackstop = original }
+        let duration = AgentSurface.jumpDuration
+        defer {
+            AgentSurface.scheduleBackstop = original
+            AgentSurface.jumpDuration = duration
+        }
         try await jumping { probe, scroll, host, window in
             // The second jump arms the step back as it begins, not before the click.
             AgentSurface.scheduleBackstop = { body in
@@ -397,16 +415,18 @@ struct AgentScrollTests {
             }
             Self.clickJump(probe, host, window)
             #expect(await Self.until { probe.following && (probe.tailHiddenBy ?? .infinity) <= 0.5 })
-            await Self.settle()
+            // Landed, or the scroll up below reads as a height correction.
+            #expect(await Self.until { !probe.jumping }, "the first jump never landed")
             scroll.contentView.scroll(to: NSPoint(x: 0, y: 100))
             scroll.reflectScrolledClipView(scroll.contentView)
             #expect(await Self.until(10) { probe.showsJump })
             await Self.settle()
             let detached = probe.detaches
+            AgentSurface.jumpDuration = Self.longFlight
             Self.clickJump(probe, host, window)
             #expect(await Self.until { stepper.steps == 1 }, "the correction step was never taken")
             #expect(await Self.until { probe.following && (probe.tailHiddenBy ?? .infinity) <= 0.5 })
-            await Self.settle()
+            #expect(await Self.until { !probe.jumping }, "the second jump never landed")
             #expect(probe.detaches == detached, "the second jump flickered: \(probe.detaches - detached)")
         }
     }
@@ -424,17 +444,21 @@ struct AgentScrollTests {
     /// the jump had started, and the jump then re-followed.
     @Test func aReaderWhoFlicksAwayMidJumpIsNotPulledBack() async throws {
         let original = AgentSurface.scheduleBackstop
+        let duration = AgentSurface.jumpDuration
         let stepper = Stepper()
-        defer { AgentSurface.scheduleBackstop = original }
+        defer {
+            AgentSurface.scheduleBackstop = original
+            AgentSurface.jumpDuration = duration
+        }
         try await jumping { probe, scroll, host, window in
-            AgentSurface.scheduleBackstop = { body in
-                stepper.arm(probe, scroll, back: 1_200)
-                original(body)
-            }
+            AgentSurface.jumpDuration = Self.longFlight
+            AgentSurface.scheduleBackstop = { _ in stepper.arm(probe, scroll, back: 1_200) }
             Self.clickJump(probe, host, window)
             #expect(await Self.until { stepper.steps == 1 }, "the flick was never made")
             #expect(await Self.until { !probe.following && probe.showsJump }, "a flick of 1,200 pt didn't stop following")
-            await Self.settle()
+            // The animation's completion has run, and left the reader where
+            // they went.
+            #expect(await Self.until { !probe.jumping }, "the jump never ended")
             #expect(!probe.following && probe.showsJump, "the reader was pulled back to the tail")
         }
     }

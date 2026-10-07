@@ -24,6 +24,10 @@ final class AgentScrollProbe {
     /// How many times the chat stopped following, for a test that no step of
     /// a Jump to Latest does (ov-386).
     var detaches = 0
+    /// Whether a Jump to Latest is in flight: set as it begins, cleared when
+    /// its animation completes (or its backstop runs). A test waits on this
+    /// rather than on a delay, which a loaded machine overruns.
+    var jumping = false
     /// `AgentStream.send`, as the composer calls it.
     var send: ((String) -> Void)?
     /// Text into the composer, as Edit puts a sent message back.

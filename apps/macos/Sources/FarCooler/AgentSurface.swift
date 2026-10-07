@@ -523,14 +523,17 @@ struct AgentSurface: View {
     private func jumpToTail() {
         follow(true)
         tail.jumping = true
+        probe?.jumping = true
         tail.jump += 1
         let jump = tail.jump
         let tail = tail
-        withAnimation(.easeOut(duration: 0.25), completionCriteria: .logicallyComplete) {
+        let probe = probe
+        withAnimation(.easeOut(duration: Self.jumpDuration), completionCriteria: .logicallyComplete) {
             scrollToTail()
         } completion: {
             guard tail.jump == jump else { return }
             tail.jumping = false
+            probe?.jumping = false
             // A reader who flicked away mid-flight, by more than a
             // correction, has already stopped following (the geometry
             // observer): they're left where they went, not pulled back.
@@ -538,8 +541,18 @@ struct AgentSurface: View {
         }
         // Backstop: a completion that never comes would leave a reader who
         // scrolls up unable to detach.
-        Self.scheduleBackstop { if tail.jump == jump { tail.jumping = false } }
+        Self.scheduleBackstop {
+            if tail.jump == jump {
+                tail.jumping = false
+                probe?.jumping = false
+            }
+        }
     }
+
+    /// How long Jump to Latest animates. A test stretches it, so a step it
+    /// takes "mid-flight" is mid-flight however long a loaded machine takes
+    /// to get to it: the animation runs on the clock, not on the test.
+    nonisolated(unsafe) static var jumpDuration: Double = 0.25
 
     /// Runs `body` a second from now: a jump's backstop. A test replaces it
     /// to run one jump's backstop at a moment it chooses.
