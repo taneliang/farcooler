@@ -223,7 +223,16 @@ impl Watcher {
         if let Some(left) = told.map(|at| TOLD_SPACING_MS - (now_millis() - at)).filter(|left| *left > 0) {
             tokio::time::sleep(Duration::from_millis(left as u64)).await;
         }
-        self.ready(&to).await.map_err(|held| DomainError::Conflict { what: held_word(held) })?;
+        // The watcher's reading can lag a turn: while claude runs a hook, the
+        // pane's foreground is the hook's process, and the watcher reads no
+        // agent there for a sample. Held as busy for that alone, the send
+        // goes on if claude's registry says it's working (below).
+        let ready = self.ready(&to).await;
+        if let Err(held) = ready
+            && held != super::Held::Busy
+        {
+            return Err(DomainError::Conflict { what: held_word(held) });
+        }
         let proven = self.proven_tui(&to).await.map_err(|held| DomainError::Conflict { what: held_word(held) })?;
         if !queues_mid_turn(proven.preset) {
             return Err(DomainError::Conflict { what: "unsupported" });
@@ -236,6 +245,9 @@ impl Watcher {
         let Some((session, transcript, busy)) = session_of(proven.pid).await else {
             return Err(DomainError::Conflict { what: "no_session" });
         };
+        if ready.is_err() && (!busy || self.typed_lately(to.id, now_millis())) {
+            return Err(DomainError::Conflict { what: if busy { "typing" } else { "busy" } });
+        }
         let proven = super::Proven { turn: if busy { Turn::During } else { proven.turn }, ..proven };
         if composed.command.is_some() && proven.turn == Turn::During {
             return Err(DomainError::Conflict { what: "busy" });

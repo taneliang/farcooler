@@ -280,3 +280,25 @@ async fn a_turn_the_screen_misses_is_read_from_claudes_registry() {
     assert_eq!(b.watcher.compose_into(agent.id, "after the tool", &[]).await.expect("queued"), Turn::During);
     assert!(si.log().contains("QUEUED after the tool"), "{}", si.log());
 }
+
+/// The watcher reading no agent for a sample (claude running a hook holds
+/// the pane's foreground): a send goes on when claude's registry says it's
+/// working, through the mid-turn checks; not when it says idle, and not
+/// over someone typing.
+#[tokio::test]
+async fn a_watcher_that_lost_the_agent_defers_to_claudes_registry() {
+    let b = board().await;
+    let (agent, si) = idle_claude(&b).await;
+    b.doing(agent.id, AgentActivity::None).await;
+    assert_eq!(refused(b.watcher.compose_into(agent.id, "now", &[]).await), "busy", "the registry says idle");
+    si.show("working").await;
+    b.screen_with(agent.id, "esc to interrupt").await;
+    b.doing(agent.id, AgentActivity::None).await;
+    crate::runtime::mark_input(b.svc.root_dir(), agent.id);
+    assert_eq!(refused(b.watcher.compose_into(agent.id, "now", &[]).await), "typing");
+    nothing_typed(&si);
+    let long_ago = now_millis() - QUIET_WATCHED_MS - 1_000;
+    std::fs::write(crate::runtime::input_mark(b.svc.root_dir(), agent.id), long_ago.to_string()).unwrap();
+    assert_eq!(b.watcher.compose_into(agent.id, "now", &[]).await.expect("queued"), Turn::During);
+    assert!(si.log().contains("QUEUED now"), "{}", si.log());
+}
