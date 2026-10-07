@@ -1654,6 +1654,8 @@ async fn dispatch(
                     .as_ref()
                     .map(|s| s.branch_prefix.as_str())
                     .unwrap_or_default(),
+                // Whether its projector, and so the conversation view, is on (ov-373).
+                "projector": facts.settings.as_ref().is_some_and(|s| s.projector),
             }))
         }
 
@@ -2325,8 +2327,8 @@ async fn dispatch(
         "worktree.file_search" | "worktree.list_dir" | "worktree.read_file" => {
             files_args::call(session, method, args).await
         }
-        // A terminal's agent rows, a page and a follow (ov-366).
-        "agent.rows" | "agent.rows_follow" => rows_args::call(session, method, args).await,
+        // A terminal's agent rows, a page and a follow (ov-366), and their setting (ov-373).
+        "agent.rows" | "agent.rows_follow" | "settings.set_projector" => rows_args::call(session, method, args).await,
         // `{terminal, text, images?}` → `{queued}` (ov-372, ov-367).
         "terminal.compose" => {
             let queued = session.compose(id("terminal")?, &text("text"), &images_arg::images(args)).await?;

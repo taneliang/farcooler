@@ -253,12 +253,16 @@ async fn a_runner_that_refuses_everything(socket: &std::path::Path) {
 }
 
 /// Whether `dispatch` has an arm for `name`, asked of a runner that refuses
-/// everything, with no arguments.
+/// everything, with no arguments. A routed name with no arm falls to the
+/// last arm's "routed but not handled", which is the miss this looks for
+/// (ov-373: it used to look only for "unknown method", which a routed name
+/// never answers, so a removed arm passed).
 async fn is_routed(session: &mut Session, name: &str) -> bool {
     let answer = tokio::time::timeout(std::time::Duration::from_secs(5), dispatch(session, name, &json!({})))
         .await
         .unwrap_or_else(|_| panic!("{name} never answered"));
-    !matches!(answer, Err(SessionError::Protocol(m)) if m == format!("unknown method: {name}"))
+    !matches!(answer, Err(SessionError::Protocol(m))
+        if m == format!("unknown method: {name}") || m == format!("method routed but not handled: {name}"))
 }
 
 /// Every wire method the iOS and Android apps name in their sources.

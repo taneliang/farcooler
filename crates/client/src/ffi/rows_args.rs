@@ -1,6 +1,6 @@
 //! A terminal's agent rows, as an app passes and reads them (ov-366):
-//! `agent.rows` and `agent.rows_follow`. EXPERIMENTAL until a client reads
-//! them (ov-372).
+//! `agent.rows` and `agent.rows_follow`, and the setting that serves them,
+//! `settings.set_projector` (ov-373).
 //!
 //! Each row arrives as the object `projector::Row` serializes to, not as a
 //! string of JSON, so an app decodes rows in the same pass as the page.
@@ -10,8 +10,11 @@ use uuid::Uuid;
 
 use crate::session::{Session, SessionError};
 
-/// One of the two row methods. `method` is one `dispatch` matched.
+/// One of the two row methods, or the projector's setting. `method` is one
+/// `dispatch` matched.
 ///
+/// - `settings.set_projector {on}` answers `{projector}`, what was set. The
+///   hello already made doesn't change: reconnect to be offered `agent_rows`.
 /// - `agent.rows {terminal, before?, limit?}` answers
 ///   `{epoch, rev, moreBefore, rows: [row]}`.
 /// - `agent.rows_follow {terminal, epoch, afterRev, waitMs?}` answers
@@ -20,6 +23,11 @@ use crate::session::{Session, SessionError};
 ///   `waitMs` the runner holds it `DEFAULT_WAIT_MS`: an app that forgets it
 ///   must not poll in a tight loop.
 pub(super) async fn call(session: &Session, method: &str, args: &Value) -> Result<Value, SessionError> {
+    if method == "settings.set_projector" {
+        let on = args.get("on").and_then(Value::as_bool).ok_or_else(|| SessionError::Protocol(format!("{method} needs on")))?;
+        session.set_projector(on).await?;
+        return Ok(json!({ "projector": on }));
+    }
     let terminal = args
         .get("terminal")
         .and_then(Value::as_str)

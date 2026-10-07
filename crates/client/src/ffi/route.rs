@@ -96,7 +96,10 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         | Method::AgentRows
         | Method::AgentRowsFollow
         // The native view's composer (ov-372).
-        | Method::TerminalCompose => Some(method.name()),
+        | Method::TerminalCompose
+        // Its setting, the phones' settings row (ov-373): `host_admin` on
+        // the runner, so a phone enrolled at `control` is refused it.
+        | Method::SettingsSetProjector => Some(method.name()),
         // The owner's two marks on a ruling (ov-333): Keep, and Keep All.
         // `ruling.set` is a phone's only as `ruling.keep`: it can't reverse or
         // settle any other way. Reversing is a request to the orchestrator,
@@ -112,9 +115,6 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         Method::HostGet => None,
         // The Mac app owns the local daemon's lifecycle, through the CLI.
         Method::DaemonShutdown => None,
-        // The native view's setting (ov-372) is the Mac's, through the CLI,
-        // until a phone has a settings row for it (ov-373).
-        Method::SettingsSetProjector => None,
         // Discovery and a node key are the Mac's and the ceremony's: paths
         // sit behind `host_admin`, and the tunnel is joined by the CLI.
         Method::WorktreeDiscover | Method::ClientSetNodeKey => None,
