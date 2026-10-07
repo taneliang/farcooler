@@ -43,8 +43,8 @@ pub struct TmuxServer {
     /// is counted at the one place that spawns. See `call_counts`.
     pub(crate) calls: Arc<Mutex<std::collections::BTreeMap<String, u64>>>,
     /// The socket a read found nothing listening on, as tmux itself named it.
-    /// See `pane_read::server_is_known_absent`.
-    pub(crate) absent_socket: Arc<Mutex<Option<crate::pane_read::Silent>>>,
+    /// See `pane_read::Learned`.
+    pub(crate) absent_socket: Arc<Mutex<crate::pane_read::Learned>>,
 }
 
 /// Far Cooler's own minimal tmux configuration.

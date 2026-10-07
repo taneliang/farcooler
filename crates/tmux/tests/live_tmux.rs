@@ -715,7 +715,9 @@ async fn no_server_is_asked_about_once() {
         let read = srv.read_panes().await.expect("no server is not an error");
         assert!(read.panes.is_empty() && read.unfinished.is_empty());
     }
-    assert_eq!(srv.calls_total(), 1, "five reads of nothing, one spawn: {:?}", srv.call_counts());
+    // The first failure is not believed on its own (it may be a server that bound
+    // a moment later), so the second asks too; after that, nothing.
+    assert!(srv.calls_total() <= 2, "five reads of nothing, two spawns at most: {:?}", srv.call_counts());
 
     srv.create_terminal_window(Uuid::now_v7(), Uuid::now_v7(), "x", "/tmp", "sleep 30").await.unwrap();
     let before = srv.calls_total();
@@ -783,4 +785,64 @@ async fn one_read_carries_the_panes_the_stamp_and_the_unfinished_opens() {
     let now = read.panes[0].stamp;
     assert!(!now.unchanged_since(&first), "typing into the pane moved its stamp: {first:?} then {now:?}");
     assert!(now.unchanged_since(&now), "a stamp is unchanged from itself");
+}
+
+/// A server that starts while a read of the empty socket is in flight is read
+/// from then on. The skip once believed the socket it found AFTER the error,
+/// which in a race is the new server's own, and then read nothing for as long as
+/// that server lived: every terminal derived Lost (review, 7 of 800).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_server_born_during_a_read_is_never_skipped() {
+    let Some(srv) = live_server("a_server_born_during_a_read_is_never_skipped").await else { return };
+    for i in 0..200u64 {
+        srv.kill_server().await.unwrap();
+        // Settle into the state the daemon idles in: the empty socket, believed.
+        for _ in 0..3 {
+            srv.read_panes().await.unwrap();
+        }
+        let reader: TmuxServer = (*srv).clone();
+        let delay = std::time::Duration::from_micros(i * 137 % 25_000);
+        let racing = tokio::spawn(async move {
+            tokio::time::sleep(delay).await;
+            reader.read_panes().await
+        });
+        srv.create_terminal_window(Uuid::now_v7(), Uuid::now_v7(), "x", "/tmp", "sleep 30").await.unwrap();
+        racing.await.unwrap().unwrap();
+        for _ in 0..2 {
+            assert_eq!(srv.read_panes().await.unwrap().panes.len(), 1, "round {i}: a running server read as empty");
+        }
+    }
+}
+
+/// `window_activity` alone moves when a program draws and puts the cursor back:
+/// a dialog painted over a full-screen program and restored. The cache's whole
+/// case for such a screen rests on it, and on tmux 3.4 as on 3.7.
+#[tokio::test]
+async fn drawing_and_restoring_the_cursor_still_moves_the_windows_activity() {
+    let Some(srv) = live_server("drawing_and_restoring_the_cursor_still_moves_the_windows_activity").await else {
+        return;
+    };
+    // Parks the cursor, waits out a whole second, then saves it, draws and
+    // restores it.
+    let program = r"printf '[10;10H'; sleep 2.5; printf '7[5;5HDIALOG8'; sleep 30";
+    srv.create_terminal_window(Uuid::now_v7(), Uuid::now_v7(), "x", "/tmp", &format!("sh -c \"{program}\""))
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    let first = srv.read_panes().await.unwrap().panes[0].stamp;
+    assert_eq!(first.cursor, (9, 9), "the program parked the cursor");
+
+    let mut moved = None;
+    for _ in 0..60 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let now = srv.read_panes().await.unwrap().panes[0].stamp;
+        if now.activity != first.activity {
+            moved = Some(now);
+            break;
+        }
+    }
+    let now = moved.expect("tmux never reported the draw as activity");
+    assert!(now.activity > first.activity);
+    assert_eq!((now.cursor, now.history, now.pid), (first.cursor, first.history, first.pid), "only the activity moved");
+    assert!(!now.unchanged_since(&first));
 }

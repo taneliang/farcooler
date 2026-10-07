@@ -78,7 +78,7 @@ async fn ten_idle_panes_cost_one_list_panes_a_tick() {
         }
         tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
     }
-    assert!(quiet, "ten shells never settled");
+    assert!(quiet, "ten idle shells were still read every tick: the screen cache is not holding their screens");
 
     let before = svc.tmux.call_counts();
     for _ in 0..6 {
@@ -180,4 +180,16 @@ fn a_held_screen_stands_only_while_nothing_it_can_see_moved() {
     first.pane_id = "%0".into();
     assert!(!held(now).stands_for(&first, std::time::Duration::ZERO), "past its age");
     assert!(held(now).stands_for(&pane(now - 5), std::time::Duration::ZERO), "%3's backstop is spread three seconds later");
+}
+
+/// A terminal that is gone is forgotten, so one that comes back is read.
+#[test]
+fn a_gone_terminal_is_forgotten_by_the_cache() {
+    use super::screen_cache::Taken;
+    let (kept, gone) = (Uuid::from_u128(1), Uuid::from_u128(2));
+    let cache = ScreenCache::default();
+    cache.hold(kept, Taken::for_test(&pane(5), 10));
+    cache.hold(gone, Taken::for_test(&pane(5), 10));
+    cache.retain(&[kept].into_iter().collect());
+    assert!(cache.holds(kept) && !cache.holds(gone));
 }

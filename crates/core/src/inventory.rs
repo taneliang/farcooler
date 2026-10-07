@@ -12,7 +12,7 @@ use uuid::Uuid;
 ///
 /// Names, indexes, and PID values are display or diagnostic data only and never
 /// establish identity.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct TaggedPane {
     pub daemon_id: Uuid,
     pub worktree_id: Uuid,
@@ -99,12 +99,11 @@ pub struct TaggedPane {
 /// in the same second came last. The cache allows for both. It is zero when
 /// the number is unknown, and a zero stamp is never trusted.
 ///
-/// Compares EQUAL to every other stamp, on purpose. A pane's output moves its
-/// stamp on every tick of a busy agent, and `TaggedPane`'s equality is what the
-/// backstop reconcile uses to report a missed notification as a defect: a
-/// stamp that took part would turn every busy pane into one. Whether a stamp
-/// moved is `unchanged_since`.
-#[derive(Debug, Clone, Copy, Default, Eq)]
+/// Deliberately NOT comparable with `==`: a stamp moves on every tick of a busy
+/// pane, so it takes no part in `TaggedPane`'s equality (see that impl), and a
+/// comparison that compiled would be one nobody meant. Whether a stamp moved is
+/// `unchanged_since`.
+#[derive(Debug, Clone, Copy, Default)]
 pub struct ScreenStamp {
     /// The window's last activity, Unix seconds.
     pub activity: u64,
@@ -113,12 +112,6 @@ pub struct ScreenStamp {
     pub cursor: (u32, u32),
     /// The program's pid: a respawned pane has the old pane's id.
     pub pid: u32,
-}
-
-impl PartialEq for ScreenStamp {
-    fn eq(&self, _: &Self) -> bool {
-        true
-    }
 }
 
 impl ScreenStamp {
@@ -132,6 +125,59 @@ impl ScreenStamp {
             && self.pid == then.pid
     }
 }
+
+/// Equal when everything but the screen stamp is. The backstop reconcile
+/// compares snapshots to find a missed notification, and a busy pane's stamp
+/// differs on every read without anything having been missed. Destructured
+/// without `..`, so a field added to `TaggedPane` is a compile error here until
+/// somebody decides whether it takes part.
+impl PartialEq for TaggedPane {
+    fn eq(&self, other: &Self) -> bool {
+        let TaggedPane {
+            daemon_id,
+            worktree_id,
+            terminal_id,
+            schema_version,
+            pane_id,
+            window_id,
+            columns,
+            rows,
+            left,
+            top,
+            window_active,
+            pane_active,
+            zoomed,
+            tty,
+            dead,
+            dead_status,
+            dead_signal,
+            command,
+            title,
+            stamp: _,
+        } = self;
+        *daemon_id == other.daemon_id
+            && *worktree_id == other.worktree_id
+            && *terminal_id == other.terminal_id
+            && *schema_version == other.schema_version
+            && *pane_id == other.pane_id
+            && *window_id == other.window_id
+            && *columns == other.columns
+            && *rows == other.rows
+            && *left == other.left
+            && *top == other.top
+            && *window_active == other.window_active
+            && *pane_active == other.pane_active
+            && *zoomed == other.zoomed
+            && *tty == other.tty
+            && *dead == other.dead
+            && *dead_status == other.dead_status
+            && *dead_signal == other.dead_signal
+            && *command == other.command
+            && *title == other.title
+    }
+}
+
+impl Eq for TaggedPane {}
 
 impl TaggedPane {
     /// A dead pane proves an exit. It does not prove life.
@@ -196,5 +242,45 @@ impl FakeInventory {
 impl RuntimeInventory for FakeInventory {
     fn snapshot(&self) -> RuntimeSnapshot {
         self.snapshot.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pane() -> TaggedPane {
+        TaggedPane {
+            daemon_id: Uuid::nil(),
+            worktree_id: Uuid::nil(),
+            terminal_id: Uuid::nil(),
+            schema_version: 1,
+            pane_id: "%1".into(),
+            window_id: "@1".into(),
+            columns: 80,
+            rows: 24,
+            left: 0,
+            top: 0,
+            window_active: true,
+            pane_active: true,
+            zoomed: false,
+            tty: String::new(),
+            dead: false,
+            dead_status: None,
+            dead_signal: None,
+            command: "sh".into(),
+            title: String::new(),
+            stamp: ScreenStamp::default(),
+        }
+    }
+
+    /// The backstop reconcile compares snapshots, and a busy pane's stamp moves
+    /// between any two reads.
+    #[test]
+    fn a_stamp_takes_no_part_in_a_panes_equality() {
+        let moved = TaggedPane { stamp: ScreenStamp { activity: 5, history: 1, cursor: (1, 1), pid: 9 }, ..pane() };
+        assert_eq!(pane(), moved);
+        assert!(!pane().stamp.unchanged_since(&moved.stamp));
+        assert_ne!(pane(), TaggedPane { title: "x".into(), ..pane() }, "everything else still does");
     }
 }

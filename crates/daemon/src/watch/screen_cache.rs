@@ -92,6 +92,17 @@ impl Taken {
     }
 }
 
+#[cfg(test)]
+impl ScreenCache {
+    pub(super) fn hold(&self, id: Uuid, taken: Taken) {
+        self.taken.lock().unwrap().insert(id, taken);
+    }
+
+    pub(super) fn holds(&self, id: Uuid) -> bool {
+        self.taken.lock().unwrap().contains_key(&id)
+    }
+}
+
 impl ScreenCache {
     /// The terminal's screen: the one already held while it stands, else a
     /// fresh `capture-pane`. Errors are not kept.
