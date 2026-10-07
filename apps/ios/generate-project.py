@@ -688,6 +688,9 @@ AGENTKIT_SOURCES = [
     "AgentRowStore.swift",
     "AgentRowCache.swift",
     "AgentConversation.swift",
+    # What a phone's composer sends with a message: a picked or pasted image as
+    # the runner takes it, converted where it doesn't (ov-404).
+    "OutgoingImage.swift",
 ]
 # The widget extension's own sources, in `apps/ios/FarCoolerActivity/`.
 #

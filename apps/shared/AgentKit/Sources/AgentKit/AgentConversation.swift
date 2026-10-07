@@ -48,6 +48,19 @@ public enum AgentConversation {
     /// `LONGEST_MESSAGE`).
     public static let longest = 500
 
+    /// The longest with `compose` (`compose.rs`'s `LONGEST_TEXT`).
+    public static let longestComposed = 100_000
+
+    /// The most images in one message (`compose.rs`'s `MOST_IMAGES`).
+    public static let mostImages = 10
+
+    /// The longest message the box takes, where the runner has `compose`
+    /// (`rich`) or doesn't.
+    public static func longest(rich: Bool) -> Int { rich ? longestComposed : longest }
+
+    /// The words that say a message is over `longest(rich:)`.
+    public static func tooLong(rich: Bool) -> String { rich ? tooLongComposed : tooLong }
+
     /// A draft as the box will take it: one line, since compose types one
     /// (multi-line is compose_into, ov-367), so what you see is what's sent.
     public static func flattened(_ draft: String) -> String {
@@ -70,6 +83,9 @@ public enum AgentConversation {
         /// Claude is showing a question, a menu or a panel only the terminal
         /// can draw: the Handoff row, with Show Terminal.
         case handoff
+        /// The message is one of claude's own commands that opens a panel or
+        /// acts at once (`handoff`): the Handoff row, with Show Terminal.
+        case panel
         /// The terminal's box holds text of its own (R-28): refused, with
         /// Show Terminal. Bring Here is a later card.
         case draftInTerminal
@@ -91,7 +107,9 @@ public enum AgentConversation {
         case lost(notSent: Bool)
     }
 
-    public static func issue(for failure: SendFailure) -> SendIssue {
+    /// `command` when the message was a slash command, which says which limit
+    /// `images` means.
+    public static func issue(for failure: SendFailure, command: Bool = false) -> SendIssue {
         switch failure {
         // A grant that may read but not type (`read`): saying so beats
         // "wasn't sent" on every try.
@@ -100,17 +118,24 @@ public enum AgentConversation {
         case .refused(let what, _):
             switch what {
             case "prompt", "dialog": return .handoff
+            case "handoff": return .panel
             case "draft": return .draftInTerminal
             case "typing": return .said("Someone typed in the terminal in the last 15 seconds, so the message wasn’t sent. Try again once they stop.")
             case "busy": return .said("Claude is working and can’t take a message from here right now.")
             case "too_long": return .said(tooLong)
-            case "command": return .said(command)
+            case "command": return .said(commandRefused)
             case "paste_left": return .said("The message didn’t land in the box as typed, so it was left there and not sent.")
             case "left_at_shell": return .said("Claude quit as the message was typed. It wasn’t run.")
-            case "unconfirmed":
-                return .said("Claude didn’t confirm it queued the message. Check the terminal before sending it again.")
+            case "unconfirmed": return .said(unconfirmed)
             case "not_running", "not_an_agent": return .said("Claude isn’t running in this pane.")
             case "unfamiliar", "unproven": return .said("Far Cooler can’t read this terminal’s box, so nothing was typed.")
+            case "unconfirmable": return .said("Far Cooler can’t find Claude’s session to confirm a send, so nothing was typed.")
+            case "unsupported": return .said("Only Claude can take a message from here. Use the terminal.")
+            case "images_too_large": return .said(imagesTooLarge)
+            case "images": return .said(command ? commandWithImages : tooManyImages)
+            case "image_too_large": return .said(imageTooLarge)
+            case "backslash": return .said(backslash)
+            case "image": return .said("One of the images couldn’t be read, so nothing was sent.")
             default: return .said("The message wasn’t sent.")
             }
         // Never "wasn't sent" for a call that may have arrived: the runner
@@ -121,8 +146,21 @@ public enum AgentConversation {
     }
 
     public static let tooLong = "That message is over \(longest) characters. Shorten it, or paste it in the terminal."
+    public static let tooLongComposed = "That message is over 100,000 characters. Shorten it, or paste it in the terminal."
     public static let command =
         "A message can’t start with a symbol Claude reads as a command, such as / or !. Use the terminal for commands."
+    /// The runner's `command`: a `!`, which claude's box runs in a shell, or
+    /// a `/` before something that isn't a command's name.
+    public static let commandRefused =
+        "Claude would run that as a shell command or doesn’t have that command, so it wasn’t sent. Use the terminal for it."
+    public static let imagesTooLarge = "These images are too large to send together. Send fewer or smaller ones."
+    public static let tooManyImages = "A message takes at most \(mostImages) images."
+    public static let commandWithImages = "A slash command can’t carry images. Send it without them."
+    public static let imageTooLarge = "That image is too large to send. Use a smaller one."
+    public static let backslash =
+        "Claude reads a backslash at the end as a new line, so the message wasn’t sent. Remove it, or add a word after it."
+    public static let unconfirmed = "Claude didn’t confirm it took the message. Check the terminal before sending it again."
+    public static let panel = "This opens a panel in Claude, so it’s for the terminal."
     public static let mayHaveBeenSent =
         "The runner didn’t answer in time. The message may have been sent, so check the terminal before sending it again."
     public static let draftInTerminal = "The terminal’s box already holds a draft. Send or clear it there first."
@@ -130,17 +168,93 @@ public enum AgentConversation {
 
     /// Messages claude's queue took that its transcript hasn't shown yet,
     /// once the newest rows show them: as a Queued row, or as the turn each
-    /// became.
+    /// became. Compared by `words`, so a message with images matches its row
+    /// (`[Image #1]` there, `[Image]` here).
     public static func unsettled(_ queued: [String], newest rows: [AgentRow]) -> [String] {
         guard !queued.isEmpty else { return queued }
         let shown = Set(rows.compactMap { row -> String? in
             switch row.kind {
-            case .queued(let q): q.text
-            case .turn(let t): t.prompt
+            case .queued(let q): words(q.text)
+            case .turn(let t): words(t.prompt)
             default: nil
             }
         })
-        return queued.filter { !shown.contains($0) }
+        return queued.filter { !shown.contains(words($0)) }
+    }
+
+    /// A Queued row's words until the transcript shows the message: each
+    /// image as `[Image]`, then the text.
+    public static func echo(_ text: String, images: Int) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (Array(repeating: "[Image]", count: images) + (trimmed.isEmpty ? [] : [trimmed])).joined(separator: " ")
+    }
+
+    /// What an echo and the transcript's row for it share: how many images
+    /// the message has (claude's `[Image #N]`, the echo's `[Image]`), and its
+    /// words without them or the white space around them. So an echo of two
+    /// images is never taken for a row of one.
+    public static func words(_ text: String) -> String {
+        let placeholder = #"\[Image( #\d+)?\]"#
+        let images = (try? Regex(placeholder)).map { text.ranges(of: $0).count } ?? 0
+        let words = text.replacingOccurrences(of: placeholder, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return "\(images) \(words)"
+    }
+
+    // MARK: - Stop and Send Now (ov-368)
+
+    /// Which key the runner is asked to press.
+    public enum PaneKey: Equatable, Sendable {
+        case stop, sendNow
+    }
+
+    /// Whether claude is working on a turn, as the newest turn's row says
+    /// (claude's registry, `Busy`). Not while a dialog is up: the row says
+    /// `Waiting` then, and an Esc would answer the dialog No.
+    public static func isWorking(newestTurn turn: AgentRow.Turn?) -> Bool {
+        guard let turn else { return false }
+        return turn.outcome == nil && turn.activity == "Busy"
+    }
+
+    /// The newest turn among `rows`, which may be in any order.
+    public static func newestTurn(in rows: [AgentRow]) -> AgentRow.Turn? {
+        for row in rows.reversed() {
+            if case .turn(let turn) = row.kind { return turn }
+        }
+        return nil
+    }
+
+    /// What the composer says when the runner didn't press `key`, or nil when
+    /// there's nothing to say: the turn ended on its own (`idle`), or a
+    /// second press came too soon after the first (`too_soon`).
+    public static func keyIssue(for failure: SendFailure, _ key: PaneKey) -> SendIssue? {
+        let stop = key == .stop
+        switch failure {
+        case .refused(_, let word?) where word == "scope-denied":
+            return .said("This device can’t control this runner.")
+        case .refused(let what, _):
+            switch what {
+            case "idle", "too_soon": return nil
+            case "prompt": return .handoff
+            case "draft": return .draftInTerminal
+            case "typing": return .said("Someone is typing in the terminal. Try again in a moment.")
+            case "sending": return .said("A message is still going in. Try again in a moment.")
+            case "nothing_queued": return .said("Nothing is waiting in Claude’s queue.")
+            case "settling":
+                return .said(stop ? "Claude is starting a step. Try Stop again in a moment."
+                    : "Claude is starting a step. Try Send Now again in a moment.")
+            case "unconfirmed":
+                return .said(stop ? "Claude didn’t confirm it stopped. It may have stopped; check the terminal before pressing again."
+                    : "Claude didn’t confirm it sent the queued messages. Check the terminal.")
+            default:
+                return .said(stop ? "Far Cooler can’t stop Claude safely from here. Use the terminal."
+                    : "Far Cooler can’t send the queue safely from here. Use the terminal.")
+            }
+        case .timedOut, .lost(notSent: false):
+            return .said("The runner didn’t answer in time. Check the terminal.")
+        case .lost(notSent: true):
+            return .said("The runner isn’t connected. Use the terminal.")
+        }
     }
 
     // MARK: - Words for rows
