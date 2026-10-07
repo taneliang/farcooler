@@ -904,6 +904,8 @@ enum TerminalAction {
     case rename
     /// Open its listening port in this Mac's browser.
     case openInBrowser
+    /// Withdraw the draft held behind a dialog in it (ov-385).
+    case withdrawDraft
 }
 
 /// The banners over the detail pane: the latest few results, and a row for

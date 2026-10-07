@@ -448,6 +448,8 @@ struct TilePane: View {
     var body: some View {
         VStack(spacing: 0) {
             if showsHeader { header.probed("pane-header") }
+            // A draft held behind a dialog in this pane (ov-385).
+            HeldDraftBar(hold: terminal.draftHold) { onAction(.withdrawDraft) }
             paneBody.probed("pane-body")
         }
         .paneCard()

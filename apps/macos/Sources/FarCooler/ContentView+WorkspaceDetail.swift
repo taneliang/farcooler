@@ -523,7 +523,7 @@ extension ContentView {
                 Task { @MainActor in
                     let delivery = await AskOrchestrator.deliver(
                         row, to: seat,
-                        paste: { text in await client?.draftPrompt(terminal: seat.terminal.short, text: text) ?? false },
+                        paste: { text in await client?.draftPrompt(terminal: seat.terminal.short, text: text) ?? .declined },
                         copy: client?.copyToClipboard ?? AskOrchestrator.copyToPasteboard)
                     // A terminal pane has no composer to fill: the person
                     // pastes, so the pane takes the keyboard.

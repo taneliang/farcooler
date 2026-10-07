@@ -5262,9 +5262,34 @@ mod tests {
             "splitOf",
             "splitOfOrchestrator",
             "ports",
+            "draftHold",
         ] {
             assert!(event.contains(field), "{field} is in neither projection");
         }
+    }
+
+    /// A draft held behind a dialog crosses both projections in the shape the
+    /// apps read (ov-385), and is null when there's none.
+    #[test]
+    fn a_held_draft_crosses_both_projections() {
+        let id = Uuid::now_v7();
+        let t = farcooler_protocol::v1::Terminal {
+            draft_hold: Some(farcooler_protocol::v1::DraftHold {
+                id: bytes::Bytes::copy_from_slice(id.as_bytes()),
+                state: farcooler_protocol::v1::DraftHoldState::Sent as i32,
+                held_ms: 5,
+                expires_ms: 1_800_005,
+                ended_ms: 9,
+            }),
+            ..Default::default()
+        };
+        let want = serde_json::json!({
+            "id": id.to_string(), "state": "sent", "heldMs": 5, "expiresMs": 1_800_005, "endedMs": 9,
+        });
+        assert_eq!(worktree_list_terminal_json(&t)["draftHold"], want);
+        assert_eq!(terminal_event_json(&t)["draftHold"], want);
+        let none = farcooler_protocol::v1::Terminal::default();
+        assert_eq!(terminal_event_json(&none)["draftHold"], serde_json::Value::Null);
     }
 
     /// The ports a terminal serves cross both projections, as numbers, so the

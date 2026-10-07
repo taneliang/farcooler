@@ -52,6 +52,8 @@ struct TerminalEvent: Sendable, Decodable {
     // `DaemonClient.apply(_:)`.
     var turnStartedAt: Double?
     var blockedQuestion: String?
+    // Pushed so a held draft's pane says "Sent" the moment it goes in (ov-385).
+    var draftHold: DraftHold?
     // Pushed for the same reason, and this is the field with the shortest
     // useful life of any of them: a line is news for as long as the agent is
     // on it. Decoded here as well as on the full read because a field carried

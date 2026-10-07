@@ -111,6 +111,6 @@ enum RulingOrchestrator {
     }
 
     private static func paste(_ text: String, seat: BoardPane, client: DaemonClient?) async -> AskAboutTask.DraftResult {
-        await client?.draftPrompt(terminal: seat.terminal.short, text: text) == true ? .pasted : .declined
+        await client?.draftPrompt(terminal: seat.terminal.short, text: text) ?? .declined
     }
 }

@@ -123,7 +123,7 @@ struct PlanRulingOwnerActionsTests {
         let calls = PlanViewTests.Calls()
         let outcome = await RulingOrchestrator.reverse(Self.ruling, seat: Self.seat(chat: false), client: Self.client(calls))
         #expect(outcome == .drafted)
-        #expect(calls.args.contains { $0.starts(with: ["terminal", "draft-prompt", "orch"]) })
+        #expect(calls.args.contains { $0.starts(with: ["terminal", "draft-prompt", "--hold", "orch"]) })
         #expect(!calls.args.contains { $0.starts(with: ["terminal", "agent-prompt"]) })
         let refused = PlanViewTests.Calls()
         let copied = Self.client(refused, answering: false)
@@ -131,6 +131,23 @@ struct PlanRulingOwnerActionsTests {
         copied.copyToClipboard = { clipboard.append($0) }
         #expect(await RulingOrchestrator.reverse(Self.ruling, seat: Self.seat(chat: false), client: copied) == .copied)
         #expect(clipboard.count == 1 && clipboard[0].contains("One token"))
+    }
+
+    @Test("A dialog in the orchestrator's pane holds Reverse's request, and nothing is copied (ov-385)")
+    func reverseHeldBehindADialog() async {
+        let calls = PlanViewTests.Calls()
+        let client = DaemonClient(target: "", notifications: NotificationCenter())
+        client.commandRunnerForTesting = { args in
+            calls.args.append(args)
+            // The CLI's `--hold` answer, as `draft_prompt::drafted` prints it.
+            return (Data(#"{"held":{"id":"h1","state":"waiting","heldMs":1,"expiresMs":1800001,"endedMs":0}}"#.utf8), nil)
+        }
+        var clipboard: [String] = []
+        client.copyToClipboard = { clipboard.append($0) }
+        let outcome = await RulingOrchestrator.reverse(Self.ruling, seat: Self.seat(chat: false), client: client)
+        #expect(outcome == .held(DraftHold(id: "h1", state: .waiting, expiresMs: 1_800_001)))
+        #expect(RulingActions.notice(for: outcome, ruling: Self.ruling) == nil, "the pane says it waits")
+        #expect(clipboard.isEmpty)
     }
 
     @Test("Discuss leaves a quote in the composer, unsent")

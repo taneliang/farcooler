@@ -1,3 +1,4 @@
+import AgentKit
 import SwiftUI
 
 /// The terminal detail pane: a header of facts, the live surface, a hint bar.
@@ -51,6 +52,28 @@ struct TerminalPane: View {
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+            // A draft held behind a dialog in this pane (ov-385).
+            HeldDraftBar(hold: terminal.draftHold) { onAction(.withdrawDraft) }
+            surface
+        }
+        // A card on the canvas, exactly as a tiled pane is — so one terminal and
+        // four are the same object at different counts, and neither has to
+        // pretend to have the window's corner. See `Pane`.
+        .paneCard()
+        .paneCanvas()
+        // The prefix works here too — ⌃B t is how a worktree gets tiled at all —
+        // so the hint has to be visible here.
+        .prefixHint()
+        // The window's own title bar, which macOS already draws. Free, native,
+        // and it costs the content no vertical space.
+        .navigationTitle(worktree.windowTitle)
+        .navigationSubtitle(worktree.windowSubtitle)
+    }
+
+    /// The pane's content: its chat, its terminal, or what's left of one.
+    @ViewBuilder
+    private var surface: some View {
         Group {
             if isLive, terminal.isAgentPane {
                 // Same rectangle, same lifecycle, a chat drawn into it instead
@@ -103,18 +126,6 @@ struct TerminalPane: View {
                 inactive
             }
         }
-        // A card on the canvas, exactly as a tiled pane is — so one terminal and
-        // four are the same object at different counts, and neither has to
-        // pretend to have the window's corner. See `Pane`.
-        .paneCard()
-        .paneCanvas()
-        // The prefix works here too — ⌃B t is how a worktree gets tiled at all —
-        // so the hint has to be visible here.
-        .prefixHint()
-        // The window's own title bar, which macOS already draws. Free, native,
-        // and it costs the content no vertical space.
-        .navigationTitle(worktree.windowTitle)
-        .navigationSubtitle(worktree.windowSubtitle)
     }
 
     /// The only state left that needs saying out loud: a terminal with no

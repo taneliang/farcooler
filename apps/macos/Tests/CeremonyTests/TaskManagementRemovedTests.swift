@@ -154,7 +154,7 @@ struct AskOrchestratorTests {
             Self.row, to: pane,
             paste: { text in
                 spy.pasted.append(text)
-                return pasteSucceeds
+                return pasteSucceeds ? .pasted : .declined
             },
             copy: { spy.copied.append($0) }, handoff: handoff)
     }
@@ -179,6 +179,18 @@ struct AskOrchestratorTests {
         #expect(AskOrchestrator.copiedNotice(for: Self.row) == "Copied a reference to bil-9. Paste it into the orchestrator.")
     }
 
+    @Test("A draft the daemon holds behind a dialog is neither copied nor called pasted (ov-385)")
+    func aHeldDraftIsNotCopied() async {
+        let spy = Spy()
+        let got = await AskOrchestrator.deliver(
+            Self.row, to: Self.pane("orch", chat: false),
+            paste: { spy.pasted.append($0); return .held(DraftHold(id: "h", state: .waiting)) },
+            copy: { spy.copied.append($0) }, handoff: ComposerHandoff())
+        #expect(got == .held)
+        #expect(spy.pasted == ["About bil-9 (“Invoice PDF export”): "])
+        #expect(spy.copied.isEmpty)
+    }
+
     @Test("A chat orchestrator takes it in its composer and the daemon is never asked")
     func aChatOrchestratorIsNotPasted() async {
         let spy = Spy()
@@ -197,7 +209,7 @@ struct AskOrchestratorTests {
         for ok in [true, false] {
             _ = await AskOrchestrator.deliver(
                 row, to: Self.pane("orch", chat: false),
-                paste: { spy.pasted.append($0); return ok }, copy: { spy.copied.append($0) },
+                paste: { spy.pasted.append($0); return ok ? .pasted : .declined }, copy: { spy.copied.append($0) },
                 handoff: ComposerHandoff())
         }
         for text in spy.pasted + spy.copied { #expect(!text.contains { $0.isNewline }) }
@@ -214,10 +226,10 @@ struct AskOrchestratorTests {
         let spy = Spy()
         let handoff = ComposerHandoff()
         _ = await AskOrchestrator.deliver(
-            row, to: Self.pane("orch"), paste: { _ in true }, copy: { spy.copied.append($0) }, handoff: handoff)
+            row, to: Self.pane("orch"), paste: { _ in .pasted }, copy: { spy.copied.append($0) }, handoff: handoff)
         #expect(handoff.waiting["orch"] == expected)
         _ = await AskOrchestrator.deliver(
-            row, to: Self.pane("t", chat: false), paste: { _ in false }, copy: { spy.copied.append($0) }, handoff: handoff)
+            row, to: Self.pane("t", chat: false), paste: { _ in .declined }, copy: { spy.copied.append($0) }, handoff: handoff)
         #expect(spy.copied == [expected.trimmingCharacters(in: .whitespaces)])
         for text in [expected] + spy.copied {
             #expect(!text.unicodeScalars.contains { $0.value < 0x20 || $0.value == 0x7F }, "\(text.debugDescription)")

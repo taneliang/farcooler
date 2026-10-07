@@ -331,6 +331,9 @@ struct Terminal: Decodable, Identifiable, Hashable {
     var turnStartedAt: Double?
     /// What the agent is asking, when it is blocked.
     var blockedQuestion: String?
+    /// A draft held behind a dialog in this pane (ov-385): waiting, or how it
+    /// ended. Absent when there's none, and from a runner too old to hold one.
+    var draftHold: DraftHold?
     /// The last three DISPLAY LINES of what the agent has been saying, oldest
     /// first.
     ///

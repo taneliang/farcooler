@@ -677,6 +677,7 @@ final class DaemonClient: ObservableObject {
             // whatever a later refresh happens to backfill.
             updated.turnStartedAt = event.turnStartedAt
             updated.blockedQuestion = event.blockedQuestion
+            updated.draftHold = event.draftHold
             // The fields whose whole job is "what is it doing RIGHT NOW".
             // Applied from the push rather than waited on, because a row that
             // only arrived with a full refresh would always be describing the
@@ -2159,15 +2160,24 @@ final class DaemonClient: ObservableObject {
 
     /// Ask the daemon to paste `text` into a TUI pane's box and NEVER press
     /// return (`terminal draft-prompt`, ov-184), so the person finishes the
-    /// sentence. True only when it did. The daemon refuses, typing nothing,
-    /// unless the pane is provably an agent with an empty box and its paste
-    /// mode known, between turns or in a claude working, whose own queue
-    /// takes what the person then sends (the same gate as typing an answer,
-    /// ov-360); a runner that doesn't know the command refuses too. Either
-    /// way the caller copies instead.
-    func draftPrompt(terminal: String, text: String) async -> Bool {
-        let (data, _) = await runRaw(["terminal", "draft-prompt", terminal, text], background: true)
-        return data != nil
+    /// sentence. The daemon refuses, typing nothing, unless the pane is
+    /// provably an agent with an empty box and its paste mode known, between
+    /// turns or in a claude working, whose own queue takes what the person
+    /// then sends (the same gate as typing an answer, ov-360); a runner that
+    /// doesn't know the command refuses too, and the caller copies instead.
+    /// A dialog in the way, on a runner with `draft_hold`, holds it until the
+    /// dialog closes (`--hold`, ov-385): `.held`, which the pane then says.
+    func draftPrompt(terminal: String, text: String) async -> AskAboutTask.DraftResult {
+        let (data, _) = await runRaw(["terminal", "draft-prompt", "--hold", terminal, text], background: true)
+        guard let data else { return .declined }
+        return HeldDraft.result(of: data)
+    }
+
+    /// Stop the runner pasting the draft `hold` it holds on `terminal`
+    /// (`terminal draft-withdraw`, ov-385). The pane's next event says how it
+    /// ended; one that didn't reach the runner leaves Withdraw there.
+    func withdrawDraft(terminal: String, hold: String) async {
+        _ = await runRaw(["terminal", "draft-withdraw", terminal, hold], background: true)
     }
 
     /// Type text into a terminal and press return.

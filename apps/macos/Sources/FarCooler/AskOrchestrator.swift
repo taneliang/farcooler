@@ -88,6 +88,9 @@ enum AskOrchestrator {
         case pasted
         /// Onto the clipboard: the daemon couldn't prove the pane safe.
         case copied
+        /// Held by the daemon behind a dialog, pasted once it closes; the
+        /// pane says so (`HeldDraftBar`, ov-385).
+        case held
     }
 
     /// What the window says when the reference was copied instead of pasted.
@@ -101,21 +104,29 @@ enum AskOrchestrator {
     /// shell running claude, adopted as the orchestrator) is asked of the
     /// daemon, which pastes it with no Enter only past the gate that types an
     /// answer: a proven, idle agent with an empty box and a known paste mode.
-    /// Anything less, or any failure, copies it instead. Nothing here ever
-    /// presses Enter, and the Mac never writes to the pane itself.
+    /// A dialog in the way, on a runner that can, holds it until the dialog
+    /// closes (ov-385). Anything else, or any failure, copies it instead.
+    /// Nothing here ever presses Enter, and the Mac never writes to the pane
+    /// itself.
     @MainActor
     static func deliver(
         _ row: TaskRow, to orchestrator: BoardPane,
-        paste: (String) async -> Bool, copy: (String) -> Void,
+        paste: (String) async -> AskAboutTask.DraftResult, copy: (String) -> Void,
         handoff: ComposerHandoff = .shared
     ) async -> Delivery {
         if orchestrator.terminal.isAgentPane {
             ask(about: row, of: orchestrator, handoff: handoff)
             return .composer
         }
-        if await paste(draft(for: row)) { return .pasted }
-        copy(draft(for: row).trimmingCharacters(in: .whitespaces))
-        return .copied
+        switch await paste(draft(for: row)) {
+        // `DaemonClient.draftPrompt` never answers `.unknown`: a CLI that
+        // didn't finish is a refusal, and nothing was typed.
+        case .pasted, .unknown: return .pasted
+        case .held: return .held
+        case .declined:
+            copy(draft(for: row).trimmingCharacters(in: .whitespaces))
+            return .copied
+        }
     }
 
     /// What a view needs to draw the item: whether it works now, and what it

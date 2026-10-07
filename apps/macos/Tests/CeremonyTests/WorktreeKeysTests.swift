@@ -1,3 +1,4 @@
+import AgentKit
 import Foundation
 import Testing
 
@@ -34,6 +35,23 @@ struct WorktreeKeysTests {
             """
         let event = try JSONDecoder().decode(TerminalEvent.self, from: Data(json.utf8))
         #expect(event.worktree == "w-1")
+    }
+
+    /// `events`, a terminal line carrying a held draft (ov-385), in the shape
+    /// `draft_hold_json` writes it; and the event applied to the row moves it.
+    @Test func aTerminalEventCarriesItsHeldDraft() throws {
+        let json = """
+            {"kind":"terminal","id":"t-1","short":"t1","worktree":"w-1","title":"claude",
+             "preset":"claude","state":"running",
+             "draftHold":{"id":"0198f2c0-0000-7000-8000-00000000f385","state":"sent","heldMs":5,"expiresMs":1800005,"endedMs":9}}
+            """
+        let event = try JSONDecoder().decode(TerminalEvent.self, from: Data(json.utf8))
+        #expect(event.draftHold == DraftHold(id: "0198f2c0-0000-7000-8000-00000000f385", state: .sent, expiresMs: 1_800_005))
+        let none = try JSONDecoder().decode(TerminalEvent.self, from: Data("""
+            {"kind":"terminal","id":"t-1","short":"t1","worktree":"w-1","title":"claude",
+             "preset":"claude","state":"running","draftHold":null}
+            """.utf8))
+        #expect(none.draftHold == nil)
     }
 
     /// `events`, a layout line.

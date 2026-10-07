@@ -114,6 +114,9 @@ extension ContentView {
             if let url = TerminalPorts.browserURL(for: term, host: worktree.host ?? "") {
                 NSWorkspace.shared.open(url)
             }
+        case .withdrawDraft:
+            guard let hold = term.draftHold else { return }
+            await store.client(for: worktree)?.withdrawDraft(terminal: term.short, hold: hold.id)
         case .useAsOrchestrator: useAsOrchestrator(BoardPane(terminal: term, worktree: worktree))
         case .stopBeingOrchestrator: await stepDown(BoardPane(terminal: term, worktree: worktree))
         }
