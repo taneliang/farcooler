@@ -160,6 +160,7 @@ fn live_pane(terminal_id: Uuid) -> TaggedPane {
         dead_signal: None,
         command: "codex".into(),
         title: String::new(),
+        stamp: Default::default(),
     }
 }
 

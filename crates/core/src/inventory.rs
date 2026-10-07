@@ -78,6 +78,59 @@ pub struct TaggedPane {
     /// carries both what they are doing and what they are doing it to — see
     /// `crate::title`.
     pub title: String,
+    /// What tmux says about this pane's screen without drawing it. See
+    /// `ScreenStamp`.
+    pub stamp: ScreenStamp,
+}
+
+/// What a pane's screen was doing when tmux was last asked, in numbers that
+/// come from the same `list-panes` that finds the pane.
+///
+/// Reading a screen is a `capture-pane`, which is a process; reading these is
+/// free, because the inventory already ran. A screen that was captured under
+/// one stamp and is asked for again under the SAME stamp, some seconds later,
+/// has nothing new to say: tmux bumps `window_activity` whenever any pane in
+/// the window receives output, moves the cursor and the scrollback with it,
+/// and a respawned program has a new pid. The sampling loop uses that to read
+/// only the screens that moved (`watch::screen_cache`).
+///
+/// `activity` is a window's, in whole seconds, so it is blunt: it also moves
+/// for a sibling pane in the same window, and it cannot say which of two writes
+/// in the same second came last. The cache allows for both. It is zero when
+/// the number is unknown, and a zero stamp is never trusted.
+///
+/// Compares EQUAL to every other stamp, on purpose. A pane's output moves its
+/// stamp on every tick of a busy agent, and `TaggedPane`'s equality is what the
+/// backstop reconcile uses to report a missed notification as a defect: a
+/// stamp that took part would turn every busy pane into one. Whether a stamp
+/// moved is `unchanged_since`.
+#[derive(Debug, Clone, Copy, Default, Eq)]
+pub struct ScreenStamp {
+    /// The window's last activity, Unix seconds.
+    pub activity: u64,
+    /// Lines of scrollback.
+    pub history: u32,
+    pub cursor: (u32, u32),
+    /// The program's pid: a respawned pane has the old pane's id.
+    pub pid: u32,
+}
+
+impl PartialEq for ScreenStamp {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl ScreenStamp {
+    /// Whether nothing tmux can see about the screen moved since `then`.
+    /// False for a stamp whose activity is unknown, which proves nothing.
+    pub fn unchanged_since(&self, then: &ScreenStamp) -> bool {
+        self.activity != 0
+            && self.activity == then.activity
+            && self.history == then.history
+            && self.cursor == then.cursor
+            && self.pid == then.pid
+    }
 }
 
 impl TaggedPane {

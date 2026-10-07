@@ -195,36 +195,7 @@ impl TmuxServer {
     /// only a list. Deciding which have been unfinished too long to be an open
     /// in progress is the caller's job (`watch::unfinished_to_reap`).
     pub async fn unfinished_opens(&self) -> Result<Vec<UnfinishedOpen>> {
-        // The start command last: it is the one field that may hold a tab.
-        let fmt = format!(
-            "#{{session_name}}\t#{{pane_id}}\t#{{pane_pid}}\t#{{{}}}\t#{{pane_start_command}}",
-            tags::TERMINAL_ID
-        );
-        let out = self.run(&["list-panes", "-a", "-F", &fmt]).await?;
-        if !out.ok() {
-            if out.stderr.contains("no server running")
-                || out.stderr.contains("no current session")
-                || out.stderr.contains("error connecting")
-            {
-                return Ok(Vec::new());
-            }
-            tracing::warn!(stderr = %out.stderr, "list-panes failed");
-            return Err(DomainError::TmuxUnavailable);
-        }
-        Ok(out
-            .stdout
-            .lines()
-            .filter_map(|line| {
-                let mut fields = line.splitn(5, '\t');
-                let (session, pane, pid, tag) = (fields.next()?, fields.next()?, fields.next()?, fields.next()?);
-                let started = fields.next().unwrap_or("");
-                let ours = session == SESSION_NAME && pane.starts_with('%');
-                (ours && tag.trim().is_empty() && started.contains(OPENING_MARK)).then(|| UnfinishedOpen {
-                    pane_id: pane.to_string(),
-                    pid: pid.trim().parse().unwrap_or(0),
-                })
-            })
-            .collect())
+        Ok(self.read_panes_once().await?.unfinished)
     }
 
     /// Tag a window with what every pane in it shares.
@@ -291,7 +262,15 @@ impl TmuxServer {
     /// dead without a status, as tmux sees it, and is not waited for again
     /// while it stays that way.
     pub async fn list_tagged_panes(&self) -> Result<Vec<TaggedPane>> {
-        let mut panes = self.list_tagged_panes_once().await?;
+        Ok(self.read_panes().await?.panes)
+    }
+
+    /// `list_tagged_panes`, with the panes an open never finished from the
+    /// same read. One `list-panes` answers both, so the sweep for unfinished
+    /// opens costs no process of its own. See `pane_read`.
+    pub async fn read_panes(&self) -> Result<crate::pane_read::PaneRead> {
+        let mut read = self.read_panes_once().await?;
+        let mut panes = std::mem::take(&mut read.panes);
         let started = std::time::Instant::now();
         let deadline = started + EXIT_SETTLE;
         let mut nudged = started;
@@ -311,7 +290,8 @@ impl TmuxServer {
                 }
             };
             if !waiting {
-                return Ok(panes);
+                read.panes = panes;
+                return Ok(read);
             }
             // Waiting alone is not always enough: tmux can lose the wakeup for
             // SIGCHLD and leave the pane's process an unreaped zombie, with no
@@ -335,55 +315,11 @@ impl TmuxServer {
             // loop exists to wait for. The good read is kept, so the deadline
             // returns it rather than turning one pane's exit into an
             // unreadable inventory.
-            if let Ok(again) = self.list_tagged_panes_once().await {
-                panes = again;
+            if let Ok(again) = self.read_panes_once().await {
+                panes = again.panes;
+                read.unfinished = again.unfinished;
             }
         }
-    }
-
-    /// One `list-panes`, as tmux answers it.
-    async fn list_tagged_panes_once(&self) -> Result<Vec<TaggedPane>> {
-        // Geometry comes along for the ride: it is the same query, and asking
-        // tmux where a pane is costs nothing next to computing it twice.
-        let fmt = format!(
-            "#{{pane_id}}\t#{{window_id}}\t#{{pane_width}}\t#{{pane_height}}\t#{{{}}}\t#{{{}}}\t#{{{}}}\t#{{{}}}\t#{{pane_dead}}\t#{{pane_dead_status}}\t#{{pane_current_command}}\t#{{pane_left}}\t#{{pane_top}}\t#{{window_active}}\t#{{pane_active}}\t#{{window_zoomed_flag}}\t#{{pane_tty}}\t#{{pane_dead_signal}}\t#{{pane_title}}",
-            tags::DAEMON_ID,
-            tags::WORKTREE_ID,
-            tags::TERMINAL_ID,
-            tags::SCHEMA_VERSION
-        );
-
-        let out = self.run(&["list-panes", "-a", "-F", &fmt]).await?;
-        if !out.ok() {
-            // No server or no session is not an error: it means nothing is alive.
-            if out.stderr.contains("no server running")
-                || out.stderr.contains("no current session")
-                || out.stderr.contains("error connecting")
-            {
-                return Ok(Vec::new());
-            }
-            tracing::warn!(stderr = %out.stderr, "list-panes failed");
-            return Err(DomainError::TmuxUnavailable);
-        }
-
-        let parsed: Vec<TaggedPane> = out.stdout.lines().filter_map(parse_pane_line).collect();
-
-        // Lines arrived and none of them parsed.
-        //
-        // Worth saying out loud because it is indistinguishable from "nothing is
-        // running" everywhere downstream: the snapshot is empty either way,
-        // `derive_terminal` reports every terminal `Lost`, and the app looks
-        // broken with nothing anywhere saying why. That is exactly how the
-        // missing-locale bug hid — tmux sanitized the tab delimiter to `_`, every
-        // line was dropped here in silence, and the symptom surfaced three layers
-        // away as panes that never leave `starting`.
-        if parsed.is_empty() && out.stdout.lines().any(|l| !l.trim().is_empty()) {
-            tracing::warn!(
-                lines = out.stdout.lines().count(),
-                "tmux listed panes but none could be parsed; the delimiter or the tags have changed"
-            );
-        }
-        Ok(parsed)
     }
 
     /// Kill exactly the window whose fresh tags match this terminal.
@@ -761,10 +697,16 @@ pub(crate) fn parse_pane_line(line: &str) -> Option<TaggedPane> {
         zoomed: flag(15) && flag(14),
         tty: f.get(16).map(|v| v.trim().to_string()).unwrap_or_default(),
         dead_signal: f.get(17).map(|v| v.trim()).filter(|v| !v.is_empty()).map(str::to_string),
-        // Appended last on purpose. A title is user-controlled text and may
-        // contain a tab; putting it at the end means such a title costs its own
-        // value and not every field after it.
-        title: f.get(18).map(|v| v.trim().to_string()).unwrap_or_default(),
+        // Last on purpose. A title is user-controlled text and may contain a
+        // tab; putting it at the end means such a title costs its own value and
+        // not every field after it. See `pane_read::list_format`.
+        title: f.get(crate::pane_read::TITLE_FIELD).map(|v| v.trim().to_string()).unwrap_or_default(),
+        stamp: farcooler_core::inventory::ScreenStamp {
+            activity: f.get(18).and_then(|v| v.trim().parse().ok()).unwrap_or(0),
+            history: cell(19),
+            cursor: (cell(20), cell(21)),
+            pid: cell(22),
+        },
     })
 }
 
@@ -1028,11 +970,16 @@ mod tests {
     fn a_pane_line_carries_the_title() {
         let d = uuid::Uuid::nil();
         let line = format!(
-            "%1\t@0\t80\t24\t{d}\t{d}\t{d}\t1\t\t\tclaude\t0\t0\t1\t1\t0\t/dev/ttys001\t\t◐ Write a haiku"
+            "%1\t@0\t80\t24\t{d}\t{d}\t{d}\t1\t\t\tclaude\t0\t0\t1\t1\t0\t/dev/ttys001\t\t1790000000\t12\t3\t4\t777\tfarcooler\t0\t◐ Write a haiku"
         );
         let p = parse_pane_line(&line).expect("a well-formed line parses");
         assert_eq!(p.title, "◐ Write a haiku");
         assert_eq!(p.tty, "/dev/ttys001");
+        assert_eq!(
+            (p.stamp.activity, p.stamp.history, p.stamp.cursor, p.stamp.pid),
+            (1_790_000_000, 12, (3, 4), 777),
+            "the screen stamp comes from the same line"
+        );
     }
 
     #[test]

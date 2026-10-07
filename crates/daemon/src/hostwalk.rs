@@ -180,6 +180,7 @@ mod tests {
             dead_signal: None,
             command: "sleep".into(),
             title: String::new(),
+            stamp: Default::default(),
         }
     }
 

@@ -15,12 +15,17 @@ use std::sync::{Arc, RwLock};
 
 use farcooler_core::inventory::{RuntimeInventory, RuntimeSnapshot};
 
+use crate::pane_read::PaneRead;
 use crate::server::TmuxServer;
+use crate::windows::UnfinishedOpen;
 
 #[derive(Clone)]
 pub struct LiveInventory {
     server: TmuxServer,
     view: Arc<RwLock<RuntimeSnapshot>>,
+    /// The panes an open never finished, from the read that made `view`. `None`
+    /// when that read failed: nothing is known, and nothing is swept.
+    unfinished: Arc<RwLock<Option<Vec<UnfinishedOpen>>>>,
 }
 
 impl LiveInventory {
@@ -30,11 +35,19 @@ impl LiveInventory {
             // Until the first successful refresh we know nothing, and "nothing
             // known" must never read as "alive".
             view: Arc::new(RwLock::new(RuntimeSnapshot::unavailable())),
+            unfinished: Arc::default(),
         }
     }
 
     pub fn server(&self) -> &TmuxServer {
         &self.server
+    }
+
+    /// The panes an open started and never tagged, as the last `refresh` read
+    /// them: from the very `list-panes` that made the view, so asking is free.
+    /// `None` until a read succeeds, and again after one fails.
+    pub fn unfinished_opens(&self) -> Option<Vec<UnfinishedOpen>> {
+        self.unfinished.read().expect("unfinished lock").clone()
     }
 
     /// How long to wait before asking tmux a second time.
@@ -64,20 +77,16 @@ impl LiveInventory {
     /// Reads only. A retried write could be performed twice, and nothing here
     /// needs one.
     pub async fn refresh(&self) -> RuntimeSnapshot {
-        let mut last = match self.server.list_tagged_panes().await {
-            Ok(panes) => {
-                let snapshot = RuntimeSnapshot::healthy(panes);
-                *self.view.write().expect("inventory lock") = snapshot.clone();
-                return snapshot;
-            }
+        let mut last = match self.server.read_panes().await {
+            Ok(read) => return self.publish(read),
             Err(e) => e,
         };
 
         tracing::debug!(error = %last, "tmux inventory read failed, asking once more");
         tokio::time::sleep(Self::RETRY_PAUSE).await;
 
-        let snapshot = match self.server.list_tagged_panes().await {
-            Ok(panes) => RuntimeSnapshot::healthy(panes),
+        let snapshot = match self.server.read_panes().await {
+            Ok(read) => return self.publish(read),
             Err(e) => {
                 last = e;
                 // Twice in a row is no longer a lost race. The daemon serves
@@ -93,6 +102,15 @@ impl LiveInventory {
             }
         };
         *self.view.write().expect("inventory lock") = snapshot.clone();
+        *self.unfinished.write().expect("unfinished lock") = None;
+        snapshot
+    }
+
+    /// Make a successful read the view, and its unfinished opens the sweep's.
+    fn publish(&self, read: PaneRead) -> RuntimeSnapshot {
+        let snapshot = RuntimeSnapshot::healthy(read.panes);
+        *self.view.write().expect("inventory lock") = snapshot.clone();
+        *self.unfinished.write().expect("unfinished lock") = Some(read.unfinished);
         snapshot
     }
 

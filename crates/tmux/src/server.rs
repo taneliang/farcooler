@@ -38,6 +38,13 @@ pub struct TmuxServer {
     /// how one puts a deliberately slow tmux in front of a real server without
     /// touching the process-wide lookup every other test shares.
     program: Option<PathBuf>,
+    /// How many times each tmux verb has been spawned, for the life of this
+    /// server handle. A process per call is what tmux costs this daemon, so it
+    /// is counted at the one place that spawns. See `call_counts`.
+    pub(crate) calls: Arc<Mutex<std::collections::BTreeMap<String, u64>>>,
+    /// The socket a read found nothing listening on, as tmux itself named it.
+    /// See `pane_read::server_is_known_absent`.
+    pub(crate) absent_socket: Arc<Mutex<Option<crate::pane_read::Silent>>>,
 }
 
 /// Far Cooler's own minimal tmux configuration.
@@ -156,7 +163,30 @@ impl TmuxServer {
             config_path,
             unsettled_exits: Arc::default(),
             program: None,
+            calls: Arc::default(),
+            absent_socket: Arc::default(),
         }
+    }
+
+    /// Whether this handle runs a named program rather than the found tmux:
+    /// only a test does.
+    pub(crate) fn has_program(&self) -> bool {
+        self.program.is_some()
+    }
+
+    /// How many times each tmux verb has been spawned through this handle (and
+    /// its clones), keyed by the verb: `list-panes`, `capture-pane`.
+    ///
+    /// The seam the spawn-budget tests count through, and what a measurement of
+    /// the daemon's tmux load reads. Counted when the process is started, so a
+    /// call that times out is still one.
+    pub fn call_counts(&self) -> std::collections::BTreeMap<String, u64> {
+        self.calls.lock().expect("calls lock").clone()
+    }
+
+    /// Every spawn so far, of any verb.
+    pub fn calls_total(&self) -> u64 {
+        self.calls.lock().expect("calls lock").values().sum()
     }
 
     /// This server, run through `program` instead of the tmux `find_tmux`
@@ -225,6 +255,7 @@ impl TmuxServer {
             })?,
         };
 
+        *self.calls.lock().expect("calls lock").entry(args.first().copied().unwrap_or("").to_string()).or_default() += 1;
         let mut cmd = Command::new(&tmux);
         // Give tmux a UTF-8 locale when the daemon inherited none.
         //

@@ -57,7 +57,8 @@ impl Watcher {
     pub(super) async fn sweep_unfinished_opens(&self) {
         // Only panes an open marked as its own, never one a person added, and
         // only once they have been unfinished longer than any open could take.
-        if let Ok(unfinished) = self.service.tmux.unfinished_opens().await {
+        // From the read this tick's refresh made: no `list-panes` of its own.
+        if let Some(unfinished) = self.service.inventory.unfinished_opens() {
             let stale = {
                 let mut seen = self.unfinished_seen.lock().unwrap_or_else(|e| e.into_inner());
                 unfinished_to_reap(&mut seen, &unfinished, std::time::Instant::now(), UNFINISHED_GRACE)

@@ -43,6 +43,7 @@ mod holds;
 mod workers;
 pub(crate) mod task_notice;
 mod reap;
+mod screen_cache;
 mod registry_join;
 use failure_observation::agent_failure_observation;
 
@@ -707,6 +708,9 @@ pub struct Watcher {
     /// When each untagged pane in our session was first seen. See
     /// `unfinished_to_reap`. A std mutex, never held across an await.
     unfinished_seen: std::sync::Mutex<HashMap<farcooler_tmux::UnfinishedOpen, std::time::Instant>>,
+    /// The last screen read for each shell pane, kept while tmux says it still
+    /// stands. See `screen_cache`.
+    screens: screen_cache::ScreenCache,
     /// When each repository was last reconciled.
     ///
     /// A std mutex on the same terms. Absent for a repository nothing has
@@ -2806,6 +2810,7 @@ impl Watcher {
             state: tokio::sync::Mutex::new(HashMap::new()),
             worktree_marks: std::sync::Mutex::new(HashMap::new()),
             unfinished_seen: std::sync::Mutex::new(HashMap::new()),
+            screens: Default::default(),
             worktree_reconciles: std::sync::Mutex::new(HashMap::new()),
             change_set_probes: std::sync::Mutex::new(HashMap::new()),
             change_set_activity: std::sync::Mutex::new(HashMap::new()),
@@ -4505,7 +4510,9 @@ impl Watcher {
         // must not have its stale screen re-read and reported as working.
         self.service.inventory.refresh().await;
 
-        let Ok(fleet) = self.service.fleet().await else { return };
+        // Over what was just read: `fleet` would refresh the inventory a second
+        // time, a second `list-panes` for the same answer.
+        let Ok(fleet) = self.service.fleet_as_inventoried().await else { return };
         let runtime = self.service.runtime();
         let mut panes = self.service.inventory_snapshot();
 
@@ -4716,6 +4723,7 @@ impl Watcher {
             // that came back would otherwise resume reading a log at the byte
             // the terminal it replaced had reached.
             self.logs.lock().unwrap_or_else(|e| e.into_inner()).retain(|id, _| ids.contains(id));
+            self.screens.retain(&ids);
             // And its ask is no longer followed: its card is being retired.
             self.asks_told.lock().unwrap_or_else(|e| e.into_inner()).retain(|id, _| ids.contains(id));
             // A closed pane takes its items with it: its ask (`HookAsks::forget`
@@ -4868,7 +4876,7 @@ impl Watcher {
                 // process name we recognize: Claude Code renames itself to its
                 // version, so a pane reporting `2.1.220` is an agent that
                 // process matching alone would never find.
-                match runtime.screen(id).await {
+                match self.screens.read(&runtime, &panes, id).await {
                     Ok((screen, _, _)) => {
                         // How far the pane scrolled since the last tick, which
                         // is the trace's lower half.
@@ -5425,6 +5433,9 @@ mod failed_turn_tests;
 
 #[cfg(test)]
 mod idle_walk_tests;
+
+#[cfg(test)]
+mod tmux_spawn_tests;
 
 #[cfg(test)]
 mod review_notice_tests;
@@ -7940,6 +7951,7 @@ mod tests {
             dead_signal: None,
             command: "fish".into(),
             title: String::new(),
+            stamp: Default::default(),
         }
     }
 

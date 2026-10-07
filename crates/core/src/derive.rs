@@ -209,6 +209,7 @@ mod tests {
             zoomed: false,
             tty: String::new(),
             title: String::new(),
+            stamp: Default::default(),
         }
     }
 

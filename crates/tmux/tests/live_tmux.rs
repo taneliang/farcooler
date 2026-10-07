@@ -701,3 +701,86 @@ async fn a_long_paste_reaches_the_pane_whole() {
     let _ = std::fs::remove_file(&got);
     srv.kill_server().await.unwrap();
 }
+
+/// A runner with no tmux server spends nothing asking whether there is one.
+///
+/// The inventory is read every second, and with no terminal open there is no
+/// server to read. The first read learns that, from tmux's own error, which
+/// names the socket it could not find; after it, the socket is a stat. The read
+/// that follows the server's birth spawns again, so a pane is never missed.
+#[tokio::test]
+async fn no_server_is_asked_about_once() {
+    let Some(srv) = live_server("no_server_is_asked_about_once").await else { return };
+    for _ in 0..5 {
+        let read = srv.read_panes().await.expect("no server is not an error");
+        assert!(read.panes.is_empty() && read.unfinished.is_empty());
+    }
+    assert_eq!(srv.calls_total(), 1, "five reads of nothing, one spawn: {:?}", srv.call_counts());
+
+    srv.create_terminal_window(Uuid::now_v7(), Uuid::now_v7(), "x", "/tmp", "sleep 30").await.unwrap();
+    let before = srv.calls_total();
+    assert_eq!(srv.read_panes().await.unwrap().panes.len(), 1, "the new server's pane is read at once");
+    assert!(srv.calls_total() > before, "a socket that appeared is asked");
+
+    // The server unlinks its socket a moment after it answers `kill-server`, and
+    // a read in that gap is refused rather than not found, which says nothing
+    // about a missing socket. So wait for the first read that learns it.
+    srv.kill_server().await.unwrap();
+    let mut learned = false;
+    for _ in 0..40 {
+        let before = srv.calls_total();
+        assert!(srv.read_panes().await.unwrap().panes.is_empty());
+        if srv.calls_total() == before {
+            learned = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(learned, "a server that went away is learned: {:?}", srv.call_counts());
+    let settled = srv.calls_total();
+    for _ in 0..3 {
+        assert!(srv.read_panes().await.unwrap().panes.is_empty());
+    }
+    assert_eq!(srv.calls_total(), settled, "and then not asked again");
+
+    // A server that comes back binds a new socket over the stale one, and is
+    // read on the very next call.
+    srv.create_terminal_window(Uuid::now_v7(), Uuid::now_v7(), "y", "/tmp", "sleep 30").await.unwrap();
+    assert_eq!(srv.read_panes().await.unwrap().panes.len(), 1, "a restarted server is not skipped");
+}
+
+/// One `list-panes` carries the panes and the unfinished opens, and the stamp
+/// of each pane moves when its screen does.
+#[tokio::test]
+async fn one_read_carries_the_panes_the_stamp_and_the_unfinished_opens() {
+    let Some(srv) = live_server("one_read_carries_the_panes_the_stamp_and_the_unfinished_opens").await else {
+        return;
+    };
+    let terminal = Uuid::now_v7();
+    let win = srv.create_terminal_window(Uuid::now_v7(), terminal, "x", "/tmp", "cat").await.unwrap();
+    // An open that never got its tag: marked, in our session, no terminal id.
+    srv.run(&[
+        "new-window",
+        "-d",
+        "-t",
+        "farcooler:",
+        &farcooler_tmux::windows::marked("sleep 30", Uuid::now_v7()),
+    ])
+    .await
+    .unwrap();
+
+    let before = srv.calls_total();
+    let read = srv.read_panes().await.unwrap();
+    assert_eq!(srv.calls_total(), before + 1, "one spawn for both answers");
+    assert_eq!(read.panes.len(), 1);
+    assert_eq!(read.unfinished.len(), 1, "the marked, untagged pane is the unfinished open");
+    let first = read.panes[0].stamp;
+    assert!(first.activity > 0, "tmux reported the window's activity");
+    assert!(first.pid > 0);
+
+    srv.send_keys(&win.pane_id, "hello").await.unwrap();
+    let read = srv.read_panes().await.unwrap();
+    let now = read.panes[0].stamp;
+    assert!(!now.unchanged_since(&first), "typing into the pane moved its stamp: {first:?} then {now:?}");
+    assert!(now.unchanged_since(&now), "a stamp is unchanged from itself");
+}

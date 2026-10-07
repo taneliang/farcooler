@@ -5348,6 +5348,13 @@ impl Service {
     /// The whole fleet, refreshed once. One inventory query, not one per terminal.
     pub async fn fleet(&self) -> Result<Vec<WorktreeView>> {
         self.inventory.refresh().await;
+        self.fleet_as_inventoried().await
+    }
+
+    /// `fleet` over the inventory as it already stands, without asking tmux
+    /// again. For the sampling loop, which has just refreshed it and would
+    /// otherwise spend a second `list-panes` a few microseconds later.
+    pub async fn fleet_as_inventoried(&self) -> Result<Vec<WorktreeView>> {
         let mut out = Vec::new();
         for ws in self.list_worktrees()? {
             out.push(self.worktree_view(&ws).await?);
@@ -7803,6 +7810,7 @@ mod orchestrator_launch_tests {
             dead_signal: None,
             command: "claude".into(),
             title: String::new(),
+            stamp: Default::default(),
         };
         let found = farcooler_store::Vacated { terminal: lost.id, resource_version: lost.resource_version };
         let seat = |t: &models::Terminal, snapshot: RuntimeSnapshot| {

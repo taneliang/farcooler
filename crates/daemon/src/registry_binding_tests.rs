@@ -75,6 +75,7 @@ fn pane(terminal: Uuid, pane_id: &str, tty: &str) -> TaggedPane {
         dead_signal: None,
         command: "claude".into(),
         title: String::new(),
+        stamp: Default::default(),
     }
 }
 

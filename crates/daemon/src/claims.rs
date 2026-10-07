@@ -713,6 +713,7 @@ mod tests {
             dead_signal: None,
             command: "codex".into(),
             title: String::new(),
+            stamp: Default::default(),
         }
     }
 
