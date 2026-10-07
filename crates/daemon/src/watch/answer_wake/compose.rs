@@ -228,28 +228,25 @@ impl Watcher {
         if !queues_mid_turn(proven.preset) {
             return Err(DomainError::Conflict { what: "unsupported" });
         }
+        // Where claude will say it took the message: its session's hooks and
+        // transcript, found before anything is typed. Its registry says too
+        // whether a turn runs, which the screen can miss: after a long paste
+        // claude's footer says `paste again to expand`, working or not, and
+        // the screen reads idle (`claude-2.1.290-working-queued-long-paste`).
+        let Some((session, transcript, busy)) = session_of(proven.pid).await else {
+            return Err(DomainError::Conflict { what: "no_session" });
+        };
+        let proven = super::Proven { turn: if busy { Turn::During } else { proven.turn }, ..proven };
         if composed.command.is_some() && proven.turn == Turn::During {
             return Err(DomainError::Conflict { what: "busy" });
         }
-        // Where claude will say it took the message: its session's hooks and
-        // transcript, found before anything is typed. Mid-turn, the witness
-        // also says it's safe to press Enter at all. The text it watches for
-        // has the images' placeholders, which only the box can tell; those
-        // are read back, and a witness made for one image is remade below.
+        // Mid-turn, the witness says it's safe to press Enter at all.
         let witness = match proven.turn {
             Turn::Between => None,
             Turn::During => Some(
                 self.witness(&proven, &to, &composed.submitted(&[])).await.ok_or(DomainError::Conflict { what: "busy" })?,
             ),
         };
-        let session = match &witness {
-            Some(w) => {
-                let (session, path, _, _) = w.record();
-                Some((session.to_string(), path.to_path_buf()))
-            }
-            None => session_of(proven.pid).await,
-        };
-        let Some((session, transcript)) = session else { return Err(DomainError::Conflict { what: "no_session" }) };
         let from = std::fs::metadata(&transcript).map(|m| m.len()).unwrap_or(0);
         let paths = self.write_images(&composed)?;
 
@@ -400,10 +397,16 @@ struct Confirm {
     submitted: String,
 }
 
-/// claude's session and transcript, from its process (`mid_turn`).
-async fn session_of(pid: i32) -> Option<(String, PathBuf)> {
+/// claude's session and transcript, from its process (`mid_turn`), and
+/// whether its registry says a turn is running (`"status":"busy"`, as
+/// claude 2.1.290 writes it; `"idle"` between turns).
+async fn session_of(pid: i32) -> Option<(String, PathBuf, bool)> {
     let config = mid_turn::config_dir(&mid_turn::process_env(pid).await?)?;
-    mid_turn::transcript_in(&config, pid)
+    let (session, transcript) = mid_turn::transcript_in(&config, pid)?;
+    let registry = std::fs::read_to_string(config.join("sessions").join(format!("{pid}.json"))).ok();
+    let registry: Option<serde_json::Value> = registry.and_then(|r| serde_json::from_str(&r).ok());
+    let busy = registry.is_some_and(|r| r.get("status").and_then(|s| s.as_str()) == Some("busy"));
+    Some((session, transcript, busy))
 }
 
 /// An image's path as pasted: as is, or in single quotes when it has a

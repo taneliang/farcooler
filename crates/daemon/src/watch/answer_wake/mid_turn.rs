@@ -124,11 +124,6 @@ impl Witness {
         self
     }
 
-    /// The session, its transcript, the transcript's length before the paste,
-    /// and whether the same text was queued before it (`compose`).
-    pub(super) fn record(&self) -> (&str, &Path, u64, bool) {
-        (&self.session, &self.path, self.from, self.queued_before)
-    }
 }
 
 #[cfg(test)]

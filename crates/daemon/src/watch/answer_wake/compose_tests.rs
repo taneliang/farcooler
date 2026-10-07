@@ -261,3 +261,22 @@ fn a_prompt_with_an_image_is_read_from_its_text_block() {
     assert_eq!(super::mid_turn::recorded_as(&path, 0, "[Image #4]  what color", false), Some("user"));
     assert_eq!(super::mid_turn::recorded_as(&path, 0, "[Image: source: /x.png]", false), None);
 }
+
+/// Working, with the screen saying idle, as claude 2.1.290's does after a
+/// long paste (`paste again to expand` where `esc to interrupt` was): its
+/// registry says busy, so the send goes in under the mid-turn checks. A call
+/// in flight refuses it, nothing typed; with none, it's Queued.
+#[tokio::test]
+async fn a_turn_the_screen_misses_is_read_from_claudes_registry() {
+    let b = board().await;
+    let (agent, si) = idle_claude(&b).await;
+    si.show("working-hidden").await;
+    b.screen_with(agent.id, "paste again to expand").await;
+    b.doing(agent.id, AgentActivity::Idle).await;
+    b.svc.hooks().asks().mark_tool_starting(SESSION, Some("toolu_1"));
+    assert_eq!(refused(b.watcher.compose_into(agent.id, "after the tool", &[]).await), "busy");
+    nothing_typed(&si);
+    b.svc.hooks().asks().tool_ended(SESSION, Some("toolu_1"));
+    assert_eq!(b.watcher.compose_into(agent.id, "after the tool", &[]).await.expect("queued"), Turn::During);
+    assert!(si.log().contains("QUEUED after the tool"), "{}", si.log());
+}

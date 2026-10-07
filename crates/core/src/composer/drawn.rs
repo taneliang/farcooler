@@ -225,4 +225,17 @@ mod tests {
         }
         assert_eq!(read("claude", &capture("claude-2.1.290-slash-alias-160x45-e.txt")), Composer::Holds("/cost".into()));
     }
+
+    /// After a long paste was queued, claude 2.1.290 keeps `paste again to
+    /// expand` where `esc to interrupt` was, so its screen reads idle while it
+    /// works (a spinner line shows `Working…`): the turn has to be read from
+    /// its registry instead (`answer_wake::compose`).
+    #[test]
+    fn a_queued_long_paste_hides_the_turn_from_the_screen() {
+        let screen = capture("claude-2.1.290-working-queued-long-paste-120x45-e.txt");
+        let classify = crate::activity::Registry::built_in().classify("claude", &screen);
+        assert_eq!(classify, farcooler_protocol::v1::AgentActivity::Idle);
+        assert_eq!(read("claude", &screen), Composer::Empty);
+        assert!(crate::composer::printed(&screen).contains("paste again to expand"));
+    }
 }

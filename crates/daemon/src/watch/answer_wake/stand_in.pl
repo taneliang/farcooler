@@ -44,7 +44,7 @@ my ($composer, $mode, $pasting, $late, $late_at, @said, @queued) = ("", "", 0, "
 my ($pasted, %whole) = (0);
 my @commands = (["/init", "", "Initialize a new CLAUDE.md file"], ["/usage", "cost", "Show session cost"],
     ["/model", "", "Set the AI model"], ["/compact", "", "Free up context"]);
-my $transcript;
+my ($transcript, $registry, $registry_cwd);
 if ($agent eq 'claude' && ($ENV{CLAUDE_CONFIG_DIR} // '') ne '') {
     use Cwd qw(getcwd);
     my ($config, $cwd) = ($ENV{CLAUDE_CONFIG_DIR}, getcwd());
@@ -53,8 +53,16 @@ if ($agent eq 'claude' && ($ENV{CLAUDE_CONFIG_DIR} // '') ne '') {
     mkdir "$config/projects";
     mkdir "$config/projects/$project";
     $transcript = "$config/projects/$project/stand-in.jsonl";
-    open(my $f, '>:utf8', "$config/sessions/$$.json") or die;
-    print $f '{"pid":' . $$ . ',"sessionId":"stand-in","cwd":' . json($cwd) . '}';
+    $registry = "$config/sessions/$$.json";
+    $registry_cwd = $cwd;
+    registry("idle");
+}
+
+# claude's session registry, with its status: `busy` while a turn runs.
+sub registry {
+    return unless defined $registry;
+    open(my $f, '>:utf8', $registry) or die;
+    print $f '{"pid":' . $$ . ',"sessionId":"stand-in","cwd":' . json($registry_cwd) . ',"status":"' . $_[0] . '"}';
     close $f;
 }
 
@@ -72,7 +80,7 @@ sub record {
     close $f;
 }
 
-sub working { return $_[0] eq 'working' || $_[0] eq 'working-quiet' }
+sub working { return $_[0] eq 'working' || $_[0] eq 'working-quiet' || $_[0] eq 'working-hidden' }
 
 # The command claude's popup highlights for the box, or undef with no popup.
 sub highlighted {
@@ -143,7 +151,7 @@ sub draw {
         } else {
             my $rule = "─" x 70;
             push @rows, map { my $q = $_; $q =~ s/\n/ /g; ("❯ $q", "  ctrl+x ctrl+s to send now") } @queued;
-            push @rows, "✻ Pondering… (3s)" if working($mode);
+            push @rows, "✻ Pondering… (3s)" if working($mode) && $mode ne 'working-hidden';
             if (defined(my $hl = highlighted())) {
                 for my $c (@commands) {
                     my $name = $c->[1] ne '' ? "$c->[0] ($c->[1])" : $c->[0];
@@ -154,7 +162,10 @@ sub draw {
             $first = "\e[7mP\e[0;2mress up to edit queued messages\e[0m" if $composer eq "" && @queued;
             push @rows, $rule, "❯\x{a0}" . $first, (map { "  $_" } @box), $rule;
             # claude drops `esc to interrupt` while its box holds something.
-            push @rows, working($mode) && $composer eq "" ? "  ⏸ manual mode on · esc to interrupt"
+            # After a long paste claude 2.1.290 keeps `paste again to expand`
+            # there, working or not (`working-hidden`).
+            push @rows, $mode eq 'working-hidden' ? "  paste again to expand"
+                : working($mode) && $composer eq "" ? "  ⏸ manual mode on · esc to interrupt"
                 : working($mode) ? "  ⏸ manual mode on" : "  ⏸ manual mode on · ? for shortcuts";
         }
     } else {
@@ -193,13 +204,15 @@ while (1) {
             for my $q (@queued) {
                 logit("SUBMIT " . logged($q));
                 record('{"type":"user","message":{"role":"user","content":' . json($q) . '},"promptSource":"queued"}')
-                    if $mode eq 'working';
+                    if $mode ne 'working-quiet';
                 (my $shown = $q) =~ s/\n/ /g;
                 push @said, $shown;
             }
             @queued = ();
         }
         $mode = $now;
+        # Not when a test took the registry away.
+        registry(working($mode) ? "busy" : "idle") if defined $registry && -e $registry;
         $composer = $1 if $mode =~ /^draft:(.*)$/s;
         print($mode eq 'nobracket' ? "\e[?2004l" : "\e[?2004h");
         draw();
@@ -252,7 +265,7 @@ while (1) {
             } elsif ($composer ne "" && working($mode)) {
                 logit("QUEUED " . logged($sent));
                 record('{"type":"queue-operation","operation":"enqueue","content":' . json($sent) . '}')
-                    if $mode eq 'working';
+                    if $mode ne 'working-quiet';
                 push @queued, $sent;
                 $composer = "";
             } elsif ($composer ne "") {
