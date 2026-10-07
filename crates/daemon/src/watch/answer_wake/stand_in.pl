@@ -22,6 +22,13 @@
 # stand-in with CLAUDE_CONFIG_DIR set keeps claude's session registry and
 # transcript there, an `enqueue` record per queued message; working-quiet
 # works the same and records nothing.
+#
+# A claude stand-in draws a paste as claude 2.1.290 does (ov-367): an image's
+# path alone as `[Image #N]`, a paste past 800 UTF-16 units or with three
+# line breaks as `[Pasted text #N +K lines]`, sent whole; a box starting
+# with `/` opens a command popup above it, its best match highlighted (an
+# alias too: `/cost` highlights `/usage`), and Enter on it runs that and logs
+# `COMMAND /usage`. A submitted line break is logged as `\n`.
 use strict;
 use warnings;
 use utf8;
@@ -34,6 +41,9 @@ system("stty raw -echo 2>/dev/null");
 print "\e[?2004h";
 
 my ($composer, $mode, $pasting, $late, $late_at, @said, @queued) = ("", "", 0, "", 0);
+my ($pasted, %whole) = (0);
+my @commands = (["/init", "", "Initialize a new CLAUDE.md file"], ["/usage", "cost", "Show session cost"],
+    ["/model", "", "Set the AI model"], ["/compact", "", "Free up context"]);
 my $transcript;
 if ($agent eq 'claude' && ($ENV{CLAUDE_CONFIG_DIR} // '') ne '') {
     use Cwd qw(getcwd);
@@ -63,6 +73,30 @@ sub record {
 }
 
 sub working { return $_[0] eq 'working' || $_[0] eq 'working-quiet' }
+
+# The command claude's popup highlights for the box, or undef with no popup.
+sub highlighted {
+    return undef unless $agent eq 'claude' && $composer =~ m{^/([^\s]*)$};
+    my $typed = $1;
+    for my $c (@commands) {
+        return $c->[0] if substr($c->[0], 1, length $typed) eq $typed;
+    }
+    for my $c (@commands) {
+        return $c->[0] if $c->[1] ne '' && substr($c->[1], 0, length $typed) eq $typed;
+    }
+    return undef;
+}
+
+# The box with each placeholder's whole paste back in it, as claude sends it.
+sub whole {
+    my ($text) = @_;
+    $text =~ s/(\[Pasted text #\d+(?: \+\d+ lines)?\])/exists $whole{$1} ? $whole{$1} : $1/ge;
+    return $text;
+}
+
+sub logged { my ($t) = @_; $t =~ s/\n/\\n/g; return $t }
+
+sub units { my ($t) = @_; my $n = length $t; $n++ while $t =~ /[^\x{0}-\x{ffff}]/g; return $n }
 
 sub mode {
     open(my $f, '<', $control) or return "idle";
@@ -95,7 +129,8 @@ sub wrap {
 
 sub draw {
     my @rows;
-    my @box = wrap($composer, 60);
+    my @box = map { wrap($_, 60) } split(/\n/, $composer, -1);
+    @box = ("") unless @box;
     if ($agent eq 'claude') {
         push @rows, " Claude Code stand-in", "";
         push @rows, map { "⏺ $_" } @said;
@@ -107,8 +142,14 @@ sub draw {
             push @rows, " Select model", " ❯ Default", "   Opus", "", "  ? for shortcuts";
         } else {
             my $rule = "─" x 70;
-            push @rows, map { ("❯ $_", "  ctrl+x ctrl+s to send now") } @queued;
+            push @rows, map { my $q = $_; $q =~ s/\n/ /g; ("❯ $q", "  ctrl+x ctrl+s to send now") } @queued;
             push @rows, "✻ Pondering… (3s)" if working($mode);
+            if (defined(my $hl = highlighted())) {
+                for my $c (@commands) {
+                    my $name = $c->[1] ne '' ? "$c->[0] ($c->[1])" : $c->[0];
+                    push @rows, ($c->[0] eq $hl ? "  ❯ " : "    ") . sprintf("%-28s%s", $name, $c->[2]);
+                }
+            }
             my $first = shift(@box);
             $first = "\e[7mP\e[0;2mress up to edit queued messages\e[0m" if $composer eq "" && @queued;
             push @rows, $rule, "❯\x{a0}" . $first, (map { "  $_" } @box), $rule;
@@ -150,10 +191,11 @@ while (1) {
     if ($now ne $mode) {
         if (working($mode) && !working($now)) {
             for my $q (@queued) {
-                logit("SUBMIT $q");
+                logit("SUBMIT " . logged($q));
                 record('{"type":"user","message":{"role":"user","content":' . json($q) . '},"promptSource":"queued"}')
                     if $mode eq 'working';
-                push @said, $q;
+                (my $shown = $q) =~ s/\n/ /g;
+                push @said, $shown;
             }
             @queued = ();
         }
@@ -183,10 +225,19 @@ while (1) {
             $pasting = 0;
             if ($mode eq 'slow') {
                 ($late, $late_at) = ($text, time() + 2);
+            } elsif ($agent eq 'claude' && $mode ne 'mangle' && $text =~ m{^'?(/.*\.(?:png|jpe?g|gif|webp))'?$} && -f $1) {
+                $pasted++;
+                take("[Image #$pasted]");
+            } elsif ($agent eq 'claude' && $mode ne 'mangle' && ((() = $text =~ /\n/g) >= 3 || units($text) > 800)) {
+                $pasted++;
+                my $breaks = () = $text =~ /\n/g;
+                my $shown = $breaks ? "[Pasted text #$pasted +$breaks lines]" : "[Pasted text #$pasted]";
+                $whole{$shown} = $text;
+                take($shown);
             } else {
                 take($mode eq 'mangle' ? "[Pasted text #1]" : $text);
             }
-            logit("PASTE $text");
+            logit("PASTE " . logged($text));
             ($fired, $mode) = (1, 'menu') if $mode eq 'menu-on-paste';
         } elsif (substr($buf, 0, 6) eq "\e[200~") {
             $buf = substr($buf, 6);
@@ -194,16 +245,21 @@ while (1) {
         } elsif (substr($buf, 0, 1) eq "\r") {
             $buf = substr($buf, 1);
             logit("ENTER");
-            if ($composer ne "" && working($mode)) {
-                logit("QUEUED $composer");
-                record('{"type":"queue-operation","operation":"enqueue","content":' . json($composer) . '}')
+            my $sent = whole($composer);
+            if (defined(my $hl = highlighted())) {
+                logit("COMMAND $hl");
+                $composer = "";
+            } elsif ($composer ne "" && working($mode)) {
+                logit("QUEUED " . logged($sent));
+                record('{"type":"queue-operation","operation":"enqueue","content":' . json($sent) . '}')
                     if $mode eq 'working';
-                push @queued, $composer;
+                push @queued, $sent;
                 $composer = "";
             } elsif ($composer ne "") {
-                logit("SUBMIT $composer");
-                record('{"type":"user","message":{"role":"user","content":' . json($composer) . '}}');
-                push @said, $composer;
+                logit("SUBMIT " . logged($sent));
+                record('{"type":"user","message":{"role":"user","content":' . json($sent) . '}}');
+                (my $shown = $composer) =~ s/\n/ /g;
+                push @said, $shown;
                 $composer = "";
             }
         } elsif (substr($buf, 0, 1) eq "\e") {

@@ -123,6 +123,12 @@ impl Witness {
         self.pasted_ms = ms;
         self
     }
+
+    /// The session, its transcript, the transcript's length before the paste,
+    /// and whether the same text was queued before it (`compose`).
+    pub(super) fn record(&self) -> (&str, &Path, u64, bool) {
+        (&self.session, &self.path, self.from, self.queued_before)
+    }
 }
 
 #[cfg(test)]
@@ -183,14 +189,32 @@ impl Watcher {
     /// went away during `terminal.tell`) can't let go of the fence while the
     /// key may still land: the fence is held to the end, `LATE_KEY` included.
     pub(super) async fn enter(&self, to: &Terminal, preset: &str, witness: &Witness, text: &str) -> Result<(), NoEnter> {
+        self.enter_expecting(to, preset, witness, &composer::drawn::Expected::plain(text)).await
+    }
+
+    /// `enter`, for a box that should show `expected`: what claude draws for
+    /// what was pasted, placeholders and all (`compose`).
+    pub(super) async fn enter_expecting(
+        &self,
+        to: &Terminal,
+        preset: &str,
+        witness: &Witness,
+        expected: &composer::drawn::Expected,
+    ) -> Result<(), NoEnter> {
         let Some(me) = self.me.upgrade() else { return Err(NoEnter::Failed) };
-        let (to, preset, witness, text) = (to.clone(), preset.to_string(), witness.clone(), text.to_string());
-        tokio::spawn(async move { me.enter_fenced(&to, &preset, &witness, &text).await })
+        let (to, preset, witness, expected) = (to.clone(), preset.to_string(), witness.clone(), expected.clone());
+        tokio::spawn(async move { me.enter_fenced(&to, &preset, &witness, &expected).await })
             .await
             .unwrap_or(Err(NoEnter::Failed))
     }
 
-    async fn enter_fenced(&self, to: &Terminal, preset: &str, witness: &Witness, text: &str) -> Result<(), NoEnter> {
+    async fn enter_fenced(
+        &self,
+        to: &Terminal,
+        preset: &str,
+        witness: &Witness,
+        expected: &composer::drawn::Expected,
+    ) -> Result<(), NoEnter> {
         let runtime = Runtime { marks: None, ..self.service.runtime() };
         let asks = self.service.hooks().asks();
         // The fence: no `PreToolUse` is answered, so no dialog drawn, from
@@ -200,7 +224,7 @@ impl Watcher {
         // The box and the keyboard as they are now, under the fence: it may
         // have waited behind another Enter for seconds.
         match self.box_of(to, preset).await {
-            Ok(Ok((now, _))) if composer::holds_exactly(&now, text) => {}
+            Ok(Ok((now, _))) if expected.shown_by(&now) => {}
             Ok(Err(super::Held::Prompt)) => return Err(NoEnter::Dialog),
             _ => return Err(NoEnter::Moved),
         }
@@ -286,7 +310,7 @@ pub(crate) fn config_dir(env: &[(String, String)]) -> Option<PathBuf> {
 /// macOS, which writes it after the command, space-separated. A value with
 /// a space in it is read only up to the space there, so a config directory
 /// named that way isn't found, and the agent isn't typed into mid-turn.
-async fn process_env(pid: i32) -> Option<Vec<(String, String)>> {
+pub(super) async fn process_env(pid: i32) -> Option<Vec<(String, String)>> {
     if let Ok(raw) = std::fs::read(format!("/proc/{pid}/environ")) {
         return Some(pairs(raw.split(|b| *b == 0).map(|v| String::from_utf8_lossy(v).into_owned())));
     }
@@ -318,13 +342,24 @@ fn records(path: &Path, start: u64) -> Vec<serde_json::Value> {
     records_between(path, start, start + LONGEST_READ)
 }
 
-/// What a record says was queued, or sent as a prompt.
-fn said(record: &serde_json::Value) -> Option<(&'static str, &str)> {
+/// What a record says was queued, or sent as a prompt. A prompt with an
+/// image is a list of blocks, its text in a `text` block (`[Image #1] what
+/// color`, measured on 2.1.290); its text is what it said.
+fn said(record: &serde_json::Value) -> Option<(&'static str, String)> {
     match record.get("type").and_then(|t| t.as_str()) {
         Some("queue-operation") if record.get("operation").and_then(|o| o.as_str()) == Some("enqueue") => {
-            record.get("content").and_then(|c| c.as_str()).map(|c| ("enqueue", c))
+            record.get("content").and_then(|c| c.as_str()).map(|c| ("enqueue", c.to_string()))
         }
-        Some("user") => record.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()).map(|c| ("user", c)),
+        Some("user") if record.get("isMeta").and_then(|m| m.as_bool()) != Some(true) => {
+            match record.get("message").and_then(|m| m.get("content"))? {
+                serde_json::Value::String(text) => Some(("user", text.clone())),
+                serde_json::Value::Array(blocks) => {
+                    let texts = blocks.iter().filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"));
+                    Some(("user", texts.filter_map(|b| b.get("text").and_then(|t| t.as_str())).collect::<Vec<_>>().join(" ")))
+                }
+                _ => None,
+            }
+        }
         _ => None,
     }
 }
@@ -349,7 +384,7 @@ pub(crate) fn enqueued_before(path: &Path, from: u64, text: &str) -> bool {
     records_between(path, from.saturating_sub(LONGEST_READ), from)
         .iter()
         .filter_map(said)
-        .any(|(kind, held)| kind == "enqueue" && squeeze(held) == want)
+        .any(|(kind, held)| kind == "enqueue" && squeeze(&held) == want)
 }
 
 /// The transcript's records in `[start, end)`, as JSON. A record cut by
@@ -375,7 +410,7 @@ pub(crate) fn recorded(path: &Path, from: u64, text: &str, queued_before: bool) 
 }
 
 /// `recorded`, with the record's kind: `enqueue` or `user`.
-fn recorded_as(path: &Path, from: u64, text: &str, queued_before: bool) -> Option<&'static str> {
+pub(super) fn recorded_as(path: &Path, from: u64, text: &str, queued_before: bool) -> Option<&'static str> {
     let want = squeeze(text);
     records(path, from)
         .iter()

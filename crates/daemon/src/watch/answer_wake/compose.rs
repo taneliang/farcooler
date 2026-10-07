@@ -1,0 +1,407 @@
+//! `terminal.compose` (ov-367): what a person writes in a native view's
+//! composer, typed into claude's own box in a terminal pane and submitted,
+//! with its line breaks, its images and its slash command, and answered
+//! Sent or Queued only once claude has said it took it.
+//!
+//! **The gate.** The answer wake's, against the pane as it is now, every
+//! check failing closed with nothing typed (`compose_into`):
+//! 1. the agent in front is proven by its process (`proven_tui`);
+//! 2. its box is recognized and empty. A draft in it refuses as `draft`, and
+//!    the view offers Bring Here or Show Terminal (R-28); a dialog or a panel
+//!    refuses as `prompt`, and the view hands off to the terminal;
+//! 3. nobody has typed there lately (`ready`);
+//! 4. bracketed paste is known to be on (`proven_tui`).
+//!
+//! **The paste.** Each image is written to the runner's paste directory and
+//! its path pasted on its own, and the box read back until it shows one more
+//! `[Image #N]`; then the text is pasted once. The box is read back against
+//! what claude draws for the paste (`composer::drawn`): the text as typed, or
+//! `[Pasted text #N +K lines]` past claude's threshold. A slash command goes
+//! in as its name alone first, and on only when the popup claude opens
+//! highlights exactly that command (`/cost` highlights `/usage`: refused);
+//! then its arguments. A key someone types meanwhile stops it: no Enter.
+//!
+//! **The Enter.** Between turns, at once. Mid-turn, as `terminal tell`'s is,
+//! through the session's fence (`mid_turn`), so it can't land on a dialog;
+//! claude puts the message in its own queue (R-29).
+//!
+//! **The confirmation.** Sent only once the session's `UserPromptSubmit`
+//! hook names the prompt, Queued only once claude's transcript has its
+//! `enqueue` record; a session no hook was ever heard from is confirmed by
+//! the prompt's record in the transcript. Neither within `CONFIRM_SETTLES`:
+//! `unconfirmed`.
+//!
+//! **Not typed.** A text starting with `!`, which turns claude's box into a
+//! shell (`command`); a command whose name isn't one (a path); claude's
+//! own commands that aren't prompts, which open a panel or act at once and
+//! never reach the hook (`/model`, `/usage`, `/config`, `/resume`,
+//! `/agents`, `/status`, `/clear`, `/compact`, …): `handoff`, and the view
+//! opens the terminal. A command mid-turn is refused as `busy`. codex is
+//! refused as `unsupported`: nothing of its box's drawn forms, images or
+//! popup was measured, and a working codex raises approvals no hook tells of
+//! (ov-360). Only claude in a terminal pane; a chat pane has a prompt
+//! channel of its own (`terminal.agent_prompt`).
+//!
+//! Each refusal is a `DomainError::Conflict` naming why with a stable word:
+//! `tell`'s (`busy`, `prompt`, `draft`, `typing`, `not_an_agent`,
+//! `unfamiliar`, `unproven`, `too_long`, `command`, `not_running`,
+//! `paste_left`, `left_at_shell`, `dialog`, `unconfirmed`), and `handoff`,
+//! `unsupported` and `no_session`.
+
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
+use farcooler_core::composer::{self, Composer, drawn::Expected};
+use farcooler_core::{DomainError, Result};
+use farcooler_protocol::v1::AgentActivity;
+use farcooler_store::models::{PaneMode, Terminal};
+use uuid::Uuid;
+
+use super::tell::held_word;
+use super::{PASTE_POLL, PASTE_SETTLES, TOLD_SPACING_MS, Turn, foreground_agent, may_be_typed_to, mid_turn, queues_mid_turn};
+use crate::runtime::{Runtime, last_input};
+use crate::watch::{Watcher, now_millis};
+
+/// The longest text composed, in characters: far past anything typed, short
+/// of what a paste through tmux should carry.
+pub(crate) const LONGEST_TEXT: usize = 100_000;
+
+/// The most images in one message.
+pub(crate) const MOST_IMAGES: usize = 10;
+
+/// How long after the Enter claude has to say it took the message.
+const CONFIRM_SETTLES: Duration = Duration::from_secs(5);
+
+/// claude 2.1.290's own commands that aren't prompts: each opens a panel or
+/// acts at once, and none reaches `UserPromptSubmit`, so none could be
+/// confirmed. Read from the CLI's command table (`type:"local"` and
+/// `type:"local-jsx"`); `/clear` and `/compact` were run, and no hook came.
+pub(crate) const NOT_PROMPTS: &[&str] = &[
+    "add-dir", "advisor", "agents", "artifacts", "auto-mode-setup", "autocompact", "autofix-pr", "background", "branch",
+    "brief", "btw", "bug", "cd", "clear", "cloud-plugins", "color", "compact", "config", "context", "copy", "cost",
+    "daemon", "design-consent", "design-login", "design-revoke", "desktop", "diff", "doctor", "effort", "exit",
+    "export", "extra-usage", "fast", "feedback", "focus", "fork", "goal", "heapdump", "help", "hooks", "ide", "import",
+    "install", "install-github-app", "install-slack-app", "keybindings", "list-agents", "login", "logout", "loops",
+    "mcp", "memory", "mobile", "model", "output-style", "passes", "pause-memory", "permissions", "plan", "plugin",
+    "powerup", "privacy-settings", "pro-trial-expired", "radio", "rate-limit-options", "recap", "release-notes",
+    "reload-plugins", "reload-skills", "remote-control", "remote-env", "rename", "restart", "resume", "rewind",
+    "scroll-speed", "session", "setup-bedrock", "setup-vertex", "skill-doctor", "skills", "status", "stickers", "stop",
+    "subtask", "tasks", "teleport", "terminal-setup", "theme", "tui", "ultraplan", "ultrareview", "upgrade",
+    "usage", "usage-credits", "version", "voice", "web-setup", "wellbeing", "workflow-launch-exec", "workflows",
+];
+
+/// What a person composed, checked and ready to type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Composition {
+    /// The text, its line breaks `\n`, every other control and invisible
+    /// character written out, trailing whitespace and leading blank lines
+    /// dropped. For a command, its arguments with their leading space.
+    pub(crate) text: String,
+    /// A slash command's name, `/init`, typed before `text`.
+    pub(crate) command: Option<String>,
+    /// Each image's bytes and extension.
+    pub(crate) images: Vec<(Vec<u8>, &'static str)>,
+}
+
+impl Composition {
+    /// What claude is sent, as its hook and transcript say it: each image's
+    /// placeholder as the box showed it, then the text.
+    fn submitted(&self, placeholders: &[String]) -> String {
+        let mut parts: Vec<String> = placeholders.to_vec();
+        match &self.command {
+            Some(name) => parts.push(format!("{name}{}", self.text)),
+            None if !self.text.is_empty() => parts.push(self.text.clone()),
+            None => {}
+        }
+        parts.join(" ")
+    }
+}
+
+/// Check `raw` and `images` (each a claimed MIME type and bytes) as a message
+/// to compose, or refuse it: `text` when there's nothing to send, `image`
+/// for bytes that aren't an image, `images` for too many or beside a command,
+/// `too_long`, `command` for a shell escape or a command that isn't one,
+/// and `handoff` for one of claude's own that isn't a prompt.
+pub(crate) fn composition(raw: &str, images: &[(String, Vec<u8>)]) -> Result<Composition> {
+    let text = normalized(raw);
+    if text.is_empty() && images.is_empty() {
+        return Err(DomainError::InvalidArgument { what: "text" });
+    }
+    if text.chars().count() > LONGEST_TEXT {
+        return Err(DomainError::Conflict { what: "too_long" });
+    }
+    if images.len() > MOST_IMAGES {
+        return Err(DomainError::InvalidArgument { what: "images" });
+    }
+    let mut kept = Vec::new();
+    for (_, bytes) in images {
+        let ext = match crate::pastes::sniff(bytes) {
+            Some(crate::pastes::Kind::Png) => "png",
+            Some(crate::pastes::Kind::Jpeg) => "jpg",
+            Some(crate::pastes::Kind::Gif) => "gif",
+            Some(crate::pastes::Kind::Webp) => "webp",
+            None => return Err(DomainError::InvalidArgument { what: "image" }),
+        };
+        if bytes.len() as u64 > farcooler_protocol::MAX_PASTE_FILE_BYTES {
+            return Err(DomainError::InvalidArgument { what: "image" });
+        }
+        kept.push((bytes.clone(), ext));
+    }
+    if text.starts_with('!') {
+        return Err(DomainError::Conflict { what: "command" });
+    }
+    let Some(rest) = text.strip_prefix('/') else {
+        return Ok(Composition { text, command: None, images: kept });
+    };
+    let name: String = rest.chars().take_while(|c| !c.is_whitespace()).collect();
+    let named = !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ':' | '.'));
+    if !named {
+        return Err(DomainError::Conflict { what: "command" });
+    }
+    if NOT_PROMPTS.contains(&name.as_str()) {
+        return Err(DomainError::Conflict { what: "handoff" });
+    }
+    if !kept.is_empty() {
+        return Err(DomainError::InvalidArgument { what: "images" });
+    }
+    let args = rest[name.len()..].to_string();
+    Ok(Composition { text: args, command: Some(format!("/{name}")), images: kept })
+}
+
+/// `raw` as it's typed: CR LF and CR as LF, since claude counts a CR as a
+/// line break of its own; every other control character, and every
+/// invisible one, written out (`one_line`'s rule) rather than sent; trailing
+/// whitespace and leading blank lines dropped.
+pub(crate) fn normalized(raw: &str) -> String {
+    let unified = raw.replace("\r\n", "\n").replace('\r', "\n");
+    let mut out = String::with_capacity(unified.len());
+    for c in unified.chars() {
+        match c {
+            '\n' | '\t' => out.push(c),
+            c if c.is_control() || super::invisible(c) => out.extend(c.escape_unicode()),
+            c => out.push(c),
+        }
+    }
+    let trimmed = out.trim_end();
+    let first = trimmed.split('\n').take_while(|line| line.trim().is_empty()).map(|line| line.len() + 1).sum::<usize>();
+    trimmed[first.min(trimmed.len())..].to_string()
+}
+
+/// How a read-back ended.
+enum Shown {
+    /// The box shows what was pasted, as this.
+    Yes(Composer),
+    /// Someone typed since the paste began.
+    Typed,
+    /// It never did.
+    No,
+}
+
+impl Watcher {
+    /// Type `raw` and `images` into the claude in terminal `id` and submit
+    /// it: `Turn::Between` when claude took it as its next prompt (Sent),
+    /// `Turn::During` when it's in claude's queue behind the turn running
+    /// (Queued). See this module's docs.
+    pub(crate) async fn compose_into(&self, id: Uuid, raw: &str, images: &[(String, Vec<u8>)]) -> Result<Turn> {
+        let to = self.service.store.get_terminal(id)?;
+        if to.pane_mode == PaneMode::Agent {
+            return Err(DomainError::InvalidArgument { what: "terminal" });
+        }
+        if to.pane_mode == PaneMode::Changes || !may_be_typed_to(&to.command_preset, to.role) {
+            return Err(DomainError::Conflict { what: "not_an_agent" });
+        }
+        if !self.service.is_running(&to) {
+            return Err(DomainError::Conflict { what: "not_running" });
+        }
+        let composed = composition(raw, images)?;
+        // One at a time with a draft's paste, which types into the same box.
+        let _one_pass = self.draft_pump.lock().await;
+        let told = self.told.lock().unwrap_or_else(|e| e.into_inner()).get(&to.id).copied();
+        if let Some(left) = told.map(|at| TOLD_SPACING_MS - (now_millis() - at)).filter(|left| *left > 0) {
+            tokio::time::sleep(Duration::from_millis(left as u64)).await;
+        }
+        self.ready(&to).await.map_err(|held| DomainError::Conflict { what: held_word(held) })?;
+        let proven = self.proven_tui(&to).await.map_err(|held| DomainError::Conflict { what: held_word(held) })?;
+        if !queues_mid_turn(proven.preset) {
+            return Err(DomainError::Conflict { what: "unsupported" });
+        }
+        if composed.command.is_some() && proven.turn == Turn::During {
+            return Err(DomainError::Conflict { what: "busy" });
+        }
+        // Where claude will say it took the message: its session's hooks and
+        // transcript, found before anything is typed. Mid-turn, the witness
+        // also says it's safe to press Enter at all. The text it watches for
+        // has the images' placeholders, which only the box can tell; those
+        // are read back, and a witness made for one image is remade below.
+        let witness = match proven.turn {
+            Turn::Between => None,
+            Turn::During => Some(
+                self.witness(&proven, &to, &composed.submitted(&[])).await.ok_or(DomainError::Conflict { what: "busy" })?,
+            ),
+        };
+        let session = match &witness {
+            Some(w) => {
+                let (session, path, _, _) = w.record();
+                Some((session.to_string(), path.to_path_buf()))
+            }
+            None => session_of(proven.pid).await,
+        };
+        let Some((session, transcript)) = session else { return Err(DomainError::Conflict { what: "no_session" }) };
+        let from = std::fs::metadata(&transcript).map(|m| m.len()).unwrap_or(0);
+        let paths = self.write_images(&composed)?;
+
+        let preset = proven.preset;
+        let runtime = Runtime { marks: None, ..self.service.runtime() };
+        let started = now_millis();
+        let mut expected = Expected::default();
+        let mut held = Composer::Empty;
+        let paste = |text: String| {
+            let hex: String = crate::pastes::encode_paste(true, &text).iter().map(|b| format!("{b:02x}")).collect();
+            let runtime = &runtime;
+            async move { runtime.send_bytes_hex(to.id, &hex).await }
+        };
+        if self.fail_sends_for_tests() {
+            return Err(DomainError::OperationFailed);
+        }
+        for path in &paths {
+            paste(quoted(path)).await?;
+            expected = expected.then_image();
+            held = self.shown(&to, preset, started, &expected, None).await.left(&proven.tty, preset).await?;
+        }
+        let placeholders = composer::drawn::images(&held);
+        if let Some(name) = &composed.command {
+            paste(name.clone()).await?;
+            expected = expected.then_paste(name);
+            self.shown(&to, preset, started, &expected, Some(name)).await.left(&proven.tty, preset).await?;
+        }
+        if !composed.text.is_empty() {
+            let text = if paths.is_empty() { composed.text.clone() } else { format!(" {}", composed.text) };
+            paste(text.clone()).await?;
+            expected = expected.then_paste(&text);
+            self.shown(&to, preset, started, &expected, None).await.left(&proven.tty, preset).await?;
+        }
+        let submitted = composed.submitted(&placeholders);
+        if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started) {
+            return Err(DomainError::Conflict { what: "paste_left" });
+        }
+        let since = Instant::now();
+        let queued_before = mid_turn::enqueued_before(&transcript, from, &submitted);
+        match &witness {
+            None => runtime.send_bytes_hex(to.id, "0d").await?,
+            Some(witness) => {
+                let witness = witness.clone().pasted_at(started);
+                self.enter_expecting(&to, preset, &witness, &expected).await.map_err(|no| match no {
+                    mid_turn::NoEnter::Dialog => DomainError::Conflict { what: "dialog" },
+                    mid_turn::NoEnter::Moved => DomainError::Conflict { what: "paste_left" },
+                    mid_turn::NoEnter::Failed => DomainError::OperationFailed,
+                })?
+            }
+        }
+        self.mark_told(to.id);
+        let took = Confirm { session, transcript, from, queued_before, since, submitted };
+        self.took(&took).await.ok_or(DomainError::Conflict { what: "unconfirmed" })
+    }
+
+    /// Write `composed`'s images to the runner's paste directory, which a
+    /// sweep empties after a week (`pastes`), each under a name of its own.
+    fn write_images(&self, composed: &Composition) -> Result<Vec<PathBuf>> {
+        if composed.images.is_empty() {
+            return Ok(Vec::new());
+        }
+        let dir = crate::paths::pastes_dir_in(self.service.root_dir())?;
+        let mut paths = Vec::new();
+        for (bytes, ext) in &composed.images {
+            let path = dir.join(format!("compose-{}.{ext}", Uuid::now_v7().simple()));
+            std::fs::write(&path, bytes).map_err(|e| {
+                tracing::warn!(error = %e, "couldn't write a composed image");
+                DomainError::OperationFailed
+            })?;
+            paths.push(path);
+        }
+        Ok(paths)
+    }
+
+    /// Read `to`'s box back, until `PASTE_SETTLES`, for `expected`; with
+    /// `command`, until claude's popup highlights exactly it as well.
+    async fn shown(&self, to: &Terminal, preset: &str, started: i64, expected: &Expected, command: Option<&str>) -> Shown {
+        let deadline = tokio::time::Instant::now() + PASTE_SETTLES;
+        while tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(PASTE_POLL).await;
+            if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started) {
+                return Shown::Typed;
+            }
+            let Ok((screen, _, _)) = self.service.screen(to.id).await else { continue };
+            if !matches!(self.service.registry().classify(preset, &screen), AgentActivity::Idle | AgentActivity::Working) {
+                continue;
+            }
+            let held = composer::read(preset, &screen);
+            let popup = composer::drawn::highlighted_command(&screen);
+            if expected.shown_by(&held) && popup.as_deref() == command {
+                return Shown::Yes(held);
+            }
+        }
+        Shown::No
+    }
+
+    /// Whether claude took `took`, and how, within `CONFIRM_SETTLES`. See
+    /// this module's docs, "The confirmation".
+    async fn took(&self, took: &Confirm) -> Option<Turn> {
+        let asks = self.service.hooks().asks();
+        let deadline = tokio::time::Instant::now() + CONFIRM_SETTLES;
+        while tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(PASTE_POLL).await;
+            let hooked = asks.hooked(&took.session);
+            if hooked && asks.prompted_since(&took.session, took.since, &took.submitted) {
+                return Some(Turn::Between);
+            }
+            match mid_turn::recorded_as(&took.transcript, took.from, &took.submitted, took.queued_before) {
+                Some("enqueue") => return Some(Turn::During),
+                Some(_) if !hooked => return Some(Turn::Between),
+                _ => {}
+            }
+        }
+        None
+    }
+}
+
+impl Shown {
+    /// The box as shown, or the refusal for a paste that didn't show: left
+    /// at a shell when the agent has gone, else left in the box.
+    async fn left(self, tty: &str, preset: &str) -> Result<Composer> {
+        match self {
+            Shown::Yes(held) => Ok(held),
+            Shown::Typed | Shown::No => {
+                if foreground_agent(tty).await != Some(preset) {
+                    return Err(DomainError::Conflict { what: "left_at_shell" });
+                }
+                Err(DomainError::Conflict { what: "paste_left" })
+            }
+        }
+    }
+}
+
+/// Where to look for claude saying it took a message.
+struct Confirm {
+    session: String,
+    transcript: PathBuf,
+    /// The transcript's length before the paste.
+    from: u64,
+    /// The same text was queued before the paste.
+    queued_before: bool,
+    /// When the Enter went: a hook from before is another prompt's.
+    since: Instant,
+    submitted: String,
+}
+
+/// claude's session and transcript, from its process (`mid_turn`).
+async fn session_of(pid: i32) -> Option<(String, PathBuf)> {
+    let config = mid_turn::config_dir(&mid_turn::process_env(pid).await?)?;
+    mid_turn::transcript_in(&config, pid)
+}
+
+/// An image's path as pasted: as is, or in single quotes when it has a
+/// space in it, which claude reads as one path (measured on 2.1.290).
+fn quoted(path: &std::path::Path) -> String {
+    let path = path.display().to_string();
+    if path.contains(char::is_whitespace) { format!("'{path}'") } else { path }
+}

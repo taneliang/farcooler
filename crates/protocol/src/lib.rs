@@ -614,6 +614,11 @@ pub mod capability {
     /// a runner that serves rows from before compose isn't offered a view
     /// whose send would fail.
     pub const AGENT_COMPOSE: &str = "agent_compose";
+    /// `terminal.compose` (ov-372, ov-367) as it now is: line breaks, images
+    /// and a slash command typed into claude's box and submitted, Sent or
+    /// Queued once claude confirms it. Its own capability so the send works
+    /// with the projector off, and a client knows images and line breaks go.
+    pub const COMPOSE: &str = "compose";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -630,6 +635,7 @@ pub mod capability {
             READ_ONLY_FOLDERS, AGENT_QUEUE, BOARD_PLAN, LFS_POINTERS, BOARD_PAGES, BOARD_RULINGS,
             BOARD_TRAINS, BOARD_COST, LANDING, BOARD_RULING_ACTIONS, AGENT_ROWS, DRAFT_HOLD,
             PROJECTOR_SETTING, AGENT_COMPOSE,
+            COMPOSE,
         ];
 
     /// Capabilities this process has but does not offer: a feature behind a

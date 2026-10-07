@@ -961,6 +961,7 @@ fn spoken_name(t: &Terminal) -> String {
     if title.is_empty() { "the agent".into() } else { title }
 }
 
+mod compose;
 pub(crate) mod draft_hold;
 mod finish;
 pub(crate) mod mid_turn;

@@ -1885,7 +1885,7 @@ impl Rpc {
             // the answer wake's gate, else refused with nothing typed. Ask the
             // Orchestrator (ov-184) never sends it (`Watcher::draft_into`);
             // `terminal tell` submits it, or queues it (`Watcher::tell_into`).
-            "terminal.draft_prompt" | "terminal.tell" | "terminal.compose" => {
+            "terminal.draft_prompt" | "terminal.tell" => {
                 let Some(request::Payload::AgentPrompt(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
@@ -1899,6 +1899,27 @@ impl Rpc {
                     crate::watch::answer_wake::draft_hold::Drafted::Pasted => self.terminal_result(id).await,
                     crate::watch::answer_wake::draft_hold::Drafted::Held(hold) => Ok(result::Value::DraftHold(hold)),
                 }
+            }
+
+            // A native composer's message typed into claude's TUI and submitted,
+            // past the same gate, Sent or Queued once claude confirms it
+            // (`Watcher::compose_into`, ov-367).
+            "terminal.compose" => {
+                let Some(request::Payload::AgentPrompt(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
+                let images: Vec<(String, Vec<u8>)> = p
+                    .blocks
+                    .iter()
+                    .filter_map(|b| match &b.content {
+                        Some(farcooler_protocol::v1::agent_prompt_block::Content::Image(i)) => Some((i.mime_type.clone(), i.data.to_vec())),
+                        _ => None,
+                    })
+                    .collect();
+                let turn = self.watcher.compose_into(id, &wire::prompt_text(&p.blocks), &images).await?;
+                let queued = turn == crate::watch::answer_wake::Turn::During;
+                Ok(result::Value::TerminalTold(farcooler_protocol::v1::TerminalTold { queued }))
             }
 
             // Stop waiting to paste a draft held behind a dialog (ov-385).

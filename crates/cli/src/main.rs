@@ -40,6 +40,7 @@ use clap::{Parser, Subcommand};
 mod changes;
 mod files;
 mod clients;
+mod compose;
 mod draft_prompt;
 mod board_reads;
 mod event_lines;
@@ -950,6 +951,17 @@ enum TerminalCmd {
     /// it's working; refused, typing nothing, unless safe. Put `--` before a
     /// message that starts with a dash.
     Tell { terminal: String, text: String },
+    /// Type a message into claude's box in a terminal pane and submit it,
+    /// with its line breaks, images and slash command; queued when it's
+    /// working. Refused, typing nothing, unless safe. `--text -` reads stdin.
+    Compose {
+        terminal: String,
+        #[arg(long)]
+        text: String,
+        /// An image to paste before the text; repeat for more.
+        #[arg(long = "image")]
+        images: Vec<std::path::PathBuf>,
+    },
     /// Answer a pending agent question, carrying the ids back exactly as the
     /// adapter sent them — inventing one here would make the answer
     /// unroutable and hang the agent on its own question.
@@ -3095,6 +3107,7 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
         TerminalCmd::DraftPrompt { terminal, text, hold } => draft_prompt::run(runner, &terminal, text, hold).await?,
         TerminalCmd::DraftWithdraw { terminal, hold } => draft_prompt::withdraw(runner, &terminal, &hold).await?,
         TerminalCmd::Tell { terminal, text } => tell::run(runner, &terminal, text).await?,
+        TerminalCmd::Compose { terminal, text, images } => compose::run(runner, &terminal, text, images, json).await?,
         TerminalCmd::AgentAnswer { terminal, request_id, option_id } => {
             let (mut link, id) = terminal_by_record(runner, &terminal).await?;
             answer_agent(&mut link, id, request_id, option_id).await?;
