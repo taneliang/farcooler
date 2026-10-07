@@ -261,9 +261,15 @@ struct NativeAgentTests {
             model.store.stop()
         }
         model.store.start(FailingAfterAPage(page: Self.page([Self.row(0, "prose:1", ["Prose": ["text": "Earlier.", "conclusion": false, "at_ms": 1]])])))
-        let deadline = ContinuousClock.now + .seconds(5)
-        while !model.store.isStale, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
-        await Self.settle(window)
+        // A loaded CI runner can take more than one settle pass to draw the
+        // banner after the store goes stale, so wait for what's drawn, not
+        // for one pass (CI run 37608760054).
+        let deadline = ContinuousClock.now + .seconds(30)
+        while !(model.store.isStale && seen.ids.contains("native-row-prose:1") && seen.ids.contains("native-stale")),
+              ContinuousClock.now < deadline {
+            await Self.settle(window)
+            try await Task.sleep(for: .milliseconds(20))
+        }
         #expect(seen.ids.contains("native-row-prose:1") && seen.ids.contains("native-stale"))
         model.draft = "carry on"
         #expect(!model.canSend)
