@@ -70,7 +70,7 @@ use crate::watch::{Watcher, now_millis};
 pub(crate) const LONGEST_TEXT: usize = 100_000;
 
 /// The most images in one message.
-pub(crate) const MOST_IMAGES: usize = 10;
+pub(crate) const MOST_IMAGES: usize = crate::pastes::staged::MOST_IMAGES;
 
 /// How long after the Enter claude has to say it took the message.
 const CONFIRM_SETTLES: Duration = Duration::from_secs(5);
@@ -126,8 +126,9 @@ impl Composition {
 /// `images_too_large` past `MAX_COMPOSE_UPLOAD_BYTES` together (those the
 /// request carried are held to `MAX_COMPOSE_IMAGE_BYTES` before this, by
 /// `pastes::staged::images`),
-/// `too_long`, `command` for a shell escape or a command that isn't one,
-/// and `handoff` for one of claude's own that isn't a prompt.
+/// `too_long`, `backslash` for a text ending in one, which claude would
+/// take as a line break rather than a send, `command` for a shell escape or
+/// a command that isn't one, and `handoff` for one of claude's own that isn't a prompt.
 pub(crate) fn composition(raw: &str, images: &[(String, Vec<u8>)]) -> Result<Composition> {
     let text = normalized(raw);
     if text.is_empty() && images.is_empty() {
@@ -135,6 +136,11 @@ pub(crate) fn composition(raw: &str, images: &[(String, Vec<u8>)]) -> Result<Com
     }
     if text.chars().count() > LONGEST_TEXT {
         return Err(DomainError::Conflict { what: "too_long" });
+    }
+    // claude reads a backslash before Enter as a line break, not a send: the
+    // text would be left in its box, unconfirmed (ov-393 review 8).
+    if text.ends_with('\\') {
+        return Err(DomainError::Conflict { what: "backslash" });
     }
     if images.len() > MOST_IMAGES {
         return Err(DomainError::InvalidArgument { what: "images" });

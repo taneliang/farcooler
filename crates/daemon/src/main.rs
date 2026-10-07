@@ -292,8 +292,9 @@ async fn run() -> Result<(), i32> {
     // Expire pasted images. Once at startup and hourly after that, because the
     // host this runs on is a laptop that is asleep more often than it is
     // up — an interval alone would let a directory grow for weeks between two
-    // long-running sessions that never reached the next tick. Hourly, so a
-    // composed image is gone within a day of its send (ov-393).
+    // long-running sessions that never reached the next tick. Hourly of awake
+    // time, so a composed image is gone within a day of its send while the
+    // host is awake, and in its first awake hour after that (ov-393).
     let sweeping = service.clone();
     tokio::spawn(async move {
         loop {

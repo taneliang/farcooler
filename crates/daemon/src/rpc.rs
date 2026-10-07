@@ -1921,7 +1921,7 @@ impl Rpc {
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
                 // Carried, or uploaded first and named (ov-393).
-                let images = crate::pastes::staged::images(svc.root_dir(), &p.blocks)?;
+                let images = crate::pastes::staged::images(svc.root_dir(), &p.blocks).await?;
                 let turn = self.watcher.compose_into(id, &wire::prompt_text(&p.blocks), &images).await?;
                 let queued = turn == crate::watch::answer_wake::Turn::During;
                 Ok(result::Value::TerminalTold(farcooler_protocol::v1::TerminalTold { queued }))

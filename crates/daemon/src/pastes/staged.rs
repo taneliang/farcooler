@@ -26,9 +26,10 @@ use super::{Accepted, Stored, accept};
 /// composes as soon as its uploads finish, so anything older was abandoned.
 pub const KEEP_STAGED: Duration = Duration::from_secs(60 * 60);
 
-/// How long a composed image's copy survives its send. Swept hourly
-/// (`super::SWEEP_EVERY`), so gone within a day; long enough for claude to
-/// have read it, which it does as its path is pasted.
+/// How long a composed image's copy survives its send. Swept hourly of
+/// awake time (`super::SWEEP_EVERY`), so gone within a day while the runner
+/// is awake; long enough for claude to have read it, which it does as its
+/// path is pasted.
 pub const KEEP_COMPOSED: Duration = Duration::from_secs(23 * 60 * 60);
 
 /// What a composed image's copy is called before its id.
@@ -76,20 +77,35 @@ pub async fn put_chunk(root: &Path, transfer_id: &[u8], total_size: u64, offset:
     }
 }
 
+/// The most images in one message.
+pub(crate) const MOST_IMAGES: usize = 10;
+
 /// A compose's images in the order its blocks name them, each a claimed
 /// MIME type and bytes: those it carries, and those staged, read and
-/// deleted. Refused as `images_too_large` past `MAX_COMPOSE_IMAGE_BYTES`
-/// carried, or `MAX_COMPOSE_UPLOAD_BYTES` in all; as `image` for a staged
-/// one that isn't here (used, or swept). Every staged one named is deleted
-/// either way.
-pub(crate) fn images(root: &Path, blocks: &[AgentPromptBlock]) -> Result<Vec<(String, Vec<u8>)>> {
+/// deleted. Refused as `images` past `MOST_IMAGES`, before anything is read;
+/// as `images_too_large` past `MAX_COMPOSE_IMAGE_BYTES` carried or
+/// `MAX_COMPOSE_UPLOAD_BYTES` in all, and `image_too_large` for one past a
+/// paste's `MAX_PASTE_FILE_BYTES`, each counted as it's read, never from a
+/// size read earlier; as `image` for a staged one that isn't here (used, or
+/// swept). Every staged one named is deleted either way, an id that isn't
+/// one included.
+pub(crate) async fn images(root: &Path, blocks: &[AgentPromptBlock]) -> Result<Vec<(String, Vec<u8>)>> {
+    let mut used = Used(Vec::new());
     let mut staged = Vec::new();
     for block in blocks {
         if let Some(Content::StagedImage(id)) = &block.content {
-            staged.push(staged_path(root, id)?);
+            let path = staged_path(root, id);
+            if let Ok(path) = &path {
+                used.0.push(path.clone());
+            }
+            staged.push(path);
         }
     }
-    let _used = Used(staged.clone());
+    let staged = staged.into_iter().collect::<Result<Vec<_>>>()?;
+    let count = blocks.iter().filter(|b| matches!(b.content, Some(Content::Image(_) | Content::StagedImage(_)))).count();
+    if count > MOST_IMAGES {
+        return Err(DomainError::InvalidArgument { what: "images" });
+    }
     let carried: usize = blocks
         .iter()
         .filter_map(|b| match &b.content {
@@ -100,26 +116,38 @@ pub(crate) fn images(root: &Path, blocks: &[AgentPromptBlock]) -> Result<Vec<(St
     if carried > farcooler_protocol::MAX_COMPOSE_IMAGE_BYTES {
         return Err(DomainError::Conflict { what: "images_too_large" });
     }
-    let mut sizes = 0usize;
-    for path in &staged {
-        let size = std::fs::metadata(path).map_err(|_| DomainError::InvalidArgument { what: "image" })?.len();
-        sizes = sizes.saturating_add(size as usize);
-    }
-    if carried.saturating_add(sizes) > farcooler_protocol::MAX_COMPOSE_UPLOAD_BYTES {
-        return Err(DomainError::Conflict { what: "images_too_large" });
-    }
+    let mut total = carried;
+    let mut staged = staged.iter();
     let mut out = Vec::new();
     for block in blocks {
         match &block.content {
             Some(Content::Image(i)) => out.push((i.mime_type.clone(), i.data.to_vec())),
-            Some(Content::StagedImage(id)) => {
-                let bytes = std::fs::read(staged_path(root, id)?).map_err(|_| DomainError::InvalidArgument { what: "image" })?;
+            Some(Content::StagedImage(_)) => {
+                let path = staged.next().ok_or(DomainError::OperationFailed)?;
+                let room = farcooler_protocol::MAX_COMPOSE_UPLOAD_BYTES - total;
+                let bytes = read_capped(path, (farcooler_protocol::MAX_PASTE_FILE_BYTES as usize).min(room)).await?;
+                total += bytes.len();
                 out.push((String::new(), bytes));
             }
             _ => {}
         }
     }
+    drop(used);
     Ok(out)
+}
+
+/// `path`'s bytes, at most `cap` of them: past it, `image_too_large` for a
+/// file over a paste's limit, else `images_too_large` for the message's.
+async fn read_capped(path: &Path, cap: usize) -> Result<Vec<u8>> {
+    use tokio::io::AsyncReadExt;
+    let file = tokio::fs::File::open(path).await.map_err(|_| DomainError::InvalidArgument { what: "image" })?;
+    let mut bytes = Vec::new();
+    file.take(cap as u64 + 1).read_to_end(&mut bytes).await.map_err(|_| DomainError::InvalidArgument { what: "image" })?;
+    if bytes.len() > cap {
+        let one = bytes.len() as u64 > farcooler_protocol::MAX_PASTE_FILE_BYTES;
+        return Err(DomainError::Conflict { what: if one { "image_too_large" } else { "images_too_large" } });
+    }
+    Ok(bytes)
 }
 
 /// Staged images a compose named, deleted when it's done with them.

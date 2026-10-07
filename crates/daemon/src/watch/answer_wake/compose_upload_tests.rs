@@ -17,6 +17,13 @@ use super::*;
 /// it, and a client core connected to it. The socket's directory goes with
 /// the test.
 async fn served(b: &Board) -> (tempfile::TempDir, Session) {
+    let dir = serving(b);
+    let session = Session::connect_local(&dir.path().join("d.sock")).await.expect("connected");
+    (dir, session)
+}
+
+/// The board's daemon on `d.sock` in the directory returned.
+fn serving(b: &Board) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     let socket = dir.path().join("d.sock");
     let server = UnixListenerServer::bind(&socket).unwrap();
@@ -33,8 +40,7 @@ async fn served(b: &Board) -> (tempfile::TempDir, Session) {
             })
             .await;
     });
-    let session = Session::connect_local(&socket).await.expect("connected");
-    (dir, session)
+    dir
 }
 
 /// A PNG's signature and `len` bytes in all: what the runner sniffs.
@@ -94,4 +100,36 @@ async fn a_refused_compose_leaves_no_image_behind() {
     assert!(files(&crate::pastes::staged::staged_dir_in(root).unwrap(), |_| true).is_empty());
     let pastes = crate::paths::pastes_dir_in(root).unwrap();
     assert!(files(&pastes, crate::pastes::staged::is_composed).is_empty(), "{:?}", files(&pastes, |_| true));
+}
+
+/// A stage into a terminal that isn't one is refused as not found, and
+/// nothing is kept: not the upload, not a partial.
+#[tokio::test]
+async fn a_stage_into_no_terminal_is_not_found_and_keeps_nothing() {
+    let b = board().await;
+    let dir = serving(&b);
+    let mut client = farcooler_transport::Client::connect(dir.path().join("d.sock"), "test", "0").await.expect("connected");
+    let nobody = Uuid::now_v7();
+    let mut req = farcooler_transport::request("terminal.paste_file");
+    req.target_resource_id = Some(bytes::Bytes::copy_from_slice(nobody.as_bytes()));
+    req.required_capabilities = vec![farcooler_protocol::capability::COMPOSE_UPLOAD.into()];
+    req.payload = Some(farcooler_protocol::v1::request::Payload::TerminalFilePut(farcooler_protocol::v1::TerminalFilePut {
+        terminal_id: bytes::Bytes::copy_from_slice(nobody.as_bytes()),
+        transfer_id: farcooler_protocol::ids::new_id(),
+        mime: "image/png".into(),
+        total_size: 64,
+        offset: 0,
+        chunk: png(64).into(),
+        name: String::new(),
+        stage: true,
+    }));
+    match client.call(req).await {
+        Err(farcooler_transport::ClientError::Daemon { code, .. }) => {
+            assert_eq!(code, farcooler_protocol::v1::ErrorCode::NotFound as i32)
+        }
+        other => panic!("{other:?}"),
+    }
+    let root = b.svc.root_dir();
+    assert!(files(&crate::pastes::staged::staged_dir_in(root).unwrap(), |_| true).is_empty());
+    assert!(files(&crate::paths::pastes_incoming_dir_in(root).unwrap(), |_| true).is_empty());
 }

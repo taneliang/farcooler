@@ -392,8 +392,10 @@ pub async fn sweep(root: &Path) {
 }
 
 /// How often `sweep` runs: often enough that a composed image is gone
-/// within a day of its send (`staged::KEEP_COMPOSED`), and a directory read
-/// an hour costs nothing.
+/// within a day of its send (`staged::KEEP_COMPOSED`) while the runner is
+/// awake, and a directory read an hour costs nothing. Counted in awake time
+/// (`tokio::time::sleep` stops while the host sleeps), so a laptop asleep
+/// overnight keeps a copy until its first awake hour after the 23.
 pub const SWEEP_EVERY: Duration = Duration::from_secs(60 * 60);
 
 /// `sweep` as of `now`.

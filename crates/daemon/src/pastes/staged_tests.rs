@@ -58,10 +58,10 @@ async fn a_compose_reads_its_staged_images_once() {
         content: Some(Content::Image(ImageBlock { mime_type: "image/png".into(), data: png(10).into() })),
     };
     let blocks = [staged_block(&[1]), carried];
-    let got = images(tmp.path(), &blocks).expect("read");
+    let got = images(tmp.path(), &blocks).await.expect("read");
     assert_eq!(got.iter().map(|(_, b)| b.len()).collect::<Vec<_>>(), [big.len(), 10]);
     assert!(!path.exists(), "used once, and deleted");
-    assert_eq!(images(tmp.path(), &blocks).unwrap_err().what(), "image");
+    assert_eq!(images(tmp.path(), &blocks).await.unwrap_err().what(), "image");
 }
 
 /// Past 50 MB together, or 900 KB carried: `images_too_large`, and
@@ -77,28 +77,32 @@ async fn images_past_the_caps_are_refused_and_still_deleted() {
         sent.push(stage(tmp.path(), &[i], &png(file)).await);
     }
     sent.push(stage(tmp.path(), &[4], &png(cap - 3 * file)).await);
-    assert_eq!(images(tmp.path(), &named).expect("at the cap").len(), 4);
+    assert_eq!(images(tmp.path(), &named).await.expect("at the cap").len(), 4);
     for i in 1..=3u8 {
         sent.push(stage(tmp.path(), &[i], &png(file)).await);
     }
     sent.push(stage(tmp.path(), &[4], &png(cap - 3 * file + 1)).await);
-    assert_eq!(images(tmp.path(), &named).unwrap_err().what(), "images_too_large");
+    assert_eq!(images(tmp.path(), &named).await.unwrap_err().what(), "images_too_large");
     assert!(!sent.iter().any(|p| p.exists()), "every staged image named is gone");
 
     let carried = |n: usize| AgentPromptBlock {
         content: Some(Content::Image(ImageBlock { mime_type: "image/png".into(), data: png(n).into() })),
     };
     let inline = farcooler_protocol::MAX_COMPOSE_IMAGE_BYTES;
-    assert!(images(tmp.path(), &[carried(inline)]).is_ok());
-    assert_eq!(images(tmp.path(), &[carried(inline + 1)]).unwrap_err().what(), "images_too_large");
+    assert!(images(tmp.path(), &[carried(inline)]).await.is_ok());
+    assert_eq!(images(tmp.path(), &[carried(inline + 1)]).await.unwrap_err().what(), "images_too_large");
 }
 
-/// An id that isn't one names nothing: refused before anything is read.
-#[test]
-fn an_empty_or_long_id_is_refused() {
+/// An id that isn't one names nothing: refused before anything is read,
+/// and a good one named beside it is deleted all the same.
+#[tokio::test]
+async fn an_empty_or_long_id_is_refused() {
     let tmp = tempfile::tempdir().unwrap();
-    assert_eq!(images(tmp.path(), &[staged_block(&[])]).unwrap_err().what(), "transfer id");
-    assert_eq!(images(tmp.path(), &[staged_block(&[0; 65])]).unwrap_err().what(), "transfer id");
+    let good = stage(tmp.path(), &[1], &png(64)).await;
+    assert_eq!(images(tmp.path(), &[staged_block(&[1]), staged_block(&[])]).await.unwrap_err().what(), "transfer id");
+    assert!(!good.exists(), "the good one named beside it is gone");
+    assert_eq!(images(tmp.path(), &[staged_block(&[])]).await.unwrap_err().what(), "transfer id");
+    assert_eq!(images(tmp.path(), &[staged_block(&[0; 65])]).await.unwrap_err().what(), "transfer id");
 }
 
 /// The sweep: a staged image after an hour, a composed copy after 23 hours,
@@ -124,4 +128,35 @@ async fn the_sweep_takes_staged_within_the_hour_and_composed_within_a_day() {
     super::super::sweep_at(root, hours(23)).await;
     assert!(!composed.exists(), "a composed copy, within a day");
     assert!(pasted.exists(), "a paste keeps its week");
+}
+
+/// More than ten images: refused before any is read, and the staged ones
+/// deleted.
+#[tokio::test]
+async fn more_than_ten_images_are_refused_before_any_is_read() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut named = Vec::new();
+    let mut paths = Vec::new();
+    for i in 0..=MOST_IMAGES as u8 {
+        paths.push(stage(tmp.path(), &[i + 1], &png(64)).await);
+        named.push(staged_block(&[i + 1]));
+    }
+    assert_eq!(images(tmp.path(), &named).await.unwrap_err().what(), "images");
+    assert!(!paths.iter().any(|p| p.exists()));
+    named.pop();
+    for path in paths.iter().take(MOST_IMAGES) {
+        std::fs::write(path, png(64)).unwrap();
+    }
+    assert_eq!(images(tmp.path(), &named).await.expect("ten").len(), MOST_IMAGES);
+}
+
+/// A staged file past a paste's limit (one replaced after it was staged) is
+/// refused as it's read, as one image too large.
+#[tokio::test]
+async fn a_staged_file_past_the_paste_limit_is_refused_as_read() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = stage(tmp.path(), &[1], &png(64)).await;
+    std::fs::write(&path, png(farcooler_protocol::MAX_PASTE_FILE_BYTES as usize + 1)).unwrap();
+    assert_eq!(images(tmp.path(), &[staged_block(&[1])]).await.unwrap_err().what(), "image_too_large");
+    assert!(!path.exists());
 }

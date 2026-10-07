@@ -252,6 +252,10 @@ fn a_composition_is_checked_before_anything_is_typed() {
     assert_eq!(composition("/init", std::slice::from_ref(&png)).unwrap_err().what(), "images");
     assert_eq!(composition("", &[png]).unwrap().images.len(), 1, "an image alone is a message");
     assert_eq!(composition(&"x".repeat(100_001), &[]).unwrap_err().what(), "too_long");
+    // A backslash before Enter is a line break to claude, never a send.
+    assert_eq!(composition("see C:\\ \n", &[]).unwrap_err().what(), "backslash");
+    assert_eq!(composition("/init the docs\\", &[]).unwrap_err().what(), "backslash");
+    assert!(composition("a \\ in the middle", &[]).is_ok());
     // Every image together, past what one compose takes, uploaded first
     // (ov-393): what one request carries is held before this.
     let cap = farcooler_protocol::MAX_COMPOSE_UPLOAD_BYTES;
