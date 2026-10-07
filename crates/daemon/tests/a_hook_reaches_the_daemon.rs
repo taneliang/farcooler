@@ -1322,6 +1322,23 @@ async fn a_stop_from_the_same_session_withdraws_its_held_ask() {
     }
 }
 
+/// A message queued mid-turn fires `UserPromptSubmit` naming the running
+/// turn (claude 2.1.290). It begins no turn, but it was typed into the box,
+/// which can't happen with a dialog up: the held ask was answered at the
+/// keyboard, and is withdrawn as at a turn's end (ov-367 review 1, item 6).
+#[tokio::test]
+async fn a_queued_messages_prompt_withdraws_its_held_ask() {
+    let HeldAsk { seen, mut asking, id, socket, _dir, .. } = a_held_ask("/wt/queued", None).await;
+    for (event, payload) in [
+        ("PostToolUse", serde_json::json!({ "session_id": "sess-1", "tool_use_id": "t0", "prompt_id": "p1" })),
+        ("UserPromptSubmit", serde_json::json!({ "session_id": "sess-1", "prompt": "and then", "prompt_id": "p1" })),
+    ] {
+        send(&socket, &HookLine { agent: Agent::Claude, event: event.to_string(), payload }).await;
+    }
+    assert_eq!(asking.line(A_LINE).await.as_deref(), Some("{}\n"));
+    assert_eq!(resolutions(&seen, &id), [""]);
+}
+
 /// A subagent's own `Stop` or `StopFailure` carries its `agent_id`, and ends
 /// only that subagent: the main turn's ask stays held (ov-364 review).
 #[tokio::test]

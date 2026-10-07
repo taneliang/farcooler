@@ -45,8 +45,10 @@ pub(super) async fn answer(
 ///
 /// A `UserPromptSubmit` for a turn a hook already named is a message added to
 /// claude's queue while that turn runs (`HookAsks::prompted`), not a turn's
-/// beginning: the turn's calls stay in flight. Returns whether this hook is a
-/// turn's beginning or end (`bounds_turn`).
+/// beginning: the turn's calls stay in flight. Returns whether this hook
+/// bounded the turn. Held asks are withdrawn on every main-thread
+/// `UserPromptSubmit` regardless (`bounds_turn`): a queued message was typed
+/// into the box, so no dialog was up.
 pub(super) fn ended(asks: &HookAsks, session: &str, event: &str, payload: &serde_json::Value) -> bool {
     let turn = payload["prompt_id"].as_str();
     let queued = match (event, payload["agent_id"].as_str(), payload["prompt"].as_str()) {
