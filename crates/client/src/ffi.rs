@@ -2270,7 +2270,7 @@ async fn dispatch(
 
         // `answers`: a claude question's, each question to its answer (ov-370).
         "terminal.agent_answer" => {
-            let answers = serde_json::from_value(args.get("answers").cloned().unwrap_or_default()).unwrap_or_default();
+            let answers = answers_args::answers(method, args)?;
             session.agent_answer(id("terminal")?, &text("requestId"), &text("optionId"), answers).await?;
             Ok(json!({}))
         }
@@ -3293,6 +3293,7 @@ mod rows_fixture_tests;
 mod board_reads_args;
 mod files_args;
 mod rows_args;
+mod answers_args;
 mod images_arg;
 mod reach;
 use board_reads_args::mark_read_of;

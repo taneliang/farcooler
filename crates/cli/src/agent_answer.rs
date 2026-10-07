@@ -17,6 +17,10 @@ pub(crate) fn parse_answers(json: Option<&str>) -> Result<HashMap<String, String
         .map_err(|_| "--answers-json takes an object of strings: {\"<question>\": \"<answer>\"}".into())
 }
 
+/// What a question answered in part is told.
+pub(crate) const ANSWER_EVERY_QUESTION: &str =
+    "answer every question: --answers-json '{\"<question>\": \"<answer>\"}' with option answer";
+
 /// `terminal agent-answer`'s call, with its refusals said by `answer_refused`.
 pub(crate) async fn answer_agent<L: tasks::DispatchLink>(
     link: &mut L,
@@ -52,6 +56,12 @@ pub(crate) fn answer_refused(e: farcooler_transport::ClientError, terminal: &str
     {
         return Box::new(tasks::Refused::naming(said.to_string(), *code, what.clone()));
     }
+    // A question answered in part, or not at all (review 1 L3).
+    if let farcooler_transport::ClientError::Daemon { code, what, .. } = &e
+        && what == "answers"
+    {
+        return Box::new(tasks::Refused::naming(ANSWER_EVERY_QUESTION.to_string(), *code, what.clone()));
+    }
     tasks::agent_refused(terminal)(e)
 }
 
@@ -67,5 +77,19 @@ mod tests {
         assert_eq!(parsed["Sizes?"], "Small, Large");
         assert!(parse_answers(Some(r#"["Blue"]"#)).is_err(), "a list names no question");
         assert!(parse_answers(Some(r#"{"Which?": 1}"#)).is_err(), "an answer is words");
+    }
+
+    #[test]
+    fn a_question_answered_in_part_is_told_in_this_clis_words() {
+        let refused = answer_refused(
+            farcooler_transport::ClientError::Daemon {
+                code: farcooler_protocol::v1::ErrorCode::InvalidArgument as i32,
+                retryable: false,
+                message: "Invalid argument.".into(),
+                what: "answers".into(),
+            },
+            "ab12",
+        );
+        assert_eq!(refused.to_string(), ANSWER_EVERY_QUESTION);
     }
 }

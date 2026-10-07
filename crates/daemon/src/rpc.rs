@@ -2845,6 +2845,10 @@ mod terminal_task_tests;
 #[path = "rpc_revision_tests.rs"]
 mod revision_tests;
 
+#[cfg(test)]
+#[path = "rpc_answer_tests.rs"]
+mod answer_tests;
+
 /// `terminal.agent_answer` for an ask a claude TUI's hook is holding
 /// (`hook_asks`), rather than one an ACP shim is waiting on.
 ///
