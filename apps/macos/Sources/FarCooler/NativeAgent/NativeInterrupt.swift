@@ -30,8 +30,9 @@ enum PaneKey: Equatable {
 
 extension NativePaneModel {
     /// Whether claude is working on a turn, as the newest turn's row says
-    /// (claude's registry, `busy`). Not while a dialog is up: claude says
-    /// `waiting` then, and Stop would answer the dialog.
+    /// (claude's registry, `busy`). Not while a dialog is up: claude's
+    /// registry says `waiting` then, which the runner carries to the row as
+    /// `Waiting`, and an Esc would answer the dialog No.
     var working: Bool {
         for id in store.ids.reversed() {
             if case .turn(let turn)? = store.box(id)?.row.kind {
@@ -81,8 +82,11 @@ extension NativePaneModel {
         case "typing": return .said("Someone is typing in the terminal. Try again in a moment.")
         case "sending": return .said("A message is still going in. Try again in a moment.")
         case "nothing_queued": return .said("Nothing is waiting in Claude’s queue.")
+        case "settling":
+            return .said(stop ? "Claude is starting a step. Try Stop again in a moment."
+                : "Claude is starting a step. Try Send Now again in a moment.")
         case "unconfirmed":
-            return .said(stop ? "Claude didn’t confirm it stopped. Check the terminal."
+            return .said(stop ? "Claude didn’t confirm it stopped. It may have stopped; check the terminal before pressing again."
                 : "Claude didn’t confirm it sent the queued messages. Check the terminal.")
         default:
             switch failure {

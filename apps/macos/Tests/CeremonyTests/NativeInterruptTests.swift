@@ -33,11 +33,11 @@ struct NativeInterruptTests {
     }
 
     /// The newest turn, open and working (`Busy`), or ended.
-    static func turn(working: Bool) -> [String: Any] {
+    static func turn(working: Bool, activity: String? = nil) -> [String: Any] {
         NativeAgentTests.row(0, "turn:p1", ["Turn": [
             "prompt": "Tidy the parser.", "origin": "Typed", "started_ms": 1, "ended_ms": working ? NSNull() : 2 as Any,
             "duration_ms": working ? NSNull() : 1 as Any, "outcome": working ? NSNull() : "Finished" as Any,
-            "background_running": 0, "activity": working ? "Busy" : "Idle",
+            "background_running": 0, "activity": activity ?? (working ? "Busy" : "Idle"),
         ]])
     }
 
@@ -64,6 +64,12 @@ struct NativeInterruptTests {
         await NativeAgentTests.settle(window)
         #expect(model.working && model.offersStop)
         #expect(seen.ids.contains("native-stop") && seen.ids.contains("native-send-now"))
+
+        // A dialog up: claude's registry says `waiting`, and Stop would answer it.
+        model.store.apply(try await model.store.ledger.page(NativeAgentTests.page([Self.turn(working: true, activity: "Waiting"), Self.queued("and the docs")])))
+        await NativeAgentTests.settle(window)
+        #expect(!model.working && !model.offersStop, "under a dialog")
+        #expect(!seen.ids.contains("native-stop") && !seen.ids.contains("native-send-now"))
 
         model.store.apply(try await model.store.ledger.page(NativeAgentTests.page([Self.turn(working: false), Self.queued("and the docs", state: "Sent")])))
         await NativeAgentTests.settle(window)
@@ -132,7 +138,14 @@ struct NativeInterruptTests {
         #expect(NativePaneModel.keyIssue(for: refused("too_soon"), .stop) == nil, "a second click")
         #expect(NativePaneModel.keyIssue(for: refused("prompt"), .stop) == .handoff)
         #expect(NativePaneModel.keyIssue(for: refused("draft"), .sendNow) == .draftInTerminal)
-        #expect(NativePaneModel.keyIssue(for: refused("unconfirmed"), .stop) == .said("Claude didn’t confirm it stopped. Check the terminal."))
+        #expect(NativePaneModel.keyIssue(for: refused("unconfirmed"), .stop) == .said("Claude didn’t confirm it stopped. It may have stopped; check the terminal before pressing again."))
+        for key in [PaneKey.stop, .sendNow] {
+            guard case .said(let words)? = NativePaneModel.keyIssue(for: refused("settling"), key) else {
+                Issue.record("settling says nothing")
+                continue
+            }
+            #expect(words.hasSuffix("again in a moment."), "never the handoff: nothing is showing")
+        }
         #expect(NativePaneModel.keyIssue(for: refused("unconfirmed"), .sendNow) == .said("Claude didn’t confirm it sent the queued messages. Check the terminal."))
         for word in ["not_an_agent", "unsupported", "unfamiliar", "unconfirmable", "not_running"] {
             if case .said(let words)? = NativePaneModel.keyIssue(for: refused(word), .stop) {
