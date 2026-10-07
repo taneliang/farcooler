@@ -355,10 +355,16 @@ struct AgentScrollTests {
     /// reader scrolling up: following stopped and the button came back until
     /// the scroll landed.
     @Test func jumpToLatestDoesNotFlickerAgainstAHeightCorrection() async throws {
+        let original = AgentSurface.scheduleBackstop
+        defer { AgentSurface.scheduleBackstop = original }
         try await jumping { probe, scroll, host, window in
             let detached = probe.detaches
             let stepper = Stepper()
-            stepper.arm(probe, scroll, back: 100)
+            // Armed as the jump begins, not before the click.
+            AgentSurface.scheduleBackstop = { body in
+                stepper.arm(probe, scroll, back: 100)
+                original(body)
+            }
             Self.clickJump(probe, host, window)
             #expect(await Self.until { stepper.steps == 1 }, "the correction step was never taken")
             #expect(await Self.until { probe.following && (probe.tailHiddenBy ?? .infinity) <= 0.5 }, "Jump to Latest didn't return to the tail")
@@ -374,10 +380,21 @@ struct AgentScrollTests {
     /// that only the second jump's own guard absorbs.
     @Test func aSecondJumpIsNotEndedByTheFirstOnesBackstop() async throws {
         let held = Held()
+        let stepper = Stepper()
         let original = AgentSurface.scheduleBackstop
-        AgentSurface.scheduleBackstop = { held.bodies.append($0) }
         defer { AgentSurface.scheduleBackstop = original }
         try await jumping { probe, scroll, host, window in
+            // The second jump arms the step back as it begins, not before the click.
+            AgentSurface.scheduleBackstop = { body in
+                held.bodies.append(body)
+                if held.bodies.count == 2 {
+                    stepper.arm(probe, scroll, back: 100) {
+                        // Jump 1's backstop; jump 2's own stays held.
+                        #expect(held.bodies.count == 2, "expected one backstop per jump, got \(held.bodies.count)")
+                        held.bodies.first?()
+                    }
+                }
+            }
             Self.clickJump(probe, host, window)
             #expect(await Self.until { probe.following && (probe.tailHiddenBy ?? .infinity) <= 0.5 })
             await Self.settle()
@@ -386,12 +403,6 @@ struct AgentScrollTests {
             #expect(await Self.until(10) { probe.showsJump })
             await Self.settle()
             let detached = probe.detaches
-            let stepper = Stepper()
-            stepper.arm(probe, scroll, back: 100) {
-                // Jump 1's backstop; jump 2's own stays held.
-                #expect(held.bodies.count == 2, "expected one backstop per jump, got \(held.bodies.count)")
-                held.bodies.first?()
-            }
             Self.clickJump(probe, host, window)
             #expect(await Self.until { stepper.steps == 1 }, "the correction step was never taken")
             #expect(await Self.until { probe.following && (probe.tailHiddenBy ?? .infinity) <= 0.5 })
