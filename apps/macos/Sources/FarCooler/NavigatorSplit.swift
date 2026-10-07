@@ -323,7 +323,10 @@ struct NavigatorSplitView: View {
                     let isLast = index == panes.count - 1
                     // Fixed chrome, so the rule's room over it and, in a
                     // closed pane, under it, are its own (ov-258).
-                    pane.header
+                    // In a stack, so a pane with no header (an empty view)
+                    // still has the room: padding on an empty view draws
+                    // nothing, and the first row sat on the rule (ov-406).
+                    VStack(spacing: 0) { pane.header }
                         .padding(.top, NavigatorSplit.headerTop(index))  // rhythm-exempt: NavigatorRhythm.rule, or none over the first
                         .padding(.bottom, NavigatorSplit.headerBottom(expanded: pane.expanded, last: isLast))  // rhythm-exempt: NavigatorRhythm.rule in a closed pane over a rule
                         .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { headers[pane.id] = $0 }

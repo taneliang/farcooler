@@ -143,7 +143,10 @@ struct OneTreeSplitWindowTests {
         let first = try #require(history.first)
         #expect(abs(first.height - tree.height) < 0.5, "first \(first.height), settled \(tree.height)")
         let shells = try #require(seen.frames["navigator-pane-shells"])
-        #expect(abs(shells.minY - tree.maxY) < 2, "the shells meet the tree's rule: no gap (\(tree.maxY) to \(shells.minY))")
+        // Only the rule's line and the rhythm's room under it (ov-406), not a
+        // stretch of blank the tree left over.
+        let rule = NavigatorSplit.ruleSlot + NavigatorSplit.headerInset
+        #expect(abs(shells.minY - tree.maxY - rule) < 2, "the shells sit a rule and its room under the tree (\(tree.maxY) to \(shells.minY))")
     }
 
     // MARK: Scrolling stays where the person put it (review 1)
