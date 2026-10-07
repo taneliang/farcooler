@@ -81,6 +81,11 @@ actor ClientCore {
         /// these through `RunnerTrouble(trouble:tunnel:)` and never the
         /// message, which it keeps only to show (ov-127).
         case unreached(String, trouble: String, tunnel: String?, fingerprint: String?)
+        /// No answer by the call's deadline (the line's `timed_out`, ov-147):
+        /// neither a refusal nor a dropped link, and the call may still be
+        /// carried out. Read by the conversation view's composer, which must
+        /// never call a send that may have arrived unsent (ov-373).
+        case timedOut(String)
         case malformed
 
         var errorDescription: String? {
@@ -89,6 +94,7 @@ actor ClientCore {
             case .rejected(let message, _, _): return message
             case .disconnected(let message, _): return message
             case .unreached(let message, _, _, _): return message
+            case .timedOut(let message): return message
             case .malformed: return "The client core returned something unreadable."
             }
         }
@@ -365,7 +371,9 @@ actor ClientCore {
                 }
             } else {
                 let message = object["error"] as? String ?? "the host refused the request"
-                if object["disconnected"] as? Bool == true {
+                if object["timed_out"] as? Bool == true {
+                    continuation.resume(throwing: CoreError.timedOut(message))
+                } else if object["disconnected"] as? Bool == true {
                     continuation.resume(
                         throwing: CoreError.disconnected(
                             message, notSent: object["not_sent"] as? Bool == true))

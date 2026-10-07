@@ -105,4 +105,21 @@ extension Connection {
         await refresh()
         return failure
     }
+
+    /// Turn the runner's projector on or off (`settings.set_projector`,
+    /// ov-373), then reconnect: a hello offers `agent_rows` only while it's
+    /// on, and this link's hello was made before. Nil when it took; the
+    /// sentence to show when it didn't.
+    func setProjector(_ on: Bool) async -> String? {
+        do {
+            _ = try await rpc("settings.set_projector", ["on": on])
+        } catch {
+            return ClientCore.refusalWord(of: error) == RunnerRefusal.scopeDenied.rawValue
+                ? "This device can’t change this runner’s settings."
+                : "That runner didn’t take the change. Try again in a moment."
+        }
+        projectorOn = on
+        reconnectNow()
+        return nil
+    }
 }

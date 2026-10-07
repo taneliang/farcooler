@@ -36,6 +36,13 @@ final class RunnerSettingsModel: ObservableObject {
     /// screen never opens dimmed and then un-dims a moment later. The controls
     /// are honest either way: the runner enforces this, not the app.
     @Published private(set) var mayAdminister = true
+    /// Whether the conversation view's setting is shown (ov-373): only to
+    /// the runner's host admin, on a runner that has the setting.
+    @Published private(set) var offersConversation = false
+    @Published private(set) var conversationOn = false
+    /// A change to it is on its way: the switch waits, so two flips can't
+    /// land out of order.
+    @Published private(set) var changingConversation = false
 
     private let connection: Connection
 
@@ -53,6 +60,9 @@ final class RunnerSettingsModel: ObservableObject {
         await connection.loadDaemonBuild()
         mayAdminister = connection.daemon?.mayAdministerRunner ?? true
         branchPrefix = connection.branchPrefix
+        offersConversation = (connection.daemon?.grantedScope == "host_admin")
+            && connection.daemon?.can(.projectorSetting) == true && connection.projectorOn != nil
+        conversationOn = connection.projectorOn ?? false
         let readThemes = await connection.hostThemes()
         let readAdapters = await connection.adapters()
         health = await connection.health()
@@ -87,6 +97,19 @@ final class RunnerSettingsModel: ObservableObject {
         let outcome = await connection.removeRepositoryRoot(root.id, confirm: confirm)
         if case .ok = outcome { roots.removeAll { $0.id == root.id } }
         return outcome
+    }
+
+    /// Turn the conversation view on or off for every client of this
+    /// runner. The connection reconnects after, so its panes are offered it.
+    func setConversation(_ on: Bool) async {
+        guard !changingConversation else { return }
+        changingConversation = true
+        defer { changingConversation = false }
+        if let trouble = await connection.setProjector(on) {
+            failure = trouble
+            return
+        }
+        conversationOn = on
     }
 
     func setBranchPrefix(_ prefix: String) async {
@@ -292,6 +315,24 @@ struct RunnerSettingsView: View {
                     "Added to branch names created from task descriptions. Leave it empty for "
                     + "no prefix."
                     + (model.mayAdminister ? "" : "\n\n" + restrictedSentence))
+            }
+
+            if model.offersConversation {
+                Section {
+                    Toggle(
+                        "Conversation view for Claude panes",
+                        isOn: Binding(
+                            get: { model.conversationOn },
+                            set: { on in Task { await model.setConversation(on) } }))
+                        .disabled(model.changingConversation)
+                        .accessibilityIdentifier("runner-conversation-view")
+                } header: {
+                    Text("Claude")
+                } footer: {
+                    Text(
+                        "Shows a Claude pane that runs in a terminal as a conversation you can read and "
+                            + "reply to, on every device that reaches this runner. Its terminal is one tap away.")
+                }
             }
 
             Section {

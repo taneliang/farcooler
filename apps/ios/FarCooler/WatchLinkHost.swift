@@ -1040,7 +1040,7 @@ final class WatchLinkHost: NSObject {
                         : "That runner turned it down, so nothing was sent."
                 )
             // `unreached` is a connect's answer and never a call's.
-            case .disconnected, .malformed, .unreached:
+            case .disconnected, .malformed, .unreached, .timedOut:
                 break
             }
         }

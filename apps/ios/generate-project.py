@@ -189,6 +189,13 @@ SOURCES = [
     "ActionFailure.swift",
     "ChangesPatchNotice.swift",
     "ConnectionActions.swift",
+    # The conversation view of a terminal-mode claude pane (ov-373): the
+    # pane's model and its rows' source, the view and its composer, the rows,
+    # and the harness its UI tests stand on.
+    "NativeAgent.swift",
+    "NativeAgentView.swift",
+    "NativeRows.swift",
+    "NativeAgentHarness.swift",
 ]
 
 # The enrollment ceremony, in `Far Cooler/Ceremony/`.
@@ -667,6 +674,14 @@ AGENTKIT_SOURCES = [
     "TaskKeyText.swift",
     # What a worktree says about large files that weren't downloaded (ov-199).
     "LfsNotice.swift",
+    # A terminal's agent rows (ov-371): the wire, the ledger that merges them
+    # off the main thread, the store a view reads, and the cache a returning
+    # pane draws from; and the phone's rules for the conversation view (ov-373).
+    "AgentRowWire.swift",
+    "AgentRowLedger.swift",
+    "AgentRowStore.swift",
+    "AgentRowCache.swift",
+    "AgentConversation.swift",
 ]
 # The widget extension's own sources, in `apps/ios/FarCoolerActivity/`.
 #
@@ -962,6 +977,9 @@ UI_TEST_SOURCES = [
     # terminals, which is the whole of what these assert — so it cannot skip
     # itself green when the demo daemon is down.
     "ShellColumnCloseTests.swift",
+    # The conversation view of a terminal-mode claude pane (ov-373), on
+    # `-native-agent-harness`: no runner.
+    "NativeAgentViewTests.swift",
 ]
 
 FRAMEWORKS = ["farcooler_vt.xcframework", "farcooler_client.xcframework"]

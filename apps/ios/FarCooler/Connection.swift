@@ -894,7 +894,12 @@ final class Connection: ObservableObject {
         // that way, so assuming nothing here would have this phone create
         // differently-named branches than the Mac beside it.
         branchPrefix = body["branchPrefix"] as? String ?? "feat/"
+        projectorOn = body["projector"] as? Bool
     }
+
+    /// Whether the runner's projector, and so the conversation view of its
+    /// claude panes, is on (ov-373): nil from a runner too old to say.
+    @Published var projectorOn: Bool?
 
     /// What this runner says a derived branch name starts with.
     ///

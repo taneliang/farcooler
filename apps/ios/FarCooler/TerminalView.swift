@@ -945,73 +945,76 @@ struct TerminalView: View {
                     lfs: ChangesView.lfs(worktree, connection))
                     .id(worktree.id)
             } else {
-                HeldDraftBar(connection: connection, terminal: live)
-                GeometryReader { geo in
-                    phaseContent(size: geo.size)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        // Size is asserted only by the pane you are LOOKING at.
-                        //
-                        // tmux sizes a pane to its smallest attached client, so
-                        // several mounted panes all telling the host their
-                        // geometry would have them fighting over it — which is
-                        // the content jumping around on open, made worse rather
-                        // than better by keeping panes alive. A hidden pane is
-                        // laid out but says nothing.
-                        .task(
-                            id: GridSize(
-                                width: geo.size.width, height: geo.size.height, cell: cellSize,
-                                visible: isVisible)
-                        ) {
-                            guard isVisible else { return }
-                            await session.configure(
-                                columns: columns(for: geo.size), rows: rows(for: geo.size))
-                        }
-                }
-                // A claude ask, answerable from here. Over the grid rather than
-                // beside it: taking rows from the grid would resize the pane in
-                // tmux and make claude redraw the very dialog being answered.
-                .overlay(alignment: .bottom) {
-                    VStack(spacing: 0) {
-                        TerminalPermissionBar(
-                            terminalID: terminal.id, core: connection.core,
-                            blocked: live.agent == .blocked, isVisible: isVisible)
-                            .id(terminal.id)
-                        // Typed input the runner didn't take (ov-238).
-                        InputHoldLine(hold: session.hold) {
-                            Task { await session.retryUnsent() }
+                // A claude pane's conversation over it, where offered (ov-373).
+                NativeSwitch(terminal: live, connection: connection, isVisible: isVisible, toConversation: { dismissRequest += 1 }) {
+                    HeldDraftBar(connection: connection, terminal: live)
+                    GeometryReader { geo in
+                        phaseContent(size: geo.size)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            // Size is asserted only by the pane you are LOOKING at.
+                            //
+                            // tmux sizes a pane to its smallest attached client, so
+                            // several mounted panes all telling the host their
+                            // geometry would have them fighting over it — which is
+                            // the content jumping around on open, made worse rather
+                            // than better by keeping panes alive. A hidden pane is
+                            // laid out but says nothing.
+                            .task(
+                                id: GridSize(
+                                    width: geo.size.width, height: geo.size.height, cell: cellSize,
+                                    visible: isVisible)
+                            ) {
+                                guard isVisible else { return }
+                                await session.configure(
+                                    columns: columns(for: geo.size), rows: rows(for: geo.size))
+                            }
+                    }
+                    // A claude ask, answerable from here. Over the grid rather than
+                    // beside it: taking rows from the grid would resize the pane in
+                    // tmux and make claude redraw the very dialog being answered.
+                    .overlay(alignment: .bottom) {
+                        VStack(spacing: 0) {
+                            TerminalPermissionBar(
+                                terminalID: terminal.id, core: connection.core,
+                                blocked: live.agent == .blocked, isVisible: isVisible)
+                                .id(terminal.id)
+                            // Typed input the runner didn't take (ov-238).
+                            InputHoldLine(hold: session.hold) {
+                                Task { await session.retryUnsent() }
+                            }
                         }
                     }
+                    // NO KEYBOARD INSET OF THIS VIEW'S OWN, AND THAT IS A CHANGE.
+                    //
+                    // There used to be one here — `Color.clear.frame(height:
+                    // keyboard.height)` outside the reader, so that the reader
+                    // itself was proposed the smaller height and `columns/rows`
+                    // asked tmux for the pane the screen could actually show. It
+                    // was correct while its premise was: the shell took no
+                    // automatic avoidance, so the grid had to ask for its own room.
+                    //
+                    // The premise died when the pane grew a `NavigationStack` for
+                    // its own bar (`ShellScreen.ShellPaneRealView.body`). A
+                    // navigation stack is a `UINavigationController`, and the
+                    // framework re-derives keyboard avoidance from the window
+                    // inside it — an `ignoresSafeArea(.keyboard)` outside the stack
+                    // does not reach in. So this inset became the SECOND
+                    // subtraction of the same 360 points, and 874 − 116 (bar and
+                    // status bar) − 450 (the shell's furniture plus the keyboard)
+                    // − 360 is negative: the grid came out **0 points tall**, the
+                    // pane rendered nothing at all with the keyboard up, and three
+                    // UI tests could not swipe an element with no visible frame.
+                    //
+                    // What replaces it is the framework's own number, and it is
+                    // the same number: SwiftUI's avoidance counts the input
+                    // accessory, so the key row is included exactly as
+                    // `KeyboardInset` counted it. This view no longer observes
+                    // `KeyboardInset` at all — `AgentView` still does, because a
+                    // DOCKED composer is on screen with the keyboard down and posts
+                    // no keyboard frame at all, which is a state the terminal's key
+                    // row never reaches: its accessory exists only while the field
+                    // it belongs to is first responder.
                 }
-                // NO KEYBOARD INSET OF THIS VIEW'S OWN, AND THAT IS A CHANGE.
-                //
-                // There used to be one here — `Color.clear.frame(height:
-                // keyboard.height)` outside the reader, so that the reader
-                // itself was proposed the smaller height and `columns/rows`
-                // asked tmux for the pane the screen could actually show. It
-                // was correct while its premise was: the shell took no
-                // automatic avoidance, so the grid had to ask for its own room.
-                //
-                // The premise died when the pane grew a `NavigationStack` for
-                // its own bar (`ShellScreen.ShellPaneRealView.body`). A
-                // navigation stack is a `UINavigationController`, and the
-                // framework re-derives keyboard avoidance from the window
-                // inside it — an `ignoresSafeArea(.keyboard)` outside the stack
-                // does not reach in. So this inset became the SECOND
-                // subtraction of the same 360 points, and 874 − 116 (bar and
-                // status bar) − 450 (the shell's furniture plus the keyboard)
-                // − 360 is negative: the grid came out **0 points tall**, the
-                // pane rendered nothing at all with the keyboard up, and three
-                // UI tests could not swipe an element with no visible frame.
-                //
-                // What replaces it is the framework's own number, and it is
-                // the same number: SwiftUI's avoidance counts the input
-                // accessory, so the key row is included exactly as
-                // `KeyboardInset` counted it. This view no longer observes
-                // `KeyboardInset` at all — `AgentView` still does, because a
-                // DOCKED composer is on screen with the keyboard down and posts
-                // no keyboard frame at all, which is a state the terminal's key
-                // row never reaches: its accessory exists only while the field
-                // it belongs to is first responder.
             }
         }
         // THE PANE'S OWN GROUND, PAINTED FROM INSIDE THE NAVIGATION STACK.
@@ -1447,8 +1450,8 @@ struct TerminalView: View {
         .frame(width: size.width, height: size.height)
         .clipped()
         .taskKeyHeldPreview($heldLink, at: heldAt, linker: linker)
-        // The keyboard on arrival.
-        .onAppear { focusRequest += 1 }
+        // The keyboard on arrival, unless a conversation covers it (ov-373).
+        .modifier(ArrivalFocus { focusRequest += 1 })
     }
 
     // MARK: - Drawing

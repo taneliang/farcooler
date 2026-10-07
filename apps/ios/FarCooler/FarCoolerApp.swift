@@ -37,6 +37,9 @@ struct FarCoolerApp: App {
             TerminalBenchHarness()
         } else if AgentLayoutHarness.isRequested {
             AgentLayoutHarness()
+        } else if NativeAgentHarness.isRequested {
+            // A terminal-mode claude pane's conversation view (ov-373).
+            NativeAgentHarness()
         } else if ChangesLayoutHarness.isRequested {
             ChangesLayoutHarness()
         } else if TunnelE2EHarness.isRequested {
