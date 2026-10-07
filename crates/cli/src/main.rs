@@ -41,6 +41,7 @@ mod changes;
 mod files;
 mod clients;
 mod compose;
+mod interrupt;
 mod draft_prompt;
 mod board_reads;
 mod event_lines;
@@ -955,6 +956,10 @@ enum TerminalCmd {
     /// images (`--image`, repeated) and slash command; queued when it's working. Refused, typing
     /// nothing, unless safe. `--text -` reads stdin.
     Compose { terminal: String, #[arg(long)] text: String, #[arg(long = "image")] images: Vec<std::path::PathBuf> },
+    /// Stop the turn claude is working on in a terminal pane: one Esc, refused unless safe.
+    Interrupt { terminal: String },
+    /// Send what waits in claude's queue now (its ctrl+x ctrl+s), refused unless safe.
+    SendNow { terminal: String },
     /// Answer a pending agent question, carrying the ids back exactly as the
     /// adapter sent them — inventing one here would make the answer
     /// unroutable and hang the agent on its own question.
@@ -3092,6 +3097,7 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
         TerminalCmd::DraftWithdraw { terminal, hold } => draft_prompt::withdraw(runner, &terminal, &hold).await?,
         TerminalCmd::Tell { terminal, text } => tell::run(runner, &terminal, text).await?,
         TerminalCmd::Compose { terminal, text, images } => compose::run(runner, &terminal, text, images, json).await?,
+        cmd @ (TerminalCmd::Interrupt { .. } | TerminalCmd::SendNow { .. }) => interrupt::press(runner, cmd).await?,
         TerminalCmd::AgentAnswer { terminal, request_id, option_id } => {
             let (mut link, id) = terminal_by_record(runner, &terminal).await?;
             answer_agent(&mut link, id, request_id, option_id).await?;
