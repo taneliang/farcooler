@@ -59,7 +59,13 @@ class InMemoryPaneViews : PaneViewMemory {
  * terminal and back. One per [Connection], so a pane on another runner gets a
  * model of its own.
  */
-class NativePanes(private val scope: CoroutineScope, private val core: ClientCall) {
+class NativePanes(
+    private val scope: CoroutineScope,
+    core: ClientCall,
+    /** Where a pane's rows come from: the core's, unless a test stands in. */
+    private val sourceFor: (String) -> AgentRowSource = { CoreRowSource(core, it) },
+    private val sink: ConversationSink = CoreComposeSink(core),
+) {
     private val panes = HashMap<String, NativePaneModel>()
 
     /** The pane's model, made once and kept. */
@@ -68,8 +74,8 @@ class NativePanes(private val scope: CoroutineScope, private val core: ClientCal
         NativePaneModel(
             terminal = terminal,
             store = AgentRowStore(scope),
-            source = CoreRowSource(core, terminal),
-            sink = CoreComposeSink(core),
+            source = sourceFor(terminal),
+            sink = sink,
             memory = memory,
             scope = scope,
         )

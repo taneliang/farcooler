@@ -196,7 +196,11 @@ private fun Quiet(text: String) =
  */
 @Composable
 fun NativeComposer(model: NativePaneModel, showTerminal: () -> Unit) {
-    val canSend = model.canSend
+    // Collected for the rows going stale or live, which `canSend` reads off the
+    // store and Compose can't see on its own: without it Send stayed enabled over
+    // rows the runner had stopped answering for.
+    val shown by model.store.shown.collectAsStateWithLifecycle()
+    val canSend = !shown.isStale && model.canSend
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).testTag("native-composer-stack"),
         verticalArrangement = Arrangement.spacedBy(8.dp),

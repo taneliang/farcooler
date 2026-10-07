@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
@@ -55,10 +54,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
@@ -205,31 +201,17 @@ fun TerminalPane(
     // trip until `host` answers.
     val daemon by connection.daemon.collectAsStateWithLifecycle()
     val lastDaemon by connection.lastDaemon.collectAsStateWithLifecycle()
-    val offered = AgentConversation.offered(daemon, lastDaemon, terminal)
-    // Held by the connection, not by this composable, so the draft and rows
-    // outlive the pane being evicted from the deck.
-    val claudeInTerminal = terminal != null &&
-        AgentConversation.isClaudeInATerminal(terminal.paneMode, terminal.preset)
-    val nativeModel = remember(ref.terminalId, claudeInTerminal) {
-        if (claudeInTerminal) connection.nativePanes.model(ref.terminalId, model.settings) else null
-    }
-    val native = nativeModel?.takeIf { offered }
+    val native = rememberNativePane(
+        terminalId = ref.terminalId,
+        claudeInTerminal = terminal != null &&
+            AgentConversation.isClaudeInATerminal(terminal.paneMode, terminal.preset),
+        offered = AgentConversation.offered(daemon, lastDaemon, terminal),
+        live = live,
+        panes = connection.nativePanes,
+        memory = model.settings,
+    )
     // The conversation covers the terminal now.
-    val covered = native?.showing == true
-    val conversationList = rememberLazyListState()
-    // The follow runs only while the pane is on screen with the app in front,
-    // and the conversation shows; a conversation that stops being offered
-    // (the setting turned off, claude exited) lets go and starts afresh.
-    LaunchedEffect(nativeModel, offered, live) {
-        if (offered) nativeModel?.setOnScreen(live) else nativeModel?.release()
-    }
-    // Removal stops it: the model outlives this pane, and a follow left running
-    // holds a call on the runner for a pane nobody has.
-    DisposableEffect(nativeModel) {
-        onDispose { nativeModel?.setOnScreen(false) }
-    }
-    val rowsPhase = nativeModel?.store?.shown?.collectAsStateWithLifecycle()?.value?.phase
-    LaunchedEffect(rowsPhase) { if (offered) nativeModel?.phaseChanged() }
+    val covered = native.covered
 
     // What this pane costs while nobody is reading it: nothing. `resume` and
     // not `relink` — relinking drops the emulator and puts "Loading…" over a tab
@@ -343,12 +325,8 @@ fun TerminalPane(
             // where it would work: `chatCapable` already reflects the daemon's
             // registry-backed check, so a pane whose agent has no adapter never
             // gets the button in the first place.
-            if (native != null && !native.unavailable) {
-                NativeSwitchButton(showing = covered, onClick = {
-                    native.switchTo(!covered)
-                    // The terminal gives up the keyboard to the conversation.
-                    if (!covered) dismissRequest += 1
-                })
+            if (native.switchable) {
+                NativeSwitchButton(showing = covered, onClick = { native.toggle { dismissRequest += 1 } })
             }
             if (terminal?.canSwitchPaneMode == true) {
                 IconButton(onClick = {
@@ -429,73 +407,46 @@ fun TerminalPane(
                     live = live,
                 )
             } else {
-                // The terminal first, always: the conversation coming and going
-                // leaves its identity, and so its stream and its grid, alone.
-                // Out of reach of TalkBack while the conversation covers it, and
-                // still composed.
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .then(if (covered) Modifier.clearAndSetSemantics {} else Modifier)
+                NativeLayer(
+                    pane = native,
+                    floatingSwitch = !showTopBar,
+                    toConversation = { dismissRequest += 1 },
                 ) {
-                TerminalSurface(
-                    session = session,
-                    name = name,
-                    gone = terminal?.let { LostPane.kind(StateKind.parse(it.state)) },
-                    preset = terminal?.preset.orEmpty(),
-                    onAct = { action -> terminal?.let { scope.launch { connection.act(Connection.Action.of(action), it) } } },
-                    fontFamily = TerminalFonts.family(fontChoice),
-                    fontSize = fontSize,
-                    onTap = { focusRequest += 1 },
-                    onLongPress = { column, row ->
-                        // Over a link, the link actions. Anywhere else, the
-                        // paste this gesture has always meant: a phone has no
-                        // other way to get a command it did not type into a
-                        // terminal, and the menu is two taps away at the top
-                        // of a screen whose whole point is one-handed use.
-                        //
-                        // So the new behavior only appears where there is
-                        // something to act on, and the old one is untouched
-                        // everywhere else.
-                        val link = TerminalPress.linkAt(session, taskKeys, column, row)
-                        if (link != null) {
-                            heldLink = link
-                            linkFailure = null
-                        } else {
-                            scope.launch { clipboard.readText()?.let { session.paste(it) } }
-                        }
-                    },
-                )
-                TerminalKeyboardAnchor(
-                    focusRequest = focusRequest,
-                    dismissRequest = dismissRequest,
-                    onText = { text -> session.send(text, consumeModifiers()) },
-                    onKey = { key, modifiers ->
-                        session.sendKey(key, modifiers or consumeModifiers())
-                    },
-                )
-                }
-                if (native != null && covered) {
-                    // Over the terminal, and taking its touches: a tap that fell
-                    // through would raise the covered terminal's keyboard.
-                    NativeAgentView(
-                        model = native,
-                        listState = conversationList,
-                        showTerminal = {
-                            native.switchTo(false)
+                    TerminalSurface(
+                        session = session,
+                        name = name,
+                        gone = terminal?.let { LostPane.kind(StateKind.parse(it.state)) },
+                        preset = terminal?.preset.orEmpty(),
+                        onAct = { action -> terminal?.let { scope.launch { connection.act(Connection.Action.of(action), it) } } },
+                        fontFamily = TerminalFonts.family(fontChoice),
+                        fontSize = fontSize,
+                        onTap = { focusRequest += 1 },
+                        onLongPress = { column, row ->
+                            // Over a link, the link actions. Anywhere else, the
+                            // paste this gesture has always meant: a phone has no
+                            // other way to get a command it did not type into a
+                            // terminal, and the menu is two taps away at the top
+                            // of a screen whose whole point is one-handed use.
+                            //
+                            // So the new behavior only appears where there is
+                            // something to act on, and the old one is untouched
+                            // everywhere else.
+                            val link = TerminalPress.linkAt(session, taskKeys, column, row)
+                            if (link != null) {
+                                heldLink = link
+                                linkFailure = null
+                            } else {
+                                scope.launch { clipboard.readText()?.let { session.paste(it) } }
+                            }
                         },
-                        modifier = Modifier.pointerInput(Unit) { detectTapGestures { } },
                     )
-                }
-                // On a tab that draws no bar of its own, the switch floats.
-                if (native != null && !native.unavailable && !showTopBar) {
-                    NativeSwitchButton(
-                        showing = covered,
-                        onClick = {
-                            native.switchTo(!covered)
-                            if (!covered) dismissRequest += 1
+                    TerminalKeyboardAnchor(
+                        focusRequest = focusRequest,
+                        dismissRequest = dismissRequest,
+                        onText = { text -> session.send(text, consumeModifiers()) },
+                        onKey = { key, modifiers ->
+                            session.sendKey(key, modifiers or consumeModifiers())
                         },
-                        modifier = Modifier.align(Alignment.TopEnd),
                     )
                 }
             }

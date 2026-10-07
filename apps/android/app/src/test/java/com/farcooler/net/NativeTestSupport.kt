@@ -66,3 +66,33 @@ fun eventually(what: String, timeoutMs: Long = 30_000, condition: () -> Boolean)
         Thread.sleep(2)
     }
 }
+
+/** Rows and pages as the client core writes them, for tests that need a few of their own. */
+object RowJson {
+    private fun obj(vararg pairs: Pair<String, kotlinx.serialization.json.JsonElement>) = buildJsonObject {
+        pairs.forEach { (k, v) -> put(k, v) }
+    }
+
+    private fun text(value: String) = JsonPrimitive(value)
+
+    private fun row(id: String, ord: Long, kind: String, payload: JsonObject) = obj(
+        "id" to text(id), "ord" to JsonPrimitive(ord), "rev" to JsonPrimitive(ord), "provisional" to JsonPrimitive(false),
+        "kind" to obj(kind to payload),
+    )
+
+    fun turn(ord: Long, prompt: String, origin: String = "Typed", outcome: String? = "Finished") = row(
+        "turn:$ord", ord, "Turn",
+        obj(
+            "prompt" to text(prompt), "origin" to text(origin),
+            "started_ms" to JsonPrimitive(1_000), "ended_ms" to JsonPrimitive(5_000), "duration_ms" to JsonPrimitive(4_000),
+            "background_running" to JsonPrimitive(0),
+        ).let { base -> if (outcome == null) base else JsonObject(base + ("outcome" to text(outcome))) },
+    )
+
+    fun prose(ord: Long, body: String) = row("prose:$ord", ord, "Prose", obj("text" to text(body), "conclusion" to JsonPrimitive(true)))
+
+    fun page(epoch: Long, rev: Long, vararg rows: JsonObject, more: Boolean = false) = obj(
+        "epoch" to JsonPrimitive(epoch), "rev" to JsonPrimitive(rev), "moreBefore" to JsonPrimitive(more),
+        "rows" to kotlinx.serialization.json.JsonArray(rows.toList()),
+    )
+}
