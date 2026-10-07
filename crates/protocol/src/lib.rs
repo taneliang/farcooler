@@ -866,6 +866,10 @@ pub mod method {
 /// Control envelopes are capped at 1 MiB.
 pub const MAX_CONTROL_ENVELOPE_BYTES: usize = 1024 * 1024;
 
+/// The most image bytes one `terminal.compose` carries, all its images
+/// together: under the envelope's 1 MiB, with room for the text (ov-367).
+pub const MAX_COMPOSE_IMAGE_BYTES: usize = 900 * 1024;
+
 /// `TerminalFrame.payload` is capped at 64 KiB.
 pub const MAX_TERMINAL_PAYLOAD_BYTES: usize = 64 * 1024;
 

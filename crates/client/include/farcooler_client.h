@@ -154,7 +154,9 @@ uint64_t farcooler_client_connect(void *handle, const char *config);
  *                                                    it took it; or refused with
  *                                                    a `what` (`terminal tell`'s
  *                                                    words, `handoff`,
- *                                                    `unsupported`, `unconfirmable`);
+ *                                                    `unsupported`, `unconfirmable`,
+ *                                                    `images_too_large` past
+ *                                                    900 KB of images);
  *                                                    needs `agent_compose`, and
  *                                                    for line breaks or an image
  *                                                    `compose` too (ov-367)

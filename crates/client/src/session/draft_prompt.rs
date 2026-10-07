@@ -68,6 +68,7 @@ impl Session {
         if !images.is_empty() || text.trim_end().contains(['\n', '\r']) {
             require(self.capabilities(), COMPOSE, "terminal.compose")?;
         }
+        images_fit(images)?;
         let mut blocks = vec![pb::AgentPromptBlock { content: Some(Content::Text(text.to_string())) }];
         for (mime, data) in images {
             let image = pb::ImageBlock { mime_type: mime.clone(), data: bytes::Bytes::copy_from_slice(data) };
@@ -85,6 +86,21 @@ impl Session {
             other => Err(wrong("terminal_told", &other)),
         }
     }
+}
+
+/// Refused here as the runner would (`images_too_large`), before a frame
+/// too big to send: all of a compose's images together, past
+/// `MAX_COMPOSE_IMAGE_BYTES`.
+pub(crate) fn images_fit(images: &[(String, Vec<u8>)]) -> Result<(), SessionError> {
+    if images.iter().map(|(_, data)| data.len()).sum::<usize>() <= farcooler_protocol::MAX_COMPOSE_IMAGE_BYTES {
+        return Ok(());
+    }
+    Err(SessionError::Refused {
+        code: farcooler_protocol::v1::ErrorCode::ResourceConflict as i32,
+        retryable: false,
+        message: "the images are too large to send together".into(),
+        what: "images_too_large".into(),
+    })
 }
 
 /// A hold as both phones read it: `id` as a uuid string, `state` as a word
@@ -109,5 +125,26 @@ pub fn draft_hold_state(state: i32) -> &'static str {
         Ok(pb::DraftHoldState::Withdrawn) => "withdrawn",
         Ok(pb::DraftHoldState::Failed) => "failed",
         _ => "expired",
+    }
+}
+
+#[cfg(test)]
+mod compose_tests {
+    use super::*;
+
+    /// Up to 900 KB of images together goes; a byte more is refused with the
+    /// runner's word, whether one image or several.
+    #[test]
+    fn images_past_the_cap_together_are_refused() {
+        let cap = farcooler_protocol::MAX_COMPOSE_IMAGE_BYTES;
+        let image = |n: usize| ("image/png".to_string(), vec![0u8; n]);
+        assert!(images_fit(&[image(cap)]).is_ok());
+        assert!(images_fit(&[image(cap / 2), image(cap / 2)]).is_ok());
+        for over in [vec![image(cap + 1)], vec![image(cap / 2), image(cap / 2 + 1)]] {
+            match images_fit(&over) {
+                Err(SessionError::Refused { what, .. }) => assert_eq!(what, "images_too_large"),
+                other => panic!("{other:?}"),
+            }
+        }
     }
 }

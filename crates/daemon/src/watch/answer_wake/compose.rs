@@ -123,6 +123,8 @@ impl Composition {
 /// Check `raw` and `images` (each a claimed MIME type and bytes) as a message
 /// to compose, or refuse it: `text` when there's nothing to send, `image`
 /// for bytes that aren't an image, `images` for too many or beside a command,
+/// `images_too_large` past `MAX_COMPOSE_IMAGE_BYTES` together (one request
+/// travels in one envelope, capped at 1 MiB),
 /// `too_long`, `command` for a shell escape or a command that isn't one,
 /// and `handoff` for one of claude's own that isn't a prompt.
 pub(crate) fn composition(raw: &str, images: &[(String, Vec<u8>)]) -> Result<Composition> {
@@ -136,6 +138,9 @@ pub(crate) fn composition(raw: &str, images: &[(String, Vec<u8>)]) -> Result<Com
     if images.len() > MOST_IMAGES {
         return Err(DomainError::InvalidArgument { what: "images" });
     }
+    if images.iter().map(|(_, bytes)| bytes.len()).sum::<usize>() > farcooler_protocol::MAX_COMPOSE_IMAGE_BYTES {
+        return Err(DomainError::Conflict { what: "images_too_large" });
+    }
     let mut kept = Vec::new();
     for (_, bytes) in images {
         let ext = match crate::pastes::sniff(bytes) {
@@ -145,9 +150,6 @@ pub(crate) fn composition(raw: &str, images: &[(String, Vec<u8>)]) -> Result<Com
             Some(crate::pastes::Kind::Webp) => "webp",
             None => return Err(DomainError::InvalidArgument { what: "image" }),
         };
-        if bytes.len() as u64 > farcooler_protocol::MAX_PASTE_FILE_BYTES {
-            return Err(DomainError::InvalidArgument { what: "image" });
-        }
         kept.push((bytes.clone(), ext));
     }
     if text.starts_with('!') {

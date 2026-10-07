@@ -31,6 +31,19 @@ pub(crate) async fn run(
     };
     let mut blocks = vec![pb::AgentPromptBlock { content: Some(Content::Text(text)) }];
     blocks.extend(super::images::image_blocks(&images)?);
+    // Refused here as the runner would, before a frame too big to send.
+    let image_bytes: usize = blocks
+        .iter()
+        .filter_map(|b| match &b.content {
+            Some(Content::Image(image)) => Some(image.data.len()),
+            _ => None,
+        })
+        .sum();
+    if image_bytes > farcooler_protocol::MAX_COMPOSE_IMAGE_BYTES {
+        let code = pb::ErrorCode::ResourceConflict as i32;
+        let said = said_about("images_too_large").unwrap_or_default().to_string();
+        return Err(Box::new(tasks::Refused::naming(said, code, "images_too_large".into())));
+    }
     let (mut link, id) = terminal_by_record(runner, terminal).await?;
     use farcooler_protocol::capability::{AGENT_COMPOSE, COMPOSE};
     if ![AGENT_COMPOSE, COMPOSE].iter().all(|need| link.daemon_capabilities().iter().any(|c| c == need)) {
@@ -59,6 +72,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
     Some(match what {
         "handoff" => "that command opens a panel or acts at once in claude, so it's for the terminal. open the pane and type it there",
         "unsupported" => "only claude can be composed into. use terminal draft-prompt for this agent",
+        "images_too_large" => "the images are over 900 KB together. send fewer, or smaller ones",
         "unconfirmable" => "the agent's session can't be found, so a send couldn't be confirmed. nothing was typed",
         "command" => "a message can't start with !, which claude reads as a shell command, or with a / that isn't a command",
         "too_long" => "that message is over 100,000 characters. shorten it",
@@ -92,6 +106,7 @@ mod tests {
         for what in [
             "busy", "prompt", "draft", "typing", "not_an_agent", "unfamiliar", "unproven", "too_long", "command",
             "not_running", "paste_left", "left_at_shell", "dialog", "unconfirmed", "handoff", "unsupported", "unconfirmable",
+            "images_too_large",
         ] {
             let said = said_about(what).unwrap_or_else(|| panic!("no line for {what}"));
             assert!(!said.ends_with('.') && said.chars().next().is_some_and(char::is_lowercase), "{said}");
