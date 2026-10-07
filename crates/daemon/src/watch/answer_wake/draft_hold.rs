@@ -178,10 +178,12 @@ impl Watcher {
         if self.draft_holds.lock().unwrap_or_else(|e| e.into_inner()).is_empty() {
             return;
         }
-        let Ok(_one_pass) = self.draft_pump.try_lock() else { return };
         // Never while an answer may be typed into the same pane: after it.
-        // `draft_pump` is taken first, so passes queue here one deep.
+        // `wake_pump` first, so the wait holds nothing a person's draft or
+        // withdrawal (`draft_into`, `withdraw_draft`, which take only
+        // `draft_pump`) would queue behind.
         let _no_answer = self.wake_pump.lock().await;
+        let Ok(_one_pass) = self.draft_pump.try_lock() else { return };
         let now = now_millis();
         let waiting: Vec<(Uuid, DraftHold)> = {
             let mut holds = self.draft_holds.lock().unwrap_or_else(|e| e.into_inner());

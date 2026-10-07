@@ -245,3 +245,25 @@ async fn a_held_draft_lands_while_an_answer_waits_on_another_pane() {
     assert_eq!(b.watcher.draft_hold(orchestrator.id).unwrap().state, DraftHoldState::Sent as i32, "{}", si.log());
     assert!(!b.pending().is_empty() && !other.log().contains("PASTE"), "the answer still waits on its own pane: {:?}", b.pending());
 }
+
+/// A drafts' pass waiting behind an answer pass holds nothing a person's own
+/// draft waits on: `draft_into` answers at once (third review).
+#[tokio::test]
+async fn a_draft_prompt_answers_promptly_while_an_answer_pass_runs() {
+    let b = board().await;
+    let (orchestrator, _si, _) = held(&b).await;
+    let answering = b.watcher.wake_pump.lock().await;
+    let waiting_pass = tokio::spawn({
+        let watcher = b.watcher.clone();
+        async move { watcher.pump_draft_holds().await }
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let asked = tokio::time::timeout(
+        Duration::from_secs(5),
+        b.watcher.draft_into(orchestrator.id, "About ov-2: ", true),
+    )
+    .await;
+    assert!(matches!(asked, Ok(Ok(Drafted::Held(_)))), "the draft waited on the answer pass: {asked:?}");
+    drop(answering);
+    waiting_pass.await.unwrap();
+}
