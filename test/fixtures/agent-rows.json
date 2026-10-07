@@ -177,9 +177,27 @@
             "answered": false,
             "answered_ms": null,
             "asked_ms": 7000,
-            "kind": "Permission",
-            "text": "Bash: rm -rf target",
-            "tool": "Bash"
+            "held": "hook-ask-1",
+            "kind": "Question",
+            "questions": [
+              {
+                "header": "Color",
+                "multi_select": false,
+                "options": [
+                  {
+                    "description": "Warm",
+                    "label": "Red"
+                  },
+                  {
+                    "description": "Calm",
+                    "label": "Blue"
+                  }
+                ],
+                "question": "Which color?"
+              }
+            ],
+            "text": "Which color?",
+            "tool": "AskUserQuestion"
           }
         },
         "ord": 5,

@@ -57,13 +57,27 @@ fn rows() -> Vec<Row> {
             current_action: "Grep fn main".into(),
             last_ms: Some(9_000),
         })),
+        // A question the runner's hook holds (ov-370): its id and its
+        // options are what a view answers it with.
         row(5, 5, "ask:1", t, RowKind::Ask(Ask {
-            kind: AskKind::Permission,
-            text: "Bash: rm -rf target".into(),
-            tool: Some("Bash".into()),
+            kind: AskKind::Question,
+            text: "Which color?".into(),
+            tool: Some("AskUserQuestion".into()),
             asked_ms: Some(7_000),
             answered_ms: None,
             answered: false,
+            held: Some("hook-ask-1".into()),
+            questions: vec![AskQuestion {
+                question: "Which color?".into(),
+                header: "Color".into(),
+                options: vec![
+                    AskOption { label: "Red".into(), description: "Warm".into() },
+                    AskOption { label: "Blue".into(), description: "Calm".into() },
+                ],
+                multi_select: false,
+            }],
+            plan: None,
+            answered_by: None,
         })),
         row(6, 6, "queued:1", t, RowKind::Queued(Queued { text: "and then the docs".into(), state: QueuedState::Waiting, at_ms: Some(8_000) })),
         row(7, 7, "notice:1", t, RowKind::Notice(Notice { kind: NoticeKind::Compacted, text: "Context compacted".into(), at_ms: None })),

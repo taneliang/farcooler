@@ -392,6 +392,21 @@ pub(super) struct Input<'a> {
 pub(super) struct Question<'a> {
     #[serde(borrow)]
     pub question: Str<'a>,
+    #[serde(borrow)]
+    pub header: Str<'a>,
+    #[serde(borrow)]
+    pub options: List<Obj<QuestionOption<'a>>>,
+    #[serde(rename = "multiSelect")]
+    pub multi_select: Bool,
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(default)]
+pub(super) struct QuestionOption<'a> {
+    #[serde(borrow)]
+    pub label: Str<'a>,
+    #[serde(borrow)]
+    pub description: Str<'a>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]

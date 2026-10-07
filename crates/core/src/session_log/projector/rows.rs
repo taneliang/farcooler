@@ -236,6 +236,40 @@ pub struct Ask {
     pub asked_ms: Option<i64>,
     pub answered_ms: Option<i64>,
     pub answered: bool,
+    /// The id a view answers it with (`terminal.agent_answer`) while the
+    /// runner's hook holds it, and only then (ov-370). Absent once the hold
+    /// ends, however it ended: then only the terminal can answer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub held: Option<String>,
+    /// An `AskUserQuestion`'s questions, whole, so a view can offer their
+    /// options. Empty for any other ask.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub questions: Vec<AskQuestion>,
+    /// An `ExitPlanMode`'s plan, its line breaks kept, up to `PLAN_CHARS`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan: Option<String>,
+    /// The device whose answer the hook took ("iPhone", "Mac"), when one
+    /// did; absent when the keyboard answered, or nobody has.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub answered_by: Option<String>,
+}
+
+/// One question of an `AskUserQuestion`, as claude asked it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct AskQuestion {
+    /// The words claude asked, which its answer is keyed by.
+    pub question: String,
+    /// Claude's short label for it ("Color").
+    pub header: String,
+    pub options: Vec<AskOption>,
+    /// Several options may be chosen; claude reads them joined by ", ".
+    pub multi_select: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct AskOption {
+    pub label: String,
+    pub description: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

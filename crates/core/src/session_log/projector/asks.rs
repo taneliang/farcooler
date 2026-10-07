@@ -45,6 +45,10 @@ impl Projection {
             asked_ms: Some(now),
             answered_ms: None,
             answered: false,
+            held: self.held_id(payload),
+            questions: Vec::new(),
+            plan: None,
+            answered_by: None,
         };
         let id = format!("perm:{}", self.next_seq());
         let ask = self.push(id, Some(turn), true, RowKind::Ask(ask));

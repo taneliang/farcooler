@@ -15,11 +15,13 @@
 //! - `files`: the session's files read as they grow, half-written lines held.
 //! - `follow`: a page of rows, and what changed after a revision (ov-366).
 //! - `asks`: a held permission tied to the one call it holds.
+//! - `held`: the id a view answers a held ask with, on its row (ov-370).
 //! - `nested`: what a subagent's own transcript launches and asks.
 //!
 //! Pure apart from `files`, and that only reads.
 
 mod asks;
+pub mod held;
 pub mod files;
 pub mod fold;
 mod follow;
@@ -42,6 +44,8 @@ mod fold_tests;
 mod files_tests;
 #[cfg(test)]
 mod hooks_tests;
+#[cfg(test)]
+mod held_tests;
 #[cfg(test)]
 mod parity_tests;
 #[cfg(test)]

@@ -161,6 +161,8 @@ pub struct Projection {
     /// Each subagent's tool calls that have not come back, as id, name and
     /// summary: what a permission one of its calls asks for is matched to.
     pub(super) sub_tools: HashMap<String, Vec<(String, String, String)>>,
+    /// Asks the runner's hook holds, and what's waiting to be tied (`held.rs`).
+    pub(super) held: super::held::HeldAsks,
     seq: u64,
     /// Bumped by every change; a row's `rev` is the value when it last moved.
     revision: u64,
@@ -842,7 +844,18 @@ impl Projection {
                     let question = input.questions.0.first().and_then(|q| q.0.as_ref()).and_then(|q| q.question.get());
                     (AskKind::Question, question.map(|q| squeeze(q, LINE_CHARS)).unwrap_or_default())
                 };
-                let ask = Ask { kind, text, tool: Some(name.to_string()), asked_ms: at, answered_ms: None, answered: false };
+                let ask = Ask {
+                    kind,
+                    text,
+                    tool: Some(name.to_string()),
+                    asked_ms: at,
+                    answered_ms: None,
+                    answered: false,
+                    held: None,
+                    questions: super::held::questions_of(input),
+                    plan: if name == "ExitPlanMode" { super::held::plan_of(input) } else { None },
+                    answered_by: None,
+                };
                 (format!("ask:{id}"), RowKind::Ask(ask))
             }
             _ => {
@@ -870,6 +883,16 @@ impl Projection {
                         new.ended_ms = clamp_end(new.started_ms, old.ended_ms);
                     }
                 }
+                // A hold the hook put on the row, and who answered it, are
+                // the runner's to say, not the record's (`held.rs`).
+                if let (RowKind::Ask(old), RowKind::Ask(new)) = (&keep_status, &mut self.rows[i].kind) {
+                    new.held = old.held.clone();
+                    new.answered_by = old.answered_by.clone();
+                    if new.questions.is_empty() {
+                        new.questions = old.questions.clone();
+                    }
+                    new.plan = new.plan.take().or_else(|| old.plan.clone());
+                }
                 self.touch(i);
                 self.tool_confirmed(id);
             }
@@ -879,9 +902,13 @@ impl Projection {
             RowKind::Tool(tool) => Some((tool.name.clone(), tool.summary.clone())),
             _ => None,
         };
-        self.push(row_id, Some(turn), provisional, kind);
+        let dialog = matches!(&kind, RowKind::Ask(_));
+        let pushed = self.push(row_id, Some(turn), provisional, kind);
         if let Some((name, summary)) = summary {
             self.link_tool(None, id, &name, &summary, !provisional);
+        }
+        if dialog {
+            self.dialog_row_up(pushed, name);
         }
     }
 

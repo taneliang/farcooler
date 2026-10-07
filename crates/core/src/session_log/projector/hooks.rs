@@ -22,6 +22,7 @@
 
 use std::path::PathBuf;
 
+use serde::Deserialize;
 use serde_json::Value;
 
 use super::fold::{clip, squeeze, Projection, PROMPT_CHARS};
@@ -58,7 +59,12 @@ fn input_of(payload: &Value) -> Input<'static> {
         query: field("query"),
         subagent_type: field("subagent_type"),
         run_in_background: Bool(payload.pointer("/tool_input/run_in_background").and_then(Value::as_bool)),
-        questions: List(Vec::new()),
+        // Whole, so a question's row can offer its options before its record
+        // is in. Owned: a hook's payload outlives no fold.
+        questions: payload
+            .pointer("/tool_input/questions")
+            .and_then(|q| List::deserialize(q.clone()).ok())
+            .unwrap_or_default(),
         plan: field("plan"),
     }
 }
@@ -117,10 +123,16 @@ impl Projection {
                 self.fail_turn(turn, detail, at);
             }
             "MessageDisplay" => self.message_display(payload, now),
+            // A question's or a plan's dialog is its `Ask` row already; its
+            // request only says the runner holds it (`held.rs`).
+            "PermissionRequest" if text(payload, "tool_name").is_some_and(super::held::is_dialog_tool) => {
+                self.dialog_request(text(payload, "tool_name").unwrap_or_default(), payload);
+            }
             "PermissionRequest" => {
                 let turn = self.hook_turn(payload, now);
                 self.permission_request(turn, payload, &input_of(payload), now);
             }
+            super::held::ASK_ENDED => self.ask_ended(payload),
             // A subagent's own tool calls carry its `agent_id`; they are its
             // row's business, not the main turn's. Its transcript counts
             // them; a `PreToolUse` names what it's doing now, ahead of it.
