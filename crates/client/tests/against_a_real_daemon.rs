@@ -233,12 +233,24 @@ async fn spawn(scratch_home: bool) -> Daemon {
 /// daemon's directory and starts it in their environment; only
 /// `Launch::StandIn` also names the stand-in.
 async fn spawn_with(scratch_home: bool, trapped: Option<Launch>) -> Daemon {
+    spawn_configured(scratch_home, trapped, None).await
+}
+
+/// `spawn_with`, with `config` written as the daemon's own config.toml before
+/// it starts. The daemon always reads that file and never this Mac's shared
+/// one (`FARCOOLER_CONFIG`), whose `[agents] projector` (ov-372) or adapters a
+/// test must neither read nor write (ov-394).
+async fn spawn_configured(scratch_home: bool, trapped: Option<Launch>, config: Option<&str>) -> Daemon {
     let dir = tempfile::tempdir().unwrap();
     let socket = dir.path().join("farcoolerd.sock");
+    if let Some(config) = config {
+        std::fs::write(dir.path().join("config.toml"), config).unwrap();
+    }
 
     let mut command = std::process::Command::new(daemon_binary());
     command
         .env("FARCOOLER_HOME", dir.path())
+        .env("FARCOOLER_CONFIG", dir.path().join("config.toml"))
         // Never the real agent: the daemon stubs every launch and refuses
         // one it cannot vouch for (`agent_program`). A stand-in, below,
         // still wins over the stub.
@@ -2064,4 +2076,21 @@ async fn a_permission_answered_at_the_keyboard_releases_the_held_hook_and_the_ph
         other => panic!("a late answer was not refused as a conflict: {other:?}"),
     }
     asking.never_trapped();
+}
+
+/// The daemon a test starts reads the config.toml in its own scratch
+/// directory, not this machine's shared one: a projector switched on there
+/// (ov-372) is offered, and one never switched on there is not, whatever this
+/// Mac's owner has set. Without `FARCOOLER_CONFIG` in `spawn_configured`, the
+/// first half reads the owner's file and the second half is only as true as
+/// their setting.
+#[tokio::test]
+async fn a_spawned_daemon_reads_its_own_config_and_not_this_machines() {
+    use farcooler_protocol::capability::AGENT_ROWS;
+    let on = spawn_configured(false, None, Some("[agents]\nprojector = true\n")).await;
+    let session = Session::connect_local(&on.socket).await.expect("connect");
+    assert!(session.can(AGENT_ROWS), "the planted projector = true was not read");
+    let off = spawn_configured(false, None, Some("[agents]\nprojector = false\n")).await;
+    let session = Session::connect_local(&off.socket).await.expect("connect");
+    assert!(!session.can(AGENT_ROWS), "a daemon offered rows its own config turned off");
 }
