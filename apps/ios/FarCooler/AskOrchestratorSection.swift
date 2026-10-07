@@ -79,11 +79,17 @@ struct AskOrchestratorSection: View {
 extension Connection {
     /// Ask the runner to paste `text` into a terminal orchestrator's box,
     /// pressing no Enter. `.declined` means nothing was typed; `.unknown` that
-    /// no answer came in time, so it may have been.
+    /// no answer came in time, so it may have been; `.held` that a dialog was
+    /// up and the runner pastes it once the dialog closes (ov-385), which the
+    /// pane's `HeldDraftBar` then says.
     func draftPrompt(terminal: String, text: String) async -> AskAboutTask.DraftResult {
         do {
-            _ = try await rpc("terminal.draft_prompt", ["terminal": terminal, "text": text])
-            return .pasted
+            let answer = try await rpc("terminal.draft_prompt", ["terminal": terminal, "text": text])
+            let result = HeldDraft.result(of: answer)
+            // The pane says it waits: read the hold now rather than at the
+            // next poll.
+            if case .held = result { await refresh() }
+            return result
         } catch {
             var lost = false
             var notSent = false

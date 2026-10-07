@@ -167,6 +167,8 @@ SOURCES = [
     "InputHoldLine.swift",
     # Ask the Orchestrator on a task's screen (ov-241).
     "AskOrchestratorSection.swift",
+    # A draft held behind a dialog, over the orchestrator's terminal (ov-385).
+    "HeldDraftBar.swift",
     # An empty state's lede and icon rows (ov-245).
     "PhoneEmptyRows.swift",
     # The phone's half of the watch link. Not under `FarCoolerWatch/`: it runs
@@ -226,6 +228,9 @@ AGENTKIT_SOURCES = [
     # Ask the Orchestrator's draft, how it is delivered, and the offers a
     # composer takes (ov-241). Here for the same reason. See `AskAboutTaskTests`.
     "AskAboutTask.swift",
+    # A draft held behind a dialog, what its pane says, and the answer read
+    # (ov-385). Here for the same reason. See `HeldDraftTests`.
+    "HeldDraft.swift",
     # The phones' empty states as a lede and icon rows (ov-245).
     "PhoneEmptyStates.swift",
     # The navigation shell's pure model: the flat sequence across the fleet,

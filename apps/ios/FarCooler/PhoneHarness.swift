@@ -313,6 +313,8 @@ final class HarnessRunner {
     static let agent = "0198f2c0-0000-7000-8000-00000000d002"
     static let shell = "0198f2c0-0000-7000-8000-00000000d003"
     static let billingOrchestrator = "0198f2c0-0000-7000-8000-00000000d004"
+    /// The draft `-phone-draft-held` holds behind a dialog (ov-385).
+    static let heldDraft = "0198f2c0-0000-7000-8000-00000000f385"
     static let decisionTask = "0198f2c0-0000-7000-8000-00000000e007"
     /// `-phone-start-states`: the cards that say who is on them and when they start.
     static var startStates: Bool { CommandLine.arguments.contains("-phone-start-states") }
@@ -329,6 +331,8 @@ final class HarnessRunner {
     /// unless `-phone-billing-led`.
     private var billingLed =
         CommandLine.arguments.contains("-phone-billing-led") || HarnessRunner.startStates
+    /// The draft held on Billing's orchestrator, as a fleet row carries it.
+    private var billingHold: [String: Any]?
     /// Whether fc-3-webhooks is put away, as the runner keeps it: starts so
     /// under `-phone-webhooks-hidden`, and `worktree.unhide` clears it.
     private var webhooksHidden = CommandLine.arguments.contains("-phone-webhooks-hidden")
@@ -433,7 +437,8 @@ final class HarnessRunner {
                 Terminal(
                     id: Self.billingOrchestrator, short: "d004", title: "claude",
                     preset: "claude", state: billingDead ? "exited" : "running",
-                    exitCode: billingDead ? 127 : nil, activity: "idle", epoch: 1,
+                    exitCode: billingDead ? 127 : nil, activity: "idle",
+                    draftHold: DraftHold(json: billingHold), epoch: 1,
                     paneMode: CommandLine.arguments.contains("-phone-orchestrator-chat") ? "agent" : "terminal",
                     chatCapable: CommandLine.arguments.contains("-phone-orchestrator-chat"), workspace: Self.billing,
                     role: "orchestrator"))
@@ -610,7 +615,21 @@ final class HarnessRunner {
                 throw ClientCore.CoreError.rejected("not safe to paste", word: "agent-not-connected")
             }
             sent.append("draft billing \(text)")
+            // `-phone-draft-held` (ov-385): a dialog is up in the pane, so the
+            // runner holds the draft and says so on the pane.
+            if CommandLine.arguments.contains("-phone-draft-held") {
+                billingHold = ["id": Self.heldDraft, "state": "waiting", "heldMs": 0, "expiresMs": 1_800_000, "endedMs": 0]
+                connection.standIn(on: fleet())
+                return try json(["held": billingHold as Any])
+            }
             return try json([:])
+        case "terminal.draft_withdraw":
+            guard args["terminal"] as? String == Self.billingOrchestrator, args["hold"] as? String == Self.heldDraft
+            else { throw ClientCore.CoreError.rejected("no such hold", word: "not-found") }
+            sent.append("withdraw billing")
+            billingHold?["state"] = "withdrawn"
+            connection.standIn(on: fleet())
+            return try json(["hold": billingHold as Any])
         case "terminal.agent_prompt":
             // `-phone-accept-prompts`: any message to the chat orchestrator is
             // taken and recorded with its photo count, for the composer's

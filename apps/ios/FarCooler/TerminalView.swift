@@ -945,6 +945,7 @@ struct TerminalView: View {
                     lfs: ChangesView.lfs(worktree, connection))
                     .id(worktree.id)
             } else {
+                HeldDraftBar(connection: connection, terminal: live)
                 GeometryReader { geo in
                     phaseContent(size: geo.size)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)

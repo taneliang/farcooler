@@ -128,6 +128,32 @@ final class FirstRunUITests: XCTestCase {
             "no notice: \(app.debugDescription)")
     }
 
+    /// **A dialog in the orchestrator's pane holds the draft, and the pane
+    /// says so with Withdraw rather than the reference being copied**
+    /// (ov-385). Withdraw reaches the runner, and the bar goes.
+    func testAskTheOrchestratorWaitsForADialogAndCanBeWithdrawn() throws {
+        let app = launch(["-phone-billing-led", "-phone-draft-held"])
+        openTask(app, "bil-9")
+        let ask = app.buttons["ask-orchestrator"]
+        XCTAssertTrue(ask.waitForExistence(timeout: 10), "no row: \(app.debugDescription)")
+        ask.tap()
+        XCTAssertTrue(
+            app.staticTexts["Waiting for the dialog to close"].waitForExistence(timeout: 10),
+            "no waiting bar: \(app.debugDescription)")
+        XCTAssertFalse(app.staticTexts["Copied a reference to bil-9. Paste it into the orchestrator."].exists)
+        // The waiting state, kept in the result bundle for review.
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "held-draft-waiting"
+        shot.lifetime = .keepAlways
+        add(shot)
+        let withdraw = app.buttons["held-draft-withdraw"]
+        XCTAssertTrue(withdraw.exists)
+        withdraw.tap()
+        XCTAssertTrue(
+            app.staticTexts["Waiting for the dialog to close"].waitForNonExistence(timeout: 10),
+            "still waiting: \(app.debugDescription)")
+    }
+
     /// **An agent the runner doesn't have is listed and can't be chosen.**
     func testAMissingAgentIsDisabledInTheStartMenu() throws {
         let app = launch(["-phone-claude-missing"])
