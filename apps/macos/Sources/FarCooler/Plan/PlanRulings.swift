@@ -164,10 +164,20 @@ struct PlanRulingRow: View {
                         .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
                         .fixedSize(horizontal: false, vertical: true)
                         .layoutPriority(1)
+                        .probed("plan-ruling-\(ruling.short)-decision")
                     Spacer(minLength: 0)
-                    RulingRowActions(ruling: ruling, onReverse: { confirming = true })
-                        .opacity(hovering || actions.alwaysShown ? 1 : 0)
-                    CopyReferenceButton(ruling: ruling, copy: copy)
+                    // The controls keep their natural size and ask for their
+                    // room first (ov-405): a long decision wraps in what's
+                    // left, rather than the squeezed buttons wrapping a
+                    // letter to a line. The actions keep their room while
+                    // hidden, so the hover never reflows the decision.
+                    HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
+                        RulingRowActions(ruling: ruling, onReverse: { confirming = true })
+                            .opacity(hovering || actions.alwaysShown ? 1 : 0)
+                        CopyReferenceButton(ruling: ruling, copy: copy)
+                    }
+                    .fixedSize()
+                    .layoutPriority(2)
                 }
                 line(PlanWords.rulingWhy, ruling.why)
                 line(PlanWords.rulingReversal, ruling.reversal)
