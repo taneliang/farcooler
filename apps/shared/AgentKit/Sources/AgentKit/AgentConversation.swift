@@ -20,6 +20,13 @@ public enum AgentConversation {
         (paneMode ?? "terminal") == "terminal" && preset.hasPrefix("claude")
     }
 
+    /// Whether the pane's process is there to talk to. A pane whose claude
+    /// has exited shows its terminal, which says how it ended, rather than a
+    /// conversation whose every send would be refused.
+    public static func isRunning(state: String) -> Bool {
+        state == "running" || state == "starting"
+    }
+
     // MARK: - The view each pane remembers (R-27)
 
     /// One key per pane.
@@ -73,9 +80,11 @@ public enum AgentConversation {
     /// How a failed send came back from the client core.
     public enum SendFailure: Equatable, Sendable {
         /// The runner refused it, naming why in `what` (`terminal.compose`'s
-        /// words: `dialog`, `draft`, `busy`, …).
-        case refused(what: String?)
-        /// No answer by the call's deadline: it may still be typed.
+        /// words: `dialog`, `draft`, `busy`, …) and, for a refusal that isn't
+        /// compose's own, its error word (`scope-denied`).
+        case refused(what: String?, word: String? = nil)
+        /// No answer by the call's deadline, or one that couldn't be read:
+        /// either way it may still be typed.
         case timedOut
         /// The link dropped. `notSent` when the call provably never left
         /// this phone; otherwise it may have reached the runner.
@@ -84,7 +93,11 @@ public enum AgentConversation {
 
     public static func issue(for failure: SendFailure) -> SendIssue {
         switch failure {
-        case .refused(let what):
+        // A grant that may read but not type (`read`): saying so beats
+        // "wasn't sent" on every try.
+        case .refused(_, let word?) where word == "scope-denied":
+            return .said("This device can’t send messages to this runner.")
+        case .refused(let what, _):
             switch what {
             case "prompt", "dialog": return .handoff
             case "draft": return .draftInTerminal

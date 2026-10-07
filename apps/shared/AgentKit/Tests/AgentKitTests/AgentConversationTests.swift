@@ -59,6 +59,17 @@ import Testing
         #expect(AgentConversation.issue(for: .timedOut) == .said(AgentConversation.mayHaveBeenSent))
         #expect(AgentConversation.issue(for: .lost(notSent: false)) == .said(AgentConversation.mayHaveBeenSent))
         #expect(AgentConversation.issue(for: .lost(notSent: true)) == .said("The runner isn’t connected, so the message wasn’t sent."))
+        #expect(
+            AgentConversation.issue(for: .refused(what: nil, word: "scope-denied"))
+                == .said("This device can’t send messages to this runner."))
+        #expect(AgentConversation.issue(for: .refused(what: "busy", word: "resource-conflict")) != .said("The message wasn’t sent."))
+    }
+
+    @Test func onlyARunningPaneIsTalkedTo() {
+        #expect(AgentConversation.isRunning(state: "running"))
+        #expect(AgentConversation.isRunning(state: "starting"))
+        #expect(!AgentConversation.isRunning(state: "exited"))
+        #expect(!AgentConversation.isRunning(state: "stopped"))
     }
 
     @Test func aQueuedEchoSettlesOnceTheTranscriptShowsIt() {
