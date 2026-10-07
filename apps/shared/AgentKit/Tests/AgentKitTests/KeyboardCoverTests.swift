@@ -34,13 +34,30 @@ struct KeyboardCoverTests {
         var cover = KeyboardCover()
         cover.frame(overlap: 400, screenHeight: phone)
         cover.willHide()
-        #expect(cover.height == 0)
+        #expect(cover.height == 400, "the hide read as nothing before its frame")
         cover.accessory(cover: 260, screenHeight: phone)
-        #expect(cover.height == 0, "a transient mid-slide cover was taken")
+        #expect(cover.height == 400, "a transient mid-slide cover was taken")
         cover.frame(overlap: 90, screenHeight: phone)
         #expect(cover.height == 90)
         cover.accessory(cover: 120, screenHeight: phone)
         #expect(cover.height == 120, "the hide's frame left the cover deaf to the composer")
+    }
+
+    /// `willChangeFrame` first, with the keyboard gone and the bar left: the
+    /// hide that follows mustn't take the bar's cover away.
+    @Test func aHideAfterItsFrameKeepsTheBarsCover() {
+        var cover = KeyboardCover()
+        cover.frame(overlap: 400, screenHeight: phone)
+        cover.frame(overlap: 90, screenHeight: phone)
+        cover.willHide()
+        #expect(cover.height == 90, "the bar's cover went to \(cover.height)")
+    }
+
+    /// 260 pt of keys under a 300 pt composer: 84% of a 667 pt phone.
+    @Test func aTallKeyboardAndComposerOnAShortPhoneIsTakenAsAFrame() {
+        var cover = KeyboardCover()
+        cover.frame(overlap: 560, screenHeight: small)
+        #expect(cover.height == 560)
     }
 
     @Test func aHideThatSendsNoFrameEndsOnItsTimeout() {

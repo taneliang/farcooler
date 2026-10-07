@@ -148,7 +148,13 @@ final class AgentFollowTests: XCTestCase {
 
     /// The keyboard going away leaves the docked composer, and the cover
     /// settles at its height (ov-386): not zero, and not whatever the
-    /// composer reported while it slid.
+    /// composer reported while it slid. Sampled from the tap on, so a zero
+    /// held until a timeout, or a mid-slide number, is seen if it's ever
+    /// read, rather than missed by a single look at the end.
+    /// Best effort: on the simulator the hide's frame follows `willHide` too
+    /// closely for this to see a zero that `KeyboardCover.willHide` used to
+    /// leave (checked: it stays green with that mutation), so the rule itself
+    /// is pinned by `KeyboardCoverTests.aHideAfterItsFrameKeepsTheBarsCover`.
     func testTheCoverSettlesAtTheBarWhenTheKeyboardHides() throws {
         let app = launch()
         let transcript = app.scrollViews["agent-transcript"]
@@ -156,15 +162,50 @@ final class AgentFollowTests: XCTestCase {
         app.textViews.firstMatch.tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(
-            wait(10) { (insets(transcript).map { $0.keyboard > $0.bar + 100 }) == true },
+            wait(30) { (insets(transcript).map { $0.keyboard > $0.bar + 100 }) == true },
             "the keyboard didn't raise the cover: \(transcript.value ?? "")")
         waitForHideKeyboardKey(app, Self.composerHideKeyboard).tap()
-        XCTAssertTrue(
-            wait(10) { !app.keyboards.firstMatch.exists && insets(transcript).map(isTheBar) == true },
-            "the cover didn't settle at the bar: \(transcript.value ?? "")")
+        var read: [String] = []
+        var below = 0
+        let settled = wait(30) {
+            let value = transcript.value as? String ?? ""
+            read.append(value)
+            if let inset = insets(transcript), inset.keyboard < inset.bar - 40 { below += 1 }
+            return !app.keyboards.firstMatch.exists && insets(transcript).map(isTheBar) == true
+        }
+        XCTAssertTrue(settled, "the cover didn't settle at the bar: \(read.suffix(3))")
+        XCTAssertEqual(below, 0, "the cover read under the bar while the keyboard hid: \(read)")
         // And it stays: nothing late moves it.
         Thread.sleep(forTimeInterval: 2)
-        let settled = try XCTUnwrap(insets(transcript))
-        XCTAssertTrue(isTheBar(settled), "a late report moved the cover: \(transcript.value ?? "")")
+        let after = try XCTUnwrap(insets(transcript))
+        XCTAssertTrue(isTheBar(after), "a late report moved the cover: \(transcript.value ?? "")")
+    }
+
+    /// With the keys up the composer growing sends no keyboard frame, so the
+    /// cover follows what the composer itself reports: through the scope
+    /// `AgentView` gives `DockedBar` and the report's `reportCover` (ov-386).
+    /// The cover must rise by within 40 pt of how far the composer's top did.
+    /// Not exactly: measured 32 of 66 pt on iPhone 17 (the report is read at
+    /// layout, as the accessory settles), against none at all when the report
+    /// doesn't reach the inset.
+    func testTheCoverFollowsTheComposerGrowingWithTheKeysUp() throws {
+        let app = launch()
+        let transcript = app.scrollViews["agent-transcript"]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 30))
+        app.textViews.firstMatch.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(wait(30) { (insets(transcript).map { $0.keyboard > $0.bar + 100 }) == true }, "\(transcript.value ?? "")")
+        Thread.sleep(forTimeInterval: 1)
+        let before = composerTop(app)
+        let coverBefore = try XCTUnwrap(insets(transcript)).keyboard
+        app.typeText(
+            "A draft long enough to wrap onto five or six separate lines inside the composer "
+                + "card, so that the field grows well past its resting height and covers more")
+        XCTAssertTrue(wait(30) { composerTop(app) < before - 30 }, "the composer didn't grow")
+        Thread.sleep(forTimeInterval: 1)
+        let grew = Int(before - composerTop(app))
+        XCTAssertTrue(
+            wait(30) { insets(transcript).map { $0.keyboard - coverBefore >= min(grew - 40, 20) } == true },
+            "the composer's top rose \(grew) pt but the cover went from \(coverBefore) to \(transcript.value ?? "")")
     }
 }

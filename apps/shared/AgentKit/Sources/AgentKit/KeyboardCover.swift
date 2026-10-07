@@ -10,8 +10,9 @@ import Foundation
 ///
 /// - A keyboard frame says where the keyboard's top is, accessory included,
 ///   so its overlap with the screen is the cover. A frame whose overlap is
-///   nearly the whole screen is iOS 26's synthetic one, with an origin of
-///   zero, and reads as no keyboard.
+///   the whole screen is iOS 26's synthetic one, with an origin of zero, and
+///   reads as no keyboard. Anything less is real: 260 pt of keys under a
+///   300 pt composer is 84% of a 667 pt phone.
 /// - The docked composer says where its own top is when UIKit resizes it
 ///   with no frame to say so (a banner above the field, a queued message).
 /// - While the keyboard is hiding the composer is mid-animation, so the top
@@ -27,14 +28,13 @@ public struct KeyboardCover: Equatable, Sendable {
 
     public init() {}
 
-    /// Beyond this share of the screen a keyboard frame is not a keyboard.
-    static let impossibleShare: CGFloat = 0.8
-
     /// The keyboard is going away. What it leaves, the docked composer,
-    /// isn't known until the next frame.
+    /// isn't known until the hide's frame, so the last cover stands until
+    /// then rather than reading as nothing: `willChangeFrame` can arrive
+    /// before this, with that frame already applied, and a zero here would
+    /// hold the transcript under a bar that is still docked.
     public mutating func willHide() {
         hiding = true
-        height = 0
     }
 
     /// The hide's frame never came, so what the composer last said stands.
@@ -46,7 +46,7 @@ public struct KeyboardCover: Equatable, Sendable {
     /// A keyboard frame, as `overlap` points of a screen `screenHeight` tall.
     public mutating func frame(overlap: CGFloat, screenHeight: CGFloat) {
         hiding = false
-        height = overlap >= screenHeight * Self.impossibleShare ? 0 : overlap
+        height = overlap >= screenHeight ? 0 : overlap
     }
 
     /// The composer's top is `cover` points up a window `screenHeight` tall.

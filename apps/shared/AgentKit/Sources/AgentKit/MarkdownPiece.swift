@@ -48,6 +48,11 @@ struct MarkdownPiece: View, Equatable {
     /// Still being written: the last paragraph of a reply that's streaming.
     /// Drawn without text selection, and its text isn't memoized.
     ///
+    /// A selection in an earlier paragraph is dropped when the reply settles
+    /// and the pieces merge into one `Text` (ov-386, ruled out): SwiftUI
+    /// can't read or restore a `Text` selection, and staying split would end
+    /// selection across paragraphs in every settled reply.
+    ///
     /// Selection on a `Text` keeps a TextKit layout of it beside the drawn
     /// one, built again whenever the text changes, which a paragraph being
     /// written does five times a second. What's selectable while a reply
