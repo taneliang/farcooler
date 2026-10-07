@@ -25,6 +25,9 @@ struct NativeAgentRunnerTests {
             .first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
+    /// The CLI these tests run, for the one that streams a live terminal.
+    nonisolated static var cliPath: String? { cli }
+
     nonisolated static var runnable: Bool {
         cli != nil
             && ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"]
