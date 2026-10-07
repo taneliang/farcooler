@@ -338,7 +338,7 @@ class NativePaneModelTest {
         terminal = "t1",
         store = AgentRowStore(running.scope, retryDelayMs = 1, followWaitMs = 1),
         source = source,
-        sink = ConversationSink { _, _ -> false },
+        sink = ConversationSink { _, _, _ -> false },
         memory = memory,
         scope = running.scope,
         answers = AnswerSink { terminal, ask, option, given ->

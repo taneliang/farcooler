@@ -68,7 +68,7 @@ class NativeAnswersViewTest {
             terminal = "t1",
             store = AgentRowStore(running.scope, retryDelayMs = 1, followWaitMs = 1),
             source = source,
-            sink = { _, _ -> false },
+            sink = { _, _, _ -> false },
             memory = InMemoryPaneViews(),
             scope = running.scope,
             answers = if (answers) AnswerSink { _, ask, option, given -> synchronized(answered) { answered.add("$ask $option $given") } } else null,
@@ -176,7 +176,7 @@ class NativeAnswersViewTest {
             terminal = "t2",
             store = AgentRowStore(running.scope, retryDelayMs = 1, followWaitMs = 1),
             source = source,
-            sink = { _, _ -> false },
+            sink = { _, _, _ -> false },
             memory = InMemoryPaneViews(),
             scope = running.scope,
         )
