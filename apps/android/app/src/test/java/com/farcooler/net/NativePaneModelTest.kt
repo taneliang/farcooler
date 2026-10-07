@@ -3,7 +3,6 @@ package com.farcooler.net
 import com.farcooler.core.CoreException
 import com.farcooler.core.DisconnectedException
 import com.farcooler.model.AgentConversation
-import com.farcooler.model.AgentRow
 import com.farcooler.model.RunnerRefusal
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
@@ -128,7 +127,8 @@ class NativePaneModelTest {
         // Rows were held, so the pane keeps its view with a stale banner over them.
         assertTrue(model.showing)
         assertTrue(model.store.shown.value.isStale)
-        assertFalse(model.canSend.also { model.onDraft("hello") })
+        model.onDraft("hello")
+        assertFalse(model.canSend)
 
         // The setting went off and the link reconnected: the view stops being offered...
         model.release()
@@ -264,6 +264,69 @@ class NativePaneModelTest {
         eventually("the outcome") { model.issue != null && !model.sending }
         assertEquals(AgentConversation.SendIssue.Said(AgentConversation.MAY_HAVE_BEEN_SENT), model.issue)
         assertTrue(model.draft == "hello")
-        assertTrue(AgentRow::class.java.simpleName.isNotEmpty())
+    }
+
+    @Test
+    fun `sync follows live while offered, and lets go when not offered`() {
+        val model = model()
+        source.answerPage()
+        model.sync(offered = true, live = true)
+        eventually("following") { source.followCalls.get() >= 1 }
+        // In front but not in the foreground.
+        model.sync(offered = true, live = false)
+        assertFalse(model.store.isFollowing)
+        assertEquals(1, model.stops)
+        model.sync(offered = true, live = true)
+        assertTrue(model.store.isFollowing)
+        // The setting went off: nothing is read for a pane that isn't offered.
+        model.sync(offered = false, live = true)
+        assertFalse(model.store.isFollowing)
+        assertEquals(2, model.stops)
+    }
+
+    @Test
+    fun `sync on a pane whose follow ended unavailable lets go and follows again once offered`() {
+        val model = model()
+        followUntilUnavailable(model)
+        model.sync(offered = false, live = true)
+        source.answerNothing()
+        model.sync(offered = true, live = true)
+        eventually("following again") { model.store.shown.value.phase == AgentRowStore.Phase.Live }
+    }
+
+    @Test
+    fun `a pane removed means off screen, and that is a stop`() {
+        val model = model()
+        source.answerPage()
+        model.sync(offered = true, live = true)
+        eventually("following") { source.followCalls.get() >= 1 }
+        model.removed()
+        assertFalse(model.store.isFollowing)
+        assertEquals(1, model.stops)
+        // Removing a pane that wasn't following stops nothing twice.
+        model.removed()
+        assertEquals(1, model.stops)
+    }
+
+    @Test
+    fun `an unavailable phase left behind doesn't send a pane that isn't followed to its terminal`() {
+        val model = model()
+        source.failPage(AgentRowsUnavailable())
+        model.sync(offered = true, live = true)
+        eventually("unavailable") { model.store.shown.value.phase == AgentRowStore.Phase.Unavailable }
+        model.release()
+        // A fresh composition while not live reads the phase the last follow left.
+        model.phaseChanged()
+        assertFalse(model.unavailable)
+        assertTrue(model.showing)
+    }
+
+    @Test
+    fun `an older page that keeps failing is asked for after a growing wait, never in a loop`() {
+        assertEquals(0L, AgentRowStore.olderBackoffMs(0))
+        assertEquals(500L, AgentRowStore.olderBackoffMs(1))
+        assertEquals(1_000L, AgentRowStore.olderBackoffMs(2))
+        assertEquals(10_000L, AgentRowStore.olderBackoffMs(9))
+        assertEquals(10_000L, AgentRowStore.olderBackoffMs(500))
     }
 }

@@ -199,6 +199,8 @@ fun TerminalPane(
     // serves it. Gated on the build the layout reads (`daemon`, failing that
     // `lastDaemon`), so a reconnect doesn't take the view down for the round
     // trip until `host` answers.
+    // Raised to put the terminal's keyboard away; read by its anchor below.
+    var dismissRequest by remember { mutableIntStateOf(0) }
     val daemon by connection.daemon.collectAsStateWithLifecycle()
     val lastDaemon by connection.lastDaemon.collectAsStateWithLifecycle()
     val native = rememberNativePane(
@@ -209,6 +211,7 @@ fun TerminalPane(
         live = live,
         panes = connection.nativePanes,
         memory = model.settings,
+        onCovered = { dismissRequest += 1 },
     )
     // The conversation covers the terminal now.
     val covered = native.covered
@@ -268,7 +271,6 @@ fun TerminalPane(
 
     var showMenu by remember { mutableStateOf(false) }
     var focusRequest by remember { mutableIntStateOf(0) }
-    var dismissRequest by remember { mutableIntStateOf(0) }
     var ctrlArmed by remember { mutableStateOf(false) }
     var altArmed by remember { mutableStateOf(false) }
 
@@ -326,7 +328,7 @@ fun TerminalPane(
             // registry-backed check, so a pane whose agent has no adapter never
             // gets the button in the first place.
             if (native.switchable) {
-                NativeSwitchButton(showing = covered, onClick = { native.toggle { dismissRequest += 1 } })
+                NativeSwitchButton(showing = covered, onClick = { native.toggle() })
             }
             if (terminal?.canSwitchPaneMode == true) {
                 IconButton(onClick = {
@@ -410,7 +412,6 @@ fun TerminalPane(
                 NativeLayer(
                     pane = native,
                     floatingSwitch = !showTopBar,
-                    toConversation = { dismissRequest += 1 },
                 ) {
                     TerminalSurface(
                         session = session,
@@ -443,6 +444,7 @@ fun TerminalPane(
                     TerminalKeyboardAnchor(
                         focusRequest = focusRequest,
                         dismissRequest = dismissRequest,
+                        covered = covered,
                         onText = { text -> session.send(text, consumeModifiers()) },
                         onKey = { key, modifiers ->
                             session.sendKey(key, modifiers or consumeModifiers())

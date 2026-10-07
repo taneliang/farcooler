@@ -19,9 +19,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
@@ -51,6 +51,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.model.AgentConversation
 import com.farcooler.net.AgentRowStore
 import com.farcooler.net.NativePaneModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -62,7 +63,8 @@ import kotlinx.coroutines.launch
 fun NativeSwitchButton(showing: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     IconButton(onClick = onClick, modifier = modifier.testTag("native-switch")) {
         Icon(
-            if (showing) Icons.Outlined.Terminal else Icons.AutoMirrored.Filled.Chat,
+            // Not the chat bubble: the pane-mode button beside it wears that.
+            if (showing) Icons.Outlined.Terminal else Icons.Outlined.Forum,
             contentDescription = if (showing) "Show terminal" else "Show conversation",
         )
     }
@@ -135,7 +137,14 @@ fun NativeAgentView(
                         Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {
                             CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                         }
-                        LaunchedEffect(Unit) { model.loadOlder() }
+                        // Asked when the spinner shows, and again each time an ask
+                        // ends with it still showing (a failed page), after a backoff.
+                        LaunchedEffect(shown.loadingOlder, shown.olderFailures) {
+                            if (!shown.loadingOlder) {
+                                delay(AgentRowStore.olderBackoffMs(shown.olderFailures))
+                                model.loadOlder()
+                            }
+                        }
                     }
                 }
             }

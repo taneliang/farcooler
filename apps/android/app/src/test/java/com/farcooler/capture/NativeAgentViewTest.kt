@@ -132,11 +132,12 @@ class NativeAgentViewTest {
             live = pane.live,
             panes = panes,
             memory = memory,
+            onCovered = { pane.keyboardDismissed += 1 },
         )
         Column(Modifier.fillMaxSize()) {
-            if (native.switchable) NativeSwitchButton(showing = native.covered, onClick = { native.toggle { pane.keyboardDismissed += 1 } })
+            if (native.switchable) NativeSwitchButton(showing = native.covered, onClick = { native.toggle() })
             Box(Modifier.weight(1f)) {
-                NativeLayer(native, floatingSwitch = false, toConversation = { pane.keyboardDismissed += 1 }) {
+                NativeLayer(native, floatingSwitch = false) {
                     // The stand-in for the terminal: counted, so a remount shows.
                     DisposableEffect(Unit) {
                         pane.terminalMounts += 1
@@ -260,6 +261,28 @@ class NativeAgentViewTest {
         assertEquals("half a sentence", scenario.look().merged["native-composer"])
         assertEquals("the terminal was never rebuilt", 1, pane.terminalMounts)
         assertEquals(0, pane.terminalDisposals)
+    }
+
+    @Test
+    fun `the terminal gives up the keyboard whenever the conversation covers it, switch or not`() = session { scenario, pane, model ->
+        source.answerPage(plain())
+        pane.serve()
+        scenario.settle("covered") { it.composed("native-composer") }
+        val first = pane.keyboardDismissed
+        assertTrue("covering raised the dismiss", first >= 1)
+        model.switchTo(false)
+        scenario.settle("the terminal") { it.reachable("terminal-surface") }
+        model.switchTo(true)
+        scenario.settle("covered again") { it.composed("native-composer") }
+        assertTrue(pane.keyboardDismissed > first)
+        // Covered by claude starting in the pane, not by the switch: the pane wasn't offered.
+        pane.daemon = notServing
+        pane.last = notServing
+        scenario.settle("the terminal") { it.reachable("terminal-surface") }
+        val before = pane.keyboardDismissed
+        pane.serve()
+        scenario.settle("covered by the pane coming back") { it.composed("native-composer") }
+        assertTrue(pane.keyboardDismissed > before)
     }
 
     @Test

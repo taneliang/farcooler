@@ -52,6 +52,15 @@ class TerminalInputView(context: Context) : View(context) {
 
     override fun onCheckIsTextEditor(): Boolean = true
 
+    /** Under the conversation: hidden from accessibility, and not focusable, so not typed into. */
+    fun setCovered(covered: Boolean) {
+        importantForAccessibility =
+            if (covered) IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS else IMPORTANT_FOR_ACCESSIBILITY_AUTO
+        if (covered) clearFocus()
+        isFocusable = !covered
+        isFocusableInTouchMode = !covered
+    }
+
     fun showKeyboard() {
         requestFocus()
         val imm = context.getSystemService(InputMethodManager::class.java)

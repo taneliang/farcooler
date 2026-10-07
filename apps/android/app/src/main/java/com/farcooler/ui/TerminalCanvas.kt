@@ -286,6 +286,12 @@ fun TerminalKeyboardAnchor(
     onText: (String) -> Unit,
     onKey: (Int, Int) -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * The conversation covers the terminal (ov-374): this view is out of TalkBack's
+     * reach and can't take focus, so no key, from a hardware keyboard too, goes to a
+     * terminal nobody can see.
+     */
+    covered: Boolean = false,
 ) {
     var view by remember { mutableStateOf<TerminalInputView?>(null) }
 
@@ -300,6 +306,7 @@ fun TerminalKeyboardAnchor(
         update = {
             it.onText = onText
             it.onKey = onKey
+            it.setCovered(covered)
         },
         modifier = modifier.size(1.dp),
     )

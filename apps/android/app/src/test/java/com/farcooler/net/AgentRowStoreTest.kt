@@ -135,4 +135,23 @@ class AgentRowStoreTest {
         store.loadOlder(source)
         assertEquals(1, source.olderCalls.get())
     }
+
+    @Test
+    fun `a failed older page is counted so the view can ask again, and a good one clears the count`() {
+        val store = store()
+        source.answerPage(pageOf(4, true, 5, 6))
+        store.start(source)
+        eventually("the page") { store.shown.value.moreBefore }
+        source.failPage(CoreException("The runner took too long to answer."))
+        store.loadOlder(source)
+        eventually("one failure") { store.shown.value.olderFailures == 1 && !store.shown.value.loadingOlder }
+        // Still more to load: the view's spinner stays, and asks again.
+        assertTrue(store.shown.value.moreBefore)
+        source.failPage(CoreException("again"))
+        store.loadOlder(source)
+        eventually("two failures") { store.shown.value.olderFailures == 2 && !store.shown.value.loadingOlder }
+        source.answerPage(pageOf(4, false, 3, 4, 5))
+        store.loadOlder(source)
+        eventually("cleared") { store.shown.value.olderFailures == 0 && store.shown.value.rows.size == 4 }
+    }
 }

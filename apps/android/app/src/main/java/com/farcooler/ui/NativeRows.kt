@@ -40,6 +40,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -186,7 +189,14 @@ private fun ThinkingRow(thinking: AgentRow.Thinking) {
 @Composable
 private fun StatusMark(status: AgentRow.Status) {
     val quiet = MaterialTheme.colorScheme.onSurfaceVariant
-    Box(Modifier.size(16.dp), contentAlignment = Alignment.Center) {
+    // Said to TalkBack: a failed tool is otherwise just its name and summary.
+    val said = when (status) {
+        AgentRow.Status.Running -> "Running"
+        AgentRow.Status.Done -> "Done"
+        AgentRow.Status.Failed -> "Failed"
+        is AgentRow.Status.Ended -> "Stopped"
+    }
+    Box(Modifier.size(16.dp).semantics { stateDescription = said }, contentAlignment = Alignment.Center) {
         when (status) {
             AgentRow.Status.Running -> CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp)
             AgentRow.Status.Done -> Icon(Icons.Filled.Check, null, Modifier.size(14.dp), tint = quiet)
@@ -204,7 +214,8 @@ private fun NativeToolRow(tool: AgentRow.Tool) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .then(if (hasDiff) Modifier.clickable { open = !open } else Modifier)
+                // Role.Button: TalkBack announces that it opens something.
+                .then(if (hasDiff) Modifier.clickable(role = Role.Button) { open = !open } else Modifier)
                 .padding(vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),

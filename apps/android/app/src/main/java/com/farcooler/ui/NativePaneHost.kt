@@ -15,6 +15,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.isTraversalGroup
+import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.net.NativePaneModel
 import com.farcooler.net.NativePanes
@@ -36,12 +38,9 @@ class NativePane(
     /** Whether the switch is drawn: offered, and the runner hasn't said it doesn't serve this pane. */
     val switchable: Boolean get() = model != null && !model.unavailable
 
-    /** The switch's tap. The terminal gives up the keyboard to the conversation. */
-    fun toggle(toConversation: () -> Unit) {
-        val model = model ?: return
-        val toTerminal = covered
-        model.switchTo(!toTerminal)
-        if (!toTerminal) toConversation()
+    /** The switch's tap. */
+    fun toggle() {
+        model?.switchTo(!covered)
     }
 }
 
@@ -67,6 +66,12 @@ fun rememberNativePane(
     live: Boolean,
     panes: NativePanes,
     memory: PaneViewMemory,
+    /**
+     * The conversation just covered the terminal, by the switch or by claude
+     * starting in the pane: the terminal gives up the keyboard, so keys typed
+     * there don't go to a terminal nobody can see.
+     */
+    onCovered: () -> Unit,
 ): NativePane {
     // Held by the connection, not by this composable, so the draft and rows
     // outlive the pane being evicted from the deck.
@@ -74,14 +79,18 @@ fun rememberNativePane(
         if (claudeInTerminal) panes.model(terminalId, memory) else null
     }
     LaunchedEffect(candidate, offered, live) {
-        if (offered) candidate?.setOnScreen(live) else candidate?.release()
+        candidate?.sync(offered, live)
     }
     DisposableEffect(candidate) {
-        onDispose { candidate?.setOnScreen(false) }
+        onDispose { candidate?.removed() }
     }
-    val phase = candidate?.store?.shown?.collectAsStateWithLifecycle()?.value?.phase
+    // Only the phase, so a streamed row doesn't redraw the pane.
+    val phase = candidate?.store?.phase?.collectAsStateWithLifecycle()?.value
     LaunchedEffect(phase) { if (offered) candidate?.phaseChanged() }
-    return NativePane(candidate?.takeIf { offered }, rememberLazyListState())
+    val pane = NativePane(candidate?.takeIf { offered }, rememberLazyListState())
+    val covered = pane.covered
+    LaunchedEffect(covered) { if (covered) onCovered() }
+    return pane
 }
 
 /**
@@ -99,7 +108,6 @@ fun NativeLayer(
     pane: NativePane,
     /** On a tab that draws no bar of its own, the switch floats over the pane. */
     floatingSwitch: Boolean,
-    toConversation: () -> Unit,
     modifier: Modifier = Modifier,
     terminal: @Composable () -> Unit,
 ) {
@@ -112,6 +120,8 @@ fun NativeLayer(
                 listState = pane.listState,
                 showTerminal = { model.switchTo(false) },
                 modifier = Modifier
+                    // One group for a screen reader, ahead of the terminal under it.
+                    .semantics { isTraversalGroup = true }
                     .background(MaterialTheme.colorScheme.background)
                     .pointerInput(Unit) { detectTapGestures { } },
             )
@@ -119,7 +129,7 @@ fun NativeLayer(
         if (floatingSwitch && pane.switchable) {
             NativeSwitchButton(
                 showing = pane.covered,
-                onClick = { pane.toggle(toConversation) },
+                onClick = { pane.toggle() },
                 modifier = Modifier.align(Alignment.TopEnd),
             )
         }

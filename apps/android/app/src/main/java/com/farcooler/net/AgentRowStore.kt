@@ -123,6 +123,8 @@ class AgentRowStore(
         /** Whether older rows exist than the oldest held. */
         val moreBefore: Boolean = false,
         val loadingOlder: Boolean = false,
+        /** Older pages that failed in a row, for the view's backoff before it asks again. */
+        val olderFailures: Int = 0,
     ) {
         /**
          * The rows held may be out of date: the last call failed, or the runner
@@ -135,6 +137,16 @@ class AgentRowStore(
     private val _shown = MutableStateFlow(Shown())
     val shown: StateFlow<Shown> = _shown.asStateFlow()
 
+    private val _phase = MutableStateFlow<Phase>(Phase.Loading)
+
+    /** The phase alone, so a reader of it isn't redrawn by every row. */
+    val phase: StateFlow<Phase> = _phase.asStateFlow()
+
+    private fun change(f: (Shown) -> Shown) {
+        _shown.update(f)
+        _phase.value = _shown.value.phase
+    }
+
     val ledger = AgentRowLedger()
     private var feed: Job? = null
 
@@ -145,7 +157,7 @@ class AgentRowStore(
     fun start(source: AgentRowSource) {
         feed?.cancel()
         // What was held is drawn at once, as held rather than as live.
-        _shown.update { shown ->
+        change { shown ->
             shown.copy(phase = if (shown.rows.isEmpty()) Phase.Loading else Phase.Cached, loadingOlder = false)
         }
         feed = scope.launch { run(source) }
@@ -160,8 +172,9 @@ class AgentRowStore(
     fun loadOlder(source: AgentRowSource) {
         val now = _shown.value
         if (!now.moreBefore || now.loadingOlder) return
-        _shown.update { it.copy(loadingOlder = true) }
+        change { it.copy(loadingOlder = true) }
         scope.launch {
+            var failed = false
             try {
                 val oldest = ledger.oldestOrd
                 if (oldest != null) {
@@ -172,21 +185,23 @@ class AgentRowStore(
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
-                // A page that didn't come is asked for again when the top shows.
+                // Counted, not shown: the view asks again after [olderBackoffMs], and
+                // the follow loop is what says the runner isn't answering.
+                failed = true
             } finally {
-                _shown.update { it.copy(loadingOlder = false) }
+                change { it.copy(loadingOlder = false, olderFailures = if (failed) it.olderFailures + 1 else 0) }
             }
         }
     }
 
     private fun publish(phase: Phase? = null) {
-        _shown.update { shown ->
+        change { shown ->
             shown.copy(rows = ledger.held(), phase = phase ?: shown.phase, moreBefore = ledger.moreBefore)
         }
     }
 
     private fun set(phase: Phase) {
-        _shown.update { if (it.phase == phase) it else it.copy(phase = phase) }
+        change { if (it.phase == phase) it else it.copy(phase = phase) }
     }
 
     private suspend fun run(source: AgentRowSource) {
@@ -227,6 +242,14 @@ class AgentRowStore(
     }
 
     companion object {
+        /**
+         * How long the view waits before asking for an older page again after
+         * [failures] failures in a row: none for the first ask, then doubling from
+         * half a second to ten, so a runner that keeps failing isn't asked in a loop.
+         */
+        fun olderBackoffMs(failures: Int): Long =
+            if (failures <= 0) 0 else minOf(500L shl minOf(failures - 1, 5), 10_000L)
+
         /** Rows a page asks for. */
         const val PAGE_SIZE = 100
 

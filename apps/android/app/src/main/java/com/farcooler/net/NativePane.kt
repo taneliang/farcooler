@@ -185,6 +185,21 @@ class NativePaneModel(
     }
 
     /**
+     * The pane's whole rule for the follow, in one place so the JVM tests hold it:
+     * while the conversation is [offered] the follow is due as [live] says; when it
+     * isn't (the setting went off, claude exited) the model lets go.
+     */
+    fun sync(offered: Boolean, live: Boolean) {
+        if (offered) setOnScreen(live) else release()
+    }
+
+    /**
+     * The pane left composition. The model outlives it, and a follow left running
+     * would hold a call on the runner for a pane nobody has.
+     */
+    fun removed() = setOnScreen(false)
+
+    /**
      * The conversation stopped being offered: the runner's setting turned off,
      * its build lost, claude exited. Stop following, and forget that the runner
      * said it had no rows, so the pane starts afresh when it's offered again. A
@@ -203,7 +218,9 @@ class NativePaneModel(
      */
     fun phaseChanged() {
         val shown = store.shown.value
-        if (shown.phase == AgentRowStore.Phase.Unavailable && shown.rows.isEmpty() && !unavailable) {
+        // Only the loop's own word counts: a phase left behind by an earlier
+        // follow says nothing about a pane that isn't being followed now.
+        if (following && shown.phase == AgentRowStore.Phase.Unavailable && shown.rows.isEmpty() && !unavailable) {
             unavailable = true
             followIfDue()
         }
