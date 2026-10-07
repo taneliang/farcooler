@@ -112,10 +112,10 @@ struct AgentScrollTests {
     /// at its next update, which a loaded machine reaches late, after the
     /// scroll and with no geometry event that shows the step. The reader's
     /// scroll isn't what's under test there, the chat's reading of it is.
-    static func scroll(_ scroll: NSScrollView, to y: CGFloat, until done: () -> Bool) async -> Bool {
+    static func scroll(_ scroll: NSScrollView, to y: @autoclosure () -> CGFloat, until done: () -> Bool) async -> Bool {
         await until {
             if done() { return true }
-            scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: y()))
             scroll.reflectScrolledClipView(scroll.contentView)
             return false
         }
@@ -306,9 +306,14 @@ struct AgentScrollTests {
         // loaded machine overruns any delay, and until it lands the chat
         // reads a step up as a height correction, not the reader.
         #expect(await Self.until { !probe.jumping }, "Jump to Latest never landed")
-        let tailOffset = try #require(probe.geometry?.contentOffset.y)
+        _ = try #require(probe.geometry)
         Self.flush(host, window)
-        #expect(await Self.scroll(scroll, to: tailOffset - 70) { probe.showsJump }, "a tail 70 pt under the composer counted as seen")
+        // 70 pt under the composer by the content's height as it is each
+        // time: a lazy stack revises its estimate for a while, and an
+        // offset measured once can end up inside the 40 pt that counts as
+        // the tail.
+        let under70 = { (probe.geometry).map { $0.contentSize.height - $0.containerSize.height - 70 } ?? 0 }
+        #expect(await Self.scroll(scroll, to: under70()) { probe.showsJump }, "a tail 70 pt under the composer counted as seen")
     }
 
     /// A jump in flight with one step back made on the first geometry event
