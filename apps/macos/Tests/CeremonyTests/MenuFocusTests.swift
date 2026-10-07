@@ -246,6 +246,7 @@ struct MenuWiringTests {
         "Next Layout": "\\.stepsLayouts",
         "Previous Layout": "\\.stepsLayouts",
         "Switch Between Terminal and Chat": "\\.switchesMode",
+        "Switch Between Terminal and Conversation": "\\.switchesConversation",
         "Next Hunk": "DiffMenuFocus.allows(\\.nextHunk, diff",
         "Previous Hunk": "DiffMenuFocus.allows(\\.previousHunk, diff",
         "Next File": "DiffMenuFocus.allows(\\.nextFile, diff",
