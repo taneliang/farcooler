@@ -171,10 +171,25 @@ async fn a_retry_that_runs_out_puts_the_pointer_back_and_leaves_the_rest() {
     plain(&wt, &["add", "notes.txt"]);
     store_object(&repo, &big);
 
-    LIMIT.with(|l| l.set(Some(std::time::Duration::from_millis(150))));
-    let after = svc.hydrate_lfs(ws.id).await;
-    LIMIT.with(|l| l.set(None));
-    after.unwrap();
+    // How long the stream takes depends on the machine: a quick one can finish
+    // inside any fixed limit. So start at 150 ms and, if the retry still won the
+    // race, put the pointer back by hand and halve the limit, until it runs out.
+    // A limit near zero always does, so this ends, and every assertion below
+    // still holds for the retry that was cut short.
+    let mut limit = std::time::Duration::from_millis(150);
+    loop {
+        LIMIT.with(|l| l.set(Some(limit)));
+        let after = svc.hydrate_lfs(ws.id).await;
+        LIMIT.with(|l| l.set(None));
+        after.unwrap();
+        if svc.store.lfs_pointer_count(ws.id).unwrap() == 1 {
+            break;
+        }
+        assert!(limit > std::time::Duration::from_micros(100), "never ran out, even at {limit:?}");
+        std::fs::write(wt.join("big.bin"), pointer_text(&big)).unwrap();
+        svc.store.set_lfs_pointers(ws.id, &["big.bin".to_string()]).unwrap();
+        limit /= 2;
+    }
     assert_eq!(svc.store.lfs_pointer_count(ws.id).unwrap(), 1, "still a pointer");
     assert_eq!(std::fs::read_to_string(wt.join("big.bin")).unwrap(), pointer_text(&big), "back to its pointer");
     assert!(!git_dir(&wt).join("index.lock").exists());
