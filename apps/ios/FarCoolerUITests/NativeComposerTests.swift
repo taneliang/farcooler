@@ -111,6 +111,16 @@ final class NativeComposerTests: XCTestCase {
     func testCommandReturnSends() {
         let app = launch()
         type(app, "Sent from the keys")
+        // typeText returns before the box has taken every key, and a loaded
+        // runner can lose the keyboard between the two: press ⌘↩ only once the
+        // box holds the whole draft and the keyboard again, or it sends a
+        // shorter draft, or nothing.
+        let field = element(app, "native-composer")
+        XCTAssertTrue(
+            wait(30) {
+                field.value(forKey: "hasKeyboardFocus") as? Bool == true
+                    && field.value as? String == "Sent from the keys"
+            }, "the box never held the draft and the keyboard: \(field.value as? String ?? "nil")")
         app.typeKey("\n", modifierFlags: .command)
         XCTAssertTrue(
             wait(30) { self.said(app, "sent") == "Sent from the keys" }, "⌘↩ never sent: \(harness(app))")
