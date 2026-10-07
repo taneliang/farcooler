@@ -1,4 +1,4 @@
-// Shipped by Canary at 290aeb3242eb3a0e2e4051d46f2c167822f3b693. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 01c93cac4a48651b9f4e69796001a05378b9e025. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -975,6 +975,14 @@ message HostSettings {
   // you the branch it is about to create — a prefix added daemon-side would
   // make that preview a lie. The daemon still validates the finished name.
   string branch_prefix = 1;
+  // `[agents] projector` in config.toml (ov-372): whether this runner's
+  // setting folds terminal-mode agent sessions into rows and serves
+  // `agent.rows`. The setting only: a runner started with
+  // `FARCOOLER_PROJECTOR=1` serves rows whatever this says, and `agent_rows`
+  // in the hello is the answer to "are rows served". Written by
+  // `settings.set_projector`, which reads only this field;
+  // `settings.set_branch_prefix` ignores it.
+  bool projector = 2;
 }
 
 message Host {
