@@ -916,6 +916,8 @@ mod plan_layer_tests;
 #[cfg(test)]
 mod ruling_wire_tests;
 #[cfg(test)]
+mod capability_tests;
+#[cfg(test)]
 mod train_wire_tests;
 #[cfg(test)]
 mod cost_wire_tests;
@@ -1366,18 +1368,6 @@ mod tests {
         assert!(ALL_CHANNELS.contains(&CHANNEL));
     }
 
-    #[test]
-    fn every_capability_a_method_names_is_one_this_build_advertises() {
-        // A method mapped to a capability absent from `ALL` would be
-        // permanently unreachable: the daemon refuses anything whose capability
-        // it does not advertise, so the typo would present as a feature that
-        // silently does not exist. Every method, not a sample of them.
-        for method in method::Method::ALL {
-            let cap = method.capability();
-            assert!(capability::ALL.contains(&cap), "{method:?} names {cap}, which is not advertised");
-        }
-    }
-
     /// Each method is one wire name and back again, and no two share a name.
     ///
     /// The macro writes the name into `name` and `parse` from one row, so the
@@ -1432,12 +1422,6 @@ mod tests {
         // list, every shipped client would break at once.
         assert!(capability::ALL.contains(&capability::WORKTREES));
         assert!(capability::ALL.contains(&capability::TERMINALS));
-    }
-
-    #[test]
-    fn capability_names_are_unique() {
-        let unique: std::collections::BTreeSet<_> = capability::ALL.iter().collect();
-        assert_eq!(unique.len(), capability::ALL.len(), "a duplicate name hides one of them");
     }
 
     #[test]
