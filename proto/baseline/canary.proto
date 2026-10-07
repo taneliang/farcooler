@@ -1,4 +1,4 @@
-// Shipped by Canary at 992f1bebb459601714c3017b5fd9db5b19259320. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 290aeb3242eb3a0e2e4051d46f2c167822f3b693. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -252,6 +252,9 @@ message Request {
     // are theirs, the rest held by `reserved` below.
     AgentRowsPage agent_rows_page = 360;
     AgentRowsFollow agent_rows_follow = 361;
+    // `terminal.draft_withdraw` (ov-385), behind `draft_hold`. 401-409 are
+    // held by `reserved` below.
+    DraftWithdraw draft_withdraw = 400;
   }
   // The rest of rulings' block, kept for them (review 1005a L1).
   reserved 182 to 189;
@@ -261,6 +264,8 @@ message Request {
   reserved 201 to 209;
   // The rest of agent rows' block (ov-366).
   reserved 362 to 369;
+  // The rest of the draft hold's block (ov-385).
+  reserved 401 to 409;
 }
 
 message Response {
@@ -390,6 +395,9 @@ message Result {
     // `agent.rows` and `agent.rows_follow` (ov-366), behind `agent_rows`.
     AgentRowPage agent_row_page = 370;
     AgentRowChanges agent_row_changes = 371;
+    // `terminal.draft_prompt` asked to hold behind a dialog, and
+    // `terminal.draft_withdraw` (ov-385), behind `draft_hold`: the hold.
+    DraftHold draft_hold = 410;
   }
   // The rest of rulings' block, kept for them (review 1005a L1).
   reserved 181 to 189;
@@ -403,6 +411,8 @@ message Result {
   reserved 311 to 319;
   // The rest of agent rows' block (ov-366).
   reserved 372 to 379;
+  // The rest of the draft hold's block (ov-385).
+  reserved 411 to 419;
 }
 
 // ---------------------------------------------------------------------------
@@ -536,6 +546,12 @@ message AgentPromptBlock {
 message AgentPrompt {
   bytes terminal_id = 1;
   repeated AgentPromptBlock blocks = 2;
+  // `terminal.draft_prompt` only (ov-385): when a dialog is up, hold the draft
+  // and paste it once the dialog closes, answering with the `DraftHold`,
+  // rather than refusing. A client sets it with `draft_hold` in
+  // `required_capabilities`, so an older runner refuses rather than dropping
+  // it.
+  bool hold_behind_dialog = 3;
 }
 
 message AgentAnswer {
@@ -1613,6 +1629,13 @@ message Terminal {
   // opens `http://localhost:<port>` only when this runner is the machine it is
   // running on; nothing here is forwarded.
   repeated uint32 ports = 44;
+
+  // The draft Ask the Orchestrator, Reverse or Discuss left waiting on this
+  // terminal for a dialog to close (ov-385): waiting, or how it ended. Kept
+  // a while after it ends, so a client that sent it can say "Sent". Absent
+  // when there is none, and from a runner without the `draft_hold`
+  // capability. The runner keeps it in memory: a restart drops it.
+  optional DraftHold draft_hold = 45;
 }
 
 // What a terminal is for. At most one live orchestrator per workspace.
@@ -4583,6 +4606,50 @@ message RulingsKept {
 // otherwise the message was submitted as its next prompt.
 message TerminalTold {
   bool queued = 1;
+}
+
+// A draft held behind a dialog (ov-385). `terminal.draft_prompt` with
+// `hold_behind_dialog` met a dialog (a permission, a question or a menu) in a
+// terminal orchestrator, so the runner keeps the draft and pastes it, still
+// never pressing Enter, once the dialog is gone and the box is free, past the
+// same checks a draft is pasted past now. One per terminal: a newer draft
+// replaces a waiting one. Pasted at once, it leaves the older reading
+// WITHDRAWN; held too, it takes the older one's place, and the client that
+// sent the older finds another `id` on the terminal.
+message DraftHold {
+  // Names this hold to `terminal.draft_withdraw`, and lets a client tell its
+  // own hold from a newer one.
+  bytes id = 1;
+  DraftHoldState state = 2;
+  // Unix milliseconds: when it was held, and when a hold still waiting gives
+  // up (`EXPIRED`), half an hour later.
+  int64 held_ms = 3;
+  int64 expires_ms = 4;
+  // When it ended; 0 while it waits.
+  int64 ended_ms = 5;
+}
+
+enum DraftHoldState {
+  DRAFT_HOLD_STATE_UNSPECIFIED = 0;
+  // Behind the dialog still.
+  DRAFT_HOLD_STATE_WAITING = 1;
+  // Pasted into the box, unsent, for the person to finish.
+  DRAFT_HOLD_STATE_SENT = 2;
+  // Withdrawn by the person, or replaced by a newer draft.
+  DRAFT_HOLD_STATE_WITHDRAWN = 3;
+  // Not pasted within half an hour, its terminal went away, or someone typed
+  // in the pane after the dialog closed.
+  DRAFT_HOLD_STATE_EXPIRED = 4;
+  // Past every check, the paste itself failed. It may have reached the box,
+  // so it's never tried again.
+  DRAFT_HOLD_STATE_FAILED = 5;
+}
+
+// `terminal.draft_withdraw` (ov-385): stop waiting to paste `hold_id`. Answers
+// with the hold as it now is: WITHDRAWN, or how it had already ended.
+message DraftWithdraw {
+  bytes terminal_id = 1;
+  bytes hold_id = 2;
 }
 
 // ---------------------------------------------------------------------------
