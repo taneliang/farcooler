@@ -231,7 +231,7 @@ fn reason_in(stderr: &str) -> Option<String> {
     let lines = || stderr.lines().map(str::trim).filter(|l| !l.is_empty());
     let line = lines()
         .find(|l| l.starts_with("Error:") || l.starts_with("error:"))
-        .or_else(|| lines().last())?;
+        .or_else(|| lines().next_back())?;
     const CAP: usize = 300;
     if line.chars().count() > CAP {
         Some(line.chars().take(CAP).chain(['…']).collect())
