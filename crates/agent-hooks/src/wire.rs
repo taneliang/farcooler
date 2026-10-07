@@ -125,10 +125,27 @@ pub fn is_fence(agent: Agent, event: &str) -> bool {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "behavior", rename_all = "snake_case")]
 pub enum Decision {
-    Allow,
+    /// `updated_input` is the tool's input as claude should run it, which is
+    /// how a hook answers a dialog that is more than yes or no (ov-370,
+    /// measured on claude 2.1.290): an `AskUserQuestion` is answered by its
+    /// own input plus `answers`, and an `ExitPlanMode` is approved only by an
+    /// allow that carries one. A plain allow leaves either dialog up for the
+    /// keyboard. A hook that predates the field reads such an allow as a
+    /// plain one, so it, too, leaves the dialog to the keyboard.
+    Allow {
+        #[serde(rename = "updatedInput", default, skip_serializing_if = "Option::is_none")]
+        updated_input: Option<serde_json::Value>,
+    },
     /// The message reaches the pane verbatim — measured, not assumed — so it
     /// names who decided rather than saying "hook".
     Deny { message: String },
+}
+
+impl Decision {
+    /// An allow that changes nothing: the tool runs as claude asked.
+    pub fn allow() -> Self {
+        Decision::Allow { updated_input: None }
+    }
 }
 
 pub fn encode_line<T: Serialize>(value: &T) -> Result<String, serde_json::Error> {
@@ -207,6 +224,40 @@ mod tests {
             let read = decode_line::<HookVerdict>(encoded.trim()).expect("a hook reads it");
             assert_eq!((read.decision, read.hold_ms), (decision, hold_ms), "{reply:?} as read");
         }
+    }
+
+    /// A plain allow is the frame it always was, and an allow with an input
+    /// carries it under claude's own key.
+    #[test]
+    fn an_allow_carries_its_input_only_when_it_has_one() {
+        let plain = encode_line(&Reply::verdict(Some(Decision::allow()))).expect("encodes");
+        assert_eq!(plain, "{\"decision\":{\"behavior\":\"allow\"}}\n");
+        let input = serde_json::json!({ "questions": [], "answers": { "Which?": "Blue" } });
+        let with = Reply::verdict(Some(Decision::Allow { updated_input: Some(input.clone()) }));
+        let encoded = encode_line(&with).expect("encodes");
+        let read = decode_line::<HookVerdict>(encoded.trim()).expect("a hook reads it");
+        assert_eq!(read.decision, Some(Decision::Allow { updated_input: Some(input) }));
+    }
+
+    /// A hook from before `updatedInput` reads an allow that carries one as a
+    /// plain allow, which leaves a question or a plan to the keyboard
+    /// (measured), never as an error that would lose a permission's allow.
+    #[test]
+    fn an_older_hook_reads_an_allow_with_input_as_a_plain_allow() {
+        #[derive(Deserialize, Debug, PartialEq)]
+        #[serde(tag = "behavior", rename_all = "snake_case")]
+        enum Before {
+            Allow,
+            Deny { message: String },
+        }
+        #[derive(Deserialize)]
+        struct Verdict {
+            decision: Option<Before>,
+        }
+        let with = Reply::verdict(Some(Decision::Allow { updated_input: Some(serde_json::json!({ "plan": "x" })) }));
+        let encoded = encode_line(&with).expect("encodes");
+        let read: Verdict = decode_line(encoded.trim()).expect("an old hook reads it");
+        assert_eq!(read.decision, Some(Before::Allow));
     }
 
     #[test]

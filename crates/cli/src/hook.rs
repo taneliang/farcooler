@@ -292,7 +292,13 @@ async fn read_verdict(reader: &mut BufReader<UnixStream>) -> Option<HookVerdict>
 /// is ignored by it, which is the same as deferring.
 fn claude_shaped_output(decision: &Decision) -> Option<String> {
     let inner = match decision {
-        Decision::Allow => serde_json::json!({ "behavior": "allow" }),
+        Decision::Allow { updated_input: None } => serde_json::json!({ "behavior": "allow" }),
+        // How a question is answered and a plan approved (ov-370): claude
+        // takes the tool's input as given, and a plain allow leaves either
+        // dialog up.
+        Decision::Allow { updated_input: Some(input) } => {
+            serde_json::json!({ "behavior": "allow", "updatedInput": input })
+        }
         Decision::Deny { message } => {
             serde_json::json!({ "behavior": "deny", "message": message })
         }
@@ -411,7 +417,7 @@ mod tests {
             let mut reader = tokio::io::BufReader::new(&mut stream);
             let mut line = String::new();
             tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line).await.expect("read");
-            let verdict = Reply::verdict(Some(Decision::Allow));
+            let verdict = Reply::verdict(Some(Decision::allow()));
             tokio::io::AsyncWriteExt::write_all(
                 &mut stream,
                 encode_line(&verdict).expect("encode").as_bytes(),
@@ -448,6 +454,21 @@ mod tests {
             serde_json::Value::Null,
             "an allow carries no words to put in the pane"
         );
+        assert!(
+            parsed["hookSpecificOutput"]["decision"].get("updatedInput").is_none(),
+            "a plain allow runs the tool as claude asked: {out}"
+        );
+    }
+
+    /// An answer to a question, or a plan's approval: claude reads the
+    /// answers from `updatedInput`, under that name (claude 2.1.290, ov-370).
+    #[test]
+    fn an_allow_with_an_input_prints_it_as_updated_input() {
+        let input = serde_json::json!({ "questions": [{ "question": "Which?" }], "answers": { "Which?": "Blue" } });
+        let out = claude_shaped_output(&Decision::Allow { updated_input: Some(input.clone()) }).expect("printed");
+        let parsed: serde_json::Value = serde_json::from_str(&out).expect("json");
+        assert_eq!(parsed["hookSpecificOutput"]["decision"]["behavior"], "allow");
+        assert_eq!(parsed["hookSpecificOutput"]["decision"]["updatedInput"], input, "{out}");
     }
 
     /// A daemon that hangs must not hang an agent.
