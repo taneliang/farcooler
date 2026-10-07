@@ -14,6 +14,9 @@ use crate::session::Session;
 /// The session `config` names, or the connect line's failure.
 pub(super) async fn open(config: &str) -> Result<Session, Value> {
     if let Some(socket) = socket_of(config) {
+        if both(config) || !socket.starts_with('/') {
+            return Err(json!({ "error": "a socket is an absolute path, named without a host or a token", "trouble": BAD_CONFIG }));
+        }
         return Session::connect_local(std::path::Path::new(&socket)).await.map_err(|e| connect_failure(&e));
     }
     match parse_destination(config) {
@@ -31,6 +34,13 @@ fn socket_of(config: &str) -> Option<String> {
     value.get("socket").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string)
 }
 
+/// A config naming a socket and an ssh destination too: two paths to one
+/// runner, with nothing choosing between them (the header's "never both").
+fn both(config: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<Value>(config) else { return false };
+    ["host", "token"].iter().any(|key| value.get(*key).is_some_and(|v| !v.is_null()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -40,6 +50,18 @@ mod tests {
         assert_eq!(socket_of(r#"{"socket":"/tmp/fc/farcoolerd.sock"}"#).as_deref(), Some("/tmp/fc/farcoolerd.sock"));
         assert_eq!(socket_of(r#"{"socket":""}"#), None);
         assert_eq!(socket_of(r#"{"host":"box","user":"me"}"#), None);
+    }
+
+    #[tokio::test]
+    async fn a_socket_beside_a_host_or_a_token_or_relative_is_refused() {
+        for config in [
+            r#"{"socket":"/tmp/fc/farcoolerd.sock","host":"box"}"#,
+            r#"{"socket":"/tmp/fc/farcoolerd.sock","token":"tc-x"}"#,
+            r#"{"socket":"farcoolerd.sock"}"#,
+        ] {
+            let failure = open(config).await.err().expect(config);
+            assert_eq!(failure["trouble"], BAD_CONFIG, "{config}");
+        }
     }
 
     #[tokio::test]

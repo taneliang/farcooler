@@ -140,6 +140,8 @@ pub fn stdio_command(dir: &std::path::Path, extra: &[&str]) -> Command {
         .arg("--stdio")
         .args(extra)
         .env("FARCOOLER_HOME", dir)
+        // Its own config.toml, as `listening_daemon_with_env` says.
+        .env("FARCOOLER_CONFIG", dir.join("config.toml"))
         // Never the real agent: the daemon stubs every launch and refuses
         // one it cannot vouch for (`agent_program`).
         .env("FARCOOLER_TEST_STUB_AGENTS", "1")
@@ -162,6 +164,10 @@ pub async fn listening_daemon(dir: &std::path::Path) -> DaemonChild {
 /// for the reason `spawn_with_env` gives.
 pub async fn listening_daemon_with_env(dir: &std::path::Path, env: &[(&str, &str)]) -> DaemonChild {
     let mut command = Command::new(env!("CARGO_BIN_EXE_farcoolerd"));
+    // This test's own config.toml unless it names one: never this Mac's,
+    // whose `[agents] projector` (ov-372) or adapters a test mustn't read
+    // or write.
+    command.env("FARCOOLER_CONFIG", dir.join("config.toml"));
     for (key, value) in env {
         command.env(key, value);
     }
