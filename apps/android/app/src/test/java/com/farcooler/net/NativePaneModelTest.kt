@@ -329,4 +329,54 @@ class NativePaneModelTest {
         assertEquals(10_000L, AgentRowStore.olderBackoffMs(9))
         assertEquals(10_000L, AgentRowStore.olderBackoffMs(500))
     }
+
+    /** A held ask's answers, as the runner was asked them (ov-370). */
+    private val answered = mutableListOf<String>()
+    private var refuse: Throwable? = null
+
+    private fun answering() = NativePaneModel(
+        terminal = "t1",
+        store = AgentRowStore(running.scope, retryDelayMs = 1, followWaitMs = 1),
+        source = source,
+        sink = ConversationSink { _, _ -> false },
+        memory = memory,
+        scope = running.scope,
+        answers = AnswerSink { terminal, ask, option, given ->
+            synchronized(answered) { answered.add("$terminal $ask $option $given") }
+            refuse?.let { throw it }
+        },
+    )
+
+    private val held = com.farcooler.model.AgentRow.Ask("Permission", "Bash touch x", "Bash", 1, false, held = "hook-ask-1")
+
+    @Test
+    fun anAnswerGoesToTheRunnerForThisPaneAndTheHeldId() {
+        val model = answering()
+        model.answer(held, AgentConversation.ALLOW)
+        eventually("the answer landed") { model.answering == null && synchronized(answered) { answered.size == 1 } }
+        assertEquals(listOf("t1 hook-ask-1 allow {}"), answered)
+        val question = held.copy(kind = "Question")
+        model.answer(question, AgentConversation.ANSWER, mapOf("Which color?" to "Blue"))
+        eventually("the question's answer landed") { model.answering == null && synchronized(answered) { answered.size == 2 } }
+        assertEquals("t1 hook-ask-1 answer {Which color?=Blue}", answered[1])
+        assertTrue(model.answerIssues.isEmpty())
+    }
+
+    @Test
+    fun anAskNothingHoldsIsNotAnswered() {
+        val model = answering()
+        model.answer(held.copy(held = null), AgentConversation.ALLOW)
+        model.answer(held.copy(answered = true), AgentConversation.ALLOW)
+        Thread.sleep(50)
+        assertTrue(answered.isEmpty())
+    }
+
+    @Test
+    fun aRefusedAnswerIsSaidByTheAsk() {
+        refuse = CoreException("Someone already answered this.", word = "resource-conflict", what = "not_held")
+        val model = answering()
+        model.answer(held, AgentConversation.DENY)
+        eventually("the refusal is said") { model.answerIssues["hook-ask-1"] != null }
+        assertEquals(AgentConversation.answerIssue("not_held"), model.answerIssues["hook-ask-1"])
+    }
 }

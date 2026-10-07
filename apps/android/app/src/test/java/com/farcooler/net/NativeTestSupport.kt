@@ -89,6 +89,31 @@ object RowJson {
         ).let { base -> if (outcome == null) base else JsonObject(base + ("outcome" to text(outcome))) },
     )
 
+    /** A held ask (ov-370): `question`, `plan` or `permission`, held under `hook-ask-1` unless [held] is null. */
+    fun heldAsk(ord: Long, which: String, held: String? = "hook-ask-1", answeredBy: String? = null): JsonObject {
+        val base = when (which) {
+            "question" -> obj(
+                "kind" to text("Question"), "text" to text("Which color should the button be?"), "tool" to text("AskUserQuestion"),
+                "questions" to kotlinx.serialization.json.JsonArray(listOf(obj(
+                    "question" to text("Which color should the button be?"), "header" to text("Color"), "multi_select" to JsonPrimitive(false),
+                    "options" to kotlinx.serialization.json.JsonArray(listOf(
+                        obj("label" to text("Red"), "description" to text("Warm and loud")),
+                        obj("label" to text("Blue"), "description" to text("Calm and quiet")),
+                    )),
+                ))),
+            )
+            "plan" -> obj(
+                "kind" to text("PlanExit"), "text" to text("# Plan 1. Make the button blue."), "tool" to text("ExitPlanMode"),
+                "plan" to text("# Plan\n\n1. Make the button blue.\n2. Ship it."),
+            )
+            else -> obj("kind" to text("Permission"), "text" to text("Bash touch spike-made-this.txt"), "tool" to text("Bash"))
+        }
+        var payload = JsonObject(base + ("answered" to JsonPrimitive(false)))
+        if (held != null) payload = JsonObject(payload + ("held" to text(held)))
+        if (answeredBy != null) payload = JsonObject(payload + ("answered_by" to text(answeredBy)))
+        return row("ask:$ord", ord, "Ask", payload)
+    }
+
     fun prose(ord: Long, body: String) = row("prose:$ord", ord, "Prose", obj("text" to text(body), "conclusion" to JsonPrimitive(true)))
 
     fun page(epoch: Long, rev: Long, vararg rows: JsonObject, more: Boolean = false) = obj(

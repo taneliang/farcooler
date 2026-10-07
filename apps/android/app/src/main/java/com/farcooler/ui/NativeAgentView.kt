@@ -131,7 +131,8 @@ fun NativeAgentView(
                 if (model.issue == AgentConversation.SendIssue.Handoff) {
                     item(key = "handoff-issue") { HandoffRow(AgentConversation.HANDOFF, showTerminal) }
                 }
-                items(shown.rows.asReversed(), key = { it.id }) { row -> NativeRowView(row, showTerminal) }
+                val answer = nativeAnswer(model)
+                items(shown.rows.asReversed(), key = { it.id }) { row -> NativeRowView(row, showTerminal, answer) }
                 if (shown.moreBefore) {
                     item(key = "older") {
                         Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {

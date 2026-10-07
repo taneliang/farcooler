@@ -215,12 +215,62 @@ object AgentConversation {
     }
 
     fun askTitle(ask: AgentRow.Ask): String {
+        val by = ask.answeredBy
+        if (by != null && (ask.answered || ask.held == null)) return "Answered on $by"
         if (ask.answered) return "Answered"
         return when (ask.kind) {
             "Permission" -> "Claude is asking for permission"
             "PlanExit" -> "Claude has a plan for you to review"
             else -> "Claude is asking a question"
         }
+    }
+
+    // Answering a held ask (ov-370, R-33)
+
+    /** Whether this view can answer the ask: the runner's hook holds it and nothing has answered it yet. */
+    fun answerable(ask: AgentRow.Ask): Boolean = !ask.answered && ask.held != null
+
+    /**
+     * What `terminal.agent_answer` takes for each button: a question is answered
+     * with [ANSWER] and its answers; a plan with [ALLOW] (approve) or [DENY] (keep
+     * planning); a permission with [ALLOW] or [DENY].
+     */
+    const val ALLOW = "allow"
+    const val DENY = "deny"
+    const val ANSWER = "answer"
+
+    /**
+     * A question's answers as claude reads them, each question's words to its
+     * answer: the options picked, in the order offered, then any words typed in
+     * Other, joined by ", ". Null until every question has one.
+     */
+    fun answers(questions: List<AgentRow.Ask.Question>, picked: Map<Int, Set<String>>, typed: Map<Int, String>): Map<String, String>? {
+        if (questions.isEmpty()) return null
+        val answers = LinkedHashMap<String, String>()
+        questions.forEachIndexed { i, question ->
+            val chosen = question.options.map { it.label }.filter { picked[i]?.contains(it) == true }
+            val other = typed[i].orEmpty().trim()
+            val parts = if (other.isEmpty()) chosen else chosen + other
+            if (parts.isEmpty()) return null
+            answers[question.question] = parts.joinToString(", ")
+        }
+        return answers
+    }
+
+    /** One pick: a single-choice question's replaces what was picked, a multi-select's toggles. */
+    fun pick(label: String, question: AgentRow.Ask.Question, picked: Set<String>): Set<String> = when {
+        !question.multiSelect -> setOf(label)
+        label in picked -> picked - label
+        else -> picked + label
+    }
+
+    /** Why an answer didn't land, by the runner's word for it. */
+    fun answerIssue(what: String?, timedOut: Boolean = false): String = when {
+        timedOut -> "The runner didn’t answer in time. Check the terminal before answering again."
+        what == "not_held" -> "This isn’t waiting here anymore. It was answered, or only the terminal can answer it now."
+        what == "not_delivered" -> "The answer didn’t reach Claude. Try again."
+        what == "answers" -> "Answer every question first."
+        else -> "The answer wasn’t sent. Use the terminal."
     }
 
     fun queuedLabel(state: String): String = when (state) {

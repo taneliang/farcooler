@@ -54,7 +54,18 @@ class AgentRowWireTest {
         assertEquals(9_000L, sub.lastMs)
 
         assertEquals(
-            AgentRow.Kind.OfAsk(AgentRow.Ask("Permission", "Bash: rm -rf target", "Bash", 7_000L, false)),
+            // A question the runner's hook holds (ov-370): its id and its options.
+            AgentRow.Kind.OfAsk(
+                AgentRow.Ask(
+                    "Question", "Which color?", "AskUserQuestion", 7_000L, false, held = "hook-ask-1",
+                    questions = listOf(
+                        AgentRow.Ask.Question(
+                            "Which color?", "Color",
+                            listOf(AgentRow.Ask.Option("Red", "Warm"), AgentRow.Ask.Option("Blue", "Calm")), multiSelect = false,
+                        ),
+                    ),
+                ),
+            ),
             page.rows[5].kind,
         )
         assertEquals(AgentRow.Kind.OfQueued(AgentRow.Queued("and then the docs", "Waiting", 8_000L)), page.rows[6].kind)

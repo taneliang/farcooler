@@ -5,8 +5,10 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.farcooler.model.AgentConversation
+import com.farcooler.model.AgentRow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
@@ -32,6 +34,30 @@ class CoreComposeSink(private val core: ClientCall) : ConversationSink {
             },
         )
         return (answer["queued"] as? JsonPrimitive)?.booleanOrNull ?: false
+    }
+}
+
+/**
+ * Where a held ask's answer goes (ov-370): the runner's `terminal.agent_answer`,
+ * which writes it to the hook claude waits on. The first answer from any device
+ * wins; a later one is refused `not_held`.
+ */
+fun interface AnswerSink {
+    suspend fun answer(terminal: String, ask: String, option: String, answers: Map<String, String>)
+}
+
+/** The runner's `terminal.agent_answer`, over this phone's client core. */
+class CoreAnswerSink(private val core: ClientCall) : AnswerSink {
+    override suspend fun answer(terminal: String, ask: String, option: String, answers: Map<String, String>) {
+        core.call(
+            "terminal.agent_answer",
+            buildJsonObject {
+                put("terminal", JsonPrimitive(terminal))
+                put("requestId", JsonPrimitive(ask))
+                put("optionId", JsonPrimitive(option))
+                if (answers.isNotEmpty()) put("answers", JsonObject(answers.mapValues { JsonPrimitive(it.value) }))
+            },
+        )
     }
 }
 
@@ -65,6 +91,8 @@ class NativePanes(
     /** Where a pane's rows come from: the core's, unless a test stands in. */
     private val sourceFor: (String) -> AgentRowSource = { CoreRowSource(core, it) },
     private val sink: ConversationSink = CoreComposeSink(core),
+    /** Where a held ask's answer goes (ov-370). */
+    private val answers: AnswerSink? = CoreAnswerSink(core),
 ) {
     private val panes = HashMap<String, NativePaneModel>()
 
@@ -78,6 +106,7 @@ class NativePanes(
             sink = sink,
             memory = memory,
             scope = scope,
+            answers = answers,
         )
     }
 }
@@ -100,7 +129,47 @@ class NativePaneModel(
     private val sink: ConversationSink,
     private val memory: PaneViewMemory,
     private val scope: CoroutineScope,
+    /** Where a held ask's answer goes (ov-370); null where the runner takes none. */
+    val answers: AnswerSink? = null,
 ) {
+    /** The held ask whose answer is on its way, by its id. */
+    var answering by mutableStateOf<String?>(null)
+        private set
+
+    /** Why an ask's answer didn't land, by the ask's id. */
+    var answerIssues by mutableStateOf<Map<String, String>>(emptyMap())
+        private set
+
+    /**
+     * Answer the held ask on [ask]'s row (ov-370, R-33): [option], and a
+     * question's [given] answers. The runner writes it to claude's hook; nothing
+     * is typed into its dialog. One at a time; refused, the row says why.
+     */
+    fun answer(ask: AgentRow.Ask, option: String, given: Map<String, String> = emptyMap()) {
+        val sink = answers ?: return
+        val id = ask.held ?: return
+        if (answering != null || !AgentConversation.answerable(ask)) return
+        answering = id
+        answerIssues = answerIssues - id
+        scope.launch {
+            try {
+                sink.answer(terminal, id, option, given)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                val issue = when (val failure = AgentConversation.failure(e)) {
+                    is AgentConversation.SendFailure.Refused -> AgentConversation.answerIssue(failure.what)
+                    is AgentConversation.SendFailure.TimedOut -> AgentConversation.answerIssue(null, timedOut = true)
+                    is AgentConversation.SendFailure.Lost ->
+                        if (failure.notSent) AgentConversation.answerIssue(null) else AgentConversation.answerIssue(null, timedOut = true)
+                }
+                answerIssues = answerIssues + (id to issue)
+            } finally {
+                answering = null
+            }
+        }
+    }
+
     /**
      * The composer's text, one line: line breaks become spaces as they arrive,
      * so what you see is what's sent. Return typed at the end sends, as the

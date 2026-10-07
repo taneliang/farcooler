@@ -136,7 +136,31 @@ data class AgentRow(
         val tool: String? = null,
         val askedMs: Long? = null,
         val answered: Boolean = false,
-    )
+        /**
+         * What `terminal.agent_answer` takes while the runner's hook holds the
+         * ask (ov-370); null once the hold ends, when only the terminal can
+         * answer it.
+         */
+        val held: String? = null,
+        /** A question's questions, whole. */
+        val questions: List<Question> = emptyList(),
+        /** A plan's text, its line breaks kept. */
+        val plan: String? = null,
+        /** The device whose answer the hook took: "iPhone", "Mac". */
+        val answeredBy: String? = null,
+    ) {
+        data class Question(
+            /** The words claude asked, which its answer is keyed by. */
+            val question: String,
+            /** Claude's short label for it: "Color". */
+            val header: String,
+            val options: List<Option>,
+            /** Several may be chosen; claude reads them joined by ", ". */
+            val multiSelect: Boolean,
+        )
+
+        data class Option(val label: String, val description: String)
+    }
 
     data class Queued(
         val text: String,
@@ -316,6 +340,19 @@ internal object AgentRowJson {
                     tool = string(p["tool"]),
                     askedMs = ms(p["asked_ms"]),
                     answered = bool(p["answered"]) ?: false,
+                    held = string(p["held"]),
+                    questions = (p["questions"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }.map { q ->
+                        AgentRow.Ask.Question(
+                            question = string(q["question"]).orEmpty(),
+                            header = string(q["header"]).orEmpty(),
+                            options = (q["options"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }.map { o ->
+                                AgentRow.Ask.Option(string(o["label"]).orEmpty(), string(o["description"]).orEmpty())
+                            },
+                            multiSelect = bool(q["multi_select"]) ?: false,
+                        )
+                    },
+                    plan = string(p["plan"]),
+                    answeredBy = string(p["answered_by"]),
                 ),
             )
             "Queued" -> AgentRow.Kind.OfQueued(

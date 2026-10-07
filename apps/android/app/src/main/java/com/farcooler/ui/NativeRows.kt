@@ -18,7 +18,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.outlined.ExpandLess
@@ -60,7 +59,7 @@ import kotlinx.coroutines.delay
  * id, redraws only the rows whose object changed.
  */
 @Composable
-fun NativeRowView(row: AgentRow, showTerminal: () -> Unit) {
+fun NativeRowView(row: AgentRow, showTerminal: () -> Unit, answer: NativeAnswer? = null) {
     Box(
         Modifier
             .fillMaxWidth()
@@ -73,7 +72,7 @@ fun NativeRowView(row: AgentRow, showTerminal: () -> Unit) {
             is AgentRow.Kind.OfThinking -> ThinkingRow(kind.thinking)
             is AgentRow.Kind.OfTool -> NativeToolRow(kind.tool)
             is AgentRow.Kind.OfSubagent -> SubagentRow(kind.subagent)
-            is AgentRow.Kind.OfAsk -> AskRow(kind.ask, showTerminal)
+            is AgentRow.Kind.OfAsk -> NativeAskRow(kind.ask, answer, showTerminal)
             is AgentRow.Kind.OfQueued -> QueuedLine(kind.queued.text, kind.queued.state)
             is AgentRow.Kind.OfNotice -> NoticeLine(kind.notice.text)
             is AgentRow.Kind.OfHandoff -> HandoffRow(kind.handoff.reason, showTerminal)
@@ -308,7 +307,7 @@ private fun SubagentRow(subagent: AgentRow.Subagent) {
 
 /** A card that asks for attention: a ring in the tertiary color, only while something waits on the person. */
 @Composable
-private fun attentionCard(attention: Boolean): Modifier {
+internal fun attentionCard(attention: Boolean): Modifier {
     val shape = RoundedCornerShape(Radius.medium)
     return Modifier
         .fillMaxWidth()
@@ -316,18 +315,6 @@ private fun attentionCard(attention: Boolean): Modifier {
         .background(MaterialTheme.colorScheme.surfaceContainerHigh)
         .then(if (attention) Modifier.border(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.55f), shape) else Modifier)
         .padding(12.dp)
-}
-
-@Composable
-private fun AskRow(ask: AgentRow.Ask, showTerminal: () -> Unit) {
-    Column(attentionCard(!ask.answered), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(if (ask.answered) Icons.Filled.Check else Icons.Outlined.HelpOutline, null, Modifier.size(18.dp))
-            Text(AgentConversation.askTitle(ask), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-        }
-        Text(ask.text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 4, overflow = TextOverflow.Ellipsis)
-        if (!ask.answered) OutlinedButton(onClick = showTerminal) { Text("Show terminal") }
-    }
 }
 
 /** A message in claude's own queue (R-29), from its transcript or sent from here a moment ago. */
