@@ -34,6 +34,9 @@ final class ComposerModel: ObservableObject {
     var inColumn = false
     private weak var field: UITextView?
     private var handoffPending = false
+    /// Bumped by each hand-off, so an earlier one's timer can't clear a later one's focus.
+    private var handoffGeneration = 0
+    private weak var handoffFrom: UITextView?
 
     /// A composer field was made. If a field was waiting for its replacement,
     /// this is it.
@@ -60,9 +63,15 @@ final class ComposerModel: ObservableObject {
                 isFocused = false
                 return
             }
+            // `willMove(toWindow: nil)` and the dismantle both report one
+            // take-down: one hand-off, one timer.
+            if handoffPending, handoffFrom === old { return }
             handoffPending = true
+            handoffFrom = old
+            handoffGeneration += 1
+            let generation = handoffGeneration
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-                guard let self, handoffPending else { return }
+                guard let self, handoffPending, generation == handoffGeneration else { return }
                 handoffPending = false
                 isFocused = false
             }

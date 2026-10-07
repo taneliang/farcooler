@@ -22,6 +22,8 @@ final class ComposerField: UITextView {
     /// keyboard away. See `ComposerTextView.Coordinator`.
     private(set) var isBeingTakenDown = false
 
+    /// Called by both `willMove(toWindow: nil)` and the dismantle, each of
+    /// which the crossing needs (measured); the model counts them as one.
     func takeDown() {
         isBeingTakenDown = true
         onTakeDown?()

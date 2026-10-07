@@ -406,6 +406,9 @@ struct AgentView: View {
                 // None in a column (ov-348), whose composer is the inline one:
                 // the bar's controller holds first responder to keep its
                 // accessory up, and so took every tap meant for the field.
+                // `composer.inColumn` has to be current by the next main-queue turn
+                // after a composer is taken down, or `ComposerModel.fieldTakenDown`
+                // reads a width crossing as a hidden pane and drops the focus.
                 .onChange(of: inColumn, initial: true) { _, column in composer.inColumn = column }
                 #if DEBUG
                 .modifier(ComposerPhotoHarness(model: composer))
