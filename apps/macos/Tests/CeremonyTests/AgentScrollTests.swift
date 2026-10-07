@@ -320,6 +320,10 @@ struct AgentScrollTests {
         /// Armed at least once: the jump has begun.
         var began = false
         var armed = false
+        /// Whether the jump was still in flight when the step was made. On a
+        /// loaded machine its animation can end between the event and the
+        /// turn the step is made in.
+        var inFlight = false
         /// The step was taken, and the jump's animation, still in flight,
         /// then put the chat following again by itself.
         var carried = false
@@ -342,6 +346,7 @@ struct AgentScrollTests {
                 // A later turn: not from inside the chat's own observer.
                 DispatchQueue.main.async { [self] in
                     before()
+                    inFlight = probe.jumping
                     let origin = scroll.contentView.bounds.origin
                     scroll.contentView.scroll(to: NSPoint(x: origin.x, y: origin.y - points))
                     scroll.reflectScrolledClipView(scroll.contentView)
@@ -426,7 +431,7 @@ struct AgentScrollTests {
         // later: its backstop is what arms the stepper.
         #expect(await until { stepper.began }, "the click never started a jump")
         _ = await until { stepper.steps == 1 || !probe.jumping }
-        return stepper.steps == 1
+        return stepper.steps == 1 && stepper.inFlight
     }
 
     /// Jump to Latest doesn't flicker (ov-386). A lazy stack correcting its
