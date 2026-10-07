@@ -18,6 +18,7 @@ struct ScratchConfigTests {
     static let reads: [String: String] = [
         "AppControlTests.swift": "hands a dictionary to a pure function and starts nothing",
         "RealWindowCaptures.swift": "reads the home the capture script set, which sets the config too",
+        "RemoteConversationSshTests.swift": "passes on to its scratch sshd the home and config ScratchDaemon.isolate set",
         "SelectionSwapTimingTests+Workspaces.swift": "reads the home a script set, which sets the config too",
     ]
 
