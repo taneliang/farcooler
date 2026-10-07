@@ -286,4 +286,63 @@ struct AgentScrollTests {
         scroll.reflectScrolledClipView(scroll.contentView)
         #expect(await Self.until(10) { probe.showsJump }, "a tail 70 pt under the composer counted as seen")
     }
+
+    /// Jump to Latest doesn't flicker (ov-386). A lazy stack correcting its
+    /// height mid-flight walks the offset back, which the chat read as the
+    /// reader scrolling up: following stopped and the button came back until
+    /// the scroll landed. Here the correction is a 3 pt step back, made in
+    /// the same turn as the click, so it arrives while the animation runs.
+    @Test func jumpToLatestDoesNotFlickerAgainstAHeightCorrection() async throws {
+        var history: [String] = []
+        for turn in 0..<24 {
+            history.append(Self.message("User", "Question \(turn)?"))
+            history.append(Self.message("Agent", String(repeating: Self.sentence, count: 4)))
+            history.append(Self.payload(["TurnEnded": ["reason": "EndTurn"]]))
+        }
+        let standIn = try StandIn(first: Self.batch(history, from: 0))
+        let probe = AgentScrollProbe()
+        let pane = "jump-\(UUID().uuidString.prefix(8))"
+        defer { PaneDraftStore.record("", forPane: pane) }
+        let mount = Mount(try Self.terminal(pane))
+        let host = NSHostingView(rootView: Hosted(mount: mount, binary: standIn.binary, probe: probe))
+        let window = NSWindow(
+            contentRect: NSRect(x: -7000, y: -7000, width: 700, height: 600), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.orderFrontRegardless()
+        defer { window.close() }
+
+        #expect(await Self.until(60) { (probe.geometry?.contentSize.height ?? 0) > 2_000 }, "the history never laid out")
+        await Self.settle()
+        let scroll = try #require(Self.scrollView(in: host))
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: 100))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        #expect(await Self.until(10) { probe.showsJump }, "scrolling up didn't offer Jump to Latest")
+        await Self.settle()
+
+        let detached = probe.detaches
+        let container = try #require(probe.geometry?.containerSize.height)
+        Self.click(host, at: NSPoint(x: 350, y: container - Spacing.group - 15), in: window)
+        // Mid-flight: the offset has moved but the end is still far off.
+        let start = scroll.contentView.bounds.origin.y
+        #expect(
+            await Self.until { scroll.contentView.bounds.origin.y > start + 50 || (probe.tailHiddenBy ?? 0) <= 0.5 },
+            "the jump never moved")
+        // The correction: a step back that a lazy stack's height estimate
+        // resolving makes, larger than a frame's travel so it's a net
+        // decrease between two geometry events. Skipped if the jump has
+        // already landed on a slow runner, where stepping back would be a
+        // reader scrolling up.
+        if (probe.tailHiddenBy ?? 0) > 400 {
+            let origin = scroll.contentView.bounds.origin
+            scroll.contentView.scroll(to: NSPoint(x: origin.x, y: origin.y - 150))
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
+
+        #expect(await Self.until { probe.following && (probe.tailHiddenBy ?? .infinity) <= 0.5 }, "Jump to Latest didn't return to the tail")
+        await Self.settle()
+        #expect(probe.detaches == detached, "the height correction stopped following \(probe.detaches - detached) time(s) mid-jump")
+        #expect(probe.following && !probe.showsJump)
+    }
 }

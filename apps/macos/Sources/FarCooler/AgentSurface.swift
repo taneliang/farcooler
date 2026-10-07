@@ -385,7 +385,10 @@ struct AgentSurface: View {
         .onScrollGeometryChange(for: ScrollGeometry.self) { $0 } action: { old, new in
             if Self.isAtTail(new) {
                 follow(true)
-            } else if new.contentOffset.y < old.contentOffset.y - 0.5 {
+            } else if new.contentOffset.y < old.contentOffset.y - 0.5, !tail.jumping {
+                // Not while Jump to Latest is on its way: a lazy stack
+                // correcting its height mid-flight walks the offset back, and
+                // that is not the reader scrolling away (ov-386).
                 follow(false)
             }
             probe?.geometry = new
@@ -493,6 +496,7 @@ struct AgentSurface: View {
 
     /// The one writer of following, and of whether the way back is shown.
     private func follow(_ on: Bool) {
+        if !on, tail.following { probe?.detaches += 1 }
         tail.following = on
         if showsJump == on { showsJump = !on }
         probe?.following = on
@@ -507,9 +511,30 @@ struct AgentSurface: View {
 
     /// Jump to Latest: following again, and the one scroll worth animating,
     /// since the reader asked for it.
+    ///
+    /// While it animates, a decrease in the offset is a lazy stack's height
+    /// correction, not the reader (`tail.jumping`), so the button doesn't
+    /// flicker back on mid-flight. Once it lands, following is asserted
+    /// again and the end re-targeted: the corrections can leave it short.
+    /// A reader who scrolls away inside those 0.25 s is overridden; they'd
+    /// asked to go to the end a moment ago.
     private func jumpToTail() {
         follow(true)
-        withAnimation(.easeOut(duration: 0.25)) { scrollToTail() }
+        tail.jumping = true
+        let tail = tail
+        withAnimation(.easeOut(duration: 0.25), completionCriteria: .logicallyComplete) {
+            scrollToTail()
+        } completion: {
+            tail.jumping = false
+            follow(true)
+            scrollToTail()
+        }
+        // Backstop: a completion that never comes would leave a reader who
+        // scrolls up unable to detach.
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1))
+            tail.jumping = false
+        }
     }
 
     /// Jump to Latest's diameter, which also lifts it clear of the composer.
@@ -587,6 +612,8 @@ struct AgentSurface: View {
     /// this is one closure that draws nothing. See `tail` above.
     private final class TailFollow {
         var following = true
+        /// Jump to Latest is animating (ov-386).
+        var jumping = false
     }
 
     /// Everything that changes what this view's size is worth in cells.

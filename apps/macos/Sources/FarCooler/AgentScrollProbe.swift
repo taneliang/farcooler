@@ -16,6 +16,9 @@ final class AgentScrollProbe {
     var lastRow: CGRect?
     var following = true
     var showsJump = false
+    /// How many times the chat stopped following, for a test that no step of
+    /// a Jump to Latest does (ov-386).
+    var detaches = 0
     /// `AgentStream.send`, as the composer calls it.
     var send: ((String) -> Void)?
     /// Text into the composer, as Edit puts a sent message back.
