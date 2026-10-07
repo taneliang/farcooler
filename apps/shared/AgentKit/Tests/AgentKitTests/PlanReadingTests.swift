@@ -52,11 +52,14 @@ struct PlanReadingTests {
     func unanswered() async {
         let started = ContinuousClock.now
         let state = await PlanReadState.read(runnerCan: true, timeout: .milliseconds(80)) {
-            try await Task.sleep(for: .seconds(60))
+            try await Task.sleep(for: .seconds(90))
             return Data()
         }
         #expect(state == .unavailable)
-        #expect(ContinuousClock.now - started < .seconds(5), "it waited out the runner instead of the timeout")
+        // The runner sleeps for 90 s, so this tells the timeout from the
+        // runner, and is loose enough for a CI machine that took 13 s over
+        // an 80 ms wait.
+        #expect(ContinuousClock.now - started < .seconds(60), "it waited out the runner instead of the timeout")
     }
 
     @Test(
@@ -70,7 +73,8 @@ struct PlanReadingTests {
             try await withCheckedThrowingContinuation { (_: CheckedContinuation<Data, Error>) in }
         }
         #expect(state == .unavailable)
-        #expect(ContinuousClock.now - started < .seconds(5))
+        // Nothing ever resumes that call, so only the timeout can end this.
+        #expect(ContinuousClock.now - started < .seconds(45))
     }
 
     @Test("A late answer after the timeout changes nothing")
