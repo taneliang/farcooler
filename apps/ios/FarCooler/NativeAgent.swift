@@ -20,6 +20,18 @@ struct CoreComposeSink: ConversationSink {
     }
 }
 
+/// A held ask's answer (ov-370): the runner's `terminal.agent_answer`, over
+/// this phone's client core, which writes it to the hook claude waits on.
+struct CoreAnswerSink: AgentAnswerSink {
+    let core: ClientCore
+
+    func answer(terminal: String, ask: String, option: String, answers: [String: String]) async throws {
+        var args: [String: Any] = ["terminal": terminal, "requestId": ask, "optionId": option]
+        if !answers.isEmpty { args["answers"] = answers }
+        _ = try await core.call("terminal.agent_answer", args)
+    }
+}
+
 /// One pane's rows over this phone's client core: `agent.rows` and
 /// `agent.rows_follow`, their answers handed to `AgentRowLedger` undecoded.
 /// The core is the connection's own, so the rows ride the ssh session the
@@ -79,7 +91,8 @@ final class NativePanes: ObservableObject {
         if let model = panes[terminal], model.core === core { return model }
         let model = NativePaneModel(
             terminal: terminal, store: AgentRowStore(key: "phone-\(terminal)"),
-            source: CoreRowSource(core: core, terminal: terminal), sink: CoreComposeSink(core: core))
+            source: CoreRowSource(core: core, terminal: terminal), sink: CoreComposeSink(core: core),
+            answers: CoreAnswerSink(core: core))
         model.core = core
         panes[terminal] = model
         return model
@@ -107,6 +120,12 @@ final class NativePaneModel: ObservableObject {
     let store: AgentRowStore
     let source: any AgentRowSource
     let sink: any ConversationSink
+    /// Where a held ask's answer goes (ov-370).
+    let answers: (any AgentAnswerSink)?
+    /// The held ask whose answer is on its way, by its id.
+    @Published private(set) var answering: String?
+    /// Why an ask's answer didn't land, by the ask's id.
+    @Published private(set) var answerIssues: [String: String] = [:]
     /// The connection's core this model reads through, so a pane opened again
     /// on another connection gets a model of its own.
     weak var core: ClientCore?
@@ -160,12 +179,13 @@ final class NativePaneModel: ObservableObject {
 
     init(
         terminal: String, store: AgentRowStore, source: any AgentRowSource, sink: any ConversationSink,
-        defaults: UserDefaults = .standard
+        answers: (any AgentAnswerSink)? = nil, defaults: UserDefaults = .standard
     ) {
         self.terminal = terminal
         self.store = store
         self.source = source
         self.sink = sink
+        self.answers = answers
         self.defaults = defaults
         wantsConversation = AgentConversation.showsConversation(terminal, defaults: defaults)
         updateShowing()
@@ -265,6 +285,26 @@ final class NativePaneModel: ObservableObject {
         let newest = store.ids.suffix(40).compactMap { store.box($0)?.row }
         let left = AgentConversation.unsettled(queued, newest: newest)
         if left != queued { queued = left }
+    }
+
+    /// Answer the held ask on `ask`'s row (ov-370, R-33): `option`, and a
+    /// question's `answers`. The runner writes it to claude's hook; nothing
+    /// is typed into its dialog. One at a time; refused, the row says why.
+    func answer(_ ask: AgentRow.Ask, option: String, answers given: [String: String] = [:]) async {
+        guard let sink = answers, let id = ask.held, answering == nil, AgentConversation.answerable(ask) else { return }
+        answering = id
+        answerIssues[id] = nil
+        defer { answering = nil }
+        do {
+            try await sink.answer(terminal: terminal, ask: id, option: option, answers: given)
+        } catch {
+            switch error as? ClientCore.CoreError {
+            case .timedOut?, .malformed?, .disconnected(_, notSent: false)?:
+                answerIssues[id] = AgentConversation.answerIssue(what: nil, timedOut: true)
+            case .rejected(_, _, let what)?: answerIssues[id] = AgentConversation.answerIssue(what: what)
+            default: answerIssues[id] = AgentConversation.answerIssue(what: nil)
+            }
+        }
     }
 
     static func failure(_ error: Error) -> AgentConversation.SendFailure {

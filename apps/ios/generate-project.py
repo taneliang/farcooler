@@ -195,6 +195,8 @@ SOURCES = [
     "NativeAgent.swift",
     "NativeAgentView.swift",
     "NativeRows.swift",
+    # A held ask answered from its row (ov-370).
+    "NativeAskRow.swift",
     "NativeAgentHarness.swift",
 ]
 
@@ -988,6 +990,7 @@ UI_TEST_SOURCES = [
     # The conversation view of a terminal-mode claude pane (ov-373), on
     # `-native-agent-harness`: no runner.
     "NativeAgentViewTests.swift",
+    "NativeAnswersUITests.swift",
 ]
 
 FRAMEWORKS = ["farcooler_vt.xcframework", "farcooler_client.xcframework"]

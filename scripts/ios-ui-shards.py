@@ -107,6 +107,7 @@ SHARDS = {
         # -native-agent-harness (ov-373). Back from LOCAL (ov-401): about
         # 440 s in runs 37612748019 and 37616804607.
         "NativeAgentViewTests",
+        "NativeAnswersUITests",  # -native-agent-harness -native-held-ask (ov-370); about 60 s locally
     ],
 }
 

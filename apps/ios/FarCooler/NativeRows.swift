@@ -11,6 +11,8 @@ struct NativeRowView: View {
     /// (`MarkdownText.streaming`, ov-382).
     var isLast = false
     let showTerminal: () -> Void
+    /// A held ask's buttons (ov-370), where the runner takes answers.
+    var answer: NativeAskAnswer?
 
     var body: some View {
         let row = box.row
@@ -21,7 +23,7 @@ struct NativeRowView: View {
             case .thinking(let thinking): ThinkingRow(thinking: thinking)
             case .tool(let tool): NativeToolRow(tool: tool)
             case .subagent(let subagent): SubagentRow(subagent: subagent)
-            case .ask(let ask): AskRow(ask: ask, showTerminal: showTerminal)
+            case .ask(let ask): NativeAskRow(ask: ask, answer: answer, showTerminal: showTerminal)
             case .queued(let queued): QueuedLine(text: queued.text, state: queued.state)
             case .notice(let notice): NoticeLine(text: notice.text)
             case .handoff(let handoff): HandoffRow(reason: handoff.reason, showTerminal: showTerminal)
@@ -234,29 +236,6 @@ private struct SubagentRow: View {
         .font(.callout)
         .padding(Spacing.inset)
         .surface(.inset, in: .card)
-    }
-}
-
-private struct AskRow: View {
-    let ask: AgentRow.Ask
-    let showTerminal: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.group) {
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
-                Image(systemName: ask.answered ? "checkmark" : "questionmark.bubble")
-                Text(AgentConversation.askTitle(ask)).fontWeight(.medium)
-            }
-            Text(ask.text).foregroundStyle(.secondary).lineLimit(4)
-            if !ask.answered {
-                Button("Show Terminal", action: showTerminal)
-                    .buttonStyle(.bordered)
-            }
-        }
-        .font(.callout)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(Spacing.inset)
-        .attentionSurface(in: .card, when: !ask.answered)
     }
 }
 

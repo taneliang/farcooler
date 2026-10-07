@@ -267,9 +267,10 @@ struct NativeAgentView: View {
                         .onAppear { model.loadOlder() }
                 }
                 let last = store.ids.last
+                let answer = model.nativeAskAnswer
                 ForEach(store.ids, id: \.self) { id in
                     if let box = store.box(id) {
-                        NativeRowView(box: box, isLast: id == last, showTerminal: showTerminal)
+                        NativeRowView(box: box, isLast: id == last, showTerminal: showTerminal, answer: answer)
                     }
                 }
                 ForEach(model.queued.indices, id: \.self) { i in

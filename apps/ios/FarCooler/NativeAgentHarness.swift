@@ -30,6 +30,10 @@ import UIKit
 /// - Compose's text picks a failure: "time out", "garble" (an unreadable
 ///   answer) and "read only" (a grant that may not type).
 /// - `-native-terminal`: the pane last switched to its terminal (R-27).
+/// - `-native-held-ask question|plan|permission` (ov-370): the page ends on
+///   that ask, held by the runner's hook; `terminal.agent_answer` takes the
+///   answer, and the next follow shows it answered on this phone.
+///   `-native-answer-taken` refuses it as answered elsewhere (`not_held`).
 ///
 /// `native-harness` reads back what was sent, and how many follows were
 /// asked for, for the tests.
@@ -145,8 +149,13 @@ private struct NativeHarnessProbe: View {
 /// The canned runner behind `NativeAgentHarness`.
 @MainActor
 final class NativeHarnessRunner: ObservableObject {
-    /// What the tests read: `follows=N background=N changed=B linked=N sent=a|b`.
-    @Published private(set) var said = "follows=0 background=0 changed=false linked=0 sent="
+    /// What the tests read: `follows=N background=N changed=B linked=N
+    /// sent=a|b answered=<ask> <option> <answers>|…`.
+    @Published private(set) var said = "follows=0 background=0 changed=false linked=0 sent= answered="
+    /// Each answer the held ask was given (ov-370).
+    private var answered: [String] = []
+    /// The held ask was answered, and the next follow is to say so.
+    private var answerDue = false
     /// Links that came up again and whose build has landed.
     private var linked = 0
     private var follows = 0
@@ -179,6 +188,12 @@ final class NativeHarnessRunner: ObservableObject {
         case "terminal.compose":
             let text = args["text"] as? String ?? ""
             return try await MainActor.run { try compose(text) }
+        case "terminal.agent_answer":
+            let ask = args["requestId"] as? String ?? ""
+            let option = args["optionId"] as? String ?? ""
+            let given = (args["answers"] as? [String: String] ?? [:]).sorted { $0.key < $1.key }
+                .map { "\($0.key)=\($0.value)" }.joined(separator: ",")
+            return try await MainActor.run { try answerAsk("\(ask) \(option) \(given)") }
         case "terminal.write":
             await MainActor.run { typedInTerminal() }
             return try json([:])
@@ -195,6 +210,43 @@ final class NativeHarnessRunner: ObservableObject {
 
     private func report() {
         said = "follows=\(follows) background=\(background) changed=\(updated) linked=\(linked) sent=\(sent.joined(separator: "|"))"
+            + " answered=\(answered.joined(separator: "|"))"
+    }
+
+    /// The held ask under `-native-held-ask`, or nil.
+    static var heldAsk: String? {
+        let args = CommandLine.arguments
+        guard let at = args.firstIndex(of: "-native-held-ask"), at + 1 < args.count else { return nil }
+        return args[at + 1]
+    }
+
+    private func answerAsk(_ what: String) throws -> Data {
+        answered.append(what)
+        report()
+        if CommandLine.arguments.contains("-native-answer-taken") {
+            throw ClientCore.CoreError.rejected("Someone already answered this.", word: "resource-conflict", what: "not_held")
+        }
+        answerDue = true
+        return try json([:])
+    }
+
+    /// The held ask's row: `held` while it waits, then answered on this phone.
+    static func heldAskRow(_ kind: String, rev: UInt64, answered: Bool) -> [String: Any] {
+        var ask: [String: Any] = switch kind {
+        case "question":
+            ["kind": "Question", "text": "Which color should the button be?", "tool": "AskUserQuestion", "questions": [[
+                "question": "Which color should the button be?", "header": "Color", "multi_select": false,
+                "options": [["label": "Red", "description": "Warm and loud"], ["label": "Blue", "description": "Calm and quiet"]],
+            ]]]
+        case "plan":
+            ["kind": "PlanExit", "text": "# Plan 1. Make the button blue.", "tool": "ExitPlanMode",
+             "plan": "# Plan\n\n1. Make the button blue.\n2. Ship it."]
+        default:
+            ["kind": "Permission", "text": "Bash touch spike-made-this.txt", "tool": "Bash"]
+        }
+        ask["answered"] = false
+        if answered { ask["answered_by"] = "iPhone" } else { ask["held"] = "hook-ask-h1" }
+        return row("ask:h1", ord: 20, rev: rev, kind: ["Ask": ask])
     }
 
     private func refuseIfOff() throws {
@@ -285,6 +337,11 @@ final class NativeHarnessRunner: ObservableObject {
         try await Task.sleep(for: .milliseconds(700))
         return try await MainActor.run {
             var changes: [[String: Any]] = []
+            if answerDue, let kind = Self.heldAsk {
+                answerDue = false
+                rev += 1
+                changes.append(["kind": "update", "id": "ask:h1", "rev": rev, "row": Self.heldAskRow(kind, rev: rev, answered: true)])
+            }
             if due, !updated {
                 updated = true
                 rev += 1
@@ -333,7 +390,7 @@ final class NativeHarnessRunner: ObservableObject {
             // No start time, so no timer ticks: a tree that changes every
             // second makes every XCUITest query slow on a loaded runner.
             Self.row("thinking:k1", ord: 10, rev: 10, kind: ["Thinking": [String: Any]()]),
-        ]
+        ] + (Self.heldAsk.map { [Self.heldAskRow($0, rev: 10, answered: false)] } ?? [])
         return ["epoch": Self.epoch, "rev": rev, "moreBefore": false, "rows": rows]
     }
 
