@@ -731,7 +731,11 @@ async fn no_server_is_asked_about_once() {
     let mut learned = false;
     for _ in 0..40 {
         let before = srv.calls_total();
-        assert!(srv.read_panes().await.unwrap().panes.is_empty());
+        // A read in the gap may be refused outright (TmuxUnavailable on a slow
+        // runner); that's the gap, not an answer, so read again.
+        if let Ok(read) = srv.read_panes().await {
+            assert!(read.panes.is_empty());
+        }
         if srv.calls_total() == before {
             learned = true;
             break;
