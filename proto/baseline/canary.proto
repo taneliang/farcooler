@@ -1,4 +1,4 @@
-// Shipped by Canary at 01c93cac4a48651b9f4e69796001a05378b9e025. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at d2d1b70742751c26f427b94f6c8b7c4079eb8494. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -540,6 +540,11 @@ message AgentPromptBlock {
     // A worktree-relative path from an @-mention.
     string file_mention = 2;
     ImageBlock image = 3;
+    // `terminal.compose` only (ov-393): an image uploaded first through
+    // `terminal.paste_file` with `stage`, named by that upload's
+    // `transfer_id`. Used once: the runner deletes the upload as it reads it.
+    // Sent with `compose_upload` in `required_capabilities`.
+    bytes staged_image = 4;
   }
 }
 
@@ -2175,12 +2180,18 @@ message TerminalFilePut {
   // `quarterly-report.pdf` in a prompt says what it is, and
   // `2026-08-09-114812Z.bin` says nothing at all.
   string name = 7;
+  // Keep the finished file for a `terminal.compose` to name by `transfer_id`
+  // (`AgentPromptBlock.staged_image`), typing nothing into the pane (ov-393).
+  // Sent with `compose_upload` in `required_capabilities`, so an older runner
+  // refuses rather than typing the path.
+  bool stage = 8;
 }
 
 message TerminalFilePutResult {
   uint64 stored = 1;
   // Final chunk only: the absolute path on the host, already typed into the
-  // terminal. Quoted in the terminal when it contains a space; bare here.
+  // terminal (unless `stage`). Quoted in the terminal when it contains a
+  // space; bare here.
   optional string path = 2;
 }
 
