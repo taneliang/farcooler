@@ -40,17 +40,17 @@ struct AppControlTests {
         withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: Array(path.utf8) + [0]) }
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         defer { close(fd) }
+        // The app hangs up on another user without reading, so a write can
+        // meet a closed socket, and left at its default that raises SIGPIPE,
+        // which kills the whole test process. Set before connecting: on a
+        // connection the app already closed, setsockopt fails with EINVAL.
+        AppControl.ignoreSIGPIPE(on: fd)
         let connected = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
         guard connected == 0 else { return Data() }
-        // The app hangs up on another user without reading, so this write
-        // can meet a closed socket. Left at its default that raises SIGPIPE,
-        // which kills the whole test process rather than failing this test.
-        var on: Int32 = 1
-        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
         // Long: the answer is made on the main actor, which the rest of the
         // suite can hold for many seconds (it took 18 in one full run).
         var wait = timeval(tv_sec: 120, tv_usec: 0)
@@ -69,6 +69,29 @@ struct AppControlTests {
     private static let echo: AppControl.Handler = { request, reply in
         reply.send(["event": "echo", "op": request["op"] as? String ?? ""])
         reply.close()
+    }
+
+    /// A write to a peer that has hung up is an error to check, not a death.
+    @Test func aWriteToAClosedPeerFailsWithEPIPE() {
+        var pair: [Int32] = [0, 0]
+        #expect(socketpair(AF_UNIX, SOCK_STREAM, 0, &pair) == 0)
+        defer { close(pair[0]) }
+        #expect(AppControl.ignoreSIGPIPE(on: pair[0]))
+        close(pair[1])
+        #expect(AppControl.writeAll(pair[0], Data("hello\n".utf8)) == EPIPE)
+        // Mid-write: a peer that hangs up while a long answer is still going.
+        var big: [Int32] = [0, 0]
+        #expect(socketpair(AF_UNIX, SOCK_STREAM, 0, &big) == 0)
+        defer { close(big[0]) }
+        #expect(AppControl.ignoreSIGPIPE(on: big[0]))
+        let peer = big[1]
+        let closer = Thread {
+            var byte: UInt8 = 0
+            _ = read(peer, &byte, 1)
+            close(peer)
+        }
+        closer.start()
+        #expect(AppControl.writeAll(big[0], Data(repeating: 0x61, count: 8 << 20)) == EPIPE)
     }
 
     @Test func theSocketSitsBesideTheChannelsDaemon() {

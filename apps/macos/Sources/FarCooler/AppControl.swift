@@ -33,14 +33,7 @@ final class AppControl: @unchecked Sendable {
             let line = data
             queue.async { [self] in
                 guard !closed else { return }
-                line.withUnsafeBytes { raw in
-                    var offset = 0
-                    while offset < raw.count {
-                        let wrote = Darwin.write(fd, raw.baseAddress! + offset, raw.count - offset)
-                        if wrote <= 0 { return }
-                        offset += wrote
-                    }
-                }
+                _ = AppControl.writeAll(fd, line)
             }
         }
 
@@ -51,6 +44,34 @@ final class AppControl: @unchecked Sendable {
                 closed = true
                 Darwin.close(fd)
             }
+        }
+    }
+
+    /// Make writes on `fd` fail with EPIPE instead of raising SIGPIPE, which
+    /// kills the whole process. Darwin has no `MSG_NOSIGNAL`; this is its
+    /// spelling. Set it on an unconnected socket when there is a choice:
+    /// on a connection whose peer has already gone it can fail with EINVAL.
+    @discardableResult
+    static func ignoreSIGPIPE(on fd: Int32) -> Bool {
+        var on: Int32 = 1
+        return setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size)) == 0
+    }
+
+    /// Write all of `data` to `fd`. Returns nil when it all went, else the
+    /// `errno` that stopped it (EPIPE once the peer hung up).
+    static func writeAll(_ fd: Int32, _ data: Data) -> Int32? {
+        data.withUnsafeBytes { raw in
+            var offset = 0
+            while offset < raw.count {
+                let wrote = Darwin.write(fd, raw.baseAddress! + offset, raw.count - offset)
+                if wrote < 0 {
+                    if errno == EINTR { continue }
+                    return errno
+                }
+                if wrote == 0 { return EPIPE }
+                offset += wrote
+            }
+            return nil
         }
     }
 
@@ -134,6 +155,7 @@ final class AppControl: @unchecked Sendable {
 
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw .system("socket") }
+        Self.ignoreSIGPIPE(on: fd)
         let bound = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
@@ -181,8 +203,11 @@ final class AppControl: @unchecked Sendable {
         guard fd >= 0 else { return }
         // A CLI that hangs up mid-answer must not take the app down with
         // SIGPIPE.
-        var on: Int32 = 1
-        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+        // If it can't be set the CLI is already gone, and nothing is owed it.
+        guard Self.ignoreSIGPIPE(on: fd) else {
+            Darwin.close(fd)
+            return
+        }
         var uid: uid_t = 0
         var gid: gid_t = 0
         guard getpeereid(fd, &uid, &gid) == 0, Self.admits(peer: uid, own: ownUser) else {
@@ -270,6 +295,7 @@ final class AppControl: @unchecked Sendable {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return false }
         defer { Darwin.close(fd) }
+        ignoreSIGPIPE(on: fd)
         return withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) == 0
