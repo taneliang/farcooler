@@ -146,3 +146,29 @@ fn a_held_permission_row_carries_its_hold() {
     let (_, ask) = the_ask(&p);
     assert_eq!((ask.held.as_deref(), ask.answered_by.as_deref()), (None, Some("Mac")));
 }
+
+/// A plan left unanswered (claude killed mid-dialog, then resumed in the same
+/// pane) is still an open `ExitPlanMode` row. A new plan's request that comes
+/// before its own row never lands on the old one, whose plan the view would
+/// show beside an Approve that approves the new one (review 1 M2).
+#[test]
+fn a_hold_lands_only_on_the_row_that_asks_what_it_holds() {
+    let mut p = Projection::new();
+    let stale = json!({"type":"assistant","uuid":"old","message":{"content":[{"type":"tool_use","id":"toolu_old","name":"ExitPlanMode","input":{"plan":"# Old plan"}}]}});
+    p.fold_line(stale.to_string().as_bytes());
+    let (_, request) = hooks_until(PLAN_HOOKS, "PermissionRequest", "hook-ask-new").pop().unwrap();
+    p.hook("PermissionRequest", &request, 1);
+    let held_on = |p: &Projection, id: &str| match &p.row(id).unwrap().kind {
+        RowKind::Ask(a) => a.held.clone(),
+        _ => None,
+    };
+    assert_eq!(held_on(&p, "ask:toolu_old"), None, "the old plan's row");
+    // A row of another plan put up while the hold waits isn't its row either.
+    let other = json!({"type":"assistant","uuid":"other","message":{"content":[{"type":"tool_use","id":"toolu_other","name":"ExitPlanMode","input":{"plan":"# Another plan"}}]}});
+    p.fold_line(other.to_string().as_bytes());
+    assert_eq!(held_on(&p, "ask:toolu_other"), None, "a row asking something else");
+    fold_all(&mut p, PLAN);
+    let new = p.rows().iter().find(|r| r.id.starts_with("ask:") && r.id != "ask:toolu_old" && r.id != "ask:toolu_other").expect("the new plan's row").id.clone();
+    assert_eq!(held_on(&p, &new).as_deref(), Some("hook-ask-new"), "its own row, once it's up");
+    assert_eq!(held_on(&p, "ask:toolu_old"), None);
+}

@@ -40,8 +40,30 @@ const ENDED_KEPT: usize = 32;
 #[derive(Debug, Default)]
 pub(crate) struct HeldAsks {
     ended: VecDeque<String>,
-    /// A question's or a plan's held id whose row isn't up yet: tool, id.
-    waiting: Vec<(String, String)>,
+    /// A question's or a plan's held id whose row isn't up yet: tool, id,
+    /// and what the row must say (`asked`).
+    waiting: Vec<(String, String, String)>,
+}
+
+/// What a question or a plan asks, from its request's `tool_input`: the
+/// plan's words, or the questions' words. A hold goes only on a row that
+/// asks the same (review 1 M2): an older row of the same tool left
+/// unanswered (claude killed mid-dialog, then resumed) must never show its
+/// plan beside an Approve that approves the new one.
+fn asked_in(tool: &str, input: &Value) -> String {
+    if tool == "ExitPlanMode" {
+        return input.get("plan").and_then(Value::as_str).map(|p| clip(p, PLAN_CHARS)).unwrap_or_default();
+    }
+    let questions = input.get("questions").and_then(Value::as_array).cloned().unwrap_or_default();
+    questions.iter().filter_map(|q| q.get("question").and_then(Value::as_str)).collect::<Vec<_>>().join("\n")
+}
+
+/// `asked_in`, as an `Ask` row says it.
+fn asked_by(ask: &Ask) -> String {
+    match ask.tool.as_deref() {
+        Some("ExitPlanMode") => ask.plan.clone().unwrap_or_default(),
+        _ => ask.questions.iter().map(|q| q.question.as_str()).collect::<Vec<_>>().join("\n"),
+    }
 }
 
 /// The tools whose dialog is answered by more than yes or no, and whose row
@@ -89,16 +111,19 @@ impl Projection {
     /// A question's or a plan's `PermissionRequest`: its hold goes on its row.
     pub(super) fn dialog_request(&mut self, tool: &str, payload: &Value) {
         let Some(id) = self.held_id(payload) else { return };
-        match self.open_dialog_row(tool) {
+        let asked = asked_in(tool, payload.get("tool_input").unwrap_or(&Value::Null));
+        match self.open_dialog_row(tool, &asked) {
             Some(i) => self.set_held(i, Some(id), None),
-            None => self.held.waiting.push((tool.to_string(), id)),
+            None => self.held.waiting.push((tool.to_string(), id, asked)),
         }
     }
 
-    /// The newest unanswered `Ask` row of `tool` that holds nothing yet.
-    fn open_dialog_row(&self, tool: &str) -> Option<usize> {
+    /// The newest unanswered `Ask` row of `tool` that holds nothing yet and
+    /// asks what the request does.
+    fn open_dialog_row(&self, tool: &str, asked: &str) -> Option<usize> {
         self.rows.iter().rposition(|row| {
-            matches!(&row.kind, RowKind::Ask(a) if !a.answered && a.held.is_none() && a.tool.as_deref() == Some(tool))
+            matches!(&row.kind, RowKind::Ask(a)
+                if !a.answered && a.held.is_none() && a.tool.as_deref() == Some(tool) && asked_by(a) == asked)
                 && row.id.starts_with("ask:")
         })
     }
@@ -106,8 +131,12 @@ impl Projection {
     /// Ask row `i`, of `tool`, was just put up: a hold that came first lands
     /// on it.
     pub(super) fn dialog_row_up(&mut self, i: usize, tool: &str) {
-        if let Some(n) = self.held.waiting.iter().position(|(t, _)| t == tool) {
-            let (_, id) = self.held.waiting.remove(n);
+        let asked = match &self.rows[i].kind {
+            RowKind::Ask(a) => asked_by(a),
+            _ => return,
+        };
+        if let Some(n) = self.held.waiting.iter().position(|(t, _, a)| t == tool && *a == asked) {
+            let (_, id, _) = self.held.waiting.remove(n);
             self.set_held(i, Some(id), None);
         }
     }
@@ -120,7 +149,7 @@ impl Projection {
             self.held.ended.pop_front();
         }
         self.held.ended.push_back(id.to_string());
-        self.held.waiting.retain(|(_, w)| w != id);
+        self.held.waiting.retain(|(_, w, _)| w != id);
         let by = payload.get("by").and_then(Value::as_str).filter(|b| !b.is_empty()).map(str::to_string);
         let row = self.rows.iter().rposition(|row| matches!(&row.kind, RowKind::Ask(a) if a.held.as_deref() == Some(id)));
         if let Some(i) = row {
