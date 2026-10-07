@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
@@ -54,7 +55,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
@@ -67,6 +71,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.core.TerminalPalette
 import com.farcooler.core.Vt
+import com.farcooler.model.AgentConversation
 import com.farcooler.model.LinkOpen
 import com.farcooler.model.LostPane
 import com.farcooler.model.NotLivePane
@@ -194,6 +199,38 @@ fun TerminalPane(
     val session = remember { TerminalSession(ref.terminalId, connection.core) }
     LaunchedEffect(reshape) { session.reshapeAllowed = reshape }
 
+    // The conversation view of a claude in a terminal (ov-374), where the runner
+    // serves it. Gated on the build the layout reads (`daemon`, failing that
+    // `lastDaemon`), so a reconnect doesn't take the view down for the round
+    // trip until `host` answers.
+    val daemon by connection.daemon.collectAsStateWithLifecycle()
+    val lastDaemon by connection.lastDaemon.collectAsStateWithLifecycle()
+    val offered = AgentConversation.offered(daemon, lastDaemon, terminal)
+    // Held by the connection, not by this composable, so the draft and rows
+    // outlive the pane being evicted from the deck.
+    val claudeInTerminal = terminal != null &&
+        AgentConversation.isClaudeInATerminal(terminal.paneMode, terminal.preset)
+    val nativeModel = remember(ref.terminalId, claudeInTerminal) {
+        if (claudeInTerminal) connection.nativePanes.model(ref.terminalId, model.settings) else null
+    }
+    val native = nativeModel?.takeIf { offered }
+    // The conversation covers the terminal now.
+    val covered = native?.showing == true
+    val conversationList = rememberLazyListState()
+    // The follow runs only while the pane is on screen with the app in front,
+    // and the conversation shows; a conversation that stops being offered
+    // (the setting turned off, claude exited) lets go and starts afresh.
+    LaunchedEffect(nativeModel, offered, live) {
+        if (offered) nativeModel?.setOnScreen(live) else nativeModel?.release()
+    }
+    // Removal stops it: the model outlives this pane, and a follow left running
+    // holds a call on the runner for a pane nobody has.
+    DisposableEffect(nativeModel) {
+        onDispose { nativeModel?.setOnScreen(false) }
+    }
+    val rowsPhase = nativeModel?.store?.shown?.collectAsStateWithLifecycle()?.value?.phase
+    LaunchedEffect(rowsPhase) { if (offered) nativeModel?.phaseChanged() }
+
     // What this pane costs while nobody is reading it: nothing. `resume` and
     // not `relink` — relinking drops the emulator and puts "Loading…" over a tab
     // you had already opened, which is the exact opposite of what mounting
@@ -306,6 +343,13 @@ fun TerminalPane(
             // where it would work: `chatCapable` already reflects the daemon's
             // registry-backed check, so a pane whose agent has no adapter never
             // gets the button in the first place.
+            if (native != null && !native.unavailable) {
+                NativeSwitchButton(showing = covered, onClick = {
+                    native.switchTo(!covered)
+                    // The terminal gives up the keyboard to the conversation.
+                    if (!covered) dismissRequest += 1
+                })
+            }
             if (terminal?.canSwitchPaneMode == true) {
                 IconButton(onClick = {
                     scope.launch {
@@ -339,7 +383,9 @@ fun TerminalPane(
                             modifier = Modifier.testTag("pane-files"),
                         )
                     }
-                    if (terminal?.isAgentPane != true) {
+                    // Not while the conversation covers the terminal: a paste or an
+                    // image path would land in a box nobody can see (ov-373 review 1).
+                    if (terminal?.isAgentPane != true && !covered) {
                         DropdownMenuItem(
                             text = { Text("Paste") },
                             leadingIcon = { Icon(Icons.Outlined.ContentPaste, null) },
@@ -383,6 +429,15 @@ fun TerminalPane(
                     live = live,
                 )
             } else {
+                // The terminal first, always: the conversation coming and going
+                // leaves its identity, and so its stream and its grid, alone.
+                // Out of reach of TalkBack while the conversation covers it, and
+                // still composed.
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .then(if (covered) Modifier.clearAndSetSemantics {} else Modifier)
+                ) {
                 TerminalSurface(
                     session = session,
                     name = name,
@@ -419,6 +474,30 @@ fun TerminalPane(
                         session.sendKey(key, modifiers or consumeModifiers())
                     },
                 )
+                }
+                if (native != null && covered) {
+                    // Over the terminal, and taking its touches: a tap that fell
+                    // through would raise the covered terminal's keyboard.
+                    NativeAgentView(
+                        model = native,
+                        listState = conversationList,
+                        showTerminal = {
+                            native.switchTo(false)
+                        },
+                        modifier = Modifier.pointerInput(Unit) { detectTapGestures { } },
+                    )
+                }
+                // On a tab that draws no bar of its own, the switch floats.
+                if (native != null && !native.unavailable && !showTopBar) {
+                    NativeSwitchButton(
+                        showing = covered,
+                        onClick = {
+                            native.switchTo(!covered)
+                            if (!covered) dismissRequest += 1
+                        },
+                        modifier = Modifier.align(Alignment.TopEnd),
+                    )
+                }
             }
         }
 
@@ -441,7 +520,7 @@ fun TerminalPane(
         // it — each of which would reserve a key row nobody can press, measure
         // its canvas three lines short, and re-assert that wrong shape to tmux
         // the moment it was resumed.
-        if (live && imeVisible && terminal?.isAgentPane != true) {
+        if (live && imeVisible && terminal?.isAgentPane != true && !covered) {
             TerminalKeyRow(
                 ctrlArmed = ctrlArmed,
                 altArmed = altArmed,

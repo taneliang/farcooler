@@ -27,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -40,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -47,6 +49,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.data.Theme
 import com.farcooler.data.Themes
 import com.farcooler.model.AdapterInfo
+import com.farcooler.model.AgentConversation
 import com.farcooler.model.AdapterTestOutcome
 import com.farcooler.model.HostHealth
 import com.farcooler.model.Repository
@@ -93,6 +96,7 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
         }
     }
     var addingRepository by remember { mutableStateOf(false) }
+    var changingConversation by remember { mutableStateOf(false) }
     // The two sections whose read is `Scope::HostAdmin` while this app enrolls
     // at `control`. Their own trouble rather than the screen's one `failure`
     // line, because a denial is about ONE section and the rest of the screen is
@@ -279,6 +283,43 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
                         }
                     }
                 }) { Text("Save") }
+            }
+
+            // Shown only to the runner's host admin, on a runner that has the
+            // setting (ov-374). Changing it reconnects, so the panes are offered
+            // the view on the new hello.
+            val projectorOn by connection.projectorOn.collectAsStateWithLifecycle()
+            if (AgentConversation.offersSetting(daemon, projectorOn)) {
+                Separator()
+                SectionTitle("Claude")
+                Row(
+                    Modifier.fillMaxWidth().testTag("runner-conversation-view"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(AgentConversation.SETTING_TITLE, Modifier.weight(1f))
+                    Switch(
+                        checked = projectorOn == true,
+                        // The switch waits while a change is on its way, so two
+                        // flips can't land out of order.
+                        enabled = !changingConversation,
+                        onCheckedChange = { on ->
+                            changingConversation = true
+                            scope.launch {
+                                try {
+                                    failure = connection.setProjector(on)
+                                } finally {
+                                    changingConversation = false
+                                }
+                            }
+                        },
+                    )
+                }
+                Text(
+                    AgentConversation.SETTING_FOOTER,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
 
             Separator()

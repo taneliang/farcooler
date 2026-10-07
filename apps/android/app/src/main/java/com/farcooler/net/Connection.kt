@@ -42,6 +42,7 @@ import com.farcooler.model.WorkspaceSummary
 import com.farcooler.model.Worktree
 import com.farcooler.model.toJson
 import com.farcooler.core.refusalWord
+import com.farcooler.model.RunnerRefusal
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
@@ -1145,6 +1146,7 @@ class Connection(
         // differently-named branches than the Mac beside it.
         _branchPrefix.value =
             body["branchPrefix"]?.jsonPrimitive?.contentOrNull ?: DEFAULT_BRANCH_PREFIX
+        _projectorOn.value = body["projector"]?.jsonPrimitive?.booleanOrNull
         // Boards this link never read: a sweep before the build was known
         // could not tell the runner keeps a board, and read nothing.
         scope.launch { boardReads.buildLanded(boardList()) }
@@ -1567,6 +1569,40 @@ class Connection(
         return runCatching {
             json.decodeFromJsonElement(HostThemes.serializer(), data).themes
         }.getOrDefault(emptyList())
+    }
+
+    private val _projectorOn = MutableStateFlow<Boolean?>(null)
+
+    /**
+     * Whether the runner's projector, and so the conversation view of its claude
+     * panes, is on (ov-374): null from a runner too old to say.
+     */
+    val projectorOn: StateFlow<Boolean?> = _projectorOn.asStateFlow()
+
+    /**
+     * Every conversation-view pane on this runner, kept for as long as this
+     * connection is, so a pane's draft and rows outlive the screens that show it.
+     */
+    val nativePanes = NativePanes(scope, ClientCall { method, args -> core.call(method, args) })
+
+    /**
+     * Turn the runner's projector on or off (`settings.set_projector`, ov-374),
+     * then reconnect: a hello offers `agent_rows` only while it's on, and this
+     * link's hello was made before. Null when it took; the sentence to show when
+     * it didn't.
+     */
+    suspend fun setProjector(on: Boolean): String? {
+        val failure = attempt { core.call("settings.set_projector", args("on" to on)) }.exceptionOrNull()
+        if (failure != null) {
+            return if (failure.refusalWord == RunnerRefusal.SCOPE_DENIED.word) {
+                "This device can’t change this runner’s settings."
+            } else {
+                "That runner didn’t take the change. Try again in a moment."
+            }
+        }
+        _projectorOn.value = on
+        reconnectNow()
+        return null
     }
 
     suspend fun setBranchPrefix(prefix: String): String? {

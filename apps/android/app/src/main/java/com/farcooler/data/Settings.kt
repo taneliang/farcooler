@@ -33,7 +33,7 @@ enum class TerminalFontChoice(val wire: String, val label: String) {
  * writing keys by hand: the terminal redraws from these on every frame, so what
  * matters is that a change is observable, not that it is transactional.
  */
-class Settings(context: Context) {
+class Settings(context: Context) : com.farcooler.net.PaneViewMemory {
     private val preferences: SharedPreferences =
         context.applicationContext.getSharedPreferences("farcooler.settings", Context.MODE_PRIVATE)
 
@@ -212,6 +212,17 @@ class Settings(context: Context) {
     fun setKeptDestination(encoded: String) {
         if (encoded == keptDestination) return
         preferences.edit().putString(KEY_DESTINATION, encoded).apply()
+    }
+
+    /**
+     * Which view each claude pane in a terminal shows, remembered per pane
+     * (R-27, ov-374): the conversation until one was switched to its terminal.
+     */
+    override fun wantsConversation(terminal: String): Boolean =
+        preferences.getBoolean(com.farcooler.model.AgentConversation.viewKey(terminal), true)
+
+    override fun remember(terminal: String, conversation: Boolean) {
+        preferences.edit().putBoolean(com.farcooler.model.AgentConversation.viewKey(terminal), conversation).apply()
     }
 
     companion object {
