@@ -1955,12 +1955,19 @@ async fn a_held_ask_reaches_needs_you_as_the_shared_fixture_spells_it() {
     let spelled = &fixture["runners"][0]["needs_you"]["items"][0];
     assert_eq!(spelled["kind"], "ask", "the fixture's first item is its ask");
 
+    // The ask is in the list as soon as the hook's `Permission` lands, which
+    // can be a sample BEFORE the watcher has recognized the agent in the pane:
+    // until then the row names the pane by what tmux reports ("shell"). So wait
+    // for the row to be named as the fixture names it, not merely to exist.
     let mut item = serde_json::Value::Null;
-    for _ in 0..100 {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while std::time::Instant::now() < deadline {
         let listed = asking.session.needs_you().await.expect("needs_you");
         if let Some(found) = listed["items"].as_array().unwrap().iter().find(|i| i["ask_id"] == id.as_str()) {
             item = found.clone();
-            break;
+            if item["terminal"]["label"] == spelled["terminal"]["label"] {
+                break;
+            }
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
