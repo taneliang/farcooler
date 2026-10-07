@@ -4636,8 +4636,12 @@ enum DraftHoldState {
   DRAFT_HOLD_STATE_SENT = 2;
   // Withdrawn by the person, or replaced by a newer draft.
   DRAFT_HOLD_STATE_WITHDRAWN = 3;
-  // Not pasted within half an hour, or its terminal went away.
+  // Not pasted within half an hour, its terminal went away, or someone typed
+  // in the pane after the dialog closed.
   DRAFT_HOLD_STATE_EXPIRED = 4;
+  // Past every check, the paste itself failed. It may have reached the box,
+  // so it's never tried again.
+  DRAFT_HOLD_STATE_FAILED = 5;
 }
 
 // `terminal.draft_withdraw` (ov-385): stop waiting to paste `hold_id`. Answers

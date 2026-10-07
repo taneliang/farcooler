@@ -18,7 +18,18 @@
 //!   A claude whose session or hooks can't be found waits, and in the end
 //!   settles as a paste left in the box;
 //! - for codex, which says nothing through hooks, between turns as both the
-//!   watcher and a fresh capture read it, as any Enter into codex is.
+//!   watcher and a fresh capture read it, as any Enter into codex is. codex
+//!   keeps "esc to interrupt" with text in its box (measured on 0.153.4), so
+//!   that reading holds. Any other agent's screen with text in the box was
+//!   never measured, so its answer settles as a paste left in the box.
+//!
+//! **A limit.** A dialog answered from inside Far Cooler, typed in the pane
+//! from the Mac or a phone, is a key typed since the paste: Far Cooler can't
+//! tell a key that went to the dialog from one that went to the box, so the
+//! answer settles "Paste left in the composer; not sent". It's finished only
+//! when the dialog went without a key Far Cooler saw: a tool call that needed
+//! no answer, an ask answered through the hook, or a key typed in a terminal
+//! attached to tmux directly.
 //!
 //! A box holding anything else, or nothing, settles "Paste left in the
 //! composer; not sent", as a box that never matched always has. The text is
@@ -60,6 +71,9 @@ impl Watcher {
             Ok(proven) => proven,
             Err(held) => return Pass::Waiting(held),
         };
+        if !matches!(preset, "claude" | "codex") {
+            return self.settle(wake, Some(task), Some(PASTE_LEFT.into()));
+        }
         let turn = match self.box_of(to, preset).await {
             Ok(Ok((now, Turn::Between))) if composer::holds_exactly(&now, text) => seen,
             Ok(Ok((now, Turn::During))) if composer::holds_exactly(&now, text) => Turn::During,
@@ -104,11 +118,15 @@ impl Watcher {
             Err(mid_turn::NoEnter::Moved) => return self.settle(wake, Some(task), Some(PASTE_LEFT.into())),
         }
         self.mark_told(to.id);
-        if let Some(witness) = witness
-            && !self.queued(&witness, text).await
-        {
-            return self.settle(wake, Some(task), Some(couldnt_confirm(wake.kind)));
-        }
+        // What claude's transcript says took it, not the screen's turn: a box
+        // holding text reads as Idle while claude works.
+        let turn = match &witness {
+            None => turn,
+            Some(witness) => match self.queued_how(witness, text).await {
+                Some(took) => took,
+                None => return self.settle(wake, Some(task), Some(couldnt_confirm(wake.kind))),
+            },
+        };
         self.settle(wake, Some(task), Some(told(wake.kind, to, turn)))
     }
 }

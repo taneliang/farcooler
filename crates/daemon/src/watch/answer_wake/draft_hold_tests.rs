@@ -146,3 +146,41 @@ async fn a_newer_draft_replaces_a_waiting_one() {
     assert_eq!(si.log().matches("PASTE ").count(), 1, "{}", si.log());
     assert!(si.log().contains("PASTE About ov-3: "), "{}", si.log());
 }
+
+/// The dialog closed and someone else's words are in the box: the draft
+/// waits. Once they type there, they've moved on, and it expires rather than
+/// land ahead of what they type next.
+#[tokio::test]
+async fn a_draft_expires_once_someone_types_after_the_dialog_closes() {
+    let b = board().await;
+    let (orchestrator, si, _) = held(&b).await;
+    si.show("draft:fix the flaky").await;
+    b.screen_with(orchestrator.id, "fix the flaky").await;
+    b.watcher.pump_draft_holds().await;
+    assert_eq!(b.watcher.draft_hold(orchestrator.id).unwrap().state, DraftHoldState::Waiting as i32);
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    crate::runtime::mark_input(b.svc.root_dir(), orchestrator.id);
+    b.watcher.pump_draft_holds().await;
+    assert_eq!(b.watcher.draft_hold(orchestrator.id).unwrap().state, DraftHoldState::Expired as i32);
+    si.show("idle").await;
+    b.screen_with(orchestrator.id, "? for shortcuts").await;
+    b.watcher.pump_draft_holds().await;
+    nothing_typed(&si);
+}
+
+/// While an answer may be typed into a pane (`wake_pump` held), no held
+/// draft is pasted: the two can't both go in after one dialog.
+#[tokio::test]
+async fn a_held_draft_waits_while_answers_are_typed() {
+    let b = board().await;
+    let (orchestrator, si, _) = held(&b).await;
+    si.show("idle").await;
+    b.screen_with(orchestrator.id, "? for shortcuts").await;
+    let answering = b.watcher.wake_pump.lock().await;
+    b.watcher.pump_draft_holds().await;
+    nothing_typed(&si);
+    drop(answering);
+    b.watcher.pump_draft_holds().await;
+    si.pasted().await;
+    assert_eq!(b.watcher.draft_hold(orchestrator.id).unwrap().state, DraftHoldState::Sent as i32);
+}

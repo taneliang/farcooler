@@ -57,7 +57,7 @@ impl Session {
 }
 
 /// A hold as both phones read it: `id` as a uuid string, `state` as a word
-/// (`waiting`, `sent`, `withdrawn`, `expired`), and its times in Unix ms.
+/// (`waiting`, `sent`, `withdrawn`, `expired`, `failed`), and its times in Unix ms.
 pub fn draft_hold_json(hold: &pb::DraftHold) -> serde_json::Value {
     let id = Uuid::from_slice(&hold.id).map(|id| id.to_string()).unwrap_or_default();
     json!({
@@ -76,6 +76,7 @@ pub fn draft_hold_state(state: i32) -> &'static str {
         Ok(pb::DraftHoldState::Waiting) => "waiting",
         Ok(pb::DraftHoldState::Sent) => "sent",
         Ok(pb::DraftHoldState::Withdrawn) => "withdrawn",
+        Ok(pb::DraftHoldState::Failed) => "failed",
         _ => "expired",
     }
 }

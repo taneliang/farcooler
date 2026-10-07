@@ -238,14 +238,21 @@ impl Watcher {
     /// Whether `text`, just submitted mid-turn, reached the agent's queue
     /// within `QUEUE_SETTLES`.
     pub(super) async fn queued(&self, witness: &Witness, text: &str) -> bool {
+        self.queued_how(witness, text).await.is_some()
+    }
+
+    /// `queued`, saying how the transcript took it: `Turn::During` for an
+    /// `enqueue` record (it waits in claude's queue), `Turn::Between` for a
+    /// `user` record (it went in as the next prompt).
+    pub(super) async fn queued_how(&self, witness: &Witness, text: &str) -> Option<super::Turn> {
         let deadline = tokio::time::Instant::now() + QUEUE_SETTLES;
         while tokio::time::Instant::now() < deadline {
             tokio::time::sleep(PASTE_POLL).await;
-            if recorded(&witness.path, witness.from, text, witness.queued_before) {
-                return true;
+            if let Some(kind) = recorded_as(&witness.path, witness.from, text, witness.queued_before) {
+                return Some(if kind == "enqueue" { super::Turn::During } else { super::Turn::Between });
             }
         }
-        false
+        None
     }
 }
 
@@ -362,12 +369,19 @@ fn records_between(path: &Path, start: u64, end: u64) -> Vec<serde_json::Value> 
 /// Whether the transcript at `path`, past byte `from`, records `text`
 /// queued, or sent as a prompt when it wasn't queued before (`queued_before`).
 /// Whitespace is ignored, as the box's read-back ignores it.
+#[cfg(test)]
 pub(crate) fn recorded(path: &Path, from: u64, text: &str, queued_before: bool) -> bool {
+    recorded_as(path, from, text, queued_before).is_some()
+}
+
+/// `recorded`, with the record's kind: `enqueue` or `user`.
+fn recorded_as(path: &Path, from: u64, text: &str, queued_before: bool) -> Option<&'static str> {
     let want = squeeze(text);
     records(path, from)
         .iter()
         .filter_map(said)
-        .any(|(kind, held)| squeeze(held) == want && (kind == "enqueue" || !queued_before))
+        .find(|(kind, held)| squeeze(held) == want && (*kind == "enqueue" || !queued_before))
+        .map(|(kind, _)| kind)
 }
 
 fn squeeze(s: &str) -> String {

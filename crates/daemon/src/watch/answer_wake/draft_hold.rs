@@ -13,7 +13,14 @@
 //!   free, through the same checks and the same paste a draft gets now
 //!   (`paste_draft`), with no Enter. Then it reads as sent.
 //! - **Withdrawn** by the person (`withdraw_draft`), or **expired** when it
-//!   hasn't gone in after `GIVE_UP_AFTER_MS`, or its terminal is gone.
+//!   hasn't gone in after `GIVE_UP_AFTER_MS`, its terminal is gone, or
+//!   someone typed in the pane after the dialog closed: they've moved on, and
+//!   a draft landing later would go in ahead of whatever they type next.
+//!   **Failed** when the paste itself failed past every check; it may have
+//!   reached the box, so it's never tried again.
+//! - **Never beside an answer.** A pass runs under the answer wake's own
+//!   lock as well (`wake_pump`), skipping the tick while answers are typed,
+//!   so an answer and a draft waiting behind one dialog can't both paste.
 //! - **Said** through `Terminal.draft_hold`, on every terminal event and
 //!   reply, and kept `ENDED_KEPT_MS` after it ends, so the client that sent it
 //!   can say how it ended.
@@ -30,7 +37,7 @@ use farcooler_store::models::Terminal;
 use uuid::Uuid;
 
 use super::{GIVE_UP_AFTER_MS, Held};
-use crate::runtime::Runtime;
+use crate::runtime::{Runtime, last_input};
 use crate::watch::{Watcher, now_millis};
 
 /// How long a hold that ended stays on its terminal, for the client that
@@ -46,6 +53,9 @@ pub(crate) struct DraftHold {
     state: DraftHoldState,
     held_ms: i64,
     ended_ms: i64,
+    /// When a pass first found no dialog in the way: a key typed from then on
+    /// went to the box, not the dialog.
+    closed_ms: Option<i64>,
 }
 
 impl DraftHold {
@@ -84,7 +94,8 @@ impl Watcher {
     /// waiting there. Called under `draft_pump`.
     pub(super) fn hold_draft(&self, to: &Terminal, text: String) -> pb::DraftHold {
         let now = now_millis();
-        let hold = DraftHold { id: Uuid::now_v7(), text, state: DraftHoldState::Waiting, held_ms: now, ended_ms: 0 };
+        let hold =
+            DraftHold { id: Uuid::now_v7(), text, state: DraftHoldState::Waiting, held_ms: now, ended_ms: 0, closed_ms: None };
         let wire = hold.wire();
         self.draft_holds.lock().unwrap_or_else(|e| e.into_inner()).insert(to.id, hold);
         self.announce_draft_hold(to.id);
@@ -158,6 +169,8 @@ impl Watcher {
             return;
         }
         let Ok(_one_pass) = self.draft_pump.try_lock() else { return };
+        // Not while an answer may be typed into the same pane: next tick.
+        let Ok(_no_answer) = self.wake_pump.try_lock() else { return };
         let now = now_millis();
         let waiting: Vec<(Uuid, DraftHold)> = {
             let mut holds = self.draft_holds.lock().unwrap_or_else(|e| e.into_inner());
@@ -165,15 +178,28 @@ impl Watcher {
             holds.iter().filter(|(_, h)| h.state == DraftHoldState::Waiting).map(|(t, h)| (*t, h.clone())).collect()
         };
         for (terminal, hold) in waiting {
+            let typed_since = |closed: i64| last_input(self.service.root_dir(), terminal).is_some_and(|at| at >= closed);
             let ended = match self.service.store.get_terminal(terminal) {
                 Err(_) => Some(DraftHoldState::Expired),
                 Ok(_) if now - hold.held_ms > GIVE_UP_AFTER_MS => Some(DraftHoldState::Expired),
+                Ok(_) if hold.closed_ms.is_some_and(typed_since) => Some(DraftHoldState::Expired),
                 Ok(to) => match self.paste_draft(&to, &hold.text).await {
                     Ok(Ok(())) => Some(DraftHoldState::Sent),
                     // Past the gate, and the send failed: it may have reached
                     // the box, so it's never pasted again.
-                    Ok(Err(_)) => Some(DraftHoldState::Expired),
-                    Err(_) => None,
+                    Ok(Err(_)) => Some(DraftHoldState::Failed),
+                    Err(Held::Prompt) => None,
+                    // The dialog is gone, and something else is in the way:
+                    // from now, a key typed is the person moving on.
+                    Err(_) => {
+                        if hold.closed_ms.is_none()
+                            && let Some(held) =
+                                self.draft_holds.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&terminal)
+                        {
+                            held.closed_ms = Some(now_millis());
+                        }
+                        None
+                    }
                 },
             };
             let Some(state) = ended else { continue };

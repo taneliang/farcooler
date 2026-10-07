@@ -69,7 +69,9 @@
 //! only the Enter, once the dialog has gone, the box holds exactly the text,
 //! nobody has typed since the paste, and every check the first Enter passed
 //! passes again (`finish`). A box holding anything else is "Paste left in the
-//! composer; not sent", as before; the text is never typed twice.
+//! composer; not sent", as before; the text is never typed twice. A dialog
+//! answered by typing in the pane from Far Cooler counts as a key typed since
+//! the paste, so that answer settles as a paste left in the box (`finish`).
 //!
 //! **Mid-turn** (ov-360). claude takes a message submitted while it works,
 //! as the person typing it would, and queues it for its next turn. Measured
