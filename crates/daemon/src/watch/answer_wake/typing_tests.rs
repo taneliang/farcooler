@@ -55,11 +55,15 @@ async fn a_held_box_stalls_no_other_panes_answer_or_draft() {
     .await;
     assert!(passes.is_ok(), "a pass waited on the held box");
     nothing_typed(&answered);
+    // The skipped answer re-arms the hint, which is all that makes the next
+    // tick's `spawn_pumps` try it again.
+    assert!(b.watcher.wakes_hint.load(Ordering::SeqCst), "a skipped answer was not set to be retried");
     drafting.pasted().await;
     assert_eq!(b.watcher.draft_hold(orchestrator.id).unwrap().state, DraftHoldState::Sent as i32, "{}", drafting.log());
     // The answer was only put off: it lands once the box is free.
+    // Delivered the way a tick does it, never by setting the hint here.
     drop(composing);
-    b.pump().await;
+    b.watcher.spawn_pumps();
     answered.submits(1).await;
     assert_eq!(answered.submitted(), [b.told("Drill in")], "{}", answered.log());
 }

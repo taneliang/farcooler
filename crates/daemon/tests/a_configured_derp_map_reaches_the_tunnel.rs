@@ -188,6 +188,7 @@ impl Runner {
         let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_farcoolerd"));
         command
             .env("FARCOOLER_HOME", &runtime)
+            .env("FARCOOLER_CONFIG", runtime.join("config.toml"))
             .env("FARCOOLER_TEST_STUB_AGENTS", "1")
             .env("HOME", &home)
             .env("FARCOOLER_TUNNEL_HELPER", &helper)

@@ -415,6 +415,7 @@ async fn start(client_id: &str, scope: Scope) -> Runner {
 async fn listening_daemon_in(runtime: &Path, home: &Path) -> DaemonChild {
     let child = Command::new(env!("CARGO_BIN_EXE_farcoolerd"))
         .env("FARCOOLER_HOME", runtime)
+        .env("FARCOOLER_CONFIG", runtime.join("config.toml"))
         .env("FARCOOLER_TEST_STUB_AGENTS", "1")
         .env("HOME", home)
         .stdout(std::process::Stdio::null())

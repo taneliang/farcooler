@@ -696,8 +696,11 @@ impl Watcher {
     }
 
     /// Hold `terminal`'s box for typing: one paste and its Enter at a time,
-    /// whoever types. Every typing path takes it last, after `wake_pump` or
-    /// `draft_pump`, so the order of the locks never crosses. Before
+    /// whoever types. The order of the locks never crosses: the passes that
+    /// hold `wake_pump` or `draft_pump` only try the box (`try_typing`) and
+    /// skip a pane that's taken, so they never wait on it; `draft_into` takes
+    /// the box first and `draft_pump` second; compose and tell take only the
+    /// box. Before
     /// ov-372 only answers and drafts kept apart; `terminal.compose` reaches
     /// the worker panes they're typed into, and a held draft pasted after a
     /// composed message's read-back would have gone out with its Enter.

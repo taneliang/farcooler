@@ -180,8 +180,9 @@ impl Watcher {
         }
         // Never while an answer may be typed into the same pane: after it.
         // `wake_pump` first, so the wait holds nothing a person's draft or
-        // withdrawal (`draft_into`, `withdraw_draft`, which take only
-        // `draft_pump`) would queue behind.
+        // withdrawal would queue behind: `withdraw_draft` takes only
+        // `draft_pump`, and `draft_into` takes a pane's box and then
+        // `draft_pump` (so a pass that holds `draft_pump` only tries a box).
         let _no_answer = self.wake_pump.lock().await;
         let Ok(_one_pass) = self.draft_pump.try_lock() else { return };
         let now = now_millis();

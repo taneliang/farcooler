@@ -28,6 +28,7 @@ impl Scratch {
     fn run(&self, args: &[&str]) -> (bool, String, String) {
         let out = Command::new(env!("CARGO_BIN_EXE_farcooler"))
             .env("FARCOOLER_HOME", self.home.join("h"))
+            .env("FARCOOLER_CONFIG", self.home.join("config.toml"))
             .args(args)
             .output()
             .expect("run farcooler");

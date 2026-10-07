@@ -51,6 +51,7 @@ struct Ran {
 fn pipe(home: &Path, id: &str) -> Ran {
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_farcooler"))
         .env("FARCOOLER_HOME", home)
+        .env("FARCOOLER_CONFIG", home.join("config.toml"))
         .args(["runner", "pipe", id])
         .output()
         .expect("run farcooler runner pipe");
