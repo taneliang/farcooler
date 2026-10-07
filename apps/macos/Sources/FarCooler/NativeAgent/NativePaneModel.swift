@@ -228,7 +228,7 @@ final class NativePaneModel: ObservableObject {
             for image in images { detach(image.id) }
             if wasQueued { queued.append(Self.echo(text, images: images.count)) }
         } catch {
-            issue = Self.issue(for: error)
+            issue = Self.issue(for: error, command: text.trimmingCharacters(in: .whitespaces).hasPrefix("/"))
         }
     }
 
@@ -239,12 +239,16 @@ final class NativePaneModel: ObservableObject {
         return (Array(repeating: "[Image]", count: images) + (trimmed.isEmpty ? [] : [trimmed])).joined(separator: " ")
     }
 
-    /// A message's words without its images' placeholders (claude's
-    /// `[Image #N]`, the echo's `[Image]`) or the white space around them,
-    /// so an echo and the transcript's row for it compare equal.
+    /// What an echo and the transcript's row for it share: how many images
+    /// the message has (claude's `[Image #N]`, the echo's `[Image]`), and its
+    /// words without them or the white space around them. So an echo of two
+    /// images is never taken for a row of one.
     static func words(_ text: String) -> String {
-        text.replacingOccurrences(of: #"\[Image( #\d+)?\]"#, with: "", options: .regularExpression)
+        let placeholder = #"\[Image( #\d+)?\]"#
+        let images = (try? Regex(placeholder)).map { text.ranges(of: $0).count } ?? 0
+        let words = text.replacingOccurrences(of: placeholder, with: "", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        return "\(images) \(words)"
     }
 
     /// The page above the oldest row held.
@@ -267,7 +271,9 @@ final class NativePaneModel: ObservableObject {
         queued.removeAll { words.contains(Self.words($0)) }
     }
 
-    static func issue(for error: Error) -> SendIssue {
+    /// `command` when the message was a slash command, which says which
+    /// limit `images` means.
+    static func issue(for error: Error, command: Bool = false) -> SendIssue {
         let failure = error as? RunnerCore.Failure
         switch failure?.what {
         case "prompt", "dialog": return .handoff
@@ -283,7 +289,9 @@ final class NativePaneModel: ObservableObject {
         case "not_running", "not_an_agent": return .said("Claude isn’t running in this pane.")
         case "unfamiliar", "unproven": return .said("Far Cooler can’t read this terminal’s box, so nothing was typed.")
         case "images_too_large": return .said(imagesTooLarge)
-        case "images": return .said("A slash command can’t carry images, and a message takes at most \(mostImages).")
+        case "images": return .said(command ? commandWithImages : tooManyImages)
+        case "image_too_large": return .said(imageTooLarge)
+        case "backslash": return .said(backslash)
         case "image": return .said("One of the images couldn’t be read, so nothing was sent.")
         case "unconfirmable": return .said("Far Cooler can’t find Claude’s session to confirm a send, so nothing was typed.")
         case "unsupported": return .said("Only Claude can take a message from here. Use the terminal.")
@@ -310,6 +318,9 @@ final class NativePaneModel: ObservableObject {
     static let commandRefused = "Claude would run that as a shell command or doesn’t have that command, so it wasn’t sent. Use the terminal for it."
     static let imagesTooLarge = "These images are too large to send together. Send fewer or smaller ones."
     static let tooManyImages = "A message takes at most \(mostImages) images."
+    static let commandWithImages = "A slash command can’t carry images. Send it without them."
+    static let imageTooLarge = "That image is too large to send. Use a smaller one."
+    static let backslash = "Claude reads a backslash at the end as a new line, so the message wasn’t sent. Remove it, or add a word after it."
     static let unconfirmed = "Claude didn’t confirm it took the message. Check the pane before sending it again."
     static let mayHaveBeenSent = "The runner didn’t answer in time. The message may have been sent, so check the terminal before sending it again."
 

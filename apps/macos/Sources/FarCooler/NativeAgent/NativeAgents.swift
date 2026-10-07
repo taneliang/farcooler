@@ -221,9 +221,10 @@ final class NativeAgents: ObservableObject {
     }
 
     /// For tests: the setting as if turned on, against `core`.
-    func pretend(enabled: Bool, rowsServed: Bool, core: RunnerCore?) {
+    func pretend(enabled: Bool, rowsServed: Bool, core: RunnerCore?, offered: Set<String> = []) {
         self.enabled = enabled
         self.rowsServed = rowsServed
         self.core = core
+        self.offered = offered
     }
 }
