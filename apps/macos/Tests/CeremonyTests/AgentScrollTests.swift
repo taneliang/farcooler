@@ -106,6 +106,29 @@ struct AgentScrollTests {
         return done()
     }
 
+    /// Puts the scroll view at `y` and keeps putting it there until `done`:
+    /// a reader who has scrolled. Once, it can be undone before the chat has
+    /// seen it: a jump's landing re-targets the end, and SwiftUI applies that
+    /// at its next update, which a loaded machine reaches late, after the
+    /// scroll and with no geometry event that shows the step. The reader's
+    /// scroll isn't what's under test there, the chat's reading of it is.
+    static func scroll(_ scroll: NSScrollView, to y: CGFloat, until done: () -> Bool) async -> Bool {
+        await until {
+            if done() { return true }
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            return false
+        }
+    }
+
+    /// SwiftUI's pending updates, applied now rather than whenever a loaded
+    /// machine gets to them.
+    static func flush(_ host: NSView, _ window: NSWindow) {
+        CATransaction.flush()
+        host.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+    }
+
     /// The window as the window server composites it, glass included, to
     /// `FARCOOLER_CAPTURE_OUT/agent-scroll-<name>.png` when that's set:
     /// captures for a review, off in CI.
@@ -284,9 +307,8 @@ struct AgentScrollTests {
         // reads a step up as a height correction, not the reader.
         #expect(await Self.until { !probe.jumping }, "Jump to Latest never landed")
         let tailOffset = try #require(probe.geometry?.contentOffset.y)
-        scroll.contentView.scroll(to: NSPoint(x: 0, y: tailOffset - 70))
-        scroll.reflectScrolledClipView(scroll.contentView)
-        #expect(await Self.until(10) { probe.showsJump }, "a tail 70 pt under the composer counted as seen")
+        Self.flush(host, window)
+        #expect(await Self.scroll(scroll, to: tailOffset - 70) { probe.showsJump }, "a tail 70 pt under the composer counted as seen")
     }
 
     /// A jump in flight with one step back made on the first geometry event
@@ -340,9 +362,7 @@ struct AgentScrollTests {
         #expect(await Self.until(60) { (probe.geometry?.contentSize.height ?? 0) > 2_000 }, "the history never laid out")
         await Self.settle()
         let scroll = try #require(Self.scrollView(in: host))
-        scroll.contentView.scroll(to: NSPoint(x: 0, y: 100))
-        scroll.reflectScrolledClipView(scroll.contentView)
-        #expect(await Self.until(10) { probe.showsJump }, "scrolling up didn't offer Jump to Latest")
+        #expect(await Self.scroll(scroll, to: 100) { probe.showsJump }, "scrolling up didn't offer Jump to Latest")
         await Self.settle()
         try await body(probe, scroll, host, window)
     }
@@ -417,10 +437,10 @@ struct AgentScrollTests {
             #expect(await Self.until { probe.following && (probe.tailHiddenBy ?? .infinity) <= 0.5 })
             // Landed, or the scroll up below reads as a height correction.
             #expect(await Self.until { !probe.jumping }, "the first jump never landed")
-            scroll.contentView.scroll(to: NSPoint(x: 0, y: 100))
-            scroll.reflectScrolledClipView(scroll.contentView)
-            #expect(await Self.until(10) { probe.showsJump })
+            Self.flush(host, window)
+            #expect(await Self.scroll(scroll, to: 100) { probe.showsJump }, "scrolling up after the jump didn't offer Jump to Latest")
             await Self.settle()
+            Self.flush(host, window)
             let detached = probe.detaches
             AgentSurface.jumpDuration = Self.longFlight
             Self.clickJump(probe, host, window)
