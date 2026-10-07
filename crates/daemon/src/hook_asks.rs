@@ -160,8 +160,11 @@ struct Heard {
     /// may be in flight unseen, so the session isn't typed into mid-turn.
     turn_seen: bool,
     /// The main thread's latest prompts (`UserPromptSubmit`), whitespace
-    /// dropped, newest last: what says a prompt typed in went in (ov-367).
-    prompts: std::collections::VecDeque<(Instant, String)>,
+    /// dropped, newest last, each with whether it was added to claude's
+    /// queue mid-turn: what says a prompt typed in went in (ov-367).
+    prompts: std::collections::VecDeque<(Instant, String, bool)>,
+    /// The turns (`prompt_id`) any hook from the session has named lately.
+    turns: std::collections::VecDeque<String>,
     /// The fence's lock.
     fence: Arc<tokio::sync::Mutex<()>>,
 }
@@ -208,6 +211,19 @@ const GATE_RECENT: Duration = Duration::from_secs(2);
 
 /// Prompts remembered per session, for `prompted_since`.
 const PROMPTS_KEPT: usize = 8;
+/// Turns remembered per session, for `prompted`.
+const TURNS_KEPT: usize = 32;
+
+/// Note the turn `prompt_id` as named by a hook.
+fn saw(heard: &mut Heard, prompt_id: &str) {
+    if heard.turns.iter().any(|t| t == prompt_id) {
+        return;
+    }
+    if heard.turns.len() >= TURNS_KEPT {
+        heard.turns.pop_front();
+    }
+    heard.turns.push_back(prompt_id.to_string());
+}
 
 /// Sessions remembered before the oldest are let go: far more than a runner
 /// runs at once.
@@ -241,6 +257,7 @@ impl HookAsks {
             calls: HashMap::new(),
             turn_seen: false,
             prompts: Default::default(),
+            turns: Default::default(),
             fence: Arc::default(),
         });
         heard.at = now;
@@ -309,23 +326,42 @@ impl HookAsks {
         }
     }
 
-    /// `session` took `prompt` as its next turn (`UserPromptSubmit`, the main
-    /// thread's). Kept for `prompted_since`, the last `PROMPTS_KEPT`.
-    pub fn prompted(&self, session: &str, prompt: &str) {
+    /// A hook from `session` named the turn `prompt_id`.
+    pub fn saw_turn(&self, session: &str, prompt_id: &str) {
         if let Some(heard) = self.sessions.lock().unwrap_or_else(|e| e.into_inner()).get_mut(session) {
-            if heard.prompts.len() >= PROMPTS_KEPT {
-                heard.prompts.pop_front();
-            }
-            heard.prompts.push_back((Instant::now(), prompt.chars().filter(|c| !c.is_whitespace()).collect()));
+            saw(heard, prompt_id);
         }
     }
 
+    /// `session` took `prompt` (`UserPromptSubmit`, the main thread's), in
+    /// the turn `prompt_id`: as its next turn, or, when a hook already named
+    /// that turn, into its queue mid-turn. Measured on claude 2.1.290: a
+    /// message submitted while a turn runs fires `UserPromptSubmit` at once,
+    /// carrying the running turn's `prompt_id`, and none fires when it's later
+    /// run. Returns whether it was queued. Kept for `prompted_since`, the last
+    /// `PROMPTS_KEPT`.
+    pub fn prompted(&self, session: &str, prompt: &str, prompt_id: Option<&str>) -> bool {
+        let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(heard) = sessions.get_mut(session) else { return false };
+        let queued = prompt_id.is_some_and(|id| heard.turns.iter().any(|t| t == id));
+        if let Some(id) = prompt_id {
+            saw(heard, id);
+        }
+        if heard.prompts.len() >= PROMPTS_KEPT {
+            heard.prompts.pop_front();
+        }
+        heard.prompts.push_back((Instant::now(), prompt.chars().filter(|c| !c.is_whitespace()).collect(), queued));
+        queued
+    }
+
     /// Whether `session` took a prompt reading `prompt`, whitespace aside, at
-    /// or after `since`.
-    pub fn prompted_since(&self, session: &str, since: Instant, prompt: &str) -> bool {
+    /// or after `since`: `Some(false)` as its next turn, `Some(true)` into its
+    /// queue (`prompted`), `None` not at all.
+    pub fn prompted_since(&self, session: &str, since: Instant, prompt: &str) -> Option<bool> {
         let want: String = prompt.chars().filter(|c| !c.is_whitespace()).collect();
         let sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
-        sessions.get(session).is_some_and(|h| h.prompts.iter().any(|(at, said)| *at >= since && *said == want))
+        let heard = sessions.get(session)?;
+        heard.prompts.iter().rev().find(|(at, said, _)| *at >= since && *said == want).map(|(_, _, queued)| *queued)
     }
 
     /// The subagent `agent` in `session` stopped (`SubagentStop`): none of

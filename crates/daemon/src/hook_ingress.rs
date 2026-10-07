@@ -799,9 +799,10 @@ impl HookIngress {
             }
             if is_fence(hook.agent, &hook.event) {
                 fence::answer(&self.asks, session, &hook.payload, &mut write).await?;
-            } else if let Some(session) = session {
-                fence::ended(&self.asks, session, &hook.event, &hook.payload);
             }
+            // Not a queued message's `UserPromptSubmit`, which bounds no turn.
+            let bounds = is_fence(hook.agent, &hook.event)
+                || session.is_none_or(|session| fence::ended(&self.asks, session, &hook.event, &hook.payload));
             let terminal = self.terminal_for(&f, hook.agent);
             if is_gate(hook.agent, &hook.event) {
                 let Some(terminal) = terminal else {
@@ -826,7 +827,7 @@ impl HookIngress {
             };
             // A turn cannot end or begin with claude's dialog up, so whatever
             // was asked on this pane has been answered at the keyboard.
-            if fence::bounds_turn(hook.agent, &hook.event, &hook.payload) {
+            if bounds && fence::bounds_turn(hook.agent, &hook.event, &hook.payload) {
                 self.asks.turn_boundary(terminal);
             }
             self.start_transcript_tail(terminal, hook.agent, &f);

@@ -25,11 +25,14 @@
 //! through the session's fence (`mid_turn`), so it can't land on a dialog;
 //! claude puts the message in its own queue (R-29).
 //!
-//! **The confirmation.** Sent only once the session's `UserPromptSubmit`
-//! hook names the prompt, Queued only once claude's transcript has its
-//! `enqueue` record; a session no hook was ever heard from is confirmed by
-//! the prompt's record in the transcript. Neither within `CONFIRM_SETTLES`:
-//! `unconfirmed`.
+//! **The confirmation.** Queued only once claude's transcript has its
+//! `enqueue` record; Sent only once the session's `UserPromptSubmit` hook
+//! names the prompt as a turn of its own. On claude 2.1.290 a message
+//! submitted mid-turn fires that hook too, at once, naming the running
+//! turn's `prompt_id`, so a hook for a turn already named is a queued one
+//! (`HookAsks::prompted`), never a Sent. A session no hook was ever heard
+//! from is confirmed by the prompt's record in the transcript. None of these
+//! within `CONFIRM_SETTLES`: `unconfirmed`.
 //!
 //! **Not typed.** A text starting with `!`, which turns claude's box into a
 //! shell (`command`); a command whose name isn't one (a path); claude's
@@ -351,13 +354,17 @@ impl Watcher {
         while tokio::time::Instant::now() < deadline {
             tokio::time::sleep(PASTE_POLL).await;
             let hooked = asks.hooked(&took.session);
-            if hooked && asks.prompted_since(&took.session, took.since, &took.submitted) {
+            let recorded = mid_turn::recorded_as(&took.transcript, took.from, &took.submitted, took.queued_before);
+            if recorded == Some("enqueue") {
+                return Some(Turn::During);
+            }
+            // A hook for a message claude queued names the running turn
+            // (`HookAsks::prompted`): only its `enqueue` record says Queued.
+            if hooked && asks.prompted_since(&took.session, took.since, &took.submitted) == Some(false) {
                 return Some(Turn::Between);
             }
-            match mid_turn::recorded_as(&took.transcript, took.from, &took.submitted, took.queued_before) {
-                Some("enqueue") => return Some(Turn::During),
-                Some(_) if !hooked => return Some(Turn::Between),
-                _ => {}
+            if recorded.is_some() && !hooked {
+                return Some(Turn::Between);
             }
         }
         None

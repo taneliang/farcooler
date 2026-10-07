@@ -25,9 +25,11 @@ fn hooked(b: &Board) {
     b.svc.hooks().asks().turn_bounded(SESSION);
 }
 
-/// claude's `UserPromptSubmit`, for each prompt the stand-in submits or
-/// command it runs, as `hook_ingress` records it: what the stand-in logged,
-/// its line breaks back. Stops when the test ends.
+/// claude's `UserPromptSubmit`, as `hook_ingress` records it, for each prompt
+/// the stand-in submits or command it runs, each a turn of its own; and, as
+/// claude 2.1.290 does, for each message it queues mid-turn, at once and
+/// naming the running turn. What the stand-in logged, its line breaks back.
+/// Stops when the test ends.
 pub(super) fn hook_on_submit(b: &Board, si: &StandIn) -> tokio::task::JoinHandle<()> {
     let asks = b.svc.hooks().asks().clone();
     let log = si.log.clone();
@@ -35,15 +37,16 @@ pub(super) fn hook_on_submit(b: &Board, si: &StandIn) -> tokio::task::JoinHandle
         let mut seen = 0;
         loop {
             let said = std::fs::read_to_string(&log).unwrap_or_default();
-            let prompts: Vec<String> = said
-                .lines()
-                .filter_map(|l| l.strip_prefix("SUBMIT ").or_else(|| l.strip_prefix("COMMAND ")))
-                .map(|p| p.replace("\\n", "\n"))
-                .collect();
-            for prompt in &prompts[seen.min(prompts.len())..] {
-                asks.prompted(SESSION, prompt);
+            let lines: Vec<&str> = said.lines().filter(|l| ["SUBMIT ", "COMMAND ", "QUEUED "].iter().any(|k| l.starts_with(k))).collect();
+            for (n, line) in lines.iter().enumerate().skip(seen) {
+                let (kind, prompt) = line.split_once(' ').unwrap_or_default();
+                let turn = if kind == "QUEUED" { "running".to_string() } else { format!("turn-{n}") };
+                if kind == "QUEUED" {
+                    asks.saw_turn(SESSION, &turn);
+                }
+                asks.prompted(SESSION, &prompt.replace("\\n", "\n"), Some(&turn));
             }
-            seen = prompts.len();
+            seen = lines.len();
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
@@ -179,8 +182,9 @@ async fn a_draft_or_a_dialog_is_refused_untyped() {
 }
 
 /// Working: the message goes into claude's own queue through the fence, and
-/// is Queued once the `enqueue` record holds it, whole. It reaches claude
-/// when the turn ends.
+/// is Queued once the `enqueue` record holds it, whole, though claude's hook
+/// names it at once as it does a turn's prompt. It reaches claude when the
+/// turn ends.
 #[tokio::test]
 async fn busy_is_queued_once_the_enqueue_record_holds_it() {
     let b = board().await;
@@ -188,6 +192,7 @@ async fn busy_is_queued_once_the_enqueue_record_holds_it() {
     si.show("working").await;
     b.screen_with(agent.id, "esc to interrupt").await;
     b.doing(agent.id, AgentActivity::Working).await;
+    let _hook = hook_on_submit(&b, &si);
     let five = "later 1\nlater 2\nlater 3\nlater 4\nlater 5";
     assert_eq!(b.watcher.compose_into(agent.id, five, &[]).await.expect("queued"), Turn::During);
     assert!(si.log().contains("QUEUED later 1\\nlater 2"), "{}", si.log());
@@ -198,7 +203,8 @@ async fn busy_is_queued_once_the_enqueue_record_holds_it() {
     assert_eq!(si.submitted(), [five.replace('\n', "\\n")], "{}", si.log());
 }
 
-/// Working with no `enqueue` record written: no Queued.
+/// Working with no `enqueue` record written: no Queued, and no Sent for the
+/// hook that names the running turn.
 #[tokio::test]
 async fn busy_with_no_enqueue_record_is_unconfirmed() {
     let b = board().await;
@@ -206,6 +212,7 @@ async fn busy_with_no_enqueue_record_is_unconfirmed() {
     si.show("working-quiet").await;
     b.screen_with(agent.id, "esc to interrupt").await;
     b.doing(agent.id, AgentActivity::Working).await;
+    let _hook = hook_on_submit(&b, &si);
     assert_eq!(refused(b.watcher.compose_into(agent.id, "a\nb", &[]).await), "unconfirmed");
     assert!(si.log().contains("QUEUED a\\nb"), "{}", si.log());
 }
