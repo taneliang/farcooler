@@ -159,6 +159,9 @@ private struct ToolRow: View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
                 StatusMark(status: tool.status)
+                if !tool.diff.isEmpty {
+                    DisclosureButton(expanded: open, accessibilityLabel: "Diff", width: 12) { open.toggle() }
+                }
                 Text(tool.name).fontWeight(.medium)
                 Text(tool.summary)
                     .font(.callout.monospaced())
@@ -166,11 +169,6 @@ private struct ToolRow: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: Spacing.group)
-                if !tool.diff.isEmpty {
-                    Button(open ? "Hide Diff" : "Show Diff") { open.toggle() }
-                        .buttonStyle(.link)
-                        .font(.caption)
-                }
                 RunTimeChip(startedMs: tool.startedMs, endedMs: tool.endedMs)
             }
             if open {

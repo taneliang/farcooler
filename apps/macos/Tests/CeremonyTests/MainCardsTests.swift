@@ -181,6 +181,8 @@ struct MainCardsTests {
         let inside: Set<String> = [
             "ContentView+WorkspaceDetail.swift",  // the task's overview tab
             "AgentSurface.swift", "ChangesPane.swift", "Files/CodeView.swift", "Files/FilesPane.swift",
+            // A pane's native view, in the pane's card as the chat is (ov-372).
+            "NativeAgent/NativeAgentView.swift",
         ]
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().appendingPathComponent("Sources/FarCooler")
