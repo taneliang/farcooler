@@ -10,6 +10,8 @@ struct NativeRowView: View {
     /// (`MarkdownText.streaming`, ov-382).
     var isLast = false
     let showTerminal: () -> Void
+    /// A waiting Queued row's Send Now (ov-368), where it's offered.
+    var sendNow: (() -> Void)?
 
     var body: some View {
         let row = box.row
@@ -24,7 +26,7 @@ struct NativeRowView: View {
             case .tool(let tool): ToolRow(tool: tool)
             case .subagent(let subagent): SubagentRow(subagent: subagent)
             case .ask(let ask): AskRow(ask: ask, showTerminal: showTerminal)
-            case .queued(let queued): QueuedLine(text: queued.text, state: queued.state)
+            case .queued(let queued): QueuedLine(text: queued.text, state: queued.state, sendNow: sendNow)
             case .notice(let notice): NoticeLine(text: notice.text)
             case .handoff(let handoff): HandoffRow(reason: handoff.reason, showTerminal: showTerminal)
             case .gap(let gap): NoticeLine(text: NativeCopy.gap(gap))
@@ -285,6 +287,9 @@ private struct AskRow: View {
 struct QueuedLine: View {
     let text: String
     var state: String = "Waiting"
+    /// Send Now (ov-368): claude takes every waiting message now, rather than
+    /// when its turn ends. Only on a message still waiting, where offered.
+    var sendNow: (() -> Void)?
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
@@ -292,6 +297,12 @@ struct QueuedLine: View {
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
             Text(text).lineLimit(2)
+            if state == "Waiting", let sendNow {
+                Button("Send Now", action: sendNow)
+                    .controlSize(.small)
+                    .help("Claude reads the queued messages now instead of after this turn.")
+                    .identified("native-send-now")
+            }
         }
         .padding(.horizontal, Spacing.inset)
         .padding(.vertical, Spacing.group)

@@ -84,6 +84,11 @@ final class NativePaneModel: ObservableObject {
 
     /// Where sends go: the runner's connection, replaced on a reconnect.
     var sink: (any ComposeSink)?
+    /// Where Stop and Send Now go (ov-368): the runner's connection, where
+    /// it serves `terminal_interrupt`; nil, and neither is offered, where not.
+    @Published var keys: (any InterruptSink)?
+    /// A Stop or a Send Now on its way, until the runner answers.
+    @Published var pressing: PaneKey?
     /// Where rows come from, once the runner is connected.
     var source: (any AgentRowSource)? {
         didSet { if source != nil { following = false } }

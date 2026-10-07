@@ -24,13 +24,14 @@ struct NativeAgentView: View {
                         .onAppear { model.loadOlder() }
                 }
                 let last = store.ids.last
+                let sendNow: (() -> Void)? = model.offersSendNow ? { Task { await model.sendNow() } } : nil
                 ForEach(store.ids, id: \.self) { id in
                     if let box = store.box(id) {
-                        NativeRowView(box: box, isLast: id == last, showTerminal: showTerminal)
+                        NativeRowView(box: box, isLast: id == last, showTerminal: showTerminal, sendNow: sendNow)
                     }
                 }
                 ForEach(model.queued.indices, id: \.self) { i in
-                    QueuedLine(text: model.queued[i])
+                    QueuedLine(text: model.queued[i], sendNow: sendNow)
                 }
                 if model.issue == .handoff {
                     HandoffRow(reason: "Claude is showing something only the terminal can.", showTerminal: showTerminal)
@@ -98,8 +99,8 @@ struct NativeAgentView: View {
 /// images come by paste, drop or the paperclip and wait as chips, and a
 /// slash command goes to claude's picker. Without it, one line and no images.
 ///
-/// A seam for what comes later: interrupt and Send Now (ov-368), a button
-/// beside Send while the turn runs, and on each Queued row.
+/// While claude works, Stop sits beside Send, with ⌘. as its shortcut in the
+/// focused pane (ov-368); each waiting Queued row has Send Now.
 struct NativeComposer: View {
     @ObservedObject var model: NativePaneModel
     let isFocused: Bool
@@ -126,6 +127,7 @@ struct NativeComposer: View {
                         .identified("native-attach")
                     }
                     field
+                    if model.offersStop { stopButton }
                     sendButton
                 }
             }
@@ -207,6 +209,24 @@ struct NativeComposer: View {
             let images = ComposeImage.from(urls: panel.urls)
             Task { @MainActor in model.attach(images) }
         }
+    }
+
+    /// Stop: one Esc in the terminal, pressed by the runner only while
+    /// claude works and nothing is asking (ov-368).
+    private var stopButton: some View {
+        Button {
+            Task { await model.stop() }
+        } label: {
+            Image(systemName: "stop.circle.fill")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+        .disabled(model.pressing != nil)
+        .keyboardShortcut(isFocused ? KeyboardShortcut(".", modifiers: .command) : nil)
+        .help("Stop")
+        .accessibilityLabel("Stop")
+        .identified("native-stop")
     }
 
     private var sendButton: some View {

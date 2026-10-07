@@ -90,7 +90,9 @@ struct NativeAgentRunnerTests {
             #expect(set.ok, "\(set.err)")
             #expect((try? String(contentsOfFile: home + "/config.toml", encoding: .utf8))?.contains("projector = true") == true)
             let fresh = RunnerCore()
-            #expect(try await fresh.connect(socket: socket).contains("agent_rows"))
+            let offered = try await fresh.connect(socket: socket)
+            #expect(offered.contains("agent_rows"))
+            #expect(offered.contains("terminal_interrupt"), "Stop and Send Now are served (ov-368)")
 
             _ = await farcooler(["root", "add", home + "/repos"], home: home)
             _ = await farcooler(["repo", "register", demo], home: home)
@@ -170,6 +172,22 @@ struct NativeAgentRunnerTests {
             let staged = FileManager.default.enumerator(atPath: home + "/h")?.compactMap { $0 as? String }
                 .filter { $0.contains("pastes/.staged/") } ?? []
             #expect(staged.isEmpty, "\(staged)")
+
+            // Stop and Send Now (ov-368) go over the wire and come back with
+            // the runner's word for a pane it won't press a key in: no claude
+            // in front, so nothing pressed.
+            for key in [PaneKey.stop, .sendNow] {
+                do {
+                    switch key {
+                    case .stop: try await fresh.interrupt(terminal: terminal)
+                    case .sendNow: try await fresh.sendNow(terminal: terminal)
+                    }
+                    Issue.record("a stand-in pane took \(key)")
+                } catch let failure as RunnerCore.Failure {
+                    print("NATIVE-RUNNER \(key) refused: \(failure)")
+                    #expect(failure.what == "not_an_agent", "\(failure)")
+                }
+            }
         }
     }
 

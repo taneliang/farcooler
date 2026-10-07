@@ -197,6 +197,8 @@ final class NativeAgents: ObservableObject {
         model.sink = core
         // Line breaks, images and commands where the runner takes them.
         model.rich = offered.contains(Capability.compose.rawValue)
+        // Stop and Send Now where the runner presses them (ov-368).
+        model.keys = offered.contains(Capability.terminalInterrupt.rawValue) ? core : nil
         model.followIfShown()
     }
 
