@@ -864,9 +864,8 @@ fn migration_0018_terminal_split_of_orchestrator(tx: &Transaction) -> rusqlite::
 /// key is what keeps a second enqueue of the same note from telling it again.
 /// It goes with its task.
 ///
-/// `claimed_at` is set, in its own write, before the first byte is typed.
-/// A row found claimed and not done was being typed when the daemon
-/// stopped, so it's never typed again: it's settled as unconfirmed.
+/// `claimed_at` is set before the first byte is typed; a row claimed and not
+/// done is never typed again (0038's `pasted_at` aside, `wakes.rs`).
 fn migration_0019_wake_on_answer(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch(
         r#"

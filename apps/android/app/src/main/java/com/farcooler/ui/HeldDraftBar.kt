@@ -40,7 +40,7 @@ import kotlinx.coroutines.launch
  * `draftHold`, so a draft another device sent shows here too.
  */
 @Composable
-fun HeldDraftBar(hold: DraftHold?, withdraw: suspend (DraftHold) -> Unit) {
+fun HeldDraftBar(hold: DraftHold?, withdraw: suspend (DraftHold) -> Boolean) {
     var tracked by remember { mutableStateOf<String?>(null) }
     var withdrawing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -71,7 +71,8 @@ fun HeldDraftBar(hold: DraftHold?, withdraw: suspend (DraftHold) -> Unit) {
                 TextButton(
                     onClick = {
                         withdrawing = true
-                        scope.launch { withdraw(hold) }
+                        // Not reached: Withdraw is there to press again.
+                        scope.launch { if (!withdraw(hold)) withdrawing = false }
                     },
                     enabled = !withdrawing,
                     modifier = Modifier.testTag("held-draft-withdraw"),

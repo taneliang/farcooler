@@ -51,7 +51,7 @@ struct HeldDraftBar: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(.bar)
+        .background(.bar) // style-exempt: the system bar material, as the pane's other bars use
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("held-draft")
     }
@@ -59,18 +59,24 @@ struct HeldDraftBar: View {
     private func withdraw(_ hold: DraftHold) {
         withdrawing = true
         Task { @MainActor in
-            await connection.withdrawDraft(terminal: terminal.id, hold: hold.id)
-            withdrawing = false
+            // Not reached: the pane still waits, and Withdraw is there again.
+            if !(await connection.withdrawDraft(terminal: terminal.id, hold: hold.id)) { withdrawing = false }
         }
     }
 }
 
 extension Connection {
     /// Stop the runner pasting a held draft. The pane's next read says how it
-    /// ended; a withdrawal that didn't reach the runner leaves it waiting, and
-    /// Withdraw still there to press again.
-    func withdrawDraft(terminal: String, hold: String) async {
-        _ = try? await rpc("terminal.draft_withdraw", ["terminal": terminal, "hold": hold])
+    /// ended. False when it didn't reach the runner: it still waits.
+    func withdrawDraft(terminal: String, hold: String) async -> Bool {
+        let reached: Bool
+        do {
+            _ = try await rpc("terminal.draft_withdraw", ["terminal": terminal, "hold": hold])
+            reached = true
+        } catch {
+            reached = false
+        }
         await refresh()
+        return reached
     }
 }

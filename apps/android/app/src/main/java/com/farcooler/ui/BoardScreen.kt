@@ -108,6 +108,7 @@ import com.farcooler.model.TaskStatus
 import com.farcooler.model.WorkspaceSummary
 import com.farcooler.net.rethrowIfCancellation
 import com.farcooler.net.Connection
+import com.farcooler.net.draftPrompt
 import com.farcooler.net.TerminalRef
 import kotlinx.coroutines.launch
 

@@ -78,6 +78,7 @@ import com.farcooler.model.Terminal
 import com.farcooler.model.WorkspaceSummary
 import com.farcooler.model.Worktree
 import com.farcooler.net.Connection
+import com.farcooler.net.withdrawDraft
 import com.farcooler.net.PaneReconnect
 import com.farcooler.net.TerminalRef
 import com.farcooler.net.TerminalSession
