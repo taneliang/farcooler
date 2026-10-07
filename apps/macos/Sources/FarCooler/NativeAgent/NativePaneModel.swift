@@ -64,15 +64,33 @@ final class NativePaneModel: ObservableObject {
     /// Whether `store` follows `source` now.
     private var following = false
 
-    /// Follow while the view shows, and stop when it doesn't: one held
-    /// follow per pane on screen, not per claude pane in the app. The rows
-    /// stay in the store, and a return follows from where it left off.
+    /// Whether this pane is on screen: mounted, not behind a zoomed pane or
+    /// another workspace's, in a window somebody can see
+    /// (`NativeSwitch.onScreen`). Off until its view says so, and off again
+    /// when the view goes. A pane whose view is only remembered as the
+    /// conversation holds no follow: each is a held call on the runner, and
+    /// the runner takes 32 connections.
+    var onScreen = false {
+        didSet { if onScreen != oldValue { followIfShown() } }
+    }
+
+    /// Follow while the conversation is on screen, and stop when it isn't:
+    /// one held follow per pane the person can see, not per claude pane in
+    /// the app. The rows stay in the store, and a return follows from where
+    /// it left off.
+    ///
+    /// Also what brings back a follow that ended `.unavailable` (the runner's
+    /// projector was off, or the pane was gone) once the pane is shown again:
+    /// that loop returned, and nothing else would start it.
     func followIfShown() {
         guard let source else { return }
-        if showsNative, !following {
+        let wanted = showsNative && onScreen
+        if wanted, following, store.phase == .unavailable {
+            store.start(source)
+        } else if wanted, !following {
             following = true
             store.start(source)
-        } else if !showsNative, following {
+        } else if !wanted, following {
             following = false
             store.stop()
         }

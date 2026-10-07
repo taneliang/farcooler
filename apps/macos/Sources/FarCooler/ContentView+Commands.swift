@@ -251,7 +251,10 @@ extension ContentView {
                 ?? screen?.group.panes.first.flatMap { pane in worktree.terminals.first { $0.id == pane.id } }
             return LayoutMenuFocus.make(
                 group: screen?.group, here: here, layouts: screen?.groups ?? [],
-                switchesMode: target.map { $0.canSwitchPaneMode || $0.isAgentPane } ?? false)
+                switchesMode: target.map { $0.canSwitchPaneMode || $0.isAgentPane } ?? false,
+                switchesConversation: target.map {
+                    NativeAgents.shared.offers($0, target: store.client(for: worktree)?.target ?? "")
+                } ?? false)
         }
         return focus
     }

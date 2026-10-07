@@ -434,6 +434,17 @@ struct FarCoolerCommands: Commands {
                 TileCommand.toggleAgentPane.post()
             }
             .disabled(!MainWindowFocus.lays(\.switchesMode, mainWindow))
+
+            // The conversation view of a Claude terminal pane
+            // (`NativeAgents`), on ⌃⌘T: not ⌘T (New Terminal), ⇧⌘T (View ▸
+            // Show Tab Bar, which AppKit adds to any window that can tab) or
+            // ⌥⌘T (View ▸ Show Toolbar), and the ⌃⌘ chords here are already
+            // the ones that move about in a task.
+            Button("Switch Between Terminal and Conversation") {
+                TileCommand.toggleConversation.post()
+            }
+            .keyboardShortcut("t", modifiers: [.command, .control])
+            .disabled(!MainWindowFocus.lays(\.switchesConversation, mainWindow))
         }
 
         // The diff pane had not one shortcut in this file, which made the only

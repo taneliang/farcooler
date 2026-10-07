@@ -38,6 +38,10 @@ enum TileCommand: Equatable {
     /// reachable from the keyboard and the palette, not a button drawn on
     /// the pane itself.
     case toggleAgentPane
+    /// A Claude terminal pane's terminal ⟷ its conversation view (ov-394).
+    /// A menu command and its own chord, not a prefix key: the switch is
+    /// client-only and never touches the pane.
+    case toggleConversation
     case help
 
     static let notification = Notification.Name("farcooler.tile")

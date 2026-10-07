@@ -272,6 +272,7 @@ struct NativeAgentTests {
     @Test("A pane follows its runner only while its conversation shows")
     func onlyAShownPaneFollows() throws {
         let model = Self.model(try Self.terminal())
+        model.onScreen = true
         model.source = FailingAfterAPage(page: Self.page([]))
         model.followIfShown()
         #expect(!model.store.isFollowing, "a pane on its terminal holds a follow")

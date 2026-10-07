@@ -60,6 +60,7 @@ enum Shortcut {
                 Item(keys: "⌘]", action: "Next terminal on screen"),
                 Item(keys: "⌘[", action: "Previous terminal on screen"),
                 Item(keys: "⌃⌘N", action: "Jump to the next thing that needs you"),
+                Item(keys: "⌃⌘T", action: "Switch a Claude pane between its terminal and its conversation"),
             ]
         ),
         (

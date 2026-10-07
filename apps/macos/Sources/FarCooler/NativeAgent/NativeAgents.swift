@@ -107,6 +107,14 @@ final class NativeAgents: ObservableObject {
             }
             guard let self, !Task.isCancelled else { return }
             self.settingTrouble = trouble
+            // The runner didn't answer this once, but it did before: keep what
+            // that hello said. Tearing the view down for a blink would put the
+            // terminal up, with the keyboard, and bring the view back a retry
+            // later; the panes' own banner says the runner isn't answering
+            // (`AgentRowStore.isStale`), and `start()` runs again on every
+            // retry. A runner that answers and doesn't serve rows is another
+            // matter, and still hides the view.
+            if trouble != nil, self.rowsServed, self.core != nil { return }
             self.core = core
             // Rows to read and a way to send: a runner with rows from
             // before `terminal.compose` gets the terminal, not a view whose
@@ -153,6 +161,21 @@ final class NativeAgents: ObservableObject {
         model.source = CoreRowSource(core: core, terminal: model.terminal)
         model.sink = core
         model.followIfShown()
+    }
+
+    /// The pane's model if one was made, without making it.
+    func model(ifMade terminal: String) -> NativePaneModel? { panes[terminal] }
+
+    /// The Switch Between Terminal and Conversation command: flip `terminal`'s
+    /// view, where the conversation is offered. False, changing nothing,
+    /// where it isn't.
+    @discardableResult
+    func toggleView(of terminal: Terminal, target: String) -> Bool {
+        guard offers(terminal, target: target) else { return false }
+
+        let model = model(for: terminal.id)
+        model.showsNative.toggle()
+        return true
     }
 
     /// A model a test made, under the registry's rules.

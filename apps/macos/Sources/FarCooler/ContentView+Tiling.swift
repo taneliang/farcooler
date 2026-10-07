@@ -189,6 +189,20 @@ extension ContentView {
             }
             await togglePaneMode(target, in: worktree)
 
+        case .toggleConversation:
+            // The pane found as Switch Between Terminal and Chat finds it.
+            let target =
+                here.flatMap { rect in worktree.terminals.first { $0.id == rect.id } }
+                ?? selectedTerminal?.terminal
+                ?? group?.panes.first.flatMap { pane in worktree.terminals.first { $0.id == pane.id } }
+            guard let target else {
+                errorBanner = "No pane to switch — select a terminal first."
+                return
+            }
+            if !NativeAgents.shared.toggleView(of: target, target: store.client(for: worktree)?.target ?? "") {
+                errorBanner = "This pane has no conversation view. It’s for Claude in a terminal on this Mac, with the setting on in Settings."
+            }
+
         case .help:
             showShortcuts = true
         }
