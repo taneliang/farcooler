@@ -37,8 +37,12 @@ pub(super) async fn answer(
 /// A call's end clears that call; a subagent's end, its calls; a turn's
 /// beginning or end (a failed one's too), the main thread's. A `Stop` or
 /// `StopFailure` that names an `agent_id` is a subagent's end, not the
-/// turn's.
+/// turn's. A turn's beginning is kept with its prompt, which is what confirms
+/// a prompt typed in went in (`answer_wake::compose`).
 pub(super) fn ended(asks: &HookAsks, session: &str, event: &str, payload: &serde_json::Value) {
+    if let ("UserPromptSubmit", None, Some(prompt)) = (event, payload["agent_id"].as_str(), payload["prompt"].as_str()) {
+        asks.prompted(session, prompt);
+    }
     match (event, payload["agent_id"].as_str()) {
         ("PostToolUse" | "PostToolUseFailure", _) => asks.tool_ended(session, payload["tool_use_id"].as_str()),
         ("SubagentStop" | "Stop" | "StopFailure", Some(agent)) => asks.subagent_ended(session, agent),
@@ -70,4 +74,30 @@ pub(super) fn raises_dialog(agent: Agent, event: &str, payload: &serde_json::Val
         || (agent == Agent::Claude
             && event == "Notification"
             && matches!(payload["notification_type"].as_str(), Some("permission_prompt" | "elicitation_dialog")))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Instant;
+
+    use super::*;
+
+    /// A main-thread `UserPromptSubmit` keeps its prompt for the session; a
+    /// subagent's, or another session's, doesn't.
+    #[test]
+    fn a_turns_prompt_is_kept_for_its_session() {
+        let asks = HookAsks::new(Default::default());
+        asks.heard("s1", false);
+        let since = Instant::now();
+        let prompt = serde_json::json!({ "prompt": "fix\nthe  tests" });
+        ended(&asks, "s1", "UserPromptSubmit", &serde_json::json!({ "prompt": "not this", "agent_id": "a1" }));
+        assert!(!asks.prompted_since("s1", since, "not this"), "a subagent's");
+        ended(&asks, "s1", "UserPromptSubmit", &prompt);
+        assert!(asks.prompted_since("s1", since, "fix the tests"), "whitespace aside");
+        assert!(!asks.prompted_since("s1", since, "fix the test"));
+        assert!(!asks.prompted_since("s2", since, "fix the tests"), "another session");
+        assert!(!asks.prompted_since("s1", Instant::now() + std::time::Duration::from_secs(1), "fix the tests"), "before since");
+        ended(&asks, "s1", "Stop", &prompt);
+        assert!(asks.prompted_since("s1", since, "fix the tests"), "kept past the turn's end");
+    }
 }

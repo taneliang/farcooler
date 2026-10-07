@@ -159,6 +159,9 @@ struct Heard {
     /// since this daemon started: before that, a call from before the start
     /// may be in flight unseen, so the session isn't typed into mid-turn.
     turn_seen: bool,
+    /// The main thread's latest prompts (`UserPromptSubmit`), whitespace
+    /// dropped, newest last: what says a prompt typed in went in (ov-367).
+    prompts: std::collections::VecDeque<(Instant, String)>,
     /// The fence's lock.
     fence: Arc<tokio::sync::Mutex<()>>,
 }
@@ -203,6 +206,9 @@ pub const FENCE_HOLD: Duration = Duration::from_secs(10);
 /// fence cover the rest.
 const GATE_RECENT: Duration = Duration::from_secs(2);
 
+/// Prompts remembered per session, for `prompted_since`.
+const PROMPTS_KEPT: usize = 8;
+
 /// Sessions remembered before the oldest are let go: far more than a runner
 /// runs at once.
 const SESSIONS_KEPT: usize = 512;
@@ -234,6 +240,7 @@ impl HookAsks {
             gate: None,
             calls: HashMap::new(),
             turn_seen: false,
+            prompts: Default::default(),
             fence: Arc::default(),
         });
         heard.at = now;
@@ -300,6 +307,25 @@ impl HookAsks {
             });
             heard.turn_seen = true;
         }
+    }
+
+    /// `session` took `prompt` as its next turn (`UserPromptSubmit`, the main
+    /// thread's). Kept for `prompted_since`, the last `PROMPTS_KEPT`.
+    pub fn prompted(&self, session: &str, prompt: &str) {
+        if let Some(heard) = self.sessions.lock().unwrap_or_else(|e| e.into_inner()).get_mut(session) {
+            if heard.prompts.len() >= PROMPTS_KEPT {
+                heard.prompts.pop_front();
+            }
+            heard.prompts.push_back((Instant::now(), prompt.chars().filter(|c| !c.is_whitespace()).collect()));
+        }
+    }
+
+    /// Whether `session` took a prompt reading `prompt`, whitespace aside, at
+    /// or after `since`.
+    pub fn prompted_since(&self, session: &str, since: Instant, prompt: &str) -> bool {
+        let want: String = prompt.chars().filter(|c| !c.is_whitespace()).collect();
+        let sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+        sessions.get(session).is_some_and(|h| h.prompts.iter().any(|(at, said)| *at >= since && *said == want))
     }
 
     /// The subagent `agent` in `session` stopped (`SubagentStop`): none of
