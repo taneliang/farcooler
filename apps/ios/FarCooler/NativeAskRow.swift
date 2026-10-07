@@ -93,6 +93,8 @@ struct NativeAskRow: View {
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
                         Image(systemName: question.multiSelect
                             ? (on ? "checkmark.square.fill" : "square") : (on ? "largecircle.fill.circle" : "circle"))
+                            // The control's own tint for what's picked, as a system radio draws it.
+                            .foregroundStyle(on ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                         VStack(alignment: .leading, spacing: 0) {
                             Text(option.label).foregroundStyle(.primary)
                             if !option.description.isEmpty {
