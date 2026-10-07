@@ -243,6 +243,8 @@ data class Terminal(
     val turnStartedAt: Double? = null,
     /** What the agent is asking, while it is asking it. */
     val blockedQuestion: String? = null,
+    /** A draft held behind a dialog in this pane (ov-385): waiting, or how it ended. */
+    val draftHold: DraftHold? = null,
     /**
      * The last few things the agent SAID, oldest first, at most three.
      *

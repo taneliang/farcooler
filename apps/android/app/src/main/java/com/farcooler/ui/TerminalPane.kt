@@ -370,6 +370,9 @@ fun TerminalPane(
             }
         }
 
+        // A draft held behind a dialog in this pane (ov-385).
+        HeldDraftBar(terminal?.draftHold) { connection.withdrawDraft(ref.terminalId, it.id) }
+
         Box(Modifier.weight(1f)) {
             if (terminal?.isAgentPane == true) {
                 AgentScreen(

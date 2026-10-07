@@ -76,6 +76,8 @@ object AskAboutTask {
         PASTED,
         /** Onto the clipboard: the runner couldn't prove the pane safe. */
         COPIED,
+        /** Held by the runner behind a dialog, pasted once it closes (ov-385); the pane says so. */
+        HELD,
         /**
          * The runner never answered in time, so it may have pasted after all.
          * Nothing is copied and nothing is claimed: copying as well would leave
@@ -88,6 +90,8 @@ object AskAboutTask {
     /** What the runner said to a paste into a terminal orchestrator. */
     enum class DraftResult {
         PASTED,
+        /** A dialog was up: the runner holds it and pastes it once it closes (ov-385). */
+        HELD,
         /** It refused, or the call never left this phone: nothing was typed. */
         DECLINED,
         /** No answer in time, or the link dropped mid-call: it may have been typed. */
@@ -138,6 +142,7 @@ object AskAboutTask {
         }
         return when (paste(text)) {
             DraftResult.PASTED -> Delivery.PASTED
+            DraftResult.HELD -> Delivery.HELD
             DraftResult.UNKNOWN -> Delivery.MAYBE_PASTED
             DraftResult.DECLINED -> {
                 copy(text.trim(' '))

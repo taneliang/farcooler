@@ -35,6 +35,8 @@ object RulingActions {
         DRAFTED,
         /** Onto the clipboard: the runner couldn't prove the pane safe. */
         COPIED,
+        /** Held by the runner behind a dialog, typed once it closes (ov-385). */
+        HELD,
         /** The runner never answered in time, so it may have been typed. */
         MAYBE_DRAFTED,
         /** A chat orchestrator didn't take it. */
@@ -58,6 +60,7 @@ object RulingActions {
         if (isAgentPane) return if (send(text)) Reversal.SENT else Reversal.FAILED
         return when (paste(text)) {
             AskAboutTask.DraftResult.PASTED -> Reversal.DRAFTED
+            AskAboutTask.DraftResult.HELD -> Reversal.HELD
             AskAboutTask.DraftResult.UNKNOWN -> Reversal.MAYBE_DRAFTED
             AskAboutTask.DraftResult.DECLINED -> {
                 copy(text)
@@ -86,6 +89,8 @@ object RulingActions {
         Reversal.SENT -> "Asked the orchestrator to reverse ${r.short}."
         Reversal.DRAFTED -> "Put the request in the orchestrator’s input. Press Return to send it." // casing ok: the key is named Return on a keyboard, and the iPhone says so too
         Reversal.COPIED -> "Copied the request to reverse ${r.short}. Paste it into the orchestrator."
+        // The orchestrator's pane says it waits, and how it ends (ov-385).
+        Reversal.HELD -> null
         Reversal.MAYBE_DRAFTED -> "Typed, not sent. Check the orchestrator’s input for the request."
         Reversal.FAILED -> "Couldn’t reach the orchestrator. Try again."
     }

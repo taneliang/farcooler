@@ -2075,9 +2075,24 @@ class Connection(
     suspend fun draftPrompt(terminal: String, text: String): com.farcooler.model.AskAboutTask.DraftResult =
         attempt { core.call("terminal.draft_prompt", args("terminal" to terminal, "text" to text)) }
             .fold(
-                onSuccess = { com.farcooler.model.AskAboutTask.DraftResult.PASTED },
+                onSuccess = {
+                    // A dialog was up: the runner holds it (ov-385), and the
+                    // pane says so once the fleet carries the hold.
+                    if (com.farcooler.model.DraftHold.held(it) != null) {
+                        refresh()
+                        com.farcooler.model.AskAboutTask.DraftResult.HELD
+                    } else {
+                        com.farcooler.model.AskAboutTask.DraftResult.PASTED
+                    }
+                },
                 onFailure = { com.farcooler.model.AskAboutTask.DraftResult.of(it) },
             )
+
+    /** Stop the runner pasting the draft [hold] it holds on [terminal] (ov-385). */
+    suspend fun withdrawDraft(terminal: String, hold: String) {
+        attempt { core.call("terminal.draft_withdraw", args("terminal" to terminal, "hold" to hold)) }
+        refresh()
+    }
 
     /**
      * Every ref in a repository, for the sheet that pins a review's base.
