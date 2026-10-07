@@ -45,6 +45,8 @@ enum Piece {
     Pasted { breaks: usize },
     /// An image's placeholder, any number.
     Image,
+    /// codex's collapsed paste, `[Pasted Content N chars]` (`codex`).
+    Content { chars: usize },
 }
 
 /// What a box should show after a series of pastes: their drawn forms in
@@ -68,6 +70,15 @@ impl Expected {
         self
     }
 
+    /// Then `pasted`, as codex 0.153.4 draws a paste of it: as is, or past
+    /// `codex::COLLAPSES_PAST_CHARS` as `[Pasted Content N chars]`.
+    pub fn then_codex_paste(mut self, pasted: &str) -> Expected {
+        let chars = pasted.chars().count();
+        let piece = if super::codex::collapses(pasted) { Piece::Content { chars } } else { Piece::Text(squeeze(pasted)) };
+        self.pieces.push(piece);
+        self
+    }
+
     /// Then one image's placeholder.
     pub fn then_image(mut self) -> Expected {
         self.pieces.push(Piece::Image);
@@ -86,6 +97,9 @@ impl Expected {
                     k => after.strip_prefix(&format!("+{k}lines]")).map(str::to_string),
                 }),
                 Piece::Image => placeholder(&rest, "[Image#").and_then(|after| after.strip_prefix(']').map(str::to_string)),
+                Piece::Content { chars } => {
+                    rest.strip_prefix(&format!("[PastedContent{chars}chars]")).map(str::to_string)
+                }
             };
             match after {
                 Some(after) => rest = after,

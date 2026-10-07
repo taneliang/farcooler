@@ -1,0 +1,45 @@
+
+[38;5;3m⚠ Model metadata for `standin-model` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.[39m
+
+[2m• [0mStand-in reply 19.
+
+[2m• [0mVim mode enabled.
+
+
+[1;2m› [0mvim paste test
+
+
+[2m• [0mStand-in reply 21.
+
+
+[1;2m› [0mvim insert test
+
+
+[2m• [0mStand-in reply 22.
+
+[2m• [0mVim mode disabled.
+
+
+[1;2m› [0m[38;5;6m[Image #1][39m
+  yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+  yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+  yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+  yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+  yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+  yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+  yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+  yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+
+
+[2m• [0mStand-in reply 23.
+
+
+[1m›[0m look at @READ
+
+[1m[38;5;6m> README.md  ./                                                                                                                                           File
+[0m  heads[2m      .git/logs/[1mre[0;2mfs/                                                                                                                              [0mDir
+  [38;5;6mmain[2m[39m       .git/logs/[1mre[0;2mfs/he[1mad[0;2ms/                                                                                                                        [0m[38;5;6mFile[39m
+  heads[2m      .git/[1mre[0;2mfs/                                                                                                                                   [0mDir
+  [38;5;6mmain[2m[39m       .git/[1mre[0;2mfs/he[1mad[0;2ms/                                                                                                                             [0m[38;5;6mFile[39m
+
+  [2menter insert · esc close · ←/→ switch search modes[0m                                                                 [1m[38;5;6m[All Results][0;2m   Filesystem Only    Plugins

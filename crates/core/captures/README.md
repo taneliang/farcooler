@@ -159,3 +159,22 @@ for its API. A bracketed paste went into the box mid-turn, then Enter.
 Both agents took the message as the next prompt once the turn ended: claude
 from its queue (`promptSource: queued` in the transcript), codex as a message
 "submitted after next tool call".
+
+## The ones with a message composed into codex (ov-416)
+
+Captured 2026-10-07 with `tmux capture-pane -p -e` against codex-cli 0.153.4
+in a sandbox (`HOME` and `CODEX_HOME` under `/tmp/fc-t`), on a stand-in for
+its API, each after one or two bracketed pastes and no Enter.
+
+| file | what it shows |
+| --- | --- |
+| `codex-0.153.4-idle-160x45-e.txt` | the empty box, its dim placeholder, the model footer |
+| `codex-0.153.4-three-lines-160x45-e.txt` | three short lines, shown as pasted |
+| `codex-0.153.4-blank-lines-160x45-e.txt` | `first\n\nthird\n\n\nsixth`: blank rows inside the box, then the blank row and the footer |
+| `codex-0.153.4-long-paste-160x45-e.txt` | 1,001 characters, collapsed to `[Pasted Content 1001 chars]` |
+| `codex-0.153.4-image-and-long-paste-160x45-e.txt` | an image's path pasted alone, `[Image #1]`, then 1,201 characters |
+| `codex-0.153.4-tall-paste-80x24-e.txt` | thirty lines in a 24-row pane: the box scrolls, its first ten lines out of sight |
+| `codex-0.153.4-slash-init-160x45-e.txt` | `/init`: the command popup below the box, in place of the footer |
+| `codex-0.153.4-mention-popup-160x45-e.txt` | `look at @READ`: the file picker, `enter insert` |
+| `codex-0.153.4-mention-no-matches-160x45-e.txt` | `try @zzzq`: the picker with no matches |
+| `codex-0.153.4-skill-no-matches-160x45-e.txt` | `try $zzzq`: the skill picker with no matches |

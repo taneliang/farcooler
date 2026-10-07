@@ -18,7 +18,9 @@
 //!   (`claude-idle-fresh.txt`, `claude-working.txt`)
 //! - codex: a line starting `› ` at column 0, then continuation lines indented
 //!   two columns, a blank line, and the model footer (`<model> · <path>`).
-//!   (`codex-idle-after-turn.txt`)
+//!   (`codex-idle-after-turn.txt`). A paste's blank lines are blank rows in
+//!   the box, read up to a footer that can only be the model's
+//!   (`codex-0.153.4-blank-lines-160x45-e.txt`, ov-416).
 //!
 //! Placeholder text is drawn DIM (SGR 2) and doesn't count as content: a box
 //! showing only a dim suggestion is empty. The cursor sits on a placeholder's
@@ -31,6 +33,7 @@
 //! The plain-text captures here are read that way: codex's `› Explain this
 //! codebase` and claude's suggested prompt both read as `Holds`.
 
+pub mod codex;
 pub mod drawn;
 
 /// What an input box holds.
@@ -206,13 +209,24 @@ fn codex(lines: &[Vec<(char, bool)>]) -> Composer {
     // A blank line, then the model footer, `<model> · <path>`; or, while a
     // turn runs with something in the box, the hint that Tab queues it
     // (`codex-0.153.4-working-paste-160x45-e.txt`).
-    let blank = lines.get(end).is_some_and(|r| text(r).trim().is_empty());
+    let blank = |row: usize| lines.get(row).is_some_and(|r| text(r).trim().is_empty());
     let footer = lines.get(end + 1).is_some_and(|r| {
         let t = text(r);
         t.starts_with("  ") && (t.contains(" · ") || t.trim_start().starts_with("tab to queue message"))
     });
-    if !blank || !footer {
-        return Composer::Unrecognized;
+    if !blank(end) || !footer {
+        // Blank rows inside the box: a paste's empty lines
+        // (`codex-0.153.4-blank-lines-160x45-e.txt`). Read only up to a
+        // footer that can be nothing else, the screen's last row with
+        // anything on it, so a picker's rows and hint below a box
+        // (`codex-0.153.4-mention-no-matches-160x45-e.txt`) never pass for
+        // the box's own.
+        let Some(last) = lines.iter().rposition(|r| !text(r).trim().is_empty()) else { return Composer::Unrecognized };
+        let inside = |r: &Vec<(char, bool)>| indented(r) || text(r).trim().is_empty();
+        if last <= end + 1 || !blank(last - 1) || !is_model_footer(&lines[last]) || !lines[end..last].iter().all(inside) {
+            return Composer::Unrecognized;
+        }
+        end = last - 1;
     }
     let first = &lines[start][2.min(lines[start].len())..];
     // A numbered choice under the marker is a menu, never a box.
@@ -224,6 +238,20 @@ fn codex(lines: &[Vec<(char, bool)>]) -> Composer {
     let rows: Vec<&[(char, bool)]> =
         std::iter::once(first).chain(lines[start + 1..end].iter().map(|r| &r[2.min(r.len())..])).collect();
     content(&rows)
+}
+
+/// codex's model footer and nothing else: `  <model> <effort> · <path>`, the
+/// path codex's working directory (`/…` or `~/…`), after it perhaps `Vim:
+/// Normal`; or `tab to queue message` while a turn runs. A picker's hint,
+/// `enter insert · esc close · ←/→ switch search modes`, has the dot but
+/// no path after it.
+fn is_model_footer(row: &[(char, bool)]) -> bool {
+    let t = text(row);
+    if !t.starts_with("  ") || t.starts_with("   ") {
+        return false;
+    }
+    let t = t.trim();
+    t.starts_with("tab to queue message") || t.rsplit_once(" · ").is_some_and(|(_, path)| path.starts_with(['/', '~']))
 }
 
 #[cfg(test)]
