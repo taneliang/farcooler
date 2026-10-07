@@ -350,8 +350,8 @@ struct AgentScrollTests {
                 armed = false
                 // A later turn: not from inside the chat's own observer.
                 DispatchQueue.main.async { [self] in
-                    before()
                     inFlight = probe.jumping
+                    before()
                     let origin = scroll.contentView.bounds.origin
                     scroll.contentView.scroll(to: NSPoint(x: origin.x, y: origin.y - points))
                     scroll.reflectScrolledClipView(scroll.contentView)
