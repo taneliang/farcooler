@@ -527,6 +527,10 @@ AGENTKIT_SOURCES = [
     "MarkdownPiece.swift",
     # The Working… sweep's layer animation, shared with the Mac (ov-382).
     "ShimmerAnimation.swift",
+    # How much of the screen the keyboard and the docked composer cover,
+    # as `KeyboardInset` publishes it (ov-386). The phone's only unit-testable
+    # home for those rules: the iOS target has no unit tests.
+    "KeyboardCover.swift",
     # Both `MarkdownView.swift` above and `DiffComputation.swift` reference it,
     # so the phone does not build without it. Not optional the way a view is:
     # this is the memo that keeps a transcript row's body from re-parsing its

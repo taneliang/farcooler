@@ -27,7 +27,7 @@ struct AgentView: View {
     @StateObject private var stream: AgentStream
     /// How far the keyboard — the docked composer included — reaches up the
     /// screen. See `KeyboardInset`.
-    @StateObject private var keyboard = KeyboardInset()
+    @StateObject private var keyboard = KeyboardInset(scope: AccessoryScope())
     @Environment(\.phoneNavigator) private var navigator
     /// How tall the docked composer measured. Reported up out of `DockedBar`.
     @State private var barHeight: CGFloat = 0
@@ -415,7 +415,7 @@ struct AgentView: View {
                 #endif
                 .background {
                     if !inColumn {
-                        DockedBar(height: $barHeight, isActive: isDocked) { composerStack }
+                        DockedBar(height: $barHeight, isActive: isDocked, scope: keyboard.scope) { composerStack }
                             .frame(width: 0, height: 0)
                             .accessibilityHidden(true)
                     }

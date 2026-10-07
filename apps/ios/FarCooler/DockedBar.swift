@@ -39,10 +39,14 @@ struct DockedBar<Content: View>: UIViewControllerRepresentable {
     /// holding first responder and went on drawing its composer — over the
     /// terminal, and over a changes pane that has no composer at all.
     var isActive: Bool
+    /// Whose inset hears this bar's size reports. See `KeyboardInset.scope`.
+    var scope: AccessoryScope? = nil
     @ViewBuilder var content: () -> Content
 
     func makeUIViewController(context: Context) -> DockedBarController {
-        DockedBarController(rootView: AnyView(content()))
+        let controller = DockedBarController(rootView: AnyView(content()))
+        controller.scope = scope
+        return controller
     }
 
     func updateUIViewController(_ controller: DockedBarController, context: Context) {
@@ -77,9 +81,23 @@ struct DockedBar<Content: View>: UIViewControllerRepresentable {
 final class KeyboardInset: ObservableObject {
     @Published private(set) var height: CGFloat = 0
 
+    /// The rules the number is published by. See `KeyboardCover`.
+    private var cover = KeyboardCover()
+
     private var observers: [NSObjectProtocol] = []
 
-    init() {
+    /// The composer this inset listens to, or nil for any docked composer.
+    ///
+    /// A chat's own inset names its own, so a second composer on screen
+    /// can't move it (ov-386). The shell's inset is the one that takes them
+    /// all: it cancels what the framework applies for whichever is up.
+    let scope: AccessoryScope?
+
+    /// Waits out a hide whose closing frame doesn't come.
+    private var hideTimeout: Task<Void, Never>?
+
+    init(scope: AccessoryScope? = nil) {
+        self.scope = scope
         let center = NotificationCenter.default
         // `willChangeFrame` rather than `willShow`: a docked accessory appearing
         // with no keyboard behind it, and the keyboard growing or shrinking for
@@ -95,11 +113,7 @@ final class KeyboardInset: ObservableObject {
                 })
         }
         observers.append(
-            center.addObserver(forName: AccessoryHostView.didResize, object: nil, queue: .main) {
-                [weak self] note in
-                guard let cover = note.userInfo?["cover"] as? CGFloat,
-                    let screenHeight = note.userInfo?["screen"] as? CGFloat
-                else { return }
+            AccessoryCoverChannel.observe(scope: scope) { [weak self] cover, screenHeight in
                 MainActor.assumeIsolated { self?.apply(accessoryCover: cover, screenHeight: screenHeight) }
             })
         observers.append(
@@ -109,12 +123,28 @@ final class KeyboardInset: ObservableObject {
                 // Hiding leaves the accessory docked, so this is not zero — the
                 // next valid frame change reports what is left. Nothing is
                 // assumed here beyond "the keyboard part is going away".
-                MainActor.assumeIsolated { self?.height = 0 }
+                MainActor.assumeIsolated { self?.willHide() }
             })
     }
 
     deinit {
         observers.forEach(NotificationCenter.default.removeObserver)
+        hideTimeout?.cancel()
+    }
+
+    private func willHide() {
+        cover.willHide()
+        height = cover.height
+        // The frame that ends a hide is what ends the wait. If none comes,
+        // the composer is asked to say where it is, since it reports only a
+        // change and what it said during the hide was dropped.
+        hideTimeout?.cancel()
+        hideTimeout = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled, let self, cover.hiding else { return }
+            cover.hideTimedOut()
+            NotificationCenter.default.post(name: AccessoryHostView.reportAgain, object: scope)
+        }
     }
 
     /// The accessory was resized with no keyboard frame to say so (ov-383).
@@ -126,9 +156,9 @@ final class KeyboardInset: ObservableObject {
     /// banner drew over the message it was about. So the accessory says where
     /// its top now is, which is the same overlap a frame would have given.
     /// When a frame does come, it says the same or later, and wins.
-    private func apply(accessoryCover cover: CGFloat, screenHeight: CGFloat) {
-        guard cover > 0, cover < screenHeight * 0.8 else { return }
-        height = cover
+    private func apply(accessoryCover top: CGFloat, screenHeight: CGFloat) {
+        cover.accessory(cover: top, screenHeight: screenHeight)
+        height = cover.height
     }
 
     private func apply(_ note: Notification) {
@@ -142,9 +172,10 @@ final class KeyboardInset: ObservableObject {
         // interactive dismissal, iOS 26 emits a synthetic keyboard frame whose
         // origin is zero. Treating that as geometry reserves the entire screen
         // (932 points on the regression device) and leaves the transcript a
-        // tiny strip. A software keyboard cannot legitimately cover virtually
-        // the whole display; the remaining accessory is measured independently.
-        height = overlap >= screen.bounds.height * 0.8 ? 0 : overlap
+        // tiny strip. `KeyboardCover.frame` reads that as no keyboard; the
+        // remaining accessory is measured independently.
+        cover.frame(overlap: overlap, screenHeight: screen.bounds.height)
+        height = cover.height
     }
 }
 
@@ -226,6 +257,12 @@ final class DockedBarController: UIViewController {
         reloadInputViews()
     }
 
+    /// Whose inset this bar's reports are for.
+    var scope: AccessoryScope? {
+        get { bar.scope }
+        set { bar.scope = newValue }
+    }
+
     /// Called when the bar's measured height changes. Set by the representable.
     var onHeightChange: ((CGFloat) -> Void)? {
         get { bar.onHeightChange }
@@ -285,13 +322,22 @@ final class AccessoryHostView: UIView {
     /// Reported upward so the conversation can leave room. See `DockedBar`.
     var onHeightChange: ((CGFloat) -> Void)?
 
-    /// Posted when UIKit has given the accessory a new height, with how far
-    /// up its window it now reaches (`cover`) and the window's height
-    /// (`screen`). See `KeyboardInset.apply(accessoryCover:screenHeight:)`.
-    static let didResize = Notification.Name("FarCooler.AccessoryHostView.didResize")
+    // `AccessoryCoverChannel.didResize` is posted when UIKit has given the
+    // accessory a new height, with how far up its window it now reaches
+    // (`cover`) and the window's height (`screen`). See
+    // `KeyboardInset.apply(accessoryCover:screenHeight:)`.
+
+    /// Asks the accessory to say again where its top is, though its height
+    /// hasn't changed: a hide dropped what it said.
+    static let reportAgain = Notification.Name("FarCooler.AccessoryHostView.reportAgain")
 
     /// The bounds height last reported in `didResize`.
     private var reportedHeight: CGFloat = 0
+
+    /// Whose inset hears `didResize`. Nil is any inset's.
+    var scope: AccessoryScope?
+
+    private var reportAgainObserver: NSObjectProtocol?
 
     /// Say so once UIKit has applied a new height: the frame is the laid-out
     /// one here, so its top is where the composer now starts.
@@ -299,9 +345,7 @@ final class AccessoryHostView: UIView {
         guard let window, abs(bounds.height - reportedHeight) > 0.5 else { return }
         reportedHeight = bounds.height
         let top = convert(bounds, to: nil).minY
-        NotificationCenter.default.post(
-            name: Self.didResize, object: nil,
-            userInfo: ["cover": window.bounds.height - top, "screen": window.bounds.height])
+        AccessoryCoverChannel.post(cover: window.bounds.height - top, screen: window.bounds.height, scope: scope)
     }
 
     init(host: MeasuredHostingController) {
@@ -317,6 +361,20 @@ final class AccessoryHostView: UIView {
         host.view.frame = bounds
         host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         addSubview(host.view)
+        reportAgainObserver = NotificationCenter.default.addObserver(
+            forName: Self.reportAgain, object: nil, queue: .main
+        ) { [weak self] note in
+            MainActor.assumeIsolated {
+                // An inset naming no composer asks them all.
+                guard let self, note.object == nil || note.object as AnyObject? === self.scope else { return }
+                self.reportedHeight = 0
+                self.setNeedsLayout()
+            }
+        }
+    }
+
+    deinit {
+        reportAgainObserver.map(NotificationCenter.default.removeObserver)
     }
 
     @available(*, unavailable)

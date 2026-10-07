@@ -128,4 +128,43 @@ final class AgentFollowTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(composerTop(app) - lastRowBottom(app, after: sent), Self.clearance)
         capture("3-composer-grown")
     }
+
+    /// The inset reads `keyboard=N;bar=M;` off the transcript's probe.
+    private func insets(_ transcript: XCUIElement) -> (keyboard: Int, bar: Int)? {
+        let parts = (transcript.value as? String ?? "").split(separator: ";")
+        func number(_ key: String) -> Int? {
+            parts.first { $0.hasPrefix(key + "=") }.flatMap { Int($0.dropFirst(key.count + 1)) }
+        }
+        guard let keyboard = number("keyboard"), let bar = number("bar") else { return nil }
+        return (keyboard, bar)
+    }
+
+    /// Whether `keyboard` is the docked bar and nothing else: the bar's
+    /// height, less at most the home indicator's strip, which the bar
+    /// counts and the keyboard's frame doesn't (measured 184 against 218).
+    private func isTheBar(_ inset: (keyboard: Int, bar: Int)) -> Bool {
+        inset.keyboard > 0 && inset.keyboard <= inset.bar + 2 && inset.keyboard >= inset.bar - 40
+    }
+
+    /// The keyboard going away leaves the docked composer, and the cover
+    /// settles at its height (ov-386): not zero, and not whatever the
+    /// composer reported while it slid.
+    func testTheCoverSettlesAtTheBarWhenTheKeyboardHides() throws {
+        let app = launch()
+        let transcript = app.scrollViews["agent-transcript"]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 30))
+        app.textViews.firstMatch.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(
+            wait(10) { (insets(transcript).map { $0.keyboard > $0.bar + 100 }) == true },
+            "the keyboard didn't raise the cover: \(transcript.value ?? "")")
+        waitForHideKeyboardKey(app, Self.composerHideKeyboard).tap()
+        XCTAssertTrue(
+            wait(10) { !app.keyboards.firstMatch.exists && insets(transcript).map(isTheBar) == true },
+            "the cover didn't settle at the bar: \(transcript.value ?? "")")
+        // And it stays: nothing late moves it.
+        Thread.sleep(forTimeInterval: 2)
+        let settled = try XCTUnwrap(insets(transcript))
+        XCTAssertTrue(isTheBar(settled), "a late report moved the cover: \(transcript.value ?? "")")
+    }
 }
