@@ -1,0 +1,109 @@
+# Do the newest agent CLIs still hand shake? (ov-410)
+#
+# ci.yml installs the versions pinned in .github/agent-clis.txt, so an upstream
+# release can no longer turn main red between one commit and the next. This is
+# the other half of that trade: once a day, the same live handshake tests run
+# against each package's @latest, in a run of their own. When they fail, an
+# issue says so, and main stays green while someone looks.
+#
+# When they pass on versions newer than the pins, the run says which, so a pin
+# can move on evidence: change .github/agent-clis.txt once this is green.
+#
+# A failure here is not always a broken release. The one that prompted this
+# was a publish race: npm served @openai/codex 0.161.0 twelve minutes before its
+# linux-x64 binary existed. The install step's `--version` calls name that case
+# on their own, and a re-run an hour later tells the two apart.
+name: Agent CLIs latest
+
+on:
+  schedule:
+    # 06:17 UTC daily: off the hour, when GitHub's scheduler is busiest.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: agent-clis-latest
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  handshake:
+    name: Handshake (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both, because each OS gets its own platform binary from npm, and the
+        # race above hit one platform at a time.
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: agent-clis-${{ matrix.os }}
+
+      - name: Install the latest agent CLIs
+        run: |
+          set -euo pipefail
+          grep -v '^#' .github/agent-clis.txt | grep . \
+            | sed -E 's/^(.+)@[^@/]+$/\1@latest/' | xargs npm install -g
+          opencode --version
+          claude --version
+          codex --version
+
+      # The same step as ci.yml's "Live agent handshakes", so a pass here
+      # means the pin can move without surprising main.
+      - name: Live agent handshakes
+        env:
+          FARCOOLER_LIVE_AGENTS: "1"
+        run: cargo test -p farcooler-agent --test backends -- --ignored
+
+      - name: Say which pins could move
+        run: |
+          set -euo pipefail
+          grep -v '^#' .github/agent-clis.txt | while read -r spec; do
+            [ -n "$spec" ] || continue
+            package=${spec%@*}
+            pinned=${spec##*@}
+            latest=$(npm view "$package@latest" version)
+            if [ "$pinned" != "$latest" ]; then
+              echo "::notice::$package $latest passes the live handshakes; .github/agent-clis.txt pins $pinned"
+            fi
+          done
+
+  report:
+    name: Report a failure
+    needs: handshake
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Open an issue, or add to the open one
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="CI: latest agent CLIs fail the live handshake"
+          versions=$(grep -v '^#' .github/agent-clis.txt | while read -r spec; do
+            [ -n "$spec" ] || continue
+            package=${spec%@*}
+            echo "- \`$package\`: latest $(npm view "$package@latest" version), pinned ${spec##*@}"
+          done)
+          body=$(printf '%s\n\n%s\n\n%s\n' \
+            "The daily run against each agent CLI's newest release failed: $RUN_URL" \
+            "$versions" \
+            "Main is unaffected, since ci.yml installs the pins in .github/agent-clis.txt. Before moving a pin, check whether the release itself broke the handshake or npm was still publishing its platform binaries (a re-run an hour later tells them apart).")
+          existing=$(gh issue list --state open --search "in:title \"$title\"" --json number,title \
+            --jq "map(select(.title == \"$title\")) | .[0].number // empty")
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi

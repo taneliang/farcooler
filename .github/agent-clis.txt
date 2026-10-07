@@ -1,0 +1,17 @@
+# The agent CLIs CI installs for the live handshakes, pinned (ov-410).
+#
+# One package@version per line; `#` starts a comment. ci.yml installs exactly
+# these. agent-clis-latest.yml installs each package's @latest instead, once a
+# day, and opens an issue when that fails, so a new upstream release is
+# announced in its own run rather than turning main red.
+#
+# Why pinned: on Oct 7 npm published @openai/codex 0.161.0 at 16:04 UTC and
+# its linux-x64 binary at 16:16. CI installed in between, got the launcher
+# without the binary, and the handshake failed on every commit until the
+# binary landed. A pinned version is one whose binaries are all published.
+#
+# To move a pin: wait for the scheduled run to go green on the new version (or
+# run it by hand), then change the line here.
+opencode-ai@1.18.35
+@anthropic-ai/claude-code@2.1.292
+@openai/codex@0.161.0

@@ -349,8 +349,20 @@ jobs:
       # `test/live_agents.rs`), so a developer's `cargo test` never starts a
       # real agent. The step after `cargo test --workspace` below is where CI
       # turns the switch on and runs them.
+      #
+      # Pinned in .github/agent-clis.txt (ov-410): an unpinned install took
+      # whatever npm served that minute, which once was a codex launcher whose
+      # platform binary was not yet published. agent-clis-latest.yml tries the
+      # newest versions daily in a run of its own. The `--version` calls fail
+      # this step, by name, when a binary is missing, rather than leaving it to
+      # a handshake test to report as silence.
       - name: Install the agents the native backends spawn
-        run: npm install -g opencode-ai @anthropic-ai/claude-code @openai/codex
+        run: |
+          set -euo pipefail
+          grep -v '^#' .github/agent-clis.txt | grep . | xargs npm install -g
+          opencode --version
+          claude --version
+          codex --version
 
       # `crates/daemon/tests/a_real_sshd_forces_the_scope.rs` stands up a real
       # loopback sshd, and `cargo test --workspace` below runs it. It is the
