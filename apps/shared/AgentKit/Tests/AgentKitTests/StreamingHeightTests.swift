@@ -42,9 +42,10 @@ struct StreamingHeightTests {
         let (streaming, scale) = Self.height(streaming: true, width: width)
         let (settled, _) = Self.height(streaming: false, width: width)
         print(String(format: "ov-382 height at %.0f, %.0fx: streaming %.1f, settled %.1f", width, scale, streaming, settled))
-        // 29 boundaries, 0.15 pt each, 4.35 pt: over the 3.5 measured, and
-        // under the 7-9 the blank-line variant drifted.
-        #expect(abs(streaming - settled) <= 29 * 0.15, "streaming \(streaming) against settled \(settled) at \(width)")
+        // 6 pt in all: 2.5 pt over the 3.5 measured at 2x, so a different
+        // display scale or font metric on CI doesn't tip it, and 1 pt under
+        // the 7 the blank-line variant drifted at its best.
+        #expect(abs(streaming - settled) <= 6, "streaming \(streaming) against settled \(settled) at \(width)")
     }
 }
 #endif
