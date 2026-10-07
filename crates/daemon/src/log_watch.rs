@@ -58,7 +58,7 @@ impl Drop for LogWatcher {
     }
 }
 
-/// The three directories the agents write their sessions under.
+/// The directories the agents write their sessions under.
 ///
 /// Named here rather than at the call site because "which roots" is this
 /// module's own subject, and a second list somewhere else is a list that can
@@ -66,12 +66,26 @@ impl Drop for LogWatcher {
 /// unset, which `start` already treats as "nothing to watch" rather than an
 /// error.
 pub fn roots() -> Vec<PathBuf> {
-    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else { return Vec::new() };
-    vec![
+    roots_in(std::env::var_os("HOME").map(PathBuf::from), std::env::var_os("CODEX_HOME").map(PathBuf::from))
+}
+
+/// `roots`, for a `$HOME` and a `$CODEX_HOME`. codex keeps its sessions under
+/// `$CODEX_HOME` when that's set (ov-416), so the runner's own is watched
+/// as well as `~/.codex`: a codex started with another one in its pane still
+/// gets the backstop's join (`LOG_JOIN_BACKSTOP_MS`), never none.
+fn roots_in(home: Option<PathBuf>, codex_home: Option<PathBuf>) -> Vec<PathBuf> {
+    let Some(home) = home else { return Vec::new() };
+    let mut roots = vec![
         home.join(".claude/projects"),
         home.join(".codex/sessions"),
         home.join(".cursor/projects"),
-    ]
+    ];
+    if let Some(sessions) = codex_home.filter(|h| !h.as_os_str().is_empty()).map(|h| h.join("sessions"))
+        && !roots.contains(&sessions)
+    {
+        roots.push(sessions);
+    }
+    roots
 }
 
 impl LogWatcher {
@@ -224,6 +238,20 @@ mod tests {
         assert!(watcher.wait_until_registered(Duration::from_secs(60)), "the log watch never registered");
         watcher.drain();
         watcher
+    }
+
+    /// codex's sessions under a `$CODEX_HOME` elsewhere are watched too
+    /// (ov-416); one that is `~/.codex`, or empty, adds nothing.
+    #[test]
+    fn a_codex_home_elsewhere_is_a_root() {
+        let home = PathBuf::from("/Users/a");
+        let roots = roots_in(Some(home.clone()), Some(PathBuf::from("/tmp/codex")));
+        assert!(roots.contains(&PathBuf::from("/tmp/codex/sessions")), "{roots:?}");
+        assert!(roots.contains(&home.join(".codex/sessions")), "{roots:?}");
+        assert_eq!(roots_in(Some(home.clone()), Some(home.join(".codex"))).len(), 3);
+        assert_eq!(roots_in(Some(home.clone()), Some(PathBuf::new())).len(), 3);
+        assert_eq!(roots_in(Some(home), None).len(), 3);
+        assert!(roots_in(None, Some(PathBuf::from("/tmp/codex"))).is_empty());
     }
 
     /// The daemon's startup path is not held behind a registration that
