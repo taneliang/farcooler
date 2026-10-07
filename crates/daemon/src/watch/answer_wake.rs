@@ -997,6 +997,7 @@ fn spoken_name(t: &Terminal) -> String {
 mod compose;
 pub(crate) mod draft_hold;
 mod finish;
+pub(crate) mod interrupt;
 pub(crate) mod mid_turn;
 pub(crate) mod registry_turn;
 mod tell;

@@ -55,4 +55,5 @@ public enum Capability: String, CaseIterable, Sendable {
     case agentCompose = "agent_compose"
     case compose = "compose"
     case composeUpload = "compose_upload"
+    case terminalInterrupt = "terminal_interrupt"
 }

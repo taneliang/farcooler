@@ -29,6 +29,7 @@ pub mod draft_prompt;
 mod terminal_ids;
 use terminal_ids::{split_of, task_of, with_draft_hold};
 mod files;
+mod interrupt;
 mod notice_task;
 mod pages;
 mod plan;

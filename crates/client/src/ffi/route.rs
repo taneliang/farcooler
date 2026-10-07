@@ -95,8 +95,10 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // A terminal's agent rows (ov-366), for the native views (ov-372).
         | Method::AgentRows
         | Method::AgentRowsFollow
-        // The native view's composer (ov-372).
+        // The native view's composer (ov-372), and its Stop and Send Now (ov-368).
         | Method::TerminalCompose
+        | Method::TerminalInterrupt
+        | Method::TerminalSendNow
         // Its setting, the phones' settings row (ov-373): `host_admin` on
         // the runner, so a phone enrolled at `control` is refused it.
         | Method::SettingsSetProjector => Some(method.name()),

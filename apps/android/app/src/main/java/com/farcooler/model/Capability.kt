@@ -57,5 +57,6 @@ enum class Capability(val wire: String) {
     PROJECTOR_SETTING("projector_setting"),
     AGENT_COMPOSE("agent_compose"),
     COMPOSE("compose"),
-    COMPOSE_UPLOAD("compose_upload");
+    COMPOSE_UPLOAD("compose_upload"),
+    TERMINAL_INTERRUPT("terminal_interrupt");
 }

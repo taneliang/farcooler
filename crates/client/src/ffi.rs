@@ -2335,6 +2335,10 @@ async fn dispatch(
             Ok(json!({ "queued": queued }))
         }
 
+        // `{terminal}` → `{}`, once claude took the key (ov-368).
+        "terminal.interrupt" => session.interrupt(id("terminal")?).await.map(|_| json!({})),
+        "terminal.send_now" => session.send_now(id("terminal")?).await.map(|_| json!({})),
+
         // Refused rather than defaulted, so a typo in a client is a visible
         // error instead of a call that silently does nothing.
         other => Err(SessionError::Protocol(match Method::parse(other) {

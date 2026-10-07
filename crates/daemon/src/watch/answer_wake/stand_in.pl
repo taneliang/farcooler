@@ -9,7 +9,8 @@
 # `›` over a blank line and the model footer, the placeholder dim), turns on
 # bracketed paste, appends a paste or typed characters to its box, and on
 # Enter logs `SUBMIT <box>` and clears it. The control file picks what it
-# shows: idle, working, menu (a permission prompt), picker (a menu with no
+# shows: idle, working, menu (a permission prompt; working-menu, one the
+# registry still calls busy), picker (a menu with no
 # box), mangle (a paste shows as `[Pasted text #1]`), slow (a paste shows
 # a second late), nobracket (bracketed paste off), draft:<text> (a box
 # already holding <text>), or <mode>-on-paste (idle until a paste arrives,
@@ -22,6 +23,13 @@
 # stand-in with CLAUDE_CONFIG_DIR set keeps claude's session registry and
 # transcript there, an `enqueue` record per queued message; working-quiet
 # works the same and records nothing.
+#
+# A lone Esc logs `ESC`; working, it stops the turn as claude 2.1.290 does
+# (ov-368): an `[Request interrupted by user]` record, the mode back to idle
+# (the control file rewritten), and anything queued submitted at once. A
+# ctrl+x ctrl+s logs `SENDNOW`; working, it sends every queued message as
+# the next turn, a `dequeue` record for each, and stays working; idle, it
+# submits a draft in the box, as claude does.
 #
 # A claude stand-in draws a paste as claude 2.1.290 does (ov-367): an image's
 # path alone as `[Image #N]`, a paste past 800 UTF-16 units or with three
@@ -82,6 +90,16 @@ sub record {
     open(my $f, '>>:utf8', $transcript) or return;
     print $f "$_[0]\n";
     close $f;
+}
+
+# What the registry says in `mode`: busy while working, but idle for
+# working-lagging (the screen works, the registry still says idle);
+# `waiting` under a dialog, as claude 2.1.290 writes it (ov-368), but busy
+# for working-menu (a dialog drawn before the registry says so).
+sub status_of {
+    my ($m) = @_;
+    return "busy" if $m eq 'working-menu' || (working($m) && $m ne 'working-lagging');
+    return $m eq 'menu' ? "waiting" : "idle";
 }
 
 # working-lagging: the screen works, the registry still says idle.
@@ -148,7 +166,7 @@ sub draw {
         push @rows, " Claude Code stand-in", "";
         push @rows, map { "⏺ $_" } @said;
         push @rows, "";
-        if ($mode eq 'menu') {
+        if ($mode eq 'menu' || $mode eq 'working-menu') {
             push @rows, " Do you want to create haiku.txt?", " ❯ 1. Yes", "   2. No", "",
                 " Esc to cancel · Tab to amend";
         } elsif ($mode eq 'picker') {
@@ -193,6 +211,18 @@ sub draw {
     print "\e[H\e[2J" . join("\r\n", @rows);
 }
 
+# Each queued message as the next turn's prompt, as claude runs its queue.
+sub run_queue {
+    for my $q (@queued) {
+        logit("SUBMIT " . logged($q));
+        record('{"type":"user","message":{"role":"user","content":' . json($q) . '},"promptSource":"queued"}')
+            if $mode ne 'working-quiet';
+        (my $shown = $q) =~ s/\n/ /g;
+        push @said, $shown;
+    }
+    @queued = ();
+}
+
 sub take {
     my ($text) = @_;
     $composer .= $text;
@@ -206,19 +236,10 @@ while (1) {
     $fired = "" if $now !~ /-on-paste$/;
     $now = $fired if $fired ne "";
     if ($now ne $mode) {
-        if (working($mode) && !working($now)) {
-            for my $q (@queued) {
-                logit("SUBMIT " . logged($q));
-                record('{"type":"user","message":{"role":"user","content":' . json($q) . '},"promptSource":"queued"}')
-                    if $mode ne 'working-quiet';
-                (my $shown = $q) =~ s/\n/ /g;
-                push @said, $shown;
-            }
-            @queued = ();
-        }
+        run_queue() if working($mode) && !working($now);
         $mode = $now;
         # Not when a test took the registry away.
-        registry(working($mode) && $mode ne 'working-lagging' ? "busy" : "idle") if defined $registry && -e $registry;
+        registry(status_of($mode)) if defined $registry && -e $registry;
         $composer = $1 if $mode =~ /^draft:(.*)$/s;
         print($mode eq 'nobracket' ? "\e[?2004l" : "\e[?2004h");
         draw();
@@ -259,7 +280,7 @@ while (1) {
             logit("PASTE " . logged($text));
             if ($mode =~ /^(.+)-on-paste$/) {
                 ($fired, $mode) = ($1, $1);
-                registry(working($mode) && $mode ne 'working-lagging' ? "busy" : "idle") if defined $registry && -e $registry;
+                registry(status_of($mode)) if defined $registry && -e $registry;
             }
         } elsif (substr($buf, 0, 6) eq "\e[200~") {
             $buf = substr($buf, 6);
@@ -282,6 +303,25 @@ while (1) {
                 record('{"type":"user","message":{"role":"user","content":' . json($sent) . '}}');
                 (my $shown = $composer) =~ s/\n/ /g;
                 push @said, $shown;
+                $composer = "";
+            }
+        } elsif ($buf eq "\e") {
+            $buf = "";
+            logit("ESC");
+            if (working($mode)) {
+                record('{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}');
+                open(my $f, '>', $control) or die;
+                print $f "idle";
+                close $f;
+            }
+        } elsif (substr($buf, 0, 2) eq "\x18\x13") {
+            $buf = substr($buf, 2);
+            logit("SENDNOW");
+            if (working($mode) && @queued) {
+                record('{"type":"queue-operation","operation":"dequeue"}') for @queued;
+                run_queue();
+            } elsif (!working($mode) && $composer ne "") {
+                logit("SUBMIT " . logged($composer));
                 $composer = "";
             }
         } elsif (substr($buf, 0, 1) eq "\e") {

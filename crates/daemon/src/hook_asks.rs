@@ -209,6 +209,12 @@ pub const FENCE_HOLD: Duration = Duration::from_secs(10);
 /// fence cover the rest.
 const GATE_RECENT: Duration = Duration::from_secs(2);
 
+/// How long after a call's `PreToolUse` its permission dialog may still be
+/// coming with nothing yet to say so: on claude 2.1.290 its
+/// `PermissionRequest` came 70 ms after (ov-368). For a key that would answer
+/// that dialog (`settles_in`).
+pub const CALL_SETTLES: Duration = Duration::from_secs(1);
+
 /// Prompts remembered per session, for `prompted_since`.
 const PROMPTS_KEPT: usize = 8;
 /// Turns remembered per session, for `prompted`.
@@ -421,6 +427,20 @@ impl HookAsks {
     pub fn gated_since(&self, session: &str, since: Instant) -> bool {
         let sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         sessions.get(session).and_then(|h| h.gate).is_some_and(|gate| gate >= since)
+    }
+
+    /// How long until `session` has gone `GATE_RECENT` since a gate began and
+    /// `CALL_SETTLES` since a call in flight began, or `None` when it has now:
+    /// before then a dialog may be drawn that the screen doesn't show yet.
+    /// For one key pressed mid-turn (`answer_wake::interrupt`), which would
+    /// answer that dialog. A session never heard from is settled: its
+    /// caller refuses it for that.
+    pub fn settles_in(&self, session: &str) -> Option<Duration> {
+        let sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+        let heard = sessions.get(session)?;
+        let gate = heard.gate.map(|at| GATE_RECENT.saturating_sub(at.elapsed()));
+        let call = heard.calls.values().map(|c| CALL_SETTLES.saturating_sub(c.since.elapsed())).max();
+        gate.into_iter().chain(call).max().filter(|left| !left.is_zero())
     }
 
     /// Told whenever an ask is offered or an offered ask ends. What changed

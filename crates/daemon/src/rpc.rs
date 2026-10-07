@@ -417,6 +417,8 @@ fn scope_of(method: Method) -> Scope {
         // Types into the orchestrator's TUI and presses Enter, past the same
         // gate (`Watcher::tell_into`, ov-214).
         | Method::TerminalTell | Method::TerminalCompose
+        // One Esc, or claude's ctrl+x ctrl+s, past the same gate (ov-368).
+        | Method::TerminalInterrupt | Method::TerminalSendNow
         | Method::TerminalAgentAnswer
         | Method::TerminalAgentSetMode | Method::TerminalAgentSetModel | Method::TerminalAgentSetConfig
         | Method::TerminalAgentCancel
@@ -1925,6 +1927,19 @@ impl Rpc {
                 let turn = self.watcher.compose_into(id, &wire::prompt_text(&p.blocks), &images).await?;
                 let queued = turn == crate::watch::answer_wake::Turn::During;
                 Ok(result::Value::TerminalTold(farcooler_protocol::v1::TerminalTold { queued }))
+            }
+
+            // Stop and Send Now in claude's TUI: one key, past the gate
+            // (`Watcher::press`, ov-368). The payload names the terminal.
+            "terminal.interrupt" | "terminal.send_now" => {
+                let Some(request::Payload::AgentCancel(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
+                use crate::watch::answer_wake::interrupt::Key;
+                let key = if req.method == "terminal.interrupt" { Key::Interrupt } else { Key::SendNow };
+                self.watcher.press(id, key).await?;
+                self.terminal_result(id).await
             }
 
             // Stop waiting to paste a draft held behind a dialog (ov-385).

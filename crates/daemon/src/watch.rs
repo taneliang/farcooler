@@ -929,6 +929,9 @@ pub struct Watcher {
     /// gate's first check through Enter: an answer, a draft or a held one, a
     /// told or composed message (`answer_wake::Watcher::typing`, ov-372).
     typing: std::sync::Mutex<HashMap<Uuid, std::sync::Arc<tokio::sync::Mutex<()>>>>,
+    /// When an Esc or a Send Now was last pressed in each terminal, for the
+    /// lockout (`answer_wake::interrupt`, ov-368).
+    keys_pressed: std::sync::Mutex<HashMap<Uuid, std::time::Instant>>,
     /// The sessions of recorded subagents being read (`workers`).
     worker_follow: std::sync::Mutex<workers::Follower>,
     /// Make the next paste fail as a send would (`answer_wake`'s tests).
@@ -949,6 +952,9 @@ pub struct Watcher {
     /// Run once, right before compose's first paste (`compose`'s tests).
     #[cfg(test)]
     before_paste: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    /// Run once, under the fence, before an interrupt's last checks.
+    #[cfg(test)]
+    before_key: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 /// One client's claim about what it is showing, and when it said so.
@@ -2816,6 +2822,7 @@ impl Watcher {
             draft_holds: std::sync::Mutex::new(HashMap::new()),
             draft_pump: tokio::sync::Mutex::new(()),
             typing: std::sync::Mutex::new(HashMap::new()),
+            keys_pressed: std::sync::Mutex::new(HashMap::new()),
             worker_follow: std::sync::Mutex::new(workers::Follower::new(
                 std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default(),
             )),
@@ -2829,6 +2836,8 @@ impl Watcher {
             before_enter: std::sync::Mutex::new(None),
             #[cfg(test)]
             before_paste: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            before_key: std::sync::Mutex::new(None),
             clears_pending: std::sync::Mutex::new(HashSet::new()),
             taps: std::sync::Mutex::new(None),
             task_notices: std::sync::Mutex::new(HashMap::new()),

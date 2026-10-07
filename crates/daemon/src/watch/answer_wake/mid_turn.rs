@@ -97,7 +97,7 @@ const _: () = assert!(LONGEST_FENCE.as_millis() < crate::hook_asks::FENCE_HOLD.a
 const QUEUE_SETTLES: Duration = Duration::from_secs(3);
 
 /// The most of a transcript read on either side of the mark.
-const LONGEST_READ: u64 = 1 << 20;
+pub(super) const LONGEST_READ: u64 = 1 << 20;
 
 /// What will show a message was queued, set up before it's typed.
 #[derive(Debug, Clone)]
@@ -384,7 +384,7 @@ pub(crate) fn enqueued_before(path: &Path, from: u64, text: &str) -> bool {
 
 /// The transcript's records in `[start, end)`, as JSON. A record cut by
 /// either end fails to parse, and is skipped.
-fn records_between(path: &Path, start: u64, end: u64) -> Vec<serde_json::Value> {
+pub(super) fn records_between(path: &Path, start: u64, end: u64) -> Vec<serde_json::Value> {
     let Ok(mut file) = std::fs::File::open(path) else { return Vec::new() };
     if file.seek(SeekFrom::Start(start)).is_err() {
         return Vec::new();

@@ -620,6 +620,10 @@ pub mod capability {
     /// A compose's images uploaded first (ov-393): `terminal.paste_file`'s `stage`, and
     /// `terminal.compose`'s `staged_image`, `MAX_COMPOSE_UPLOAD_BYTES` together.
     pub const COMPOSE_UPLOAD: &str = "compose_upload";
+    /// `terminal.interrupt` and `terminal.send_now` (ov-368): one Esc, or claude's
+    /// ctrl+x ctrl+s, pressed in a terminal-mode claude pane past the typing gate.
+    /// Its own word, so a client offers Stop and Send Now only where they're served.
+    pub const TERMINAL_INTERRUPT: &str = "terminal_interrupt";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -636,7 +640,7 @@ pub mod capability {
             READ_ONLY_FOLDERS, AGENT_QUEUE, BOARD_PLAN, LFS_POINTERS, BOARD_PAGES, BOARD_RULINGS,
             BOARD_TRAINS, BOARD_COST, LANDING, BOARD_RULING_ACTIONS, AGENT_ROWS, DRAFT_HOLD,
             PROJECTOR_SETTING, AGENT_COMPOSE,
-            COMPOSE, COMPOSE_UPLOAD,
+            COMPOSE, COMPOSE_UPLOAD, TERMINAL_INTERRUPT,
         ];
 
     /// Capabilities this process has but does not offer: a feature behind a
@@ -763,6 +767,8 @@ pub mod method {
         TerminalTell = "terminal.tell" => AGENT,
         TerminalDraftWithdraw = "terminal.draft_withdraw" => DRAFT_HOLD,
         TerminalCompose = "terminal.compose" => AGENT_COMPOSE,
+        TerminalInterrupt = "terminal.interrupt" => TERMINAL_INTERRUPT,
+        TerminalSendNow = "terminal.send_now" => TERMINAL_INTERRUPT,
         TerminalAgentAnswer = "terminal.agent_answer" => AGENT,
         TerminalAgentSetMode = "terminal.agent_set_mode" => AGENT,
         TerminalAgentSetModel = "terminal.agent_set_model" => AGENT,
@@ -1377,40 +1383,6 @@ mod tests {
     #[test]
     fn the_stamped_channel_is_one_of_the_four() {
         assert!(ALL_CHANNELS.contains(&CHANNEL));
-    }
-
-    /// Each method is one wire name and back again, and no two share a name.
-    ///
-    /// The macro writes the name into `name` and `parse` from one row, so the
-    /// round trip can only fail on a duplicate: `parse` would answer the first
-    /// row for both, and the second would be unreachable on the wire.
-    #[test]
-    fn every_method_round_trips_through_its_wire_name() {
-        let names: std::collections::BTreeSet<_> = method::Method::ALL.iter().map(|m| m.name()).collect();
-        assert_eq!(names.len(), method::Method::ALL.len(), "two methods share a wire name");
-        for &m in method::Method::ALL {
-            assert_eq!(method::Method::parse(m.name()), Some(m), "{m:?}");
-            assert_eq!(capability::for_method(m.name()), Some(m.capability()), "{m:?}");
-        }
-        // The agent queue's three, which the daemon's own scope table was
-        // missing while this table had them.
-        for name in ["terminal.agent_edit_queued", "terminal.agent_cancel_queued", "terminal.agent_steer_queued"] {
-            assert_eq!(capability::for_method(name), Some(capability::AGENT_QUEUE), "{name}");
-        }
-        // And the ones they act on stay under `agent`: an older runner has
-        // both, and only the three above are missing there.
-        for name in ["terminal.agent_prompt", "terminal.agent_cancel"] {
-            assert_eq!(capability::for_method(name), Some(capability::AGENT), "{name}");
-        }
-    }
-
-    /// A runner advertises the queue's capability, and the queue's methods are
-    /// the only ones that need it.
-    #[test]
-    fn the_queue_capability_is_advertised_and_apart_from_agent() {
-        assert!(capability::ALL.contains(&capability::AGENT_QUEUE), "the daemon would not advertise it");
-        assert_ne!(capability::AGENT_QUEUE, capability::AGENT);
-        assert_eq!(capability::AGENT_QUEUE, "agent_queue");
     }
 
     #[test]

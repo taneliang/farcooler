@@ -37,6 +37,36 @@ pub(crate) fn said(config: &Path, pid: i32) -> Said {
     }
 }
 
+/// What claude's registry says the live process `pid` is doing, for a key
+/// that stops or steers a turn (`interrupt`, ov-368).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Status {
+    /// `"status":"busy"`, and only that: a turn running, no dialog up.
+    Busy,
+    /// `idle`, or `shell` (a `!` command or a background shell running, the
+    /// turn over): nothing to stop.
+    Idle,
+    /// Live, and anything else. claude 2.1.290 writes `"status":"waiting"`
+    /// while a permission dialog is up (ov-368); no status at all is an
+    /// older claude's, which can't say there's none.
+    Waiting,
+    /// No live entry.
+    Nothing,
+}
+
+/// `pid`'s status in the registry under `config`, read as `said` reads it.
+pub(crate) fn status(config: &Path, pid: i32) -> Status {
+    let Ok(bytes) = std::fs::read(config.join("sessions").join(format!("{pid}.json"))) else { return Status::Nothing };
+    match claude_registry::parse(&bytes) {
+        Some(entry) if entry.pid == pid && claude_registry::is_live(&entry, &Kernel) => match entry.status {
+            Some(Activity::Busy) => Status::Busy,
+            Some(Activity::Idle | Activity::Shell) => Status::Idle,
+            None => Status::Waiting,
+        },
+        _ => Status::Nothing,
+    }
+}
+
 /// claude's config directory, from its process's environment (`mid_turn`).
 pub(crate) async fn config_of(pid: i32) -> Option<PathBuf> {
     mid_turn::config_dir(&mid_turn::process_env(pid).await?)
@@ -77,6 +107,32 @@ mod tests {
         }
         write(entry(r#","status":"idle""#).replace(&started, "Sun Oct  4 18:06:13 2020"));
         assert_eq!(said(config.path(), pid), Said::Nothing, "a stale file");
+    }
+
+    /// Only an explicit `busy` from the live process is busy (ov-368): the
+    /// `waiting` claude writes under a dialog, and no status, are neither
+    /// busy nor idle.
+    #[test]
+    fn only_an_explicit_busy_is_busy() {
+        let config = tempfile::tempdir().unwrap();
+        let pid = std::process::id() as i32;
+        let started = started_utc(pid);
+        std::fs::create_dir_all(config.path().join("sessions")).unwrap();
+        let file = config.path().join("sessions").join(format!("{pid}.json"));
+        assert_eq!(status(config.path(), pid), Status::Nothing, "no file");
+        for (field, want) in [
+            (r#","status":"busy""#, Status::Busy),
+            (r#","status":"idle""#, Status::Idle),
+            (r#","status":"shell""#, Status::Idle),
+            (r#","status":"waiting""#, Status::Waiting),
+            ("", Status::Waiting),
+        ] {
+            std::fs::write(&file, format!(r#"{{"pid":{pid},"sessionId":"s","procStart":"{started}"{field}}}"#)).unwrap();
+            assert_eq!(status(config.path(), pid), want, "{field:?}");
+        }
+        let stale = format!(r#"{{"pid":{pid},"sessionId":"s","procStart":"Sun Oct  4 18:06:13 2020","status":"busy"}}"#);
+        std::fs::write(&file, stale).unwrap();
+        assert_eq!(status(config.path(), pid), Status::Nothing, "a stale file");
     }
 
     /// This process's start, as claude writes `procStart`: UTC.

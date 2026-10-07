@@ -81,7 +81,7 @@ fn queue_key(text: &str) -> String {
 }
 
 /// Text claude queues for itself rather than for a person.
-fn machine_queued(text: &str) -> bool {
+pub fn machine_queued(text: &str) -> bool {
     let text = text.trim_start();
     text.starts_with("<task-notification>") || text.starts_with("<agent-message")
 }
