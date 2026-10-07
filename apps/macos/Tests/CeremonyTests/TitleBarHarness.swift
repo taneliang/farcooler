@@ -21,6 +21,9 @@ enum TitleBarHarness {
         var needYou = 3
         var title = "Main"
         var repository = "overnight"
+        /// The orchestrator's state: `.none` is a workspace with no
+        /// orchestrator, whose mark is the wide person glyph (ov-417).
+        var orchestrator: OrchestratorRow.State = .working
     }
 
     static let worktree = Worktree(
@@ -68,7 +71,7 @@ enum TitleBarHarness {
                 }
                 .titleBarStatus(
                     TitleStatusSource(
-                        orchestrator: .working, status: .working, nowDoing: words.nowDoing,
+                        orchestrator: words.orchestrator, status: .working, nowDoing: words.nowDoing,
                         waiting: { [needYou = words.needYou] _ in needYou }),
                     room: room, actions: TitleStatusActions(console: console), width: $width)
                 .toolbar(removing: .title)

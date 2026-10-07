@@ -66,7 +66,7 @@ enum TitleStatus {
         /// Its width, fixed: see the file's comment.
         var width: CGFloat {
             switch self {
-            case .ring: 64
+            case .ring: 96
             case .short: 184
             case .medium: 380
             case .wide: 680
@@ -120,6 +120,12 @@ enum TitleStatus {
         let label = repository.isEmpty ? title : "\(title) · \(repository)"
         return 96 + 39 + textWidth(label) + 43 + 8
     }
+
+    /// Whether the orchestrator's menu draws its ⌄: with its words, from the
+    /// short form up. At the ring it is the mark alone, and a ⌄ 20 pt from a
+    /// 16 pt mark read as a second chevron beside the title's (ov-417); the
+    /// menu is still there on a long press, and Show Activity is ⌘K.
+    static func showsMenuIndicator(_ form: Form) -> Bool { form >= .short }
 
     /// How far the orchestrator's menu sits below center so its label's
     /// baseline meets the borderless buttons' beside it (integ-9).
@@ -362,6 +368,7 @@ struct TitleStatusView: View {
             actions.goToOrchestrator()
         }
         .menuStyle(.borderlessButton)
+        .menuIndicator(TitleStatus.showsMenuIndicator(form) ? .visible : .hidden)
         .fixedSize()
         // A borderless menu draws its label 1 pt higher than a borderless
         // button draws its title in the regular bar (integ-9, measured at
