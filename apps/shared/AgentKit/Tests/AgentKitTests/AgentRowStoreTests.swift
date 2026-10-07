@@ -72,7 +72,12 @@ func theSharedRowFixtureDecodes() throws {
     #expect(sub.status == .ended("Killed") && sub.toolCount == 7 && sub.currentAction == "Grep fn main")
     #expect(sub.startedMs == 6_000 && sub.endedMs == nil && sub.lastMs == 9_000)
 
-    #expect(page.rows[5].kind == .ask(.init(kind: "Permission", text: "Bash: rm -rf target", tool: "Bash", askedMs: 7_000, answered: false)))
+    // A question the runner's hook holds (ov-370): its id and its options.
+    #expect(page.rows[5].kind == .ask(.init(
+        kind: "Question", text: "Which color?", tool: "AskUserQuestion", askedMs: 7_000, answered: false, held: "hook-ask-1",
+        questions: [.init(
+            question: "Which color?", header: "Color",
+            options: [.init(label: "Red", description: "Warm"), .init(label: "Blue", description: "Calm")], multiSelect: false)])))
     #expect(page.rows[6].kind == .queued(.init(text: "and then the docs", state: "Waiting", atMs: 8_000)))
     #expect(page.rows[7].kind == .notice(.init(kind: "Compacted", text: "Context compacted", atMs: nil)))
     #expect(page.rows[8].kind == .handoff(.init(reason: "A panel is open", atMs: 9_500)))

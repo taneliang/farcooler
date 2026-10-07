@@ -188,11 +188,65 @@ public enum AgentConversation {
     }
 
     public static func askTitle(_ ask: AgentRow.Ask) -> String {
+        if let by = ask.answeredBy, ask.answered || ask.held == nil { return "Answered on \(by)" }
         if ask.answered { return "Answered" }
         switch ask.kind {
         case "Permission": return "Claude is asking for permission"
         case "PlanExit": return "Claude has a plan for you to review"
         default: return "Claude is asking a question"
+        }
+    }
+
+    // MARK: - Answering a held ask (ov-370, R-33)
+
+    /// Whether this view can answer the ask: the runner's hook holds it and
+    /// nothing has answered it yet. Otherwise only the terminal can.
+    public static func answerable(_ ask: AgentRow.Ask) -> Bool {
+        !ask.answered && ask.held != nil
+    }
+
+    /// What `terminal.agent_answer` takes for each button. A question is
+    /// answered with `answer` and its answers; a plan with `allow` (Approve
+    /// Plan) or `deny` (Keep Planning); a permission with `allow` or `deny`.
+    public enum AnswerOption {
+        public static let allow = "allow"
+        public static let deny = "deny"
+        public static let answer = "answer"
+    }
+
+    /// A question's answers as claude reads them, each question's words to
+    /// its answer: the options picked, in the order offered, then any words
+    /// typed in Other, joined by ", ". Nil until every question has one.
+    public static func answers(
+        for questions: [AgentRow.Ask.Question], picked: [Int: Set<String>], typed: [Int: String]
+    ) -> [String: String]? {
+        guard !questions.isEmpty else { return nil }
+        var answers: [String: String] = [:]
+        for (i, question) in questions.enumerated() {
+            let chosen = question.options.map(\.label).filter { picked[i]?.contains($0) == true }
+            let other = (typed[i] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let parts = other.isEmpty ? chosen : chosen + [other]
+            guard !parts.isEmpty else { return nil }
+            answers[question.question] = parts.joined(separator: ", ")
+        }
+        return answers
+    }
+
+    /// One pick: a single-choice question's replaces what was picked, a
+    /// multi-select's toggles.
+    public static func pick(_ label: String, in question: AgentRow.Ask.Question, picked: Set<String>) -> Set<String> {
+        guard question.multiSelect else { return [label] }
+        return picked.contains(label) ? picked.subtracting([label]) : picked.union([label])
+    }
+
+    /// Why an answer didn't land, by the runner's word for it.
+    public static func answerIssue(what: String?, timedOut: Bool = false) -> String {
+        if timedOut { return "The runner didn’t answer in time. Check the terminal before answering again." }
+        switch what {
+        case "not_held": return "This isn’t waiting here anymore. It was answered, or only the terminal can answer it now."
+        case "not_delivered": return "The answer didn’t reach Claude. Try again."
+        case "answers": return "Answer every question first."
+        default: return "The answer wasn’t sent. Use the terminal."
         }
     }
 
@@ -203,4 +257,11 @@ public enum AgentConversation {
         default: "Queued"
         }
     }
+}
+
+/// Where a held ask's answer goes (ov-370): the runner's
+/// `terminal.agent_answer`, which writes it to the hook claude is waiting on.
+/// The first answer from any device wins; a later one is refused `not_held`.
+public protocol AgentAnswerSink: Sendable {
+    func answer(terminal: String, ask: String, option: String, answers: [String: String]) async throws
 }

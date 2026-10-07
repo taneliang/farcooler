@@ -130,6 +130,46 @@ public struct AgentRow: Sendable, Equatable, Identifiable, Codable {
         public var tool: String?
         public var askedMs: Int64?
         public var answered: Bool
+        /// What `terminal.agent_answer` takes while the runner's hook holds
+        /// the ask (ov-370); nil once the hold ends, when only the terminal
+        /// can answer it.
+        public var held: String? = nil
+        /// A question's questions, whole. Optional only for the cache's sake:
+        /// a row cached before them decodes. `questionList` reads it.
+        public var questions: [Question]? = nil
+        /// A plan's text, its line breaks kept.
+        public var plan: String? = nil
+        /// The device whose answer the hook took: "iPhone", "Mac".
+        public var answeredBy: String? = nil
+
+        public var questionList: [Question] { questions ?? [] }
+
+        public struct Question: Sendable, Equatable, Codable {
+            /// The words claude asked, which its answer is keyed by.
+            public var question: String
+            /// Claude's short label for it: "Color".
+            public var header: String
+            public var options: [Option]
+            /// Several may be chosen; claude reads them joined by ", ".
+            public var multiSelect: Bool
+
+            public init(question: String, header: String, options: [Option], multiSelect: Bool) {
+                self.question = question
+                self.header = header
+                self.options = options
+                self.multiSelect = multiSelect
+            }
+        }
+
+        public struct Option: Sendable, Equatable, Codable {
+            public var label: String
+            public var description: String
+
+            public init(label: String, description: String) {
+                self.label = label
+                self.description = description
+            }
+        }
     }
 
     public struct Queued: Sendable, Equatable, Codable {
@@ -323,9 +363,19 @@ extension AgentRow {
                 toolCount: AgentRowJSON.int(p["tool_count"]), currentAction: text("current_action"),
                 lastMs: AgentRowJSON.ms(p["last_ms"])))
         case "Ask":
+            let questions = (p["questions"] as? [Any] ?? []).compactMap { $0 as? [String: Any] }.map { q in
+                Ask.Question(
+                    question: q["question"] as? String ?? "", header: q["header"] as? String ?? "",
+                    options: (q["options"] as? [Any] ?? []).compactMap { $0 as? [String: Any] }.map {
+                        Ask.Option(label: $0["label"] as? String ?? "", description: $0["description"] as? String ?? "")
+                    },
+                    multiSelect: q["multi_select"] as? Bool ?? false)
+            }
             return .ask(Ask(
                 kind: AgentRowJSON.tag(p["kind"])?.name ?? "", text: text("text"), tool: p["tool"] as? String,
-                askedMs: AgentRowJSON.ms(p["asked_ms"]), answered: p["answered"] as? Bool ?? false))
+                askedMs: AgentRowJSON.ms(p["asked_ms"]), answered: p["answered"] as? Bool ?? false,
+                held: p["held"] as? String, questions: questions.isEmpty ? nil : questions, plan: p["plan"] as? String,
+                answeredBy: p["answered_by"] as? String))
         case "Queued":
             return .queued(Queued(text: text("text"), state: AgentRowJSON.tag(p["state"])?.name ?? "Waiting", atMs: AgentRowJSON.ms(p["at_ms"])))
         case "Notice":
