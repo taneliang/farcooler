@@ -63,6 +63,9 @@ fun nativeAnswer(model: NativePaneModel): NativeAnswer? {
 fun NativeAskRow(ask: AgentRow.Ask, answer: NativeAnswer?, showTerminal: () -> Unit) {
     var picked by remember(ask.held) { mutableStateOf<Map<Int, Set<String>>>(emptyMap()) }
     var typed by remember(ask.held) { mutableStateOf<Map<Int, String>>(emptyMap()) }
+    // The hold this row last answered, so what became of the answer is still
+    // said once the hold ends (review 1 M1).
+    var sentFor by remember { mutableStateOf<String?>(null) }
     val waiting = !ask.answered && ask.answeredBy == null
     val canAnswer = answer != null && AgentConversation.answerable(ask)
     val sending = ask.held != null && answer?.answering == ask.held
@@ -122,7 +125,10 @@ fun NativeAskRow(ask: AgentRow.Ask, answer: NativeAnswer?, showTerminal: () -> U
         }
         if (canAnswer && answer != null) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                val send = { option: String, given: Map<String, String> -> answer.send(ask, option, given) }
+                val send = { option: String, given: Map<String, String> ->
+                    sentFor = ask.held
+                    answer.send(ask, option, given)
+                }
                 when (ask.kind) {
                     "Question" -> {
                         val given = AgentConversation.answers(ask.questions, picked, typed)
@@ -153,7 +159,7 @@ fun NativeAskRow(ask: AgentRow.Ask, answer: NativeAnswer?, showTerminal: () -> U
         } else if (waiting) {
             OutlinedButton(onClick = showTerminal, modifier = Modifier.testTag("native-ask-show-terminal")) { Text("Show terminal") }
         }
-        val held = ask.held
+        val held = ask.held ?: sentFor
         val issue = if (held != null) answer?.issues?.get(held) else null
         if (issue != null) {
             Text(issue, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("native-ask-issue"))

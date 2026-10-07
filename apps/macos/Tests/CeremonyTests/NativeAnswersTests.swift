@@ -197,4 +197,27 @@ struct NativeAnswersTests {
         #expect(drawn.model.answerIssues["hook-ask-p"] == AgentConversation.answerIssue(what: "not_held"))
         #expect(drawn.ids.contains("native-ask-issue"))
     }
+
+    @Test("An answer that didn't reach Claude is still said once its hold has ended, beside Show Terminal")
+    func undeliveredIsSaidAfterTheHold() async throws {
+        let drawn = try await Self.draw(Self.permission())
+        defer { drawn.window.close() }
+        await drawn.sink.set(.failure(.refused("Not delivered.", word: "resource-conflict", what: "not_delivered")))
+        try drawn.click("native-ask-allow")
+        _ = await drawn.heard(1)
+        // The runner ends the hold naming nobody (review 1 M1): the row loses
+        // its id, and only the terminal can answer now.
+        let rows = [
+            NativeAgentTests.row(0, "turn:p1", ["Turn": [
+                "prompt": "Make the button.", "origin": "Typed", "started_ms": 1, "ended_ms": NSNull(),
+                "duration_ms": NSNull(), "outcome": NSNull(), "background_running": 0, "activity": "Waiting",
+            ]]),
+            NativeAgentTests.row(1, "ask:toolu_1", ["Ask": Self.permission(held: nil)]),
+        ]
+        drawn.model.store.apply(try await drawn.model.store.ledger.page(NativeAgentTests.page(rows)))
+        await NativeAgentTests.settle(drawn.window, 240)
+        #expect(drawn.ids.contains("native-ask-issue"), "\(drawn.ids.sorted())")
+        #expect(drawn.ids.contains("native-ask-show-terminal") && !drawn.ids.contains("native-ask-allow"))
+        #expect(AgentConversation.answerIssue(what: "not_delivered").contains("terminal"))
+    }
 }

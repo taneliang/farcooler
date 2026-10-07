@@ -250,7 +250,13 @@ object AgentConversation {
         questions.forEachIndexed { i, question ->
             val chosen = question.options.map { it.label }.filter { picked[i]?.contains(it) == true }
             val other = typed[i].orEmpty().trim()
-            val parts = if (other.isEmpty()) chosen else chosen + other
+            // Other is one more choice: for a single-choice question it
+            // replaces the pick, as claude's own dialog has it (review 1 L1).
+            val parts = when {
+                other.isEmpty() -> chosen
+                question.multiSelect -> chosen + other
+                else -> listOf(other)
+            }
             if (parts.isEmpty()) return null
             answers[question.question] = parts.joinToString(", ")
         }
@@ -268,9 +274,9 @@ object AgentConversation {
     fun answerIssue(what: String?, timedOut: Boolean = false): String = when {
         timedOut -> "The runner didn’t answer in time. Check the terminal before answering again."
         what == "not_held" -> "This isn’t waiting here anymore. It was answered, or only the terminal can answer it now."
-        what == "not_delivered" -> "The answer didn’t reach Claude. Try again."
+        what == "not_delivered" -> "The answer didn’t reach Claude. Answer in the terminal."
         what == "answers" -> "Answer every question first."
-        else -> "The answer wasn’t sent. Use the terminal."
+        else -> "The answer wasn’t sent. Answer in the terminal."
     }
 
     fun queuedLabel(state: String): String = when (state) {

@@ -32,6 +32,9 @@ struct NativeAskRow: View {
     let showTerminal: () -> Void
     @State private var picked: [Int: Set<String>] = [:]
     @State private var typed: [Int: String] = [:]
+    /// The hold this row last answered, so what became of the answer is
+    /// still said once the hold ends (review 1 M1).
+    @State private var sentFor: String?
 
     private var waiting: Bool { !ask.answered && ask.answeredBy == nil }
     private var canAnswer: Bool { answer != nil && AgentConversation.answerable(ask) }
@@ -65,7 +68,7 @@ struct NativeAskRow: View {
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("native-ask-show-terminal")
             }
-            if let held = ask.held, let issue = answer?.issues[held] {
+            if let held = ask.held ?? sentFor, let issue = answer?.issues[held] {
                 Text(issue)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -159,6 +162,7 @@ struct NativeAskRow: View {
     }
 
     private func send(_ option: String, _ answers: [String: String] = [:]) {
+        sentFor = ask.held
         answer?.send(ask, option, answers)
     }
 }

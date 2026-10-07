@@ -33,6 +33,9 @@ import Testing
         let given = AgentConversation.answers(for: questions, picked: [0: ["Blue"], 1: ["L", "S"]], typed: [1: "XL"])
         #expect(given == ["Which color?": "Blue", "Which sizes?": "S, L, XL"], "offered order, then Other, joined as claude reads them")
         #expect(AgentConversation.answers(for: [color], picked: [:], typed: [0: "Green"]) == ["Which color?": "Green"])
+        #expect(
+            AgentConversation.answers(for: [color], picked: [0: ["Red"]], typed: [0: "Green"]) == ["Which color?": "Green"],
+            "a single-choice question's Other replaces the pick")
         #expect(AgentConversation.answers(for: [], picked: [:], typed: [:]) == nil)
     }
 
@@ -56,7 +59,7 @@ import Testing
 
     @Test func refusalsAreWords() {
         #expect(AgentConversation.answerIssue(what: "not_held").contains("isn’t waiting here"))
-        #expect(AgentConversation.answerIssue(what: "not_delivered") == "The answer didn’t reach Claude. Try again.")
+        #expect(AgentConversation.answerIssue(what: "not_delivered") == "The answer didn’t reach Claude. Answer in the terminal.")
         #expect(AgentConversation.answerIssue(what: "answers") == "Answer every question first.")
         #expect(AgentConversation.answerIssue(what: nil, timedOut: true).contains("didn’t answer in time"))
         #expect(!AgentConversation.answerIssue(what: "x").contains("_"), "no runner words on screen")

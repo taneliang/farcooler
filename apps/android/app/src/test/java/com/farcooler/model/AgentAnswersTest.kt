@@ -33,6 +33,11 @@ class AgentAnswersTest {
             AgentConversation.answers(questions, mapOf(0 to setOf("Blue"), 1 to setOf("L", "S")), mapOf(1 to "XL")),
         )
         assertEquals(mapOf("Which color?" to "Green"), AgentConversation.answers(listOf(color), emptyMap(), mapOf(0 to "Green")))
+        assertEquals(
+            "a single-choice question's Other replaces the pick",
+            mapOf("Which color?" to "Green"),
+            AgentConversation.answers(listOf(color), mapOf(0 to setOf("Red")), mapOf(0 to "Green")),
+        )
         assertNull(AgentConversation.answers(emptyList(), emptyMap(), emptyMap()))
     }
 
@@ -54,7 +59,7 @@ class AgentAnswersTest {
     @Test
     fun refusalsAreWords() {
         assertTrue(AgentConversation.answerIssue("not_held").contains("isn’t waiting here"))
-        assertEquals("The answer didn’t reach Claude. Try again.", AgentConversation.answerIssue("not_delivered"))
+        assertEquals("The answer didn’t reach Claude. Answer in the terminal.", AgentConversation.answerIssue("not_delivered"))
         assertEquals("Answer every question first.", AgentConversation.answerIssue("answers"))
         assertFalse("no runner words on screen", AgentConversation.answerIssue("x_y").contains("_"))
     }

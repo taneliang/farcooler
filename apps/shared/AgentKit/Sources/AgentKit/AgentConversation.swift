@@ -225,7 +225,9 @@ public enum AgentConversation {
         for (i, question) in questions.enumerated() {
             let chosen = question.options.map(\.label).filter { picked[i]?.contains($0) == true }
             let other = (typed[i] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let parts = other.isEmpty ? chosen : chosen + [other]
+            // Other is one more choice: for a single-choice question it
+            // replaces the pick, as claude's own dialog has it (review 1 L1).
+            let parts = other.isEmpty ? chosen : question.multiSelect ? chosen + [other] : [other]
             guard !parts.isEmpty else { return nil }
             answers[question.question] = parts.joined(separator: ", ")
         }
@@ -244,9 +246,10 @@ public enum AgentConversation {
         if timedOut { return "The runner didn’t answer in time. Check the terminal before answering again." }
         switch what {
         case "not_held": return "This isn’t waiting here anymore. It was answered, or only the terminal can answer it now."
-        case "not_delivered": return "The answer didn’t reach Claude. Try again."
+        // Its hold is over, so a second try would be refused: the terminal.
+        case "not_delivered": return "The answer didn’t reach Claude. Answer in the terminal."
         case "answers": return "Answer every question first."
-        default: return "The answer wasn’t sent. Use the terminal."
+        default: return "The answer wasn’t sent. Answer in the terminal."
         }
     }
 
