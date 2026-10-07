@@ -99,24 +99,53 @@ async fn a_pane_that_wrote_is_read_again() {
     let (_dir, svc, repo) = crate::test_support::fixture().await;
     let main = svc.store.list_worktrees_for_repository(repo).unwrap().into_iter().find(|w| w.is_main_checkout).unwrap();
     let term = svc.create_terminal(main.id, "shell", "shell").await.expect("a shell pane");
-    let cache = ScreenCache::default();
     let runtime = svc.runtime();
+    let patient = std::time::Duration::from_secs(60);
 
-    // Let the prompt land and its second pass, so the next read can be held.
-    tokio::time::sleep(std::time::Duration::from_millis(2300)).await;
-    let snapshot = svc.inventory.refresh().await;
-    let before = svc.tmux.call_counts();
-    cache.read(&runtime, &snapshot, term.id).await.expect("a screen");
-    cache.read(&runtime, &snapshot, term.id).await.expect("a screen");
-    assert_eq!(spawned_since(&svc, &before).get("capture-pane"), Some(&1), "the second read is held");
+    // Hold a screen, once the shell has stopped drawing. A read is held only
+    // when the capture began in a later second than the pane's last output, so
+    // a prompt still being drawn (fish, on a loaded machine, takes seconds)
+    // makes the second read a fresh capture, as it must. That is the cache
+    // being right, and it used to fail this test half the time at a load of 20
+    // (ov-419): it slept a fixed 2.3 s and then demanded the hold.
+    //
+    // So each attempt starts from an empty cache and demands exactly what the
+    // test always did: the first read captures, the second is held. An attempt
+    // that finds the pane still drawing is made again a moment later, and a
+    // cache that never holds still fails, after the wait.
+    let started = std::time::Instant::now();
+    let cache = loop {
+        let cache = ScreenCache::default();
+        let snapshot = svc.inventory.refresh().await;
+        let before = svc.tmux.call_counts();
+        cache.read(&runtime, &snapshot, term.id).await.expect("a screen");
+        cache.read(&runtime, &snapshot, term.id).await.expect("a screen");
+        let spawned = spawned_since(&svc, &before);
+        if spawned.get("capture-pane") == Some(&1) {
+            break cache;
+        }
+        assert!(
+            started.elapsed() < patient,
+            "the second read is held: still {spawned:?} after {patient:?}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    };
 
     runtime.send_input(term.id, "echo FC_MOVED_390\n").await.expect("typed");
+    // Wait for the screen to have moved, by asking tmux itself rather than the
+    // cache, then ask the cache AT ONCE. Waiting on the cache instead would let
+    // its age backstop (20 s and up) rescue a cache that never noticed the
+    // move, and the wait has to be long for a slow runner. This way the bound
+    // belongs to the pane and the verdict to a single read: the cache either
+    // hands back the screen from before it moved or it does not.
+    let started = std::time::Instant::now();
     let mut seen = false;
-    for _ in 0..40 {
-        let snapshot = svc.inventory.refresh().await;
-        let (screen, _, _) = cache.read(&runtime, &snapshot, term.id).await.expect("a screen");
-        if screen.contains("FC_MOVED_390") {
-            seen = true;
+    while started.elapsed() < patient {
+        let (truth, _, _) = runtime.screen(term.id).await.expect("a screen");
+        if truth.contains("FC_MOVED_390") {
+            let snapshot = svc.inventory.refresh().await;
+            let (screen, _, _) = cache.read(&runtime, &snapshot, term.id).await.expect("a screen");
+            seen = screen.contains("FC_MOVED_390");
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
