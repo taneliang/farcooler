@@ -356,7 +356,10 @@ final class DaemonClient: ObservableObject {
         state = .connecting
         retryTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            if self.target.isEmpty { await LocalDaemon.shared.ensure() }
+            if self.target.isEmpty {
+                await LocalDaemon.shared.ensure()
+                NativeAgents.shared.start()
+            }
             guard !Task.isCancelled else { return }
             await self.refresh()
             guard !Task.isCancelled else { return }

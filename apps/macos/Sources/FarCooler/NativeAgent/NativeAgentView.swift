@@ -38,6 +38,8 @@ struct NativeAgentView: View {
             }
             .padding(Spacing.section)
         }
+        // Clear of the switch that floats in the pane's top corner.
+        .contentMargins(.top, 36, for: .scrollContent)
         .defaultScrollAnchor(.bottom)
         .scrollEdgeEffectStyle(.soft, for: .bottom)
         .overlay {

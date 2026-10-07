@@ -154,16 +154,16 @@ final class NativePaneModel: ObservableObject {
 
     // MARK: - The view each pane remembers (R-27)
 
-    private static let key = "nativeAgent.paneViews"
+    /// One key per pane, a Bool, so a capture can set it like any other
+    /// (`FARCOOLER_CAPTURE_DEFAULTS`).
+    static func key(for terminal: String) -> String { "nativeAgent.view.\(terminal)" }
 
     /// Terminal on the Mac until a pane was switched (R-27).
     static func remembered(for terminal: String, defaults: UserDefaults = .standard) -> Bool {
-        (defaults.dictionary(forKey: key) as? [String: Bool])?[terminal] ?? false
+        defaults.bool(forKey: key(for: terminal))
     }
 
     static func remember(_ native: Bool, for terminal: String, defaults: UserDefaults = .standard) {
-        var all = (defaults.dictionary(forKey: key) as? [String: Bool]) ?? [:]
-        all[terminal] = native ? true : nil
-        defaults.set(all, forKey: key)
+        if native { defaults.set(true, forKey: key(for: terminal)) } else { defaults.removeObject(forKey: key(for: terminal)) }
     }
 }

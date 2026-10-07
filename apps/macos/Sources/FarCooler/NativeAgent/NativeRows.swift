@@ -93,12 +93,16 @@ private struct TurnRow: View {
 
     var body: some View {
         VStack(alignment: .trailing, spacing: Spacing.tight) {
-            Text(turn.prompt)
-                .textSelection(.enabled)
-                .padding(.horizontal, Spacing.inset)
-                .padding(.vertical, Spacing.group)
-                .surface(.inset, in: .card)
-                .frame(maxWidth: 560, alignment: .trailing)
+            // A turn whose prompt the projection never saw (a resume) has
+            // only its outcome to show.
+            if !turn.prompt.isEmpty {
+                Text(turn.prompt)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, Spacing.inset)
+                    .padding(.vertical, Spacing.group)
+                    .surface(.inset, in: .card)
+                    .frame(maxWidth: 560, alignment: .trailing)
+            }
             HStack(spacing: Spacing.group) {
                 if turn.origin == "Queued" { Text("From the queue") }
                 if turn.backgroundRunning > 0 {

@@ -192,7 +192,11 @@ final class FleetStore: ObservableObject {
             // retry loop follows in `scheduleRetry()` and
             // `reconnectNow()`. Skipped for a remote target: only this
             // Mac bundles and starts its own daemon.
-            if target.isEmpty { await LocalDaemon.shared.ensure() }
+            if target.isEmpty {
+                await LocalDaemon.shared.ensure()
+                // The native view's one connection to this runner (ov-372).
+                NativeAgents.shared.start()
+            }
             await client.refresh()
             guard !Task.isCancelled else { return }
             client.startEvents()
