@@ -13,7 +13,7 @@
 3343 crates/client/src/session.rs
 3245 crates/store/src/tasks.rs
 3213 apps/macos/Sources/FarCooler/DaemonClient.swift
-3076 crates/daemon/src/rpc.rs
+3073 crates/daemon/src/rpc.rs
 2993 apps/ios/FarCooler/ChangesView.swift
 2798 apps/ios/FarCooler/TerminalView.swift
 2633 apps/macos/Sources/FarCooler/ChangesPane.swift

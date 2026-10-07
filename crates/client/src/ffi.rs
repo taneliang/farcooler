@@ -2277,14 +2277,10 @@ async fn dispatch(
         // (ov-241): never Enter, and refused unless the pane is provably idle.
         // `{}` when it went in; `{held: <hold>}` when a runner with
         // `draft_hold` holds it behind a dialog (ov-385).
-        "terminal.draft_prompt" => {
-            match session.draft_prompt(id("terminal")?, &text("text")).await? {
-                crate::session::draft_prompt::Drafted::Pasted => Ok(json!({})),
-                crate::session::draft_prompt::Drafted::Held(hold) => {
-                    Ok(json!({ "held": crate::session::draft_prompt::draft_hold_json(&hold) }))
-                }
-            }
-        }
+        "terminal.draft_prompt" => Ok(match session.draft_prompt(id("terminal")?, &text("text")).await? {
+            crate::session::draft_prompt::Drafted::Pasted => json!({}),
+            crate::session::draft_prompt::Drafted::Held(hold) => json!({ "held": crate::session::draft_prompt::draft_hold_json(&hold) }),
+        }),
 
         // `{terminal, hold}` → `{hold: <hold>}`, as it now is (ov-385).
         "terminal.draft_withdraw" => {
