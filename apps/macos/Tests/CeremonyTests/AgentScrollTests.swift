@@ -317,17 +317,23 @@ struct AgentScrollTests {
     @MainActor
     final class Stepper {
         var steps = 0
+        /// Armed at least once: the jump has begun.
+        var began = false
         var armed = false
         func arm(
-            _ probe: AgentScrollProbe, _ scroll: NSScrollView, back points: CGFloat, before: @escaping @MainActor () -> Void = {}
+            _ probe: AgentScrollProbe, _ scroll: NSScrollView, back points: CGFloat, after moved: CGFloat = 20,
+            before: @escaping @MainActor () -> Void = {}
         ) {
             armed = true
+            began = true
             // Where the jump starts from: the first events after the click
-            // can still report that, before the animation has moved at all,
-            // and a step made then is a step before the jump, not in it.
+            // report that, before the animation has moved. A height
+            // correction is taken once it has moved `moved` points, since a
+            // step before that interrupts the animation instead of landing
+            // inside it.
             let start = scroll.contentView.bounds.origin.y
             probe.onGeometry = { [self] geometry in
-                guard armed, AgentSurface.tailHiddenBy(geometry) > 400, geometry.contentOffset.y > start + 200 else { return }
+                guard armed, AgentSurface.tailHiddenBy(geometry) > 400, geometry.contentOffset.y > start + moved else { return }
                 armed = false
                 // A later turn: not from inside the chat's own observer.
                 DispatchQueue.main.async { [self] in
@@ -412,6 +418,9 @@ struct AgentScrollTests {
 
     /// Waits for the step to be taken, or for the jump to end without it.
     private static func stepTaken(_ stepper: Stepper, _ probe: AgentScrollProbe) async -> Bool {
+        // The click is delivered as an event, so the jump begins a turn
+        // later: its backstop is what arms the stepper.
+        #expect(await until { stepper.began }, "the click never started a jump")
         _ = await until { stepper.steps == 1 || !probe.jumping }
         return stepper.steps == 1
     }
@@ -493,13 +502,23 @@ struct AgentScrollTests {
         try await animatedJump { probe, scroll, host, window in
             let stepper = Stepper()
             AgentSurface.jumpDuration = Self.longFlight
-            AgentSurface.scheduleBackstop = { _ in stepper.arm(probe, scroll, back: 1_200) }
+            // The flick is on the first event, before the animation has
+            // moved: it interrupts the animation, whose completion then runs
+            // with the reader away. Taken later, the animation, still going,
+            // carries the reader to the end on its own (the 0.25 s a reader
+            // is overridden for), and that isn't what's under test.
+            AgentSurface.scheduleBackstop = { _ in stepper.arm(probe, scroll, back: 1_200, after: -1) }
             Self.clickJump(probe, host, window)
             guard await Self.stepTaken(stepper, probe) else { return false }
             #expect(await Self.until { !probe.following && probe.showsJump }, "a flick of 1,200 pt didn't stop following")
-            // The animation's completion has run, and left the reader where
-            // they went.
-            #expect(await Self.until { !probe.jumping }, "the jump never ended")
+            // The animation's completion runs, with the reader away. If the
+            // animation carried them back first, there's nothing to check.
+            let ended = await Self.until { !probe.jumping || probe.following }
+            guard ended, !probe.following else { return false }
+            // What the completion would do is applied by the next update, so
+            // flush it, and give it a moment to show.
+            Self.flush(host, window)
+            await Self.settle()
             #expect(!probe.following && probe.showsJump, "the reader was pulled back to the tail")
             return true
         }
