@@ -47,6 +47,7 @@ use farcooler_agent_hooks::ask::{is_gate, permission_ask};
 use farcooler_agent_hooks::wire::{HookLine, LONGEST_HOLD, Reply, decode_line, encode_line, is_fence};
 use farcooler_core::derive;
 use farcooler_core::inventory::{RuntimeInventory, RuntimeSnapshot};
+use farcooler_core::session_log::projector::held::HELD_ASK;
 use farcooler_protocol::v1::TerminalState;
 use farcooler_store::{Store, Terminal};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -54,7 +55,7 @@ use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{UnixListener, UnixStream};
 use uuid::Uuid;
 
-use crate::hook_asks::{AnswerRefused, HookAsks, Settled};
+use crate::hook_asks::{AnswerRefused, AskShape, HookAsks, Settled};
 use crate::transcript_tail::TranscriptTail;
 
 /// How long a connection may say nothing at all before it is dropped.
@@ -69,19 +70,6 @@ use crate::transcript_tail::TranscriptTail;
 /// for the life of the daemon; enough of those is the descriptor shortage that
 /// `listen` now has to survive.
 const IDLE: std::time::Duration = std::time::Duration::from_secs(600);
-
-/// Tools whose `PermissionRequest` is not an ordinary "may this tool run" ask,
-/// so it is never held or offered to a phone.
-///
-/// The gate's `matcher` is `"*"`, so it fires for every tool, and claude
-/// routes more than tool permissions through this hook: a question it asks
-/// the person (`AskUserQuestion`), and its request to leave plan mode
-/// (`ExitPlanMode`). A phone offers only Allow and Deny, and what an Allow does
-/// to one of these is unmeasured. It could answer a question nobody read, or
-/// approve a plan nobody saw. So these are told "no decision" at once, and the
-/// dialog stays with the keyboard. An explicit list, not a guess from the
-/// name: a tool added here is one somebody has decided a phone must not answer.
-const NOT_TOOL_PERMISSIONS: &[&str] = &["AskUserQuestion", "ExitPlanMode"];
 
 /// How long to wait before accepting again after a refusal.
 ///
@@ -815,11 +803,6 @@ impl HookIngress {
                     write_reply(&mut write, &Reply::verdict(None)).await?;
                     continue;
                 };
-                if hook.payload["tool_name"].as_str().is_some_and(|t| NOT_TOOL_PERMISSIONS.contains(&t)) {
-                    tracing::debug!(%terminal, "a PermissionRequest that is not a tool permission; not held");
-                    write_reply(&mut write, &Reply::verdict(None)).await?;
-                    continue;
-                }
                 return self.hold_ask(terminal, hook, f, reader, write).await;
             }
             let Some(terminal) = terminal else {
@@ -872,7 +855,9 @@ impl HookIngress {
         // The tool's name rides on the lock screen's card ("Bash · Billing");
         // `push::WireAsk` decides whether it may.
         let tool = hook.payload["tool_name"].as_str();
-        let (id, mut settled) = self.asks.hold_for(terminal, tool, self.hold);
+        let shape = AskShape::of(tool, &hook.payload["tool_input"]);
+        let permission = shape.is_permission();
+        let (id, mut settled) = self.asks.hold_shaped(terminal, tool, shape, self.hold);
         if let Err(e) = write_reply(&mut write, &Reply::hold(self.hold)).await {
             // The hook missed its deadline and has gone. Nobody was offered
             // this ask, so it ends with nothing to take back.
@@ -881,13 +866,21 @@ impl HookIngress {
         }
         // `false` when something ended it already; `settled` then has that
         // ending, and the select below writes it at once.
-        self.asks.offer(terminal, &id, permission_ask(&id, &hook.payload));
+        //
+        // A question or a plan is held but offered to no surface that
+        // answers with Allow and Deny (`AskShape::is_permission`): it is
+        // answered from its row in a conversation view, which reads the
+        // hold's id from the request folded below (ov-370).
+        if permission {
+            self.asks.offer(terminal, &id, permission_ask(&id, &hook.payload));
+        }
+        let mut payload = hook.payload;
+        payload[HELD_ASK] = serde_json::Value::String(id.clone());
         let this = self.clone();
         tokio::task::spawn_blocking(move || {
             this.start_transcript_tail(terminal, hook.agent, &f);
             this.observe_cwd(terminal, hook.agent, &f);
-            let events =
-                this.accept(terminal, hook.agent, &hook.event, &hook.payload, f.session_id.as_deref());
+            let events = this.accept(terminal, hook.agent, &hook.event, &payload, f.session_id.as_deref());
             let sink = this.sink.lock().unwrap_or_else(|e| e.into_inner()).clone();
             if let (false, Some(sink)) = (events.is_empty(), sink) {
                 sink(terminal, events);

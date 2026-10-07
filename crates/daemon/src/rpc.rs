@@ -2266,10 +2266,12 @@ impl Rpc {
                         None => None,
                     };
                     let decider = decider_name(self.peer.client_id.is_none(), label.as_deref());
-                    svc.hooks().answer(id, &p.request_id, &p.option_id, &decider).await.map_err(|refused| {
+                    let asks = svc.hooks().asks();
+                    asks.answer_with(id, &p.request_id, &p.option_id, &p.answers, &decider).await.map_err(|refused| {
                         use crate::hook_asks::AnswerRefused;
                         match refused {
                             AnswerRefused::UnknownOption => DomainError::InvalidArgument { what: "option_id" },
+                            AnswerRefused::Unanswered => DomainError::InvalidArgument { what: "answers" },
                             // Named, so a client can say which: someone else
                             // answered, or this answer never reached the hook.
                             AnswerRefused::NotHeld => DomainError::Conflict { what: "not_held" },
@@ -2912,7 +2914,7 @@ mod hook_answer_tests {
             payload: Some(request::Payload::AgentAnswer(AgentAnswer {
                 terminal_id: crate::wire::id_bytes(terminal),
                 request_id: request_id.into(),
-                option_id: option_id.into(),
+                option_id: option_id.into(), answers: Default::default(),
             })),
             ..Default::default()
         }
@@ -2951,7 +2953,7 @@ mod hook_answer_tests {
         let (id, hook) = held(&r);
         let phone = handler(&r.svc, Some("phone-1"));
         assert_eq!(refusal(&phone, an_answer(r.terminal, &id, "allow")).await, None);
-        assert_eq!(hook.await.unwrap(), Some(Decision::Allow));
+        assert_eq!(hook.await.unwrap(), Some(Decision::allow()));
     }
 
     #[tokio::test]

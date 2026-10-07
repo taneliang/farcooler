@@ -1395,24 +1395,7 @@ async fn a_failed_turn_ends_failed() {
     );
 }
 
-/// Claude's own questions and its plan approval are not tool permissions. A
-/// phone's "Allow" on one of those has an unmeasured effect, so they are told
-/// "no decision" at once: no hold, no ask in the ledger, nothing on a phone.
-#[tokio::test]
-async fn a_permission_request_that_is_not_a_tool_permission_is_never_held() {
-    for tool in ["AskUserQuestion", "ExitPlanMode"] {
-        let dir = tempfile::tempdir().unwrap();
-        let (store, terminal) = store_with_terminal("/wt/not-a-tool", "claude", Some("sess-1"));
-        let ingress = ingress_claiming(store, &[terminal]);
-        let (socket, seen) = listening_on(ingress.clone(), dir.path()).await;
-        let mut line = a_permission_request(Agent::Claude, "sess-1");
-        line.payload["tool_name"] = serde_json::json!(tool);
-        let mut asking = Asking::open(&socket, &line).await;
-
-        assert_eq!(asking.line(FIRST_CONTACT).await.as_deref(), Some("{}\n"), "{tool}: no decision, at once");
-        asking.then(&sentinel(Agent::Claude, serde_json::json!({ "session_id": "sess-1" }))).await;
-        let got = through_the_sentinel(&seen).await;
-        assert!(!ingress.asks().is_holding(terminal), "{tool} reached the ledger");
-        assert_eq!(got, only_the_sentinel(terminal), "{tool} reached the phones");
-    }
-}
+/// Claude's own questions and its plan approvals, held for a conversation
+/// view to answer (ov-370).
+#[path = "a_hook_reaches_the_daemon/held_dialogs.rs"]
+mod held_dialogs;

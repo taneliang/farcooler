@@ -7,6 +7,11 @@
 //! nothing else: no sockets, and no screens. It is told what a screen shows;
 //! it never looks.
 //!
+//! **Questions and plans** (ov-370). claude asks its `AskUserQuestion` and
+//! its `ExitPlanMode` approval through the same hook. Those are held too,
+//! but answered only from their rows in a conversation view, in their own
+//! terms (`shape`): never offered as Allow and Deny.
+//!
 //! **At most one ask per terminal.** A device finds its ask by the id it was
 //! shown, but the keyboard's answer is only ever seen per pane (the dialog
 //! leaves the screen, or a turn ends), so two asks held on one pane could not
@@ -60,6 +65,9 @@ use uuid::Uuid;
 
 use crate::hook_ingress::EventSink;
 
+mod shape;
+pub use shape::AskShape;
+
 /// What every held ask's id starts with, so `terminal.agent_answer` can tell
 /// an answer for a held hook from one for an ACP shim without asking both.
 pub const HOOK_ASK_PREFIX: &str = "hook-ask-";
@@ -99,6 +107,9 @@ pub enum AnswerRefused {
     /// The ask was settled, but the hook's connection never confirmed the
     /// verdict landed.
     NotDelivered,
+    /// A question's answer leaves one of its questions unanswered, or
+    /// answers one it didn't ask. The ask stays held.
+    Unanswered,
 }
 
 struct Held {
@@ -120,6 +131,8 @@ struct Held {
     /// Whether its `Permission` was recorded. Only an offered ask is owed a
     /// `Resolved`.
     offered: bool,
+    /// What it asks, which says what an answer to it may be.
+    shape: AskShape,
     reply: oneshot::Sender<Settled>,
 }
 
@@ -476,15 +489,26 @@ impl HookAsks {
         self.hold_for(terminal, None, LONGEST_HOLD)
     }
 
+    /// `hold_for` a permission: may `tool` run.
+    pub fn hold_for(
+        &self,
+        terminal: Uuid,
+        tool: Option<&str>,
+        hold: Duration,
+    ) -> (String, oneshot::Receiver<Settled>) {
+        self.hold_shaped(terminal, tool, AskShape::Permission, hold)
+    }
+
     /// Hold a new ask on `terminal`, superseding any older one there, for
     /// `hold`: the ingress's own timer, which is what makes `until` true.
     ///
     /// Returns the ask's id, which a device echoes back, and the channel its
     /// ending arrives on.
-    pub fn hold_for(
+    pub fn hold_shaped(
         &self,
         terminal: Uuid,
         tool: Option<&str>,
+        shape: AskShape,
         hold: Duration,
     ) -> (String, oneshot::Receiver<Settled>) {
         let id = format!("{HOOK_ASK_PREFIX}{}", Uuid::now_v7());
@@ -499,14 +523,18 @@ impl HookAsks {
             seen_dialog: false,
             absent_samples: 0,
             offered: false,
+            shape,
             reply,
         };
         let sink = self.sink();
         let mut asks = self.lock();
         if let Some(older) = asks.insert(terminal, held) {
             let was_open = older.offered;
+            let older_id = older.id.clone();
             let settled = Settled { decision: None, ack: None };
             end(terminal, older, settled, "", true, "superseded", sink.as_ref());
+            drop(asks);
+            shape::ended(terminal, &older_id, None);
             if was_open {
                 self.changed();
             }
@@ -539,10 +567,8 @@ impl HookAsks {
         true
     }
 
-    /// A device's answer to the ask held under `id` on `terminal`.
-    ///
-    /// `decider` names the device, and a deny says it: "Denied from iPhone".
-    /// Returns once the verdict is on the hook's socket, or refuses.
+    /// A device's answer to the ask held under `id` on `terminal`, with no
+    /// answers to questions: a permission's, or a plan's.
     pub async fn answer(
         &self,
         terminal: Uuid,
@@ -550,17 +576,31 @@ impl HookAsks {
         option: &str,
         decider: &str,
     ) -> Result<(), AnswerRefused> {
-        if !self.lock().get(&terminal).is_some_and(|held| held.id == id) {
+        self.answer_with(terminal, id, option, &HashMap::new(), decider).await
+    }
+
+    /// A device's answer to the ask held under `id` on `terminal`: `option`,
+    /// and for a question, `answers` (`shape::decide`).
+    ///
+    /// `decider` names the device, and a deny says it: "Denied from iPhone".
+    /// The first answer wins; any later one finds nothing held. Returns once
+    /// the verdict is on the hook's socket, or refuses.
+    pub async fn answer_with(
+        &self,
+        terminal: Uuid,
+        id: &str,
+        option: &str,
+        answers: &HashMap<String, String>,
+        decider: &str,
+    ) -> Result<(), AnswerRefused> {
+        let Some(shape) = self.lock().get(&terminal).filter(|held| held.id == id).map(|held| held.shape.clone())
+        else {
             return Err(AnswerRefused::NotHeld);
-        }
-        let decision = match option {
-            "allow" => Decision::Allow,
-            "deny" => Decision::Deny { message: format!("Denied from {decider}") },
-            _ => return Err(AnswerRefused::UnknownOption),
         };
+        let decision = shape::decide(&shape, option, answers, decider)?;
         let (ack, landed) = oneshot::channel();
         let settled = Settled { decision: Some(decision), ack: Some(ack) };
-        if !self.settle(terminal, Some(id), settled, option, true, "answered") {
+        if !self.settle_by(terminal, Some(id), settled, option, Some(Some(decider)), "answered") {
             // Ended by something else between the look above and now.
             return Err(AnswerRefused::NotHeld);
         }
@@ -641,6 +681,12 @@ impl HookAsks {
         self.lock().contains_key(&terminal)
     }
 
+    /// The id of the ask held on `terminal`, offered or not: a question's or
+    /// a plan's reaches a view only on its row. For tests and for logs.
+    pub fn held_on(&self, terminal: Uuid) -> Option<String> {
+        self.lock().get(&terminal).map(|held| held.id.clone())
+    }
+
     /// End the ask held on `terminal`, if there is one and, when `id` is
     /// given, it is that ask. The one way any ask ends; returns whether this
     /// call was the one that ended it.
@@ -658,6 +704,22 @@ impl HookAsks {
         record: bool,
         why: &str,
     ) -> bool {
+        self.settle_by(terminal, id, settled, chosen, record.then_some(None), why)
+    }
+
+    /// `settle`, telling the ask's row it ended (`shape::ended`) unless
+    /// `told` is `None`, and naming the device that answered it when
+    /// `told` is `Some(Some(device))`. The row is told after the ledger's
+    /// lock is let go: a projector reads its file as it folds.
+    fn settle_by(
+        &self,
+        terminal: Uuid,
+        id: Option<&str>,
+        settled: Settled,
+        chosen: &str,
+        told: Option<Option<&str>>,
+        why: &str,
+    ) -> bool {
         let sink = self.sink();
         let mut asks = self.lock();
         if !asks.get(&terminal).is_some_and(|ask| id.is_none_or(|id| ask.id == id)) {
@@ -665,7 +727,12 @@ impl HookAsks {
         }
         let Some(held) = asks.remove(&terminal) else { return false };
         let was_open = held.offered;
-        end(terminal, held, settled, chosen, record, why, sink.as_ref());
+        let ended = held.id.clone();
+        end(terminal, held, settled, chosen, told.is_some(), why, sink.as_ref());
+        drop(asks);
+        if let Some(by) = told {
+            shape::ended(terminal, &ended, by);
+        }
         if was_open {
             self.changed();
         }
@@ -982,7 +1049,7 @@ mod tests {
         assert!(id.starts_with(HOOK_ASK_PREFIX));
         let hook = a_hook_waiting_on(rx);
         assert_eq!(asks.answer(pane, &id, "allow", "iPhone").await, Ok(()));
-        assert_eq!(hook.await.unwrap(), Some(Decision::Allow));
+        assert_eq!(hook.await.unwrap(), Some(Decision::allow()));
         assert_eq!(resolved(&recorded, &id), ["allow"]);
         assert!(!asks.is_holding(pane));
     }

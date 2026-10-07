@@ -28,7 +28,7 @@
 1837 crates/fence/src/lib.rs
 1808 crates/store/src/store.rs
 1802 crates/store/src/migrate.rs
-1793 crates/daemon/src/hook_ingress.rs
+1790 crates/daemon/src/hook_ingress.rs
 1774 crates/codex/src/backend.rs
 1745 apps/macos/Sources/FarCooler/TaskBoard.swift
 1700 crates/claude/src/normalize.rs
