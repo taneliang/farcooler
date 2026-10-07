@@ -330,6 +330,36 @@ mod tests {
         assert_eq!(read("claude", &boxed("❯\u{a0}\x1b[7mx\x1b[27m\x1b[2m \x1b[0m")), Composer::Holds("x".into()));
     }
 
+    /// claude 2.1.292's real screens, with escapes: the dim `Try "…"`
+    /// suggestion in a fresh box, the box mid-turn, and the box after a
+    /// turn are all empty, whatever the footer says about the permission
+    /// mode or agents. The `auto mode` and `←3 agents` footers are put in by
+    /// hand, from the owner's screen: the sandbox has neither.
+    #[test]
+    fn claude_2_1_292_suggestion_and_footers_read_empty() {
+        let classify = |screen: &str| crate::activity::Registry::built_in().classify("claude", screen);
+        let fresh = capture("claude-2.1.292-idle-placeholder-160x45-e.txt");
+        let working = capture("claude-2.1.292-working-160x45-e.txt");
+        let after = capture("claude-2.1.292-after-turn-160x45-e.txt");
+        assert!(printed(&fresh).contains("❯\u{a0}Try \"how does <filepath> work?\""));
+        assert_eq!(classify(&fresh), AgentActivity::Idle);
+        assert_eq!(classify(&working), AgentActivity::Working);
+        assert_eq!(classify(&after), AgentActivity::Idle);
+        let auto = "⏵⏵ auto mode on (shift+tab to cycle) · ←3 agents";
+        for (name, screen, footer) in [
+            ("fresh", &fresh, "⏸ manual mode on · ? for shortcuts · ← for agents"),
+            ("working", &working, "⏵⏵ accept edits on\x1b[38;5;246m (shift+tab to cycle) · esc to interrupt · ← for agents"),
+            ("after", &after, "⏵⏵ accept edits on\x1b[38;5;246m (shift+tab to cycle) · ← for agents"),
+        ] {
+            assert!(screen.contains(footer), "{name}: the footer as captured");
+            assert_eq!(read("claude", screen), Composer::Empty, "{name}");
+            assert_eq!(read("claude", &screen.replace(footer, auto)), Composer::Empty, "{name}, auto mode");
+        }
+        // The suggestion is empty for its dim alone: drawn plain, it's a draft.
+        let plain = fresh.replace("\x1b[2mTry", "Try");
+        assert_eq!(read("claude", &plain), Composer::Holds("Try \"how does <filepath> work?\"".into()));
+    }
+
     /// codex's box is the marker line, a blank line and the model footer;
     /// without the footer, or with a numbered choice under the marker, it's
     /// no box.

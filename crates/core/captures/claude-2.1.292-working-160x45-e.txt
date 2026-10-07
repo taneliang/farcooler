@@ -1,0 +1,45 @@
+
+[38;5;174m ▐[48;5;16m▛███▛█[39m[49m   [1mClaude Code[0m [38;5;246mv2.1.292[39m
+[38;5;174m▝▜[48;5;16m█████[49m█▀[39m  [38;5;246mHaiku 4.5 · API Usage Billing
+[38;5;174m ▝▝   ▝▝ [39m  [38;5;246m/private/tmp/fc-t/typing-marks/work2[39m
+
+[38;5;215m▎[39m [38;5;215mYour voice can help guide AI[39m
+[38;5;215m▎[39m Take 15 min to share your experiences with Anthropic Interviewer. [94m]8;id=1t1x4c9;https://clau.de/yourthoughts\Start now[39m]8;;\
+
+[38;5;246m[48;5;237m❯ [38;5;231mWrite a 60-line poem about tide pools.[39m
+
+[38;5;231m[49m⏺[39m Line 0 of the tide pool poem.
+   Line 1 of the tide pool poem.
+   Line 2 of the tide pool poem.
+   Line 3 of the tide pool poem.
+   Line 4 of the tide pool poem.
+   Line 5 of the tide pool poem.
+   Line 6 of the tide pool poem.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                                          [38;5;220mauto mode unavailable for this model[39m
+[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[38;5;246m❯ [39m
+[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m  [38;5;147m⏵⏵ accept edits on[38;5;246m (shift+tab to cycle) · esc to interrupt · ← for agents[39m
