@@ -101,28 +101,27 @@ impl Session {
     }
 }
 
-/// Refused here as the runner would (`images_too_large`), before anything
-/// is sent: all of a compose's images together past
-/// `MAX_COMPOSE_UPLOAD_BYTES` when they're `uploaded` first, each past the
-/// largest file a paste takes; else past `MAX_COMPOSE_IMAGE_BYTES`, which
-/// one request can carry.
+/// Refused here as the runner would, before anything is sent: one image
+/// past the largest file a paste takes when they're `uploaded` first
+/// (`image_too_large`); all of them together past `MAX_COMPOSE_UPLOAD_BYTES`
+/// then, else past `MAX_COMPOSE_IMAGE_BYTES`, which one request can carry
+/// (`images_too_large`).
 pub(crate) fn images_fit(images: &[(String, Vec<u8>)], uploaded: bool) -> Result<(), SessionError> {
     let total = images.iter().map(|(_, data)| data.len()).sum::<usize>();
-    let fits = if uploaded {
-        total <= farcooler_protocol::MAX_COMPOSE_UPLOAD_BYTES
-            && images.iter().all(|(_, data)| data.len() as u64 <= farcooler_protocol::MAX_PASTE_FILE_BYTES)
-    } else {
-        total <= farcooler_protocol::MAX_COMPOSE_IMAGE_BYTES
-    };
-    if fits {
-        return Ok(());
-    }
-    Err(SessionError::Refused {
+    let refused = |what: &str, message: &str| SessionError::Refused {
         code: farcooler_protocol::v1::ErrorCode::ResourceConflict as i32,
         retryable: false,
-        message: "the images are too large to send together".into(),
-        what: "images_too_large".into(),
-    })
+        message: message.into(),
+        what: what.into(),
+    };
+    if uploaded && images.iter().any(|(_, data)| data.len() as u64 > farcooler_protocol::MAX_PASTE_FILE_BYTES) {
+        return Err(refused("image_too_large", "an image is too large to send"));
+    }
+    let cap = if uploaded { farcooler_protocol::MAX_COMPOSE_UPLOAD_BYTES } else { farcooler_protocol::MAX_COMPOSE_IMAGE_BYTES };
+    if total > cap {
+        return Err(refused("images_too_large", "the images are too large to send together"));
+    }
+    Ok(())
 }
 
 /// A hold as both phones read it: `id` as a uuid string, `state` as a word
@@ -176,7 +175,10 @@ mod compose_tests {
         too_large(images_fit(&[ten_mb], false));
         let file = farcooler_protocol::MAX_PASTE_FILE_BYTES as usize;
         assert!(images_fit(&[image(file), image(file), image(file)], true).is_ok());
-        too_large(images_fit(&[image(file + 1)], true));
+        match images_fit(&[image(file + 1)], true) {
+            Err(SessionError::Refused { what, .. }) => assert_eq!(what, "image_too_large", "one image, its own word"),
+            other => panic!("{other:?}"),
+        }
         let total = farcooler_protocol::MAX_COMPOSE_UPLOAD_BYTES;
         too_large(images_fit(&[image(file), image(file), image(file), image(total - 3 * file + 1)], true));
     }
