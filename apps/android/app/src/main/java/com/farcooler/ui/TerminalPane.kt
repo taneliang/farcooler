@@ -209,6 +209,8 @@ fun TerminalPane(
             AgentConversation.isClaudeInATerminal(terminal.paneMode, terminal.preset),
         offered = AgentConversation.offered(daemon, lastDaemon, terminal),
         live = live,
+        rich = AgentConversation.rich(daemon ?: lastDaemon),
+        interrupts = AgentConversation.interrupts(daemon ?: lastDaemon),
         panes = connection.nativePanes,
         memory = model.settings,
         onCovered = { dismissRequest += 1 },

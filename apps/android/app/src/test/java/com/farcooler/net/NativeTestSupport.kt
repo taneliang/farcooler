@@ -80,13 +80,15 @@ object RowJson {
         "kind" to obj(kind to payload),
     )
 
-    fun turn(ord: Long, prompt: String, origin: String = "Typed", outcome: String? = "Finished") = row(
+    /** [activity] (`Busy`, `Waiting`, ...) is the newest turn's, which the registry says while it's open. */
+    fun turn(ord: Long, prompt: String, origin: String = "Typed", outcome: String? = "Finished", activity: String? = null) = row(
         "turn:$ord", ord, "Turn",
         obj(
             "prompt" to text(prompt), "origin" to text(origin),
             "started_ms" to JsonPrimitive(1_000), "ended_ms" to JsonPrimitive(5_000), "duration_ms" to JsonPrimitive(4_000),
             "background_running" to JsonPrimitive(0),
-        ).let { base -> if (outcome == null) base else JsonObject(base + ("outcome" to text(outcome))) },
+        ).let { base -> if (outcome == null) base else JsonObject(base + ("outcome" to text(outcome))) }
+            .let { base -> if (activity == null) base else JsonObject(base + ("activity" to text(activity))) },
     )
 
     /** A held ask (ov-370): `question`, `plan` or `permission`, held under `hook-ask-1` unless [held] is null. */

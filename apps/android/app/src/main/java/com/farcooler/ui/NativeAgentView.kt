@@ -1,5 +1,33 @@
 package com.farcooler.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import android.graphics.Bitmap
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.content.MediaType
+import androidx.compose.foundation.content.consume
+import androidx.compose.foundation.content.contentReceiver
+import androidx.compose.foundation.content.hasMediaType
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.AddPhotoAlternate
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -127,12 +155,15 @@ fun NativeAgentView(
                 // Bottom to top: what is below the transcript, then the rows
                 // newest first, then the spinner that pages in older ones.
                 val queued = model.queued
-                items(queued.indices.reversed().toList(), key = { "queued-$it" }) { QueuedLine(queued[it]) }
+                val sendNow: (() -> Unit)? = if (model.offersSendNow) ({ model.sendNow() }) else null
+                items(queued.indices.reversed().toList(), key = { "queued-$it" }) { QueuedLine(queued[it], sendNow = sendNow) }
                 if (model.issue == AgentConversation.SendIssue.Handoff) {
                     item(key = "handoff-issue") { HandoffRow(AgentConversation.HANDOFF, showTerminal) }
+                } else if (model.issue == AgentConversation.SendIssue.Panel) {
+                    item(key = "panel-issue") { HandoffRow(AgentConversation.PANEL, showTerminal) }
                 }
                 val answer = nativeAnswer(model)
-                items(shown.rows.asReversed(), key = { it.id }) { row -> NativeRowView(row, showTerminal, answer) }
+                items(shown.rows.asReversed(), key = { it.id }) { row -> NativeRowView(row, showTerminal, answer, sendNow) }
                 if (shown.moreBefore) {
                     item(key = "older") {
                         Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {
@@ -200,10 +231,18 @@ private fun Quiet(text: String) =
     Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
 /**
- * The conversation's box (ov-374). Send goes through `terminal.compose`: typed
- * into claude's own box and submitted, or taken by claude's queue while it works
- * (R-29). One line, as on the iPhone; attachments and commands are later cards.
+ * The conversation's box (ov-374, ov-404). Send goes through `terminal.compose`:
+ * typed into claude's own box and submitted, or taken by claude's queue while it
+ * works (R-29).
+ *
+ * Where the runner has `compose` ([NativePaneModel.rich]), as on the Mac and the
+ * iPhone: Enter is a new line and Send sends (so does Ctrl or Meta with Enter, from
+ * a hardware keyboard); photos come from the picker or a paste and wait as chips;
+ * a slash command goes to claude's picker. While claude works, Stop sits beside
+ * Send, and each waiting Queued row has Send now (ov-368). Without `compose`, one
+ * line and no photos.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun NativeComposer(model: NativePaneModel, showTerminal: () -> Unit) {
     // Collected for the rows going stale or live, which `canSend` reads off the
@@ -211,42 +250,150 @@ fun NativeComposer(model: NativePaneModel, showTerminal: () -> Unit) {
     // rows the runner had stopped answering for.
     val shown by model.store.shown.collectAsStateWithLifecycle()
     val canSend = !shown.isStale && model.canSend
+    val scope = rememberCoroutineScope()
+    val resolver = LocalContext.current.contentResolver
+    val readUris: (List<android.net.Uri>) -> Unit = { uris ->
+        scope.launch {
+            val datas = withContext(Dispatchers.IO) {
+                uris.map { uri -> runCatching { resolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull() }
+            }
+            model.attachPicked(datas, ::convertForRunner)
+        }
+    }
+    val pick = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(AgentConversation.MOST_IMAGES),
+    ) { uris -> if (uris.isNotEmpty()) readUris(uris) }
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).testTag("native-composer-stack"),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         val issue = model.issue
-        if (issue != null && issue != AgentConversation.SendIssue.Handoff) IssueLine(issue, showTerminal) { model.issue = null }
+        if (issue != null && issue != AgentConversation.SendIssue.Handoff && issue != AgentConversation.SendIssue.Panel) {
+            IssueLine(issue, showTerminal) { model.issue = null }
+        }
         Surface(
             shape = RoundedCornerShape(Radius.large),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Row(Modifier.padding(start = 4.dp, end = 6.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextField(
-                    value = model.draft,
-                    onValueChange = model::onDraft,
-                    placeholder = { Text("Message Claude") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { model.send() }),
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                    ),
-                    modifier = Modifier.weight(1f).testTag("native-composer"),
-                )
-                FilledIconButton(
-                    onClick = { model.send() },
-                    enabled = canSend,
-                    // An edge while it can't send, so it still reads on light paper.
-                    modifier = Modifier
-                        .size(40.dp)
-                        .then(if (canSend) Modifier else Modifier.border(1.dp, MaterialTheme.colorScheme.outline, CircleShape))
-                        .testTag("native-send"),
-                ) { Icon(Icons.Filled.ArrowUpward, contentDescription = "Send") }
+            Column(Modifier.padding(start = 4.dp, end = 6.dp, top = 4.dp, bottom = 4.dp)) {
+                if (model.images.isNotEmpty()) ImageChips(model)
+                Row(verticalAlignment = Alignment.Bottom) {
+                    if (model.rich) {
+                        IconButton(
+                            onClick = {
+                                pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            },
+                            enabled = model.imageRoom > 0,
+                            modifier = Modifier.testTag("native-attach"),
+                        ) {
+                            Icon(
+                                Icons.Outlined.AddPhotoAlternate,
+                                contentDescription = "Attach photos",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    TextField(
+                        value = model.draft,
+                        onValueChange = model::onDraft,
+                        placeholder = { Text("Message Claude") },
+                        singleLine = !model.rich,
+                        maxLines = if (model.rich) 6 else 1,
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.Sentences,
+                            imeAction = if (model.rich) ImeAction.Default else ImeAction.Send,
+                        ),
+                        keyboardActions = KeyboardActions(onSend = { model.send() }),
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("native-composer")
+                            // A hardware keyboard's Ctrl or Meta with Enter sends, as the Mac's Return.
+                            .onPreviewKeyEvent { event ->
+                                val send = event.type == KeyEventType.KeyDown && event.key == Key.Enter &&
+                                    (event.isCtrlPressed || event.isMetaPressed)
+                                if (send) model.send()
+                                send
+                            }
+                            // An image pasted, or sent from the keyboard, is a chip, and not text.
+                            .contentReceiver { content ->
+                                if (!model.rich || !content.hasMediaType(MediaType.Image)) return@contentReceiver content
+                                val uris = mutableListOf<android.net.Uri>()
+                                val rest = content.consume { item ->
+                                    item.uri?.let { uris.add(it) } != null
+                                }
+                                if (uris.isNotEmpty()) readUris(uris)
+                                rest
+                            },
+                    )
+                    if (model.offersStop) {
+                        IconButton(
+                            onClick = { model.stop() },
+                            enabled = model.pressing == null,
+                            modifier = Modifier.testTag("native-stop"),
+                        ) {
+                            Icon(
+                                Icons.Filled.Stop,
+                                contentDescription = "Stop",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    FilledIconButton(
+                        onClick = { model.send() },
+                        enabled = canSend,
+                        // An edge while it can't send, so it still reads on light paper.
+                        modifier = Modifier
+                            .size(40.dp)
+                            .then(if (canSend) Modifier else Modifier.border(1.dp, MaterialTheme.colorScheme.outline, CircleShape))
+                            .testTag("native-send"),
+                    ) { Icon(Icons.Filled.ArrowUpward, contentDescription = "Send") }
+                }
+            }
+        }
+    }
+}
+
+/** The images waiting to go, each with a button to take it out. */
+@Composable
+private fun ImageChips(model: NativePaneModel) {
+    LazyRow(
+        Modifier.fillMaxWidth().padding(start = 8.dp, top = 8.dp).testTag("native-image-chips"),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(model.images, key = { it.id }) { image ->
+            // Decoded small, once, off the main thread, not at full size on every redraw.
+            val picture by produceState<Bitmap?>(null, image.id) { value = withContext(Dispatchers.Default) { chipPicture(image.data) } }
+            Box(Modifier.size(56.dp).testTag("native-image-chip")) {
+                val bitmap = picture
+                if (bitmap != null) {
+                    Image(
+                        bitmap.asImageBitmap(),
+                        contentDescription = "Photo",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(Radius.small)),
+                    )
+                } else {
+                    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerHighest, RoundedCornerShape(Radius.small)))
+                }
+                IconButton(
+                    onClick = { model.detach(image.id) },
+                    modifier = Modifier.align(Alignment.TopEnd).size(24.dp).testTag("native-image-remove"),
+                ) {
+                    Icon(
+                        Icons.Filled.Cancel,
+                        contentDescription = "Remove photo",
+                        // style: a badge over a photo, white on dark to read on any picture
+                        tint = Color.White,
+                        modifier = Modifier.background(Color.Black.copy(alpha = 0.6f), CircleShape).size(18.dp),
+                    )
+                }
             }
         }
     }
@@ -269,7 +416,7 @@ private fun IssueLine(issue: AgentConversation.SendIssue, showTerminal: () -> Un
             }
             is AgentConversation.SendIssue.Said ->
                 Text(issue.words, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-            AgentConversation.SendIssue.Handoff -> Unit
+            AgentConversation.SendIssue.Handoff, AgentConversation.SendIssue.Panel -> Unit
         }
         TextButton(onClick = dismiss) { Text("Dismiss") }
     }

@@ -6,6 +6,7 @@ import com.farcooler.model.AgentConversation.SendFailure
 import com.farcooler.model.AgentConversation.SendIssue
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -77,7 +78,7 @@ class AgentConversationTest {
         assertEquals(SendIssue.Handoff, said("prompt"))
         assertEquals(SendIssue.DraftInTerminal, said("draft"))
         assertEquals(SendIssue.Said(AgentConversation.TOO_LONG), said("too_long"))
-        assertEquals(SendIssue.Said(AgentConversation.COMMAND), said("command"))
+        assertEquals(SendIssue.Said(AgentConversation.COMMAND_REFUSED), said("command"))
         assertEquals(SendIssue.Said("Claude isn’t running in this pane."), said("not_running"))
         assertEquals(SendIssue.Said("The message wasn’t sent."), said("something-new"))
         assertEquals(SendIssue.Said("The message wasn’t sent."), said(null))
@@ -150,5 +151,71 @@ class AgentConversationTest {
         assertEquals("A line of this session couldn’t be read.", AgentConversation.gap(AgentRow.Gap("Unparsed", 1)))
         assertEquals("Sent from the queue", AgentConversation.queuedLabel("Sent"))
         assertEquals("Queued", AgentConversation.queuedLabel("Waiting"))
+    }
+
+    /** ov-404: the Mac's words for an image refused, and which limit it hit. */
+    @Test
+    fun `a refused image says which limit it hit`() {
+        fun said(what: String, command: Boolean = false) = AgentConversation.issue(SendFailure.Refused(what), command)
+        assertEquals(SendIssue.Said(AgentConversation.IMAGE_TOO_LARGE), said("image_too_large"))
+        assertEquals(SendIssue.Said(AgentConversation.IMAGES_TOO_LARGE), said("images_too_large"))
+        assertEquals(SendIssue.Said(AgentConversation.TOO_MANY_IMAGES), said("images"))
+        assertEquals("a slash command can't carry any, however few", SendIssue.Said(AgentConversation.COMMAND_WITH_IMAGES), said("images", command = true))
+        assertTrue(AgentConversation.IMAGE_TOO_LARGE != AgentConversation.IMAGES_TOO_LARGE)
+        assertEquals(SendIssue.Said(AgentConversation.BACKSLASH), said("backslash"))
+        assertEquals(SendIssue.Panel, said("handoff"))
+        assertEquals(SendIssue.Said(AgentConversation.UNCONFIRMED), said("unconfirmed"))
+    }
+
+    @Test
+    fun `the limits follow whether the runner has compose`() {
+        assertEquals(500, AgentConversation.longest(rich = false))
+        assertEquals(100_000, AgentConversation.longest(rich = true))
+        assertTrue(AgentConversation.tooLong(rich = true).contains("100,000"))
+        assertTrue(AgentConversation.tooLong(rich = false).contains("500"))
+    }
+
+    @Test
+    fun `an echo of images settles against the row claude wrote`() {
+        assertEquals("[Image] [Image] look", AgentConversation.echo("look", 2))
+        assertEquals("[Image]", AgentConversation.echo("  ", 1))
+        fun row(text: String) = AgentRow("q", 1, 1, kind = AgentRow.Kind.OfQueued(AgentRow.Queued(text, "Waiting", null)))
+        assertEquals(emptyList<String>(), AgentConversation.unsettled(listOf("[Image] [Image] look"), listOf(row("[Image #1] [Image #2] look"))))
+        assertEquals(1, AgentConversation.unsettled(listOf("[Image] [Image] look"), listOf(row("[Image #1] look"))).size)
+        assertEquals(1, AgentConversation.unsettled(listOf("look"), listOf(row("look elsewhere"))).size)
+    }
+
+    private fun turn(outcome: AgentRow.Turn.Outcome? = null, activity: String?) =
+        AgentRow.Turn("p", "Typed", outcome = outcome, activity = activity)
+
+    /** Stop is for a turn claude is working on; under a dialog its Esc would answer No. */
+    @Test
+    fun `Stop is offered only while claude works`() {
+        assertTrue(AgentConversation.isWorking(turn(activity = "Busy")))
+        assertFalse("hidden under a dialog", AgentConversation.isWorking(turn(activity = "Waiting")))
+        assertFalse(AgentConversation.isWorking(turn(activity = "Idle")))
+        assertFalse(AgentConversation.isWorking(turn(activity = "Shell")))
+        assertFalse("a turn that ended", AgentConversation.isWorking(turn(AgentRow.Turn.Outcome.Finished, "Busy")))
+        assertFalse(AgentConversation.isWorking(null))
+    }
+
+    @Test
+    fun `a key that did nothing needed says nothing, and the others say what to do`() {
+        fun key(what: String, key: AgentConversation.PaneKey) = AgentConversation.keyIssue(SendFailure.Refused(what), key)
+        val stop = AgentConversation.PaneKey.Stop
+        val now = AgentConversation.PaneKey.SendNow
+        assertNull(key("idle", stop))
+        assertNull(key("too_soon", now))
+        assertEquals(SendIssue.Handoff, key("prompt", stop))
+        assertEquals(SendIssue.Said("Nothing is waiting in Claude’s queue."), key("nothing_queued", now))
+        assertEquals(SendIssue.Said("Claude is starting a step. Try Stop again in a moment."), key("settling", stop))
+        assertEquals(SendIssue.Said("Claude is starting a step. Try Send now again in a moment."), key("settling", now))
+        assertEquals(
+            SendIssue.Said("Claude didn’t confirm it stopped. It may have stopped; check the terminal before pressing again."),
+            key("unconfirmed", stop),
+        )
+        assertEquals(SendIssue.Said("The runner didn’t answer in time. Check the terminal."), AgentConversation.keyIssue(SendFailure.TimedOut, stop))
+        assertEquals(SendIssue.Said("The runner isn’t connected. Use the terminal."), AgentConversation.keyIssue(SendFailure.Lost(true), stop))
+        assertEquals(SendIssue.Said("Far Cooler can’t stop Claude safely from here. Use the terminal."), key("mystery", stop))
     }
 }

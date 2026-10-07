@@ -29,7 +29,7 @@ class NativePaneModelTest {
         terminal = "t1",
         store = AgentRowStore(running.scope, retryDelayMs = 1, followWaitMs = 1),
         source = source,
-        sink = ConversationSink { _, text ->
+        sink = ConversationSink { _, text, _ ->
             sends.incrementAndGet()
             composed.add(text)
             answer()

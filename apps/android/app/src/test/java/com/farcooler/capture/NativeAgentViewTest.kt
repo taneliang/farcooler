@@ -85,7 +85,7 @@ class NativeAgentViewTest {
         running.scope,
         ClientCall { _, _ -> throw AssertionError("no call goes to a core here") },
         sourceFor = { source },
-        sink = ConversationSink { _, text -> composed.add(text); false },
+        sink = ConversationSink { _, text, _ -> composed.add(text); false },
     )
 
     /**
@@ -130,6 +130,8 @@ class NativeAgentViewTest {
             claudeInTerminal = true,
             offered = AgentConversation.offered(pane.daemon, pane.last, claude),
             live = pane.live,
+            rich = AgentConversation.rich(pane.daemon ?: pane.last),
+            interrupts = AgentConversation.interrupts(pane.daemon ?: pane.last),
             panes = panes,
             memory = memory,
             onCovered = { pane.keyboardDismissed += 1 },

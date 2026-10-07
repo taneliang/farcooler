@@ -27,6 +27,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -59,7 +60,7 @@ import kotlinx.coroutines.delay
  * id, redraws only the rows whose object changed.
  */
 @Composable
-fun NativeRowView(row: AgentRow, showTerminal: () -> Unit, answer: NativeAnswer? = null) {
+fun NativeRowView(row: AgentRow, showTerminal: () -> Unit, answer: NativeAnswer? = null, sendNow: (() -> Unit)? = null) {
     Box(
         Modifier
             .fillMaxWidth()
@@ -73,7 +74,7 @@ fun NativeRowView(row: AgentRow, showTerminal: () -> Unit, answer: NativeAnswer?
             is AgentRow.Kind.OfTool -> NativeToolRow(kind.tool)
             is AgentRow.Kind.OfSubagent -> SubagentRow(kind.subagent)
             is AgentRow.Kind.OfAsk -> NativeAskRow(kind.ask, answer, showTerminal)
-            is AgentRow.Kind.OfQueued -> QueuedLine(kind.queued.text, kind.queued.state)
+            is AgentRow.Kind.OfQueued -> QueuedLine(kind.queued.text, kind.queued.state, sendNow)
             is AgentRow.Kind.OfNotice -> NoticeLine(kind.notice.text)
             is AgentRow.Kind.OfHandoff -> HandoffRow(kind.handoff.reason, showTerminal)
             is AgentRow.Kind.OfGap -> NoticeLine(AgentConversation.gap(kind.gap))
@@ -317,21 +318,30 @@ internal fun attentionCard(attention: Boolean): Modifier {
         .padding(12.dp)
 }
 
-/** A message in claude's own queue (R-29), from its transcript or sent from here a moment ago. */
+/**
+ * A message in claude's own queue (R-29), from its transcript or sent from here a
+ * moment ago. [sendNow] (ov-368): claude takes every waiting message now, rather
+ * than when its turn ends; offered on a waiting message only.
+ */
 @Composable
-fun QueuedLine(text: String, state: String = "Waiting") {
+fun QueuedLine(text: String, state: String = "Waiting", sendNow: (() -> Unit)? = null) {
     Column(
         Modifier.fillMaxWidth().testTag("native-queued"),
         horizontalAlignment = Alignment.End,
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Bubble(text)
-        Text(
-            AgentConversation.queuedLabel(state),
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Medium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                AgentConversation.queuedLabel(state),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (state == "Waiting" && sendNow != null) {
+                TextButton(onClick = sendNow, modifier = Modifier.testTag("native-send-now")) { Text("Send now") }
+            }
+        }
     }
 }
 

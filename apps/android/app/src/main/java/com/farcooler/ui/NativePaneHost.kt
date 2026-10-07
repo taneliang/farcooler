@@ -64,6 +64,9 @@ fun rememberNativePane(
     claudeInTerminal: Boolean,
     offered: Boolean,
     live: Boolean,
+    /** What the runner's hello offers the composer: [AgentConversation.rich] and [AgentConversation.interrupts]. */
+    rich: Boolean,
+    interrupts: Boolean,
     panes: NativePanes,
     memory: PaneViewMemory,
     /**
@@ -80,6 +83,9 @@ fun rememberNativePane(
     }
     LaunchedEffect(candidate, offered, live) {
         candidate?.sync(offered, live)
+    }
+    LaunchedEffect(candidate, rich, interrupts) {
+        candidate?.offer(rich, interrupts)
     }
     DisposableEffect(candidate) {
         onDispose { candidate?.removed() }

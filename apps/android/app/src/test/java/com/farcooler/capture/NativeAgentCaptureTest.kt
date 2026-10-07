@@ -53,7 +53,7 @@ class NativeAgentCaptureTest {
             terminal = "t1",
             store = AgentRowStore(running.scope, retryDelayMs = 1, followWaitMs = 1),
             source = source,
-            sink = { _, _ -> false },
+            sink = { _, _, _ -> false },
             memory = InMemoryPaneViews(),
             scope = running.scope,
         )

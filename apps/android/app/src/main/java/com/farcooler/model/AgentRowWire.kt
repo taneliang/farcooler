@@ -62,7 +62,7 @@ data class AgentRow(
         /** Null while the turn is open. */
         val outcome: Outcome? = null,
         val backgroundRunning: Int = 0,
-        /** `Busy`, `Idle` or `Shell`, on the newest turn only. */
+        /** `Busy`, `Idle`, `Shell` or `Waiting` (a dialog up, ov-368), on the newest turn only. */
         val activity: String? = null,
     ) {
         sealed interface Outcome {

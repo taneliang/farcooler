@@ -6,31 +6,54 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.farcooler.model.AgentConversation
 import com.farcooler.model.AgentRow
+import com.farcooler.model.OutgoingImage
+import java.util.Base64
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 
 /**
- * Where the conversation view's message goes (ov-374): `terminal.compose`,
- * which types it into claude's box on one line and presses Enter past the same
- * gate as `terminal tell`, or refuses with a word and types nothing. True when
- * claude was working and its own queue took it (R-29).
+ * Where the conversation view's message goes (ov-374): `terminal.compose`, which
+ * types it into claude's box and presses Enter past the same gate as `terminal
+ * tell`, or refuses with a word and types nothing. With the runner's `compose`
+ * (ov-367), its line breaks, images and slash command too; the client core
+ * stages the images first where the runner takes that (ov-393). True when claude
+ * was working and its own queue took it (R-29).
  */
 fun interface ConversationSink {
-    suspend fun compose(terminal: String, text: String): Boolean
+    suspend fun compose(terminal: String, text: String, images: List<OutgoingImage>): Boolean
 }
 
 /** The runner's `terminal.compose`, over this phone's client core. */
 class CoreComposeSink(private val core: ClientCall) : ConversationSink {
-    override suspend fun compose(terminal: String, text: String): Boolean {
+    override suspend fun compose(terminal: String, text: String, images: List<OutgoingImage>): Boolean {
         val answer = core.call(
             "terminal.compose",
             buildJsonObject {
                 put("terminal", JsonPrimitive(terminal))
                 put("text", JsonPrimitive(text))
+                // The core stages each image on a runner that takes uploads
+                // (`compose_upload`), in chunks, and carries a small one inside the
+                // compose on one that doesn't; either way it's handed the bytes here.
+                if (images.isNotEmpty()) {
+                    put(
+                        "images",
+                        buildJsonArray {
+                            for (image in images) {
+                                add(
+                                    buildJsonObject {
+                                        put("mime", JsonPrimitive(image.mime))
+                                        put("base64", JsonPrimitive(Base64.getEncoder().encodeToString(image.data)))
+                                    },
+                                )
+                            }
+                        },
+                    )
+                }
             },
         )
         return (answer["queued"] as? JsonPrimitive)?.booleanOrNull ?: false
@@ -58,6 +81,28 @@ class CoreAnswerSink(private val core: ClientCall) : AnswerSink {
                 if (answers.isNotEmpty()) put("answers", JsonObject(answers.mapValues { JsonPrimitive(it.value) }))
             },
         )
+    }
+}
+
+/**
+ * Stop and Send now (ov-368): the runner presses one Esc, or claude's ctrl+x
+ * ctrl+s, in the pane's TUI, past the same gate as a send, and answers once claude
+ * took it; or it refuses with a word and presses nothing.
+ */
+interface InterruptSink {
+    suspend fun interrupt(terminal: String)
+
+    suspend fun sendNow(terminal: String)
+}
+
+/** The runner's `terminal.interrupt` and `terminal.send_now`, over this phone's client core. */
+class CoreInterruptSink(private val core: ClientCall) : InterruptSink {
+    override suspend fun interrupt(terminal: String) {
+        core.call("terminal.interrupt", buildJsonObject { put("terminal", JsonPrimitive(terminal)) })
+    }
+
+    override suspend fun sendNow(terminal: String) {
+        core.call("terminal.send_now", buildJsonObject { put("terminal", JsonPrimitive(terminal)) })
     }
 }
 
@@ -93,6 +138,7 @@ class NativePanes(
     private val sink: ConversationSink = CoreComposeSink(core),
     /** Where a held ask's answer goes (ov-370). */
     private val answers: AnswerSink? = CoreAnswerSink(core),
+    private val interruptSink: InterruptSink = CoreInterruptSink(core),
 ) {
     private val panes = HashMap<String, NativePaneModel>()
 
@@ -107,6 +153,7 @@ class NativePanes(
             memory = memory,
             scope = scope,
             answers = answers,
+            interruptSink = interruptSink,
         )
     }
 }
@@ -131,6 +178,8 @@ class NativePaneModel(
     private val scope: CoroutineScope,
     /** Where a held ask's answer goes (ov-370); null where the runner takes none. */
     val answers: AnswerSink? = null,
+    /** Where Stop and Send now go, handed to [keys] where the runner offers them. */
+    private val interruptSink: InterruptSink? = null,
 ) {
     /** The held ask whose answer is on its way, by its id. */
     var answering by mutableStateOf<String?>(null)
@@ -171,12 +220,34 @@ class NativePaneModel(
     }
 
     /**
-     * The composer's text, one line: line breaks become spaces as they arrive,
-     * so what you see is what's sent. Return typed at the end sends, as the
-     * keyboard's Send key says. Set through [onDraft].
+     * The composer's text. Against a runner without `compose`, one line: line
+     * breaks become spaces as they arrive, so what you see is what's sent, and a
+     * Return typed at the end sends, as the keyboard's Send key says. With it, as
+     * typed: Return is a new line, and Send sends. Set through [onDraft].
      */
     var draft by mutableStateOf("")
         private set
+
+    /**
+     * Whether the runner takes line breaks, images and slash commands (`compose`,
+     * ov-367), as its hello said. Without it, one line.
+     */
+    var rich by mutableStateOf(false)
+        private set
+
+    /** Images to send with the text, in order (ov-404). Only with [rich]. */
+    var images by mutableStateOf<List<OutgoingImage>>(emptyList())
+        private set
+
+    /** Where Stop and Send now go (ov-368): the runner's connection where it serves `terminal_interrupt`; null, and neither is offered. */
+    var keys by mutableStateOf<InterruptSink?>(null)
+        private set
+
+    /** A Stop or a Send now on its way, until the runner answers. */
+    var pressing by mutableStateOf<AgentConversation.PaneKey?>(null)
+        private set
+
+    private val nextImage = java.util.concurrent.atomic.AtomicInteger()
 
     var sending by mutableStateOf(false)
         private set
@@ -295,14 +366,44 @@ class NativePaneModel(
         }
     }
 
-    val canSend: Boolean
-        get() {
-            val text = draft.trim()
-            return !sending && text.isNotEmpty() && text.length <= AgentConversation.LONGEST && !store.shown.value.isStale
+    /**
+     * What the runner offers this pane, from its hello's capabilities: line
+     * breaks, images and commands with `compose` (ov-367), Stop and Send now with
+     * `terminal_interrupt` (ov-368).
+     */
+    fun offer(rich: Boolean, interrupts: Boolean) {
+        if (this.rich != rich) {
+            this.rich = rich
+            if (!rich) {
+                images = emptyList()
+                // The draft was kept as typed, or flattened as it came in.
+                draft = AgentConversation.flattened(draft)
+            }
         }
+        val sink = if (interrupts) interruptSink else null
+        if (keys !== sink) keys = sink
+    }
 
-    /** The text field's change: one line, and a trailing Return sends. */
+    /** The longest message the box takes now. */
+    val longestNow: Int get() = AgentConversation.longest(rich)
+
+    /**
+     * The draft as it's sent: trimmed of spaces at the ends on one line; with
+     * `compose`, as typed, the runner trimming the ends but keeping an indent.
+     */
+    private val outgoing: String get() = if (rich) draft else draft.trim(' ', '\t')
+
+    private val hasText: Boolean get() = draft.isNotBlank()
+
+    val canSend: Boolean
+        get() = !sending && (hasText || images.isNotEmpty()) && outgoing.length <= longestNow && !store.shown.value.isStale
+
+    /** The text field's change: as typed with `compose`; one line, and a trailing Return sends, without. */
     fun onDraft(text: String) {
+        if (rich) {
+            draft = text
+            return
+        }
         if (text.endsWith("\n") && text.dropLast(1) == draft) {
             send()
             return
@@ -310,14 +411,53 @@ class NativePaneModel(
         draft = AgentConversation.flattened(text)
     }
 
-    /** Send the draft. The outcome is kept here, whether or not a view is there to see it. */
+    /**
+     * The one path a photo takes into the composer, from the picker, a paste or a
+     * test standing in for either: [datas] read (null where one didn't load, as a
+     * photo in the cloud and not on the device doesn't), converted by [convert]
+     * where the runner wouldn't take it as it is, off the main thread, and added;
+     * or said why not.
+     */
+    suspend fun attachPicked(datas: List<ByteArray?>, convert: (ByteArray) -> OutgoingImage.Converted?) {
+        if (!rich) return
+        val made = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            datas.map { data -> data?.let { OutgoingImage.make(nextImageId(), it, convert) } }
+        }
+        attach(made.filterNotNull())
+        if (made.any { it == null }) issue = AgentConversation.SendIssue.Said(AgentConversation.UNREADABLE_IMAGE)
+    }
+
+    /** Add [new] after the images already waiting, up to the most a message takes. */
+    fun attach(new: List<OutgoingImage>) {
+        if (!rich) return
+        val room = maxOf(0, AgentConversation.MOST_IMAGES - images.size)
+        images = images + new.take(room)
+        if (new.size > room) issue = AgentConversation.SendIssue.Said(AgentConversation.TOO_MANY_IMAGES)
+    }
+
+    /** A new image's id, for the loader to make one with. */
+    fun nextImageId(): Int = nextImage.getAndIncrement()
+
+    /** Take the image [id] out of the message. */
+    fun detach(id: Int) {
+        images = images.filter { it.id != id }
+    }
+
+    /** How many more images the message takes. */
+    val imageRoom: Int get() = maxOf(0, AgentConversation.MOST_IMAGES - images.size)
+
+    /** Send the draft and its images. The outcome is kept here, whether or not a view is there to see it. */
     fun send() {
-        val text = draft.trim()
+        val text = outgoing
+        val going = images
         if (!canSend) {
-            if (text.length > AgentConversation.LONGEST) issue = AgentConversation.SendIssue.Said(AgentConversation.TOO_LONG)
+            if (outgoing.length > longestNow) issue = AgentConversation.SendIssue.Said(AgentConversation.tooLong(rich))
             return
         }
-        if (AgentConversation.isCommand(text)) {
+        // Without `compose`, a slash or a bang would open claude's command picker
+        // or its shell, which Enter would then run. With it, the runner drives the
+        // picker, and refuses what it can't.
+        if (!rich && AgentConversation.isCommand(text)) {
             issue = AgentConversation.SendIssue.Said(AgentConversation.COMMAND)
             return
         }
@@ -325,16 +465,60 @@ class NativePaneModel(
         issue = null
         scope.launch {
             try {
-                val wasQueued = sink.compose(terminal, text)
-                if (draft.trim() == text) draft = ""
-                if (wasQueued) queued = queued + text
+                val wasQueued = sink.compose(terminal, text, going)
+                if (outgoing == text) draft = ""
+                detachAll(going)
+                if (wasQueued) queued = queued + AgentConversation.echo(text, going.size)
                 sent += 1
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                issue = AgentConversation.issue(AgentConversation.failure(e))
+                issue = AgentConversation.issue(AgentConversation.failure(e), command = text.trim().startsWith("/"))
             } finally {
                 sending = false
+            }
+        }
+    }
+
+    private fun detachAll(sent: List<OutgoingImage>) {
+        val ids = sent.map { it.id }.toSet()
+        images = images.filter { it.id !in ids }
+    }
+
+    // Stop and Send now.
+
+    /** Whether claude is working on a turn, as the newest turn's row says (not while a dialog is up). */
+    val working: Boolean get() = AgentConversation.isWorking(AgentConversation.newestTurn(store.shown.value.rows))
+
+    /** Whether Stop is offered: the runner serves it and claude is working. */
+    val offersStop: Boolean get() = keys != null && working && !store.shown.value.isStale
+
+    /** Whether Send now is offered on a Queued row. */
+    val offersSendNow: Boolean get() = offersStop
+
+    /** Stop the turn. */
+    fun stop() = press(AgentConversation.PaneKey.Stop)
+
+    /** Send what waits in claude's queue now: a Queued row's Send now. */
+    fun sendNow() = press(AgentConversation.PaneKey.SendNow)
+
+    private fun press(key: AgentConversation.PaneKey) {
+        val keys = keys ?: return
+        if (pressing != null || !offersStop) return
+        pressing = key
+        issue = null
+        scope.launch {
+            try {
+                when (key) {
+                    AgentConversation.PaneKey.Stop -> keys.interrupt(terminal)
+                    AgentConversation.PaneKey.SendNow -> keys.sendNow(terminal)
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                issue = AgentConversation.keyIssue(AgentConversation.failure(e), key)
+            } finally {
+                pressing = null
             }
         }
     }
