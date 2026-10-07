@@ -184,14 +184,17 @@ fn open_action() -> pb::NeedsYouAction {
     action("open", "Open", false, false)
 }
 
-/// What a row calls a terminal: the agent running in it (`claude`), as a
-/// notice does, else its title.
+/// What a row calls a terminal: the agent the watcher recognized in it
+/// (`claude`), as a notice does. Until it recognizes one, `describe` reports
+/// the placeholder `shell`, which must not outrank what the pane was opened
+/// as, so the pane's preset then its title answer instead.
 fn label(t: &models::Terminal, observed: Option<&Observation>) -> String {
     observed
         .map(|o| o.command.trim().to_string())
-        .filter(|c| !c.is_empty())
+        .filter(|c| !c.is_empty() && c != "shell")
+        .or_else(|| Some(t.command_preset.trim().to_string()).filter(|p| !p.is_empty()))
         .or_else(|| Some(t.title.clone()).filter(|t| !t.is_empty()))
-        .unwrap_or_else(|| t.command_preset.clone())
+        .unwrap_or_else(|| "shell".to_string())
 }
 
 /// A question's options, from its note's `extra_json.options`
@@ -773,6 +776,18 @@ mod tests {
         assert_eq!(items[0].id, format!("ask:{ask}"));
         assert_eq!(items[0].task, None, "an orchestrator's item named a task");
         assert_eq!(items[0].terminal.as_ref().map(|t| t.role), Some(terminal_role(TerminalRole::Orchestrator)));
+    }
+
+    #[test]
+    fn a_held_ask_on_a_claude_pane_reads_claude_before_the_watcher_recognizes_it() {
+        let mut fleet = Fleet::new();
+        let pane = fleet.agent(None);
+        fleet.hook_ask(pane, "Allow touch x", MINUTE);
+        // `describe` says "shell" until claude is recognized.
+        fleet.inputs.observed.get_mut(&pane).unwrap().command = "shell".into();
+        let items = fleet.items();
+        assert_eq!(kinds(&items), [NeedsYouKind::Ask]);
+        assert_eq!(items[0].terminal.as_ref().map(|t| t.label.as_str()), Some("claude"));
     }
 
     #[test]
