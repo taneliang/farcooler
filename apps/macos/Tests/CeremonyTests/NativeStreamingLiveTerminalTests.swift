@@ -104,7 +104,7 @@ struct NativeStreamingLiveTerminalTests {
                 let surfaces = Self.renderViews(in: try #require(window.contentView))
                 try #require(surfaces.count == 1, "\(surfaces.count) terminal surfaces in the window")
                 let surface = surfaces[0]
-                let drawnBefore = surface.framesDrawn
+                let drawnBefore = surface.lastDrawnRevision
                 let revisionBefore = surface.core.revision
                 // A display link of a window on no screen never fires, and a
                 // window on a screen would sit in front of somebody's work. So
@@ -129,10 +129,14 @@ struct NativeStreamingLiveTerminalTests {
                 // while the reply streamed: about fifty lines a second, for a
                 // few seconds.
                 vsync.cancel()
-                let drawn = surface.framesDrawn - drawnBefore
+                // Fed (the core's revision moved) and drawn (a tick drew the
+                // revision it reached): the revision is bumped by each feed.
+                let fed = surface.core.revision &- revisionBefore
+                let drawn = surface.lastDrawnRevision &- drawnBefore
+                #expect(surface.core.revision &- surface.lastDrawnRevision < 5, "the terminal's last draw is far behind its bytes")
                 #expect(surface.core.revision != revisionBefore, "no byte of the pane's stream reached the terminal")
-                #expect(drawn >= 20, "the terminal underneath drew \(drawn) frames, so it wasn't live")
-                print("PERF[native+terminal] run \(run): the terminal drew \(drawn) frames")
+                #expect(fed >= 20 && drawn >= 20, "the terminal underneath was fed \(fed) and drew \(drawn) revisions, so it wasn't live")
+                print("PERF[native+terminal] run \(run): the terminal was fed \(fed) revisions and drew up to \(drawn)")
                 let when = monitor.when()
                 let stalls = monitor.take()
                 monitor.stop()

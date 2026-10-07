@@ -101,10 +101,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     /// layers to deliver one integer to the one object that acts on it, and
     /// every one of those layers would be passing it through untouched.
     private var themeObserver: AnyCancellable?
-    private var lastDrawnRevision: UInt64 = .max
-    /// Ticks that found new bytes and drew them: what a harness checks to
-    /// know a terminal underneath something is live (`NativeStreamingLiveTerminalTests`).
-    private(set) var framesDrawn = 0
+    private(set) var lastDrawnRevision: UInt64 = .max
     private var lastReportedGeometry = PaneGrid(columns: 0, rows: 0)
     /// The grid tmux says this pane has, once somebody knows it.
     ///
@@ -331,7 +328,6 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         }
         restingTicks = 0
         lastDrawnRevision = revision
-        framesDrawn += 1
         invalidateChangedRows()
         drainSignals()
     }
