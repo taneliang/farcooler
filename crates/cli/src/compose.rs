@@ -31,7 +31,6 @@ pub(crate) async fn run(
     };
     let mut blocks = vec![pb::AgentPromptBlock { content: Some(Content::Text(text)) }];
     blocks.extend(super::images::image_blocks(&images)?);
-    // Refused here as the runner would, before a frame too big to send.
     let image_bytes: usize = blocks
         .iter()
         .filter_map(|b| match &b.content {
@@ -39,21 +38,39 @@ pub(crate) async fn run(
             _ => None,
         })
         .sum();
-    if image_bytes > farcooler_protocol::MAX_COMPOSE_IMAGE_BYTES {
+    let (mut link, id) = terminal_by_record(runner, terminal).await?;
+    use farcooler_protocol::capability::{AGENT_COMPOSE, COMPOSE, COMPOSE_UPLOAD};
+    let offers = |need: &str| link.daemon_capabilities().iter().any(|c| c == need);
+    if !(offers(AGENT_COMPOSE) && offers(COMPOSE)) {
+        return Err("this runner can't compose into a terminal yet. update it".into());
+    }
+    // Uploaded first, in chunks, where the runner takes it (ov-393); else
+    // carried in the one request, and refused here as the runner would,
+    // before a frame too big to send.
+    let upload = image_bytes > 0 && offers(COMPOSE_UPLOAD);
+    let cap = if upload { farcooler_protocol::MAX_COMPOSE_UPLOAD_BYTES } else { farcooler_protocol::MAX_COMPOSE_IMAGE_BYTES };
+    if image_bytes > cap {
         let code = pb::ErrorCode::ResourceConflict as i32;
         let said = said_about("images_too_large").unwrap_or_default().to_string();
         return Err(Box::new(tasks::Refused::naming(said, code, "images_too_large".into())));
     }
-    let (mut link, id) = terminal_by_record(runner, terminal).await?;
-    use farcooler_protocol::capability::{AGENT_COMPOSE, COMPOSE};
-    if ![AGENT_COMPOSE, COMPOSE].iter().all(|need| link.daemon_capabilities().iter().any(|c| c == need)) {
-        return Err("this runner can't compose into a terminal yet. update it".into());
+    let mut required = vec![AGENT_COMPOSE.to_string(), COMPOSE.to_string()];
+    if upload {
+        for block in &mut blocks {
+            if let Some(Content::Image(image)) = &block.content {
+                let staged = farcooler_client::actions::stage_compose_image(link.client_mut(), id, &image.mime_type, &image.data)
+                    .await
+                    .map_err(refused)?;
+                block.content = Some(Content::StagedImage(staged));
+            }
+        }
+        required.push(COMPOSE_UPLOAD.to_string());
     }
     let mut ask = with(
         req("terminal.compose"),
         request::Payload::AgentPrompt(pb::AgentPrompt { terminal_id: id_bytes(id), blocks, hold_behind_dialog: false }),
     );
-    ask.required_capabilities = vec![AGENT_COMPOSE.into(), COMPOSE.into()];
+    ask.required_capabilities = required;
     // Targeted, as the apps' compose is: its order kept against the pane's
     // other input, beside every other pane's calls.
     ask.target_resource_id = Some(id_bytes(id));
@@ -72,7 +89,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
     Some(match what {
         "handoff" => "that command opens a panel or acts at once in claude, so it's for the terminal. open the pane and type it there",
         "unsupported" => "only claude can be composed into. use terminal draft-prompt for this agent",
-        "images_too_large" => "the images are over 900 KB together. send fewer, or smaller ones",
+        "images_too_large" => "the images are too large to send together. send fewer, or smaller ones",
         "unconfirmable" => "the agent's session can't be found, so a send couldn't be confirmed. nothing was typed",
         "command" => "a message can't start with !, which claude reads as a shell command, or with a / that isn't a command",
         "too_long" => "that message is over 100,000 characters. shorten it",

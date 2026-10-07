@@ -156,7 +156,11 @@ uint64_t farcooler_client_connect(void *handle, const char *config);
  *                                                    words, `handoff`,
  *                                                    `unsupported`, `unconfirmable`,
  *                                                    `images_too_large` past
- *                                                    900 KB of images);
+ *                                                    50 MB of images, each
+ *                                                    uploaded first in chunks,
+ *                                                    with `compose_upload`
+ *                                                    (ov-393), else past
+ *                                                    900 KB);
  *                                                    needs `agent_compose`, and
  *                                                    for line breaks or an image
  *                                                    `compose` too (ov-367)

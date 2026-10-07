@@ -1686,6 +1686,17 @@ impl Rpc {
                 let Some(request::Payload::TerminalFilePut(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
+                // A compose's image, kept for the compose and typed nowhere
+                // (`compose_upload`, ov-393).
+                if p.stage {
+                    svc.store.get_terminal(id)?;
+                    let stored = crate::pastes::staged::put_chunk(svc.root_dir(), &p.transfer_id, p.total_size, p.offset, &p.chunk).await?;
+                    let (stored, path) = match stored {
+                        crate::pastes::Stored::Partial { stored } => (stored, None),
+                        crate::pastes::Stored::Complete { path, stored } => (stored, Some(path.to_string_lossy().to_string())),
+                    };
+                    return Ok(result::Value::TerminalFilePut(farcooler_protocol::v1::TerminalFilePutResult { stored, path }));
+                }
                 let stored = crate::pastes::put_chunk(
                     svc.root_dir(),
                     &p.transfer_id,
@@ -1909,14 +1920,8 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                let images: Vec<(String, Vec<u8>)> = p
-                    .blocks
-                    .iter()
-                    .filter_map(|b| match &b.content {
-                        Some(farcooler_protocol::v1::agent_prompt_block::Content::Image(i)) => Some((i.mime_type.clone(), i.data.to_vec())),
-                        _ => None,
-                    })
-                    .collect();
+                // Carried, or uploaded first and named (ov-393).
+                let images = crate::pastes::staged::images(svc.root_dir(), &p.blocks)?;
                 let turn = self.watcher.compose_into(id, &wire::prompt_text(&p.blocks), &images).await?;
                 let queued = turn == crate::watch::answer_wake::Turn::During;
                 Ok(result::Value::TerminalTold(farcooler_protocol::v1::TerminalTold { queued }))

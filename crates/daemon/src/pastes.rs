@@ -15,6 +15,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::MAX_PASTE_FILE_BYTES;
 
+pub mod staged;
+
 /// How long a finished paste survives.
 ///
 /// Seven days rather than one because conversations get resumed: an agent that
@@ -130,6 +132,33 @@ pub async fn put_chunk_in(
     chunk: &[u8],
     now: SystemTime,
 ) -> Result<Stored> {
+    match accept(incoming, transfer_id, total_size, offset, chunk).await? {
+        Accepted::Partial { stored } => Ok(Stored::Partial { stored }),
+        Accepted::Whole { partial, stored } => {
+            let path = finalize(dir, &partial, name, sniff(&head(&partial).await?), now).await?;
+            Ok(Stored::Complete { path, stored })
+        }
+    }
+}
+
+/// What a chunk did, before the file has a name.
+pub(crate) enum Accepted {
+    /// More is expected; the bytes on disk so far.
+    Partial { stored: u64 },
+    /// Every byte is in `partial`, under `.incoming`, to be named.
+    Whole { partial: PathBuf, stored: u64 },
+}
+
+/// Append one chunk of a transfer to its partial under `incoming`: the
+/// offset, retransmit and size rules of `put_chunk_in`, for a paste and a
+/// compose's upload alike (`staged`).
+pub(crate) async fn accept(
+    incoming: &Path,
+    transfer_id: &[u8],
+    total_size: u64,
+    offset: u64,
+    chunk: &[u8],
+) -> Result<Accepted> {
     if transfer_id.is_empty() {
         return Err(DomainError::InvalidArgument { what: "transfer id" });
     }
@@ -152,7 +181,7 @@ pub async fn put_chunk_in(
     // A retransmit of bytes already accepted. Nothing to do, and saying so is
     // what lets a client retry a chunk whose response it never saw.
     if offset < stored && offset + chunk.len() as u64 <= stored {
-        return Ok(Stored::Partial { stored });
+        return Ok(Accepted::Partial { stored });
     }
     if offset != stored {
         return Err(DomainError::InvalidArgument { what: "file offset" });
@@ -164,11 +193,9 @@ pub async fn put_chunk_in(
     append(&partial, chunk).await?;
     let stored = stored + chunk.len() as u64;
     if stored < total_size {
-        return Ok(Stored::Partial { stored });
+        return Ok(Accepted::Partial { stored });
     }
-
-    let path = finalize(dir, &partial, name, sniff(&head(&partial).await?), now).await?;
-    Ok(Stored::Complete { path, stored })
+    Ok(Accepted::Whole { partial, stored })
 }
 
 async fn append(path: &Path, chunk: &[u8]) -> std::result::Result<(), DomainError> {
@@ -357,17 +384,30 @@ pub fn encode_paste(bracketed: bool, text: &str) -> Vec<u8> {
 
 /// Delete what has expired.
 ///
-/// Runs on startup and daily. Failures are logged and skipped rather than
-/// propagated: a paste that cannot be deleted is a directory that grows, not a
-/// daemon that should stop.
+/// Runs on startup and hourly (`SWEEP_EVERY`). Failures are logged and
+/// skipped rather than propagated: a paste that cannot be deleted is a
+/// directory that grows, not a daemon that should stop.
 pub async fn sweep(root: &Path) {
-    let now = SystemTime::now();
+    sweep_at(root, SystemTime::now()).await;
+}
+
+/// How often `sweep` runs: often enough that a composed image is gone
+/// within a day of its send (`staged::KEEP_COMPOSED`), and a directory read
+/// an hour costs nothing.
+pub const SWEEP_EVERY: Duration = Duration::from_secs(60 * 60);
+
+/// `sweep` as of `now`.
+pub(crate) async fn sweep_at(root: &Path, now: SystemTime) {
     for (dir, keep) in [
         (crate::paths::pastes_dir_in(root), KEEP),
         (crate::paths::pastes_incoming_dir_in(root), KEEP_INCOMING),
+        (staged::staged_dir_in(root), staged::KEEP_STAGED),
     ] {
         let Ok(dir) = dir else { continue };
         sweep_dir(&dir, keep, now).await;
+    }
+    if let Ok(dir) = crate::paths::pastes_dir_in(root) {
+        sweep_where(&dir, staged::KEEP_COMPOSED, now, staged::is_composed).await;
     }
 }
 
@@ -376,9 +416,17 @@ pub async fn sweep(root: &Path) {
 /// Directories are skipped rather than recursed: `.incoming` lives inside the
 /// paste directory and is swept on its own, shorter clock.
 pub async fn sweep_dir(dir: &Path, keep: Duration, now: SystemTime) {
+    sweep_where(dir, keep, now, |_| true).await;
+}
+
+/// `sweep_dir`, for the files whose name `named` picks.
+async fn sweep_where(dir: &Path, keep: Duration, now: SystemTime, named: impl Fn(&str) -> bool) {
     let Ok(mut entries) = tokio::fs::read_dir(dir).await else { return };
     while let Ok(Some(entry)) = entries.next_entry().await {
         let path = entry.path();
+        if !entry.file_name().to_str().is_some_and(&named) {
+            continue;
+        }
         let Ok(meta) = entry.metadata().await else { continue };
         if meta.is_dir() {
             continue;

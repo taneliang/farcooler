@@ -53,7 +53,24 @@ where
     R: AsyncRead + Unpin + Send,
     W: AsyncWrite + Unpin + Send,
 {
+    call_requiring(client, method, target, payload, Vec::new()).await
+}
+
+/// `call`, naming the capabilities the request depends on
+/// (`Request.required_capabilities`).
+async fn call_requiring<R, W>(
+    client: &Client<R, W>,
+    method: &str,
+    target: Uuid,
+    payload: Option<request::Payload>,
+    required: Vec<String>,
+) -> Result<Option<result::Value>, ClientError>
+where
+    R: AsyncRead + Unpin + Send,
+    W: AsyncWrite + Unpin + Send,
+{
     let mut request = farcooler_transport::request(method);
+    request.required_capabilities = required;
     request.target_resource_id = Some(bytes::Bytes::copy_from_slice(target.as_bytes()));
     if let Some(p) = payload {
         request.payload = Some(p);
@@ -173,8 +190,43 @@ pub async fn paste_file<R, W>(
     name: &str,
     mime: &str,
     file: &[u8],
-    mut progress: impl FnMut(u64, u64),
+    progress: impl FnMut(u64, u64),
 ) -> Result<String, ClientError>
+where
+    R: AsyncRead + Unpin + Send,
+    W: AsyncWrite + Unpin + Send,
+{
+    put_file(client, terminal, name, mime, file, false, progress).await.map(|(path, _)| path)
+}
+
+/// Upload an image for a `terminal.compose` to name (ov-393): `paste_file`'s
+/// chunks, with `stage`, so the runner keeps it under the transfer id this
+/// returns and types nothing. Needs `compose_upload`, and says so in each
+/// request, so an older runner refuses rather than typing the path.
+pub async fn stage_compose_image<R, W>(
+    client: &Client<R, W>,
+    terminal: Uuid,
+    mime: &str,
+    file: &[u8],
+) -> Result<bytes::Bytes, ClientError>
+where
+    R: AsyncRead + Unpin + Send,
+    W: AsyncWrite + Unpin + Send,
+{
+    put_file(client, terminal, "", mime, file, true, |_, _| {}).await.map(|(_, id)| id)
+}
+
+/// `paste_file` and `stage_compose_image`: the finished file's path on the
+/// runner, and the transfer's id.
+async fn put_file<R, W>(
+    client: &Client<R, W>,
+    terminal: Uuid,
+    name: &str,
+    mime: &str,
+    file: &[u8],
+    stage: bool,
+    mut progress: impl FnMut(u64, u64),
+) -> Result<(String, bytes::Bytes), ClientError>
 where
     R: AsyncRead + Unpin + Send,
     W: AsyncWrite + Unpin + Send,
@@ -204,8 +256,10 @@ where
                 total_size: total,
                 offset,
                 chunk: bytes::Bytes::copy_from_slice(chunk),
+                stage,
             });
-        let answer = call(client, "terminal.paste_file", terminal, Some(payload)).await;
+        let required = if stage { vec![farcooler_protocol::capability::COMPOSE_UPLOAD.to_string()] } else { Vec::new() };
+        let answer = call_requiring(client, "terminal.paste_file", terminal, Some(payload), required).await;
 
         // A `NotFound` on the FIRST chunk has two causes and cannot tell
         // them apart, so it names both rather than guessing.
@@ -237,7 +291,7 @@ where
                 offset = r.stored;
                 progress(r.stored, total);
                 if let Some(path) = r.path {
-                    return Ok(path);
+                    return Ok((path, transfer_id));
                 }
             }
             _ => {

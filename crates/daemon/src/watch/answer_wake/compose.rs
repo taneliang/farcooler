@@ -123,8 +123,9 @@ impl Composition {
 /// Check `raw` and `images` (each a claimed MIME type and bytes) as a message
 /// to compose, or refuse it: `text` when there's nothing to send, `image`
 /// for bytes that aren't an image, `images` for too many or beside a command,
-/// `images_too_large` past `MAX_COMPOSE_IMAGE_BYTES` together (one request
-/// travels in one envelope, capped at 1 MiB),
+/// `images_too_large` past `MAX_COMPOSE_UPLOAD_BYTES` together (those the
+/// request carried are held to `MAX_COMPOSE_IMAGE_BYTES` before this, by
+/// `pastes::staged::images`),
 /// `too_long`, `command` for a shell escape or a command that isn't one,
 /// and `handoff` for one of claude's own that isn't a prompt.
 pub(crate) fn composition(raw: &str, images: &[(String, Vec<u8>)]) -> Result<Composition> {
@@ -138,7 +139,7 @@ pub(crate) fn composition(raw: &str, images: &[(String, Vec<u8>)]) -> Result<Com
     if images.len() > MOST_IMAGES {
         return Err(DomainError::InvalidArgument { what: "images" });
     }
-    if images.iter().map(|(_, bytes)| bytes.len()).sum::<usize>() > farcooler_protocol::MAX_COMPOSE_IMAGE_BYTES {
+    if images.iter().map(|(_, bytes)| bytes.len()).sum::<usize>() > farcooler_protocol::MAX_COMPOSE_UPLOAD_BYTES {
         return Err(DomainError::Conflict { what: "images_too_large" });
     }
     let mut kept = Vec::new();
@@ -236,6 +237,9 @@ impl Watcher {
         // Written before the gate, so nothing slow sits between its checks
         // and the first paste (review finding 8).
         let paths = self.write_images(composed)?;
+        // Deleted at once if the send ends before a path is pasted; once one
+        // is, claude may read them all, so the sweep takes them within a day.
+        let mut unpasted = Unpasted(paths.clone());
         let told = self.told.lock().unwrap_or_else(|e| e.into_inner()).get(&to.id).copied();
         if let Some(left) = told.map(|at| TOLD_SPACING_MS - (now_millis() - at)).filter(|left| *left > 0) {
             tokio::time::sleep(Duration::from_millis(left as u64)).await;
@@ -292,6 +296,7 @@ impl Watcher {
         }
         for path in &paths {
             paste(quoted(path)).await?;
+            unpasted.0.clear();
             expected = expected.then_image();
             held = self.shown(to, preset, started, &expected, None).await.left(&proven.tty, preset).await?;
         }
@@ -377,7 +382,8 @@ impl Watcher {
     }
 
     /// Write `composed`'s images to the runner's paste directory, which a
-    /// sweep empties after a week (`pastes`), each under a name of its own.
+    /// sweep empties of these within a day (`pastes::staged::KEEP_COMPOSED`),
+    /// each under a name of its own.
     fn write_images(&self, composed: &Composition) -> Result<Vec<PathBuf>> {
         if composed.images.is_empty() {
             return Ok(Vec::new());
@@ -385,7 +391,7 @@ impl Watcher {
         let dir = crate::paths::pastes_dir_in(self.service.root_dir())?;
         let mut paths = Vec::new();
         for (bytes, ext) in &composed.images {
-            let path = dir.join(format!("compose-{}.{ext}", Uuid::now_v7().simple()));
+            let path = dir.join(format!("{}{}.{ext}", crate::pastes::staged::COMPOSED_PREFIX, Uuid::now_v7().simple()));
             std::fs::write(&path, bytes).map_err(|e| {
                 tracing::warn!(error = %e, "couldn't write a composed image");
                 DomainError::OperationFailed
@@ -458,6 +464,18 @@ impl Shown {
                 }
                 Err(DomainError::Conflict { what: "paste_left" })
             }
+        }
+    }
+}
+
+/// A compose's written images whose paths nothing has pasted yet: deleted
+/// when the send ends, so a refused one leaves no copy behind (ov-393).
+struct Unpasted(Vec<PathBuf>);
+
+impl Drop for Unpasted {
+    fn drop(&mut self) {
+        for path in &self.0 {
+            let _ = std::fs::remove_file(path);
         }
     }
 }

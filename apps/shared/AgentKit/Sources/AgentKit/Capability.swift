@@ -54,4 +54,5 @@ public enum Capability: String, CaseIterable, Sendable {
     case projectorSetting = "projector_setting"
     case agentCompose = "agent_compose"
     case compose = "compose"
+    case composeUpload = "compose_upload"
 }

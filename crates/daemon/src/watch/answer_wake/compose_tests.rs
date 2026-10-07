@@ -52,7 +52,7 @@ pub(super) fn hook_on_submit(b: &Board, si: &StandIn) -> tokio::task::JoinHandle
     })
 }
 
-async fn idle_claude(b: &Board) -> (Terminal, StandIn) {
+pub(super) async fn idle_claude(b: &Board) -> (Terminal, StandIn) {
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
     b.doing(agent.id, AgentActivity::Idle).await;
@@ -252,8 +252,9 @@ fn a_composition_is_checked_before_anything_is_typed() {
     assert_eq!(composition("/init", std::slice::from_ref(&png)).unwrap_err().what(), "images");
     assert_eq!(composition("", &[png]).unwrap().images.len(), 1, "an image alone is a message");
     assert_eq!(composition(&"x".repeat(100_001), &[]).unwrap_err().what(), "too_long");
-    // Every image together, past what one request carries.
-    let cap = farcooler_protocol::MAX_COMPOSE_IMAGE_BYTES;
+    // Every image together, past what one compose takes, uploaded first
+    // (ov-393): what one request carries is held before this.
+    let cap = farcooler_protocol::MAX_COMPOSE_UPLOAD_BYTES;
     let padded = |n: usize| ("image/png".to_string(), [PNG, &vec![0u8; n - PNG.len()]].concat());
     assert!(composition("x", &[padded(cap / 2), padded(cap / 2)]).is_ok());
     assert_eq!(composition("x", &[padded(cap / 2), padded(cap / 2 + 1)]).unwrap_err().what(), "images_too_large");

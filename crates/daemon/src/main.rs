@@ -289,15 +289,16 @@ async fn run() -> Result<(), i32> {
     // a base branch that came to refuse direct pushes is said, never switched.
     tokio::spawn(farcooler_daemon::landing_read::run(service.clone(), watcher.clone()));
 
-    // Expire pasted images. Once at startup and daily after that, because the
+    // Expire pasted images. Once at startup and hourly after that, because the
     // host this runs on is a laptop that is asleep more often than it is
     // up — an interval alone would let a directory grow for weeks between two
-    // long-running sessions that never reached the next tick.
+    // long-running sessions that never reached the next tick. Hourly, so a
+    // composed image is gone within a day of its send (ov-393).
     let sweeping = service.clone();
     tokio::spawn(async move {
         loop {
             farcooler_daemon::pastes::sweep(sweeping.root_dir()).await;
-            tokio::time::sleep(std::time::Duration::from_secs(24 * 60 * 60)).await;
+            tokio::time::sleep(farcooler_daemon::pastes::SWEEP_EVERY).await;
         }
     });
 

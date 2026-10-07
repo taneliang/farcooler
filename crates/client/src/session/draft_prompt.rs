@@ -62,37 +62,59 @@ impl Session {
     /// took it; either way only once claude said it took it. A runner with
     /// `agent_compose` alone (ov-372) takes one line and no image, so anything
     /// more is refused here rather than flattened there.
+    ///
+    /// A runner with `compose_upload` (ov-393) is sent each image first, in
+    /// chunks (`actions::stage_compose_image`), and the compose names them,
+    /// so they may be `MAX_COMPOSE_UPLOAD_BYTES` together; an older one gets
+    /// them inside the request, `MAX_COMPOSE_IMAGE_BYTES` together.
     pub async fn compose(&self, terminal: Uuid, text: &str, images: &[(String, Vec<u8>)]) -> Result<bool, SessionError> {
-        use farcooler_protocol::capability::{AGENT_COMPOSE, COMPOSE};
+        use farcooler_protocol::capability::{AGENT_COMPOSE, COMPOSE, COMPOSE_UPLOAD};
         require(self.capabilities(), AGENT_COMPOSE, "terminal.compose")?;
         if !images.is_empty() || text.trim_end().contains(['\n', '\r']) {
             require(self.capabilities(), COMPOSE, "terminal.compose")?;
         }
-        images_fit(images)?;
+        let upload = !images.is_empty() && self.can(COMPOSE_UPLOAD);
+        images_fit(images, upload)?;
         let mut blocks = vec![pb::AgentPromptBlock { content: Some(Content::Text(text.to_string())) }];
         for (mime, data) in images {
-            let image = pb::ImageBlock { mime_type: mime.clone(), data: bytes::Bytes::copy_from_slice(data) };
-            blocks.push(pb::AgentPromptBlock { content: Some(Content::Image(image)) });
+            let content = if upload {
+                Content::StagedImage(crate::actions::stage_compose_image(&self.client, terminal, mime, data).await?)
+            } else {
+                Content::Image(pb::ImageBlock { mime_type: mime.clone(), data: bytes::Bytes::copy_from_slice(data) })
+            };
+            blocks.push(pb::AgentPromptBlock { content: Some(content) });
         }
         let payload = request::Payload::AgentPrompt(pb::AgentPrompt {
             terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
             blocks,
             hold_behind_dialog: false,
         });
+        // Named, so a runner that lost `compose_upload` refuses rather than
+        // dropping the images it can't read.
+        let required = if upload { vec![COMPOSE_UPLOAD.to_string()] } else { Vec::new() };
         // Targeted, so it keeps its order against this terminal's other
         // input and runs beside every other pane's calls.
-        match self.value("terminal.compose", Some(terminal), Some(payload)).await? {
+        match self.value_requiring("terminal.compose", Some(terminal), Some(payload), required).await? {
             result::Value::TerminalTold(told) => Ok(told.queued),
             other => Err(wrong("terminal_told", &other)),
         }
     }
 }
 
-/// Refused here as the runner would (`images_too_large`), before a frame
-/// too big to send: all of a compose's images together, past
-/// `MAX_COMPOSE_IMAGE_BYTES`.
-pub(crate) fn images_fit(images: &[(String, Vec<u8>)]) -> Result<(), SessionError> {
-    if images.iter().map(|(_, data)| data.len()).sum::<usize>() <= farcooler_protocol::MAX_COMPOSE_IMAGE_BYTES {
+/// Refused here as the runner would (`images_too_large`), before anything
+/// is sent: all of a compose's images together past
+/// `MAX_COMPOSE_UPLOAD_BYTES` when they're `uploaded` first, each past the
+/// largest file a paste takes; else past `MAX_COMPOSE_IMAGE_BYTES`, which
+/// one request can carry.
+pub(crate) fn images_fit(images: &[(String, Vec<u8>)], uploaded: bool) -> Result<(), SessionError> {
+    let total = images.iter().map(|(_, data)| data.len()).sum::<usize>();
+    let fits = if uploaded {
+        total <= farcooler_protocol::MAX_COMPOSE_UPLOAD_BYTES
+            && images.iter().all(|(_, data)| data.len() as u64 <= farcooler_protocol::MAX_PASTE_FILE_BYTES)
+    } else {
+        total <= farcooler_protocol::MAX_COMPOSE_IMAGE_BYTES
+    };
+    if fits {
         return Ok(());
     }
     Err(SessionError::Refused {
@@ -132,19 +154,30 @@ pub fn draft_hold_state(state: i32) -> &'static str {
 mod compose_tests {
     use super::*;
 
-    /// Up to 900 KB of images together goes; a byte more is refused with the
-    /// runner's word, whether one image or several.
+    /// Up to 900 KB of images together goes to a runner without
+    /// `compose_upload`; a byte more is refused with the runner's word,
+    /// whether one image or several. Uploaded first, up to 50 MB together,
+    /// each no more than a paste takes.
     #[test]
     fn images_past_the_cap_together_are_refused() {
         let cap = farcooler_protocol::MAX_COMPOSE_IMAGE_BYTES;
         let image = |n: usize| ("image/png".to_string(), vec![0u8; n]);
-        assert!(images_fit(&[image(cap)]).is_ok());
-        assert!(images_fit(&[image(cap / 2), image(cap / 2)]).is_ok());
+        assert!(images_fit(&[image(cap)], false).is_ok());
+        assert!(images_fit(&[image(cap / 2), image(cap / 2)], false).is_ok());
+        let too_large = |result: Result<(), SessionError>| match result {
+            Err(SessionError::Refused { what, .. }) => assert_eq!(what, "images_too_large"),
+            other => panic!("{other:?}"),
+        };
         for over in [vec![image(cap + 1)], vec![image(cap / 2), image(cap / 2 + 1)]] {
-            match images_fit(&over) {
-                Err(SessionError::Refused { what, .. }) => assert_eq!(what, "images_too_large"),
-                other => panic!("{other:?}"),
-            }
+            too_large(images_fit(&over, false));
         }
+        let ten_mb = image(10 * 1024 * 1024);
+        assert!(images_fit(std::slice::from_ref(&ten_mb), true).is_ok());
+        too_large(images_fit(&[ten_mb], false));
+        let file = farcooler_protocol::MAX_PASTE_FILE_BYTES as usize;
+        assert!(images_fit(&[image(file), image(file), image(file)], true).is_ok());
+        too_large(images_fit(&[image(file + 1)], true));
+        let total = farcooler_protocol::MAX_COMPOSE_UPLOAD_BYTES;
+        too_large(images_fit(&[image(file), image(file), image(file), image(total - 3 * file + 1)], true));
     }
 }
