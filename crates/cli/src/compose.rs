@@ -30,11 +30,7 @@ pub(crate) async fn run(
         text
     };
     let mut blocks = vec![pb::AgentPromptBlock { content: Some(Content::Text(text)) }];
-    for path in images {
-        let data = std::fs::read(&path).map_err(|e| format!("couldn't read {}: {e}", path.display()))?;
-        let image = pb::ImageBlock { mime_type: mime_of(&path).into(), data: data.into() };
-        blocks.push(pb::AgentPromptBlock { content: Some(Content::Image(image)) });
-    }
+    blocks.extend(super::images::image_blocks(&images)?);
     let (mut link, id) = terminal_by_record(runner, terminal).await?;
     if !link.daemon_capabilities().iter().any(|c| c == farcooler_protocol::capability::COMPOSE) {
         return Err("this runner can't compose into a terminal yet. update it".into());
@@ -54,23 +50,12 @@ pub(crate) async fn run(
     Ok(())
 }
 
-/// The MIME type a path's extension claims; the runner sniffs the bytes.
-fn mime_of(path: &std::path::Path) -> &'static str {
-    match path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
-        Some("png") => "image/png",
-        Some("jpg" | "jpeg") => "image/jpeg",
-        Some("gif") => "image/gif",
-        Some("webp") => "image/webp",
-        _ => "application/octet-stream",
-    }
-}
-
 /// This CLI's line for a refusal `terminal tell` doesn't have.
 pub(crate) fn said_about(what: &str) -> Option<&'static str> {
     Some(match what {
         "handoff" => "that command opens a panel or acts at once in claude, so it's for the terminal. open the pane and type it there",
         "unsupported" => "only claude can be composed into. use terminal draft-prompt for this agent",
-        "no_session" => "Far Cooler can't find the agent's session, so it couldn't confirm a send. nothing was typed",
+        "no_session" => "the agent's session can't be found, so a send couldn't be confirmed. nothing was typed",
         "command" => "a message can't start with !, which claude reads as a shell command, or with a / that isn't a command",
         "too_long" => "that message is over 100,000 characters. shorten it",
         "busy" => {
@@ -107,12 +92,5 @@ mod tests {
             let said = said_about(what).unwrap_or_else(|| panic!("no line for {what}"));
             assert!(!said.ends_with('.') && said.chars().next().is_some_and(char::is_lowercase), "{said}");
         }
-    }
-
-    #[test]
-    fn an_image_is_named_by_its_extension() {
-        assert_eq!(mime_of(std::path::Path::new("/a/b.PNG")), "image/png");
-        assert_eq!(mime_of(std::path::Path::new("shot.jpeg")), "image/jpeg");
-        assert_eq!(mime_of(std::path::Path::new("notes")), "application/octet-stream");
     }
 }

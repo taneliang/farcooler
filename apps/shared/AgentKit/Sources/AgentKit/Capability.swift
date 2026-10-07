@@ -53,4 +53,5 @@ public enum Capability: String, CaseIterable, Sendable {
     case draftHold = "draft_hold"
     case projectorSetting = "projector_setting"
     case agentCompose = "agent_compose"
+    case compose = "compose"
 }

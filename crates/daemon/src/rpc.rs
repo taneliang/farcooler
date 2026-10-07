@@ -1891,8 +1891,8 @@ impl Rpc {
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
                 let text = wire::prompt_text(&p.blocks);
-                if req.method != "terminal.draft_prompt" {
-                    let queued = self.watcher.submit_into(id, &text, req.method == "terminal.tell").await? == crate::watch::answer_wake::Turn::During;
+                if req.method == "terminal.tell" {
+                    let queued = self.watcher.tell_into(id, &text).await? == crate::watch::answer_wake::Turn::During;
                     return Ok(result::Value::TerminalTold(farcooler_protocol::v1::TerminalTold { queued }));
                 }
                 match self.watcher.draft_into(id, &text, p.hold_behind_dialog).await? {

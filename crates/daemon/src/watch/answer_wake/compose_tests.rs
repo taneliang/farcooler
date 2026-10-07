@@ -28,7 +28,7 @@ fn hooked(b: &Board) {
 /// claude's `UserPromptSubmit`, for each prompt the stand-in submits or
 /// command it runs, as `hook_ingress` records it: what the stand-in logged,
 /// its line breaks back. Stops when the test ends.
-fn hook_on_submit(b: &Board, si: &StandIn) -> tokio::task::JoinHandle<()> {
+pub(super) fn hook_on_submit(b: &Board, si: &StandIn) -> tokio::task::JoinHandle<()> {
     let asks = b.svc.hooks().asks().clone();
     let log = si.log.clone();
     tokio::spawn(async move {

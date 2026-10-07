@@ -30,9 +30,9 @@ async fn a_message_is_typed_into_an_idle_orchestrator_and_submitted() {
     assert_eq!(si.submitted(), ["-x land ov-214 after the rebase"], "{}", si.log());
 }
 
-/// The native view's composer (`terminal.compose`, ov-372): any claude
-/// pane, not only the orchestrator, past the same gate, while `tell` still
-/// refuses the worker.
+/// The native view's composer (`terminal.compose`, ov-372, ov-367): any
+/// claude pane, not only the orchestrator, past the same gate, its line
+/// breaks kept, while `tell` still refuses the worker.
 #[tokio::test]
 async fn a_composed_message_is_submitted_into_a_worker_claude_pane() {
     let b = board().await;
@@ -41,10 +41,12 @@ async fn a_composed_message_is_submitted_into_a_worker_claude_pane() {
     b.doing(agent.id, AgentActivity::Idle).await;
     assert_eq!(refused_with(b.watcher.tell_into(agent.id, "hello").await), "terminal");
     nothing_typed(&si);
-    let turn = b.watcher.submit_into(agent.id, "fix the build\nthen the docs", false).await.expect("composed");
+    b.svc.hooks().asks().heard("stand-in", false);
+    let _hook = super::compose_tests::hook_on_submit(&b, &si);
+    let turn = b.watcher.compose_into(agent.id, "fix the build\nthen the docs", &[]).await.expect("composed");
     assert_eq!(turn, Turn::Between);
     si.submits(1).await;
-    assert_eq!(si.submitted(), ["fix the build then the docs"], "{}", si.log());
+    assert_eq!(si.submitted(), ["fix the build\\nthen the docs"], "{}", si.log());
 }
 
 /// A composed message and a draft never type into one box at once
@@ -57,9 +59,11 @@ async fn a_composed_message_and_a_draft_wait_for_the_box() {
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
     b.doing(agent.id, AgentActivity::Idle).await;
+    b.svc.hooks().asks().heard("stand-in", false);
+    let _hook = super::compose_tests::hook_on_submit(&b, &si);
     let held = b.watcher.typing(agent.id).await;
     let watcher = std::sync::Arc::clone(&b.watcher);
-    let composed = tokio::spawn(async move { watcher.submit_into(agent.id, "carry on", false).await });
+    let composed = tokio::spawn(async move { watcher.compose_into(agent.id, "carry on", &[]).await });
     let watcher = std::sync::Arc::clone(&b.watcher);
     let drafted = tokio::spawn(async move { watcher.draft_into(agent.id, "About ov-1: ", false).await });
     tokio::time::sleep(std::time::Duration::from_millis(800)).await;

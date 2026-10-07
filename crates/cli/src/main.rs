@@ -951,17 +951,10 @@ enum TerminalCmd {
     /// it's working; refused, typing nothing, unless safe. Put `--` before a
     /// message that starts with a dash.
     Tell { terminal: String, text: String },
-    /// Type a message into claude's box in a terminal pane and submit it,
-    /// with its line breaks, images and slash command; queued when it's
-    /// working. Refused, typing nothing, unless safe. `--text -` reads stdin.
-    Compose {
-        terminal: String,
-        #[arg(long)]
-        text: String,
-        /// An image to paste before the text; repeat for more.
-        #[arg(long = "image")]
-        images: Vec<std::path::PathBuf>,
-    },
+    /// Type a message into claude's box in a terminal pane and submit it, with its line breaks,
+    /// images (`--image`, repeated) and slash command; queued when it's working. Refused, typing
+    /// nothing, unless safe. `--text -` reads stdin.
+    Compose { terminal: String, #[arg(long)] text: String, #[arg(long = "image")] images: Vec<std::path::PathBuf> },
     /// Answer a pending agent question, carrying the ids back exactly as the
     /// adapter sent them — inventing one here would make the answer
     /// unroutable and hang the agent on its own question.
@@ -3076,18 +3069,9 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
             use farcooler_protocol::v1::agent_prompt_block::Content;
             let (mut link, id) = terminal_by_record(runner, &terminal).await?;
 
-            let mut blocks = Vec::new();
-            for path in &images {
-                let data = std::fs::read(path)?;
-                blocks.push(farcooler_protocol::v1::AgentPromptBlock {
-                    content: Some(Content::Image(farcooler_protocol::v1::ImageBlock {
-                        // From the extension, because that is all a file gives
-                        // us and the adapter only needs to know how to decode.
-                        mime_type: mime_for(path).to_string(),
-                        data: bytes::Bytes::from(data),
-                    })),
-                });
-            }
+            // Typed from the extension, because that is all a file gives us
+            // and the adapter only needs to know how to decode.
+            let mut blocks = images::image_blocks(&images)?;
             blocks.push(farcooler_protocol::v1::AgentPromptBlock {
                 content: Some(Content::Text(text)),
             });

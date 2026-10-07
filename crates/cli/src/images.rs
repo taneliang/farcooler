@@ -14,3 +14,15 @@ pub(crate) fn mime_for(path: &std::path::Path) -> &'static str {
         _ => "image/jpeg",
     }
 }
+
+/// Each file at `paths` as a prompt's image block, typed by `mime_for`.
+pub(crate) fn image_blocks(paths: &[std::path::PathBuf]) -> std::io::Result<Vec<farcooler_protocol::v1::AgentPromptBlock>> {
+    use farcooler_protocol::v1::{AgentPromptBlock, ImageBlock, agent_prompt_block::Content};
+    let mut blocks = Vec::new();
+    for path in paths {
+        let data = std::fs::read(path)?;
+        let image = ImageBlock { mime_type: mime_for(path).to_string(), data: bytes::Bytes::from(data) };
+        blocks.push(AgentPromptBlock { content: Some(Content::Image(image)) });
+    }
+    Ok(blocks)
+}

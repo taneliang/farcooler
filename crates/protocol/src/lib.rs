@@ -614,10 +614,8 @@ pub mod capability {
     /// a runner that serves rows from before compose isn't offered a view
     /// whose send would fail.
     pub const AGENT_COMPOSE: &str = "agent_compose";
-    /// `terminal.compose` (ov-372, ov-367) as it now is: line breaks, images
-    /// and a slash command typed into claude's box and submitted, Sent or
-    /// Queued once claude confirms it. Its own capability so the send works
-    /// with the projector off, and a client knows images and line breaks go.
+    /// `terminal.compose` takes line breaks, images and slash commands, and answers once claude
+    /// confirms (ov-367); with `agent_compose` alone, one line and no image.
     pub const COMPOSE: &str = "compose";
 
     /// Every capability this build has, in a stable order.

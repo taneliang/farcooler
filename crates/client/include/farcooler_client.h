@@ -145,12 +145,19 @@ uint64_t farcooler_client_connect(void *handle, const char *config);
  *                                                    "heldMs", "expiresMs",
  *                                                    "endedMs"}; also a fleet
  *                                                    terminal's "draftHold"
- *   terminal.compose       {terminal, text}       -> {"queued"}: typed into a
- *                                                    terminal-mode agent's box
- *                                                    on one line and submitted,
- *                                                    or refused with a `what`
- *                                                    (`terminal tell`'s words);
- *                                                    needs `agent_compose`
+ *   terminal.compose       {terminal, text,       -> {"queued"}: typed into
+ *                           images?}                 claude's box in a terminal
+ *                                                    pane with its line breaks,
+ *                                                    images ([{mime, base64}])
+ *                                                    and slash command, and
+ *                                                    submitted once claude says
+ *                                                    it took it; or refused with
+ *                                                    a `what` (`terminal tell`'s
+ *                                                    words, `handoff`,
+ *                                                    `unsupported`, `no_session`);
+ *                                                    needs `agent_compose`, and
+ *                                                    for line breaks or an image
+ *                                                    `compose` too (ov-367)
  *   agent.rows             {terminal, before?, limit?}
  *                          -> {"epoch", "rev", "moreBefore", "rows"}
  *   agent.rows_follow      {terminal, epoch, afterRev, waitMs?}

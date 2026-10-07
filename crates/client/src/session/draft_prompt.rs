@@ -55,15 +55,27 @@ impl Session {
         }
     }
 
-    /// `terminal.compose` (ov-372): `text` typed into a terminal-mode agent
-    /// pane's box on one line and submitted past the same gate as
-    /// `terminal tell`, or refused with nothing typed. True when the agent
-    /// was working and its own queue took it.
-    pub async fn compose(&self, terminal: Uuid, text: &str) -> Result<bool, SessionError> {
-        require(self.capabilities(), farcooler_protocol::capability::AGENT_COMPOSE, "terminal.compose")?;
+    /// `terminal.compose` (ov-372, ov-367): `text`, with its line breaks, and
+    /// `images` (MIME type and bytes) typed into claude's box in a terminal
+    /// pane and submitted, or refused with nothing typed, past the same gate
+    /// as `terminal tell`. True when claude was working and its own queue
+    /// took it; either way only once claude said it took it. A runner with
+    /// `agent_compose` alone (ov-372) takes one line and no image, so anything
+    /// more is refused here rather than flattened there.
+    pub async fn compose(&self, terminal: Uuid, text: &str, images: &[(String, Vec<u8>)]) -> Result<bool, SessionError> {
+        use farcooler_protocol::capability::{AGENT_COMPOSE, COMPOSE};
+        require(self.capabilities(), AGENT_COMPOSE, "terminal.compose")?;
+        if !images.is_empty() || text.trim_end().contains(['\n', '\r']) {
+            require(self.capabilities(), COMPOSE, "terminal.compose")?;
+        }
+        let mut blocks = vec![pb::AgentPromptBlock { content: Some(Content::Text(text.to_string())) }];
+        for (mime, data) in images {
+            let image = pb::ImageBlock { mime_type: mime.clone(), data: bytes::Bytes::copy_from_slice(data) };
+            blocks.push(pb::AgentPromptBlock { content: Some(Content::Image(image)) });
+        }
         let payload = request::Payload::AgentPrompt(pb::AgentPrompt {
             terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
-            blocks: vec![pb::AgentPromptBlock { content: Some(Content::Text(text.to_string())) }],
+            blocks,
             hold_behind_dialog: false,
         });
         // Targeted, so it keeps its order against this terminal's other

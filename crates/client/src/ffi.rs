@@ -2244,23 +2244,7 @@ async fn dispatch(
         }
 
         "terminal.agent_prompt" => {
-            // `[{ "mime": "image/png", "base64": "..." }]`, decoded here so the
-            // protocol carries bytes and only this boundary deals in text.
-            let images: Vec<(String, Vec<u8>)> = args
-                .get("images")
-                .and_then(|v| v.as_array())
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(|item| {
-                            let mime = item.get("mime")?.as_str()?.to_string();
-                            let data =
-                                farcooler_core::base64::decode(item.get("base64")?.as_str()?)?;
-                            Some((mime, data))
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+            let images = images_arg::images(args);
             session
                 .agent_prompt(id("terminal")?, &text("text"), &images)
                 .await?;
@@ -2343,7 +2327,11 @@ async fn dispatch(
         }
         // A terminal's agent rows, a page and a follow (ov-366).
         "agent.rows" | "agent.rows_follow" => rows_args::call(session, method, args).await,
-        "terminal.compose" => Ok(json!({ "queued": session.compose(id("terminal")?, &text("text")).await? })),
+        // `{terminal, text, images?}` → `{queued}` (ov-372, ov-367).
+        "terminal.compose" => {
+            let queued = session.compose(id("terminal")?, &text("text"), &images_arg::images(args)).await?;
+            Ok(json!({ "queued": queued }))
+        }
 
         // Refused rather than defaulted, so a typo in a client is a visible
         // error instead of a call that silently does nothing.
@@ -3297,6 +3285,7 @@ mod rows_fixture_tests;
 mod board_reads_args;
 mod files_args;
 mod rows_args;
+mod images_arg;
 mod reach;
 use board_reads_args::mark_read_of;
 mod calls;
