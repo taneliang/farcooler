@@ -240,6 +240,11 @@ fn a_composition_is_checked_before_anything_is_typed() {
     assert_eq!(normalized("  indented\nkept"), "  indented\nkept");
     let init = composition("/init focus\non tests", &[]).unwrap();
     assert_eq!(init, Composition { text: " focus\non tests".into(), command: Some("/init".into()), images: vec![] });
+    // Behind leading spaces, still a command or a shell escape.
+    assert_eq!(composition("  /init focus", &[]).unwrap().command.as_deref(), Some("/init"));
+    assert_eq!(composition(" /model", &[]).unwrap_err().what(), "handoff");
+    assert_eq!(composition("\t!ls", &[]).unwrap_err().what(), "command");
+    assert_eq!(composition("  plain", &[]).unwrap().text, "  plain", "a prompt keeps its indent");
     assert_eq!(composition(" \n", &[]).unwrap_err().what(), "text");
     let not_png = ("image/png".to_string(), b"GIF8".to_vec());
     assert_eq!(composition("x", &[not_png]).unwrap_err().what(), "image");

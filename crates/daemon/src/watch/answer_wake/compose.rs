@@ -152,10 +152,14 @@ pub(crate) fn composition(raw: &str, images: &[(String, Vec<u8>)]) -> Result<Com
         };
         kept.push((bytes.clone(), ext));
     }
-    if text.starts_with('!') {
+    // Read past leading spaces: whether claude trims them before it routes
+    // `/` and `!` wasn't measured, so a command behind a space is still one
+    // (a panel never typed), and goes in without the space.
+    let lead = text.trim_start();
+    if lead.starts_with('!') {
         return Err(DomainError::Conflict { what: "command" });
     }
-    let Some(rest) = text.strip_prefix('/') else {
+    let Some(rest) = lead.strip_prefix('/') else {
         return Ok(Composition { text, command: None, images: kept });
     };
     let name: String = rest.chars().take_while(|c| !c.is_whitespace()).collect();
