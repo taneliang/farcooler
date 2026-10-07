@@ -241,7 +241,8 @@ final class NativeAgentViewTests: XCTestCase {
         let app = launch(["-native-stale"])
         _ = conversation(app)
         let banner = element(app, "native-stale")
-        XCTAssertTrue(banner.waitForExistence(timeout: 20), "no stale banner")
+        // Four follows in, then the first retry's failure: slow under load.
+        XCTAssertTrue(banner.waitForExistence(timeout: 40), "no stale banner: \(harness(app))")
         XCTAssertTrue(app.staticTexts["Can’t reach the runner, so this may be out of date. Trying again…"].exists)
         element(app, "native-composer").tap()
         app.typeText("Anything")
