@@ -133,7 +133,7 @@ async fn answering_a_chat_ask_sends_a_count_notice() {
         payload: Some(farcooler_protocol::v1::request::Payload::AgentAnswer(farcooler_protocol::v1::AgentAnswer {
             terminal_id: crate::wire::id_bytes(pane),
             request_id: "chat-1".into(),
-            option_id: "allow".into(),
+            option_id: "allow".into(), answers: Default::default(),
         })),
         ..Default::default()
     };

@@ -151,7 +151,7 @@ async fn answering_a_chat_ask_takes_it_off_the_list() {
     answer.payload = Some(farcooler_protocol::v1::request::Payload::AgentAnswer(farcooler_protocol::v1::AgentAnswer {
         terminal_id: bytes::Bytes::copy_from_slice(pane.as_bytes()),
         request_id: "chat-1".into(),
-        option_id: "allow".into(),
+        option_id: "allow".into(), answers: Default::default(),
     }));
     // The reply re-reads the pane through tmux, which this harness may not
     // have; that the shim heard the answer is what's asked about.
@@ -233,7 +233,7 @@ async fn answering_the_later_of_two_asks_leaves_the_earlier_listed() {
     answer.payload = Some(farcooler_protocol::v1::request::Payload::AgentAnswer(farcooler_protocol::v1::AgentAnswer {
         terminal_id: bytes::Bytes::copy_from_slice(pane.as_bytes()),
         request_id: "chat-2".into(),
-        option_id: "allow".into(),
+        option_id: "allow".into(), answers: Default::default(),
     }));
     let _ = link.call(answer).await;
     assert!(matches!(shim.heard().await, farcooler_agent::link::DaemonMessage::Answer { .. }));

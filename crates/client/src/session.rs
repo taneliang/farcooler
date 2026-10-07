@@ -1567,17 +1567,20 @@ impl Session {
         }
     }
 
-    /// Answer a pending permission request.
+    /// Answer a pending permission request; a claude question with option
+    /// `answer` and `answers`, each question's text to its answer (ov-370).
     pub async fn agent_answer(
         &self,
         terminal: Uuid,
         request_id: &str,
         option_id: &str,
+        answers: std::collections::HashMap<String, String>,
     ) -> Result<Terminal, SessionError> {
         let payload = request::Payload::AgentAnswer(farcooler_protocol::v1::AgentAnswer {
             terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
             request_id: request_id.to_string(),
             option_id: option_id.to_string(),
+            answers,
         });
         match self.value("terminal.agent_answer", None, Some(payload)).await? {
             result::Value::Terminal(t) => Ok(t),

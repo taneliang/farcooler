@@ -2268,10 +2268,10 @@ async fn dispatch(
             Ok(json!({ "hold": crate::session::draft_prompt::draft_hold_json(&hold) }))
         }
 
+        // `answers`: a claude question's, each question to its answer (ov-370).
         "terminal.agent_answer" => {
-            session
-                .agent_answer(id("terminal")?, &text("requestId"), &text("optionId"))
-                .await?;
+            let answers = serde_json::from_value(args.get("answers").cloned().unwrap_or_default()).unwrap_or_default();
+            session.agent_answer(id("terminal")?, &text("requestId"), &text("optionId"), answers).await?;
             Ok(json!({}))
         }
 

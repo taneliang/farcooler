@@ -1940,7 +1940,7 @@ async fn a_claude_asking() -> Asking {
 async fn a_permission_answered_from_a_phone_reaches_the_held_hook() {
     let mut asking = a_claude_asking().await;
     let (terminal, id) = (asking.terminal, asking.id.clone());
-    asking.session.agent_answer(terminal, &id, "allow").await.expect("the answer landed");
+    asking.session.agent_answer(terminal, &id, "allow", Default::default()).await.expect("the answer landed");
 
     assert!(asking.exists("hook-exited", std::time::Duration::from_secs(5)).await, "the hook never exited");
     let printed: serde_json::Value =
@@ -2007,7 +2007,7 @@ async fn a_held_ask_reaches_needs_you_as_the_shared_fixture_spells_it() {
     assert_eq!(item["question"], item["actions"][0]["title"]);
     assert_eq!(spelled["question"], spelled["actions"][0]["title"]);
     assert_eq!(item["actions"][1]["title"], spelled["actions"][1]["title"]);
-    asking.session.agent_answer(terminal, &id, "deny").await.expect("the answer landed");
+    asking.session.agent_answer(terminal, &id, "deny", Default::default()).await.expect("the answer landed");
     asking.never_trapped();
 }
 
@@ -2017,7 +2017,7 @@ async fn a_held_ask_reaches_needs_you_as_the_shared_fixture_spells_it() {
 async fn a_permission_denied_from_the_mac_says_so_to_the_model() {
     let mut asking = a_claude_asking().await;
     let (terminal, id) = (asking.terminal, asking.id.clone());
-    asking.session.agent_answer(terminal, &id, "deny").await.expect("the answer landed");
+    asking.session.agent_answer(terminal, &id, "deny", Default::default()).await.expect("the answer landed");
 
     assert!(asking.exists("hook-exited", std::time::Duration::from_secs(5)).await, "the hook never exited");
     let printed: serde_json::Value =
@@ -2067,7 +2067,7 @@ async fn a_permission_answered_at_the_keyboard_releases_the_held_hook_and_the_ph
     assert_eq!(asking.resolved().await, "");
 
     let id = asking.id.clone();
-    match asking.session.agent_answer(terminal, &id, "allow").await {
+    match asking.session.agent_answer(terminal, &id, "allow", Default::default()).await {
         Err(SessionError::Refused { code, what, .. }) => {
             assert_eq!(farcooler_core::error::word_for(code), "resource-conflict");
             // Named, so a phone can say "Someone already answered this."

@@ -564,6 +564,11 @@ message AgentAnswer {
   // make the answer unroutable and hang the agent on its own question.
   string request_id = 2;
   string option_id = 3;
+  // A claude question held by its hook (`AskUserQuestion`), answered with
+  // option `answer`: each question's text, as asked, to the answer given
+  // (several options of a multi-select joined by ", "). Empty for any other
+  // ask.
+  map<string, string> answers = 4;
 }
 
 message AgentSetMode {

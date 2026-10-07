@@ -73,7 +73,7 @@ async fn settling_a_held_ask_announces_needs_you_changed() {
     answer.payload = Some(payload::Payload::AgentAnswer(pb::AgentAnswer {
         terminal_id: id(pane),
         request_id: ask,
-        option_id: "allow".into(),
+        option_id: "allow".into(), answers: Default::default(),
     }));
     let _ = connect(&h).await.call(answer).await;
     hook.await.unwrap();

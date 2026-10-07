@@ -51,6 +51,10 @@ mod page_text;
 mod ci_words;
 mod plan;
 mod tell;
+mod agent_answer;
+use agent_answer::answer_agent;
+#[cfg(test)]
+use agent_answer::answer_refused;
 use images::mime_for;
 mod report;
 mod terminal_requests;
@@ -963,7 +967,8 @@ enum TerminalCmd {
     /// Answer a pending agent question, carrying the ids back exactly as the
     /// adapter sent them — inventing one here would make the answer
     /// unroutable and hang the agent on its own question.
-    AgentAnswer { terminal: String, request_id: String, option_id: String },
+    /// `--answers-json` answers a claude question: `{"<question>": "<answer>"}`, option `answer`.
+    AgentAnswer { terminal: String, request_id: String, option_id: String, #[arg(long = "answers-json")] answers: Option<String> },
     /// Switch the running agent's own mode (e.g. a permission mode), not the
     /// pane's mode — see `SetPaneMode` for that.
     AgentSetMode { terminal: String, agent_mode: String },
@@ -1051,42 +1056,6 @@ fn error_code_lines(error: &(dyn std::error::Error + 'static), json: bool) -> Ve
     let mut lines = vec![format!("code: {word}")];
     lines.extend(what.map(|w| format!("what: {w}")));
     lines
-}
-
-/// `terminal agent-answer`'s call, with its refusals said by `answer_refused`.
-async fn answer_agent<L: tasks::DispatchLink>(
-    link: &mut L,
-    terminal: Uuid,
-    request_id: String,
-    option_id: String,
-) -> Fallible {
-    link.call(with(
-        req("terminal.agent_answer"),
-        request::Payload::AgentAnswer(farcooler_protocol::v1::AgentAnswer {
-            terminal_id: id_bytes(terminal),
-            request_id,
-            option_id,
-        }),
-    ))
-    .await
-    .map_err(|e| answer_refused(e, &short(terminal)))?;
-    Ok(())
-}
-
-/// A refused `terminal agent-answer`, in this CLI's words when the runner
-/// named which of its two conflicts it was.
-///
-/// Both are `resource-conflict`, and the runner's own message is the apps'
-/// capitalized sentence. `said_about` holds this CLI's line for each, in
-/// clap's style. Anything else is left as it was.
-fn answer_refused(e: farcooler_transport::ClientError, terminal: &str) -> Box<dyn std::error::Error> {
-    if let farcooler_transport::ClientError::Daemon { code, what, .. } = &e
-        && matches!(what.as_str(), "not_held" | "not_delivered")
-        && let Some(said) = tasks::said_about(what)
-    {
-        return Box::new(tasks::Refused::naming(said.to_string(), *code, what.clone()));
-    }
-    tasks::agent_refused(terminal)(e)
 }
 
 /// What a runner too old for Needs You is told.
@@ -3098,9 +3067,10 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
         TerminalCmd::Tell { terminal, text } => tell::run(runner, &terminal, text).await?,
         TerminalCmd::Compose { terminal, text, images } => compose::run(runner, &terminal, text, images, json).await?,
         cmd @ (TerminalCmd::Interrupt { .. } | TerminalCmd::SendNow { .. }) => interrupt::press(runner, cmd).await?,
-        TerminalCmd::AgentAnswer { terminal, request_id, option_id } => {
+        TerminalCmd::AgentAnswer { terminal, request_id, option_id, answers } => {
+            let answers = agent_answer::parse_answers(answers.as_deref())?;
             let (mut link, id) = terminal_by_record(runner, &terminal).await?;
-            answer_agent(&mut link, id, request_id, option_id).await?;
+            answer_agent(&mut link, id, request_id, option_id, answers).await?;
             println!("answered {}", short(id));
         }
 
@@ -4393,12 +4363,12 @@ mod tests {
     async fn a_refused_answer_says_which_conflict_in_this_clis_words() {
         let terminal = Uuid::now_v7();
         let mut link = answering(Err(conflict("not_held")));
-        let held = answer_agent(&mut link, terminal, "a-1".into(), "allow".into()).await.expect_err("refused");
+        let held = answer_agent(&mut link, terminal, "a-1".into(), "allow".into(), Default::default()).await.expect_err("refused");
         assert_eq!(link.sent[0].method, "terminal.agent_answer");
         assert_eq!(held.to_string(), "someone already answered this");
         assert_eq!(error_code_lines(held.as_ref(), true), ["code: resource-conflict", "what: not_held"]);
         let mut link = answering(Err(conflict("not_delivered")));
-        let lost = answer_agent(&mut link, terminal, "a-1".into(), "allow".into()).await.expect_err("refused");
+        let lost = answer_agent(&mut link, terminal, "a-1".into(), "allow".into(), Default::default()).await.expect_err("refused");
         assert_eq!(lost.to_string(), "the answer didn't reach the agent. try again");
 
         let other = answer_refused(farcooler_transport::ClientError::Daemon {
