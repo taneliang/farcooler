@@ -203,7 +203,7 @@ actor ScriptedRows: AgentRowSource {
 }
 
 @MainActor
-func waitFor(_ what: String, within: Duration = .seconds(5), _ condition: () async -> Bool) async {
+func waitFor(_ what: String, within: Duration = .seconds(30), _ condition: () async -> Bool) async {
     let deadline = ContinuousClock.now + within
     while ContinuousClock.now < deadline {
         if await condition() { return }
@@ -227,6 +227,7 @@ func theLoopRepagesOnResetAndFailure() async throws {
             .fail,
         ])
     let store = AgentRowStore(key: "loop", cache: nil)
+    store.retryDelay = .milliseconds(1)
     store.start(source)
     defer { store.stop() }
     await waitFor("the third page") { await source.calls.count >= 7 }

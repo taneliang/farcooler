@@ -83,6 +83,9 @@ public final class AgentRowStore {
     @ObservationIgnored private let cache: AgentRowCache?
     @ObservationIgnored private var seeded: AgentRowSnapshot?
     @ObservationIgnored private var feed: Task<Void, Never>?
+    /// The first wait after a failed call, doubled on each failure in a row.
+    /// Tests set it near zero before `start`.
+    @ObservationIgnored var retryDelay: Duration = .milliseconds(500)
 
     /// `key` names the pane (a runner and a terminal) in `cache`.
     public init(key: String, cache: AgentRowCache? = .shared) {
@@ -132,8 +135,9 @@ public final class AgentRowStore {
         let seed = seeded
         seeded = nil
         let weakly = Weakly(self)
+        let retryDelay = retryDelay
         feed = Task.detached(priority: .userInitiated) { [ledger, cache, key] in
-            await Self.run(store: weakly, ledger: ledger, source: source, cache: cache, key: key, seed: seed)
+            await Self.run(store: weakly, ledger: ledger, source: source, cache: cache, key: key, seed: seed, retryDelay: retryDelay)
         }
     }
 
@@ -188,7 +192,7 @@ public final class AgentRowStore {
     /// a call that failed may have lost changes nobody can name.
     nonisolated static func run(
         store weakly: Weakly, ledger: AgentRowLedger, source: any AgentRowSource, cache: AgentRowCache?,
-        key: String, seed: AgentRowSnapshot?
+        key: String, seed: AgentRowSnapshot?, retryDelay: Duration = .milliseconds(500)
     ) async {
         // Weak, so a pane that goes away ends its loop rather than being
         // kept alive by it.
@@ -204,7 +208,7 @@ public final class AgentRowStore {
         }
         var needsPage = await ledger.cursor == nil
         var waitMs = 0
-        var backoff: Duration = .milliseconds(500)
+        var backoff = retryDelay
         var saved = ContinuousClock.now
         while !Task.isCancelled {
             do {
@@ -222,7 +226,7 @@ public final class AgentRowStore {
                     }
                 }
                 waitMs = followWaitMs
-                backoff = .milliseconds(500)
+                backoff = retryDelay
                 guard !Task.isCancelled else { break }
                 await MainActor.run {
                     if let delta { store?.apply(delta) }
