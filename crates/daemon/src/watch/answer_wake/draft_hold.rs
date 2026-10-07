@@ -200,26 +200,32 @@ impl Watcher {
             let ended = match self.service.store.get_terminal(terminal) {
                 Err(_) => Some(DraftHoldState::Expired),
                 Ok(_) if now - hold.held_ms > GIVE_UP_AFTER_MS => Some(DraftHoldState::Expired),
-                Ok(to) => match self.paste_draft(&to, &hold.text).await {
-                    Ok(Ok(())) => Some(DraftHoldState::Sent),
-                    // Past the gate, and the send failed: it may have reached
-                    // the box, so it's never pasted again.
-                    Ok(Err(_)) => Some(DraftHoldState::Failed),
-                    // A dialog again: a key typed now answers it, not the box.
-                    Err(Held::Prompt) => {
-                        set_closed(None);
-                        None
-                    }
-                    // No dialog, and something else in the way. A key typed
-                    // since the pass that first saw the dialog gone is the
-                    // person moving on; from that pass, a key will be.
-                    Err(_) => match hold.closed_ms {
-                        Some(closed) if typed_since(closed) => Some(DraftHoldState::Expired),
-                        Some(_) => None,
-                        None => {
-                            set_closed(Some(now_millis()));
+                // Someone is typing there (a composed message, say): this
+                // pane's turn comes next pass. Holding `draft_pump` and
+                // `wake_pump` for it would stall every other pane's.
+                Ok(to) => match self.try_typing(to.id) {
+                    None => continue,
+                    Some(typing) => match self.paste_draft(&to, &hold.text, typing).await {
+                        Ok(Ok(())) => Some(DraftHoldState::Sent),
+                        // Past the gate, and the send failed: it may have reached
+                        // the box, so it's never pasted again.
+                        Ok(Err(_)) => Some(DraftHoldState::Failed),
+                        // A dialog again: a key typed now answers it, not the box.
+                        Err(Held::Prompt) => {
+                            set_closed(None);
                             None
                         }
+                        // No dialog, and something else in the way. A key typed
+                        // since the pass that first saw the dialog gone is the
+                        // person moving on; from that pass, a key will be.
+                        Err(_) => match hold.closed_ms {
+                            Some(closed) if typed_since(closed) => Some(DraftHoldState::Expired),
+                            Some(_) => None,
+                            None => {
+                                set_closed(Some(now_millis()));
+                                None
+                            }
+                        },
                     },
                 },
             };
@@ -235,11 +241,15 @@ impl Watcher {
     /// then one bracketed paste and no Enter. Not recorded as someone typing
     /// (`marks: None`), as an answer isn't. `Err` with why it can't now,
     /// nothing typed; `Ok` with how the send went.
-    pub(super) async fn paste_draft(&self, to: &Terminal, text: &str) -> std::result::Result<Result<()>, Held> {
+    pub(super) async fn paste_draft(
+        &self,
+        to: &Terminal,
+        text: &str,
+        _typing: tokio::sync::OwnedMutexGuard<()>,
+    ) -> std::result::Result<Result<()>, Held> {
         if !self.service.is_running(to) {
             return Err(Held::NotAnAgent);
         }
-        let _typing = self.typing(to.id).await;
         self.ready(to).await?;
         self.proven_tui(to).await?;
         let runtime = Runtime { marks: None, ..self.service.runtime() };

@@ -10,7 +10,7 @@ use super::*;
 
 /// An orchestrator's claude with a permission dialog up, and a draft held
 /// behind it: nothing typed yet.
-async fn held(b: &Board) -> (Terminal, StandIn, farcooler_protocol::v1::DraftHold) {
+pub(super) async fn held(b: &Board) -> (Terminal, StandIn, farcooler_protocol::v1::DraftHold) {
     let orchestrator = b.adopted_shell().await;
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;

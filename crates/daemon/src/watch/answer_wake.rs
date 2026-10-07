@@ -319,6 +319,10 @@ enum Pass {
     Settled,
     /// Not yet, and why.
     Waiting(Held),
+    /// Another send holds the pane's box (`Watcher::try_typing`). Not a
+    /// reason to tell the person anything, and not worth stalling the pass
+    /// for: the next tick tries again.
+    Skipped,
 }
 
 impl Watcher {
@@ -371,9 +375,13 @@ impl Watcher {
                 self.settle(wake, None, Some(SUPERSEDED.into()));
                 continue;
             }
-            if let Pass::Waiting(held) = self.wake(wake).await {
-                self.wake_holds.lock().unwrap_or_else(|e| e.into_inner()).insert(wake.note, held);
-                self.wakes_hint.store(true, Ordering::SeqCst);
+            match self.wake(wake).await {
+                Pass::Settled => {}
+                Pass::Waiting(held) => {
+                    self.wake_holds.lock().unwrap_or_else(|e| e.into_inner()).insert(wake.note, held);
+                    self.wakes_hint.store(true, Ordering::SeqCst);
+                }
+                Pass::Skipped => self.wakes_hint.store(true, Ordering::SeqCst),
             }
         }
     }
@@ -413,8 +421,10 @@ impl Watcher {
         let Some(to) = self.recipient(&task).await else {
             return self.settle(wake, Some(&task), left(Some(nobody(wake.kind))));
         };
-        // Nothing else types into this box until the answer is in.
-        let _typing = self.typing(to.id).await;
+        // Nothing else types into this box until the answer is in. Never
+        // waited for here: this pass holds `wake_pump`, so a slow compose
+        // into one pane would stall every other pane's answer and draft.
+        let Some(_typing) = self.try_typing(to.id) else { return Pass::Skipped };
         let pass = match self.ready(&to).await {
             Err(held) => Pass::Waiting(held),
             Ok(turn) => {
@@ -669,8 +679,12 @@ impl Watcher {
         if text.trim().is_empty() {
             return Err(DomainError::InvalidArgument { what: "text" });
         }
+        // The box first, then `draft_pump`: a pump pass holds `draft_pump`
+        // and only tries the box, so this wait for a slow send holds nothing
+        // another pane's draft or withdrawal queues behind.
+        let typing = self.typing(to.id).await;
         let _one_pass = self.draft_pump.lock().await;
-        match self.paste_draft(&to, &text).await {
+        match self.paste_draft(&to, &text, typing).await {
             Ok(sent) => {
                 sent?;
                 self.draft_replaced(to.id);
@@ -690,6 +704,14 @@ impl Watcher {
     pub(crate) async fn typing(&self, terminal: Uuid) -> tokio::sync::OwnedMutexGuard<()> {
         let lock = std::sync::Arc::clone(self.typing.lock().unwrap_or_else(|e| e.into_inner()).entry(terminal).or_default());
         lock.lock_owned().await
+    }
+
+    /// `typing`, or `None` when someone holds the box. For the pumps, which
+    /// hold `wake_pump` or `draft_pump` and so never wait on a slow send: they
+    /// skip that terminal this pass.
+    pub(crate) fn try_typing(&self, terminal: Uuid) -> Option<tokio::sync::OwnedMutexGuard<()>> {
+        let lock = std::sync::Arc::clone(self.typing.lock().unwrap_or_else(|e| e.into_inner()).entry(terminal).or_default());
+        lock.try_lock_owned().ok()
     }
 
     /// The pane's box as a fresh capture shows it, and whether a turn is
