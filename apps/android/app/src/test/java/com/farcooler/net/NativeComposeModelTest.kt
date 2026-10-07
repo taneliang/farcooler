@@ -277,4 +277,26 @@ class NativeComposeModelTest {
         eventually("the press ended") { model.pressing == null }
         assertNull(model.issue)
     }
+
+    /** Neither key is offered over rows the runner stopped answering for, though claude was working when they were read. */
+    @Test
+    fun `neither key is offered over stale rows, and Send now not under a dialog`() {
+        val stale = model()
+        working(stale)
+        assertTrue(stale.offersSendNow)
+        source.failFollow(CoreException("The runner took too long to answer."))
+        eventually("stale") { stale.store.shown.value.isStale }
+        assertFalse(stale.offersStop)
+        assertFalse("Send now on a stale pane", stale.offersSendNow)
+        stale.sendNow()
+        assertEquals("a press over stale rows is a no-op", emptyList<String>(), pressed.toList())
+        val waiting = model()
+        working(waiting, "Waiting")
+        assertFalse("Send now under a dialog", waiting.offersSendNow)
+    }
+
+    @Test
+    fun `the composed limit's words say the number the limit is`() {
+        assertTrue(AgentConversation.TOO_LONG_COMPOSED.contains(String.format(java.util.Locale.US, "%,d", AgentConversation.LONGEST_COMPOSED)))
+    }
 }

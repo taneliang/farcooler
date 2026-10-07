@@ -146,7 +146,8 @@ public enum AgentConversation {
     }
 
     public static let tooLong = "That message is over \(longest) characters. Shorten it, or paste it in the terminal."
-    public static let tooLongComposed = "That message is over 100,000 characters. Shorten it, or paste it in the terminal."
+    public static let tooLongComposed =
+        "That message is over \(longestComposed.formatted(.number.locale(Locale(identifier: "en_US")))) characters. Shorten it, or paste it in the terminal."
     public static let command =
         "A message can’t start with a symbol Claude reads as a command, such as / or !. Use the terminal for commands."
     /// The runner's `command`: a `!`, which claude's box runs in a shell, or

@@ -112,6 +112,7 @@ import UniformTypeIdentifiers
         #expect(AgentConversation.longest(rich: false) == 500)
         #expect(AgentConversation.longest(rich: true) == 100_000)
         #expect(AgentConversation.tooLong(rich: true).contains("100,000"))
+        #expect(AgentConversation.longestComposed == 100_000, "the words above say this number")
         #expect(AgentConversation.tooLong(rich: false).contains("500"))
     }
 

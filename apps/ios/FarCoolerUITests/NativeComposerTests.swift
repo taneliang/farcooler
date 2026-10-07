@@ -301,4 +301,28 @@ final class NativeComposerTests: XCTestCase {
             "\(app.staticTexts.allElementsBoundByIndex.map(\.label))")
         XCTAssertEqual(said(app, "pressed"), "")
     }
+
+    /// Under a dialog Stop is hidden, and so is Send Now on a message queued
+    /// before it (ov-404 review 1: the gate was tested only for Stop).
+    func testSendNowIsHiddenUnderAWaitingDialog() {
+        let app = launch(["-native-waiting", "-native-busy"])
+        XCTAssertTrue(app.staticTexts["And the lexer."].waitForExistence(timeout: 60))
+        type(app, "Wait for me")
+        sendButton(app).tap()
+        XCTAssertTrue(element(app, "native-queued").waitForExistence(timeout: 30), "no Queued row")
+        Thread.sleep(forTimeInterval: 2)
+        XCTAssertFalse(element(app, "native-send-now").exists, "Send Now offered over a waiting dialog")
+        XCTAssertFalse(element(app, "native-stop").exists)
+    }
+
+    /// Rows held and the runner not answering: neither key is offered, though
+    /// claude was working when the rows were last read.
+    func testNeitherKeyIsOfferedOverStaleRows() {
+        let app = launch(["-native-stale"])
+        // Stop shows while the rows are live (`testStopShowsWhileClaudeWorksAndPressesTheKey`);
+        // the fourth follow's failure comes within seconds, so only the end is read.
+        XCTAssertTrue(element(app, "native-stale").waitForExistence(timeout: 60), "the rows never went stale: \(harness(app))")
+        XCTAssertTrue(wait(30) { !self.element(app, "native-stop").exists }, "Stop offered over stale rows")
+        XCTAssertFalse(element(app, "native-send-now").exists)
+    }
 }

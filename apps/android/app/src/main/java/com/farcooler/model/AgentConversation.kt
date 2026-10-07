@@ -230,7 +230,8 @@ object AgentConversation {
     fun tooLong(rich: Boolean): String = if (rich) TOO_LONG_COMPOSED else TOO_LONG
 
     const val TOO_LONG = "That message is over $LONGEST characters. Shorten it, or paste it in the terminal."
-    const val TOO_LONG_COMPOSED = "That message is over 100,000 characters. Shorten it, or paste it in the terminal."
+    const val TOO_LONG_COMPOSED =
+        "That message is over 100,000 characters. Shorten it, or paste it in the terminal." // LONGEST_COMPOSED, written out for a const
     /** The runner's `command`: a `!`, which claude's box runs in a shell, or a `/` before something that isn't a command's name. */
     const val COMMAND_REFUSED =
         "Claude would run that as a shell command or doesn’t have that command, so it wasn’t sent. Use the terminal for it."

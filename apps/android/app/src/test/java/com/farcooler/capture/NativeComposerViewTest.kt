@@ -68,8 +68,24 @@ class NativeComposerViewTest {
         )
     }
 
+    private val models = CopyOnWriteArrayList<NativePaneModel>()
+
+    /**
+     * Ends the test with nothing still writing Compose state. A send's or a key's
+     * `finally` writes `sending` and `pressing` from [running]'s thread after the
+     * call the test waited for, and a global snapshot write left pending as the
+     * test ends keeps the process's one apply-notification flag set: every later
+     * Robolectric test then misses its recompositions (the Wide workspace's Back
+     * test failed in a full run, 5 runs of 6, with this class and in none without).
+     */
     @After
-    fun tearDown() = running.close()
+    fun tearDown() {
+        models.forEach { model -> eventually("the model to settle") { !model.sending && model.pressing == null } }
+        idle()
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        idle()
+        running.close()
+    }
 
     private fun loaded(page: JsonObject, rich: Boolean = true, interrupts: Boolean = true): NativePaneModel {
         val model = NativePaneModel(
@@ -85,6 +101,7 @@ class NativeComposerViewTest {
             },
         )
         model.offer(rich, interrupts)
+        models.add(model)
         source.answerPage(page)
         model.setOnScreen(true)
         eventually("rows") { model.store.shown.value.rows.isNotEmpty() }
@@ -223,5 +240,64 @@ class NativeComposerViewTest {
         queuing.send()
         eventually("queued") { queuing.queued == listOf("After this, the tests") }
         Capture.both("native-composer-send-now") { NativeAgentView(queuing, rememberLazyListState(), showTerminal = {}) }
+    }
+
+    @Test
+    fun `Send now is not on a Queued row under a dialog`() {
+        queues = true
+        val model = loaded(RowJson.page(4, 12, RowJson.turn(0, "Tidy", outcome = null, activity = "Waiting")))
+        model.onDraft("Wait for me")
+        model.send()
+        eventually("queued") { model.queued == listOf("Wait for me") }
+        look(model) {
+            assertTrue(it.composed("native-queued"))
+            assertFalse("Send now over a dialog", it.composed("native-send-now"))
+            assertFalse(it.composed("native-stop"))
+        }
+    }
+
+    /**
+     * A hardware keyboard's Ctrl+Enter sends, and Enter alone doesn't: the key event
+     * goes to the composer's own field, focused through its semantics action (no
+     * input is injected; see [NativeAgentViewTest]), so a broken handler is red.
+     */
+    @Test
+    fun `Ctrl and Enter send from a hardware keyboard, and Enter alone is a new line`() {
+        val model = loaded(busy())
+        model.onDraft("From the keys")
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            scenario.onActivity {
+                it.setContent { FarCoolerTheme { NativeAgentView(model, rememberLazyListState(), showTerminal = {}) } }
+            }
+            idle()
+            fun key(down: Boolean, meta: Int) = scenario.onActivity { activity ->
+                val action = if (down) android.view.KeyEvent.ACTION_DOWN else android.view.KeyEvent.ACTION_UP
+                val now = android.os.SystemClock.uptimeMillis()
+                activity.window.decorView.dispatchKeyEvent(
+                    android.view.KeyEvent(now, now, action, android.view.KeyEvent.KEYCODE_ENTER, 0, meta),
+                )
+            }
+            fun focusComposer() = scenario.onActivity { activity ->
+                fun roots(view: View): List<RootForTest> = when {
+                    view is RootForTest -> listOf(view)
+                    view is ViewGroup -> (0 until view.childCount).flatMap { roots(view.getChildAt(it)) }
+                    else -> emptyList()
+                }
+                fun find(node: SemanticsNode): SemanticsNode? =
+                    if (node.config.getOrNull(SemanticsProperties.TestTag) == "native-composer") node
+                    else node.children.firstNotNullOfOrNull(::find)
+                val node = find(roots(activity.window.decorView).first().semanticsOwner.unmergedRootSemanticsNode)
+                node?.config?.getOrNull(androidx.compose.ui.semantics.SemanticsActions.RequestFocus)?.action?.invoke()
+            }
+            focusComposer()
+            idle()
+            // Enter alone: the text field's own, never a send.
+            key(true, 0); key(false, 0)
+            idle()
+            assertEquals("Enter alone sent", 0, composed.size)
+            key(true, android.view.KeyEvent.META_CTRL_ON); key(false, android.view.KeyEvent.META_CTRL_ON)
+            idle()
+            eventually("Ctrl+Enter sent it") { composed.size == 1 }
+        }
     }
 }

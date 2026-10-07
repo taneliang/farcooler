@@ -72,7 +72,10 @@ final class ComposerField: UITextView {
     }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        if action == #selector(paste(_:)), onPasteImages != nil, !Self.images(on: .general).isEmpty { return true }
+        // `hasImages` only: it never reads the contents, so it can't raise the
+        // "Allow Paste" prompt each time the edit menu asks. What is pasted is
+        // read in `paste`.
+        if action == #selector(paste(_:)), onPasteImages != nil, UIPasteboard.general.hasImages { return true }
         return super.canPerformAction(action, withSender: sender)
     }
 

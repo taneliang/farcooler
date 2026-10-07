@@ -176,7 +176,11 @@ final class KeyboardInset: ObservableObject {
         // remaining accessory is measured independently.
         cover.frame(overlap: overlap, screenHeight: screen.bounds.height)
         height = cover.height
-        askAccessoryAgain()
+        // Once the frame has landed, not while it is still on its way: a
+        // `willChangeFrame` arrives with the accessory mid-slide, and its top
+        // then is wherever the animation has got to (218 pt of a 546 pt
+        // cover, measured). `didChangeFrame` is the end of the move.
+        if note.name == UIResponder.keyboardDidChangeFrameNotification { askAccessoryAgain() }
     }
 
     /// A keyboard frame carries the accessory's height as it was when UIKit
@@ -188,7 +192,7 @@ final class KeyboardInset: ObservableObject {
     /// later report was right, so the cover sat 34 pt too high, and the
     /// composer growing by 66 pt moved it by 32. A frame is a statement about
     /// the keyboard; where the accessory's top is, only the accessory can say.
-    /// So after a frame, it says it again, and its answer is the last word.
+    /// So after a frame has landed, it says it again, and its answer is the last word.
     ///
     /// Only a chat's own inset: it names its composer. The shell's takes
     /// every composer's reports, and asking them all would be a layout pass

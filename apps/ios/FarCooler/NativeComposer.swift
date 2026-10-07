@@ -16,6 +16,13 @@ struct NativeComposer: View {
     @ObservedObject var model: NativePaneModel
     let showTerminal: () -> Void
 
+    /// The side of a button's target, and of its glyph's room.
+    private static let targetSide: CGFloat = 44
+    /// What the attach glyph (`photo.badge.plus` at `.title3`, about 26 pt wide)
+    /// leaves each side of its target: a chip strip is inset by it, so the
+    /// first chip's edge and the glyph's ink share a line.
+    private static let glyphSlack: CGFloat = 9
+
     @State private var fieldHeight = NativeComposerField.lineHeight
     @State private var picked: [PhotosPickerItem] = []
 
@@ -78,9 +85,13 @@ struct NativeComposer: View {
             Image(systemName: "photo.badge.plus")
                 .font(.title3)
                 .foregroundStyle(.secondary)
-                .frame(width: 44, height: 44)
+                .frame(width: Self.targetSide, height: Self.targetSide)
                 .contentShape(.rect)
         }
+        // A `PhotosPicker` tints its label with the app's accent, and a
+        // foreground style on the label doesn't survive it: the glyph came out
+        // blue beside a gray Stop (ov-404 review 1).
+        .tint(.secondary)
         .disabled(model.imageRoom == 0)
         .accessibilityLabel("Attach Photos")
         .accessibilityIdentifier("native-attach")
@@ -104,7 +115,11 @@ struct NativeComposer: View {
             HStack(spacing: Spacing.group) {
                 ForEach(model.images) { image in chip(image) }
             }
-            .padding(.top, Spacing.tight)
+            // Room above for the remove badge, which sits on the chip's corner,
+            // so a larger Dynamic Type size can't clip it; the strip's own left
+            // inset lines the first chip up with the attach glyph.
+            .padding(.top, Spacing.group)
+            .padding(.leading, model.rich ? Self.glyphSlack : 0)
             .padding(.trailing, Spacing.group)
         }
         .scrollIndicators(.never)
