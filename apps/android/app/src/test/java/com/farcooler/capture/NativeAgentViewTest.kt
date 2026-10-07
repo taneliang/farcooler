@@ -244,7 +244,7 @@ class NativeAgentViewTest {
         scenario.settle("the conversation") { it.composed("native-composer") }
         model.onDraft("half a sentence")
         scenario.settle("the draft in the box") { it.merged["native-composer"] == "half a sentence" }
-        assertEquals(2, pane.terminalMounts)
+        assertEquals(1, pane.terminalMounts)
 
         // Covered: composed under the conversation, and out of TalkBack's reach.
         val covered = scenario.look()
