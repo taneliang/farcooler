@@ -15,6 +15,8 @@ extension RunnerCore: AgentAnswerSink {
 /// What a row's buttons need from its pane: where an answer goes, and how
 /// the last one went.
 struct NativeAnswer {
+    /// The agent asking, as the row's title names it.
+    var agent = "Claude"
     /// The held ask whose answer is on its way.
     var answering: String?
     /// Why an ask's answer didn't land, by the ask's id.
@@ -26,7 +28,7 @@ extension NativePaneModel {
     /// The rows' answering, where the runner takes answers.
     var nativeAnswer: NativeAnswer? {
         guard answers != nil else { return nil }
-        return NativeAnswer(answering: answering, issues: answerIssues) { [weak self] ask, option, answers in
+        return NativeAnswer(agent: agent, answering: answering, issues: answerIssues) { [weak self] ask, option, answers in
             Task { await self?.answer(ask, option: option, answers: answers) }
         }
     }
@@ -41,15 +43,15 @@ extension NativePaneModel {
         do {
             try await sink.answer(terminal: terminal, ask: id, option: option, answers: given)
         } catch {
-            answerIssues[id] = Self.answerIssue(for: error)
+            answerIssues[id] = Self.answerIssue(for: error, agent: agent)
         }
     }
 
-    static func answerIssue(for error: Error) -> String {
+    static func answerIssue(for error: Error, agent: String = "Claude") -> String {
         switch error as? RunnerCore.Failure {
-        case .timedOut?, .lost(_, notSent: false)?: AgentConversation.answerIssue(what: nil, timedOut: true)
-        case .refused(_, _, let what)?: AgentConversation.answerIssue(what: what)
-        default: AgentConversation.answerIssue(what: nil)
+        case .timedOut?, .lost(_, notSent: false)?: AgentConversation.answerIssue(what: nil, timedOut: true, agent: agent)
+        case .refused(_, _, let what)?: AgentConversation.answerIssue(what: what, agent: agent)
+        default: AgentConversation.answerIssue(what: nil, agent: agent)
         }
     }
 }

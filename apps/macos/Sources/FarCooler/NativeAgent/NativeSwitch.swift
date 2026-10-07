@@ -41,7 +41,7 @@ struct NativeSwitch<Surface: View>: View {
     @Environment(\.windowVisible) private var windowVisible
 
     var body: some View {
-        let model = agents.offers(terminal, target: target) ? agents.model(for: terminal.id, target: target) : nil
+        let model = agents.offers(terminal, target: target) ? agents.model(for: terminal.id, target: target, program: terminal.program ?? terminal.preset) : nil
         let showing = native && model != nil
         // The terminal first, always: the native layer coming and going
         // leaves its identity, and so its stream, alone.

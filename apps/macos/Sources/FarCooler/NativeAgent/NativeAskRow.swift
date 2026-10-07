@@ -30,7 +30,7 @@ struct NativeAskRow: View {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
                 Image(systemName: waiting ? "questionmark.bubble" : "checkmark")
                 VStack(alignment: .leading, spacing: Spacing.tight) {
-                    Text(AgentConversation.askTitle(ask)).fontWeight(.medium)
+                    Text(AgentConversation.askTitle(ask, agent: answer?.agent ?? "Claude")).fontWeight(.medium)
                     // Not beside the whole question or plan drawn below.
                     if !(waiting && (ask.kind == "Question" ? !ask.questionList.isEmpty : ask.kind == "PlanExit" && ask.plan != nil)) {
                         Text(ask.text).foregroundStyle(.secondary).lineLimit(3)

@@ -163,7 +163,9 @@ uint64_t farcooler_client_connect(void *handle, const char *config);
  *                                                    900 KB; `image_too_large`
  *                                                    for one past 16 MB;
  *                                                    `backslash` for a text
- *                                                    ending in one);
+ *                                                    ending in one, to claude;
+ *                                                    for codex, `picker` and
+ *                                                    `too_tall`, ov-416);
  *                                                    needs `agent_compose`, and
  *                                                    for line breaks or an image
  *                                                    `compose` too (ov-367)

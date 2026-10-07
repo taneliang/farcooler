@@ -406,7 +406,7 @@ struct SettingsView: View {
                 // Off by default until it matches the terminal (ov-372).
                 Setting(LocalizedStringKey(NativeAgents.settingNote)) {
                     Toggle(
-                        "Conversation view for Claude panes",
+                        "Conversation view for Claude and Codex panes",
                         isOn: Binding(get: { native.enabled }, set: { on in Task { await native.setEnabled(on) } }))
                         .disabled(native.changing)
                     if let trouble = native.settingTrouble {

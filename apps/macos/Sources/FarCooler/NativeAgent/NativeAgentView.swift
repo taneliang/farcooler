@@ -1,7 +1,8 @@
 import AgentKit
 import SwiftUI
 
-/// The native view of a terminal-mode claude pane (ov-372): its rows as the
+/// The native view of a terminal-mode claude or codex pane (ov-372, ov-416):
+/// its rows as the
 /// runner's projector folds them, newest at the bottom, and a box to type
 /// into.
 ///
@@ -35,9 +36,9 @@ struct NativeAgentView: View {
                     QueuedLine(text: model.queued[i], sendNow: sendNow)
                 }
                 if model.issue == .handoff {
-                    HandoffRow(reason: "Claude is showing something only the terminal can.", showTerminal: showTerminal)
+                    HandoffRow(reason: AgentConversation.handoff(model.agent), showTerminal: showTerminal)
                 } else if model.issue == .panel {
-                    HandoffRow(reason: "This opens a panel in Claude, so it’s for the terminal.", showTerminal: showTerminal)
+                    HandoffRow(reason: AgentConversation.panel(model.agent), showTerminal: showTerminal)
                 }
             }
             .padding(Spacing.section)
@@ -143,7 +144,7 @@ struct NativeComposer: View {
             .frame(height: fieldHeight)
             .overlay(alignment: .topLeading) {
                 if model.draft.isEmpty {
-                    Text("Message Claude")
+                    Text("Message \(model.agent)")
                         .font(Font(ComposerField.font))
                         .foregroundStyle(.tertiary)
                         .allowsHitTesting(false)

@@ -19,12 +19,37 @@ import Testing
         #expect(!AgentConversation.served(by: nil), "not read yet")
     }
 
-    @Test func onlyClaudeInATerminal() {
-        #expect(AgentConversation.isClaudeInATerminal(paneMode: "terminal", preset: "claude"))
-        #expect(AgentConversation.isClaudeInATerminal(paneMode: nil, preset: "claude --resume x"))
-        #expect(!AgentConversation.isClaudeInATerminal(paneMode: "agent", preset: "claude"), "a chat pane has its own view")
-        #expect(!AgentConversation.isClaudeInATerminal(paneMode: "terminal", preset: "codex"))
-        #expect(!AgentConversation.isClaudeInATerminal(paneMode: "terminal", preset: "shell"))
+    @Test func claudeOrCodexInATerminal() {
+        let old = build(["agent_rows", "agent_compose"])
+        let codex = build(["agent_rows", "agent_compose", "codex_view"])
+        #expect(AgentConversation.isAgentInATerminal(paneMode: "terminal", preset: "claude", build: old))
+        #expect(AgentConversation.isAgentInATerminal(paneMode: nil, preset: "claude --resume x", build: nil))
+        #expect(!AgentConversation.isAgentInATerminal(paneMode: "agent", preset: "claude", build: codex), "a chat pane has its own view")
+        #expect(AgentConversation.isAgentInATerminal(paneMode: "terminal", preset: "codex", build: codex), "ov-416")
+        #expect(!AgentConversation.isAgentInATerminal(paneMode: "terminal", preset: "codex", build: old), "a runner from before codex's view")
+        #expect(!AgentConversation.isAgentInATerminal(paneMode: "agent", preset: "codex", build: codex))
+        #expect(!AgentConversation.isAgentInATerminal(paneMode: "terminal", preset: "shell", build: codex))
+        #expect(AgentConversation.agentName(preset: "codex:gpt-5") == "Codex")
+        #expect(AgentConversation.agentName(preset: "claude") == "Claude")
+        #expect(AgentConversation.pressesKeys(preset: "claude"))
+        #expect(!AgentConversation.pressesKeys(preset: "codex"), "the runner presses no keys in codex")
+    }
+
+    /// A codex pane's words name codex, its own refusals included (ov-416).
+    @Test func codexsRefusalsNameCodex() {
+        let said = { (what: String) -> String in
+            guard case .said(let words) = AgentConversation.issue(for: .refused(what: what), agent: "Codex") else { return "" }
+            return words
+        }
+        for what in ["busy", "left_at_shell", "unconfirmed", "not_running", "unconfirmable", "picker", "too_tall", "command"] {
+            #expect(said(what).contains("Codex"), "\(what): \(said(what))")
+            #expect(!said(what).contains("Claude"), "\(what)")
+        }
+        #expect(said("picker").contains("@"))
+        #expect(AgentConversation.issue(for: .refused(what: "picker")) != .said("The message wasn’t sent."))
+        #expect(AgentConversation.handoff("Codex") == "Codex is showing something only the terminal can.")
+        #expect(AgentConversation.askTitle(
+            AgentRow.Ask(kind: "Permission", text: "ls", tool: "Bash", askedMs: 1, answered: false), agent: "Codex") == "Codex is asking for permission")
     }
 
     /// R-27: a phone opens the conversation until the pane is switched, and

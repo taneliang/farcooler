@@ -38,7 +38,7 @@ struct RemoteReach: Equatable, Sendable {
         var sentence: String {
             switch self {
             case .unresolved: "Far Cooler couldn’t look up this runner’s address in your ssh settings."
-            case .proxied: "This runner is reached through a proxy, so its Claude panes show the terminal."
+            case .proxied: "This runner is reached through a proxy, so its Claude and Codex panes show the terminal."
             case .unknownHost: "Connect to this runner once with ssh, so Far Cooler can check its host key."
             }
         }

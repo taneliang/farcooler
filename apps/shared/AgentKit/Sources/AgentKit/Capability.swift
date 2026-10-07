@@ -56,4 +56,5 @@ public enum Capability: String, CaseIterable, Sendable {
     case compose = "compose"
     case composeUpload = "compose_upload"
     case terminalInterrupt = "terminal_interrupt"
+    case codexView = "codex_view"
 }

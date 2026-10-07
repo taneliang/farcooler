@@ -32,7 +32,7 @@ extension RunnerCore: ComposeSink {
     }
 }
 
-/// One terminal-mode claude pane's native side: its rows, the composer's
+/// One terminal-mode claude or codex pane's native side: its rows, the composer's
 /// draft, and which of the two views is showing (ov-372).
 ///
 /// Held by `NativeAgents` for the life of the app rather than by a view, so
@@ -43,6 +43,11 @@ extension RunnerCore: ComposeSink {
 final class NativePaneModel: ObservableObject {
     let terminal: String
     let store: AgentRowStore
+    /// The agent the pane runs, as its program says: `claude` or `codex`
+    /// (ov-416).
+    @Published var program = "claude"
+    /// The agent's name, as the view's words say it.
+    var agent: String { AgentConversation.agentName(preset: program) }
 
     /// The composer's text. Against a runner without `compose`, line breaks
     /// become spaces as they arrive: it takes one line, so what you see is
@@ -239,7 +244,7 @@ final class NativePaneModel: ObservableObject {
             for image in images { detach(image.id) }
             if wasQueued { queued.append(Self.echo(text, images: images.count)) }
         } catch {
-            issue = Self.issue(for: error, command: text.trimmingCharacters(in: .whitespaces).hasPrefix("/"))
+            issue = Self.issue(for: error, command: text.trimmingCharacters(in: .whitespaces).hasPrefix("/"), agent: agent)
         }
     }
 
@@ -284,28 +289,30 @@ final class NativePaneModel: ObservableObject {
 
     /// `command` when the message was a slash command, which says which
     /// limit `images` means.
-    static func issue(for error: Error, command: Bool = false) -> SendIssue {
+    static func issue(for error: Error, command: Bool = false, agent: String = "Claude") -> SendIssue {
         let failure = error as? RunnerCore.Failure
         switch failure?.what {
         case "prompt", "dialog": return .handoff
         case "handoff": return .panel
         case "draft": return .draftInTerminal
         case "typing": return .said("Someone typed in the terminal in the last 15 seconds, so the message wasn’t sent. Try again once they stop.")
-        case "busy": return .said("Claude is working and can’t take a message from here right now.")
+        case "busy": return .said("\(agent) is working and can’t take a message from here right now.")
         case "too_long": return .said(tooLong)
-        case "command": return .said(commandRefused)
+        case "command": return .said(AgentConversation.commandRefused(agent))
         case "paste_left": return .said("The message didn’t land in the box as typed, so it was left there and not sent.")
-        case "left_at_shell": return .said("Claude quit as the message was typed. It wasn’t run.")
-        case "unconfirmed": return .said(unconfirmed)
-        case "not_running", "not_an_agent": return .said("Claude isn’t running in this pane.")
+        case "left_at_shell": return .said("\(agent) quit as the message was typed. It wasn’t run.")
+        case "unconfirmed": return .said(unconfirmed(agent))
+        case "not_running", "not_an_agent": return .said("\(agent) isn’t running in this pane.")
         case "unfamiliar", "unproven": return .said("Far Cooler can’t read this terminal’s box, so nothing was typed.")
         case "images_too_large": return .said(imagesTooLarge)
         case "images": return .said(command ? commandWithImages : tooManyImages)
         case "image_too_large": return .said(imageTooLarge)
         case "backslash": return .said(backslash)
         case "image": return .said("One of the images couldn’t be read, so nothing was sent.")
-        case "unconfirmable": return .said("Far Cooler can’t find Claude’s session to confirm a send, so nothing was typed.")
-        case "unsupported": return .said("Only Claude can take a message from here. Use the terminal.")
+        case "unconfirmable": return .said("Far Cooler can’t find \(agent)’s session to confirm a send, so nothing was typed.")
+        case "unsupported": return .said("\(agent) can’t take a message from here. Use the terminal.")
+        case "picker": return .said(AgentConversation.picker(agent))
+        case "too_tall": return .said(AgentConversation.tooTall(agent))
         default:
             switch failure {
             // Never "wasn't sent" for a call that may have arrived: the
@@ -332,7 +339,10 @@ final class NativePaneModel: ObservableObject {
     static let commandWithImages = "A slash command can’t carry images. Send it without them."
     static let imageTooLarge = "That image is too large to send. Use a smaller one."
     static let backslash = "Claude reads a backslash at the end as a new line, so the message wasn’t sent. Remove it, or add a word after it."
-    static let unconfirmed = "Claude didn’t confirm it took the message. Check the pane before sending it again."
+    static let unconfirmed = unconfirmed("Claude")
+    static func unconfirmed(_ agent: String) -> String {
+        "\(agent) didn’t confirm it took the message. Check the pane before sending it again."
+    }
     static let mayHaveBeenSent = "The runner didn’t answer in time. The message may have been sent, so check the terminal before sending it again."
 
     // MARK: - The view each pane remembers (R-27)

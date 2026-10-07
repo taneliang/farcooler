@@ -346,7 +346,7 @@ struct OrchestratorViewItem: View {
     var body: some View {
         if agents.offers(terminal, target: target) {
             ConversationSwitchItem(
-                model: agents.model(for: terminal.id), terminal: terminal, opensAsChat: opensAsChat,
+                model: agents.model(for: terminal.id, program: terminal.program ?? terminal.preset), terminal: terminal, opensAsChat: opensAsChat,
                 onTogglePaneMode: onTogglePaneMode)
         } else if let item = OrchestratorViewSwitch.of(
             terminal: terminal, offersConversation: false, conversationShown: false, opensAsChat: opensAsChat)

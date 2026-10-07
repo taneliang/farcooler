@@ -87,7 +87,7 @@ final class NativeAgents: ObservableObject {
     /// The setting's line in Settings: it adds a key to every other runner,
     /// and that key runs commands there.
     static let settingNote =
-        "Adds a view of each Claude pane you can read and reply in, beside its terminal. On other runners, this Mac adds "
+        "Adds a view of each Claude or Codex pane you can read and reply in, beside its terminal. On other runners, this Mac adds "
         + "a key of its own to each one, which can create terminals and run commands there. See Devices."
 
     init(defaults: UserDefaults = .standard, pairing: RemotePairing? = nil) {
@@ -209,7 +209,7 @@ final class NativeAgents: ObservableObject {
             let failed = (failures[target] ?? 0) + 1
             failures[target] = failed
             if target.isEmpty {
-                settingTrouble = "Far Cooler can’t reach this Mac’s runner, so Claude panes show the terminal."
+                settingTrouble = "Far Cooler can’t reach this Mac’s runner, so Claude and Codex panes show the terminal."
             }
             // The runner didn't answer this once, but it did before: keep
             // what that hello said for a few tries. Tearing the view down for
@@ -268,10 +268,11 @@ final class NativeAgents: ObservableObject {
 
     /// Whether `terminal`, on the runner `target` names, gets the native
     /// view: the setting on, that runner serving rows over a connection this
-    /// Mac holds, and claude running in a terminal-mode pane.
+    /// Mac holds, and claude running in a terminal-mode pane, or codex where
+    /// that runner projects and composes into it (`codex_view`, ov-416).
     func offers(_ terminal: Terminal, target: String) -> Bool {
         guard enabled, let link = links[target] else { return false }
-        return link.rowsServed && link.core != nil && Self.isClaudeInATerminal(terminal)
+        return link.rowsServed && link.core != nil && Self.isAgentInATerminal(terminal, offered: link.offered)
     }
 
     /// Whether a hello offers the view: rows to read and compose to send.
@@ -279,17 +280,24 @@ final class NativeAgents: ObservableObject {
         offered.contains("agent_rows") && offered.contains("agent_compose")
     }
 
-    static func isClaudeInATerminal(_ terminal: Terminal) -> Bool {
+    static func isAgentInATerminal(_ terminal: Terminal, offered: Set<String>) -> Bool {
         let mode = terminal.paneMode ?? "terminal"
-        return mode == "terminal" && (terminal.program ?? terminal.preset).hasPrefix("claude")
+        let program = terminal.program ?? terminal.preset
+        guard mode == "terminal" else { return false }
+        return program.hasPrefix("claude") || (program.hasPrefix("codex") && offered.contains("codex_view"))
     }
 
     /// The pane's model, made once and kept, following its runner's rows.
-    func model(for terminal: String, target: String = "") -> NativePaneModel {
-        if let model = panes[terminal] { return model }
+    /// `program` names the agent, for its words and its keys.
+    func model(for terminal: String, target: String = "", program: String? = nil) -> NativePaneModel {
+        if let model = panes[terminal] {
+            if let program { model.program = program }
+            return model
+        }
         let store = AgentRowStore(key: target.isEmpty ? "local-\(terminal)" : "remote-\(terminal)")
         let core = links[target]?.core
         let model = NativePaneModel(terminal: terminal, store: store, sink: core)
+        if let program { model.program = program }
         panes[terminal] = model
         paneTargets[terminal] = target
         if let core { follow(model, on: core, target: target) }

@@ -57,7 +57,7 @@ struct ComposerField: NSViewRepresentable {
         view.registerForDraggedTypes([.png, .tiff])
         view.string = model.draft
         view.setAccessibilityIdentifier("native-composer-text")
-        view.setAccessibilityLabel("Message Claude")
+        view.setAccessibilityLabel("Message \(model.agent)")
         scroll.documentView = view
         context.coordinator.view = view
         apply(view, context: context)

@@ -43,7 +43,7 @@ extension NativePaneModel {
     }
 
     /// Whether Stop is offered: the runner serves it and claude is working.
-    var offersStop: Bool { keys != nil && working && !store.isStale }
+    var offersStop: Bool { keys != nil && AgentConversation.pressesKeys(preset: program) && working && !store.isStale }
 
     /// Whether Send Now is offered on a Queued row.
     var offersSendNow: Bool { offersStop }

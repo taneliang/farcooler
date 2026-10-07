@@ -29,7 +29,7 @@ struct OrchestratorViewTests {
         let agents = NativeAgentTests.agents()
         #expect(agents.offers(orchestrator, target: ""))
         #expect(!agents.offers(orchestrator, target: "--host box"), "a runner that isn't this Mac's")
-        #expect(!agents.offers(try Self.orchestrator(program: "codex"), target: ""), "Claude only")
+        #expect(!agents.offers(try Self.orchestrator(program: "codex"), target: ""), "a runner that never said codex_view")
         #expect(!agents.offers(try Self.orchestrator(mode: "agent"), target: ""), "the old chat has its own surface")
     }
 

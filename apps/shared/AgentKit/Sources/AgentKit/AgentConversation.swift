@@ -1,6 +1,7 @@
 import Foundation
 
-/// The conversation view of a terminal-mode claude pane on a phone (ov-373):
+/// The conversation view of a terminal-mode claude or codex pane on a phone
+/// (ov-373, ov-416):
 /// the rules a phone decides by, here so `swift test` reads them back. The
 /// Mac's native view (ov-372) keeps its own copies in `NativePaneModel` and
 /// `NativeCopy`, with the same words; a later card moves it onto these.
@@ -14,10 +15,25 @@ public enum AgentConversation {
         return build.can(.agentRows) && build.can(.agentCompose)
     }
 
-    /// Whether a pane is claude in a terminal, the one kind of pane the
-    /// runner projects rows for.
-    public static func isClaudeInATerminal(paneMode: String?, preset: String) -> Bool {
-        (paneMode ?? "terminal") == "terminal" && preset.hasPrefix("claude")
+    /// Whether a pane is an agent in a terminal the runner projects rows
+    /// for and composes into: claude, or codex where the runner says it does
+    /// (`codex_view`, ov-416). A runner from before projected no codex rows
+    /// and refused every send into one.
+    public static func isAgentInATerminal(paneMode: String?, preset: String, build: DaemonBuild?) -> Bool {
+        guard (paneMode ?? "terminal") == "terminal" else { return false }
+        if preset.hasPrefix("claude") { return true }
+        return preset.hasPrefix("codex") && build?.can(.codexView) == true
+    }
+
+    /// The agent's name, as the conversation's words say it.
+    public static func agentName(preset: String) -> String {
+        preset.hasPrefix("codex") ? "Codex" : "Claude"
+    }
+
+    /// Whether the runner presses Stop and Send Now in this agent's pane:
+    /// claude's keys alone (`terminal.interrupt` refuses codex).
+    public static func pressesKeys(preset: String) -> Bool {
+        preset.hasPrefix("claude")
     }
 
     /// Whether the pane's process is there to talk to. A pane whose claude
@@ -108,8 +124,8 @@ public enum AgentConversation {
     }
 
     /// `command` when the message was a slash command, which says which limit
-    /// `images` means.
-    public static func issue(for failure: SendFailure, command: Bool = false) -> SendIssue {
+    /// `images` means; `agent` names the agent in the words.
+    public static func issue(for failure: SendFailure, command: Bool = false, agent: String = "Claude") -> SendIssue {
         switch failure {
         // A grant that may read but not type (`read`): saying so beats
         // "wasn't sent" on every try.
@@ -121,16 +137,18 @@ public enum AgentConversation {
             case "handoff": return .panel
             case "draft": return .draftInTerminal
             case "typing": return .said("Someone typed in the terminal in the last 15 seconds, so the message wasn’t sent. Try again once they stop.")
-            case "busy": return .said("Claude is working and can’t take a message from here right now.")
+            case "busy": return .said("\(agent) is working and can’t take a message from here right now.")
             case "too_long": return .said(tooLong)
-            case "command": return .said(commandRefused)
+            case "command": return .said(commandRefused(agent))
             case "paste_left": return .said("The message didn’t land in the box as typed, so it was left there and not sent.")
-            case "left_at_shell": return .said("Claude quit as the message was typed. It wasn’t run.")
-            case "unconfirmed": return .said(unconfirmed)
-            case "not_running", "not_an_agent": return .said("Claude isn’t running in this pane.")
+            case "left_at_shell": return .said("\(agent) quit as the message was typed. It wasn’t run.")
+            case "unconfirmed": return .said(unconfirmed(agent))
+            case "not_running", "not_an_agent": return .said("\(agent) isn’t running in this pane.")
             case "unfamiliar", "unproven": return .said("Far Cooler can’t read this terminal’s box, so nothing was typed.")
-            case "unconfirmable": return .said("Far Cooler can’t find Claude’s session to confirm a send, so nothing was typed.")
-            case "unsupported": return .said("Only Claude can take a message from here. Use the terminal.")
+            case "unconfirmable": return .said("Far Cooler can’t find \(agent)’s session to confirm a send, so nothing was typed.")
+            case "unsupported": return .said("\(agent) can’t take a message from here. Use the terminal.")
+            case "picker": return .said(picker(agent))
+            case "too_tall": return .said(tooTall(agent))
             case "images_too_large": return .said(imagesTooLarge)
             case "images": return .said(command ? commandWithImages : tooManyImages)
             case "image_too_large": return .said(imageTooLarge)
@@ -152,20 +170,37 @@ public enum AgentConversation {
         "A message can’t start with a symbol Claude reads as a command, such as / or !. Use the terminal for commands."
     /// The runner's `command`: a `!`, which claude's box runs in a shell, or
     /// a `/` before something that isn't a command's name.
-    public static let commandRefused =
-        "Claude would run that as a shell command or doesn’t have that command, so it wasn’t sent. Use the terminal for it."
+    public static let commandRefused = commandRefused("Claude")
+    public static func commandRefused(_ agent: String) -> String {
+        "\(agent) would run that as a shell command or doesn’t have that command, so it wasn’t sent. Use the terminal for it."
+    }
     public static let imagesTooLarge = "These images are too large to send together. Send fewer or smaller ones."
     public static let tooManyImages = "A message takes at most \(mostImages) images."
     public static let commandWithImages = "A slash command can’t carry images. Send it without them."
     public static let imageTooLarge = "That image is too large to send. Use a smaller one."
     public static let backslash =
         "Claude reads a backslash at the end as a new line, so the message wasn’t sent. Remove it, or add a word after it."
-    public static let unconfirmed = "Claude didn’t confirm it took the message. Check the terminal before sending it again."
-    public static let panel = "This opens a panel in Claude, so it’s for the terminal."
+    public static let unconfirmed = unconfirmed("Claude")
+    public static func unconfirmed(_ agent: String) -> String {
+        "\(agent) didn’t confirm it took the message. Check the terminal before sending it again."
+    }
+    public static let panel = panel("Claude")
+    public static func panel(_ agent: String) -> String { "This opens a panel in \(agent), so it’s for the terminal." }
+    /// The runner's `picker` (codex, ov-416): a last word codex would open a
+    /// picker for, which takes the Enter.
+    public static func picker(_ agent: String) -> String {
+        "\(agent) would open a picker for a last word that starts with @ or $, so the message wasn’t sent. Add a word after it, or use the terminal."
+    }
+    /// The runner's `too_tall` (codex, ov-416): more lines than its box
+    /// shows, so it couldn't be read back.
+    public static func tooTall(_ agent: String) -> String {
+        "That message is too tall for \(agent)’s box to show whole, so it wasn’t sent. Shorten it, or paste it in the terminal."
+    }
     public static let mayHaveBeenSent =
         "The runner didn’t answer in time. The message may have been sent, so check the terminal before sending it again."
     public static let draftInTerminal = "The terminal’s box already holds a draft. Send or clear it there first."
-    public static let handoff = "Claude is showing something only the terminal can."
+    public static let handoff = handoff("Claude")
+    public static func handoff(_ agent: String) -> String { "\(agent) is showing something only the terminal can." }
 
     /// Messages claude's queue took that its transcript hasn't shown yet,
     /// once the newest rows show them: as a Queued row, or as the turn each
@@ -302,13 +337,13 @@ public enum AgentConversation {
         }
     }
 
-    public static func askTitle(_ ask: AgentRow.Ask) -> String {
+    public static func askTitle(_ ask: AgentRow.Ask, agent: String = "Claude") -> String {
         if let by = ask.answeredBy, ask.answered || ask.held == nil { return "Answered on \(by)" }
         if ask.answered { return "Answered" }
         switch ask.kind {
-        case "Permission": return "Claude is asking for permission"
-        case "PlanExit": return "Claude has a plan for you to review"
-        default: return "Claude is asking a question"
+        case "Permission": return "\(agent) is asking for permission"
+        case "PlanExit": return "\(agent) has a plan for you to review"
+        default: return "\(agent) is asking a question"
         }
     }
 
@@ -357,12 +392,12 @@ public enum AgentConversation {
     }
 
     /// Why an answer didn't land, by the runner's word for it.
-    public static func answerIssue(what: String?, timedOut: Bool = false) -> String {
+    public static func answerIssue(what: String?, timedOut: Bool = false, agent: String = "Claude") -> String {
         if timedOut { return "The runner didn’t answer in time. Check the terminal before answering again." }
         switch what {
         case "not_held": return "This isn’t waiting here anymore. It was answered, or only the terminal can answer it now."
         // Its hold is over, so a second try would be refused: the terminal.
-        case "not_delivered": return "The answer didn’t reach Claude. Answer in the terminal."
+        case "not_delivered": return "The answer didn’t reach \(agent). Answer in the terminal."
         case "answers": return "Answer every question first."
         default: return "The answer wasn’t sent. Answer in the terminal."
         }
