@@ -50,4 +50,5 @@ public enum Capability: String, CaseIterable, Sendable {
     case boardTrains = "board_trains"
     case boardCost = "board_cost"
     case agentRows = "agent_rows"
+    case draftHold = "draft_hold"
 }

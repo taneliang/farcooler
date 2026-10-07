@@ -74,8 +74,11 @@ public enum AskAboutTask {
         /// A terminal orchestrator's input line, pasted by the runner with no
         /// Enter.
         case pasted
-        /// Onto the clipboard: the runner couldn't prove the pane safe.
+        /// Onto the clipboard: the runner couldn't prove the pane safe, or is
+        /// too old to hold a draft behind a dialog.
         case copied
+        /// Held by the runner behind a dialog, pasted once it closes (ov-385).
+        case held(DraftHold)
         /// The runner never answered in time, so it may have pasted after all.
         /// Nothing is copied and nothing is claimed: copying as well would leave
         /// the reference in the box and on the clipboard under a notice that says
@@ -86,6 +89,8 @@ public enum AskAboutTask {
     /// What the runner said to a paste into a terminal orchestrator.
     public enum DraftResult: Equatable, Sendable {
         case pasted
+        /// A dialog was up: the runner holds it and pastes it once it closes.
+        case held(DraftHold)
         /// It refused, or the call never left this phone: nothing was typed.
         case declined
         /// No answer in time, or the link dropped mid-call: it may have been typed.
@@ -110,8 +115,9 @@ public enum AskAboutTask {
     /// A chat pane takes it in its composer. A terminal pane (a shell running
     /// claude, adopted as the orchestrator) is asked of the runner, which pastes
     /// it with no Enter only past the gate that types an answer: a proven, idle
-    /// agent with an empty box and a known paste mode. Anything less, or any
-    /// failure, copies it instead. Nothing here ever presses Enter, and the
+    /// agent with an empty box and a known paste mode. A dialog in the way, on
+    /// a runner that can, holds it until the dialog closes (ov-385). Anything
+    /// else, or any failure, copies it instead. Nothing here ever presses Enter, and the
     /// phone never writes to the pane itself.
     @MainActor
     public static func deliver(
@@ -139,6 +145,7 @@ public enum AskAboutTask {
         }
         switch await paste(text) {
         case .pasted: return .pasted
+        case .held(let hold): return .held(hold)
         case .unknown: return .maybePasted
         case .declined:
             copy(text.trimmingCharacters(in: .whitespaces))

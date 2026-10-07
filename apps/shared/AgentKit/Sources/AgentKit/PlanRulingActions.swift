@@ -42,6 +42,8 @@ public enum RulingActions {
         case drafted
         /// Onto the clipboard: the runner couldn't prove the pane safe.
         case copied
+        /// Held by the runner behind a dialog, typed once it closes (ov-385).
+        case held(DraftHold)
         /// The runner never answered in time, so it may have been typed.
         case maybeDrafted
         /// A chat orchestrator didn't take it.
@@ -66,6 +68,7 @@ public enum RulingActions {
         if isAgentPane { return await send(text) ? .sent : .failed }
         switch await paste(text) {
         case .pasted: return .drafted
+        case .held(let hold): return .held(hold)
         case .unknown: return .maybeDrafted
         case .declined:
             copy(text)
@@ -102,6 +105,8 @@ public enum RulingActions {
         case .sent: "Asked the orchestrator to reverse \(ruling.short)."
         case .drafted: "Put the request in the orchestrator’s input. Press Return to send it."
         case .copied: "Copied the request to reverse \(ruling.short). Paste it into the orchestrator."
+        // Its own banner says it waits, and how it ends (`HeldDraft`).
+        case .held: nil
         case .maybeDrafted: "Typed, not sent. Check the orchestrator’s input for the request."
         case .failed: "Couldn’t reach the orchestrator. Try again."
         }
