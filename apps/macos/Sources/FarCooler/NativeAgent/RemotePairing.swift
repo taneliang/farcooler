@@ -16,8 +16,12 @@ import Foundation
 /// ```
 ///
 /// The daemon writes the line (restricted, a forced command, `control`), as it
-/// does for a phone. That grants the app's connection nothing the Mac doesn't
-/// already have: the owner's ssh on that runner is a shell.
+/// does for a phone. Restricted means no ssh shell, not little power:
+/// `control` creates terminals and types into them, which runs commands as
+/// the runner's user. The setting's copy says so, since turning it on is the
+/// consent for every runner. It grants nothing the owner's own ssh on that
+/// runner can't do, but it's a software key in the login keychain, used
+/// without whatever presence check the owner's ssh key has.
 ///
 /// **Revocation is never undone by itself.** A runner is paired automatically
 /// only when this Mac has no record of it. A runner that refuses a key this
@@ -76,6 +80,8 @@ final class RemotePairing: ObservableObject {
     /// The host key each runner was found to present, checked against
     /// `known_hosts`, for this run of the app.
     private var pins: [String: String] = [:]
+    /// Bumped by `halt`: a connect begun under an older one acts no more.
+    private var generations: [String: Int] = [:]
     /// Runners whose projector this run already turned on.
     private var projectorAsked: Set<String> = []
 
@@ -100,36 +106,49 @@ final class RemotePairing: ObservableObject {
     static var label: String { "\(thisMacName) Conversation View" }
 
     /// Reach `target`'s runner, pairing first where this Mac never has.
+    ///
+    /// **Nothing a person stopped is undone by a connect already on its way.**
+    /// Unpair, the setting going off and a runner leaving the fleet each bump
+    /// `target`'s generation (`halt`), and every step after a suspension
+    /// checks it, the record and cancellation before it writes a line or a
+    /// record. A line an abandoned connect wrote anyway is taken back off.
     func connect(target: String) async -> Outcome {
+        let generation = generations[target, default: 0]
+        // Said before anything that could fail would hide it behind a
+        // passing sentence (and a Try Again that isn't Pair Again).
+        if let stopped = stopped(target) {
+            states[target] = stopped
+            return .unavailable
+        }
         let reach: RemoteReach
         switch await resolve(target) {
-        case .failure(let refusal): return unavailable(target, refusal.sentence)
+        case .failure(let refusal):
+            guard current(target, generation) else { return .unavailable }
+            return unavailable(target, refusal.sentence)
         case .success(let found): reach = found
         }
+        guard current(target, generation) else { return .unavailable }
         guard let privateKey = key.privateKey(), let clientID = key.clientID, let publicKey = key.publicKey else {
             return unavailable(target, "Far Cooler couldn’t keep this Mac’s key in the Keychain.")
         }
-        let recorded = record[target]
-        if recorded == "unpaired" {
-            states[target] = .unpaired
-            return .unavailable
-        }
-        // Paired under THIS key, or revoked: a record of a key this Mac no
-        // longer holds says nothing about the one it holds now.
-        let wasPaired = recorded == clientID || recorded == "removed"
+        // Paired under THIS key: a record of a key this Mac no longer holds
+        // says nothing about the one it holds now.
+        let wasPaired = record[target] == clientID
 
         let pin: String
         switch await hostKey(target, reach: reach, privateKey: privateKey) {
         case .pinned(let found): pin = found
         case .mismatch:
+            guard current(target, generation) else { return .unavailable }
             return unavailable(target, "This runner’s host key doesn’t match the one ssh knows, so Far Cooler won’t connect to it.")
         case .failed: return .unreachable
         }
 
         switch await open(reach, privateKey: privateKey, pin: pin) {
         case .connected(let core, let offered):
-            return await settle(target, core, offered, reach: reach, privateKey: privateKey, pin: pin, clientID: clientID)
+            return await settle(target, generation, core, offered, reach: reach, privateKey: privateKey, pin: pin, clientID: clientID)
         case .rejected:
+            guard current(target, generation) else { return .unavailable }
             // Revoked: a key this Mac paired, refused. Never re-paired here.
             if wasPaired {
                 record[target] = "removed"
@@ -140,12 +159,18 @@ final class RemotePairing: ObservableObject {
                 "--json", "--runner", target, "client", "enroll", "--key", publicKey, "--label", Self.label,
                 "--client-id", clientID, "--scope", "control",
             ])
+            guard current(target, generation) else {
+                // Unpaired, turned off or forgotten while the line was being
+                // written: it was never wanted, so it comes back off.
+                if enrolled.ok { _ = await cli(["--json", "--runner", target, "client", "revoke", clientID]) }
+                return .unavailable
+            }
             guard enrolled.ok else {
                 return unavailable(target, "This runner didn’t take this Mac’s key. Update Far Cooler on it and try again.")
             }
-            record[target] = clientID
+            // Recorded only once a connect proves the line (`settle`).
             guard case .connected(let core, let offered) = await open(reach, privateKey: privateKey, pin: pin) else { return .unreachable }
-            return await settle(target, core, offered, reach: reach, privateKey: privateKey, pin: pin, clientID: clientID)
+            return await settle(target, generation, core, offered, reach: reach, privateKey: privateKey, pin: pin, clientID: clientID)
         case .failed:
             return .unreachable
         }
@@ -155,6 +180,7 @@ final class RemotePairing: ObservableObject {
     /// pair it again only when asked. Nil when it's done; a sentence when
     /// the runner didn't answer.
     func unpair(target: String) async -> String? {
+        halt(target)
         guard let clientID = key.clientID else { return "Far Cooler couldn’t read this Mac’s key." }
         let revoked = await cli(["--json", "--runner", target, "client", "revoke", clientID])
         guard revoked.ok else { return "Far Cooler couldn’t reach this runner to unpair it. Try again when it’s online." }
@@ -162,6 +188,26 @@ final class RemotePairing: ObservableObject {
         states[target] = .unpaired
         pins[target] = nil
         return nil
+    }
+
+    /// Abandon any connect to `target` on its way: it writes no line and no
+    /// record from here on.
+    func halt(_ target: String) {
+        generations[target, default: 0] += 1
+    }
+
+    /// Why `target` is stopped until a person says otherwise, if it is.
+    private func stopped(_ target: String) -> State? {
+        switch record[target] {
+        case "unpaired": .unpaired
+        case "removed": .removed
+        default: nil
+        }
+    }
+
+    /// Whether a connect begun at `generation` may still act.
+    private func current(_ target: String, _ generation: Int) -> Bool {
+        !Task.isCancelled && generations[target, default: 0] == generation && stopped(target) == nil
     }
 
     /// Forget why `target` stopped, so the next connect pairs it again.
@@ -200,11 +246,13 @@ final class RemotePairing: ObservableObject {
     /// it. The core shows the key and refuses before signing in, so the
     /// private key is never offered to a host that isn't checked.
     private func hostKey(_ target: String, reach: RemoteReach, privateKey: String) async -> Pin {
-        if let pinned = pins[target], reach.knownKeys.contains(pinned) { return .pinned(pinned) }
+        if let pinned = pins[target], reach.knownKeys.contains(pinned), !reach.revokedKeys.contains(pinned) { return .pinned(pinned) }
         do {
             _ = try await dial(reach, privateKey, nil)
         } catch RunnerCore.Failure.unconnected(_, trouble: "host_key_unknown", let fingerprint?) {
-            guard reach.knownKeys.contains(fingerprint) else { return .mismatch }
+            // A key known_hosts marks `@revoked` is never pinned, whatever
+            // else lists it.
+            guard reach.knownKeys.contains(fingerprint), !reach.revokedKeys.contains(fingerprint) else { return .mismatch }
             pins[target] = fingerprint
             return .pinned(fingerprint)
         } catch {}
@@ -214,9 +262,10 @@ final class RemotePairing: ObservableObject {
     /// Paired and connected; turn the runner's projector on once if its hello
     /// doesn't serve rows, since the setting says it does.
     private func settle(
-        _ target: String, _ core: RunnerCore, _ offered: Set<String>, reach: RemoteReach, privateKey: String, pin: String,
-        clientID: String
+        _ target: String, _ generation: Int, _ core: RunnerCore, _ offered: Set<String>, reach: RemoteReach, privateKey: String,
+        pin: String, clientID: String
     ) async -> Outcome {
+        guard current(target, generation) else { return .unavailable }
         record[target] = clientID
         states[target] = .paired
         guard !NativeAgents.serves(offered), !projectorAsked.contains(target) else { return .connected(core, offered) }

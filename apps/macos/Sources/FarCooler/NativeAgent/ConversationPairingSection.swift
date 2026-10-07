@@ -31,10 +31,7 @@ struct ConversationPairingSection: View {
             } header: {
                 Text("Conversation View")
             } footer: {
-                Text(
-                    "To show Claude panes on other runners as a conversation, this Mac adds a key it keeps in the Keychain "
-                        + "to each runner. The key can read and reply in Far Cooler, and can’t open a shell."
-                )
+                Text(Self.footer)
                 .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -48,7 +45,7 @@ struct ConversationPairingSection: View {
             case .removed?, .unpaired?:
                 Button("Pair Again") { native.pairAgain(target) }
             case .unavailable?:
-                Button("Try Again") { native.pairAgain(target) }
+                Button("Try Again") { native.retry(target) }
             case nil:
                 EmptyView()
             }
@@ -57,6 +54,12 @@ struct ConversationPairingSection: View {
             Text(Self.status(state)).fixedSize(horizontal: false, vertical: true)
         }
     }
+
+    /// What the key can do, said plainly: turning the setting on is the
+    /// consent for every runner, and `control` runs commands.
+    static let footer =
+        "This Mac adds a key of its own, kept in the Keychain, to each runner. With it, anyone using Far Cooler "
+        + "on this Mac can read and reply to Claude there, and create terminals and run commands, as with a paired phone."
 
     static func status(_ state: RemotePairing.State?) -> String {
         switch state {

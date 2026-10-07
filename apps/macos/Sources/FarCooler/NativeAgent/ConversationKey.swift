@@ -6,9 +6,18 @@ import Security
 /// Where this Mac's conversation key is kept: the Keychain in the app, memory
 /// in a test, so no test writes the owner's login keychain.
 protocol ConversationKeyVault: Sendable {
-    func read() -> String?
+    func read() -> ConversationKeyRead
     @discardableResult func write(_ privateKey: String) -> Bool
     func delete()
+}
+
+/// What a vault read found. `failed` is not `absent`: a Keychain that's
+/// locked or refuses is no reason to make a new key, which would be a new
+/// device to every runner and would re-pair runners that revoked the old one.
+enum ConversationKeyRead: Equatable, Sendable {
+    case found(String)
+    case absent
+    case failed
 }
 
 /// The key this Mac's client core signs in to remote runners with, for the
@@ -43,8 +52,12 @@ final class ConversationKey: @unchecked Sendable {
     func privateKey() -> String? {
         lock.lock()
         defer { lock.unlock() }
-        if let existing = vault.read(), !existing.isEmpty { return existing }
-        guard let generated = Self.generate(), vault.write(generated), vault.read() == generated else { return nil }
+        switch vault.read() {
+        case .found(let existing): return existing
+        case .failed: return nil
+        case .absent: break
+        }
+        guard let generated = Self.generate(), vault.write(generated), vault.read() == .found(generated) else { return nil }
         return generated
     }
 
@@ -72,9 +85,12 @@ final class ConversationKey: @unchecked Sendable {
     }
 }
 
-/// The Keychain: a generic password, after first unlock, this Mac only, never
-/// synced. Channel-scoped like everything a channel owns, so a canary and a
-/// release build never pair one key.
+/// The Keychain: a generic password, never synced, readable without asking
+/// only by this app's signature. It's the login keychain, so the
+/// after-first-unlock, this-device-only attribute is advisory: the item moves
+/// with `login.keychain-db` (Migration Assistant, a restored backup), as the
+/// account tokens (`TokenStore`) do. Channel-scoped like everything a channel
+/// owns, so a canary and a release build never pair one key.
 struct KeychainConversationKeyVault: ConversationKeyVault {
     var service = "com.farcooler.conversation-key.\(AppVersion.channel)"
     private static let account = "device"
@@ -83,13 +99,18 @@ struct KeychainConversationKeyVault: ConversationKeyVault {
         [kSecClass: kSecClassGenericPassword, kSecAttrService: service, kSecAttrAccount: Self.account]
     }
 
-    func read() -> String? {
+    func read() -> ConversationKeyRead {
         var ask = query
         ask[kSecReturnData] = true
         ask[kSecMatchLimit] = kSecMatchLimitOne
         var result: CFTypeRef?
-        guard SecItemCopyMatching(ask as CFDictionary, &result) == errSecSuccess, let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+        switch SecItemCopyMatching(ask as CFDictionary, &result) {
+        case errSecSuccess:
+            guard let data = result as? Data, let text = String(data: data, encoding: .utf8), !text.isEmpty else { return .failed }
+            return .found(text)
+        case errSecItemNotFound: return .absent
+        default: return .failed
+        }
     }
 
     @discardableResult
@@ -117,10 +138,14 @@ final class MemoryConversationKeyVault: ConversationKeyVault, @unchecked Sendabl
 
     init(_ stored: String? = nil) { self.stored = stored }
 
-    func read() -> String? {
+    /// Set to make reads fail, as a locked or refusing Keychain does.
+    var failing = false
+
+    func read() -> ConversationKeyRead {
         lock.lock()
         defer { lock.unlock() }
-        return stored
+        if failing { return .failed }
+        return stored.map(ConversationKeyRead.found) ?? .absent
     }
 
     func write(_ privateKey: String) -> Bool {

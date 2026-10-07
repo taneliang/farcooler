@@ -5,8 +5,9 @@ import Foundation
 /// `known_hosts` already trusts for it.
 ///
 /// **Read, never written.** `ssh -G` reads the owner's config (every `Host`,
-/// `Match` and `Include`) and touches no network; `ssh-keygen -F` reads
-/// `known_hosts`. Nothing here writes a file in `~/.ssh`, and nothing does a
+/// `Match` and `Include`); it opens no connection, though a config may still
+/// resolve names (`CanonicalizeHostname`) or run its own `Match exec`.
+/// `ssh-keygen -F` reads `known_hosts`. Nothing here writes a file in `~/.ssh`, and nothing does a
 /// keyscan: trusting whatever answers now is the unknown-host prompt with the
 /// human taken out. A runner the owner has never reached with `ssh` has no key
 /// here, and the conversation view isn't offered on it.
@@ -18,8 +19,10 @@ struct RemoteReach: Equatable, Sendable {
     let host: String
     let port: Int
     let user: String
-    /// Every `SHA256:…` the owner's `known_hosts` holds for this runner.
+    /// Every `SHA256:…` the owner's `known_hosts` trusts for this runner.
     let knownKeys: Set<String>
+    /// The ones marked `@revoked`, which nothing here ever pins.
+    var revokedKeys: Set<String> = []
 
     /// Why a runner can't be dialed by the client core. Each is a sentence for
     /// Settings, never ssh's own words.
@@ -80,13 +83,34 @@ struct RemoteReach: Equatable, Sendable {
             .filter { $0.lowercased() != "none" }
     }
 
-    /// The fingerprints in `ssh-keygen -l -F` output: one per key line, the
-    /// `# Host … found` lines skipped.
-    static func fingerprints(_ output: String) -> Set<String> {
-        Set(
-            output.components(separatedBy: .newlines)
-                .filter { !$0.hasPrefix("#") }
-                .compactMap { line in line.split(separator: " ").first { $0.hasPrefix("SHA256:") }.map(String.init) })
+    /// What `ssh-keygen -l -F` says about a host: the keys it trusts, and
+    /// the keys marked `@revoked`.
+    ///
+    /// The marker is only in the header before each key line
+    /// (`# Host h found: line 1 REVOKED`, `… CA`), never on the key line
+    /// itself (`h ED25519 SHA256:…`), so the two are read as pairs. A
+    /// `@cert-authority` key is a CA's, never a host's, and is dropped. A
+    /// revoked key wins over a plain line for the same key: OpenSSH refuses it.
+    static func fingerprints(_ output: String) -> (trusted: Set<String>, revoked: Set<String>) {
+        var trusted: Set<String> = []
+        var revoked: Set<String> = []
+        var marker = ""
+        for line in output.components(separatedBy: .newlines) {
+            if line.hasPrefix("#") {
+                let words = line.split(separator: " ")
+                marker = words.last.map(String.init) ?? ""
+                if marker != "REVOKED", marker != "CA" { marker = "" }
+                continue
+            }
+            guard let fingerprint = line.split(separator: " ").first(where: { $0.hasPrefix("SHA256:") }).map(String.init) else { continue }
+            switch marker {
+            case "REVOKED": revoked.insert(fingerprint)
+            case "CA": break
+            default: trusted.insert(fingerprint)
+            }
+            marker = ""
+        }
+        return (trusted.subtracting(revoked), revoked)
     }
 
     /// Resolve `target` with the same `ssh` the CLI runs.
@@ -108,12 +132,18 @@ struct RemoteReach: Equatable, Sendable {
         let keygen = keygen(beside: ssh)
         let name = knownHostsName(settings, host: destination.host, port: destination.port)
         var known: Set<String> = []
+        var revoked: Set<String> = []
         for file in knownHostsFiles(settings) where FileManager.default.fileExists(atPath: file) {
             let ran = await ProcessRunner.run(keygen, ["-l", "-F", name, "-f", file], deadline: 30, discardStderr: true)
-            known.formUnion(fingerprints(String(decoding: ran.stdout, as: UTF8.self)))
+            let found = fingerprints(String(decoding: ran.stdout, as: UTF8.self))
+            known.formUnion(found.trusted)
+            revoked.formUnion(found.revoked)
         }
+        // Revoked in any file is revoked everywhere, as ssh reads it.
+        known.subtract(revoked)
         guard !known.isEmpty else { return .failure(.unknownHost) }
-        return .success(RemoteReach(host: destination.host, port: destination.port, user: destination.user, knownKeys: known))
+        return .success(
+            RemoteReach(host: destination.host, port: destination.port, user: destination.user, knownKeys: known, revokedKeys: revoked))
     }
 
     /// The `ssh` the CLI would run: the first on the CLI's `PATH`.

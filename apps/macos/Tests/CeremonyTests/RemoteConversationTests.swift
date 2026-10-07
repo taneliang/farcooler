@@ -43,16 +43,56 @@ struct RemoteConversationTests {
         #expect(files == ["/u/.ssh/known_hosts", "/u/.ssh/known_hosts2", "/etc/ssh/ssh_known_hosts"])
     }
 
-    @Test("ssh-keygen -l -F's lines give every fingerprint and skip its headers")
+    /// `ssh-keygen -l -F h.example -f <file>`'s own output, from a file with an
+    /// `@revoked` line, an `@cert-authority` line and a plain one (OpenSSH
+    /// 10.3): the marker is only in the header before each key.
+    static let keygenOutput = """
+        # Host h.example found: line 1 REVOKED
+        h.example ED25519 SHA256:sIfROYC3ydUqn1k0ucj3nnDnnJWK72iUym46jBLg22I
+        # Host h.example found: line 2 CA
+        h.example ED25519 SHA256:2LBnHreiGEifbAlGIPIfKnaaefiRqv9y9Mq5sxvWZek
+        # Host h.example found: line 3 
+        h.example ED25519 SHA256:lNiNLWZjNbE6UioQ5mbhuVEfc1ux1J3JRhnWU3u2wf4
+        """
+
+    @Test("ssh-keygen -l -F's lines give the trusted keys; @revoked ones are denied and CA keys dropped")
     func keygenLinesGiveFingerprints() {
-        let output = """
-            # Host [127.0.0.1]:22411 found: line 1
-            256 SHA256:lNiNLWZjNbE6UioQ5mbhuVEfc1ux1J3JRhnWU3u2wf4 [127.0.0.1]:22411 (ED25519)
-            # Host [127.0.0.1]:22411 found: line 2
-            3072 SHA256:abc [127.0.0.1]:22411 (RSA)
-            """
-        #expect(RemoteReach.fingerprints(output) == ["SHA256:lNiNLWZjNbE6UioQ5mbhuVEfc1ux1J3JRhnWU3u2wf4", "SHA256:abc"])
-        #expect(RemoteReach.fingerprints("").isEmpty)
+        let found = RemoteReach.fingerprints(Self.keygenOutput)
+        #expect(found.trusted == ["SHA256:lNiNLWZjNbE6UioQ5mbhuVEfc1ux1J3JRhnWU3u2wf4"])
+        #expect(found.revoked == ["SHA256:sIfROYC3ydUqn1k0ucj3nnDnnJWK72iUym46jBLg22I"])
+        // Revoked wins over a plain line for the same key, as in OpenSSH.
+        let both = RemoteReach.fingerprints(
+            "# Host h found: line 1 \nh ED25519 SHA256:x\n# Host h found: line 2 REVOKED\nh ED25519 SHA256:x\n")
+        #expect(both.trusted.isEmpty && both.revoked == ["SHA256:x"])
+        #expect(RemoteReach.fingerprints("").trusted.isEmpty)
+    }
+
+    /// The real `ssh -G` and `ssh-keygen` against a config and known_hosts of
+    /// the test's own (through an `ssh` wrapper adding `-F`): no network.
+    @Test("Resolving runs ssh -G and ssh-keygen for real, and a revoked host key isn't trusted")
+    func resolveRunsTheRealTools() async throws {
+        let dir = "/tmp/fc-t/rr-\(UUID().uuidString.prefix(6))"
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        var blobs: [String] = []
+        for name in ["good", "bad"] {
+            _ = await ProcessRunner.run("/usr/bin/ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", "\(dir)/\(name)"], deadline: 30)
+            let line = try String(contentsOfFile: "\(dir)/\(name).pub", encoding: .utf8)
+            blobs.append(String(line.split(separator: " ")[1]))
+        }
+        let (good, bad) = (blobs[0], blobs[1])
+        try "[127.0.0.1]:2222 ssh-ed25519 \(good)\n@revoked [127.0.0.1]:2222 ssh-ed25519 \(bad)\n[127.0.0.1]:2222 ssh-ed25519 \(bad)\n"
+            .write(toFile: dir + "/kh", atomically: true, encoding: .utf8)
+        try "Host box\n  HostName 127.0.0.1\n  Port 2222\n  User deploy\n  UserKnownHostsFile \(dir)/kh\n  GlobalKnownHostsFile /dev/null\n"
+            .write(toFile: dir + "/config", atomically: true, encoding: .utf8)
+        try "#!/bin/sh\nexec /usr/bin/ssh -F \(dir)/config \"$@\"\n".write(toFile: dir + "/ssh", atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir + "/ssh")
+        let reach = try await RemoteReach.resolve("box", ssh: dir + "/ssh").get()
+        #expect(reach.host == "127.0.0.1" && reach.port == 2222 && reach.user == "deploy")
+        let goodPrint = try #require(RunnerFacts.fingerprint(ofOpenSSHKey: "ssh-ed25519 \(good)"))
+        let badPrint = try #require(RunnerFacts.fingerprint(ofOpenSSHKey: "ssh-ed25519 \(bad)"))
+        #expect(reach.knownKeys == [goodPrint])
+        #expect(reach.revokedKeys == [badPrint])
     }
 
     // MARK: - The key
@@ -74,7 +114,7 @@ struct RemoteConversationTests {
     @Test("A vault that won't keep the key gives no key, rather than a new one each time")
     func anUnkeptKeyIsNoKey() {
         struct Refusing: ConversationKeyVault {
-            func read() -> String? { nil }
+            func read() -> ConversationKeyRead { .absent }
             func write(_ privateKey: String) -> Bool { false }
             func delete() {}
         }
@@ -92,7 +132,7 @@ struct RemoteConversationTests {
         defer { vault.delete() }
         let key = ConversationKey(vault: vault)
         let made = try #require(key.privateKey())
-        #expect(vault.read() == made)
+        #expect(vault.read() == .found(made))
         #expect(ConversationKey(vault: vault).privateKey() == made)
     }
 
@@ -279,6 +319,105 @@ struct RemoteConversationTests {
         }
         #expect(NativeAgents.serves(offered))
         #expect(runner.calls.contains(["--runner", "me@box", "settings", "set-projector", "on"]))
+    }
+
+    @Test("A Keychain that refuses a read is not an empty one: no new key, nothing written")
+    func aFailedReadMakesNoKey() {
+        let vault = MemoryConversationKeyVault("-----BEGIN OPENSSH PRIVATE KEY-----")
+        vault.failing = true
+        #expect(ConversationKey(vault: vault).privateKey() == nil)
+        #expect(vault.writes == 0, "a refused read made a new key")
+    }
+
+    @Test("A host key known_hosts marks @revoked is never pinned or signed in to")
+    func aRevokedHostKeyIsRefused() async {
+        let runner = Runner()
+        let pairing = Self.pairing(runner, defaults: Self.defaults())
+        pairing.resolve = { _ in .success(RemoteReach(host: "box", port: 22, user: "me", knownKeys: [Self.known], revokedKeys: [Self.known])) }
+        guard case .unavailable = await pairing.connect(target: "me@box") else {
+            Issue.record("signed in to a revoked host key")
+            return
+        }
+        #expect(runner.dials == [nil], "dialed with a revoked host key pinned: \(runner.dials)")
+        #expect(runner.calls.isEmpty)
+    }
+
+    @Test("Unpair while a connect is on its way: the connect writes no line and no record")
+    func unpairWinsTheRace() async throws {
+        let runner = Runner()
+        let pairing = Self.pairing(runner, defaults: Self.defaults())
+        var held = true
+        let dial = pairing.dial
+        pairing.dial = { reach, key, pin in
+            // The pinned dial waits, as a slow ssh handshake does.
+            if pin != nil { while held { try await Task.sleep(for: .milliseconds(5)) } }
+            return try await dial(reach, key, pin)
+        }
+        let connecting = Task { await pairing.connect(target: "me@box") }
+        try await NativeDefaultOnTests.until { runner.dials.count >= 1 && held }
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(await pairing.unpair(target: "me@box") == nil)
+        held = false
+        let outcome = await connecting.value
+        if case .connected = outcome { Issue.record("connected after Unpair") }
+        #expect(!runner.calls.contains { $0.contains("enroll") }, "enrolled after Unpair: \(runner.calls)")
+        #expect(runner.keys.isEmpty, "a line is on the runner after Unpair")
+        #expect(pairing.states["me@box"] == .unpaired)
+    }
+
+    @Test("A removed runner says so even when ssh can't resolve it, and Try Again never re-pairs it")
+    func tryAgainNeverRepairs() async throws {
+        let runner = Runner()
+        let agents = Self.agents(runner)
+        agents.start(target: "me@box")
+        let terminal = try NativeAgentTests.terminal()
+        try await NativeDefaultOnTests.until { agents.offers(terminal, target: "me@box") }
+        runner.keys = []
+        agents.pairing.resolve = { _ in .failure(.unresolved) }
+        agents.retry("me@box")
+        try await NativeDefaultOnTests.until { agents.pairing.states["me@box"] != .paired }
+        // Not yet seen removed: resolve fails first. The record says paired.
+        agents.pairing.resolve = { _ in .success(Self.reach) }
+        agents.retry("me@box")
+        try await NativeDefaultOnTests.until { agents.pairing.states["me@box"] == .removed }
+        #expect(agents.pairing.states["me@box"] == .removed)
+        runner.calls = []
+        agents.pairing.resolve = { _ in .failure(.unresolved) }
+        agents.retry("me@box")
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(agents.pairing.states["me@box"] == .removed, "a passing failure hid the revoke behind Try Again")
+        agents.pairing.resolve = { _ in .success(Self.reach) }
+        agents.retry("me@box")
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(runner.calls.isEmpty, "Try Again re-paired a revoked key: \(runner.calls)")
+        #expect(!agents.offers(terminal, target: "me@box"))
+    }
+
+    @Test("The setting and Devices say the key is added to every runner and runs commands there")
+    func theCopySaysWhatTheKeyCanDo() {
+        for copy in [ConversationPairingSection.footer, NativeAgents.settingNote] {
+            #expect(copy.contains("key of its own"), "\(copy)")
+            #expect(copy.contains("run commands") && copy.contains("terminals"), "\(copy)")
+            #expect(!copy.contains("can’t open a shell"), "\(copy)")
+        }
+    }
+
+    @Test("A line the post-enroll connect didn't prove isn't recorded as paired")
+    func anUnprovenLineIsNotRecorded() async {
+        let runner = Runner()
+        let defaults = Self.defaults()
+        let pairing = Self.pairing(runner, defaults: defaults)
+        let cli = pairing.cli
+        pairing.cli = { args in
+            let said = await cli(args)
+            if args.contains("enroll") { runner.reachable = false }
+            return said
+        }
+        guard case .unreachable = await pairing.connect(target: "me@box") else {
+            Issue.record("not unreachable")
+            return
+        }
+        #expect(defaults.dictionary(forKey: RemotePairing.recordKey)?["me@box"] == nil)
     }
 
     // MARK: - The view on a remote runner

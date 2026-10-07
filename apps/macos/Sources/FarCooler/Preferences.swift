@@ -404,7 +404,7 @@ struct SettingsView: View {
                 }
 
                 // Off by default until it matches the terminal (ov-372).
-                Setting("Adds a view of each Claude pane you can read and reply in, beside its terminal. Other runners are paired with a key this Mac keeps, listed in Devices.") {
+                Setting(LocalizedStringKey(NativeAgents.settingNote)) {
                     Toggle(
                         "Conversation view for Claude panes",
                         isOn: Binding(get: { native.enabled }, set: { on in Task { await native.setEnabled(on) } }))

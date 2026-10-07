@@ -84,6 +84,11 @@ final class NativeAgents: ObservableObject {
     let pairing: RemotePairing
 
     static let settingKey = "nativeAgent.enabled"
+    /// The setting's line in Settings: it adds a key to every other runner,
+    /// and that key runs commands there.
+    static let settingNote =
+        "Adds a view of each Claude pane you can read and reply in, beside its terminal. On other runners, this Mac adds "
+        + "a key of its own to each one, which can create terminals and run commands there. See Devices."
 
     init(defaults: UserDefaults = .standard, pairing: RemotePairing? = nil) {
         self.defaults = defaults
@@ -112,6 +117,7 @@ final class NativeAgents: ObservableObject {
     func forget(_ target: String) {
         guard !target.isEmpty else { return }
         remotes.remove(target)
+        pairing.halt(target)
         connecting[target]?.cancel()
         connecting[target] = nil
         retrying[target]?.cancel()
@@ -137,7 +143,9 @@ final class NativeAgents: ObservableObject {
             reconnect()
             await connecting[""]?.value
         } else {
-            // A reconnect still on its way would otherwise set a core after.
+            // A reconnect still on its way would otherwise set a core after,
+            // or write a line on a runner after the setting went off.
+            for remote in remotes { pairing.halt(remote) }
             for task in connecting.values { task.cancel() }
             for task in retrying.values { task.cancel() }
             connecting = [:]
@@ -332,6 +340,13 @@ final class NativeAgents: ObservableObject {
         retrying[target] = nil
         drop(target)
         return nil
+    }
+
+    /// Settings' Try Again: connect to `target`'s runner again. Never pairs
+    /// a runner that was unpaired or whose key was removed; only Pair Again
+    /// does.
+    func retry(_ target: String) {
+        if enabled { reconnect(target) }
     }
 
     /// Settings' Pair Again: pair `target`'s runner on the next connect, now.
