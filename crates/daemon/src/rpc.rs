@@ -416,7 +416,7 @@ fn scope_of(method: Method) -> Scope {
         | Method::TerminalDraftWithdraw
         // Types into the orchestrator's TUI and presses Enter, past the same
         // gate (`Watcher::tell_into`, ov-214).
-        | Method::TerminalTell
+        | Method::TerminalTell | Method::TerminalCompose
         | Method::TerminalAgentAnswer
         | Method::TerminalAgentSetMode | Method::TerminalAgentSetModel | Method::TerminalAgentSetConfig
         | Method::TerminalAgentCancel
@@ -593,6 +593,7 @@ fn scope_of(method: Method) -> Scope {
         // which is the entire purpose of the method.
         Method::ClientSetNodeKey => Scope::Read,
         Method::SettingsSetBranchPrefix
+        | Method::SettingsSetProjector
         | Method::ThemeUpsert
         | Method::ThemeDelete
         | Method::AdapterList
@@ -1884,14 +1885,14 @@ impl Rpc {
             // the answer wake's gate, else refused with nothing typed. Ask the
             // Orchestrator (ov-184) never sends it (`Watcher::draft_into`);
             // `terminal tell` submits it, or queues it (`Watcher::tell_into`).
-            "terminal.draft_prompt" | "terminal.tell" => {
+            "terminal.draft_prompt" | "terminal.tell" | "terminal.compose" => {
                 let Some(request::Payload::AgentPrompt(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
                 let text = wire::prompt_text(&p.blocks);
-                if req.method == "terminal.tell" {
-                    let queued = self.watcher.tell_into(id, &text).await? == crate::watch::answer_wake::Turn::During;
+                if req.method != "terminal.draft_prompt" {
+                    let queued = self.watcher.submit_into(id, &text, req.method == "terminal.tell").await? == crate::watch::answer_wake::Turn::During;
                     return Ok(result::Value::TerminalTold(farcooler_protocol::v1::TerminalTold { queued }));
                 }
                 match self.watcher.draft_into(id, &text, p.hold_behind_dialog).await? {
@@ -2080,7 +2081,7 @@ impl Rpc {
                 crate::rpc_pages::dispatch(svc, &self.watcher, req).await
             }
             "repository.landing" => crate::landing_read::handle(svc, req).await, // ov-313
-            "agent.rows" | "agent.rows_follow" => crate::rpc_rows::dispatch(svc, req).await, // ov-366
+            "agent.rows" | "agent.rows_follow" | "settings.set_projector" => crate::rpc_rows::dispatch(svc, req).await, // ov-366, ov-372
 
             // ---- workspaces ----
             //
@@ -2647,6 +2648,7 @@ mod tests {
         // runner that may not be the one asking.
         for method in [
             "settings.set_branch_prefix",
+            "settings.set_projector",
             "theme.upsert",
             "theme.delete",
             "adapter.upsert",

@@ -607,6 +607,9 @@ pub mod capability {
     /// a draft a dialog is in the way of: a client that reads it absent copies
     /// the draft to the clipboard instead, as it always did.
     pub const DRAFT_HOLD: &str = "draft_hold";
+    /// `settings.set_projector` (ov-372): turn the runner's projector, and so
+    /// `agent_rows`, on or off from a client's settings, without a restart.
+    pub const PROJECTOR_SETTING: &str = "projector_setting";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -622,11 +625,12 @@ pub mod capability {
             TASK_WAITS, TASK_WORKERS, NOTICE_TASK, BOARD_READS, WORKTREE_FILES, TERMINAL_NAMES, TERMINAL_PORTS,
             READ_ONLY_FOLDERS, AGENT_QUEUE, BOARD_PLAN, LFS_POINTERS, BOARD_PAGES, BOARD_RULINGS,
             BOARD_TRAINS, BOARD_COST, LANDING, BOARD_RULING_ACTIONS, AGENT_ROWS, DRAFT_HOLD,
+            PROJECTOR_SETTING,
         ];
 
     /// Capabilities this process has but does not offer: a feature behind a
-    /// runner's flag (`agent_rows` without `FARCOOLER_PROJECTOR=1`). Set once
-    /// at start, before any connection.
+    /// runner's flag (`agent_rows` with the projector off). Set at start, and
+    /// again when `settings.set_projector` turns it on or off.
     static WITHHELD: std::sync::RwLock<Vec<&'static str>> = std::sync::RwLock::new(Vec::new());
 
     /// Stop offering `capability`, in the hello and in `daemon.version`.
@@ -635,6 +639,11 @@ pub mod capability {
         if !withheld.contains(&capability) {
             withheld.push(capability);
         }
+    }
+
+    /// Offer `capability` again (`settings.set_projector` turning it on).
+    pub fn offer(capability: &str) {
+        WITHHELD.write().unwrap_or_else(|e| e.into_inner()).retain(|c| *c != capability);
     }
 
     /// What this process offers: `ALL`, less what it withholds.
@@ -742,6 +751,7 @@ pub mod method {
         TerminalDraftPrompt = "terminal.draft_prompt" => AGENT,
         TerminalTell = "terminal.tell" => AGENT,
         TerminalDraftWithdraw = "terminal.draft_withdraw" => DRAFT_HOLD,
+        TerminalCompose = "terminal.compose" => AGENT_ROWS,
         TerminalAgentAnswer = "terminal.agent_answer" => AGENT,
         TerminalAgentSetMode = "terminal.agent_set_mode" => AGENT,
         TerminalAgentSetModel = "terminal.agent_set_model" => AGENT,
@@ -780,6 +790,7 @@ pub mod method {
         ThemeUpsert = "theme.upsert" => THEMES,
         ThemeDelete = "theme.delete" => THEMES,
         SettingsSetBranchPrefix = "settings.set_branch_prefix" => THEMES,
+        SettingsSetProjector = "settings.set_projector" => PROJECTOR_SETTING,
         ClientList = "client.list" => ENROLLMENT,
         ClientEnroll = "client.enroll" => ENROLLMENT,
         ClientRevoke = "client.revoke" => ENROLLMENT,

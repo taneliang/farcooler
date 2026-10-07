@@ -70,6 +70,9 @@ void farcooler_client_free(void *handle);
  *      "passphrase":null,
  *      "host_fingerprint":"SHA256:..."}
  *
+ * An app on the runner's own machine names its daemon's socket instead,
+ * `{"socket": "<runtime dir>/farcoolerd.sock"}`: no ssh, no key (ov-372).
+ *
  * A runner reached through the tunnel names `"token"` and this device's own
  * `"node_key"` in place of `"host"` and `"port"`. A token or an address, never
  * both: two paths to one runner would leave nothing choosing between them.
@@ -142,6 +145,16 @@ uint64_t farcooler_client_connect(void *handle, const char *config);
  *                                                    "heldMs", "expiresMs",
  *                                                    "endedMs"}; also a fleet
  *                                                    terminal's "draftHold"
+ *   terminal.compose       {terminal, text}       -> {"queued"}: typed into a
+ *                                                    terminal-mode agent's box
+ *                                                    on one line and submitted,
+ *                                                    or refused with a `what`
+ *                                                    (`terminal tell`'s words);
+ *                                                    needs `agent_rows`
+ *   agent.rows             {terminal, before?, limit?}
+ *                          -> {"epoch", "rev", "moreBefore", "rows"}
+ *   agent.rows_follow      {terminal, epoch, afterRev, waitMs?}
+ *                          -> {"epoch", "rev", "reset", "changes"}
  *   terminal.agent_answer  {terminal, requestId, optionId}
  *   terminal.agent_set_mode   {terminal, mode}
  *   terminal.agent_set_model  {terminal, model}

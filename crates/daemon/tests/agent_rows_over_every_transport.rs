@@ -244,7 +244,10 @@ async fn rows_page_follow_and_survive_a_restart_on_every_transport() {
 #[tokio::test]
 async fn without_the_flag_rows_are_refused_as_unsupported() {
     let dir = tempfile::tempdir().unwrap();
-    let _daemon = common::listening_daemon(dir.path()).await;
+    // Its own config.toml, which says nothing: this Mac's may turn the
+    // projector on (`[agents] projector`, ov-372).
+    let config = dir.path().join("config.toml").to_string_lossy().into_owned();
+    let _daemon = common::listening_daemon_with_env(dir.path(), &[("FARCOOLER_CONFIG", &config)]).await;
     let client = socket(dir.path()).await;
     assert!(!client.server_hello().capabilities.iter().any(|c| c == "agent_rows"), "offered and then refused");
     let (_relay, relayed) = spawn(dir.path()).await;

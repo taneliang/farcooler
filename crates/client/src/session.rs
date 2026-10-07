@@ -1236,6 +1236,7 @@ impl Session {
         let payload =
             request::Payload::HostSettings(farcooler_protocol::v1::HostSettings {
                 branch_prefix: prefix.to_string(),
+                projector: false,
             });
         match self.value("settings.set_branch_prefix", None, Some(payload)).await? {
             result::Value::Host(h) => Ok(h),

@@ -30,6 +30,23 @@ async fn a_message_is_typed_into_an_idle_orchestrator_and_submitted() {
     assert_eq!(si.submitted(), ["-x land ov-214 after the rebase"], "{}", si.log());
 }
 
+/// The native view's composer (`terminal.compose`, ov-372): any claude
+/// pane, not only the orchestrator, past the same gate, while `tell` still
+/// refuses the worker.
+#[tokio::test]
+async fn a_composed_message_is_submitted_into_a_worker_claude_pane() {
+    let b = board().await;
+    let agent = b.agent("Agent 2", "claude").await;
+    let si = b.stand_in(&agent, "claude", "claude").await;
+    b.doing(agent.id, AgentActivity::Idle).await;
+    assert_eq!(refused_with(b.watcher.tell_into(agent.id, "hello").await), "terminal");
+    nothing_typed(&si);
+    let turn = b.watcher.submit_into(agent.id, "fix the build\nthen the docs", false).await.expect("composed");
+    assert_eq!(turn, Turn::Between);
+    si.submits(1).await;
+    assert_eq!(si.submitted(), ["fix the build then the docs"], "{}", si.log());
+}
+
 /// Two messages a moment apart: the second waits out the spacing an answer
 /// would, rather than be refused for it.
 #[tokio::test]

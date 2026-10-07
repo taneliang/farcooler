@@ -6,7 +6,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 use super::results::wrong;
-use super::{Session, SessionError};
+use super::{Session, SessionError, require};
 
 /// What the runner did with a draft.
 #[derive(Debug)]
@@ -52,6 +52,22 @@ impl Session {
         match self.value_requiring("terminal.draft_withdraw", None, Some(payload), required).await? {
             result::Value::DraftHold(h) => Ok(h),
             other => Err(wrong("draft_hold", &other)),
+        }
+    }
+
+    /// `terminal.compose` (ov-372): `text` typed into a terminal-mode agent
+    /// pane's box on one line and submitted past the same gate as
+    /// `terminal tell`, or refused with nothing typed. True when the agent
+    /// was working and its own queue took it.
+    pub async fn compose(&self, terminal: Uuid, text: &str) -> Result<bool, SessionError> {
+        require(self.capabilities(), farcooler_protocol::capability::AGENT_ROWS, "terminal.compose")?;
+        let payload = request::Payload::AgentPrompt(pb::AgentPrompt {
+            terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
+            blocks: vec![pb::AgentPromptBlock { content: Some(Content::Text(text.to_string())) }],
+        });
+        match self.value("terminal.compose", None, Some(payload)).await? {
+            result::Value::TerminalTold(told) => Ok(told.queued),
+            other => Err(wrong("terminal_told", &other)),
         }
     }
 }

@@ -34,6 +34,9 @@ pub(crate) async fn dispatch(svc: &Service, req: Request) -> Result<result::Valu
     // A follow's wait counts from here, so a first follow that rebuilds a
     // transcript still answers inside the client's 30 s deadline.
     let arrived = tokio::time::Instant::now();
+    if req.method == "settings.set_projector" {
+        return set_projector(req);
+    }
     if !session_projectors::shadowing() {
         return Err(DomainError::CapabilityUnsupported { needed: farcooler_protocol::capability::AGENT_ROWS });
     }
@@ -62,6 +65,22 @@ pub(crate) async fn dispatch(svc: &Service, req: Request) -> Result<result::Valu
         }
         _ => Err(DomainError::InvalidArgument { what: "payload" }),
     }
+}
+
+/// `settings.set_projector` (ov-372): `[agents] projector` written to
+/// config.toml, then the projector turned on or off in this daemon at once.
+/// Refused, with nothing changed, when the file can't be written.
+fn set_projector(req: Request) -> Result<result::Value> {
+    let Some(request::Payload::HostSettings(p)) = req.payload else {
+        return Err(DomainError::InvalidArgument { what: "payload" });
+    };
+    let path = farcooler_core::config::config_path().ok_or(DomainError::OperationFailed)?;
+    farcooler_core::config::write_projector(&path, p.projector).map_err(|e| {
+        tracing::warn!(error = %e, "couldn't write the projector setting");
+        DomainError::OperationFailed
+    })?;
+    session_projectors::set_shadowing(p.projector);
+    Ok(result::Value::Empty(pb::Empty {}))
 }
 
 /// A follow's answer. Its wait is counted from `arrived`, before `open`

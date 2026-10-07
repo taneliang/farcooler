@@ -53,5 +53,6 @@ enum class Capability(val wire: String) {
     BOARD_TRAINS("board_trains"),
     BOARD_COST("board_cost"),
     AGENT_ROWS("agent_rows"),
-    DRAFT_HOLD("draft_hold");
+    DRAFT_HOLD("draft_hold"),
+    PROJECTOR_SETTING("projector_setting");
 }

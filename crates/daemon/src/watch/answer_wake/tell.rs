@@ -89,9 +89,19 @@ impl Watcher {
     /// the answer wake's gate: `Turn::Between` when it's the agent's next
     /// prompt, `Turn::During` when it's queued behind the turn running. See
     /// this module's docs.
+    ///
+    /// The wire reaches it as `submit_into(id, raw, true)`.
+    #[cfg(test)]
     pub(crate) async fn tell_into(&self, id: Uuid, raw: &str) -> Result<Turn> {
+        self.submit_into(id, raw, true).await
+    }
+
+    /// `tell_into` for any terminal-mode agent pane, not only the
+    /// orchestrator's: the native view's composer (`terminal.compose`,
+    /// ov-372). Every other check is the same, `orchestrator_only` aside.
+    pub(crate) async fn submit_into(&self, id: Uuid, raw: &str, orchestrator_only: bool) -> Result<Turn> {
         let to = self.service.store.get_terminal(id)?;
-        if to.role != TerminalRole::Orchestrator {
+        if orchestrator_only && to.role != TerminalRole::Orchestrator {
             return Err(DomainError::InvalidArgument { what: "terminal" });
         }
         if to.pane_mode == PaneMode::Agent {

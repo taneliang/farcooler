@@ -344,29 +344,23 @@ pub unsafe extern "C" fn farcooler_client_connect(
         let events = Arc::clone(&h.events);
 
         h.runtime.spawn(async move {
-            let outcome = match parse_destination(&config) {
-                Ok(destination) => match Session::connect_ssh(&destination).await {
-                    Ok(open) => {
-                        let version = open.daemon_version().to_string();
-                        // What that runner can do, so the app can dim what it
-                        // cannot serve rather than offering a control that fails.
-                        // Normalized here rather than in each app: iOS and Android
-                        // must not disagree about what a runner supports.
-                        let capabilities: Vec<String> = farcooler_protocol::capability::ALL
-                            .iter()
-                            .filter(|c| open.can(c))
-                            .map(|c| (*c).to_string())
-                            .collect();
-                        subscribe(&open, &events).await;
-                        *locked(&session) = Some(Arc::new(open));
-                        Ok(json!({ "daemon_version": version, "capabilities": capabilities }))
-                    }
-                    Err(e) => Err(connect_failure(&e)),
-                },
-                // A config this boundary could not read never left the
-                // device, so it is no failure of the runner's; it gets a word
-                // of its own rather than none, on `trouble`'s terms.
-                Err(message) => Err(json!({ "error": message, "trouble": BAD_CONFIG })),
+            let outcome = match reach::open(&config).await {
+                Ok(open) => {
+                    let version = open.daemon_version().to_string();
+                    // What that runner can do, so the app can dim what it
+                    // cannot serve rather than offering a control that fails.
+                    // Normalized here rather than in each app: iOS and Android
+                    // must not disagree about what a runner supports.
+                    let capabilities: Vec<String> = farcooler_protocol::capability::ALL
+                        .iter()
+                        .filter(|c| open.can(c))
+                        .map(|c| (*c).to_string())
+                        .collect();
+                    subscribe(&open, &events).await;
+                    *locked(&session) = Some(Arc::new(open));
+                    Ok(json!({ "daemon_version": version, "capabilities": capabilities }))
+                }
+                Err(failure) => Err(failure),
             };
             push_connect(&finished, ticket, outcome);
         });
@@ -2349,6 +2343,7 @@ async fn dispatch(
         }
         // A terminal's agent rows, a page and a follow (ov-366).
         "agent.rows" | "agent.rows_follow" => rows_args::call(session, method, args).await,
+        "terminal.compose" => Ok(json!({ "queued": session.compose(id("terminal")?, &text("text")).await? })),
 
         // Refused rather than defaulted, so a typo in a client is a visible
         // error instead of a call that silently does nothing.
@@ -3302,6 +3297,7 @@ mod rows_fixture_tests;
 mod board_reads_args;
 mod files_args;
 mod rows_args;
+mod reach;
 use board_reads_args::mark_read_of;
 mod calls;
 #[cfg(test)]

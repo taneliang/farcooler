@@ -26,8 +26,9 @@
 //! would be a row with an `ord` ahead of turns older than it. A second open
 //! meanwhile waits for that read rather than starting its own.
 //!
-//! **Behind `FARCOOLER_PROJECTOR=1` until a client reads it** (ov-372). The
-//! flag gates all of it: with it unset no projector opens for a pane,
+//! **Behind a setting, off by default** (ov-372): `[agents] projector` in
+//! config.toml, which a client's settings turn on (`settings.set_projector`),
+//! or `FARCOOLER_PROJECTOR=1`. It gates all of it: off, no projector opens for a pane,
 //! `agent.rows` and `agent.rows_follow` are refused as unsupported, and
 //! `agent_rows` is left out of the hello, so the daemon does what it did
 //! before. watch.rs's own turn, question and subagent state still come from
@@ -35,7 +36,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -212,10 +213,35 @@ impl Inner {
     }
 }
 
-/// Whether claude panes get a projector, and `agent.rows` is served.
+/// Whether claude panes get a projector, and `agent.rows` is served: the
+/// `FARCOOLER_PROJECTOR=1` environment, or `[agents] projector` in
+/// config.toml as the daemon read it at start or a client last set it
+/// (`set_shadowing`, ov-372).
 pub fn shadowing() -> bool {
+    by_environment() || SETTING.load(Ordering::Relaxed)
+}
+
+/// The config's half of `shadowing`, which `settings.set_projector` changes
+/// while the daemon runs.
+static SETTING: AtomicBool = AtomicBool::new(false);
+
+fn by_environment() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("FARCOOLER_PROJECTOR").is_some_and(|v| v == "1"))
+}
+
+/// Turn the projector on or off, and offer `agent_rows` in every hello from
+/// now on only while it's on. A connection open before keeps the hello it
+/// had, so a client reconnects to see the change. Turned off, a projector
+/// already open keeps following its pane until the daemon restarts; no new
+/// one opens, and `agent.rows` is refused.
+pub fn set_shadowing(on: bool) {
+    SETTING.store(on, Ordering::Relaxed);
+    let rows = farcooler_protocol::capability::AGENT_ROWS;
+    match shadowing() {
+        true => farcooler_protocol::capability::offer(rows),
+        false => farcooler_protocol::capability::withhold(rows),
+    }
 }
 
 fn now_ms() -> i64 {

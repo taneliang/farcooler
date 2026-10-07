@@ -17,7 +17,9 @@ use std::path::{Path, PathBuf};
 
 use crate::activity::Registry;
 
+mod projector;
 mod read_only;
+pub use projector::{load_projector, projector_from, write_projector};
 pub use read_only::{load_read_only_folders, read_only_folders_from};
 
 /// One `[adapters.<name>]` table.

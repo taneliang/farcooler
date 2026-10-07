@@ -573,6 +573,15 @@ enum SettingsCmd {
     Show,
     /// Set what a derived branch name starts with. Empty opts out entirely.
     SetBranchPrefix { prefix: String },
+    /// Turn the agent row projector, which the native agent view reads, on
+    /// or off. Takes effect at once.
+    SetProjector { state: OnOff },
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum OnOff {
+    On,
+    Off,
 }
 
 #[derive(Subcommand)]
@@ -1664,12 +1673,13 @@ async fn settings(runner: Option<&str>, cmd: SettingsCmd, json: bool) -> Fallibl
                 .as_ref()
                 .map(|s| s.branch_prefix.clone())
                 .unwrap_or_default();
+            let projector = facts.settings.as_ref().is_some_and(|s| s.projector);
             if json {
-                println!("{}", serde_json::json!({ "branchPrefix": prefix }));
+                println!("{}", serde_json::json!({ "branchPrefix": prefix, "projector": projector }));
             } else {
                 // Quoted, because the empty string is a real and deliberate
                 // value here and an unquoted blank line would read as a bug.
-                println!("branch prefix  \"{prefix}\"");
+                println!("branch prefix  \"{prefix}\"\nprojector      {}", if projector { "on" } else { "off" });
             }
         }
         SettingsCmd::SetBranchPrefix { prefix } => {
@@ -1677,6 +1687,7 @@ async fn settings(runner: Option<&str>, cmd: SettingsCmd, json: bool) -> Fallibl
                 req("settings.set_branch_prefix"),
                 request::Payload::HostSettings(farcooler_protocol::v1::HostSettings {
                     branch_prefix: prefix,
+                    projector: false,
                 }),
             );
             let r = link.call(req).await?;
@@ -1690,6 +1701,20 @@ async fn settings(runner: Option<&str>, cmd: SettingsCmd, json: bool) -> Fallibl
                 println!("{}", serde_json::json!({ "branchPrefix": stored }));
             } else {
                 println!("branch prefix is now \"{stored}\"");
+            }
+        }
+        SettingsCmd::SetProjector { state } => {
+            let on = matches!(state, OnOff::On);
+            let mut ask = with(
+                req("settings.set_projector"),
+                request::Payload::HostSettings(farcooler_protocol::v1::HostSettings { branch_prefix: String::new(), projector: on }),
+            );
+            ask.required_capabilities.push(farcooler_protocol::capability::PROJECTOR_SETTING.to_string());
+            expect_value(link.call(ask).await?.value)?;
+            if json {
+                println!("{}", serde_json::json!({ "projector": on }));
+            } else {
+                println!("projector is now {}", if on { "on" } else { "off" });
             }
         }
     }
