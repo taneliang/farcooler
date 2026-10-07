@@ -19,7 +19,7 @@ fn hook(socket: &Path, event: &str, session: &str, patience: std::time::Duration
 
 /// `hook`, with the whole payload given.
 fn hook_with(socket: &Path, event: &str, payload: serde_json::Value, patience: std::time::Duration) -> Option<String> {
-    let line = HookLine { agent: Agent::Claude, event: event.to_string(), payload };
+    let line = HookLine { agent: Agent::Claude, event: event.to_string(), payload, takes: Vec::new() };
     let frame = encode_line(&line).expect("encode");
     let mut stream = std::os::unix::net::UnixStream::connect(socket).expect("connect");
     stream.set_read_timeout(Some(patience)).expect("timeout");
@@ -89,6 +89,7 @@ async fn a_pre_tool_use_is_marked_and_answered_after_the_fence() {
                 agent: Agent::Claude,
                 event: "PreToolUse".into(),
                 payload: serde_json::json!({ "session_id": "s1" }),
+                takes: Vec::new(),
             };
             let mut stream = std::os::unix::net::UnixStream::connect(&socket).expect("connect");
             stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).expect("timeout");
@@ -121,7 +122,7 @@ async fn told(socket: &Path, event: &str, payload: serde_json::Value) {
     let socket = socket.to_path_buf();
     let event = event.to_string();
     tokio::task::spawn_blocking(move || {
-        let line = HookLine { agent: Agent::Claude, event, payload };
+        let line = HookLine { agent: Agent::Claude, event, payload, takes: Vec::new() };
         let mut stream = std::os::unix::net::UnixStream::connect(&socket).expect("connect");
         stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).expect("timeout");
         std::io::Write::write_all(&mut stream, encode_line(&line).expect("encode").as_bytes()).expect("write");

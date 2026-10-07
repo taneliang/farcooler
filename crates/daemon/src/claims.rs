@@ -672,6 +672,7 @@ mod tests {
                 "hook_event_name": "Stop",
                 "last_assistant_message": "done",
             }),
+            takes: Vec::new(),
         });
         let mut stream = tokio::net::UnixStream::connect(&socket).await.expect("the daemon listens");
         for line in &lines {

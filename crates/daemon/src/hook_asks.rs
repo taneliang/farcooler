@@ -67,6 +67,8 @@ use crate::hook_ingress::EventSink;
 
 mod shape;
 pub use shape::AskShape;
+#[cfg(test)]
+mod delivery_tests;
 
 /// What every held ask's id starts with, so `terminal.agent_answer` can tell
 /// an answer for a held hook from one for an ACP shim without asking both.
@@ -600,14 +602,15 @@ impl HookAsks {
         let decision = shape::decide(&shape, option, answers, decider)?;
         let (ack, landed) = oneshot::channel();
         let settled = Settled { decision: Some(decision), ack: Some(ack) };
-        if !self.settle_by(terminal, Some(id), settled, option, Some(Some(decider)), "answered") {
+        // The row is told only once the verdict's fate is known (review
+        // 1 M1): it names the device only for an answer the hook took.
+        if !self.settle_by(terminal, Some(id), settled, option, true, false, "answered") {
             // Ended by something else between the look above and now.
             return Err(AnswerRefused::NotHeld);
         }
-        match tokio::time::timeout(ACK_BOUND, landed).await {
-            Ok(Ok(())) => Ok(()),
-            _ => Err(AnswerRefused::NotDelivered),
-        }
+        let landed = matches!(tokio::time::timeout(ACK_BOUND, landed).await, Ok(Ok(())));
+        shape::ended(terminal, id, landed.then_some(decider));
+        if landed { Ok(()) } else { Err(AnswerRefused::NotDelivered) }
     }
 
     /// What one sample of `terminal`'s screen showed: claude's permission
@@ -704,20 +707,23 @@ impl HookAsks {
         record: bool,
         why: &str,
     ) -> bool {
-        self.settle_by(terminal, id, settled, chosen, record.then_some(None), why)
+        self.settle_by(terminal, id, settled, chosen, record, record, why)
     }
 
-    /// `settle`, telling the ask's row it ended (`shape::ended`) unless
-    /// `told` is `None`, and naming the device that answered it when
-    /// `told` is `Some(Some(device))`. The row is told after the ledger's
-    /// lock is let go: a projector reads its file as it folds.
+    /// `settle`, recording its `Resolved` when `record`, and telling the
+    /// ask's row it ended (`shape::ended`, naming nobody) when `note`. The
+    /// row is told after the ledger's lock is let go: a projector reads its
+    /// file as it folds. A device's answer tells the row itself, once it
+    /// knows whether the hook took it.
+    #[allow(clippy::too_many_arguments)]
     fn settle_by(
         &self,
         terminal: Uuid,
         id: Option<&str>,
         settled: Settled,
         chosen: &str,
-        told: Option<Option<&str>>,
+        record: bool,
+        note: bool,
         why: &str,
     ) -> bool {
         let sink = self.sink();
@@ -728,10 +734,10 @@ impl HookAsks {
         let Some(held) = asks.remove(&terminal) else { return false };
         let was_open = held.offered;
         let ended = held.id.clone();
-        end(terminal, held, settled, chosen, told.is_some(), why, sink.as_ref());
+        end(terminal, held, settled, chosen, record, why, sink.as_ref());
         drop(asks);
-        if let Some(by) = told {
-            shape::ended(terminal, &ended, by);
+        if note {
+            shape::ended(terminal, &ended, None);
         }
         if was_open {
             self.changed();

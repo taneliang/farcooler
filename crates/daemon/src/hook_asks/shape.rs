@@ -100,8 +100,20 @@ fn answered(input: &Value, answers: &HashMap<String, String>) -> Result<Decision
 /// The hold of `id` on `terminal` ended: the row it was on stops offering
 /// it, and says `by` answered it when a device did.
 pub(super) fn ended(terminal: Uuid, id: &str, by: Option<&str>) {
+    #[cfg(test)]
+    NOTES.lock().unwrap_or_else(|e| e.into_inner()).push((terminal, id.to_string(), by.map(str::to_string)));
     let note = serde_json::json!({ "ask_id": id, "by": by });
     crate::session_projectors::global().hook(terminal, ASK_ENDED, &note);
+}
+
+/// Every `ended` note, for tests: (terminal, ask id, by).
+#[cfg(test)]
+pub(crate) static NOTES: std::sync::Mutex<Vec<(Uuid, String, Option<String>)>> = std::sync::Mutex::new(Vec::new());
+
+/// The notes `terminal`'s row was sent, for tests.
+#[cfg(test)]
+pub(crate) fn notes_for(terminal: Uuid) -> Vec<(String, Option<String>)> {
+    NOTES.lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|n| n.0 == terminal).map(|n| (n.1.clone(), n.2.clone())).collect()
 }
 
 #[cfg(test)]

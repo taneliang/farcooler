@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use farcooler_agent_hooks::wire::{
-    Decision, HOLD_GRACE, HookLine, HookVerdict, LONGEST_HOLD, decode_line, encode_line,
+    Decision, HOLD_GRACE, HookLine, HookVerdict, LONGEST_HOLD, TAKES_UPDATED_INPUT, decode_line, encode_line,
 };
 use farcooler_agent_hooks::Agent;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -197,7 +197,8 @@ async fn with_input(
     let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&payload) else {
         return String::new();
     };
-    let line = HookLine { agent, event, payload };
+    // It prints `updatedInput` (`claude_shaped_output`), and says so.
+    let line = HookLine { agent, event, payload, takes: vec![TAKES_UPDATED_INPUT.to_string()] };
     let Ok(encoded) = encode_line(&line) else {
         return String::new();
     };
@@ -458,6 +459,26 @@ mod tests {
             parsed["hookSpecificOutput"]["decision"].get("updatedInput").is_none(),
             "a plain allow runs the tool as claude asked: {out}"
         );
+    }
+
+    /// The hook says it prints `updatedInput`, without which the daemon
+    /// never holds a question or a plan for it (ov-370 review 1 M4).
+    #[tokio::test]
+    async fn a_hook_says_it_prints_updated_input() {
+        let dir = tempfile::tempdir().expect("a directory");
+        let socket = dir.path().join("h.sock");
+        let listener = tokio::net::UnixListener::bind(&socket).expect("bind");
+        let heard = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let mut reader = tokio::io::BufReader::new(&mut stream);
+            let mut line = String::new();
+            tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line).await.expect("read");
+            let _ = tokio::io::AsyncWriteExt::write_all(&mut stream, b"{}\n").await;
+            decode_line::<HookLine>(line.trim()).expect("a frame")
+        });
+        let payload = b"{\"session_id\":\"abc\",\"tool_name\":\"AskUserQuestion\"}".to_vec();
+        let _ = run_with_input(Agent::Claude, "PermissionRequest".to_string(), socket, true, payload, SHAPE_NOT_SPEED).await;
+        assert!(heard.await.expect("the daemon heard it").takes_updated_input());
     }
 
     /// An answer to a question, or a plan's approval: claude reads the

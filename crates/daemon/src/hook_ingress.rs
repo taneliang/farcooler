@@ -803,6 +803,14 @@ impl HookIngress {
                     write_reply(&mut write, &Reply::verdict(None)).await?;
                     continue;
                 };
+                // A question or a plan only for a hook that prints its
+                // answer (`HookLine::takes`); an older one gets the keyboard
+                // at once, as before ov-370.
+                let tool = hook.payload["tool_name"].as_str();
+                if !AskShape::of(tool, &serde_json::Value::Null).is_permission() && !hook.takes_updated_input() {
+                    write_reply(&mut write, &Reply::verdict(None)).await?;
+                    continue;
+                }
                 return self.hold_ask(terminal, hook, f, reader, write).await;
             }
             let Some(terminal) = terminal else {
@@ -1177,6 +1185,7 @@ mod tests {
                 "tool_name": "Bash",
                 "tool_input": { "command": "touch x" },
             }),
+            takes: Vec::new(),
         };
         // A std socket with the kernel's read timeout, not tokio's timer:
         // with a worker parked in the claim check, nothing is certain to

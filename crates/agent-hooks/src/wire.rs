@@ -19,6 +19,24 @@ pub struct HookLine {
     /// The agent's own event name, verbatim, in its own spelling.
     pub event: String,
     pub payload: serde_json::Value,
+    /// What this hook binary can print beyond allow and deny (ov-370 review
+    /// 1 M4): `TAKES_UPDATED_INPUT` when it prints a decision's
+    /// `updatedInput`. A hook from before it sends none, and the daemon then
+    /// never holds a question or a plan for it, whose answer it would print
+    /// as a plain allow: the dialog would stay up while a device was told it
+    /// was answered.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub takes: Vec<String>,
+}
+
+/// `HookLine::takes`: the hook prints `Decision::Allow`'s `updatedInput`.
+pub const TAKES_UPDATED_INPUT: &str = "updated_input";
+
+impl HookLine {
+    /// Whether the hook that sent this prints a decision's `updatedInput`.
+    pub fn takes_updated_input(&self) -> bool {
+        self.takes.iter().any(|t| t == TAKES_UPDATED_INPUT)
+    }
 }
 
 /// What a gating hook is told to do.
@@ -166,6 +184,7 @@ mod tests {
             agent: Agent::Claude,
             event: "MessageDisplay".to_string(),
             payload: serde_json::json!({ "session_id": "abc" }),
+            takes: Vec::new(),
         };
         let encoded = encode_line(&line).expect("encodes");
         assert!(encoded.ends_with('\n'), "a frame is one line");

@@ -18,6 +18,8 @@ fn a_dialog_request(tool: &str, input: serde_json::Value) -> HookLine {
     let mut line = a_permission_request(Agent::Claude, "sess-1");
     line.payload["tool_name"] = serde_json::json!(tool);
     line.payload["tool_input"] = input;
+    // A hook that prints `updatedInput`, as this build's does.
+    line.takes = vec![farcooler_agent_hooks::wire::TAKES_UPDATED_INPUT.to_string()];
     line
 }
 
@@ -82,7 +84,6 @@ async fn verdict(asking: &mut Asking) -> serde_json::Value {
 async fn a_held_question_is_answered_once_with_its_answers() {
     let line = a_dialog_request("AskUserQuestion", question_input());
     let Dialog { ingress, terminal, seen, mut asking, id, .. } = a_held_dialog("/wt/question", &line, None).await;
-    assert!(!any_permission(&seen), "no Allow and Deny for a question, on any surface");
 
     let asks = ingress.asks();
     let none = HashMap::new();
@@ -95,6 +96,9 @@ async fn a_held_question_is_answered_once_with_its_answers() {
         verdict(&mut asking).await,
         serde_json::json!({ "decision": { "behavior": "allow", "updatedInput": expected } })
     );
+    // After the verdict, which `hold_ask` writes only after the place an
+    // offer would have been made: a barrier, not a race (review 1 L4).
+    assert!(!any_permission(&seen), "no Allow and Deny for a question, on any surface");
 
     let late = answers(&[("Which color should the button be?", "Red")]);
     assert_eq!(asks.answer_with(terminal, &id, "answer", &late, "iPhone").await, Err(AnswerRefused::NotHeld), "a late second answer");
@@ -106,7 +110,6 @@ async fn a_held_question_is_answered_once_with_its_answers() {
 async fn a_held_plan_is_approved_once() {
     let line = a_dialog_request("ExitPlanMode", plan_input());
     let Dialog { ingress, terminal, seen, mut asking, id, .. } = a_held_dialog("/wt/plan", &line, None).await;
-    assert!(!any_permission(&seen), "no Allow and Deny for a plan on a lock screen");
 
     let asks = ingress.asks();
     assert_eq!(asks.answer(terminal, &id, "allow", "Mac").await, Ok(()));
@@ -114,6 +117,7 @@ async fn a_held_plan_is_approved_once() {
         verdict(&mut asking).await,
         serde_json::json!({ "decision": { "behavior": "allow", "updatedInput": plan_input() } })
     );
+    assert!(!any_permission(&seen), "no Allow and Deny for a plan on a lock screen (after the verdict: a barrier)");
     assert_eq!(asks.answer(terminal, &id, "deny", "iPhone").await, Err(AnswerRefused::NotHeld), "a late second answer");
 }
 
@@ -143,4 +147,26 @@ async fn an_answer_after_the_hold_ended_is_refused() {
         Err(AnswerRefused::NotHeld),
         "a stale ask"
     );
+}
+
+/// A hook from before `takes` would print a question's answer or a plan's
+/// approval as a plain allow, which leaves claude's dialog up (measured on
+/// 2.1.290) while a device is told it answered. So it isn't held at all: it
+/// gets the keyboard at once, as before ov-370 (review 1 M4).
+#[tokio::test]
+async fn a_hook_that_prints_no_updated_input_is_left_to_the_keyboard() {
+    for tool in ["AskUserQuestion", "ExitPlanMode"] {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, terminal) = store_with_terminal("/wt/old-hook", "claude", Some("sess-1"));
+        let ingress = ingress_claiming(store, &[terminal]);
+        let (socket, seen) = listening_on(ingress.clone(), dir.path()).await;
+        let mut line = a_dialog_request(tool, question_input());
+        line.takes.clear();
+        let mut asking = Asking::open(&socket, &line).await;
+        assert_eq!(asking.line(PATIENCE).await.as_deref(), Some("{}\n"), "{tool}: no decision, at once");
+        asking.then(&sentinel(Agent::Claude, serde_json::json!({ "session_id": "sess-1" }))).await;
+        let got = through_the_sentinel(&seen).await;
+        assert!(!ingress.asks().is_holding(terminal), "{tool} was held for a hook that can't print its answer");
+        assert_eq!(got, only_the_sentinel(terminal), "{tool} reached the phones");
+    }
 }
