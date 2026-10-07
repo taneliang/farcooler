@@ -12,9 +12,9 @@
 # shows: idle, working, menu (a permission prompt), picker (a menu with no
 # box), mangle (a paste shows as `[Pasted text #1]`), slow (a paste shows
 # a second late), nobracket (bracketed paste off), draft:<text> (a box
-# already holding <text>), or menu-on-paste (idle until a paste arrives, then
-# the menu, drawn in the same pass that logs PASTE, so a test never races a
-# menu against the read-back).
+# already holding <text>), or <mode>-on-paste (idle until a paste arrives,
+# then <mode>: menu, working, working-hidden…, drawn in the same pass that
+# logs PASTE, so a test never races it against the read-back).
 #
 # While working, Enter queues the box as the real agents do (ov-360): it
 # logs `QUEUED <box>`, draws it above the box as claude 2.1.290 or codex
@@ -84,7 +84,8 @@ sub record {
     close $f;
 }
 
-sub working { return $_[0] =~ /^working(-quiet|-hidden|-long)?$/ }
+# working-lagging: the screen works, the registry still says idle.
+sub working { return $_[0] =~ /^working(-quiet|-hidden|-long|-lagging)?$/ }
 
 # The command claude's popup highlights for the box, or undef with no popup.
 sub highlighted {
@@ -199,11 +200,11 @@ sub take {
 
 draw();
 my $buf = "";
-my $fired = 0;    # menu-on-paste's paste has arrived: the menu stays up
+my $fired = "";   # an X-on-paste's paste has arrived: X stays up
 while (1) {
     my $now = mode();
-    $fired = 0 if $now ne 'menu-on-paste';
-    $now = 'menu' if $fired;
+    $fired = "" if $now !~ /-on-paste$/;
+    $now = $fired if $fired ne "";
     if ($now ne $mode) {
         if (working($mode) && !working($now)) {
             for my $q (@queued) {
@@ -217,7 +218,7 @@ while (1) {
         }
         $mode = $now;
         # Not when a test took the registry away.
-        registry(working($mode) ? "busy" : "idle") if defined $registry && -e $registry;
+        registry(working($mode) && $mode ne 'working-lagging' ? "busy" : "idle") if defined $registry && -e $registry;
         $composer = $1 if $mode =~ /^draft:(.*)$/s;
         print($mode eq 'nobracket' ? "\e[?2004l" : "\e[?2004h");
         draw();
@@ -256,7 +257,10 @@ while (1) {
                 take($mode eq 'mangle' ? "[Pasted text #1]" : $text);
             }
             logit("PASTE " . logged($text));
-            ($fired, $mode) = (1, 'menu') if $mode eq 'menu-on-paste';
+            if ($mode =~ /^(.+)-on-paste$/) {
+                ($fired, $mode) = ($1, $1);
+                registry(working($mode) && $mode ne 'working-lagging' ? "busy" : "idle") if defined $registry && -e $registry;
+            }
         } elsif (substr($buf, 0, 6) eq "\e[200~") {
             $buf = substr($buf, 6);
             $pasting = 1;

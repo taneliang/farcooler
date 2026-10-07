@@ -942,6 +942,10 @@ pub struct Watcher {
     /// Make each mid-turn Enter's send take this many ms (`mid_turn`'s tests).
     #[cfg(test)]
     slow_enter_ms: std::sync::atomic::AtomicU64,
+    /// Run once, right before compose's last check ahead of a between-turns
+    /// Enter (`compose`'s tests): a key typed after the box read back.
+    #[cfg(test)]
+    before_enter: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 /// One client's claim about what it is showing, and when it said so.
@@ -2818,6 +2822,8 @@ impl Watcher {
             after_dialog_read: std::sync::Mutex::new(None),
             #[cfg(test)]
             slow_enter_ms: std::sync::atomic::AtomicU64::new(0),
+            #[cfg(test)]
+            before_enter: std::sync::Mutex::new(None),
             clears_pending: std::sync::Mutex::new(HashSet::new()),
             taps: std::sync::Mutex::new(None),
             task_notices: std::sync::Mutex::new(HashMap::new()),

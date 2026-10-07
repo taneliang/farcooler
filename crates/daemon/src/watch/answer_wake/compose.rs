@@ -301,13 +301,17 @@ impl Watcher {
             self.shown(to, preset, started, &expected, None).await.left(&proven.tty, preset).await?;
         }
         let submitted = composed.submitted(&placeholders);
-        if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started) {
-            return Err(DomainError::Conflict { what: "paste_left" });
-        }
         let since = Instant::now();
         let queued_before = mid_turn::enqueued_before(&transcript, from, &submitted);
         match &witness {
-            None => runtime.send_bytes_hex(to.id, "0d").await?,
+            None => {
+                #[cfg(test)]
+                if let Some(run) = self.before_enter.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                    run();
+                }
+                self.still_between(to, preset, proven.pid, started, &expected).await?;
+                runtime.send_bytes_hex(to.id, "0d").await?
+            }
             Some(witness) => {
                 let witness = witness.clone().pasted_at(started);
                 self.enter_expecting(to, preset, &witness, &expected).await.map_err(|no| match no {
@@ -320,6 +324,27 @@ impl Watcher {
         self.mark_told(to.id);
         let took = Confirm { session, transcript, from, queued_before, since, submitted };
         self.took(&took).await.ok_or(DomainError::Conflict { what: "unconfirmed" })
+    }
+
+    /// The last check before a between-turns Enter, which goes in with no
+    /// fence: the pastes can take seconds, and claude may have begun a turn
+    /// of its own meanwhile (a background task finishing). Nobody typed since
+    /// the paste began; a fresh capture reads Idle with the box showing
+    /// `expected`; and claude's registry still says idle. Anything else
+    /// leaves the text in the box: `paste_left`.
+    async fn still_between(&self, to: &Terminal, preset: &str, pid: i32, started: i64, expected: &Expected) -> Result<()> {
+        let left = DomainError::Conflict { what: "paste_left" };
+        if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started) {
+            return Err(left);
+        }
+        let (screen, _, _) = self.service.screen(to.id).await?;
+        if self.service.registry().classify(preset, &screen) != AgentActivity::Idle
+            || !expected.shown_by(&composer::read(preset, &screen))
+            || registry_turn::said_of(pid).await != registry_turn::Said::Idle
+        {
+            return Err(left);
+        }
+        Ok(())
     }
 
     /// Write `composed`'s images to the runner's paste directory, which a

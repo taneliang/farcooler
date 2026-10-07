@@ -302,3 +302,29 @@ async fn a_watcher_that_lost_the_agent_defers_to_claudes_registry() {
     assert_eq!(b.watcher.compose_into(agent.id, "now", &[]).await.expect("queued"), Turn::During);
     assert!(si.log().contains("QUEUED now"), "{}", si.log());
 }
+
+/// claude begins a turn of its own while the text is pasted, between
+/// turns: the last check before the unfenced Enter sees it on the screen
+/// (its registry lagging), or in its registry when the screen doesn't show
+/// it. No Enter; the text is left in the box.
+#[tokio::test]
+async fn a_turn_begun_during_the_paste_gets_no_enter() {
+    for mode in ["working-lagging-on-paste", "working-hidden-on-paste"] {
+        let b = board().await;
+        let (agent, si) = idle_claude(&b).await;
+        si.show(mode).await;
+        assert_eq!(refused(b.watcher.compose_into(agent.id, "one\ntwo", &[]).await), "paste_left", "{mode}");
+        assert!(si.log().contains("PASTE ") && !si.log().contains("ENTER"), "{mode}: {}", si.log());
+    }
+}
+
+/// A key typed after the box read back, before the Enter: no Enter.
+#[tokio::test]
+async fn a_key_typed_after_the_read_back_gets_no_enter() {
+    let b = board().await;
+    let (agent, si) = idle_claude(&b).await;
+    let (root, id) = (b.svc.root_dir().to_path_buf(), agent.id);
+    *b.watcher.before_enter.lock().unwrap() = Some(Box::new(move || crate::runtime::mark_input(&root, id)));
+    assert_eq!(refused(b.watcher.compose_into(agent.id, "one\ntwo", &[]).await), "paste_left");
+    assert!(si.log().contains("PASTE ") && !si.log().contains("ENTER"), "{}", si.log());
+}
