@@ -94,7 +94,6 @@ SHARDS = {
         "ChangesLfsNoticeTests",  # -changes-layout-harness -lfs-pointers (ov-199); 48 s
         "WorkspaceChromeTests",  # -phone-harness -phone-plan (ov-342); 68 s
         "RunnerReachTests",  # seeded -hosts at an address that never answers; 11 s
-        "NativeAgentViewTests",  # -native-agent-harness (ov-373); 14 tests, about 210 s on this Mac
     ],
 }
 
@@ -102,6 +101,7 @@ SHARDS = {
 LOCAL = {
     "ComposerWidthUITests": "needs an iPad simulator (fc-lanes-ipad); CI's shards run on an iPhone",
     "KeyboardTabStripTests": "needs a real iPhone; skips on any simulator",
+    "NativeAgentViewTests": "times out on CI's simulator but not locally (runs 37585430997, 37597338762); off CI until ov-401 finds why",
     "NewTerminalTests": "needs the demo runner",
     "PadWorkspaceUITests": "needs an iPad simulator (fc-lanes-ipad); CI's shards run on an iPhone",
     "TerminalPermissionTests": "needs the demo runner",
