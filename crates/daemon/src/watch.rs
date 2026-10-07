@@ -925,6 +925,10 @@ pub struct Watcher {
     /// Held across a draft's paste, a pass over the holds and a withdrawal,
     /// so none of them cross.
     draft_pump: tokio::sync::Mutex<()>,
+    /// One lock per terminal, held by whatever types into its box from the
+    /// gate's first check through Enter: an answer, a draft or a held one, a
+    /// told or composed message (`answer_wake::Watcher::typing`, ov-372).
+    typing: std::sync::Mutex<HashMap<Uuid, std::sync::Arc<tokio::sync::Mutex<()>>>>,
     /// The sessions of recorded subagents being read (`workers`).
     worker_follow: std::sync::Mutex<workers::Follower>,
     /// Make the next paste fail as a send would (`answer_wake`'s tests).
@@ -2804,6 +2808,7 @@ impl Watcher {
             wake_holds: std::sync::Mutex::new(HashMap::new()),
             draft_holds: std::sync::Mutex::new(HashMap::new()),
             draft_pump: tokio::sync::Mutex::new(()),
+            typing: std::sync::Mutex::new(HashMap::new()),
             worker_follow: std::sync::Mutex::new(workers::Follower::new(
                 std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default(),
             )),

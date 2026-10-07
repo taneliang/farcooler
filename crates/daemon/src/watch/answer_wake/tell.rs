@@ -122,6 +122,9 @@ impl Watcher {
         if let Some(left) = told.map(|at| TOLD_SPACING_MS - (now_millis() - at)).filter(|left| *left > 0) {
             tokio::time::sleep(std::time::Duration::from_millis(left as u64)).await;
         }
+        // Held through the Enter and the queue's confirmation: no answer or
+        // draft pastes into this box meanwhile.
+        let _typing = self.typing(to.id).await;
         self.ready(&to).await.map_err(|held| DomainError::Conflict { what: held_word(held) })?;
         let proven = self.proven_tui(&to).await.map_err(|held| DomainError::Conflict { what: held_word(held) })?;
         let witness = match proven.turn {

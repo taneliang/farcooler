@@ -239,6 +239,7 @@ impl Watcher {
         if !self.service.is_running(to) {
             return Err(Held::NotAnAgent);
         }
+        let _typing = self.typing(to.id).await;
         self.ready(to).await?;
         self.proven_tui(to).await?;
         let runtime = Runtime { marks: None, ..self.service.runtime() };

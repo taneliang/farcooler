@@ -413,6 +413,8 @@ impl Watcher {
         let Some(to) = self.recipient(&task).await else {
             return self.settle(wake, Some(&task), left(Some(nobody(wake.kind))));
         };
+        // Nothing else types into this box until the answer is in.
+        let _typing = self.typing(to.id).await;
         let pass = match self.ready(&to).await {
             Err(held) => Pass::Waiting(held),
             Ok(turn) => {
@@ -669,6 +671,17 @@ impl Watcher {
             Err(Held::Prompt) if hold => Ok(draft_hold::Drafted::Held(self.hold_draft(&to, text))),
             Err(_) => Err(DomainError::Conflict { what: "not_pasteable" }),
         }
+    }
+
+    /// Hold `terminal`'s box for typing: one paste and its Enter at a time,
+    /// whoever types. Every typing path takes it last, after `wake_pump` or
+    /// `draft_pump`, so the order of the locks never crosses. Before
+    /// ov-372 only answers and drafts kept apart; `terminal.compose` reaches
+    /// the worker panes they're typed into, and a held draft pasted after a
+    /// composed message's read-back would have gone out with its Enter.
+    pub(crate) async fn typing(&self, terminal: Uuid) -> tokio::sync::OwnedMutexGuard<()> {
+        let lock = std::sync::Arc::clone(self.typing.lock().unwrap_or_else(|e| e.into_inner()).entry(terminal).or_default());
+        lock.lock_owned().await
     }
 
     /// The pane's box as a fresh capture shows it, and whether a turn is

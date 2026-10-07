@@ -47,6 +47,40 @@ async fn a_composed_message_is_submitted_into_a_worker_claude_pane() {
     assert_eq!(si.submitted(), ["fix the build then the docs"], "{}", si.log());
 }
 
+/// A composed message and a draft never type into one box at once
+/// (ov-372): whichever holds the box (`Watcher::typing`, as an answer, a
+/// held draft's pass or another send does) is through its Enter before the
+/// other pastes. Here the box is held, and neither types until it's free.
+#[tokio::test]
+async fn a_composed_message_and_a_draft_wait_for_the_box() {
+    let b = board().await;
+    let agent = b.agent("Agent 2", "claude").await;
+    let si = b.stand_in(&agent, "claude", "claude").await;
+    b.doing(agent.id, AgentActivity::Idle).await;
+    let held = b.watcher.typing(agent.id).await;
+    let watcher = std::sync::Arc::clone(&b.watcher);
+    let composed = tokio::spawn(async move { watcher.submit_into(agent.id, "carry on", false).await });
+    let watcher = std::sync::Arc::clone(&b.watcher);
+    let drafted = tokio::spawn(async move { watcher.draft_into(agent.id, "About ov-1: ", false).await });
+    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+    nothing_typed(&si);
+    assert!(!composed.is_finished() && !drafted.is_finished(), "one typed past the held box");
+    drop(held);
+    // One goes first and the other finds its box taken (a draft, or a
+    // message), never both pasted together.
+    let (composed, drafted) = (composed.await.unwrap(), drafted.await.unwrap());
+    match &composed {
+        Ok(_) => si.submits(1).await,
+        Err(e) => assert_eq!(e.what(), "draft", "the draft went first, and the message found it: {composed:?}"),
+    }
+    assert!(composed.is_ok() || drafted.is_ok(), "{composed:?} {drafted:?}");
+    // What was submitted is the message alone, never a draft pasted in
+    // after its read-back.
+    for submitted in si.submitted() {
+        assert_eq!(submitted, "carry on", "{}", si.log());
+    }
+}
+
 /// Two messages a moment apart: the second waits out the spacing an answer
 /// would, rather than be refused for it.
 #[tokio::test]
