@@ -111,6 +111,9 @@ pub fn check_version(found: &str, expected: &str) -> Result<(), BackendError> {
     Err(BackendError::Incompatible { found: found.to_string(), expected: expected.to_string() })
 }
 
+/// How long a failed handshake waits for a dead codex's stderr to end.
+const STDERR_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Start `codex app-server`, send `initialize`, and read until it answers.
 ///
 /// Blocking, like the ACP handshake it sits beside, and for the same reason:
@@ -127,9 +130,14 @@ pub fn handshake(launch: &Launch, timeout: std::time::Duration) -> Result<String
         .current_dir(std::env::temp_dir())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        // Piped, not discarded: when codex dies before answering, its stderr
+        // is the only place that says why. On Oct 7 npm served the launcher
+        // without its platform binary, and all CI could report was "closed
+        // without answering" while the launcher printed the reason here.
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("could not start `{shown}`: {e}"))?;
+    let stderr = drain(child.stderr.take().expect("piped"));
 
     let mut stdin = child.stdin.take().expect("piped");
     let request = initialize_request(1);
@@ -137,7 +145,13 @@ pub fn handshake(launch: &Launch, timeout: std::time::Duration) -> Result<String
     if let Err(e) = sent {
         let _ = child.kill();
         let _ = child.wait();
-        return Err(format!("could not talk to `{shown}`: {e}"));
+        // A broken pipe here is the same death as "closed without
+        // answering", only quicker, so it says why the same way.
+        let said = stderr.recv_timeout(STDERR_GRACE).ok();
+        return Err(match said.as_deref().and_then(reason_in) {
+            Some(reason) => format!("could not talk to `{shown}`: {e}: {reason}"),
+            None => format!("could not talk to `{shown}`: {e}"),
+        });
     }
 
     let stdout = child.stdout.take().expect("piped");
@@ -164,13 +178,26 @@ pub fn handshake(launch: &Launch, timeout: std::time::Duration) -> Result<String
         let _ = tx.send(result);
     });
 
-    let answer = rx
-        .recv_timeout(timeout)
-        .unwrap_or_else(|_| Err("codex app-server started and then went silent".to_string()));
+    // `closed`: the reader finished on its own, so stdout ended — as opposed
+    // to the bound running out on a codex that is still alive.
+    let (answer, closed) = match rx.recv_timeout(timeout) {
+        Ok(answer) => (answer, true),
+        Err(_) => (Err("codex app-server started and then went silent".to_string()), false),
+    };
     let _ = child.kill();
     let _ = child.wait();
 
-    let value = answer?;
+    // Only when stdout closed on its own, which is how a codex that died at
+    // startup looks. The child has been reaped by now, so its stderr has
+    // ended and the wait is for the drain thread to notice — bounded all the
+    // same, because a grandchild could still hold the pipe open.
+    let value = answer.map_err(|e| {
+        let said = closed.then(|| stderr.recv_timeout(STDERR_GRACE).ok()).flatten();
+        match said.as_deref().and_then(reason_in) {
+            Some(reason) => format!("{e}: {reason}"),
+            None => e,
+        }
+    })?;
     if let Some(error) = value.get("error") {
         let message = error
             .get("message")
@@ -191,6 +218,51 @@ pub fn handshake(launch: &Launch, timeout: std::time::Duration) -> Result<String
     check_version(&version, PINNED_CODEX_VERSION).map_err(|e| e.to_string())?;
 
     Ok(format!("codex app-server {version}"))
+}
+
+/// The one line of a dead codex's stderr that says why it died.
+///
+/// Node's uncaught-error report opens with the source line and a caret and
+/// closes with a stack and the node version, so neither the first nor the last
+/// line is the reason: the line starting `Error:` is. A Rust codex that refuses
+/// its arguments says `error: …` instead. Anything else falls back to the last
+/// thing said. Capped, because this ends up in a one-line status.
+fn reason_in(stderr: &str) -> Option<String> {
+    let lines = || stderr.lines().map(str::trim).filter(|l| !l.is_empty());
+    let line = lines()
+        .find(|l| l.starts_with("Error:") || l.starts_with("error:"))
+        .or_else(|| lines().last())?;
+    const CAP: usize = 300;
+    if line.chars().count() > CAP {
+        Some(line.chars().take(CAP).chain(['…']).collect())
+    } else {
+        Some(line.to_string())
+    }
+}
+
+/// Read a child's stderr to its end on a thread of its own, keeping the head.
+///
+/// Read to the end rather than stopping at the cap, so a chatty child never
+/// blocks on a full pipe; only the first 64 KiB is kept, which is where a
+/// startup failure puts its reason.
+fn drain(stderr: std::process::ChildStderr) -> std::sync::mpsc::Receiver<String> {
+    use std::io::Read;
+    const KEEP: usize = 64 * 1024;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut stderr = stderr;
+        let mut kept = Vec::new();
+        let mut chunk = [0u8; 4096];
+        while let Ok(n) = stderr.read(&mut chunk) {
+            if n == 0 {
+                break;
+            }
+            let room = KEEP.saturating_sub(kept.len());
+            kept.extend_from_slice(&chunk[..n.min(room)]);
+        }
+        let _ = tx.send(String::from_utf8_lossy(&kept).into_owned());
+    });
+    rx
 }
 
 #[cfg(test)]
@@ -261,6 +333,68 @@ mod tests {
             .unwrap()
             .trim_start_matches("codex-cli ")
             .trim());
+    }
+
+    /// A stand-in `codex` that does what npm's launcher did on CI on Oct 7:
+    /// print node's uncaught-error report to stderr and exit without a word
+    /// on stdout. The text is the launcher's own, read off a 0.161.0 install
+    /// with its platform package removed.
+    fn a_codex_whose_binary_is_missing(name: &str) -> Launch {
+        use std::os::unix::fs::PermissionsExt;
+        let path = std::env::temp_dir()
+            .join(format!("farcooler-codex-handshake-{}-{name}", std::process::id()));
+        std::fs::write(&path, concat!(
+            "#!/bin/sh\n",
+            // Takes the request first, so the write cannot race the exit and
+            // land in the broken-pipe branch instead of the one under test.
+            "read request\n",
+            "echo 'file:///x/lib/node_modules/@openai/codex/bin/codex.js:107' >&2\n",
+            "echo '  throw new Error(' >&2\n",
+            "echo '' >&2\n",
+            "echo 'Error: Missing optional dependency @openai/codex-linux-x64. ",
+            "Reinstall Codex: npm install -g @openai/codex@latest' >&2\n",
+            "echo '    at findCodexExecutable (file:///x/codex.js:107:9)' >&2\n",
+            "echo '' >&2\n",
+            "echo 'Node.js v24.0.0' >&2\n",
+            "exit 1\n",
+        ))
+        .unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        Launch { program: path, args: Vec::new(), env: Default::default() }
+    }
+
+    #[test]
+    fn a_codex_that_exits_unanswered_is_reported_in_its_own_words() {
+        // The CI failure this exists for (ov-410): npm published codex 0.161.0
+        // before its linux-x64 binary, CI installed the launcher alone, and
+        // the handshake said only "closed without answering" — the one line
+        // that named the cause went to /dev/null.
+        let launch = a_codex_whose_binary_is_missing("unanswered");
+        let result = handshake(&launch, std::time::Duration::from_secs(60));
+        let _ = std::fs::remove_file(&launch.program);
+        let e = result.expect_err("nothing answered");
+        assert!(e.contains("closed without answering"), "still says what happened: {e}");
+        assert!(
+            e.contains("Missing optional dependency @openai/codex-linux-x64"),
+            "and says why, in codex's words: {e}"
+        );
+        assert!(!e.contains("findCodexExecutable"), "but not node's stack: {e}");
+    }
+
+    #[test]
+    fn the_reason_is_the_error_line_or_else_the_last_thing_said() {
+        assert_eq!(
+            reason_in("file:///x.js:1\n\nError: it broke\n    at f (x.js:1)\n\nNode.js v24\n")
+                .as_deref(),
+            Some("Error: it broke")
+        );
+        assert_eq!(
+            reason_in("starting\nerror: unexpected argument 'app-server'\n").as_deref(),
+            Some("error: unexpected argument 'app-server'")
+        );
+        assert_eq!(reason_in("first\nlast words\n\n").as_deref(), Some("last words"));
+        assert_eq!(reason_in(" \n\n"), None);
+        assert_eq!(reason_in(&"x".repeat(1000)).map(|r| r.chars().count()), Some(301));
     }
 
     #[test]
