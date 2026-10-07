@@ -14,6 +14,8 @@ import Foundation
 actor RunnerCore {
     nonisolated(unsafe) private var handle: UnsafeMutableRawPointer?
     private var waiting: [UInt64: CheckedContinuation<Data, Error>] = [:]
+    /// The tickets that are connects, whose failures carry the core's word.
+    private var connecting: Set<UInt64> = []
     private var pump: Task<Void, Never>?
     /// What the runner's hello offered, empty until connected.
     private(set) var capabilities: Set<String> = []
@@ -29,10 +31,15 @@ actor RunnerCore {
         /// No answer by the call's deadline: it may still be done.
         case timedOut(String)
         case notConnected
+        /// A connect that failed before there was a session, by the core's
+        /// word for why (`trouble`: `key_rejected`, `host_key_unknown`, …)
+        /// and the host key it was shown, if any. Only a connect answers
+        /// this; a call on a session that drops is `lost`.
+        case unconnected(String, trouble: String, fingerprint: String?)
 
         var errorDescription: String? {
             switch self {
-            case .refused(let message, _, _), .lost(let message, _), .timedOut(let message): message
+            case .refused(let message, _, _), .lost(let message, _), .timedOut(let message), .unconnected(let message, _, _): message
             case .notConnected: "The runner isn't connected."
             }
         }
@@ -79,6 +86,23 @@ actor RunnerCore {
         return capabilities
     }
 
+    /// Connect to a remote runner over the core's own ssh session (ov-408),
+    /// signing in with `privateKey` and requiring the host key
+    /// `fingerprint`, or, with none, failing with the key the runner showed
+    /// (`unconnected`, `host_key_unknown`) before anything is sent: an
+    /// unpinned connect never authenticates.
+    @discardableResult
+    func connect(reach: RemoteReach, privateKey: String, fingerprint: String?) async throws -> Set<String> {
+        var config: [String: Any] = ["host": reach.host, "port": reach.port, "user": reach.user, "private_key": privateKey]
+        if let fingerprint { config["host_fingerprint"] = fingerprint }
+        let data = try await submit(connect: true) { handle in
+            Self.json(config).withCString { farcooler_client_connect(handle, $0) }
+        }
+        let object = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+        capabilities = Set(object["capabilities"] as? [String] ?? [])
+        return capabilities
+    }
+
     /// Invoke a method; its result's JSON, undecoded.
     func call(_ method: String, _ args: [String: any Sendable]) async throws -> Data {
         try await submit { handle in
@@ -86,10 +110,11 @@ actor RunnerCore {
         }
     }
 
-    private func submit(_ start: (UnsafeMutableRawPointer) -> UInt64) async throws -> Data {
+    private func submit(connect: Bool = false, _ start: (UnsafeMutableRawPointer) -> UInt64) async throws -> Data {
         guard let handle else { throw Failure.notConnected }
         let ticket = start(handle)
         guard ticket != 0 else { throw Failure.refused("The call couldn't be made.", word: nil, what: nil) }
+        if connect { connecting.insert(ticket) }
         startPumping()
         return try await withCheckedThrowingContinuation { waiting[ticket] = $0 }
     }
@@ -116,13 +141,17 @@ actor RunnerCore {
                 let ticket = (object["ticket"] as? NSNumber)?.uint64Value,
                 let continuation = waiting.removeValue(forKey: ticket)
             else { continue }
+            let wasConnect = connecting.remove(ticket) != nil
             if object["ok"] as? Bool == true {
                 let result = object["result"] ?? [String: Any]()
                 continuation.resume(
                     returning: (try? JSONSerialization.data(withJSONObject: result, options: [.fragmentsAllowed])) ?? Data("{}".utf8))
             } else {
                 let message = object["error"] as? String ?? "The runner refused the request."
-                if object["timed_out"] as? Bool == true {
+                if wasConnect, let trouble = object["trouble"] as? String {
+                    continuation.resume(
+                        throwing: Failure.unconnected(message, trouble: trouble, fingerprint: object["fingerprint"] as? String))
+                } else if object["timed_out"] as? Bool == true {
                     continuation.resume(throwing: Failure.timedOut(message))
                 } else if object["disconnected"] as? Bool == true || object["trouble"] != nil || object["not_sent"] as? Bool == true {
                     continuation.resume(throwing: Failure.lost(message, notSent: object["not_sent"] as? Bool == true))
@@ -154,6 +183,9 @@ actor RunnerCore {
 struct CoreRowSource: AgentRowSource {
     let core: RunnerCore
     let terminal: String
+    /// Told when a call finds the link gone, so the runner's connection is
+    /// made again now (`NativeAgents.linkLost`).
+    var lost: (@Sendable () -> Void)? = nil
 
     func page(before: UInt64?, limit: Int) async throws -> Data {
         var args: [String: any Sendable] = ["terminal": terminal, "limit": limit]
@@ -174,6 +206,12 @@ struct CoreRowSource: AgentRowSource {
             return try await call()
         } catch let failure as RunnerCore.Failure where ["capability-unsupported", "not-found"].contains(failure.word ?? "") {
             throw AgentRowsUnavailable()
+        } catch let failure as RunnerCore.Failure {
+            switch failure {
+            case .lost, .notConnected: lost?()
+            default: break
+            }
+            throw failure
         }
     }
 }

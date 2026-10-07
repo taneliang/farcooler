@@ -45,6 +45,8 @@ struct DevicesSettings: View {
                 .fixedSize(horizontal: false, vertical: true)
             }
 
+            ConversationPairingSection()
+
             Section {
                 RemoteLoginView()
             }

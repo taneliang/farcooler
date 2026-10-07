@@ -157,6 +157,10 @@ final class FleetStore: ObservableObject {
             // transition and seeds repositories, roots and layouts on its
             // own. Bring-up does not need to read them itself afterward.
             client.onReconnect = { [weak self] in
+                // A remote runner's conversation connection is the client
+                // core's own ssh session (ov-408), made once the fleet has
+                // reached it; this Mac's is made at bring-up.
+                if !target.isEmpty { NativeAgents.shared.start(target: target) }
                 Task { @MainActor in await self?.seed(target) }
             }
             clientObservers[target] = client.objectWillChange.sink { [weak self] _ in
@@ -174,6 +178,7 @@ final class FleetStore: ObservableObject {
             bringUpTasks[target] = nil
             client.onReconnect = nil
             client.stopEvents()
+            NativeAgents.shared.forget(target)
             clients[target] = nil
             clientObservers[target] = nil
         }
