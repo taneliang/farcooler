@@ -27,6 +27,7 @@ struct PlanSpecimenTests {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: bin)
         process.arguments = args
+        // GlanceTests can't see `ScratchDaemon`; `ScratchConfigTests` checks this line.
         process.environment = ProcessInfo.processInfo.environment.merging(["FARCOOLER_HOME": home, "FARCOOLER_CONFIG": home + "/config.toml"]) { _, new in new }
         let out = Pipe()
         process.standardOutput = out

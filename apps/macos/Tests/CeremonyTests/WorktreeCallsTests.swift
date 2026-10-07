@@ -545,8 +545,7 @@ struct WorktreeCallsTests {
         process.arguments = line
         var environment = ProcessInfo.processInfo.environment
         let home = "/tmp/fc-t/ui-2/h-\(UUID().uuidString.prefix(8))"
-        environment["FARCOOLER_HOME"] = home
-        environment["FARCOOLER_CONFIG"] = home + "/config.toml"
+        ScratchDaemon.isolate(&environment, home: home)
         process.environment = environment
         let err = Pipe()
         process.standardOutput = FileHandle.nullDevice
@@ -595,8 +594,7 @@ struct WorktreeCallsTests {
         var environment = ProcessInfo.processInfo.environment
         let home = FileManager.default.temporaryDirectory
             .appendingPathComponent("fc-worktree-calls-\(UUID().uuidString)").path
-        environment["FARCOOLER_HOME"] = home
-        environment["FARCOOLER_CONFIG"] = home + "/config.toml"
+        ScratchDaemon.isolate(&environment, home: home)
         process.environment = environment
         let err = Pipe()
         process.standardOutput = FileHandle.nullDevice

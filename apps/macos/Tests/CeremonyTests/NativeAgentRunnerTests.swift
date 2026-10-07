@@ -36,10 +36,9 @@ struct NativeAgentRunnerTests {
 
     private static func environment(_ home: String) -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
-        environment["FARCOOLER_HOME"] = home + "/h"
+        ScratchDaemon.isolate(&environment, home: home + "/h", config: home + "/config.toml")
         environment["FARCOOLER_TEST_STUB_AGENTS"] = "1"
         environment["CLAUDE_CONFIG_DIR"] = home + "/claude"
-        environment["FARCOOLER_CONFIG"] = home + "/config.toml"
         environment.removeValue(forKey: "FARCOOLER_PROJECTOR")
         return environment
     }

@@ -7,12 +7,21 @@ import Foundation
 /// shell for as long as the Mac is up; `test.sh` runs every test under
 /// `scripts/tmux-leak-check.py`, which fails the run on one.
 enum ScratchDaemon {
+    /// The one place a test names `FARCOOLER_HOME`: a scratch home and its
+    /// own config.toml together (`config`, beside the home unless a test
+    /// keeps it elsewhere), so no launch can read or write this Mac's shared
+    /// `[agents] projector` and adapters (ov-394). `ScratchConfigTests` fails
+    /// any other test source that names the key.
+    static func isolate(_ environment: inout [String: String], home: String, config: String? = nil) {
+        environment["FARCOOLER_HOME"] = home
+        environment["FARCOOLER_CONFIG"] = config ?? home + "/config.toml"
+    }
+
     /// Stop the daemon `cli` runs under `farcoolerHome`, then its tmux
     /// server, by the socket `status` names in its recovery line.
     static func stop(cli: String, farcoolerHome: String) async {
         var environment = ProcessInfo.processInfo.environment
-        environment["FARCOOLER_HOME"] = farcoolerHome
-        environment["FARCOOLER_CONFIG"] = farcoolerHome + "/config.toml"
+        isolate(&environment, home: farcoolerHome)
         let status = await ProcessRunner.run(cli, ["status"], environment: environment, deadline: 30)
         _ = await ProcessRunner.run(cli, ["daemon", "stop"], environment: environment, deadline: 30)
         let said = String(decoding: status.stdout, as: UTF8.self)

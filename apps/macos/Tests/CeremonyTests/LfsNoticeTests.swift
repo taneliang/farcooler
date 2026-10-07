@@ -86,10 +86,7 @@ struct LfsNoticeTests {
         var environment = ProcessInfo.processInfo.environment
         for key in environment.keys where key.hasPrefix("GIT_") { environment[key] = nil }
         environment["GIT_CONFIG_GLOBAL"] = "/dev/null"
-        if let home {
-            environment["FARCOOLER_HOME"] = home
-            environment["FARCOOLER_CONFIG"] = home + "/config.toml"
-        }
+        if let home { ScratchDaemon.isolate(&environment, home: home) }
         process.environment = environment
         if let directory { process.currentDirectoryURL = URL(fileURLWithPath: directory) }
         let out = Pipe()

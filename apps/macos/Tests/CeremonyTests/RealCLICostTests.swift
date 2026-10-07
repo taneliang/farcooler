@@ -15,8 +15,7 @@ import Testing
 struct RealCLICostTests {
     private func farcooler(_ args: [String], home: String) async -> (ok: Bool, out: Data, err: String) {
         var environment = ProcessInfo.processInfo.environment
-        environment["FARCOOLER_HOME"] = home + "/h"
-        environment["FARCOOLER_CONFIG"] = home + "/h/config.toml"
+        ScratchDaemon.isolate(&environment, home: home + "/h")
         for key in ["FARCOOLER_WORKSPACE", "FARCOOLER_ACTOR", "FARCOOLER_TASK"] { environment.removeValue(forKey: key) }
         let ran = await ProcessRunner.run(RealCLIPagesTests.cli!, args, environment: environment, deadline: 60)
         return (ran.succeeded, ran.stdout, String(decoding: ran.stderr, as: UTF8.self))
