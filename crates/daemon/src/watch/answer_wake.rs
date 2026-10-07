@@ -539,7 +539,10 @@ impl Watcher {
                     held_exactly = true;
                     break;
                 }
-                Ok(Err(Held::Prompt)) => dialog = true,
+                Ok(Err(Held::Prompt)) => {
+                    dialog = true;
+                    self.after_dialog_read_for_tests();
+                }
                 _ => dialog = false,
             }
         }
@@ -690,6 +693,14 @@ impl Watcher {
         return self.fail_sends.swap(false, Ordering::SeqCst);
         #[cfg(not(test))]
         false
+    }
+
+    /// Run the hook a test set to act just after a dialog was read.
+    fn after_dialog_read_for_tests(&self) {
+        #[cfg(test)]
+        if let Some(hook) = self.after_dialog_read.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            hook();
+        }
     }
 
     fn mark_told(&self, terminal: Uuid) {

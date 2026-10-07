@@ -172,29 +172,22 @@ async fn a_pasted_answer_someone_typed_beside_is_never_entered_in_claude() {
     assert_eq!(b.settled(), ["Paste left in the composer; not sent"]);
 }
 
-/// Answer an idle claude, and put a permission menu up the moment the paste
-/// reaches it; with `typing`, then type a key once the menu has been read.
+/// Answer an idle claude whose stand-in puts a permission menu up in the
+/// very pass that takes the paste (`menu-on-paste`), so the menu is up before
+/// the read-back can run. With `typing`, a key is marked as typed right after
+/// the read-back first reads that menu (`after_dialog_read`): after the menu
+/// was seen, before the pass settles, at no clock's mercy.
 async fn answered_as_a_menu_comes_up(b: &Board, agent: &Terminal, si: &StandIn, typing: bool) {
     hooked(b);
     b.doing(agent.id, AgentActivity::Idle).await;
-    let (log, control, root, id) = (si.log.clone(), si.control.clone(), b.svc.root_dir().to_path_buf(), agent.id);
-    let menu = tokio::spawn(async move {
-        for _ in 0..1_000 {
-            if std::fs::read_to_string(&log).unwrap_or_default().contains("PASTE ") {
-                std::fs::write(&control, "menu").unwrap();
-                if typing {
-                    tokio::time::sleep(Duration::from_millis(700)).await;
-                    crate::runtime::mark_input(&root, id);
-                }
-                return true;
-            }
-            tokio::time::sleep(Duration::from_millis(2)).await;
-        }
-        false
-    });
+    si.show("menu-on-paste").await;
+    if typing {
+        let (root, id) = (b.svc.root_dir().to_path_buf(), agent.id);
+        *b.watcher.after_dialog_read.lock().unwrap() = Some(Box::new(move || crate::runtime::mark_input(&root, id)));
+    }
     b.answer("Drill in");
     b.pump().await;
-    assert!(menu.await.unwrap(), "the paste never reached the stand-in");
+    assert!(si.log().contains("PASTE "), "the paste never reached the stand-in: {}", si.log());
     assert!(!si.log().contains("ENTER"), "{}", si.log());
 }
 

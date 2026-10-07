@@ -930,6 +930,11 @@ pub struct Watcher {
     /// Make the next paste fail as a send would (`answer_wake`'s tests).
     #[cfg(test)]
     fail_sends: std::sync::atomic::AtomicBool,
+    /// Run once, right after a paste's read-back first reads a dialog over
+    /// the box (`answer_wake`'s tests): a key typed at that point lands after
+    /// the dialog was seen and before the pass settles.
+    #[cfg(test)]
+    after_dialog_read: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
     /// Make each mid-turn Enter's send take this many ms (`mid_turn`'s tests).
     #[cfg(test)]
     slow_enter_ms: std::sync::atomic::AtomicU64,
@@ -2804,6 +2809,8 @@ impl Watcher {
             )),
             #[cfg(test)]
             fail_sends: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            after_dialog_read: std::sync::Mutex::new(None),
             #[cfg(test)]
             slow_enter_ms: std::sync::atomic::AtomicU64::new(0),
             clears_pending: std::sync::Mutex::new(HashSet::new()),

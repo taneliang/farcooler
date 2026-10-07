@@ -11,8 +11,10 @@
 # Enter logs `SUBMIT <box>` and clears it. The control file picks what it
 # shows: idle, working, menu (a permission prompt), picker (a menu with no
 # box), mangle (a paste shows as `[Pasted text #1]`), slow (a paste shows
-# a second late), nobracket (bracketed paste off), or draft:<text> (a box
-# already holding <text>).
+# a second late), nobracket (bracketed paste off), draft:<text> (a box
+# already holding <text>), or menu-on-paste (idle until a paste arrives, then
+# the menu, drawn in the same pass that logs PASTE, so a test never races a
+# menu against the read-back).
 #
 # While working, Enter queues the box as the real agents do (ov-360): it
 # logs `QUEUED <box>`, draws it above the box as claude 2.1.290 or codex
@@ -140,8 +142,11 @@ sub take {
 
 draw();
 my $buf = "";
+my $fired = 0;    # menu-on-paste's paste has arrived: the menu stays up
 while (1) {
     my $now = mode();
+    $fired = 0 if $now ne 'menu-on-paste';
+    $now = 'menu' if $fired;
     if ($now ne $mode) {
         if (working($mode) && !working($now)) {
             for my $q (@queued) {
@@ -182,6 +187,7 @@ while (1) {
                 take($mode eq 'mangle' ? "[Pasted text #1]" : $text);
             }
             logit("PASTE $text");
+            ($fired, $mode) = (1, 'menu') if $mode eq 'menu-on-paste';
         } elsif (substr($buf, 0, 6) eq "\e[200~") {
             $buf = substr($buf, 6);
             $pasting = 1;
