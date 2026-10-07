@@ -66,7 +66,7 @@ ALLOWS = ("not a count", "not UI copy")
 # Android casing (ov-204): words that keep their capital mid-string.
 CASING_PROPER = {
     "GitHub", "Codex", "Android", "Git", "Cursor", "Mac", "Keychain", "WorkOS", "Gemini",
-    "Google", "Tailscale", "Firebase", "Linux", "I", "Opus", "Sonnet", "Haiku",
+    "Google", "Tailscale", "Firebase", "Linux", "I", "Opus", "Sonnet", "Haiku", "Claude",
 }
 # Multi-word names match as whole phrases: "Claude Code" passes, "Review Code"
 # doesn't, and neither word passes alone.

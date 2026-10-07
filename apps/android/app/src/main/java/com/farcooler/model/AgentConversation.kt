@@ -81,7 +81,7 @@ object AgentConversation {
         /** Claude is showing a question, a menu or a panel only the terminal can draw: the Handoff row. */
         data object Handoff : SendIssue
 
-        /** The terminal's box holds text of its own (R-28): refused, with Show Terminal. */
+        /** The terminal's box holds text of its own (R-28): refused, with Show terminal. */
         data object DraftInTerminal : SendIssue
 
         /** Something only words can say. */

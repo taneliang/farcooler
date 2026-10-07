@@ -63,7 +63,7 @@ fun NativeSwitchButton(showing: Boolean, onClick: () -> Unit, modifier: Modifier
     IconButton(onClick = onClick, modifier = modifier.testTag("native-switch")) {
         Icon(
             if (showing) Icons.Outlined.Terminal else Icons.AutoMirrored.Filled.Chat,
-            contentDescription = if (showing) "Show Terminal" else "Show Conversation",
+            contentDescription = if (showing) "Show terminal" else "Show conversation",
         )
     }
 }
@@ -83,7 +83,7 @@ fun NativeSwitchButton(showing: Boolean, onClick: () -> Unit, modifier: Modifier
  * reader scrolled up is never moved, and a session shorter than the screen sits
  * on the composer. Whether it follows is derived from where the list is, so only
  * a finger changes it; a send brings the message into view, and the way back is
- * Jump to Latest.
+ * Jump to latest.
  *
  * [listState] is the pane's, so scrolling survives the switch to the terminal
  * and back.
@@ -144,7 +144,7 @@ fun NativeAgentView(
                 SmallFloatingActionButton(
                     onClick = { scope.launch { listState.animateScrollToItem(0) } },
                     modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp).testTag("native-jump-to-latest"),
-                ) { Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Jump to Latest") }
+                ) { Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Jump to latest") }
             }
         }
         NativeComposer(model, showTerminal)
@@ -169,7 +169,7 @@ private fun StaleBanner(phase: AgentRowStore.Phase, showTerminal: () -> Unit) {
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.weight(1f),
         )
-        TextButton(onClick = showTerminal) { Text("Show Terminal") }
+        TextButton(onClick = showTerminal) { Text("Show terminal") }
     }
 }
 
@@ -255,7 +255,7 @@ private fun IssueLine(issue: AgentConversation.SendIssue, showTerminal: () -> Un
         when (issue) {
             AgentConversation.SendIssue.DraftInTerminal -> {
                 Text(AgentConversation.DRAFT_IN_TERMINAL, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                TextButton(onClick = showTerminal) { Text("Show Terminal") }
+                TextButton(onClick = showTerminal) { Text("Show terminal") }
             }
             is AgentConversation.SendIssue.Said ->
                 Text(issue.words, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))

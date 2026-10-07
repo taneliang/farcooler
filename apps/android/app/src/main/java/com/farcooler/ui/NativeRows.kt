@@ -315,7 +315,7 @@ private fun AskRow(ask: AgentRow.Ask, showTerminal: () -> Unit) {
             Text(AgentConversation.askTitle(ask), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
         }
         Text(ask.text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 4, overflow = TextOverflow.Ellipsis)
-        if (!ask.answered) OutlinedButton(onClick = showTerminal) { Text("Show Terminal") }
+        if (!ask.answered) OutlinedButton(onClick = showTerminal) { Text("Show terminal") }
     }
 }
 
@@ -356,6 +356,6 @@ fun HandoffRow(reason: String, showTerminal: () -> Unit) {
             Icon(Icons.Outlined.Terminal, null, Modifier.size(18.dp))
             Text(reason, style = MaterialTheme.typography.bodyMedium)
         }
-        OutlinedButton(onClick = showTerminal, modifier = Modifier.testTag("native-handoff-show-terminal")) { Text("Show Terminal") }
+        OutlinedButton(onClick = showTerminal, modifier = Modifier.testTag("native-handoff-show-terminal")) { Text("Show terminal") }
     }
 }

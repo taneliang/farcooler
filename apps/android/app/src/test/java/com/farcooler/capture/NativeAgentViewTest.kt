@@ -355,7 +355,7 @@ class NativeAgentViewTest {
 
         source.failFollow(CoreException("The runner took too long to answer.", RunnerRefusal.TIMED_OUT_WORD))
         scenario.settle("the stale banner") { it.composed("native-stale") }
-        assertEquals(AgentConversation.STALE_TROUBLE + " Show Terminal", scenario.look().unmerged["native-stale"])
+        assertEquals(AgentConversation.STALE_TROUBLE + " Show terminal", scenario.look().unmerged["native-stale"])
         assertTrue("Send waits while the rows may be old", "native-send" in scenario.look().disabled)
 
         source.answerPage(plain())

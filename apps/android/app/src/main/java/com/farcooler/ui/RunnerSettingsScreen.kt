@@ -56,6 +56,7 @@ import com.farcooler.model.Repository
 import com.farcooler.model.RepositoryRoot
 import com.farcooler.model.Trouble
 import com.farcooler.net.Connection
+import com.farcooler.net.setProjector
 import com.farcooler.net.rethrowIfCancellation
 import com.farcooler.core.refusalWord
 import com.farcooler.model.troubleFor
@@ -288,7 +289,7 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
             // Shown only to the runner's host admin, on a runner that has the
             // setting (ov-374). Changing it reconnects, so the panes are offered
             // the view on the new hello.
-            val projectorOn by connection.projectorOn.collectAsStateWithLifecycle()
+            val projectorOn by connection.projector.on.collectAsStateWithLifecycle()
             if (AgentConversation.offersSetting(daemon, projectorOn)) {
                 Separator()
                 SectionTitle("Claude")
