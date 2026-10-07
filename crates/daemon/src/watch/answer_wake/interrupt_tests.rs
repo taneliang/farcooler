@@ -297,6 +297,17 @@ async fn a_confirmed_stop_ends_the_calls_it_killed() {
     assert_eq!(asks.calls_for_tests(SESSION), ["toolu_sub"]);
 }
 
+/// Checks under the fence that run past `UNDER_FENCE` (a loaded runner):
+/// `settling`, nothing pressed, so a late key never outlives the fence.
+#[tokio::test]
+async fn checks_under_the_fence_that_overrun_are_settling() {
+    let b = board().await;
+    let (agent, si) = working_claude(&b).await;
+    b.watcher.slow_recheck_ms.store(3_500, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(refused(b.watcher.press(agent.id, Key::Interrupt).await), "settling");
+    assert!(!si.log().contains("ESC"), "{}", si.log());
+}
+
 /// A session this daemon never heard a hook from has no fence: nothing.
 #[tokio::test]
 async fn a_session_never_heard_from_is_unconfirmable() {

@@ -955,6 +955,9 @@ pub struct Watcher {
     /// Run once, after an interrupt's first checks, as the fence is taken.
     #[cfg(test)]
     before_key: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    /// Make an interrupt's checks under the fence take this many ms longer.
+    #[cfg(test)]
+    slow_recheck_ms: std::sync::atomic::AtomicU64,
 }
 
 /// One client's claim about what it is showing, and when it said so.
@@ -2838,6 +2841,8 @@ impl Watcher {
             before_paste: std::sync::Mutex::new(None),
             #[cfg(test)]
             before_key: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            slow_recheck_ms: std::sync::atomic::AtomicU64::new(0),
             clears_pending: std::sync::Mutex::new(HashSet::new()),
             taps: std::sync::Mutex::new(None),
             task_notices: std::sync::Mutex::new(HashMap::new()),

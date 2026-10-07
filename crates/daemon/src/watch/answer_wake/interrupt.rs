@@ -179,6 +179,8 @@ impl Watcher {
                 }
                 tokio::time::sleep(left).await;
             }
+            #[cfg(test)]
+            tokio::time::sleep(Duration::from_millis(self.slow_recheck_ms.load(std::sync::atomic::Ordering::SeqCst))).await;
             self.pressable(&to, key).await
         })
         .await;
