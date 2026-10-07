@@ -19,6 +19,7 @@ pub mod claude;
 
 pub mod codex;
 
+pub mod codex_prompts;
 pub mod codex_turn;
 
 pub mod cursor;
