@@ -43,7 +43,8 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "unsupported" => "only claude can be stopped from here",
         "unfamiliar" => "the pane's screen isn't one Far Cooler recognizes, so nothing was pressed",
         "unconfirmable" => "Far Cooler can't find claude's session or hasn't heard its hooks, so nothing was pressed",
-        "unconfirmed" => "the key was pressed, but claude never said it took it. check its pane",
+        "settling" => "claude is starting a step that may ask something. try again in a moment",
+        "unconfirmed" => "the key was pressed, but claude never said it took it. it may have; check its pane before pressing again",
         _ => return None,
     })
 }
@@ -65,7 +66,7 @@ mod tests {
     fn every_refusal_word_has_a_line() {
         for word in [
             "idle", "prompt", "draft", "typing", "too_soon", "sending", "nothing_queued", "not_an_agent", "not_running",
-            "unsupported", "unfamiliar", "unconfirmable", "unconfirmed",
+            "unsupported", "unfamiliar", "unconfirmable", "unconfirmed", "settling",
         ] {
             assert!(super::said_about(word).is_some(), "{word}");
         }

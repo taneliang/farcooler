@@ -28,7 +28,7 @@ async fn working_claude(b: &Board) -> (Terminal, StandIn) {
     (agent, si)
 }
 
-fn pressed(si: &StandIn, key: &str) -> usize {
+fn pressed_count(si: &StandIn, key: &str) -> usize {
     si.log().lines().filter(|l| *l == key).count()
 }
 
@@ -60,7 +60,7 @@ async fn one_esc_stops_a_working_claude_and_is_confirmed() {
     let b = board().await;
     let (agent, si) = working_claude(&b).await;
     b.watcher.press(agent.id, Key::Interrupt).await.expect("stopped");
-    assert_eq!(pressed(&si, "ESC"), 1, "{}", si.log());
+    assert_eq!(pressed_count(&si, "ESC"), 1, "{}", si.log());
     assert!(interrupted_since(&transcript(&si), 0), "the stand-in recorded it");
 }
 
@@ -128,10 +128,10 @@ async fn never_twice_inside_the_lockout() {
     si.show("working").await;
     assert_eq!(refused(b.watcher.press(agent.id, Key::Interrupt).await), "too_soon");
     assert_eq!(refused(b.watcher.press(agent.id, Key::SendNow).await), "too_soon");
-    assert_eq!(pressed(&si, "ESC"), 1, "{}", si.log());
+    assert_eq!(pressed_count(&si, "ESC"), 1, "{}", si.log());
     tokio::time::sleep(LOCKOUT).await;
     b.watcher.press(agent.id, Key::Interrupt).await.expect("stopped again, past the lockout");
-    assert_eq!(pressed(&si, "ESC"), 2, "{}", si.log());
+    assert_eq!(pressed_count(&si, "ESC"), 2, "{}", si.log());
 }
 
 /// A gate begun a moment ago may have a dialog coming: waited out, and the
@@ -189,6 +189,114 @@ async fn a_dialog_drawn_as_the_fence_is_taken_stops_the_key() {
     assert!(!si.log().contains("ESC"), "{}", si.log());
 }
 
+/// Draw claude's dialog in the stand-in `after` from now, as one announced
+/// by a gate or a call would be, on a thread of its own.
+fn dialog_after(si: &StandIn, after: Duration) -> std::thread::JoinHandle<()> {
+    let control = si.control.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(after);
+        std::fs::write(control, "working-menu").unwrap();
+    })
+}
+
+/// A gate heard after the first checks, as the fence is taken: waited out
+/// under the fence, and the dialog it drew stops the key (review F1).
+#[tokio::test]
+async fn a_gate_heard_after_the_first_checks_is_waited_out_under_the_fence() {
+    let b = board().await;
+    let (agent, si) = working_claude(&b).await;
+    let asks = b.svc.hooks().asks().clone();
+    let si_control = StandIn { control: si.control.clone(), log: si.log.clone() };
+    let drawn = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let handle = drawn.clone();
+    *b.watcher.before_key.lock().unwrap() = Some(Box::new(move || {
+        asks.heard(SESSION, true);
+        *handle.lock().unwrap() = Some(dialog_after(&si_control, Duration::from_millis(300)));
+    }));
+    assert_eq!(refused(b.watcher.press(agent.id, Key::Interrupt).await), "prompt");
+    drawn.lock().unwrap().take().unwrap().join().unwrap();
+    assert!(!si.log().contains("ESC"), "{}", si.log());
+}
+
+/// So is a call marked after the first checks, before the fence.
+#[tokio::test]
+async fn a_call_begun_after_the_first_checks_is_waited_out_under_the_fence() {
+    let b = board().await;
+    let (agent, si) = working_claude(&b).await;
+    let asks = b.svc.hooks().asks().clone();
+    let si_control = StandIn { control: si.control.clone(), log: si.log.clone() };
+    let drawn = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let handle = drawn.clone();
+    *b.watcher.before_key.lock().unwrap() = Some(Box::new(move || {
+        asks.mark_tool_starting(SESSION, Some("toolu_1"));
+        *handle.lock().unwrap() = Some(dialog_after(&si_control, Duration::from_millis(300)));
+    }));
+    assert_eq!(refused(b.watcher.press(agent.id, Key::Interrupt).await), "prompt");
+    drawn.lock().unwrap().take().unwrap().join().unwrap();
+    assert!(!si.log().contains("ESC"), "{}", si.log());
+}
+
+/// An agent calling tools as fast as it can: each new call waits on the
+/// fence, so the wait ends and the key goes (review F3).
+#[tokio::test]
+async fn stop_lands_while_calls_keep_coming() {
+    let b = board().await;
+    let (agent, si) = working_claude(&b).await;
+    let asks = b.svc.hooks().asks().clone();
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (calls, until) = (asks.clone(), stop.clone());
+    let caller = std::thread::spawn(move || {
+        let mut n = 0;
+        while !until.load(std::sync::atomic::Ordering::SeqCst) && n < 100 {
+            calls.mark_tool_starting(SESSION, Some(&format!("toolu_{n}")));
+            n += 1;
+            std::thread::sleep(Duration::from_millis(150));
+        }
+    });
+    let pressed = b.watcher.press(agent.id, Key::Interrupt).await;
+    stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    caller.join().unwrap();
+    pressed.expect("stopped");
+    assert_eq!(pressed_count(&si, "ESC"), 1, "{}", si.log());
+}
+
+/// A gate heard again and again keeps a dialog maybe coming: past the time
+/// the fence may be held, its own word, never `prompt` (review F3).
+#[tokio::test]
+async fn a_dialog_that_keeps_maybe_coming_is_settling() {
+    let b = board().await;
+    let (agent, si) = working_claude(&b).await;
+    let asks = b.svc.hooks().asks().clone();
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (gates, until) = (asks.clone(), stop.clone());
+    let gating = std::thread::spawn(move || {
+        while !until.load(std::sync::atomic::Ordering::SeqCst) {
+            gates.heard(SESSION, true);
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    });
+    let pressed = b.watcher.press(agent.id, Key::Interrupt).await;
+    stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    gating.join().unwrap();
+    assert_eq!(refused(pressed), "settling");
+    assert!(!si.log().contains("ESC"), "{}", si.log());
+}
+
+/// A confirmed Stop ends the main thread's calls in flight, which no hook
+/// would (measured): a mid-turn send isn't held `busy` for the rest of the
+/// next turn. A subagent's is left (review F5).
+#[tokio::test]
+async fn a_confirmed_stop_ends_the_calls_it_killed() {
+    let b = board().await;
+    let (agent, si) = working_claude(&b).await;
+    let asks = b.svc.hooks().asks().clone();
+    asks.mark_tool_starting(SESSION, Some("toolu_main"));
+    asks.mark_call(SESSION, Some("toolu_sub"), Some("a1"));
+    b.watcher.press(agent.id, Key::Interrupt).await.expect("stopped");
+    assert_eq!(pressed_count(&si, "ESC"), 1, "{}", si.log());
+    assert_eq!(asks.calls_for_tests(SESSION), ["toolu_sub"]);
+}
+
 /// A session this daemon never heard a hook from has no fence: nothing.
 #[tokio::test]
 async fn a_session_never_heard_from_is_unconfirmable() {
@@ -224,7 +332,7 @@ async fn send_now_sends_what_waits_in_the_queue() {
     queue(&b, &agent, &si, "then land it").await;
     b.screen_with(agent.id, "Press up to edit queued messages").await;
     b.watcher.press(agent.id, Key::SendNow).await.expect("sent now");
-    assert_eq!(pressed(&si, "SENDNOW"), 1, "{}", si.log());
+    assert_eq!(pressed_count(&si, "SENDNOW"), 1, "{}", si.log());
     assert_eq!(si.submitted(), ["and the docs", "then land it"], "{}", si.log());
 }
 

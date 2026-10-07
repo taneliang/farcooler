@@ -48,14 +48,20 @@
 //! 7. its transcript found, and its hooks heard by this daemon, whose fence
 //!    the key is pressed under (`unconfirmable`);
 //! 8. no ask held on the pane (`prompt`), and for Send Now a message waiting
-//!    in claude's queue (`nothing_queued`).
+//!    in claude's queue (`nothing_queued`);
+//! 9. under the fence, a dialog that may be coming waited out in time
+//!    (`settling`), and checks 3 to 8 again.
 //!
 //! **The key.** Under the session's fence, so no `PreToolUse` is answered and
-//! no new dialog drawn while it lands (`mid_turn`). Before the fence is
-//! taken, a gate begun in the last two seconds or a call begun in the last
-//! `CALL_SETTLES` is waited out (`HookAsks::settles_in`): its dialog may be
-//! coming. Under the fence every check runs again, then the key is sent once
-//! and the fence held `KEY_LANDS` past it.
+//! no new dialog drawn while it lands (`mid_turn`). The fence is taken first;
+//! then a gate begun in the last two seconds, or a call begun before the
+//! fence and in the last `CALL_SETTLES`, is waited out under it
+//! (`HookAsks::settles_in`), as its dialog may be coming; then every check
+//! runs again. A call marked once the fence is held waits on it, so the
+//! wait converges. That wait and the checks get `UNDER_FENCE`, else
+//! `settling`; then the key is sent once and the fence held `KEY_LANDS` past
+//! it. A confirmed Stop ends the main thread's calls begun before the key,
+//! which no hook ends (`HookAsks::calls_ended_before`).
 //!
 //! **The confirmation.** Stop: an interrupted record past the transcript's
 //! length before the key, or the registry turning idle. Send Now: a
@@ -70,7 +76,7 @@ use farcooler_core::{DomainError, Result};
 use farcooler_store::models::{PaneMode, Terminal};
 use uuid::Uuid;
 
-use super::mid_turn::{self, ENTER_DEADLINE, KEY_LANDS, LATE_KEY};
+use super::mid_turn::{self, KEY_LANDS, LATE_KEY};
 use super::registry_turn::{self, Status};
 use super::tell::held_word;
 use super::{Held, PASTE_POLL, may_be_typed_to};
@@ -90,8 +96,20 @@ const TYPING_WAIT: Duration = Duration::from_secs(10);
 /// How long after the key claude has to say it took.
 const CONFIRM_SETTLES: Duration = Duration::from_secs(3);
 
-/// How many times a dialog that may be coming is waited out.
-const SETTLE_TRIES: usize = 3;
+/// The longest the gate's wait for a dialog that may be coming, and its
+/// checks again, take under the fence. Past it: `settling`, nothing pressed.
+const UNDER_FENCE: Duration = Duration::from_millis(3_000);
+
+/// The longest the key's `tmux send-keys` may take before it's killed.
+const KEY_DEADLINE: Duration = Duration::from_millis(1_500);
+
+// The fence is held at most `UNDER_FENCE`, then the key's send, then
+// `LATE_KEY` for a send that went wrong and `KEY_LANDS`: all inside the
+// longest a `PreToolUse` waits on it, so a late key never outlives the fence.
+const _: () = assert!(
+    UNDER_FENCE.as_millis() + KEY_DEADLINE.as_millis() + LATE_KEY.as_millis() + KEY_LANDS.as_millis()
+        < crate::hook_asks::FENCE_HOLD.as_millis()
+);
 
 /// Which key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,36 +162,55 @@ impl Watcher {
             return Err(conflict("sending"));
         };
         let asks = self.service.hooks().asks().clone();
-        for _ in 0..SETTLE_TRIES {
-            let target = self.pressable(&to, key).await?;
-            if let Some(left) = asks.settles_in(&target.session) {
-                tokio::time::sleep(left).await;
-                continue;
-            }
-            let Some(fence) = asks.fence(&target.session) else { return Err(conflict("unconfirmable")) };
-            let fenced = fence.lock_owned().await;
-            self.before_key_for_tests();
-            // Again, under the fence: it may have waited behind an Enter.
-            let again = self.pressable(&to, key).await?;
-            if again.session != target.session || asks.settles_in(&again.session).is_some() {
-                drop(fenced);
-                continue;
-            }
-            let from = std::fs::metadata(&again.transcript).map(|m| m.len()).unwrap_or(0);
-            self.keys_pressed.lock().unwrap_or_else(|e| e.into_inner()).insert(to.id, Instant::now());
-            let runtime = Runtime { marks: None, ..self.service.runtime() };
-            match tokio::time::timeout(ENTER_DEADLINE, runtime.send_bytes_hex(to.id, key.hex())).await {
-                Ok(Ok(())) => tokio::time::sleep(KEY_LANDS).await,
-                Ok(Err(_)) | Err(_) => {
-                    tracing::warn!(terminal = %to.id, "a key didn't go cleanly; holding the fence while it may still land");
-                    tokio::time::sleep(LATE_KEY).await;
-                    return Err(DomainError::OperationFailed);
+        let target = self.pressable(&to, key).await?;
+        self.before_key_for_tests();
+        let Some(fence) = asks.fence(&target.session) else { return Err(conflict("unconfirmable")) };
+        let fenced = fence.lock_owned().await;
+        // From here no `PreToolUse` is answered, so no call begun now can
+        // raise a dialog. One begun before may still: its gate, or its first
+        // `CALL_SETTLES`, is waited out here, and every check runs again.
+        // Both inside `UNDER_FENCE`, failing closed (`settling`), so the key
+        // and a late one's hold stay inside `FENCE_HOLD`.
+        let fenced_at = Instant::now();
+        let checked = tokio::time::timeout(UNDER_FENCE, async {
+            while let Some(left) = asks.settles_in(&target.session, fenced_at) {
+                if fenced_at.elapsed() + left >= UNDER_FENCE {
+                    return Err(conflict("settling"));
                 }
+                tokio::time::sleep(left).await;
             }
-            drop(fenced);
-            return if confirmed(key, &again, from).await { Ok(()) } else { Err(conflict("unconfirmed")) };
+            self.pressable(&to, key).await
+        })
+        .await;
+        let again = match checked {
+            Ok(Ok(again)) if again.session == target.session => again,
+            Ok(Ok(_)) => return Err(conflict("unconfirmable")),
+            Ok(Err(refused)) => return Err(refused),
+            Err(_) => return Err(conflict("settling")),
+        };
+        let from = std::fs::metadata(&again.transcript).map(|m| m.len()).unwrap_or(0);
+        let pressed_at = Instant::now();
+        self.keys_pressed.lock().unwrap_or_else(|e| e.into_inner()).insert(to.id, pressed_at);
+        let runtime = Runtime { marks: None, ..self.service.runtime() };
+        match tokio::time::timeout(KEY_DEADLINE, runtime.send_bytes_hex(to.id, key.hex())).await {
+            Ok(Ok(())) => tokio::time::sleep(KEY_LANDS).await,
+            Ok(Err(_)) | Err(_) => {
+                tracing::warn!(terminal = %to.id, "a key didn't go cleanly; holding the fence while it may still land");
+                tokio::time::sleep(LATE_KEY).await;
+                return Err(DomainError::OperationFailed);
+            }
         }
-        Err(conflict("prompt"))
+        drop(fenced);
+        if !confirmed(key, &again, from).await {
+            return Err(conflict("unconfirmed"));
+        }
+        // Every main-thread call begun before the Esc ended with it: killed,
+        // or never run. No hook says so (measured), so they'd keep the
+        // session busy for mid-turn sends until the next boundary.
+        if key == Key::Interrupt {
+            asks.calls_ended_before(&again.session, pressed_at);
+        }
+        Ok(())
     }
 
     /// The gate's checks 3 to 8, against the pane as it is now.
@@ -217,7 +254,7 @@ impl Watcher {
         Ok(Target { session, transcript, config, pid })
     }
 
-    /// Run the hook a test set to act under the fence, before the last checks.
+    /// Run the hook a test set to act after the first checks, as the fence is taken.
     fn before_key_for_tests(&self) {
         #[cfg(test)]
         if let Some(run) = self.before_key.lock().unwrap_or_else(|e| e.into_inner()).take() {

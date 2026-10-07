@@ -429,18 +429,35 @@ impl HookAsks {
         sessions.get(session).and_then(|h| h.gate).is_some_and(|gate| gate >= since)
     }
 
-    /// How long until `session` has gone `GATE_RECENT` since a gate began and
-    /// `CALL_SETTLES` since a call in flight began, or `None` when it has now:
-    /// before then a dialog may be drawn that the screen doesn't show yet.
-    /// For one key pressed mid-turn (`answer_wake::interrupt`), which would
-    /// answer that dialog. A session never heard from is settled: its
-    /// caller refuses it for that.
-    pub fn settles_in(&self, session: &str) -> Option<Duration> {
+    /// How long until `session` has gone `GATE_RECENT` since a gate began, and
+    /// `CALL_SETTLES` since each call in flight that began before `calls_before`
+    /// did, or `None` when it has now: before then a dialog may be drawn that
+    /// the screen doesn't show yet. For one key pressed mid-turn under the
+    /// fence taken at `calls_before` (`answer_wake::interrupt`): a call marked
+    /// since waits on that fence, and can't raise a dialog until it's let go.
+    /// A session never heard from is settled: its caller refuses it for that.
+    pub fn settles_in(&self, session: &str, calls_before: Instant) -> Option<Duration> {
         let sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         let heard = sessions.get(session)?;
         let gate = heard.gate.map(|at| GATE_RECENT.saturating_sub(at.elapsed()));
-        let call = heard.calls.values().map(|c| CALL_SETTLES.saturating_sub(c.since.elapsed())).max();
+        let call = heard
+            .calls
+            .values()
+            .filter(|c| c.since < calls_before)
+            .map(|c| CALL_SETTLES.saturating_sub(c.since.elapsed()))
+            .max();
         gate.into_iter().chain(call).max().filter(|left| !left.is_zero())
+    }
+
+    /// One Esc stopped `session`'s turn at `at` (`answer_wake::interrupt`,
+    /// confirmed): each main-thread call begun before it was killed, or
+    /// never ran, and claude 2.1.290 sends no `PostToolUse` for it. A
+    /// subagent's call is left to its own end: whether `SubagentStop` fires on
+    /// an Esc wasn't measured.
+    pub fn calls_ended_before(&self, session: &str, at: Instant) {
+        if let Some(heard) = self.sessions.lock().unwrap_or_else(|e| e.into_inner()).get_mut(session) {
+            heard.calls.retain(|_, call| call.agent.is_some() || call.since >= at);
+        }
     }
 
     /// Told whenever an ask is offered or an offered ask ends. What changed
@@ -710,6 +727,37 @@ mod tests {
             into.extend(events.into_iter().map(|e| (terminal, e)));
         });
         (HookAsks::new(Arc::new(Mutex::new(Some(sink)))), recorded)
+    }
+
+    /// Under a key's fence (ov-368): a call begun before it may still raise a
+    /// dialog and is waited out; one marked since waits on the fence and
+    /// isn't, so the wait ends however fast the agent calls tools.
+    #[test]
+    fn only_calls_from_before_the_fence_are_waited_out() {
+        let (asks, _) = ledger();
+        asks.heard("s", false);
+        asks.mark_tool_starting("s", Some("before"));
+        let fenced = Instant::now();
+        assert!(asks.settles_in("s", fenced).is_some(), "the call from before");
+        asks.age_calls("s", CALL_SETTLES);
+        asks.mark_tool_starting("s", Some("after"));
+        assert_eq!(asks.settles_in("s", fenced), None, "the one marked under the fence waits on it");
+        asks.heard("s", true);
+        assert!(asks.settles_in("s", fenced).is_some(), "a gate, whenever it came");
+    }
+
+    /// A confirmed Stop ends the main thread's calls begun before the key, not
+    /// a subagent's, and not one begun after.
+    #[test]
+    fn a_stop_ends_the_main_threads_calls_before_it() {
+        let (asks, _) = ledger();
+        asks.heard("s", false);
+        asks.mark_tool_starting("s", Some("killed"));
+        asks.mark_call("s", Some("subagent's"), Some("a1"));
+        let key = Instant::now();
+        asks.mark_tool_starting("s", Some("next turn"));
+        asks.calls_ended_before("s", key);
+        assert_eq!(asks.calls_for_tests("s"), ["next turn", "subagent's"]);
     }
 
     /// Every `Resolved` recorded for `id`, as what was chosen.

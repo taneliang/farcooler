@@ -952,7 +952,7 @@ pub struct Watcher {
     /// Run once, right before compose's first paste (`compose`'s tests).
     #[cfg(test)]
     before_paste: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
-    /// Run once, under the fence, before an interrupt's last checks.
+    /// Run once, after an interrupt's first checks, as the fence is taken.
     #[cfg(test)]
     before_key: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
