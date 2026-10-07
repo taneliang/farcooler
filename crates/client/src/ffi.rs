@@ -2275,9 +2275,21 @@ async fn dispatch(
 
         // Ask the Orchestrator's paste into a terminal orchestrator's box
         // (ov-241): never Enter, and refused unless the pane is provably idle.
+        // `{}` when it went in; `{held: <hold>}` when a runner with
+        // `draft_hold` holds it behind a dialog (ov-385).
         "terminal.draft_prompt" => {
-            session.draft_prompt(id("terminal")?, &text("text")).await?;
-            Ok(json!({}))
+            match session.draft_prompt(id("terminal")?, &text("text")).await? {
+                crate::session::draft_prompt::Drafted::Pasted => Ok(json!({})),
+                crate::session::draft_prompt::Drafted::Held(hold) => {
+                    Ok(json!({ "held": crate::session::draft_prompt::draft_hold_json(&hold) }))
+                }
+            }
+        }
+
+        // `{terminal, hold}` → `{hold: <hold>}`, as it now is (ov-385).
+        "terminal.draft_withdraw" => {
+            let hold = session.draft_withdraw(id("terminal")?, id("hold")?).await?;
+            Ok(json!({ "hold": crate::session::draft_prompt::draft_hold_json(&hold) }))
         }
 
         "terminal.agent_answer" => {

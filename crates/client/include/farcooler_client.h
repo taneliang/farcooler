@@ -135,6 +135,13 @@ uint64_t farcooler_client_connect(void *handle, const char *config);
  *                                                    `images` is [{"mime",
  *                                                    "base64"}]
  *   terminal.draft_prompt  {terminal, text}       refused unless the pane is idle
+ *                          -> {} pasted, or {"held": <hold>} behind a dialog
+ *                                                    on a `draft_hold` runner
+ *   terminal.draft_withdraw {terminal, hold}  -> {"hold": <hold>}
+ *                                                    <hold> is {"id", "state",
+ *                                                    "heldMs", "expiresMs",
+ *                                                    "endedMs"}; also a fleet
+ *                                                    terminal's "draftHold"
  *   terminal.agent_answer  {terminal, requestId, optionId}
  *   terminal.agent_set_mode   {terminal, mode}
  *   terminal.agent_set_model  {terminal, model}

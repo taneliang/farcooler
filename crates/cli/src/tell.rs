@@ -18,6 +18,7 @@ pub(crate) async fn run(runner: Option<&str>, terminal: &str, text: String) -> R
             request::Payload::AgentPrompt(pb::AgentPrompt {
                 terminal_id: id_bytes(id),
                 blocks: vec![pb::AgentPromptBlock { content: Some(Content::Text(text)) }],
+                hold_behind_dialog: false,
             }),
         ))
         .await

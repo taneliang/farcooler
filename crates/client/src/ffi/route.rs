@@ -44,6 +44,8 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         | Method::TerminalAgentSubscribe
         | Method::TerminalAgentPrompt
         | Method::TerminalDraftPrompt
+        // Withdraw a draft held behind a dialog (ov-385).
+        | Method::TerminalDraftWithdraw
         | Method::TerminalAgentAnswer
         | Method::TerminalAgentSetMode
         | Method::TerminalAgentSetModel

@@ -1355,7 +1355,7 @@ async fn a_draft_is_pasted_into_an_idle_orchestrator_and_never_submitted() {
     let orchestrator = b.adopted_shell().await;
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
-    b.watcher.draft_into(orchestrator.id, "About ov-1 (“Fix”): ").await.expect("pasted");
+    b.watcher.draft_into(orchestrator.id, "About ov-1 (“Fix”): ", false).await.expect("pasted");
     si.pasted().await;
     assert!(si.log().contains("PASTE "), "a bracketed paste: {}", si.log());
     assert!(si.submitted().is_empty(), "Enter was pressed: {}", si.log());
@@ -1370,18 +1370,18 @@ async fn a_draft_is_refused_where_an_answer_would_wait() {
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     // Its state unknown.
     b.doing(orchestrator.id, AgentActivity::Unknown).await;
-    assert!(b.watcher.draft_into(orchestrator.id, "About ov-1: ").await.is_err());
+    assert!(b.watcher.draft_into(orchestrator.id, "About ov-1: ", false).await.is_err());
     nothing_typed(&si);
     // A menu.
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     si.show("menu").await;
     b.screen_with(orchestrator.id, "Tab to amend").await;
-    assert!(b.watcher.draft_into(orchestrator.id, "About ov-1: ").await.is_err());
+    assert!(b.watcher.draft_into(orchestrator.id, "About ov-1: ", false).await.is_err());
     nothing_typed(&si);
     // Someone's draft in the box.
     si.show("draft:fix the flaky").await;
     b.screen_with(orchestrator.id, "fix the flaky").await;
-    assert!(b.watcher.draft_into(orchestrator.id, "About ov-1: ").await.is_err());
+    assert!(b.watcher.draft_into(orchestrator.id, "About ov-1: ", false).await.is_err());
     nothing_typed(&si);
 }
 
@@ -1392,7 +1392,7 @@ async fn a_draft_is_refused_for_a_process_that_is_not_an_agent() {
     let orchestrator = b.adopted_shell().await;
     let si = b.stand_in(&orchestrator, "claude", "perl").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
-    assert!(b.watcher.draft_into(orchestrator.id, "About ov-1: ").await.is_err());
+    assert!(b.watcher.draft_into(orchestrator.id, "About ov-1: ", false).await.is_err());
     nothing_typed(&si);
 }
 
@@ -1404,7 +1404,7 @@ async fn a_draft_whose_send_fails_is_an_error() {
     let _si = b.stand_in(&orchestrator, "claude", "claude").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     b.watcher.fail_sends.store(true, Ordering::SeqCst);
-    assert!(b.watcher.draft_into(orchestrator.id, "About ov-1: ").await.is_err());
+    assert!(b.watcher.draft_into(orchestrator.id, "About ov-1: ", false).await.is_err());
 }
 
 #[path = "tell_tests.rs"]
@@ -1412,3 +1412,6 @@ mod tell_tests;
 
 #[path = "mid_turn_tests.rs"]
 mod mid_turn_tests;
+
+#[path = "draft_hold_tests.rs"]
+mod draft_hold_tests;

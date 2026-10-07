@@ -920,6 +920,11 @@ pub struct Watcher {
     told: std::sync::Mutex<HashMap<Uuid, i64>>,
     /// Why each waiting answer last waited, for its "Not delivered" note.
     wake_holds: std::sync::Mutex<HashMap<Uuid, answer_wake::Held>>,
+    /// Each terminal's draft held behind a dialog (`draft_hold`, ov-385).
+    draft_holds: std::sync::Mutex<HashMap<Uuid, answer_wake::draft_hold::DraftHold>>,
+    /// Held across a draft's paste, a pass over the holds and a withdrawal,
+    /// so none of them cross.
+    draft_pump: tokio::sync::Mutex<()>,
     /// The sessions of recorded subagents being read (`workers`).
     worker_follow: std::sync::Mutex<workers::Follower>,
     /// Make the next paste fail as a send would (`answer_wake`'s tests).
@@ -2792,6 +2797,8 @@ impl Watcher {
             wakes_hint: std::sync::atomic::AtomicBool::new(true),
             told: std::sync::Mutex::new(HashMap::new()),
             wake_holds: std::sync::Mutex::new(HashMap::new()),
+            draft_holds: std::sync::Mutex::new(HashMap::new()),
+            draft_pump: tokio::sync::Mutex::new(()),
             worker_follow: std::sync::Mutex::new(workers::Follower::new(
                 std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default(),
             )),
@@ -4409,6 +4416,9 @@ impl Watcher {
                     // After the sample, so an agent that just went idle is
                     // told on the tick that saw it.
                     self.spawn_wake_pump();
+                    // Drafts held behind a dialog (ov-385): a map lookup
+                    // when there are none.
+                    self.spawn_draft_pump();
                     // Gated: a drained set lookup per repository, and a git
                     // process only for repositories the filesystem says
                     // actually gained or lost a worktree. The separate forced
@@ -5297,6 +5307,7 @@ impl Watcher {
             message.current_command = observed.command.clone();
             message.ports = observed.ports.clone();
             message.chat_capable = observed.chat_capable;
+            message.draft_hold = self.draft_hold(terminal);
             // Finished lines, already redacted and already cut to a row's
             // width. See `farcooler_core::feed` for why both happen here and
             // not on the three clients that render them.

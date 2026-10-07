@@ -635,10 +635,10 @@ impl Watcher {
     /// `proven_tui`): the pane is a proven agent, between turns or mid-turn
     /// in one that queues, nobody is typing, its box is empty, and bracketed
     /// paste is known to be on. Any failure is an error, and nothing is
-    /// typed; the Mac then copies the text instead.
-    ///
-    /// Not recorded as someone typing (`marks: None`), as an answer isn't.
-    pub(crate) async fn draft_into(&self, id: Uuid, text: &str) -> Result<()> {
+    /// typed; the app then copies the text instead. But a dialog in the way,
+    /// when the client asked (`hold`), holds the draft until it closes
+    /// (`draft_hold`, ov-385).
+    pub(crate) async fn draft_into(&self, id: Uuid, text: &str, hold: bool) -> Result<draft_hold::Drafted> {
         let to = self.service.store.get_terminal(id)?;
         if to.pane_mode == PaneMode::Agent {
             // A chat pane has a composer of the app's own; no TUI to paste to.
@@ -654,14 +654,16 @@ impl Watcher {
         if text.trim().is_empty() {
             return Err(DomainError::InvalidArgument { what: "text" });
         }
-        self.ready(&to).await.map_err(|_| DomainError::Conflict { what: "not_pasteable" })?;
-        self.proven_tui(&to).await.map_err(|_| DomainError::Conflict { what: "not_pasteable" })?;
-        let runtime = Runtime { marks: None, ..self.service.runtime() };
-        let paste: String = crate::pastes::encode_paste(true, &text).iter().map(|b| format!("{b:02x}")).collect();
-        if self.fail_sends_for_tests() {
-            return Err(DomainError::OperationFailed);
+        let _one_pass = self.draft_pump.lock().await;
+        match self.paste_draft(&to, &text).await {
+            Ok(sent) => {
+                sent?;
+                self.draft_replaced(to.id);
+                Ok(draft_hold::Drafted::Pasted)
+            }
+            Err(Held::Prompt) if hold => Ok(draft_hold::Drafted::Held(self.hold_draft(&to, text))),
+            Err(_) => Err(DomainError::Conflict { what: "not_pasteable" }),
         }
-        runtime.send_bytes_hex(to.id, &paste).await
     }
 
     /// The pane's box as a fresh capture shows it, and whether a turn is
@@ -933,6 +935,7 @@ fn spoken_name(t: &Terminal) -> String {
     if title.is_empty() { "the agent".into() } else { title }
 }
 
+pub(crate) mod draft_hold;
 mod finish;
 pub(crate) mod mid_turn;
 mod tell;

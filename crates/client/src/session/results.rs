@@ -16,6 +16,7 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::Worktree(_) => "worktree",
         result::Value::WorktreeList(_) => "worktree_list",
         result::Value::Terminal(_) => "terminal",
+        result::Value::DraftHold(_) => "draft_hold",
         result::Value::TerminalList(_) => "terminal_list",
         result::Value::Operation(_) => "operation",
         result::Value::DaemonVersion(_) => "daemon_version",

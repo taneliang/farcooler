@@ -599,6 +599,14 @@ pub mod capability {
     /// client reads it (ov-372): without it both methods are refused as
     /// unsupported. Its own capability because no earlier runner has either.
     pub const AGENT_ROWS: &str = "agent_rows";
+    /// A draft held behind a dialog (ov-385): `hold_behind_dialog` on
+    /// `terminal.draft_prompt`, the `DraftHold` it answers with,
+    /// `Terminal.draft_hold` and `terminal.draft_withdraw`.
+    ///
+    /// Its own capability because an older runner drops the flag and refuses
+    /// a draft a dialog is in the way of: a client that reads it absent copies
+    /// the draft to the clipboard instead, as it always did.
+    pub const DRAFT_HOLD: &str = "draft_hold";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -613,7 +621,7 @@ pub mod capability {
             AGENTS_FOUND,
             TASK_WAITS, TASK_WORKERS, NOTICE_TASK, BOARD_READS, WORKTREE_FILES, TERMINAL_NAMES, TERMINAL_PORTS,
             READ_ONLY_FOLDERS, AGENT_QUEUE, BOARD_PLAN, LFS_POINTERS, BOARD_PAGES, BOARD_RULINGS,
-            BOARD_TRAINS, BOARD_COST, LANDING, BOARD_RULING_ACTIONS, AGENT_ROWS,
+            BOARD_TRAINS, BOARD_COST, LANDING, BOARD_RULING_ACTIONS, AGENT_ROWS, DRAFT_HOLD,
         ];
 
     /// Capabilities this process has but does not offer: a feature behind a
@@ -733,6 +741,7 @@ pub mod method {
         TerminalAgentPrompt = "terminal.agent_prompt" => AGENT,
         TerminalDraftPrompt = "terminal.draft_prompt" => AGENT,
         TerminalTell = "terminal.tell" => AGENT,
+        TerminalDraftWithdraw = "terminal.draft_withdraw" => DRAFT_HOLD,
         TerminalAgentAnswer = "terminal.agent_answer" => AGENT,
         TerminalAgentSetMode = "terminal.agent_set_mode" => AGENT,
         TerminalAgentSetModel = "terminal.agent_set_model" => AGENT,

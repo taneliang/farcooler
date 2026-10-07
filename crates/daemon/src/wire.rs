@@ -397,6 +397,8 @@ pub fn terminal(view: &TerminalView) -> wire::Terminal {
         // The runner's `task_link::stamp_notice_task` sets it, where the store is
         // at hand; this converter has none.
         notice_task_id: None,
+        // The watcher's, set beside the activity (ov-385).
+        draft_hold: None,
         // Left unset here for the same reason as `activity`: both describe a
         // live ACP session, and only the supervisor holding that session knows
         // them. A converter that guessed would report a mode the agent is not

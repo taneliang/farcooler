@@ -412,6 +412,8 @@ fn scope_of(method: Method) -> Scope {
         // Types into a TUI pane like `terminal.write`, but never Enter, and
         // only past the answer wake's gate (`Watcher::draft_into`).
         | Method::TerminalDraftPrompt
+        // Only ends a held draft: it types nothing (ov-385).
+        | Method::TerminalDraftWithdraw
         // Types into the orchestrator's TUI and presses Enter, past the same
         // gate (`Watcher::tell_into`, ov-214).
         | Method::TerminalTell
@@ -1892,8 +1894,20 @@ impl Rpc {
                     let queued = self.watcher.tell_into(id, &text).await? == crate::watch::answer_wake::Turn::During;
                     return Ok(result::Value::TerminalTold(farcooler_protocol::v1::TerminalTold { queued }));
                 }
-                self.watcher.draft_into(id, &text).await?;
-                self.terminal_result(id).await
+                match self.watcher.draft_into(id, &text, p.hold_behind_dialog).await? {
+                    crate::watch::answer_wake::draft_hold::Drafted::Pasted => self.terminal_result(id).await,
+                    crate::watch::answer_wake::draft_hold::Drafted::Held(hold) => Ok(result::Value::DraftHold(hold)),
+                }
+            }
+
+            // Stop waiting to paste a draft held behind a dialog (ov-385).
+            "terminal.draft_withdraw" => {
+                let Some(request::Payload::DraftWithdraw(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
+                let hold = wire::parse_id(&p.hold_id).ok_or(DomainError::NotFound)?;
+                Ok(result::Value::DraftHold(self.watcher.withdraw_draft(id, hold).await?))
             }
 
             // ---- review ----
@@ -2520,6 +2534,7 @@ impl Rpc {
         }
         message.ports = self.watcher.ports(view.terminal.id).await;
         message.chat_capable = self.watcher.chat_capable(view.terminal.id).await;
+        message.draft_hold = self.watcher.draft_hold(view.terminal.id);
         // The same lines the broadcast path sends, off the same `Observed`. A
         // client that reads a list and then watches events must not see the
         // feed appear, vanish, and come back.
@@ -3064,6 +3079,7 @@ mod hook_answer_tests {
             payload: Some(request::Payload::AgentPrompt(farcooler_protocol::v1::AgentPrompt {
                 terminal_id: crate::wire::id_bytes(r.terminal),
                 blocks: Vec::new(),
+                hold_behind_dialog: false,
             })),
             ..Default::default()
         };

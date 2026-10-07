@@ -281,7 +281,7 @@ async fn a_draft_is_pasted_into_a_working_orchestrator() {
     let orchestrator = b.adopted_shell().await;
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     working(&b, &orchestrator, &si, "working").await;
-    b.watcher.draft_into(orchestrator.id, "About ov-1 (“Fix”): ").await.expect("pasted");
+    b.watcher.draft_into(orchestrator.id, "About ov-1 (“Fix”): ", false).await.expect("pasted");
     si.pasted().await;
     assert!(!si.log().contains("ENTER"), "{}", si.log());
 }

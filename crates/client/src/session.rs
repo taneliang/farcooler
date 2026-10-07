@@ -25,7 +25,7 @@ use crate::changes_json::{stack_json, change_set_json, file_change_json, file_di
 use crate::ssh;
 
 mod board_reads;
-mod draft_prompt;
+pub mod draft_prompt;
 mod files;
 mod notice_task;
 mod pages;
@@ -890,7 +890,7 @@ impl Session {
                     "ordinal": w.ordinal,
                     "terminals": terminals.iter()
                         .filter(|t| t.worktree_id == w.id)
-                        .map(|t| json!({
+                        .map(|t| with_draft_hold(t, json!({
                             "id": uuid_of(&t.id).to_string(),
                             "short": short(&t.id),
                             "title": t.title,
@@ -994,7 +994,7 @@ impl Session {
                             // `task_of` for why a missing or malformed id is
                             // absent rather than the nil uuid.
                             "taskId": task_of(t),
-                        }))
+                        })))
                         .collect::<Vec<_>>(),
                 });
                 with_workspaces(row, w, terminals, known)
@@ -1555,6 +1555,7 @@ impl Session {
         let payload = request::Payload::AgentPrompt(farcooler_protocol::v1::AgentPrompt {
             terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
             blocks,
+            hold_behind_dialog: false,
         });
         match self.value("terminal.agent_prompt", None, Some(payload)).await? {
             result::Value::Terminal(t) => Ok(t),
@@ -2335,6 +2336,17 @@ fn require(advertised: &[String], capability: &str, method: &str) -> Result<(), 
     })
 }
 
+/// A fleet row with the draft held on its terminal behind a dialog (ov-385),
+/// as `draftHold`, so the phone that sent it can say whether it went in.
+/// Absent when there's none. Set here, not in the row's `json!`, which is at
+/// the macro's recursion limit.
+fn with_draft_hold(t: &farcooler_protocol::v1::Terminal, mut row: serde_json::Value) -> serde_json::Value {
+    if let (Some(hold), Some(row)) = (&t.draft_hold, row.as_object_mut()) {
+        row.insert("draftHold".into(), draft_prompt::draft_hold_json(hold));
+    }
+    row
+}
+
 /// The board task a terminal was opened for, as a uuid string, or nothing.
 ///
 /// Nothing for a pane nobody dispatched, for a runner too old to record one
@@ -2342,6 +2354,7 @@ fn require(advertised: &[String], capability: &str, method: &str) -> Result<(), 
 /// never the nil uuid, which `uuid_of` would hand back and which a client
 /// would then match against nothing and draw as a link to nowhere. The same
 /// rule as the CLI's `task_of`, which projects the same field for the Mac.
+
 fn task_of(t: &Terminal) -> Option<String> {
     t.task_id.as_deref().and_then(|b| Uuid::from_slice(b).ok()).map(|u| u.to_string())
 }

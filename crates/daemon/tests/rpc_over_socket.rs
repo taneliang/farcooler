@@ -1621,6 +1621,7 @@ async fn a_prompt_nothing_is_listening_for_is_refused_rather_than_dropped() {
                 "please do the thing".to_string(),
             )),
         }],
+        hold_behind_dialog: false,
     }));
 
     match client.call(req).await {

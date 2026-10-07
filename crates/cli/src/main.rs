@@ -933,7 +933,16 @@ enum TerminalCmd {
         images: Vec<PathBuf>,
     },
     /// Paste text into a TUI pane's box, never Enter; refused unless safe.
-    DraftPrompt { terminal: String, text: String },
+    DraftPrompt {
+        terminal: String,
+        text: String,
+        /// Hold it behind a dialog until the dialog closes, rather than be
+        /// refused for one, where the runner can; print a JSON line.
+        #[arg(long)]
+        hold: bool,
+    },
+    /// Withdraw a draft held behind a dialog; print the hold as JSON.
+    DraftWithdraw { terminal: String, hold: String },
     /// Type a message into an orchestrator's TUI and submit it, queued when
     /// it's working; refused, typing nothing, unless safe. Put `--` before a
     /// message that starts with a dash.
@@ -3074,13 +3083,15 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
                 request::Payload::AgentPrompt(farcooler_protocol::v1::AgentPrompt {
                     terminal_id: id_bytes(id),
                     blocks,
+                    hold_behind_dialog: false,
                 }),
             ))
             .await.map_err(tasks::agent_refused(&terminal))?;
             println!("sent to {}", short(id));
         }
 
-        TerminalCmd::DraftPrompt { terminal, text } => draft_prompt::run(runner, &terminal, text).await?,
+        TerminalCmd::DraftPrompt { terminal, text, hold } => draft_prompt::run(runner, &terminal, text, hold).await?,
+        TerminalCmd::DraftWithdraw { terminal, hold } => draft_prompt::withdraw(runner, &terminal, &hold).await?,
         TerminalCmd::Tell { terminal, text } => tell::run(runner, &terminal, text).await?,
         TerminalCmd::AgentAnswer { terminal, request_id, option_id } => {
             let (mut link, id) = terminal_by_record(runner, &terminal).await?;
@@ -3694,6 +3705,9 @@ fn worktree_list_terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_js
         // What the agent is asking, when it is blocked and legible. Without
         // this a row can say "Needs you" and never say what for.
         "blockedQuestion": t.blocked_question,
+        // A draft held behind a dialog (ov-385), so the Mac can say whether
+        // the one it sent went in. Absent when there's none.
+        "draftHold": t.draft_hold.as_ref().map(farcooler_client::session::draft_prompt::draft_hold_json),
         // The last three things it SAID, in the agent's own words. Already
         // redacted and already cut to a row's width — a client renders these
         // and decides nothing about them.
@@ -3927,6 +3941,10 @@ fn terminal_event_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Valu
         // permission prompt resolves.
         "turnStartedAt": turn_started_at(t),
         "blockedQuestion": t.blocked_question,
+        // Watched: the event that says a held draft went in, or ended, is
+        // the one the Mac turns "Waiting for the dialog to close" into "Sent"
+        // with (ov-385).
+        "draftHold": t.draft_hold.as_ref().map(farcooler_client::session::draft_prompt::draft_hold_json),
         // Watched for the same reason again, and this is the field with the
         // shortest useful life of any of them: a line is news for as long as
         // the agent is on it, and a transcript that only arrived on a full
