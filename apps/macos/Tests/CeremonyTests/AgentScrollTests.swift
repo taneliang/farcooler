@@ -220,7 +220,7 @@ struct AgentScrollTests {
         let scroll = try #require(Self.scrollView(in: host))
         scroll.contentView.scroll(to: NSPoint(x: 0, y: 200))
         scroll.reflectScrolledClipView(scroll.contentView)
-        #expect(await Self.until(10) { !probe.following && probe.showsJump }, "scrolling up didn't stop following")
+        #expect(await Self.until { !probe.following && probe.showsJump }, "scrolling up didn't stop following")
         let offset = try #require(probe.geometry?.contentOffset.y)
         let height = probe.geometry?.contentSize.height
         try standIn.stream([Self.batch([Self.message("Agent", String(repeating: Self.sentence, count: 3))], from: seq)])
@@ -406,13 +406,23 @@ struct AgentScrollTests {
 
     /// A reader who flicks away mid-flight by more than a correction is not
     /// pulled back when the animation ends.
+    ///
+    /// The flick is armed from inside the jump (its backstop is scheduled
+    /// as the jump begins), not before the click: armed earlier, a late
+    /// geometry report from the scrolled-up chat could take the flick before
+    /// the jump had started, and the jump then re-followed.
     @Test func aReaderWhoFlicksAwayMidJumpIsNotPulledBack() async throws {
+        let original = AgentSurface.scheduleBackstop
+        let stepper = Stepper()
+        defer { AgentSurface.scheduleBackstop = original }
         try await jumping { probe, scroll, host, window in
-            let stepper = Stepper()
-            stepper.arm(probe, scroll, back: 1_200)
+            AgentSurface.scheduleBackstop = { body in
+                stepper.arm(probe, scroll, back: 1_200)
+                original(body)
+            }
             Self.clickJump(probe, host, window)
             #expect(await Self.until { stepper.steps == 1 }, "the flick was never made")
-            #expect(await Self.until(10) { !probe.following && probe.showsJump }, "a flick of 1,200 pt didn't stop following")
+            #expect(await Self.until { !probe.following && probe.showsJump }, "a flick of 1,200 pt didn't stop following")
             await Self.settle()
             #expect(!probe.following && probe.showsJump, "the reader was pulled back to the tail")
         }
