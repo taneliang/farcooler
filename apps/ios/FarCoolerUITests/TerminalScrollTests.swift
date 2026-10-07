@@ -87,6 +87,7 @@ final class TerminalScrollTests: XCTestCase {
         // assignment in the right place and fails a run where nothing ran.
         runner = LiveRunner.address
         app.launchArguments += ["-farcoolerDemoHost", runner]
+        app.withoutLogMirroring()
         app.launch()
         return app
     }
