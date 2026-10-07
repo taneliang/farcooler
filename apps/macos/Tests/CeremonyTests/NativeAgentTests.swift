@@ -61,12 +61,15 @@ struct NativeAgentTests {
     /// A runner that records what the composer sent and answers as told.
     actor StandInSink: ComposeSink {
         var sent: [String] = []
+        /// Each send's images, in step with `sent`.
+        var images: [[ComposeImage]] = []
         var answer: Result<Bool, RunnerCore.Failure> = .success(false)
 
         func set(_ answer: Result<Bool, RunnerCore.Failure>) { self.answer = answer }
 
-        func compose(terminal: String, text: String) async throws -> Bool {
+        func compose(terminal: String, text: String, images: [ComposeImage]) async throws -> Bool {
             sent.append(text)
+            self.images.append(images)
             return try answer.get()
         }
     }

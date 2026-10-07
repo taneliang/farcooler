@@ -1,18 +1,32 @@
 import AgentKit
+import AppKit
 import Foundation
 import SwiftUI
 
 /// Where the native composer's message goes (ov-372): `terminal.compose`,
-/// which types it into the TUI's box on one line and presses Enter past the
-/// same gate as `terminal tell`, or refuses with a word and types nothing.
-/// True when the agent was working and claude's own queue took it (R-29).
+/// which types it into the TUI's box and presses Enter past the same gate as
+/// `terminal tell`, or refuses with a word and types nothing. With the
+/// runner's `compose` (ov-367), its line breaks, images and slash command
+/// too; the client core uploads the images first where the runner takes
+/// that (ov-393). True when the agent was working and claude's own queue
+/// took it (R-29).
 protocol ComposeSink: Sendable {
-    func compose(terminal: String, text: String) async throws -> Bool
+    func compose(terminal: String, text: String, images: [ComposeImage]) async throws -> Bool
+}
+
+extension ComposeSink {
+    func compose(terminal: String, text: String) async throws -> Bool {
+        try await compose(terminal: terminal, text: text, images: [])
+    }
 }
 
 extension RunnerCore: ComposeSink {
-    func compose(terminal: String, text: String) async throws -> Bool {
-        let data = try await call("terminal.compose", ["terminal": terminal, "text": text])
+    func compose(terminal: String, text: String, images: [ComposeImage]) async throws -> Bool {
+        var args: [String: any Sendable] = ["terminal": terminal, "text": text]
+        if !images.isEmpty {
+            args["images"] = images.map { ["mime": $0.mime, "base64": $0.data.base64EncodedString()] }
+        }
+        let data = try await call("terminal.compose", args)
         let object = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
         return object["queued"] as? Bool ?? false
     }
@@ -30,17 +44,30 @@ final class NativePaneModel: ObservableObject {
     let terminal: String
     let store: AgentRowStore
 
-    /// The composer's text. Line breaks become spaces as they arrive: the
-    /// box takes one line from here until compose_into (ov-367), so what you
-    /// see is what's sent.
+    /// The composer's text. Against a runner without `compose`, line breaks
+    /// become spaces as they arrive: it takes one line, so what you see is
+    /// what's sent.
     @Published var draft = "" {
         didSet {
-            if draft.contains(where: \.isNewline) {
+            if !rich, draft.contains(where: \.isNewline) {
                 draft = draft.replacingOccurrences(of: "\r\n", with: " ").replacingOccurrences(of: "\n", with: " ")
                     .replacingOccurrences(of: "\r", with: " ")
             }
         }
     }
+    /// Whether the runner takes line breaks, images and slash commands
+    /// (`compose`, ov-367), as its hello said. Without it, one line.
+    @Published var rich = false {
+        didSet {
+            guard !rich else { return }
+            images = []
+            draft = draft
+        }
+    }
+    /// Images to send with the text, in order (ov-400). Only with `rich`.
+    @Published private(set) var images: [ComposeImage] = []
+    /// Each image's chip picture, made once as it's added.
+    private(set) var thumbnails: [UUID: NSImage] = [:]
     @Published private(set) var sending = false
     /// What stopped the last send, until the next one or a dismissal.
     @Published var issue: SendIssue?
@@ -118,34 +145,77 @@ final class NativePaneModel: ObservableObject {
     /// The longest message the box takes from here (`tell.rs`'s
     /// `LONGEST_MESSAGE`).
     static let longest = 500
+    /// The longest with `compose` (`compose.rs`'s `LONGEST_TEXT`).
+    static let longestComposed = 100_000
+    /// The most images in one message (`compose.rs`'s `MOST_IMAGES`).
+    static let mostImages = 10
+
+    /// The longest message the box takes now.
+    var longestNow: Int { rich ? Self.longestComposed : Self.longest }
+
+    /// Add `new` after the images already waiting, up to `mostImages`. False
+    /// when the runner takes no images, so a paste or a drop goes to the
+    /// text instead.
+    @discardableResult
+    func attach(_ new: [ComposeImage]) -> Bool {
+        guard rich else { return false }
+        let room = max(0, Self.mostImages - images.count)
+        for image in new.prefix(room) {
+            thumbnails[image.id] = image.thumbnail()
+            images.append(image)
+        }
+        if new.count > room { issue = .said(Self.tooManyImages) }
+        return true
+    }
+
+    /// Take the image `id` out of the message.
+    func detach(_ id: UUID) {
+        images.removeAll { $0.id == id }
+        thumbnails[id] = nil
+    }
 
     /// Why a message wasn't sent, as the composer says it.
     enum SendIssue: Equatable {
         /// Claude is showing a question, a menu or a panel only the terminal
         /// can draw: the Handoff row, with Show Terminal.
         case handoff
+        /// The message is one of claude's own commands that opens a panel or
+        /// acts at once (`handoff`): the Handoff row, with Show Terminal.
+        case panel
         /// The terminal's box holds text of its own (R-28).
         case draftInTerminal
         /// Something only words can say.
         case said(String)
     }
 
-    var canSend: Bool {
-        let text = draft.trimmingCharacters(in: .whitespaces)
-        return !sending && !text.isEmpty && text.count <= Self.longest && sink != nil && !store.isStale
+    /// The draft as it's sent: trimmed of spaces at the ends on one line;
+    /// with `compose`, as typed, the runner trimming the ends but keeping an
+    /// indent.
+    private var outgoing: String {
+        rich ? draft : draft.trimmingCharacters(in: .whitespaces)
     }
 
-    /// Send the draft. Enter's action.
+    /// Whether the draft has anything but white space in it.
+    private var hasText: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var canSend: Bool {
+        !sending && (hasText || !images.isEmpty) && outgoing.count <= longestNow && sink != nil && !store.isStale
+    }
+
+    /// Send the draft and its images. Return's action.
     func send() async {
-        let text = draft.trimmingCharacters(in: .whitespaces)
+        let text = outgoing
+        let images = self.images
         guard canSend, let sink else {
-            if draft.trimmingCharacters(in: .whitespaces).count > Self.longest { issue = .said(Self.tooLong) }
+            if outgoing.count > longestNow { issue = .said(tooLongNow) }
             return
         }
-        // A slash or a bang opens claude's command picker or its shell, which
-        // Enter would then run: commands go through the terminal until the
-        // picker is driven from here (ov-367).
-        if let first = text.first, "/!#@&$?\\".contains(first) {
+        // Without `compose`, a slash or a bang would open claude's command
+        // picker or its shell, which Enter would then run. With it, the
+        // runner drives the picker, and refuses what it can't.
+        if !rich, let first = text.first, "/!#@&$?\\".contains(first) {
             issue = .said(Self.command)
             return
         }
@@ -153,12 +223,28 @@ final class NativePaneModel: ObservableObject {
         issue = nil
         defer { sending = false }
         do {
-            let wasQueued = try await sink.compose(terminal: terminal, text: text)
-            if draft.trimmingCharacters(in: .whitespaces) == text { draft = "" }
-            if wasQueued { queued.append(text) }
+            let wasQueued = try await sink.compose(terminal: terminal, text: text, images: images)
+            if outgoing == text { draft = "" }
+            for image in images { detach(image.id) }
+            if wasQueued { queued.append(Self.echo(text, images: images.count)) }
         } catch {
             issue = Self.issue(for: error)
         }
+    }
+
+    /// A Queued row's words until the transcript shows the message: each
+    /// image as `[Image]`, then the text.
+    static func echo(_ text: String, images: Int) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (Array(repeating: "[Image]", count: images) + (trimmed.isEmpty ? [] : [trimmed])).joined(separator: " ")
+    }
+
+    /// A message's words without its images' placeholders (claude's
+    /// `[Image #N]`, the echo's `[Image]`) or the white space around them,
+    /// so an echo and the transcript's row for it compare equal.
+    static func words(_ text: String) -> String {
+        text.replacingOccurrences(of: #"\[Image( #\d+)?\]"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// The page above the oldest row held.
@@ -177,23 +263,30 @@ final class NativePaneModel: ObservableObject {
             default: nil
             }
         })
-        queued.removeAll { shown.contains($0) }
+        let words = Set(shown.map(Self.words))
+        queued.removeAll { words.contains(Self.words($0)) }
     }
 
     static func issue(for error: Error) -> SendIssue {
         let failure = error as? RunnerCore.Failure
         switch failure?.what {
         case "prompt", "dialog": return .handoff
+        case "handoff": return .panel
         case "draft": return .draftInTerminal
         case "typing": return .said("Someone is typing in the terminal. Try again in a moment.")
         case "busy": return .said("Claude is working and can’t take a message from here right now.")
         case "too_long": return .said(tooLong)
-        case "command": return .said(command)
+        case "command": return .said(commandRefused)
         case "paste_left": return .said("The message didn’t land in the box as typed, so it was left there and not sent.")
         case "left_at_shell": return .said("Claude quit as the message was typed. It wasn’t run.")
-        case "unconfirmed": return .said("Claude didn’t confirm it queued the message. Check the terminal before sending it again.")
+        case "unconfirmed": return .said(unconfirmed)
         case "not_running", "not_an_agent": return .said("Claude isn’t running in this pane.")
         case "unfamiliar", "unproven": return .said("Far Cooler can’t read this terminal’s box, so nothing was typed.")
+        case "images_too_large": return .said(imagesTooLarge)
+        case "images": return .said("A slash command can’t carry images, and a message takes at most \(mostImages).")
+        case "image": return .said("One of the images couldn’t be read, so nothing was sent.")
+        case "unconfirmable": return .said("Far Cooler can’t find Claude’s session to confirm a send, so nothing was typed.")
+        case "unsupported": return .said("Only Claude can take a message from here. Use the terminal.")
         default:
             switch failure {
             // Never "wasn't sent" for a call that may have arrived: the
@@ -209,7 +302,15 @@ final class NativePaneModel: ObservableObject {
     }
 
     static let tooLong = "That message is over \(longest) characters. Shorten it, or paste it in the terminal."
+    static let tooLongComposed = "That message is over 100,000 characters. Shorten it, or paste it in the terminal."
+    var tooLongNow: String { rich ? Self.tooLongComposed : Self.tooLong }
     static let command = "A message can’t start with a symbol Claude reads as a command, such as / or !. Use the terminal for commands."
+    /// The runner's `command`: a `!`, which claude's box runs in a shell, or
+    /// a `/` before something that isn't a command's name.
+    static let commandRefused = "Claude would run that as a shell command or doesn’t have that command, so it wasn’t sent. Use the terminal for it."
+    static let imagesTooLarge = "These images are too large to send together. Send fewer or smaller ones."
+    static let tooManyImages = "A message takes at most \(mostImages) images."
+    static let unconfirmed = "Claude didn’t confirm it took the message. Check the pane before sending it again."
     static let mayHaveBeenSent = "The runner didn’t answer in time. The message may have been sent, so check the terminal before sending it again."
 
     // MARK: - The view each pane remembers (R-27)

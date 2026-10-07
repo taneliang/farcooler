@@ -617,11 +617,8 @@ pub mod capability {
     /// `terminal.compose` takes line breaks, images and slash commands, and answers once claude
     /// confirms (ov-367); with `agent_compose` alone, one line and no image.
     pub const COMPOSE: &str = "compose";
-    /// A compose's images uploaded in chunks first (ov-393): `stage` on
-    /// `terminal.paste_file` keeps the finished file for a compose and types
-    /// nothing, and `terminal.compose` takes `staged_image` blocks naming
-    /// it, up to `MAX_COMPOSE_UPLOAD_BYTES` together. Without it, images ride
-    /// in the request, `MAX_COMPOSE_IMAGE_BYTES` together.
+    /// A compose's images uploaded first (ov-393): `terminal.paste_file`'s `stage`, and
+    /// `terminal.compose`'s `staged_image`, `MAX_COMPOSE_UPLOAD_BYTES` together.
     pub const COMPOSE_UPLOAD: &str = "compose_upload";
 
     /// Every capability this build has, in a stable order.
@@ -876,10 +873,8 @@ pub const MAX_CONTROL_ENVELOPE_BYTES: usize = 1024 * 1024;
 /// together: under the envelope's 1 MiB, with room for the text (ov-367).
 pub const MAX_COMPOSE_IMAGE_BYTES: usize = 900 * 1024;
 
-/// The most image bytes one `terminal.compose` names, all its images
-/// together, when they were uploaded first (`compose_upload`, ov-393): ten
-/// Retina screenshots and room to spare, and far short of what a runner's
-/// disk or claude's request would mind.
+/// The most image bytes one `terminal.compose` names, uploaded first
+/// (`compose_upload`, ov-393): ten Retina screenshots and room to spare.
 pub const MAX_COMPOSE_UPLOAD_BYTES: usize = 50 * 1024 * 1024;
 
 /// `TerminalFrame.payload` is capped at 64 KiB.

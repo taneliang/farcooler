@@ -35,6 +35,8 @@ final class NativeAgents: ObservableObject {
     @Published private(set) var changing = false
 
     private(set) var core: RunnerCore?
+    /// What this Mac's runner offered in its last hello.
+    private var offered: Set<String> = []
     private var panes: [String: NativePaneModel] = [:]
     private let defaults: UserDefaults
     private var connecting: Task<Void, Never>?
@@ -138,6 +140,7 @@ final class NativeAgents: ObservableObject {
                 }
             }
             self.core = core
+            self.offered = offered
             // Rows to read and a way to send: a runner with rows from
             // before `terminal.compose` gets the terminal, not a view whose
             // every send would fail.
@@ -192,6 +195,8 @@ final class NativeAgents: ObservableObject {
     private func follow(_ model: NativePaneModel, on core: RunnerCore) {
         model.source = CoreRowSource(core: core, terminal: model.terminal)
         model.sink = core
+        // Line breaks, images and commands where the runner takes them.
+        model.rich = offered.contains(Capability.compose.rawValue)
         model.followIfShown()
     }
 

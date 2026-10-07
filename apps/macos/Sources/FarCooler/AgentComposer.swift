@@ -1072,6 +1072,14 @@ final class ComposerTextView: NSTextView {
     var onApprove: (() -> Void)?
     var onReject: (() -> Void)?
     var placeholder: String = "" { didSet { needsDisplay = true } }
+    /// Where Paste reads: the system's pasteboard, or a test's own.
+    var pasteboard: NSPasteboard = .general
+    /// Takes the images on a pasteboard, pasted or dropped, before anything
+    /// else does; true when it took them (the native composer, ov-400).
+    var onImages: ((NSPasteboard) -> Bool)?
+    /// Whether a pasteboard holds images `onImages` would take, for a drag
+    /// passing over.
+    var offersImages: ((NSPasteboard) -> Bool)?
 
     override func keyDown(with event: NSEvent) {
         // An input method is composing (Japanese, Chinese, Korean) and Return
@@ -1120,6 +1128,13 @@ final class ComposerTextView: NSTextView {
             onSubmit?()
             return
         }
+        // Shift-Return breaks the line here, from the event in hand, rather
+        // than through `insertNewline`, which reads the shift off
+        // `NSApp.currentEvent`.
+        if isReturn {
+            insertNewlineIgnoringFieldEditor(nil)
+            return
+        }
         super.keyDown(with: event)
     }
 
@@ -1145,12 +1160,25 @@ final class ComposerTextView: NSTextView {
     }
 
     override func paste(_ sender: Any?) {
-        let pasteboard = NSPasteboard.general
-        if let image = NSImage(pasteboard: pasteboard) {
-            onPasteImage?(image)
+        if let onImages, onImages(pasteboard) { return }
+        if let onPasteImage, let image = NSImage(pasteboard: pasteboard) {
+            onPasteImage(image)
             return
         }
         super.paste(sender)
+    }
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        offersImages?(sender.draggingPasteboard) == true ? .copy : super.draggingEntered(sender)
+    }
+
+    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        offersImages?(sender.draggingPasteboard) == true ? .copy : super.draggingUpdated(sender)
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        if let onImages, onImages(sender.draggingPasteboard) { return true }
+        return super.performDragOperation(sender)
     }
 
     override func draw(_ dirtyRect: NSRect) {

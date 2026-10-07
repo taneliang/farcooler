@@ -34,6 +34,8 @@ struct NativeAgentView: View {
                 }
                 if model.issue == .handoff {
                     HandoffRow(reason: "Claude is showing something only the terminal can.", showTerminal: showTerminal)
+                } else if model.issue == .panel {
+                    HandoffRow(reason: "This opens a panel in Claude, so it’s for the terminal.", showTerminal: showTerminal)
                 }
             }
             .padding(Spacing.section)
@@ -88,54 +90,139 @@ struct NativeAgentView: View {
     }
 }
 
-/// The native view's box (ov-372). Enter sends through `terminal.compose`:
+/// The native view's box (ov-372). Return sends through `terminal.compose`:
 /// typed into claude's own box and submitted, or taken by claude's queue
 /// while it works (R-29).
 ///
-/// Seams for what comes later, each named where it will go:
-/// - images and attachments (ov-367): an accessory before the field, sent as
-///   `compose_into`'s paths;
-/// - slash commands (ov-367): refused here today (`NativePaneModel.send`),
-///   the picker to be driven from this field;
-/// - interrupt and Send Now (ov-368): a button beside Send while the turn
-///   runs, and on each Queued row.
+/// Where the runner has `compose` (ov-400): Shift-Return makes a new line,
+/// images come by paste, drop or the paperclip and wait as chips, and a
+/// slash command goes to claude's picker. Without it, one line and no images.
+///
+/// A seam for what comes later: interrupt and Send Now (ov-368), a button
+/// beside Send while the turn runs, and on each Queued row.
 struct NativeComposer: View {
     @ObservedObject var model: NativePaneModel
     let isFocused: Bool
     let showTerminal: () -> Void
-    @FocusState private var focused: Bool
+    @State private var fieldHeight = ComposerField.lineHeight
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.group) {
-            if let issue = model.issue, issue != .handoff {
+            if let issue = model.issue, issue != .handoff, issue != .panel {
                 issueLine(issue)
             }
-            HStack(alignment: .bottom, spacing: Spacing.group) {
-                TextField("Message Claude", text: $model.draft, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...8)
-                    .focused($focused)
-                    .onSubmit { Task { await model.send() } }
-                    .identified("native-composer")
-                Button {
-                    Task { await model.send() }
-                } label: {
-                    // A filled circle either way, so it reads on light paper
-                    // when it can't send yet as well as when it can.
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(model.canSend ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
+            VStack(alignment: .leading, spacing: Spacing.group) {
+                if !model.images.isEmpty { chips }
+                HStack(alignment: .bottom, spacing: Spacing.group) {
+                    if model.rich {
+                        Button(action: pickImages) {
+                            Image(systemName: "paperclip")
+                                .font(.title3)
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Attach Images")
+                        .accessibilityLabel("Attach Images")
+                        .identified("native-attach")
+                    }
+                    field
+                    sendButton
                 }
-                .buttonStyle(.plain)
-                .disabled(!model.canSend)
-                .help("Send")
-                .accessibilityLabel("Send")
             }
             .padding(.horizontal, Spacing.inset)
             .padding(.vertical, Spacing.group)
             .surface(.floating, in: .floating)
         }
-        .onChange(of: isFocused, initial: true) { _, now in focused = now }
+    }
+
+    private var field: some View {
+        ComposerField(model: model, isFocused: isFocused, measuredHeight: $fieldHeight)
+            .frame(height: fieldHeight)
+            .overlay(alignment: .topLeading) {
+                if model.draft.isEmpty {
+                    Text("Message Claude")
+                        .font(Font(ComposerField.font))
+                        .foregroundStyle(.tertiary)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
+            .identified("native-composer")
+    }
+
+    /// The images waiting to go, each with a button to take it out.
+    private var chips: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: Spacing.group) {
+                ForEach(model.images) { image in
+                    chip(image)
+                }
+            }
+            .padding(.top, Spacing.tight)
+        }
+        .scrollIndicators(.never)
+        .identified("native-image-chips")
+    }
+
+    private func chip(_ image: ComposeImage) -> some View {
+        Group {
+            if let thumbnail = model.thumbnails[image.id] {
+                Image(nsImage: thumbnail).resizable().aspectRatio(contentMode: .fill)
+            } else {
+                Image(systemName: "photo").foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 48, height: 48)
+        .surface(.inset, in: .control)
+        .clipShape(.control)
+        .overlay(alignment: .topTrailing) {
+            Button {
+                model.detach(image.id)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .symbolRenderingMode(.palette)
+                    // style-exempt: a badge over a photo, white on dark to read on any picture
+                    .foregroundStyle(.white, .black.opacity(0.6))
+            }
+            .buttonStyle(.plain)
+            .help("Remove Image")
+            .accessibilityLabel("Remove Image")
+            .offset(x: Spacing.tight, y: -Spacing.tight)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Image")
+        .identified("native-image-chip")
+    }
+
+    /// The paperclip's picker: images from disk, added as chips.
+    private func pickImages() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.prompt = "Attach"
+        let model = model
+        panel.begin { response in
+            guard response == .OK else { return }
+            let images = ComposeImage.from(urls: panel.urls)
+            Task { @MainActor in model.attach(images) }
+        }
+    }
+
+    private var sendButton: some View {
+        Button {
+            Task { await model.send() }
+        } label: {
+            // A filled circle either way, so it reads on light paper
+            // when it can't send yet as well as when it can.
+            Image(systemName: "arrow.up.circle.fill")
+                .font(.title2)
+                .foregroundStyle(model.canSend ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
+        }
+        .buttonStyle(.plain)
+        .disabled(!model.canSend)
+        .help("Send")
+        .accessibilityLabel("Send")
     }
 
     @ViewBuilder
@@ -149,7 +236,7 @@ struct NativeComposer: View {
             case .said(let words):
                 Text(words)
                 Spacer(minLength: Spacing.group)
-            case .handoff:
+            case .handoff, .panel:
                 EmptyView()
             }
             Button("Dismiss") { model.issue = nil }
