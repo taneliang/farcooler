@@ -269,7 +269,7 @@ public enum AgentConversation {
     /// draft the person may take, never a message: nothing here sends.
     public static func suggestion(newestTurn turn: AgentRow.Turn?, draft: String, stale: Bool) -> String? {
         guard !stale, let turn, turn.activity != "Busy", turn.activity != "Waiting" else { return nil }
-        guard draft.allSatisfy(\.isWhitespace) else { return nil }
+        guard draft.isEmpty else { return nil }
         guard let words = turn.suggestion?.trimmingCharacters(in: .whitespacesAndNewlines), !words.isEmpty else { return nil }
         return words
     }
@@ -279,7 +279,7 @@ public enum AgentConversation {
     /// nothing is typed. It is a hint: Tab and a tap do not take it, as in
     /// claude.
     public static func hint(_ text: String?, draft: String, stale: Bool) -> String? {
-        guard !stale, draft.allSatisfy(\.isWhitespace) else { return nil }
+        guard !stale, draft.isEmpty else { return nil }
         guard let words = text?.trimmingCharacters(in: .whitespacesAndNewlines), !words.isEmpty else { return nil }
         return words
     }

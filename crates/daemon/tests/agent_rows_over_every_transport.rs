@@ -136,7 +136,7 @@ where
     R: AsyncRead + Unpin + Send + 'static,
     W: AsyncWrite + Unpin + Send + 'static,
 {
-    let payload = request::Payload::AgentRowsPage(pb::AgentRowsPage { terminal_id: terminal.id.clone(), before, limit });
+    let payload = request::Payload::AgentRowsPage(pb::AgentRowsPage { terminal_id: terminal.id.clone(), before, limit, hint_rows: true });
     let result::Value::AgentRowPage(page) = call(client, "agent.rows", payload).await else { panic!("agent.rows") };
     page
 }
@@ -146,7 +146,7 @@ where
     R: AsyncRead + Unpin + Send + 'static,
     W: AsyncWrite + Unpin + Send + 'static,
 {
-    let payload = request::Payload::AgentRowsFollow(pb::AgentRowsFollow { terminal_id: terminal.id.clone(), epoch, after_rev, wait_ms });
+    let payload = request::Payload::AgentRowsFollow(pb::AgentRowsFollow { terminal_id: terminal.id.clone(), epoch, after_rev, wait_ms, hint_rows: true });
     let result::Value::AgentRowChanges(changes) = call(client, "agent.rows_follow", payload).await else { panic!("agent.rows_follow") };
     changes
 }
@@ -272,7 +272,7 @@ async fn without_the_flag_rows_are_refused_as_unsupported() {
     let (_relay, relayed) = spawn(dir.path()).await;
     assert!(!relayed.server_hello().capabilities.iter().any(|c| c == "agent_rows"));
     let mut req = call_named("agent.rows");
-    req.payload = Some(request::Payload::AgentRowsPage(pb::AgentRowsPage { terminal_id: uuid::Uuid::now_v7().as_bytes().to_vec().into(), before: None, limit: 0 }));
+    req.payload = Some(request::Payload::AgentRowsPage(pb::AgentRowsPage { terminal_id: uuid::Uuid::now_v7().as_bytes().to_vec().into(), before: None, limit: 0, hint_rows: false }));
     match client.call_with(req, Default::default()).await {
         Err(farcooler_transport::ClientError::Daemon { code, .. }) => assert_eq!(code, pb::ErrorCode::CapabilityUnsupported as i32),
         other => panic!("{other:?}"),

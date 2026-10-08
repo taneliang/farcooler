@@ -460,6 +460,7 @@ private fun IssueLine(issue: AgentConversation.SendIssue, showTerminal: () -> Un
 private fun SuggestionPlaceholder(suggestion: String, take: () -> Unit) {
     Row(
         Modifier
+            .fillMaxWidth()
             .clickable(onClickLabel = "Use suggestion", onClick = take)
             .semantics(mergeDescendants = true) { contentDescription = "Suggested message: $suggestion" }
             .testTag("native-suggestion"),

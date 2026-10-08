@@ -51,7 +51,7 @@ fn a_follow_goes_on_the_wire_as_kinds_by_id() {
             RowChange::Insert(a_row("prose:a1:0", 2, 9)),
         ],
     };
-    let wire = pb_changes(terminal, follow);
+    let wire = pb_changes(terminal, follow, true);
     assert_eq!((wire.epoch, wire.rev, wire.reset), (7, 9, false));
     let kinds: Vec<(i32, &str, bool)> = wire.changes.iter().map(|c| (c.kind, c.id.as_str(), c.row.is_some())).collect();
     assert_eq!(
@@ -65,8 +65,33 @@ fn a_follow_goes_on_the_wire_as_kinds_by_id() {
     let row: serde_json::Value = serde_json::from_str(&wire.changes[2].row.as_ref().unwrap().row_json).unwrap();
     assert_eq!(row["id"], "prose:a1:0");
     assert!(row.get("born").is_none() && row.get("retracted").is_none(), "bookkeeping stays off the wire: {row}");
-    let reset = pb_changes(terminal, Follow::Reset { epoch: 8, rev: 3 });
+    let reset = pb_changes(terminal, Follow::Reset { epoch: 8, rev: 3 }, true);
     assert!(reset.reset && reset.changes.is_empty());
+}
+
+/// An older client counts the `Hint` row as a row it cannot draw, and a fresh
+/// session would lose its empty state, so only a client that said it draws
+/// one is sent it, in a page and in a follow.
+#[test]
+fn the_hint_row_goes_only_to_a_client_that_draws_it() {
+    let hint = || a_row(HINT_ID, 1, 5);
+    let mut page = vec![a_row("turn:p1", 0, 4), hint()];
+    keep_hint_for(&mut page, false);
+    assert_eq!(page.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["turn:p1"]);
+    let mut page = vec![a_row("turn:p1", 0, 4), hint()];
+    keep_hint_for(&mut page, true);
+    assert_eq!(page.len(), 2);
+
+    let follow = || Follow::Changes {
+        epoch: 1,
+        rev: 6,
+        changes: vec![RowChange::Insert(hint()), RowChange::Update(a_row("turn:p1", 0, 6)), RowChange::Remove { id: HINT_ID.into(), rev: 6 }],
+    };
+    let ids = |wire: pb::AgentRowChanges| wire.changes.into_iter().map(|c| c.id).collect::<Vec<_>>();
+    assert_eq!(ids(pb_changes(Uuid::now_v7(), follow(), false)), ["turn:p1"]);
+    assert_eq!(ids(pb_changes(Uuid::now_v7(), follow(), true)), [HINT_ID, "turn:p1", HINT_ID]);
+    // The revision still advances for a client that is not sent the row.
+    assert_eq!(pb_changes(Uuid::now_v7(), follow(), false).rev, 6);
 }
 
 /// A follow's wait counts from the call's arrival: an open that took 300 ms
@@ -80,7 +105,7 @@ async fn a_follows_wait_counts_from_arrival_not_from_the_open() {
     let terminal = Uuid::now_v7();
     projectors.open(terminal, path);
     let page = projectors.read_page(terminal, None, 10).unwrap();
-    let p = pb::AgentRowsFollow { terminal_id: wire::id_bytes(terminal), epoch: page.epoch, after_rev: page.rev, wait_ms: 500 };
+    let p = pb::AgentRowsFollow { terminal_id: wire::id_bytes(terminal), epoch: page.epoch, after_rev: page.rev, wait_ms: 500, hint_rows: true };
     let arrived = tokio::time::Instant::now();
     let slow_open = async {
         tokio::time::sleep(Duration::from_millis(300)).await;

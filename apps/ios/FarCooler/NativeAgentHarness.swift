@@ -503,7 +503,7 @@ final class NativeHarnessRunner: ObservableObject {
 
     private func page() -> [String: Any] {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
-        let rows: [[String: Any]] = [
+        var rows: [[String: Any]] = [
             Self.row("turn:p1", ord: 1, rev: 1, kind: ["Turn": Self.turn("Tidy the parser, please.", origin: "Typed")]),
             Self.row("prose:a1:0", ord: 2, rev: 2, kind: ["Prose": ["text": Self.firstReply, "conclusion": false]]),
             Self.row("tool:t1", ord: 3, rev: 3, kind: ["Tool": [
@@ -521,12 +521,17 @@ final class NativeHarnessRunner: ObservableObject {
             Self.row("ask:q1", ord: 7, rev: 7, kind: ["Ask": ["kind": "Question", "text": "Keep the old names?", "answered": true]]),
             Self.row("gap:g1", ord: 8, rev: 8, kind: ["Gap": ["reason": "Unparsed", "count": 2]]),
             Self.row("turn:p2", ord: 9, rev: 9, kind: ["Turn": Self.turn("And the lexer.", origin: "Typed", open: true)]),
-            // No start time, so no timer ticks: a tree that changes every
-            // second makes every XCUITest query slow on a loaded runner.
-            Self.row("thinking:k1", ord: 10, rev: 10, kind: ["Thinking": [String: Any]()]),
-        ] + (Self.heldAsk.map { [Self.heldAskRow($0, rev: 10, answered: false)] } ?? [])
-            + (CommandLine.arguments.contains("-native-hint")
-                ? [Self.row("hint:composer", ord: 11, rev: 11, kind: ["Hint": ["text": Self.exampleHint]])] : [])
+        ]
+        // No start time, so no timer ticks: a tree that changes every
+        // second makes every XCUITest query slow on a loaded runner. A turn
+        // at rest with a suggestion is not thinking (ov-409).
+        if !CommandLine.arguments.contains("-native-suggestion") {
+            rows.append(Self.row("thinking:k1", ord: 10, rev: 10, kind: ["Thinking": [String: Any]()]))
+        }
+        if let ask = Self.heldAsk { rows.append(Self.heldAskRow(ask, rev: 10, answered: false)) }
+        if CommandLine.arguments.contains("-native-hint") {
+            rows.append(Self.row("hint:composer", ord: 11, rev: 11, kind: ["Hint": ["text": Self.exampleHint]]))
+        }
         return ["epoch": Self.epoch, "rev": rev, "moreBefore": false, "rows": rows]
     }
 

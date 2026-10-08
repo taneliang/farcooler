@@ -183,7 +183,7 @@ object AgentConversation {
      */
     fun suggestion(newestTurn: AgentRow.Turn?, draft: String, stale: Boolean): String? {
         if (stale || newestTurn == null || newestTurn.activity == "Busy" || newestTurn.activity == "Waiting") return null
-        if (draft.isNotBlank()) return null
+        if (draft.isNotEmpty()) return null
         return newestTurn.suggestion?.trim()?.takeIf { it.isNotEmpty() }
     }
 
@@ -193,7 +193,7 @@ object AgentConversation {
      * is typed. A hint: Tab and a tap do not take it, as in claude.
      */
     fun hint(rows: List<AgentRow>, draft: String, stale: Boolean): String? {
-        if (stale || draft.isNotBlank()) return null
+        if (stale || draft.isNotEmpty()) return null
         val kind = rows.lastOrNull { it.id == AgentRow.HINT_ID }?.kind as? AgentRow.Kind.OfHint
         return kind?.hint?.text?.trim()?.takeIf { it.isNotEmpty() }
     }

@@ -19,7 +19,7 @@ import Testing
     @Test func offeredOnlyForAnEmptyDraftOnLiveRowsOfAnAgentAtRest() {
         let words = "run the tests again"
         #expect(AgentConversation.suggestion(newestTurn: turn(words), draft: "", stale: false) == words)
-        #expect(AgentConversation.suggestion(newestTurn: turn(words), draft: " \n", stale: false) == words, "blank is empty")
+        #expect(AgentConversation.suggestion(newestTurn: turn(words), draft: " \n", stale: false) == nil, "a blank draft hides the field's placeholder, so Tab must not fill it")
         #expect(AgentConversation.suggestion(newestTurn: turn(words), draft: "fix", stale: false) == nil, "typing wins")
         #expect(AgentConversation.suggestion(newestTurn: turn(words), draft: "", stale: true) == nil, "rows that may be old")
         #expect(AgentConversation.suggestion(newestTurn: turn(words, activity: "Busy"), draft: "", stale: false) == nil)

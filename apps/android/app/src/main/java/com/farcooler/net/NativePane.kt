@@ -367,7 +367,7 @@ class NativePaneModel(
         val shown = store.shown.value
         // Only the loop's own word counts: a phase left behind by an earlier
         // follow says nothing about a pane that isn't being followed now.
-        if (following && shown.phase == AgentRowStore.Phase.Unavailable && shown.rows.isEmpty() && !unavailable) {
+        if (following && shown.phase == AgentRowStore.Phase.Unavailable && shown.rows.none { it.id != AgentRow.HINT_ID } && !unavailable) {
             unavailable = true
             followIfDue()
         }

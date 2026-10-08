@@ -15,6 +15,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use farcooler_core::session_log::projector::HINT_ID;
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1::{self as pb, Request, request, result};
 use uuid::Uuid;
@@ -49,7 +50,8 @@ pub(crate) async fn dispatch(svc: &Service, req: Request) -> Result<result::Valu
                 n => n.min(MAX_PAGE),
             };
             let page = open.then(|| session_projectors::global().read_page(terminal, p.before, limit)).flatten();
-            let page = page.unwrap_or(Page { epoch: 0, rev: 0, rows: Vec::new(), more_before: false });
+            let mut page = page.unwrap_or(Page { epoch: 0, rev: 0, rows: Vec::new(), more_before: false });
+            keep_hint_for(&mut page.rows, p.hint_rows);
             Ok(result::Value::AgentRowPage(pb::AgentRowPage {
                 terminal_id: wire::id_bytes(terminal),
                 epoch: page.epoch,
@@ -61,7 +63,7 @@ pub(crate) async fn dispatch(svc: &Service, req: Request) -> Result<result::Valu
         ("agent.rows_follow", Some(request::Payload::AgentRowsFollow(p))) => {
             let terminal = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
             let follow = follow_answer(session_projectors::global(), terminal, &p, arrived, ensure_open(svc, terminal)).await?;
-            Ok(result::Value::AgentRowChanges(pb_changes(terminal, follow)))
+            Ok(result::Value::AgentRowChanges(pb_changes(terminal, follow, p.hint_rows)))
         }
         _ => Err(DomainError::InvalidArgument { what: "payload" }),
     }
@@ -165,7 +167,17 @@ fn pb_row(row: &farcooler_core::session_log::projector::Row) -> pb::AgentRow {
     }
 }
 
-fn pb_changes(terminal: Uuid, follow: Follow) -> pb::AgentRowChanges {
+/// `rows` as a client that said whether it draws the `Hint` row may see them.
+fn keep_hint_for(rows: &mut Vec<farcooler_core::session_log::projector::Row>, hint_rows: bool) {
+    if !hint_rows {
+        rows.retain(|row| row.id != HINT_ID);
+    }
+}
+
+/// A follow on the wire. The `Hint` row goes only to a client that said it
+/// draws one (`hint_rows`): an older client counts it as a row it cannot draw,
+/// and a fresh session would lose its empty state.
+fn pb_changes(terminal: Uuid, follow: Follow, hint_rows: bool) -> pb::AgentRowChanges {
     use pb::AgentRowChangeKind as Kind;
     let (epoch, rev, changes, reset) = match follow {
         Follow::Reset { epoch, rev } => (epoch, rev, Vec::new(), true),
@@ -173,6 +185,13 @@ fn pb_changes(terminal: Uuid, follow: Follow) -> pb::AgentRowChanges {
     };
     let changes = changes
         .iter()
+        .filter(|change| {
+            let id = match change {
+                RowChange::Insert(row) | RowChange::Update(row) => &row.id,
+                RowChange::Remove { id, .. } => id,
+            };
+            hint_rows || id != HINT_ID
+        })
         .map(|change| match change {
             RowChange::Insert(row) | RowChange::Update(row) => pb::AgentRowChange {
                 kind: if matches!(change, RowChange::Insert(_)) { Kind::Insert } else { Kind::Update } as i32,

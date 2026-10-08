@@ -299,7 +299,7 @@ final class NativePaneModel: ObservableObject {
     /// pane falls back to its terminal; with some, the view says they're
     /// stale over them.
     func phaseChanged() {
-        if store.phase == .unavailable, store.ids.isEmpty, !unavailable {
+        if store.phase == .unavailable, store.shownIds.isEmpty, !unavailable {
             unavailable = true
             updateShowing()
             followIfDue()

@@ -9,6 +9,15 @@
 //! a 256 or true color grey) counts too, so a prediction drawn in color is
 //! not missed.
 //!
+//! Dim text alone is not enough to be offered. A prediction is a sentence
+//! claude drafted for the person, so [`looks_like_a_prediction`] is an
+//! allowlist of that shape: words and ordinary punctuation, no `<…>`
+//! placeholder, bracket, ellipsis or other markup. Any other dim text claude
+//! draws in an idle empty box (a placeholder, a status) offers nothing, so a
+//! shape nobody has captured fails closed. A colon sub-parameter SGR
+//! (`38:5:246`) is not parsed as a grey, which likewise only misses a
+//! prediction.
+//!
 //! The same slot shows three kinds of text, told apart by their words:
 //!
 //! - a prediction (`suggestion`): anything else. The composer offers it, and
@@ -33,7 +42,18 @@ const MAX_CHARS: usize = 300;
 /// claude draws one. `None` for a box holding anything typed, for no box,
 /// and for the example and the queue hints.
 pub fn suggestion(preset: &str, screen: &str) -> Option<String> {
-    placeholder(preset, screen).filter(|words| !is_example(words) && !is_queue_hint(words))
+    placeholder(preset, screen).filter(|words| !is_example(words) && !is_queue_hint(words) && looks_like_a_prediction(words))
+}
+
+/// Whether dim `words` are shaped like a drafted prompt: they start with a
+/// letter, a digit, a slash or a quote, hold a letter, and use only letters,
+/// digits, spaces and ordinary punctuation. Nothing in angle or square
+/// brackets, braces, pipes, or an ellipsis, which placeholders and statuses
+/// use and a sentence for the person to send does not.
+fn looks_like_a_prediction(words: &str) -> bool {
+    let first = words.chars().next().is_some_and(|c| c.is_alphanumeric() || matches!(c, '/' | '`' | '"' | '\''));
+    let plain = words.chars().all(|c| c.is_alphanumeric() || c == ' ' || ".,;:!?'\"`-_/()#@%&+=*~$".contains(c));
+    first && plain && words.chars().any(char::is_alphabetic) && !words.ends_with("..")
 }
 
 /// The generic `Try "…"` example in claude's empty box, if that is what it
@@ -146,6 +166,33 @@ mod tests {
         let swapped = fresh.replace("Try \"how does <filepath> work?\"", "run the tests again");
         assert_eq!(suggestion("claude", &swapped).as_deref(), Some("run the tests again"));
         assert_eq!(hint("claude", &swapped), None, "a prediction is not the example");
+    }
+
+    /// Dim text of any other shape in an idle empty box is a placeholder or a
+    /// status, not a prediction, whatever its words: Tab must not put it in
+    /// the draft.
+    #[test]
+    fn dim_text_of_another_shape_is_not_a_prediction() {
+        for other in [
+            "Type a message…",
+            "Ask anything...",
+            "<enter a prompt>",
+            "[Pasted text #1 +20 lines]",
+            "{{prompt}}",
+            "ctrl+c | esc",
+            "…",
+            "...",
+            "123",
+            "→ next",
+            "wait for the shell >",
+        ] {
+            let screen = predicted().replace("wait for the background shell to finish", other);
+            assert_eq!(suggestion("claude", &screen), None, "{other}");
+        }
+        for fine in ["run the tests again", "Add a regression test for it.", "/commit", "fix `foo()` in src/a.rs, then run it", "yes", "run 2 tests (fast)?"] {
+            let screen = predicted().replace("wait for the background shell to finish", fine);
+            assert_eq!(suggestion("claude", &screen).as_deref(), Some(fine), "{fine}");
+        }
     }
 
     #[test]

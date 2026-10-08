@@ -57,7 +57,7 @@ pub(crate) fn changes_line(follow: &AgentRowChanges) -> String {
 }
 
 async fn page(link: &mut Link, id: Uuid, before: Option<u64>, limit: u32) -> Result<AgentRowPage, Box<dyn std::error::Error>> {
-    let mut ask = with(req("agent.rows"), request::Payload::AgentRowsPage(farcooler_protocol::v1::AgentRowsPage { terminal_id: id_bytes(id), before, limit }));
+    let mut ask = with(req("agent.rows"), request::Payload::AgentRowsPage(farcooler_protocol::v1::AgentRowsPage { terminal_id: id_bytes(id), before, limit, hint_rows: false }));
     ask.required_capabilities.push(capability::AGENT_ROWS.to_string());
     match expect_value(link.call(ask).await?.value)? {
         result::Value::AgentRowPage(page) => Ok(page),
@@ -77,7 +77,7 @@ pub(crate) async fn run(mut link: Link, id: Uuid, before: Option<u64>, limit: u3
     loop {
         let mut ask = with(
             req("agent.rows_follow"),
-            request::Payload::AgentRowsFollow(farcooler_protocol::v1::AgentRowsFollow { terminal_id: id_bytes(id), epoch, after_rev: rev, wait_ms: WAIT_MS }),
+            request::Payload::AgentRowsFollow(farcooler_protocol::v1::AgentRowsFollow { terminal_id: id_bytes(id), epoch, after_rev: rev, wait_ms: WAIT_MS, hint_rows: false }),
         );
         ask.required_capabilities.push(capability::AGENT_ROWS.to_string());
         let result::Value::AgentRowChanges(changes) = expect_value(link.call(ask).await?.value)? else {

@@ -18,6 +18,7 @@ impl Session {
             terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
             before,
             limit,
+            hint_rows: true,
         });
         match self.value("agent.rows", None, Some(payload)).await? {
             result::Value::AgentRowPage(page) => Ok(page),
@@ -41,6 +42,7 @@ impl Session {
             epoch,
             after_rev,
             wait_ms,
+            hint_rows: true,
         });
         match self.value("agent.rows_follow", None, Some(payload)).await? {
             result::Value::AgentRowChanges(changes) => Ok(changes),
