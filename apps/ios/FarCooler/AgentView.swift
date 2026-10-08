@@ -3038,7 +3038,7 @@ private struct ComposerTextView: UIViewRepresentable {
             // not the reader putting the keyboard away: the composer for the
             // other width is waiting to take the focus over (ov-357).
             guard (textView as? ComposerField)?.isBeingTakenDown != true else { return }
-            parent.isEditing = false
+            parent.model.focusEnded(textView)
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {

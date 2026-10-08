@@ -37,11 +37,25 @@ final class ComposerModel: ObservableObject {
     /// Bumped by each hand-off, so an earlier one's timer can't clear a later one's focus.
     private var handoffGeneration = 0
     private weak var handoffFrom: UITextView?
+    /// Every field made and not yet gone, weakly.
+    private var fields: [WeakField] = []
+    private struct WeakField { weak var view: UITextView? }
+
+    /// Whether a field other than `old` is in a window with the keyboard. The
+    /// docked composer's input accessory is sometimes built a second time
+    /// while the pane crosses to the column, and that spare, taken down a
+    /// moment later, must not read as the focus leaving: another field has it
+    /// (ov-415). Asked of the views themselves rather than of the model's
+    /// bookkeeping, since which field is "newest" is what went wrong.
+    private func anotherFieldHasTheKeyboard(than old: UITextView) -> Bool {
+        fields.contains { $0.view.map { $0 !== old && $0.window != nil && $0.isFirstResponder } ?? false }
+    }
 
     /// A composer field was made. If a field was waiting for its replacement,
     /// this is it.
     func fieldMade(_ new: UITextView) {
         field = new
+        fields = fields.filter { $0.view != nil } + [WeakField(view: new)]
         handoffPending = false
     }
 
@@ -56,9 +70,9 @@ final class ComposerModel: ObservableObject {
     /// moment later when it's the keyboard's: the focus is kept for it, and
     /// dropped if it never comes.
     func fieldTakenDown(_ old: UITextView, madeForColumn: Bool) {
-        guard isFocused, field === old else { return }
+        guard isFocused, field === old, !anotherFieldHasTheKeyboard(than: old) else { return }
         DispatchQueue.main.async { [weak self] in
-            guard let self, isFocused, field === old else { return }
+            guard let self, isFocused, field === old, !anotherFieldHasTheKeyboard(than: old) else { return }
             guard madeForColumn != inColumn else {
                 isFocused = false
                 return
@@ -71,7 +85,8 @@ final class ComposerModel: ObservableObject {
             handoffGeneration += 1
             let generation = handoffGeneration
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-                guard let self, handoffPending, generation == handoffGeneration else { return }
+                guard let self, handoffPending, generation == handoffGeneration,
+                      !anotherFieldHasTheKeyboard(than: old) else { return }
                 handoffPending = false
                 isFocused = false
             }
@@ -82,6 +97,16 @@ final class ComposerModel: ObservableObject {
     func focusBegan() {
         handoffPending = false
         isFocused = true
+    }
+
+    /// A field stopped editing and wasn't taken down. It's the reader putting
+    /// the keyboard away only if no other field has it: when the other
+    /// width's composer takes the focus while the old field is still in its
+    /// window, UIKit resigns the old one after the new one has begun, and that
+    /// late ending must not clear the focus the new field just took (ov-415).
+    func focusEnded(_ ended: UITextView) {
+        guard !anotherFieldHasTheKeyboard(than: ended) else { return }
+        isFocused = false
     }
 
     /// The caret as a `Character` offset, which `activeToken(in:cursor:)`

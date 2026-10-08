@@ -78,7 +78,8 @@ final class ComposerWidthUITests: XCTestCase {
     /// on its way out wasn't taken for the reader putting the keyboard away.
     private func assertHideKeyboardShown(_ app: XCUIApplication, _ why: String) {
         let hide = app.buttons.matching(NSPredicate(format: "label == 'Hide Keyboard'")).firstMatch
-        XCTAssertTrue(hide.waitForExistence(timeout: 10), "\(why): the composer has the keyboard but not Hide Keyboard")
+        let ok = hide.waitForExistence(timeout: 10)
+        XCTAssertTrue(ok, "\(why): the composer has the keyboard but not Hide Keyboard")
     }
 
     private func sendButton(_ app: XCUIApplication) -> XCUIElement {
@@ -228,6 +229,7 @@ final class ComposerWidthUITests: XCTestCase {
         XCTAssertTrue(photo.firstMatch.waitForExistence(timeout: 10), "no photo in the strip: \(app.debugDescription)")
         XCTAssertTrue(hasKeyboardFocus(field), "the column's composer lost the keyboard to the photo")
 
+        assertHideKeyboardShown(app, "column first")
         keep("1-column-before")
         post("com.farcooler.harness.pad-compact")
         layout(app, is: "phone", "compact")
