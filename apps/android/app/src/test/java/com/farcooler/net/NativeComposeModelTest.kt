@@ -344,7 +344,7 @@ class NativeComposeModelTest {
     fun `the suggestion rules, on their own`() {
         val turn = com.farcooler.model.AgentRow.Turn("go", "Typed", activity = "Idle", suggestion = " do it ")
         assertEquals("do it", AgentConversation.suggestion(turn, "", stale = false))
-        assertEquals("do it", AgentConversation.suggestion(turn, " \n", stale = false))
+        assertNull("a blank draft hides the field's placeholder", AgentConversation.suggestion(turn, " \n", stale = false))
         assertNull(AgentConversation.suggestion(turn, "fix", stale = false))
         assertNull(AgentConversation.suggestion(turn, "", stale = true))
         assertNull(AgentConversation.suggestion(turn.copy(suggestion = "  "), "", stale = false))
