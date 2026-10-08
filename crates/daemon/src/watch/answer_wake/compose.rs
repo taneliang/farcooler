@@ -259,8 +259,14 @@ impl Watcher {
         let proven = self.proven_tui(to).await.map_err(|held| DomainError::Conflict { what: held_word(held) })?;
         // codex: between turns only, and its own drawn forms (`codex`).
         if proven.preset == "codex" {
-            if ready.is_err() {
-                return Err(DomainError::Conflict { what: "busy" });
+            // The watcher can lose codex: under fish, which runs `-c` without
+            // job control, the pane's foreground command reads `fish`, and
+            // the watcher's word goes to none (measured, ov-416). The fresh
+            // capture and the rollout `proven_tui` just read are the word
+            // then, as claude's registry is for claude: between turns, and
+            // nobody typing, goes on.
+            if ready.is_err() && (proven.turn == Turn::During || self.typed_lately(to.id, now_millis())) {
+                return Err(DomainError::Conflict { what: if proven.turn == Turn::During { "busy" } else { "typing" } });
             }
             return self.compose_codex(to, composed, &proven, &paths, &mut unpasted).await;
         }

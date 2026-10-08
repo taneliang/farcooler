@@ -176,6 +176,29 @@ async fn a_codex_mid_turn_is_busy() {
     nothing_typed(&si);
 }
 
+/// The watcher lost codex (under fish its pane's command reads `fish`, and
+/// its word goes to none): the fresh capture and the rollout decide. Idle and
+/// nobody typing, sent; someone typing, or a turn on the screen, refused.
+#[tokio::test]
+async fn a_watcher_that_lost_codex_defers_to_the_screen_and_rollout() {
+    let b = board().await;
+    let path = rollout(&b);
+    let (agent, si) = idle_codex(&b, &path, false).await;
+    b.doing(agent.id, AgentActivity::None).await;
+    crate::runtime::mark_input(b.svc.root_dir(), agent.id);
+    assert_eq!(refused(b.watcher.compose_into(agent.id, "now", &[]).await), "typing");
+    let long_ago = now_millis() - QUIET_WATCHED_MS - 1_000;
+    std::fs::write(crate::runtime::input_mark(b.svc.root_dir(), agent.id), long_ago.to_string()).unwrap();
+    si.show("working").await;
+    b.doing(agent.id, AgentActivity::None).await;
+    assert_eq!(refused(b.watcher.compose_into(agent.id, "now", &[]).await), "busy");
+    nothing_typed(&si);
+    si.show("idle").await;
+    b.doing(agent.id, AgentActivity::None).await;
+    assert_eq!(b.watcher.compose_into(agent.id, "now", &[]).await.expect("sent"), Turn::Between, "{}", si.log());
+    assert_eq!(si.submitted(), ["now"], "{}", si.log());
+}
+
 /// A turn begun between the read-back and the Enter, as the rollout says:
 /// no Enter, the text left in the box.
 #[tokio::test]
