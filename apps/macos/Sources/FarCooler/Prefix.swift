@@ -26,6 +26,9 @@ enum TileCommand: Equatable {
     case evenPanes
     case splitRight
     case splitDown
+    /// Layout ▸ Open Web Page: a page, asked for, beside the focused pane
+    /// (ov-435). A menu command, not a prefix key.
+    case openWebPage
     case breakPane
     case closePane
     case newGroup

@@ -707,6 +707,7 @@ final class DaemonClient: ObservableObject {
             // (`olderPanes`), so stale ones put the wrong agent first.
             updated.said = event.said
             updated.paneMode = event.paneMode
+            updated.webUrl = event.webUrl
             updated.rank = event.rank
             updated.taskId = event.taskId
             updated.ports = event.ports

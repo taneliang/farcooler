@@ -411,6 +411,9 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// why it is optional rather than defaulted to something that would look
     /// like a real answer.
     var paneMode: String?
+    /// The page a web pane opened on (ov-435), from the runner; nil for
+    /// every other pane. Where it is now is `WebPaneModel.url`, on this Mac.
+    var webUrl: String?
     var agentSessionId: String?
     var agentMode: String?
     var availableAgentModes: [String]?
@@ -495,12 +498,23 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// behind it exists only to hold the rectangle; see `farcooler pane-host`.
     var isChangesPane: Bool { paneMode == "changes" }
 
+    /// Whether this pane is a web page (ov-435), which this app draws as a
+    /// changes pane is drawn: the process behind it only holds the rectangle.
+    var isWebPane: Bool { paneMode == "web" }
+
+    /// The page it opened on, if it's a web pane with one that may load.
+    var webPage: URL? { isWebPane ? WebAddress.page(webUrl) : nil }
+
+    /// A changes or web pane: this app draws it, nothing runs in it, and
+    /// nothing switches it to a terminal or a chat.
+    var isClientDrawn: Bool { isChangesPane || isWebPane }
+
     /// Whether to offer the terminal/chat switch at all.
     ///
     /// Never on a changes pane. There is no TUI underneath it to switch back
     /// to, and the daemon refuses the call — offering a control that can only
     /// produce an error message is worse than not offering it.
-    var canSwitchPaneMode: Bool { chatCapable == true && !isChangesPane }
+    var canSwitchPaneMode: Bool { chatCapable == true && !isClientDrawn }
 
     /// Whether an agent is running here at all, as opposed to a plain shell.
     ///
@@ -521,7 +535,7 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// to one word, instead of re-deriving that knowledge here.
     var hasDetectedAgent: Bool {
         let name = preset.split(separator: ":").first.map(String.init) ?? ""
-        guard !name.isEmpty else { return false }
+        guard !name.isEmpty, !isWebPane else { return false }
         return name != "shell" && !Self.shells.contains(name.lowercased())
     }
 
@@ -564,6 +578,7 @@ struct Terminal: Decodable, Identifiable, Hashable {
         // needs, and both are answers to a question about a program rather than
         // about the pane.
         if isChangesPane { return "Changes" }
+        if isWebPane { return webPage?.host() ?? "Web Page" }
         if !title.isEmpty, !Self.isPlaceholder(title) { return title }
         return Self.name(of: preset)
     }
@@ -581,6 +596,7 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// what's running.
     var headerName: String {
         if isChangesPane { return "Changes" }
+        if isWebPane { return label }
         let launched = (program ?? "").split(separator: ":").first.map(String.init) ?? ""
         return Self.name(of: launched.isEmpty ? preset : launched)
     }
@@ -1018,5 +1034,5 @@ extension Terminal: TaskBoardPane {
     /// `farcooler`, which `hasDetectedAgent` would take for an agent — and the
     /// daemon never dispatches one for a task, but a pill that could lead to a
     /// diff is a rule that works by luck.
-    var runsAgent: Bool { TaskAgentLink.runsAgent(preset: preset, isChangesPane: isChangesPane) }
+    var runsAgent: Bool { TaskAgentLink.runsAgent(preset: preset, isChangesPane: isClientDrawn) }
 }

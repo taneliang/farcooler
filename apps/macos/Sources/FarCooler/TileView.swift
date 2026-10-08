@@ -267,7 +267,7 @@ struct TileView: View {
             refusal: refusal,
             isFocused: isFocused,
             isZoomed: rect.zoomed,
-            showsHeader: TileGeometry.showsHeader(panes: group.panes.count, isChanges: terminal.isChangesPane),
+            showsHeader: TileGeometry.showsHeader(panes: group.panes.count, isChanges: terminal.isClientDrawn),
             index: (group.panes.firstIndex(of: rect) ?? 0) + 1,
             size: size,
             // The pane's grid as tmux reports it, which is the only correct
@@ -293,7 +293,7 @@ struct TileView: View {
     /// `headerHeight(_:)`, for `group` among `terminals`.
     static func headerHeight(_ group: PaneGroup, terminals: [Terminal]) -> CGFloat {
         let changes = group.panes.count == 1
-            && terminals.first { $0.id == group.panes[0].id }?.isChangesPane == true
+            && terminals.first { $0.id == group.panes[0].id }?.isClientDrawn == true
         return TileGeometry.showsHeader(panes: group.panes.count, isChanges: changes)
             ? WorkspaceStyle.paneHeaderHeight : 0
     }
@@ -482,6 +482,11 @@ struct TilePane: View {
             // killed still shows the branch; it just cannot be split.
             ChangesPane(changes: changes, isFocused: isFocused, agents: reviewTargets)
                 .id("\(terminal.id)#changes")
+        } else if terminal.isWebPane {
+            // Not gated on `isLive` either, for the changes pane's reason:
+            // the page is this app's, whatever holds the rectangle (ov-435).
+            WebPane(model: WebPanes.shared.model(for: terminal.id), opened: terminal.webPage, isFocused: isFocused)
+                .id("\(terminal.id)#web")
         } else if isLive, terminal.isAgentPane {
             // Same empty `onResize` as the terminal case just below, and
             // for the identical reason: `TileView.send(viewport:for:)`
@@ -621,19 +626,28 @@ struct TilePane: View {
                 .foregroundStyle(isFocused ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
                 .frame(minWidth: 9)
 
-            // Its program, never the session's title (ov-218).
-            Text(terminal.headerName)
-                .font(WorkspaceStyle.paneTitle)
-                .fontWeight(isFocused ? .semibold : .medium)
-                .foregroundStyle(isFocused ? .primary : .secondary)
-                .lineLimit(1)
-                .layoutPriority(1)
+            if terminal.isWebPane {
+                // Back, Forward, Reload and the page's own name (ov-435).
+                WebPaneNavigation(model: WebPanes.shared.model(for: terminal.id), isFocused: isFocused)
+            } else {
+                // Its program, never the session's title (ov-218).
+                Text(terminal.headerName)
+                    .font(WorkspaceStyle.paneTitle)
+                    .fontWeight(isFocused ? .semibold : .medium)
+                    .foregroundStyle(isFocused ? .primary : .secondary)
+                    .lineLimit(1)
+                    .layoutPriority(1)
+            }
 
             if terminal.isChangesPane {
                 changesControls
             }
 
             Spacer(minLength: 4)
+
+            if terminal.isWebPane {
+                WebPaneOpenButton(model: WebPanes.shared.model(for: terminal.id))
+            }
 
             // Which protocol this chat is on, beside the name it belongs to.
             //

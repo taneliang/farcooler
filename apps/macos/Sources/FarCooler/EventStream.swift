@@ -90,6 +90,7 @@ struct TerminalEvent: Sendable, Decodable {
     // struct, so a field the wire carries and this app drops fails by name.
     var said: String?
     var paneMode: String?
+    var webUrl: String?
     var rank: UInt32?
     var taskId: String?
     var ports: [Int]?

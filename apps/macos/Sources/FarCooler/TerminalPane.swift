@@ -75,7 +75,16 @@ struct TerminalPane: View {
     @ViewBuilder
     private var surface: some View {
         Group {
-            if isLive, terminal.isAgentPane {
+            if terminal.isWebPane {
+                // Outside a layout there's no header strip, so the page's
+                // controls draw their own above it (ov-435).
+                let model = WebPanes.shared.model(for: terminal.id)
+                VStack(spacing: 0) {
+                    WebPaneBar(model: model)
+                    WebPane(model: model, opened: terminal.webPage, isFocused: hasKeyboard)
+                }
+                .id("\(terminal.id)#web")
+            } else if isLive, terminal.isAgentPane {
                 // Same rectangle, same lifecycle, a chat drawn into it instead
                 // of a VT grid. See `AgentSurface`'s own doc comment for why
                 // it still owes `onGeometry` an honest answer even though it

@@ -97,6 +97,9 @@ extension ContentView {
             // Land in the pane that was just made, which is the one tmux focuses.
             reveal(groups, in: worktree)
 
+        case .openWebPage:
+            await openWebPage(in: worktree, beside: here, layout: shown)
+
         case .breakPane:
             guard let here else { return }
             // Never the orchestrator: what shares its window moves out

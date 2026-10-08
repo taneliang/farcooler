@@ -294,7 +294,7 @@ enum OrchestratorAdoption {
     static func offer(for terminal: Terminal, in worktree: Worktree, host: String, fleet: Fleet) -> Offer? {
         if terminal.isOrchestrator { return .stepDown }
         guard worktree.isMainCheckout, terminal.taskId == nil,
-            !terminal.isChangesPane, StateKind.parse(terminal.state) == .running,
+            !terminal.isClientDrawn, StateKind.parse(terminal.state) == .running,
             let id = terminal.workspace, let listed = fleet.runnerWorkspaces[host],
             let workspace = listed.first(where: { $0.id == id }), !workspace.isImplicit
         else { return nil }

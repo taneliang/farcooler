@@ -85,7 +85,7 @@ struct EventResyncTests {
             activitySince: 1234, turnStartedAt: 5678, blockedQuestion: "Allow touch x?",
             draftHold: DraftHold(id: "hold-1", state: .waiting, expiresMs: 99),
             feed: ["a line"], line: "3/7 · Testing", subagents: ["Explore"], turnFailed: true,
-            noticeTaskId: "task-1", said: "Added the retry.", paneMode: "agent", rank: 7,
+            noticeTaskId: "task-1", said: "Added the retry.", paneMode: "agent", webUrl: "https://github.com/", rank: 7,
             taskId: "task-9", ports: [3000, 8080], agentSessionId: "sess-1", agentMode: "plan",
             availableAgentModes: ["plan", "edit"], agentFailure: "adapter_failed", workspace: "ws-1",
             role: "orchestrator")
