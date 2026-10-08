@@ -4985,6 +4985,7 @@ impl Watcher {
                         // whose file has gone quiet anyway, is a pane attached
                         // to the wrong file — see `join_looks_dead`.
                         let screen_says = registry.classify(&command, &screen);
+                        registry_join::feed_suggestion(id, agent.as_deref(), &screen, screen_says == AgentActivity::Idle);
                         // What the screen alone says, before any folding, is
                         // what a held permission ask needs: claude's dialog
                         // leaving the screen is the keyboard answering it,
@@ -8654,3 +8655,6 @@ mod tests {
 
 #[cfg(test)]
 mod needs_you_push_tests;
+
+#[cfg(test)]
+mod suggestion_tests;

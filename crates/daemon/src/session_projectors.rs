@@ -513,6 +513,15 @@ impl SessionProjectors {
         open.publish(&session);
     }
 
+    /// What claude's box suggests on `terminal`'s screen now (ov-409), for its
+    /// newest turn row. Nothing when the terminal has no projector open.
+    pub fn suggest(&self, terminal: Uuid, suggestion: Option<String>) {
+        let Some(open) = self.get(terminal) else { return };
+        let mut session = open.lock();
+        session.projection_mut().set_suggestion(suggestion);
+        open.publish(&session);
+    }
+
     /// A page of `terminal`'s rows, oldest first: up to `limit` before `ord`.
     pub fn page(&self, terminal: Uuid, before: Option<u64>, limit: usize) -> Option<Vec<Row>> {
         self.read_page(terminal, before, limit).map(|p| p.rows)

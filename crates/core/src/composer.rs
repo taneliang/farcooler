@@ -35,6 +35,9 @@
 
 pub mod codex;
 pub mod drawn;
+mod suggestion;
+
+pub use suggestion::suggestion;
 
 /// What an input box holds.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -166,34 +169,36 @@ fn indented(row: &[(char, bool)]) -> bool {
 }
 
 fn claude(lines: &[Vec<(char, bool)>]) -> Composer {
+    claude_box(lines).map_or(Composer::Unrecognized, |rows| content(&rows))
+}
+
+/// claude's input box on a screen, as its rows past the `❯ ` marker; `None`
+/// where it is no box this module recognizes.
+fn claude_box(lines: &[Vec<(char, bool)>]) -> Option<Vec<&[(char, bool)]>> {
     // The last prompt line on the screen: the box is drawn below everything.
-    let Some(start) = lines.iter().rposition(|row| {
+    let start = lines.iter().rposition(|row| {
         row.first().map(|c| c.0) == Some('❯') && matches!(row.get(1).map(|c| c.0), None | Some(' ' | '\u{a0}'))
-    }) else {
-        return Composer::Unrecognized;
-    };
+    })?;
     if start == 0 || !is_rule(&lines[start - 1]) {
-        return Composer::Unrecognized;
+        return None;
     }
     let mut end = start + 1;
     while end < lines.len() && !is_rule(&lines[end]) {
         if !indented(&lines[end]) && !text(&lines[end]).trim().is_empty() {
-            return Composer::Unrecognized;
+            return None;
         }
         end += 1;
     }
     if end == lines.len() {
-        return Composer::Unrecognized;
+        return None;
     }
     // Vim mode's NORMAL: keys there are commands, not text.
     let below: String = lines[end + 1..].iter().map(|r| text(r)).collect::<Vec<_>>().join(" ");
     if below.contains("NORMAL") {
-        return Composer::Unrecognized;
+        return None;
     }
     let first = &lines[start][2.min(lines[start].len())..];
-    let rows: Vec<&[(char, bool)]> =
-        std::iter::once(first).chain(lines[start + 1..end].iter().map(|r| &r[2.min(r.len())..])).collect();
-    content(&rows)
+    Some(std::iter::once(first).chain(lines[start + 1..end].iter().map(|r| &r[2.min(r.len())..])).collect())
 }
 
 fn codex(lines: &[Vec<(char, bool)>]) -> Composer {

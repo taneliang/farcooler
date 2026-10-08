@@ -106,6 +106,12 @@ pub struct Turn {
     /// What claude's session registry last said about the process, for the
     /// newest turn only: busy, idle, or running a shell command.
     pub activity: Option<Activity>,
+    /// The prompt claude's empty box suggests after this turn, for the newest
+    /// turn only: the words its composer shows dim, and takes into the draft
+    /// on Tab (ov-409). Read off the screen, the one place claude puts it;
+    /// absent when there is none. Never sent by anything but a person.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggestion: Option<String>,
 }
 
 /// Who started a turn: claude's own `promptSource` / `origin.kind`, folded.

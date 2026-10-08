@@ -64,3 +64,5 @@ mod nested_tests;
 mod subagent_link_tests;
 #[cfg(test)]
 mod codex_tests;
+#[cfg(test)]
+mod suggestion_tests;

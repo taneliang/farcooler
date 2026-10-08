@@ -141,6 +141,10 @@ pub struct Projection {
     pub(super) claimed: HashSet<usize>,
     /// The turn row showing `activity`, so a new one clears just that one.
     activity_shown: Option<usize>,
+    /// The next prompt claude's box suggests, read off the screen (ov-409),
+    /// and the turn row showing it.
+    suggestion: Option<String>,
+    suggestion_shown: Option<usize>,
     /// Turns a hook opened that the transcript has not yet written, so a
     /// confirmed turn retires them without walking every row.
     hook_turns: Vec<usize>,
@@ -417,6 +421,32 @@ impl Projection {
         self.show_activity();
     }
 
+    /// The prompt claude's box suggests now (`None` when it suggests none),
+    /// shown on the newest turn and cleared from the one before it. It is
+    /// only ever a draft the person may take: no row sends it.
+    pub fn set_suggestion(&mut self, suggestion: Option<String>) {
+        if self.suggestion == suggestion {
+            return;
+        }
+        self.suggestion = suggestion;
+        self.show_suggestion();
+    }
+
+    fn show_suggestion(&mut self) {
+        let Some(newest) = self.newest_turn else { return };
+        let shown = self.suggestion_shown.replace(newest);
+        let want = self.suggestion.clone();
+        for (i, want) in [(shown.filter(|&s| s != newest), None), (Some(newest), want)] {
+            let Some(i) = i else { continue };
+            if let RowKind::Turn(turn) = &mut self.rows[i].kind {
+                if turn.suggestion != want {
+                    turn.suggestion = want;
+                    self.touch(i);
+                }
+            }
+        }
+    }
+
     pub(super) fn show_activity(&mut self) {
         let Some(newest) = self.newest_turn else { return };
         let activity = self.activity;
@@ -531,9 +561,13 @@ impl Projection {
             outcome: None,
             background_running: 0,
             activity: None,
+            suggestion: None,
         };
         let i = self.push(id, None, provisional, RowKind::Turn(turn));
         self.newest_turn = Some(i);
+        // A new prompt was given: the last suggestion is spent.
+        self.suggestion = None;
+        self.show_suggestion();
         self.show_activity();
         if provisional {
             self.hook_turns.push(i);
