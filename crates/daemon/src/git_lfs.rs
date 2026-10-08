@@ -482,11 +482,26 @@ mod tests {
         fixture_git(&repo, &["add", "-A"]);
         fixture_git(&repo, &["commit", "-q", "-m", "base"]);
 
-        let wt = root.join("wt");
-        LIMIT.with(|l| l.set(Some(std::time::Duration::from_millis(150))));
-        let made = crate::git::create_worktree(&repo, "feature", "HEAD", &wt).await;
-        LIMIT.with(|l| l.set(None));
-        made.expect("the worktree is made, hydrated or not");
+        // How long the stream takes depends on the machine: a quick one can finish
+        // inside any fixed limit. So start at 150 ms and, while a worktree still came
+        // out hydrated, make a fresh one with half the limit. A limit near zero
+        // always runs out, so this ends, and every assertion below holds for the
+        // worktree that was cut short.
+        let mut limit = std::time::Duration::from_millis(150);
+        let mut attempt = 0;
+        let wt = loop {
+            let wt = root.join(format!("wt{attempt}"));
+            LIMIT.with(|l| l.set(Some(limit)));
+            let made = crate::git::create_worktree(&repo, &format!("feature{attempt}"), "HEAD", &wt).await;
+            LIMIT.with(|l| l.set(None));
+            made.expect("the worktree is made, hydrated or not");
+            if std::fs::read(wt.join("big.bin")).unwrap() == pointer.as_bytes() {
+                break wt;
+            }
+            assert!(limit > std::time::Duration::from_micros(100), "never ran out, even at {limit:?}");
+            limit /= 2;
+            attempt += 1;
+        };
         assert_eq!(std::fs::read(wt.join("big.bin")).unwrap(), pointer.as_bytes(), "back to its pointer");
         assert!(!crate::change_set::working_tree(&wt).await.unwrap().is_dirty(), "and clean");
         let git_dir = std::fs::read_to_string(wt.join(".git")).unwrap();
