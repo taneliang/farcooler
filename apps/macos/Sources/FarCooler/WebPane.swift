@@ -296,7 +296,7 @@ extension WebPaneModel: WKNavigationDelegate {
         _ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
         decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
     ) {
-        decisionHandler(WebPaneModel.policy(for: action))
+        decisionHandler(WebPaneModel.policy(for: action, in: webView.window))
     }
 
     nonisolated static func allows(_ url: URL?, mainFrame: Bool) -> Bool {
@@ -331,18 +331,42 @@ extension WebPaneModel: WKNavigationDelegate {
         return .app
     }
 
-    /// Hand a link to the app that handles it. Nothing when none does.
-    static var openExternally: (URL) -> Void = { url in
-        guard NSWorkspace.shared.urlForApplication(toOpen: url) != nil else { return }
-        NSWorkspace.shared.open(url)
+    /// The app that handles a link's scheme, by name, or nil when none does.
+    static var appName: (URL) -> String? = { url in
+        guard let app = NSWorkspace.shared.urlForApplication(toOpen: url) else { return nil }
+        return FileManager.default.displayName(atPath: app.path).replacingOccurrences(of: ".app", with: "")
+    }
+
+    /// What the owner is asked before a link leaves for another app, as
+    /// Safari does: a page script can click a link, so a click proves nothing.
+    static var confirm: (String, NSWindow?) async -> Bool = { name, window in
+        let alert = NSAlert()
+        alert.messageText = "Open “\(name)”?"
+        alert.informativeText = "A web page is asking to open this app."
+        alert.addButton(withTitle: "Open")
+        alert.addButton(withTitle: "Cancel")
+        let response = if let window { await alert.beginSheetModal(for: window) } else { alert.runModal() }
+        return response == .alertFirstButtonReturn
+    }
+
+    /// The system's own open, behind the question.
+    static var open: (URL) -> Void = { NSWorkspace.shared.open($0) }
+
+    /// Ask, naming the app, then hand the link to it. Nothing when no app
+    /// handles the scheme or the owner says Cancel.
+    static func openExternally(_ url: URL, in window: NSWindow?) {
+        guard let name = appName(url) else { return }
+        Task { @MainActor in
+            if await confirm(name, window) { open(url) }
+        }
     }
 
     /// Apply `route` to a navigation, and say whether the web view may load it.
-    static func policy(for action: WKNavigationAction) -> WKNavigationActionPolicy {
+    static func policy(for action: WKNavigationAction, in window: NSWindow?) -> WKNavigationActionPolicy {
         let route = route(
             action.request.url, mainFrame: action.targetFrame?.isMainFrame ?? true,
             clicked: action.navigationType == .linkActivated)
-        if route == .app, let url = action.request.url { openExternally(url) }
+        if route == .app, let url = action.request.url { openExternally(url, in: window) }
         return route == .page ? .allow : .cancel
     }
 
@@ -374,7 +398,7 @@ extension WebPaneModel: WKUIDelegate {
             if WebPaneModel.route(url, mainFrame: true, clicked: action.navigationType == .linkActivated) == .app,
                 let url
             {
-                WebPaneModel.openExternally(url)
+                WebPaneModel.openExternally(url, in: webView.window)
             }
             return nil
         }
@@ -530,7 +554,7 @@ final class WebPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSWindowDele
         _ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
         decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
     ) {
-        decisionHandler(WebPaneModel.policy(for: action))
+        decisionHandler(WebPaneModel.policy(for: action, in: webView.window))
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { retitle() }

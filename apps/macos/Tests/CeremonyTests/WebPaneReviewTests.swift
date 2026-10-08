@@ -241,12 +241,14 @@ struct WebPaneReviewTests {
         #expect(WebPaneModel.route(URL(string: "linear://x"), mainFrame: false, clicked: false) == .page, "a frame's own")
     }
 
-    @Test("A link click in a real page reaches NSWorkspace, and a redirect does not")
+    @Test("A link click in a real page asks first, then opens; a redirect does not")
     func aClickedLinkOpensItsApp() async throws {
         let opened = Box()
-        let saved = WebPaneModel.openExternally
-        WebPaneModel.openExternally = { opened.urls.append($0) }
-        defer { WebPaneModel.openExternally = saved }
+        let saved = (WebPaneModel.open, WebPaneModel.confirm, WebPaneModel.appName)
+        WebPaneModel.open = { opened.urls.append($0) }
+        WebPaneModel.appName = { _ in "Linear" }
+        WebPaneModel.confirm = { name, _ in opened.asked.append(name); return opened.answer }
+        defer { (WebPaneModel.open, WebPaneModel.confirm, WebPaneModel.appName) = saved }
         let model = WebPaneModel(terminal: "app-link-1", memory: WebPaneMemory(defaults: Self.defaults()))
         let window = Self.offscreen(model.webView)
         defer { window.close() }
@@ -262,11 +264,22 @@ struct WebPaneReviewTests {
         try await Task.sleep(for: .seconds(1))
         #expect(opened.urls.isEmpty, "a page's own redirect launched an app: \(opened.urls)")
         _ = try await model.webView.evaluateJavaScript("document.getElementById('l').click()")
+        for _ in 0..<300 where opened.asked.isEmpty { try await Task.sleep(for: .milliseconds(100)) }
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(opened.asked == ["Linear"], "the owner is asked, naming the app")
+        #expect(opened.urls.isEmpty, "a non-web link opened without a yes")
+        // A yes opens it.
+        opened.answer = true
+        _ = try await model.webView.evaluateJavaScript("document.getElementById('l').click()")
         for _ in 0..<300 where opened.urls.isEmpty { try await Task.sleep(for: .milliseconds(100)) }
         #expect(opened.urls == [URL(string: "linear://acme/issue/ENG-1")!])
     }
 
-    final class Box { var urls: [URL] = [] }
+    final class Box {
+        var urls: [URL] = []
+        var asked: [String] = []
+        var answer = false
+    }
 
     // MARK: - M1: a page that arrives late
 
