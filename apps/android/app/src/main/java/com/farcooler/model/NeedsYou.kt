@@ -258,8 +258,8 @@ sealed interface NeedsYouButton {
     /** Sends [action]: an ask's option, or a decision's option as the answer. */
     data class Answer(val action: NeedsYouAction) : NeedsYouButton
 
-    /** A decision's options past the third, behind one "More" menu. */
-    data class More(val actions: List<NeedsYouAction>) : NeedsYouButton
+    /** A decision's options, every one, as a radio list with Answer under it (ov-431). */
+    data class Choose(val actions: List<NeedsYouAction>) : NeedsYouButton
 
     /** A decision with no options: the answer is typed. "Answer" */
     data object Write : NeedsYouButton
@@ -269,9 +269,6 @@ sealed interface NeedsYouButton {
 }
 
 object NeedsYouAnswer {
-    /** Decisions show this many options as buttons; the rest go in a menu. */
-    const val OPTION_BUTTONS = 3
-
     /**
      * An item's buttons. [mayAnswer] false is a reader below Control scope,
      * who sees the item and Open, and nothing that writes (spec §2.5) — the
@@ -289,9 +286,7 @@ object NeedsYouAnswer {
             NeedsYouKind.DECISION -> when {
                 !mayAnswer -> listOf(NeedsYouButton.Open(OPEN_TITLE))
                 answers.isEmpty() -> listOf(NeedsYouButton.Write)
-                answers.size <= OPTION_BUTTONS -> answers.map(NeedsYouButton::Answer)
-                else -> answers.take(OPTION_BUTTONS).map(NeedsYouButton::Answer) +
-                    NeedsYouButton.More(answers.drop(OPTION_BUTTONS))
+                else -> listOf(NeedsYouButton.Choose(answers))
             }
             NeedsYouKind.REVIEW -> listOf(NeedsYouButton.Open(REVIEW_TITLE))
             NeedsYouKind.BLOCKED, NeedsYouKind.UNKNOWN -> listOf(NeedsYouButton.Open(OPEN_TITLE))

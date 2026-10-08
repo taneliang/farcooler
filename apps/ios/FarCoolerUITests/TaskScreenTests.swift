@@ -150,6 +150,54 @@ final class TaskScreenTests: XCTestCase {
             CFNotificationName("com.farcooler.harness.\(which)" as CFString), nil, nil, true)
     }
 
+    /// **A task's question lists every option, whole, and Answer records the
+    /// chosen one** (ov-431): choosing sends nothing, Answer is off until one
+    /// is chosen, and what's sent is the option's text as a `task.note`.
+    func testATaskQuestionIsARadioListAndAnswerRecordsTheChoice() throws {
+        let app = launch(["-push-task", "bil-7", "-phone-long-options"])
+        let long = app.buttons["task-option-1"]
+        XCTAssertTrue(long.waitForExistence(timeout: 30), "no options on the task")
+        let short = app.buttons["task-option-0"]
+        // Whole text, not cut: the label is the option and the row is taller
+        // than the one-line option beside it.
+        XCTAssertTrue(long.label.hasSuffix("stops once the file is written"), long.label)
+        XCTAssertGreaterThan(long.frame.height, short.frame.height * 1.8, "the long option didn't wrap")
+        XCTAssertGreaterThan(long.frame.minY, short.frame.maxY - 1, "options aren't stacked")
+        let answer = app.buttons["task-answer-send"]
+        XCTAssertTrue(answer.exists)
+        XCTAssertFalse(answer.isEnabled, "Answer is on before a choice")
+        long.tap()
+        XCTAssertTrue(answer.isEnabled, "Answer is off after a choice")
+        XCTAssertNotEqual(element(app, "harness-sent").value as? String, "task.note bil-7 pdfkit")
+        XCTAssertFalse(
+            (element(app, "harness-sent").value as? String ?? "").contains("task.note"), "choosing sent")
+        answer.tap()
+        let sent = NSPredicate(format: "value CONTAINS 'task.note bil-7 wkhtmltopdf, run as'")
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [expectation(for: sent, evaluatedWith: element(app, "harness-sent"))], timeout: 15),
+            .completed, "the chosen option wasn't recorded: \(element(app, "harness-sent").value ?? "")")
+    }
+
+    /// Opt-in capture (ov-431): the task's question with long options, in
+    /// written to `FARCOOLER_CAPTURE_DIR` (passed as
+    /// `TEST_RUNNER_FARCOOLER_CAPTURE_DIR`). Never taps anything but a
+    /// choice, so it needs no real input beyond the test's own.
+    func testCaptureTaskQuestion() throws {
+        guard let dir = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_DIR"] else {
+            throw XCTSkip("captures are opt-in: set TEST_RUNNER_FARCOOLER_CAPTURE_DIR")
+        }
+        // The appearance is the simulator's (`simctl ui appearance`), named by
+        // `TEST_RUNNER_FARCOOLER_CAPTURE_NAME` so a run per appearance and
+        // device writes its own file.
+        let name = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_NAME"] ?? "shot"
+        let app = launch(["-push-task", "bil-7", "-phone-long-options"])
+        XCTAssertTrue(app.buttons["task-option-1"].waitForExistence(timeout: 30), "no options on the task")
+        app.buttons["task-option-2"].tap()
+        let shot = XCUIScreen.main.screenshot().pngRepresentation
+        try shot.write(to: URL(fileURLWithPath: dir).appendingPathComponent("ios-task-question-\(name).png"))
+        app.terminate()
+    }
+
     /// **Answering a decision from Needs You takes it off Needs You**, and
     /// leaves the ask beside it alone.
     func testAnsweringADecisionRemovesItFromNeedsYou() throws {
@@ -276,6 +324,7 @@ final class ReadScopeTests: XCTestCase {
         XCTAssertTrue(
             app.descendants(matching: .any)["task-question"].waitForExistence(timeout: 10),
             "the question isn't shown")
-        XCTAssertFalse(app.buttons["task-answer-pdfkit"].exists, "an answer is offered")
+        XCTAssertFalse(app.buttons["task-option-0"].exists, "an option is offered")
+        XCTAssertFalse(app.buttons["task-answer-send"].exists, "Answer is offered")
     }
 }

@@ -22,6 +22,7 @@ import SwiftUI
 //   -phone-read-scope        this phone holds a Read grant: the runner sends
 //                            items without their answers, as the daemon does
 //   -deep-link <terminal>    as though a notification for it was tapped
+//   -phone-long-options      bil-7's question offers three options, two of them long
 //   -push-task <key>         as though a decision push for that task was
 //                            tapped
 //   -phone-keep-stack        reopen the stack the last launch kept, rather
@@ -752,8 +753,19 @@ final class HarnessRunner {
             "id": "note-q", "kind": "question", "actor": "manager",
             "at": Int64(Date().timeIntervalSince1970 * 1000) - 600_000,
             "body": "Which PDF library?",
-            "extra": ["options": ["pdfkit", "wkhtmltopdf"]],
+            "extra": ["options": Self.questionOptions],
         ]
+    }
+
+    /// bil-7's options: two short ones, or with `-phone-long-options` three
+    /// whose text runs past a phone's width (ov-431).
+    static var questionOptions: [String] {
+        CommandLine.arguments.contains("-phone-long-options")
+            ? [
+                "pdfkit",
+                "wkhtmltopdf, run as a separate process the daemon starts for each export and stops once the file is written",
+                "Render the invoice on the server with a headless browser, and keep the layout in one template shared with the web",
+            ] : ["pdfkit", "wkhtmltopdf"]
     }
 
     private var answered: [String: Any] {
@@ -797,13 +809,9 @@ final class HarnessRunner {
                     "status": "needs_decision",
                 ],
                 "question": "Which PDF library?",
-                "actions": [
-                    ["id": "pdfkit", "title": "pdfkit", "destructive": false, "primary": false],
-                    [
-                        "id": "wkhtmltopdf", "title": "wkhtmltopdf", "destructive": false,
-                        "primary": false,
-                    ],
-                ],
+                "actions": Self.questionOptions.map {
+                    ["id": $0, "title": $0, "destructive": false, "primary": false] as [String: Any]
+                },
             ])
         }
         // Below Control, the runner sends an item's id, kind, rank, subject

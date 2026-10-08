@@ -29,6 +29,8 @@ struct TaskScreen: View {
     @State private var failure: String?
     @State private var writing = false
     @State private var draft = ""
+    /// The option chosen in the list, not yet sent.
+    @State private var picked: String?
 
     @Environment(\.phoneNavigator) private var navigator
     @Environment(\.colorScheme) private var scheme
@@ -206,8 +208,8 @@ struct TaskScreen: View {
     /// What "ov-190" in this task's text links to.
     private var linker: TaskKeyLinker { connection.taskKeyLinker(navigator) }
 
-    /// The question it's waiting on, and its answers: the options as
-    /// buttons (a menu past three), else Answer… for words of your own.
+    /// The question it's waiting on, and its answers: the options as a radio
+    /// list and Answer, else Answer… for words of your own.
     @ViewBuilder
     private func decision(_ question: TaskQuestion) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -229,24 +231,48 @@ struct TaskScreen: View {
     }
 
     private func answers(_ question: TaskQuestion) -> some View {
-            HStack(spacing: 8) {
-                ForEach(question.buttons, id: \.self) { option in
-                    Button(option) { answer(option) }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .disabled(sending != nil)
-                        .accessibilityIdentifier("task-answer-\(option)")
-                }
-                if !question.overflow.isEmpty {
-                    Menu("More") {
-                        ForEach(question.overflow, id: \.self) { option in
-                            Button(option) { answer(option) }
+        VStack(alignment: .leading, spacing: 12) {
+            if !question.options.isEmpty {
+                // Every option on its own row with its whole text, then Answer
+                // (ov-431). Choosing sends nothing.
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(question.options.enumerated()), id: \.offset) { index, option in
+                        let chosen = picked == option
+                        Button {
+                            picked = option
+                        } label: {
+                            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                Image(systemName: chosen ? "largecircle.fill.circle" : "circle")
+                                    .foregroundStyle(chosen ? Color.accentColor : Color.secondary)
+                                    .accessibilityHidden(true)
+                                Text(option)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.primary)
+                                    .multilineTextAlignment(.leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(.vertical, 6)
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
+                        .disabled(sending != nil)
+                        .accessibilityAddTraits(chosen ? .isSelected : [])
+                        .accessibilityIdentifier("task-option-\(index)")
+                    }
+                }
+                HStack(spacing: 8) {
+                    Button("Answer") {
+                        if let picked { answer(picked) }
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .disabled(picked == nil || sending != nil)
+                    .accessibilityIdentifier("task-answer-send")
+                    if sending != nil { ProgressView().controlSize(.small) }
                 }
-                if question.options.isEmpty {
+            } else {
+                HStack(spacing: 8) {
                     Button("Answer…") {
                         draft = ""
                         writing = true
@@ -255,9 +281,10 @@ struct TaskScreen: View {
                     .controlSize(.small)
                     .disabled(sending != nil)
                     .accessibilityIdentifier("task-answer")
+                    if sending != nil { ProgressView().controlSize(.small) }
                 }
-                if sending != nil { ProgressView().controlSize(.small) }
             }
+        }
     }
 
     /// Agent, Changes and Worktree: where the task's work is, each pushed

@@ -23,8 +23,6 @@ import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -319,7 +317,6 @@ internal fun NeedsYouItemRow(
     var sending by remember(item.id) { mutableStateOf<String?>(null) }
     var refusal by remember(item.id) { mutableStateOf<String?>(null) }
     var writing by remember(item.id) { mutableStateOf(false) }
-    var more by remember(item.id) { mutableStateOf(false) }
     val agent = item.terminal?.label?.ifBlank { null } ?: "the agent"
 
     fun send(id: String, answer: suspend (Connection) -> Unit) {
@@ -420,20 +417,9 @@ internal fun NeedsYouItemRow(
                             }
                         }
                     }
-                    is NeedsYouButton.More -> Box {
-                        OutlinedButton(onClick = { more = true }, enabled = sending == null) { Text("More") }
-                        DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
-                            button.actions.forEach { action ->
-                                DropdownMenuItem(
-                                    text = { Text(action.title.ifBlank { action.id }) },
-                                    onClick = {
-                                        more = false
-                                        answer(action.id, action.id)
-                                    },
-                                )
-                            }
-                        }
-                    }
+                    is NeedsYouButton.Choose -> DecisionOptions(
+                        button.actions, sending, onAnswer = { answer(it.id, it.id) },
+                    )
                     NeedsYouButton.Write ->
                         if (sending == WRITTEN) {
                             Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {

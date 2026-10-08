@@ -292,7 +292,7 @@ class NeedsYouTest {
         val options = (1..5).map { NeedsYouAction("o$it", "o$it") }
         val decision = item("decision:t", "decision", 3).copy(actions = options)
         assertEquals(
-            options.take(3).map(NeedsYouButton::Answer) + NeedsYouButton.More(options.drop(3)),
+            listOf(NeedsYouButton.Choose(options)),
             NeedsYouAnswer.buttons(decision, mayAnswer = true),
         )
         assertEquals(listOf(NeedsYouButton.Write), NeedsYouAnswer.buttons(decision.copy(actions = emptyList()), true))
