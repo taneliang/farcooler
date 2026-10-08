@@ -945,7 +945,7 @@ jobs:
   # say "every push to main runs it regardless", on purpose, as a backstop.
   # The owner chose otherwise on Oct 5 (ov-301): GitHub gives this repository
   # five macOS runners, CI asked for seven per push and Canary two, so pushes
-  # queued, and four shards are about 60 macOS minutes that a daemon-only or
+  # queued, and five shards are about 130 macOS minutes that a daemon-only or
   # Mac-only push does not need. With no green ancestor in the history, or a range
   # that cannot be computed, everything still runs (scripts/ios-ui-plan.py). A skipped
   # shard is ignored by the shard budget (scripts/ios-ui-shard-budget.py).
@@ -1033,25 +1033,23 @@ jobs:
   # simulator and nothing else. A live-runner test that slipped into a shard
   # would skip with "NO LIVE RUNNER:", and the script turns that red.
   #
-  # Four shards since ov-301; the seconds per class are in
+  # Five shards (four since ov-301; R-40 added one); the seconds per class are in
   # scripts/ios-ui-shards.py. Each runs the products the `ios` job built
   # (`test-without-building`), so its overhead is the download, the boot and
   # the first launch, not a compile: 440 to 570 s a shard, measured. The
   # timeout is 45 minutes (ov-384; it was 40) and the budget job above goes
-  # red at 75% of it, 33.75 minutes. The three big shards hold 1,270 to 1,370
-  # s of tests, 31.5 minutes at most at a 520 s overhead.
+  # red at 75% of it, 33.75 minutes. Since R-40 each of the five shards holds
+  # about 1,160 s of tests, 25.5 minutes as a job at a 375 s overhead (57%).
   #
-  # WHY FOUR JOBS IN TWO PLACES (ov-384). The account has five macOS runners.
-  # At the start CI asks for three (`rust` on macOS, `swift`, `ios`), and when
-  # `ios` ends after about five minutes four shards ask for four more. Two
-  # slots are free, and which two shards got them was arbitrary, so the last
-  # started when Rust's macOS leg ended at 13 to 16.5 minutes: 38 to 52
-  # minutes from the push depending on which shard it was. `phone2`, in
-  # `ios-ui-late` below, is now always the one held until `rust` ends, and it
-  # is the small one (about 810 s of tests), so the four end together near
-  # minute 36. Replayed on three measured runs: 36 to 37, against 41 to 44 for
-  # the old order on average. The 45 minutes is what lets the big three be that
-  # size under the 75% bar. See .claude/agent/reports/ci-queueing/report.md.
+  # WHY TWO JOBS (ov-384, R-40). The account has five macOS runners. At the
+  # start CI asks for three (`rust` on macOS, `swift`, `ios`), and when `ios`
+  # ends after about five minutes the shards ask for more than the two free
+  # slots plus one; which got them was arbitrary, and the last started when
+  # Rust's macOS leg ended at 13 to 16.5 minutes. So `ios-ui` holds three
+  # shards that start at once, and `ios-ui-late` below holds the other two,
+  # always held until `rust` ends, so they end together near minute 40 (they
+  # were one, `phone2`, until R-40). See
+  # .claude/agent/reports/ci-queueing/report.md.
   #
   # `!cancelled()` and not the implied `success()`: a red `ios` job that
   # still uploaded its products (one of its script tests failed after the
@@ -1066,7 +1064,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # With `ios-ui-late`'s shard, these are SHARDS in
+        # With `ios-ui-late`'s shards, these are SHARDS in
         # scripts/ios-ui-shards.py, whose `--check` fails when the two
         # disagree. The big ones; see the comment above.
         shard: [shell, agent, phone]
@@ -1078,24 +1076,30 @@ jobs:
         with:
           shard: ${{ matrix.shard }}
 
-  # The fourth shard, the small one, held until `rust` ends. Not a matrix
-  # entry of `ios-ui` because `needs` is per job. `!cancelled()` again: a red
-  # `rust` must not stop the app's UI tests from running. It waits for both of
+  # The fourth and fifth shards, held until `rust` ends. Not entries of
+  # `ios-ui`'s matrix because `needs` is per job. `!cancelled()` again: a red
+  # `rust` must not stop the app's UI tests from running. They wait for both of
   # `rust`'s legs; the Linux one ends first, so the wait is the macOS leg's.
-  # Its name is the one the budget script reads (scripts/ios-ui-shard-budget.py)
-  # and its timeout must equal `ios-ui`'s, which `ios-ui-shards.py --check`
-  # holds it to.
+  # The job names are the ones the budget script reads
+  # (scripts/ios-ui-shard-budget.py) and the timeout must equal `ios-ui`'s,
+  # which `ios-ui-shards.py --check` holds it to. A fifth shard because four
+  # ran 1,470 to 1,860 s of tests and `shell` was 80% of the timeout (R-40).
   ios-ui-late:
-    name: iOS UI (phone2)
+    name: iOS UI (${{ matrix.shard }})
     needs: [ios-ui-plan, ios, rust]
     if: ${{ !cancelled() && needs.ios-ui-plan.outputs.run == 'true' }}
     runs-on: xcode-27
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        # SHARDS in scripts/ios-ui-shards.py, as `ios-ui`'s are.
+        shard: [phone2, phone3]
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/ios-ui-shard
         with:
-          shard: phone2
+          shard: ${{ matrix.shard }}
 
   android:
     name: Android

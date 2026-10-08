@@ -24,7 +24,7 @@ first.
     count, and the check waits for main to measure the new split. Adding a
     class keeps the old times, as a floor, until the next run measures it.
   - A skipped shard measures nothing. Since ov-301 a push to main whose changes
-    do not touch the iOS app skips all four shards (scripts/ios-ui-plan.py), and
+    do not touch the iOS app skips all five shards (scripts/ios-ui-plan.py), and
     a skipped job reports no run time, or a zero one that would pass for a fast
     run and drag the median down. Only success, failure and a cancel at the
     timeout are read, and a job whose name is still the unexpanded matrix

@@ -279,12 +279,19 @@ async fn a_pasted_answer_waits_while_codex_s_rollout_is_lost() {
     b.doing(agent.id, AgentActivity::Idle).await;
     // The gate sees the rollout (a slash command is refused after it).
     assert!(b.watcher.compose_into(agent.id, "/init", &[]).await.is_err());
+    // `answer` spawns a pass of its own, which runs at the first await below
+    // and, with the agent idle and its rollout found, claims and pastes the
+    // answer itself: `claim_wake` below then lost the race (CI, main run
+    // 37771611102, 3 in 10 under load). Holding the pass lock makes that pass
+    // return at once, so the test is the only thing to claim the wake.
+    let one_pass = b.watcher.wake_pump.lock().await;
     b.answer("Drill in");
     let wake = b.pending().remove(0);
     si.show(&format!("draft:{}", b.told("Drill in"))).await;
     b.screen_with(agent.id, "Continue.").await;
     assert!(b.svc.store.claim_wake(&wake).unwrap());
     assert!(b.svc.store.mark_wake_pasted(&wake, now_millis() - 1).unwrap());
+    drop(one_pass);
     std::fs::remove_file(&rollout).unwrap();
     b.pump().await;
     assert!(!si.log().contains("ENTER"), "an Enter with the rollout lost: {}", si.log());

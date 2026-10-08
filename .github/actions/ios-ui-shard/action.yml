@@ -1,6 +1,6 @@
 # One iOS UI shard: unpack the products the `ios` job built, boot a simulator
 # and run the shard's classes. Two jobs in ci.yml use it, `ios-ui` (a matrix of
-# three shards) and `ios-ui-late` (the fourth), which differ only in when the
+# three shards) and `ios-ui-late` (the other two), which differ only in when the
 # runner pool can start them (ov-384); the steps live here so they cannot drift.
 #
 # The caller checks the repository out first. A local action is read from the
