@@ -39,6 +39,14 @@
 # alias too: `/cost` highlights `/usage`), and Enter on it runs that and logs
 # `COMMAND /usage`. A submitted line break is logged as `\n`.
 #
+# With STAND_IN_DRAFT set, a claude stand-in draws its box as claude 2.1.292
+# does for Bring Here (ov-369): wrapped at the pane's width less 4, its cursor
+# a reverse-video space after the last character, and a box taller than half
+# the pane less 5 rows windowed to its last rows, `❯` on the first shown.
+# ctrl+u deletes back to the start of the last row (with the line break
+# before an empty one), logging `CLEARROW`; ctrl+y puts back all a run of
+# ctrl+u's took, logging `PUTBACK`.
+#
 # A codex stand-in draws a paste as codex 0.153.4 does (ov-416): an image's
 # path alone as `[Image #N] `, N from 1 in each message, and a paste past
 # 1,000 characters as `[Pasted Content N chars]`, sent whole. With
@@ -63,6 +71,10 @@ print "\e[?2004h";
 
 my ($composer, $mode, $pasting, $late, $late_at, @said, @queued) = ("", "", 0, "", 0);
 my ($pasted, %whole) = (0);
+# Bring Here's box (STAND_IN_DRAFT): the pane's size, and what ctrl+u took.
+my $draft = ($ENV{STAND_IN_DRAFT} // '') ne '' && $agent eq 'claude';
+my ($rows_tall, $cols_wide) = split ' ', (`stty size 2>/dev/null` || "24 80");
+my $killed = "";
 my @commands = (["/init", "", "Initialize a new CLAUDE.md file"], ["/usage", "cost", "Show session cost"],
     ["/model", "", "Set the AI model"], ["/compact", "", "Free up context"]);
 my ($transcript, $registry, $registry_cwd);
@@ -206,10 +218,45 @@ sub wrap {
     return @lines;
 }
 
+# The box's rows as claude draws them: wrapped at 60, or for Bring Here at
+# the pane's width less 4.
+sub box_rows {
+    my @box = map { wrap($_, $draft ? $cols_wide - 4 : 60) } split(/\n/, $composer, -1);
+    return @box ? @box : ("");
+}
+
+# ctrl+u: the last row's text, or an empty last row's line break and the
+# row before it, kept for ctrl+y.
+sub clear_row {
+    my @box = box_rows();
+    my $last = $box[-1];
+    my $took;
+    if ($last eq "" && $composer =~ /\n\z/) {
+        $composer =~ s/\n\z//;
+        my @before = box_rows();
+        $took = "\n";
+        $last = $before[-1];
+    }
+    $composer = substr($composer, 0, length($composer) - length($last));
+    $killed = $last . ($took // "") . $killed;
+}
+
 sub draw {
     my @rows;
-    my @box = map { wrap($_, 60) } split(/\n/, $composer, -1);
-    @box = ("") unless @box;
+    my @box = box_rows();
+    if ($draft) {
+        # STAND_IN_WINDOW: fewer rows than claude's, a later claude's window.
+        my $most = $ENV{STAND_IN_WINDOW} || int($rows_tall / 2) - 5;
+        @box = @box[-$most .. -1] if $most > 0 && @box > $most;
+        # STAND_IN_CURSOR_BACK: the cursor moved that many characters back.
+        my $back = $ENV{STAND_IN_CURSOR_BACK} || 0;
+        if ($back > 0 && $back <= length $box[-1]) {
+            my $at = length($box[-1]) - $back;
+            $box[-1] = substr($box[-1], 0, $at) . "\e[7m" . substr($box[-1], $at, 1) . "\e[0m" . substr($box[-1], $at + 1);
+        } else {
+            $box[-1] .= "\e[7m \e[0m";
+        }
+    }
     if ($agent eq 'claude') {
         push @rows, " Claude Code stand-in", "";
         push @rows, map { "⏺ $_" } @said;
@@ -383,12 +430,22 @@ while (1) {
                 logit("SUBMIT " . logged($composer));
                 $composer = "";
             }
+        } elsif ($draft && substr($buf, 0, 1) eq "\x15") {
+            $buf = substr($buf, 1);
+            logit("CLEARROW");
+            clear_row();
+        } elsif ($draft && substr($buf, 0, 1) eq "\x19") {
+            $buf = substr($buf, 1);
+            logit("PUTBACK");
+            $composer .= $killed;
+            $killed = "";
         } elsif (substr($buf, 0, 1) eq "\e") {
             # An escape that isn't a paste: drop it whole, a mouse report
             # (`ESC [ < 0 ; 41 ; 13 M`) or a reply (`ESC [ ? 6 c`) too.
             $buf =~ s/^\e\[?[<?>]?[0-9;]*\$?[A-Za-z~]?//;
         } else {
-            $buf =~ s/^([^\e\r]+)//;
+            $buf =~ s/^([^\e\r\x15\x19]+)// or $buf =~ s/^(.)//s;
+            $killed = "";
             take(decode_utf8($1));
             logit("TYPED " . decode_utf8($1));
         }

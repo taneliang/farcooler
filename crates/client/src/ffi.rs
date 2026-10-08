@@ -2338,6 +2338,9 @@ async fn dispatch(
         // `{terminal}` → `{}`, once claude took the key (ov-368).
         "terminal.interrupt" => session.interrupt(id("terminal")?).await.map(|_| json!({})),
         "terminal.send_now" => session.send_now(id("terminal")?).await.map(|_| json!({})),
+        // `{terminal, expected?}` → `{text, cleared}`: Bring Here (ov-369).
+        "terminal.bring_draft" => session.bring_draft(id("terminal")?, args.get("expected").and_then(Value::as_str)).await
+            .map(|b| json!({ "text": b.text, "cleared": b.cleared })),
 
         // Refused rather than defaulted, so a typo in a client is a visible
         // error instead of a call that silently does nothing.

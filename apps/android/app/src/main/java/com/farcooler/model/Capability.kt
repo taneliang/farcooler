@@ -59,5 +59,6 @@ enum class Capability(val wire: String) {
     COMPOSE("compose"),
     COMPOSE_UPLOAD("compose_upload"),
     TERMINAL_INTERRUPT("terminal_interrupt"),
-    CODEX_VIEW("codex_view");
+    CODEX_VIEW("codex_view"),
+    BRING_DRAFT("bring_draft");
 }

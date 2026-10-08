@@ -75,3 +75,12 @@ fn the_interrupt_is_served_behind_its_own_word() {
     assert!(capability::ALL.contains(&capability::TERMINAL_INTERRUPT));
     assert_eq!(method::Method::ALL.iter().filter(|m| m.capability() == capability::TERMINAL_INTERRUPT).count(), 2);
 }
+
+/// Bring Here is served behind a word of its own (ov-369), which no other
+/// method needs.
+#[test]
+fn bring_here_is_served_behind_its_own_word() {
+    assert_eq!(capability::for_method("terminal.bring_draft"), Some(capability::BRING_DRAFT));
+    assert!(capability::ALL.contains(&capability::BRING_DRAFT));
+    assert_eq!(method::Method::ALL.iter().filter(|m| m.capability() == capability::BRING_DRAFT).count(), 1);
+}

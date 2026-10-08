@@ -1444,3 +1444,6 @@ mod interrupt_tests;
 
 #[path = "codex_turn_tests.rs"]
 mod codex_turn_tests;
+
+#[path = "bring_tests.rs"]
+mod bring_tests;

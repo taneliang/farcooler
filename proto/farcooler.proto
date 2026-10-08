@@ -254,6 +254,9 @@ message Request {
     // `terminal.draft_withdraw` (ov-385), behind `draft_hold`. 401-409 are
     // held by `reserved` below.
     DraftWithdraw draft_withdraw = 400;
+    // `terminal.bring_draft` (ov-369), behind `bring_draft`. 421-429 are held
+    // by `reserved` below.
+    BringDraft bring_draft = 420;
   }
   // The rest of rulings' block, kept for them (review 1005a L1).
   reserved 182 to 189;
@@ -265,6 +268,8 @@ message Request {
   reserved 362 to 369;
   // The rest of the draft hold's block (ov-385).
   reserved 401 to 409;
+  // The rest of Bring Here's block (ov-369).
+  reserved 421 to 429;
 }
 
 message Response {
@@ -397,6 +402,9 @@ message Result {
     // `terminal.draft_prompt` asked to hold behind a dialog, and
     // `terminal.draft_withdraw` (ov-385), behind `draft_hold`: the hold.
     DraftHold draft_hold = 410;
+    // `terminal.bring_draft` (ov-369), behind `bring_draft`: the box's draft,
+    // and whether it was cleared.
+    BroughtDraft brought_draft = 420;
   }
   // The rest of rulings' block, kept for them (review 1005a L1).
   reserved 181 to 189;
@@ -412,6 +420,8 @@ message Result {
   reserved 372 to 379;
   // The rest of the draft hold's block (ov-385).
   reserved 411 to 419;
+  // The rest of Bring Here's block (ov-369).
+  reserved 421 to 429;
 }
 
 // ---------------------------------------------------------------------------
@@ -4657,6 +4667,28 @@ message DraftHold {
   int64 expires_ms = 4;
   // When it ended; 0 while it waits.
   int64 ended_ms = 5;
+}
+
+// Bring Here (ov-369, R-28): the draft a person left in a terminal-mode
+// claude's own box, read so a native composer can take it, and then cleared.
+// Two calls, so the text is never in neither place: without `expected`, the
+// box is read and nothing typed; with it, the box is emptied (ctrl+u, row by
+// row, each checked) only while it still reads exactly `expected`, and put
+// back (ctrl+y) when anything else shows. Refused with a word in
+// `Error.what`, nothing typed: `pasted`, `too_tall`, `cursor`, `changed`,
+// `typing`, `sending`, `prompt`, `unfamiliar`, `unsupported`; once a clear
+// began and couldn't finish or undo, `partly`.
+message BringDraft {
+  bytes terminal_id = 1;
+  // The text the read answered, to clear; empty to read.
+  string expected = 2;
+}
+
+// What `terminal.bring_draft` found: the box's text, its line breaks as
+// `\n`, empty when the box was; and whether it was cleared.
+message BroughtDraft {
+  string text = 1;
+  bool cleared = 2;
 }
 
 enum DraftHoldState {

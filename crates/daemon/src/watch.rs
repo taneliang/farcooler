@@ -932,6 +932,9 @@ pub struct Watcher {
     /// When an Esc or a Send Now was last pressed in each terminal, for the
     /// lockout (`answer_wake::interrupt`, ov-368).
     keys_pressed: std::sync::Mutex<HashMap<Uuid, std::time::Instant>>,
+    /// When Bring Here last emptied each terminal's box (`answer_wake::bring`,
+    /// ov-369): keys from before it made the draft a composer now holds.
+    brought: std::sync::Mutex<HashMap<Uuid, i64>>,
     /// The sessions of recorded subagents being read (`workers`).
     worker_follow: std::sync::Mutex<workers::Follower>,
     /// Make the next paste fail as a send would (`answer_wake`'s tests).
@@ -962,6 +965,9 @@ pub struct Watcher {
     /// Make an interrupt's checks under the fence take this many ms longer.
     #[cfg(test)]
     slow_recheck_ms: std::sync::atomic::AtomicU64,
+    /// Run once, after Bring Here's first ctrl+u (`bring`'s tests).
+    #[cfg(test)]
+    after_clear_key: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 /// One client's claim about what it is showing, and when it said so.
@@ -2830,6 +2836,7 @@ impl Watcher {
             draft_pump: tokio::sync::Mutex::new(()),
             typing: std::sync::Mutex::new(HashMap::new()),
             keys_pressed: std::sync::Mutex::new(HashMap::new()),
+            brought: std::sync::Mutex::new(HashMap::new()),
             worker_follow: std::sync::Mutex::new(workers::Follower::new(
                 std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default(),
             )),
@@ -2849,6 +2856,8 @@ impl Watcher {
             before_key: std::sync::Mutex::new(None),
             #[cfg(test)]
             slow_recheck_ms: std::sync::atomic::AtomicU64::new(0),
+            #[cfg(test)]
+            after_clear_key: std::sync::Mutex::new(None),
             clears_pending: std::sync::Mutex::new(HashSet::new()),
             taps: std::sync::Mutex::new(None),
             task_notices: std::sync::Mutex::new(HashMap::new()),

@@ -419,6 +419,8 @@ fn scope_of(method: Method) -> Scope {
         | Method::TerminalTell | Method::TerminalCompose
         // One Esc, or claude's ctrl+x ctrl+s, past the same gate (ov-368).
         | Method::TerminalInterrupt | Method::TerminalSendNow
+        // Bring Here (ov-369): clears what a person typed in claude's box.
+        | Method::TerminalBringDraft
         | Method::TerminalAgentAnswer
         | Method::TerminalAgentSetMode | Method::TerminalAgentSetModel | Method::TerminalAgentSetConfig
         | Method::TerminalAgentCancel
@@ -1940,6 +1942,12 @@ impl Rpc {
                 let key = if req.method == "terminal.interrupt" { Key::Interrupt } else { Key::SendNow };
                 self.watcher.press(id, key).await?;
                 self.terminal_result(id).await
+            }
+
+            // Bring Here (ov-369): the box's draft read; with `expected`, cleared too.
+            "terminal.bring_draft" => {
+                let Some(request::Payload::BringDraft(p)) = req.payload else { return Err(DomainError::InvalidArgument { what: "payload" }) };
+                Ok(result::Value::BroughtDraft(self.watcher.bring_draft_wire(&p).await?))
             }
 
             // Stop waiting to paste a draft held behind a dialog (ov-385).

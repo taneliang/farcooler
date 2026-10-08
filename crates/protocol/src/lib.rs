@@ -631,6 +631,11 @@ pub mod capability {
     /// before refused every send into codex as `unsupported`: a client that
     /// reads it absent offers the view on claude panes alone.
     pub const CODEX_VIEW: &str = "codex_view";
+    /// `terminal.bring_draft` (ov-369, R-28): Bring Here, the draft in a
+    /// terminal-mode claude's box read, then cleared, so a native composer
+    /// can take it. Its own word, so a client offers Bring Here only where
+    /// it's served, and Show Terminal alone elsewhere.
+    pub const BRING_DRAFT: &str = "bring_draft";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -647,7 +652,7 @@ pub mod capability {
             READ_ONLY_FOLDERS, AGENT_QUEUE, BOARD_PLAN, LFS_POINTERS, BOARD_PAGES, BOARD_RULINGS,
             BOARD_TRAINS, BOARD_COST, LANDING, BOARD_RULING_ACTIONS, AGENT_ROWS, DRAFT_HOLD,
             PROJECTOR_SETTING, AGENT_COMPOSE,
-            COMPOSE, COMPOSE_UPLOAD, TERMINAL_INTERRUPT, CODEX_VIEW,
+            COMPOSE, COMPOSE_UPLOAD, TERMINAL_INTERRUPT, CODEX_VIEW, BRING_DRAFT,
         ];
 
     /// Capabilities this process has but does not offer: a feature behind a
@@ -776,6 +781,7 @@ pub mod method {
         TerminalCompose = "terminal.compose" => AGENT_COMPOSE,
         TerminalInterrupt = "terminal.interrupt" => TERMINAL_INTERRUPT,
         TerminalSendNow = "terminal.send_now" => TERMINAL_INTERRUPT,
+        TerminalBringDraft = "terminal.bring_draft" => BRING_DRAFT,
         TerminalAgentAnswer = "terminal.agent_answer" => AGENT,
         TerminalAgentSetMode = "terminal.agent_set_mode" => AGENT,
         TerminalAgentSetModel = "terminal.agent_set_model" => AGENT,

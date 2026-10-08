@@ -99,6 +99,8 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         | Method::TerminalCompose
         | Method::TerminalInterrupt
         | Method::TerminalSendNow
+        // Bring Here (ov-369).
+        | Method::TerminalBringDraft
         // Its setting, the phones' settings row (ov-373): `host_admin` on
         // the runner, so a phone enrolled at `control` is refused it.
         | Method::SettingsSetProjector => Some(method.name()),

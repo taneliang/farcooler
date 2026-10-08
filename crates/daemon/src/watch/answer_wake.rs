@@ -844,7 +844,10 @@ impl Watcher {
             anyone_watching(&watched, terminal, now)
         };
         let quiet = if watched { QUIET_WATCHED_MS } else { QUIET_MS };
-        last_input(self.service.root_dir(), terminal).is_some_and(|at| now - at < quiet)
+        // Keys from before Bring Here emptied the box made the draft a
+        // composer now holds: no sign of anyone typing now (ov-369).
+        let brought = self.brought.lock().unwrap_or_else(|e| e.into_inner()).get(&terminal).copied();
+        last_input(self.service.root_dir(), terminal).is_some_and(|at| now - at < quiet && brought.is_none_or(|b| at > b))
     }
 }
 
@@ -1009,6 +1012,7 @@ fn spoken_name(t: &Terminal) -> String {
     if title.is_empty() { "the agent".into() } else { title }
 }
 
+mod bring;
 pub(crate) mod codex_turn;
 mod compose;
 pub(crate) mod draft_hold;
