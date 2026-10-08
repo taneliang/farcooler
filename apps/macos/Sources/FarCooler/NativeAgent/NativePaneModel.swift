@@ -94,6 +94,12 @@ final class NativePaneModel: ObservableObject {
     @Published var keys: (any InterruptSink)?
     /// A Stop or a Send Now on its way, until the runner answers.
     @Published var pressing: PaneKey?
+    /// Where Bring Here reads and clears claude's box (ov-369): the
+    /// runner's connection, where it serves `bring_draft`; nil, and only
+    /// Show Terminal is offered, where not.
+    @Published var drafts: (any DraftSink)?
+    /// A Bring Here on its way, until the runner answers the clear.
+    @Published var bringing = false
     /// Where a held ask's answer goes (ov-370): the runner's connection.
     @Published var answers: (any AgentAnswerSink)?
     /// The held ask whose answer is on its way, by its id.
@@ -198,8 +204,12 @@ final class NativePaneModel: ObservableObject {
         /// The message is one of claude's own commands that opens a panel or
         /// acts at once (`handoff`): the Handoff row, with Show Terminal.
         case panel
-        /// The terminal's box holds text of its own (R-28).
+        /// The terminal's box holds text of its own (R-28): Bring Here where
+        /// it's offered, and Show Terminal.
         case draftInTerminal
+        /// Bring Here put the box's text in the composer but couldn't clear
+        /// the box: the text is in both, as this says.
+        case draftLeftInTerminal(String)
         /// Something only words can say.
         case said(String)
     }

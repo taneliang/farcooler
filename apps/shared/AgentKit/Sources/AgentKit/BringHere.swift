@@ -36,7 +36,10 @@ public enum BringHere {
     /// `clear` the box of exactly that text. Each call answers what the
     /// runner said, or how it failed. Answers what the composer's line says
     /// after, nil for nothing.
+    /// Runs on the caller's actor (`isolation`), so the closures need not be
+    /// `Sendable`: a pane's model calls it from the main actor.
     public static func run(
+        isolation: isolated (any Actor)? = #isolation,
         agent: String = "Claude",
         read: () async -> Result<String, AgentConversation.SendFailure>,
         place: (String) async -> Void,
@@ -61,6 +64,7 @@ public enum BringHere {
 
     /// `result`'s value, or its failure as `run` takes it, by `failure`.
     public static func result<T>(
+        isolation: isolated (any Actor)? = #isolation,
         _ call: () async throws -> T, failure: (Error) -> AgentConversation.SendFailure
     ) async -> Result<T, AgentConversation.SendFailure> {
         do { return .success(try await call()) } catch { return .failure(failure(error)) }

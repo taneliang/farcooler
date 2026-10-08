@@ -237,6 +237,7 @@ final class NativeAgents: ObservableObject {
             pane.source = nil
             pane.sink = nil
             pane.keys = nil
+            pane.drafts = nil
             pane.store.stop()
         }
     }
@@ -317,6 +318,8 @@ final class NativeAgents: ObservableObject {
         model.rich = offered.contains(Capability.compose.rawValue)
         // Stop and Send Now where the runner presses them (ov-368).
         model.keys = offered.contains(Capability.terminalInterrupt.rawValue) ? core : nil
+        // Bring Here where the runner reads and clears claude's box (ov-369).
+        model.drafts = offered.contains(Capability.bringDraft.rawValue) ? core : nil
         // A held ask's buttons (ov-370). A runner from before them holds no
         // ask on a row, so none is offered there.
         model.answers = core

@@ -278,7 +278,17 @@ struct NativeComposer: View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
             switch issue {
             case .draftInTerminal:
-                Text("The terminal’s box already holds a draft. Send or clear it there first.")
+                // R-28: refused, and the draft offered here or the terminal.
+                Text(model.offersBringHere ? AgentConversation.draftInTerminalBring : AgentConversation.draftInTerminal)
+                Spacer(minLength: Spacing.group)
+                if model.offersBringHere {
+                    Button("Bring Here") { Task { await model.bringHere() } }
+                        .disabled(model.bringing)
+                        .identified("native-bring-here")
+                }
+                Button("Show Terminal", action: showTerminal)
+            case .draftLeftInTerminal(let words):
+                Text(words)
                 Spacer(minLength: Spacing.group)
                 Button("Show Terminal", action: showTerminal)
             case .said(let words):
