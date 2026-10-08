@@ -34,7 +34,13 @@ class AgentConversationTest {
         assertTrue(AgentConversation.offered(serving, null, claude()))
         assertTrue(AgentConversation.offered(serving, null, claude(state = "starting", preset = "claude-yolo")))
         // Not claude, not a terminal, not running, or no terminal at all.
+        // Codex only where the runner projects it and composes into it (ov-416).
         assertFalse(AgentConversation.offered(serving, null, claude(preset = "codex")))
+        val codexServing = build(Capability.AGENT_ROWS, Capability.AGENT_COMPOSE, Capability.CODEX_VIEW)
+        assertTrue(AgentConversation.offered(codexServing, null, claude(preset = "codex")))
+        assertTrue(AgentConversation.offered(null, codexServing, claude(preset = "codex:gpt-5")))
+        assertFalse(AgentConversation.offered(codexServing, null, claude(preset = "codex", paneMode = "agent")))
+        assertFalse(AgentConversation.offered(codexServing, null, claude(preset = "shell")))
         assertFalse(AgentConversation.offered(serving, null, claude(paneMode = "agent")))
         assertFalse(AgentConversation.offered(serving, null, claude(state = "exited")))
         assertFalse(AgentConversation.offered(serving, null, null))
@@ -50,6 +56,21 @@ class AgentConversationTest {
         assertFalse(AgentConversation.offered(null, build(Capability.TERMINALS), claude()))
         // The fresh build wins over the last: a runner that turned it off stops offering.
         assertFalse(AgentConversation.offered(build(Capability.TERMINALS), serving, claude()))
+    }
+
+    @Test
+    fun `a codex pane's words name codex`() {
+        assertEquals("Codex", AgentConversation.agentName("codex"))
+        assertEquals("Claude", AgentConversation.agentName("claude"))
+        assertFalse(AgentConversation.pressesKeys("codex"))
+        assertTrue(AgentConversation.pressesKeys("claude"))
+        for (what in listOf("busy", "left_at_shell", "unconfirmed", "not_running", "unconfirmable", "picker", "too_tall", "command")) {
+            val said = (AgentConversation.issue(SendFailure.Refused(what), agent = "Codex") as SendIssue.Said).words
+            assertTrue("$what: $said", said.contains("Codex"))
+            assertFalse(what, said.contains("Claude"))
+        }
+        assertEquals("Codex is showing something only the terminal can.", AgentConversation.handoff("Codex"))
+        assertTrue(AgentConversation.picker("Codex").contains("@ or $"))
     }
 
     @Test

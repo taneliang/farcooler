@@ -1,7 +1,7 @@
 package com.farcooler.model
 
 /**
- * The conversation view of a terminal-mode claude pane on a phone (ov-374):
+ * The conversation view of a terminal-mode claude or codex pane on a phone (ov-374, ov-416):
  * the rules it decides by, here so the JVM tests read them back. AgentKit's
  * `AgentConversation` (ov-373), with the same words, which the Mac's native view
  * keeps its own copy of.
@@ -22,9 +22,21 @@ object AgentConversation {
     /** Whether the runner presses Stop and Send now (`terminal_interrupt`, ov-368). */
     fun interrupts(build: DaemonBuild?): Boolean = build?.can(Capability.TERMINAL_INTERRUPT) == true
 
-    /** Whether a pane is claude in a terminal, the one kind of pane the runner projects rows for. */
-    fun isClaudeInATerminal(paneMode: String?, preset: String): Boolean =
-        (paneMode ?: "terminal") == "terminal" && preset.startsWith("claude")
+    /**
+     * Whether a pane is an agent in a terminal the runner projects rows for and
+     * composes into: claude, or codex where the runner says it does (`codex_view`,
+     * ov-416). A runner from before projected no codex rows and refused every send
+     * into one.
+     */
+    fun isAgentInATerminal(paneMode: String?, preset: String, build: DaemonBuild?): Boolean =
+        (paneMode ?: "terminal") == "terminal" &&
+            (preset.startsWith("claude") || (preset.startsWith("codex") && build?.can(Capability.CODEX_VIEW) == true))
+
+    /** The agent's name, as the conversation's words say it. */
+    fun agentName(preset: String): String = if (preset.startsWith("codex")) "Codex" else "Claude"
+
+    /** Whether the runner presses Stop and Send now in this agent's pane: claude's keys alone. */
+    fun pressesKeys(preset: String): Boolean = preset.startsWith("claude")
 
     /**
      * Whether the pane's process is there to talk to. A pane whose claude has
@@ -45,7 +57,7 @@ object AgentConversation {
      */
     fun offered(daemon: DaemonBuild?, lastDaemon: DaemonBuild?, terminal: Terminal?): Boolean =
         terminal != null && served(daemon ?: lastDaemon) &&
-            isClaudeInATerminal(terminal.paneMode, terminal.preset) && isRunning(terminal.state)
+            isAgentInATerminal(terminal.paneMode, terminal.preset, daemon ?: lastDaemon) && isRunning(terminal.state)
 
     /**
      * Whether the runner settings screen shows the conversation view's switch:
@@ -56,9 +68,9 @@ object AgentConversation {
     fun offersSetting(build: DaemonBuild?, projectorOn: Boolean?): Boolean =
         build != null && build.grantedScope == "host_admin" && build.can(Capability.PROJECTOR_SETTING) && projectorOn != null
 
-    const val SETTING_TITLE = "Conversation view for Claude panes"
+    const val SETTING_TITLE = "Conversation view for Claude and Codex panes"
     const val SETTING_FOOTER =
-        "Shows a Claude pane that runs in a terminal as a conversation you can read and reply to, " +
+        "Shows a Claude or Codex pane that runs in a terminal as a conversation you can read and reply to, " +
             "on every device that reaches this runner. Its terminal is one tap away."
 
     /** One key per pane (R-27). */
@@ -114,7 +126,7 @@ object AgentConversation {
     }
 
     /** [command] when the message was a slash command, which says which limit `images` means. */
-    fun issue(failure: SendFailure, command: Boolean = false): SendIssue = when (failure) {
+    fun issue(failure: SendFailure, command: Boolean = false, agent: String = "Claude"): SendIssue = when (failure) {
         // A grant that may read but not type (`read`): saying so beats
         // "wasn't sent" on every try.
         is SendFailure.Refused -> if (failure.word == "scope-denied") {
@@ -124,16 +136,18 @@ object AgentConversation {
             "handoff" -> SendIssue.Panel
             "draft" -> SendIssue.DraftInTerminal
             "typing" -> SendIssue.Said("Someone typed in the terminal in the last 15 seconds, so the message wasn’t sent. Try again once they stop.")
-            "busy" -> SendIssue.Said("Claude is working and can’t take a message from here right now.")
+            "busy" -> SendIssue.Said("$agent is working and can’t take a message from here right now.")
             "too_long" -> SendIssue.Said(TOO_LONG)
-            "command" -> SendIssue.Said(COMMAND_REFUSED)
+            "command" -> SendIssue.Said(commandRefused(agent))
             "paste_left" -> SendIssue.Said("The message didn’t land in the box as typed, so it was left there and not sent.")
-            "left_at_shell" -> SendIssue.Said("Claude quit as the message was typed. It wasn’t run.")
-            "unconfirmed" -> SendIssue.Said(UNCONFIRMED)
-            "not_running", "not_an_agent" -> SendIssue.Said("Claude isn’t running in this pane.")
+            "left_at_shell" -> SendIssue.Said("$agent quit as the message was typed. It wasn’t run.")
+            "unconfirmed" -> SendIssue.Said(unconfirmed(agent))
+            "not_running", "not_an_agent" -> SendIssue.Said("$agent isn’t running in this pane.")
             "unfamiliar", "unproven" -> SendIssue.Said("Far Cooler can’t read this terminal’s box, so nothing was typed.")
-            "unconfirmable" -> SendIssue.Said("Far Cooler can’t find Claude’s session to confirm a send, so nothing was typed.")  // casing ok: names
-            "unsupported" -> SendIssue.Said("Only Claude can take a message from here. Use the terminal.")
+            "unconfirmable" -> SendIssue.Said("Far Cooler can’t find $agent’s session to confirm a send, so nothing was typed.")  // casing ok: names
+            "unsupported" -> SendIssue.Said("$agent can’t take a message from here. Use the terminal.")
+            "picker" -> SendIssue.Said(picker(agent))
+            "too_tall" -> SendIssue.Said(tooTall(agent))
             "images_too_large" -> SendIssue.Said(IMAGES_TOO_LARGE)
             "images" -> SendIssue.Said(if (command) COMMAND_WITH_IMAGES else TOO_MANY_IMAGES)
             "image_too_large" -> SendIssue.Said(IMAGE_TOO_LARGE)
@@ -235,6 +249,23 @@ object AgentConversation {
     /** The runner's `command`: a `!`, which claude's box runs in a shell, or a `/` before something that isn't a command's name. */
     const val COMMAND_REFUSED =
         "Claude would run that as a shell command or doesn’t have that command, so it wasn’t sent. Use the terminal for it."
+
+    fun commandRefused(agent: String): String =
+        "$agent would run that as a shell command or doesn’t have that command, so it wasn’t sent. Use the terminal for it."
+
+    fun unconfirmed(agent: String): String = "$agent didn’t confirm it took the message. Check the terminal before sending it again."
+
+    fun handoff(agent: String): String = "$agent is showing something only the terminal can."
+
+    fun panel(agent: String): String = "This opens a panel in $agent, so it’s for the terminal."
+
+    /** The runner's `picker` (codex, ov-416): a last word codex would open a picker for, which takes the Enter. */
+    fun picker(agent: String): String =
+        "$agent would open a picker for a last word that starts with @ or \$, so the message wasn’t sent. Add a word after it, or use the terminal."
+
+    /** The runner's `too_tall` (codex, ov-416): more lines than its box shows, so it couldn't be read back. */
+    fun tooTall(agent: String): String =
+        "That message is too tall for $agent’s box to show whole, so it wasn’t sent. Shorten it, or paste it in the terminal."
     const val IMAGES_TOO_LARGE = "These images are too large to send together. Send fewer or smaller ones."
     const val TOO_MANY_IMAGES = "A message takes at most $MOST_IMAGES images."
     const val COMMAND_WITH_IMAGES = "A slash command can’t carry images. Send it without them."
@@ -326,14 +357,14 @@ object AgentConversation {
         is AgentRow.Turn.Outcome.Other -> "Ended"
     }
 
-    fun askTitle(ask: AgentRow.Ask): String {
+    fun askTitle(ask: AgentRow.Ask, agent: String = "Claude"): String {
         val by = ask.answeredBy
         if (by != null && (ask.answered || ask.held == null)) return "Answered on $by"
         if (ask.answered) return "Answered"
         return when (ask.kind) {
-            "Permission" -> "Claude is asking for permission"
-            "PlanExit" -> "Claude has a plan for you to review"
-            else -> "Claude is asking a question"
+            "Permission" -> "$agent is asking for permission"
+            "PlanExit" -> "$agent has a plan for you to review"
+            else -> "$agent is asking a question"
         }
     }
 
@@ -383,10 +414,10 @@ object AgentConversation {
     }
 
     /** Why an answer didn't land, by the runner's word for it. */
-    fun answerIssue(what: String?, timedOut: Boolean = false): String = when {
+    fun answerIssue(what: String?, timedOut: Boolean = false, agent: String = "Claude"): String = when {
         timedOut -> "The runner didn’t answer in time. Check the terminal before answering again."
         what == "not_held" -> "This isn’t waiting here anymore. It was answered, or only the terminal can answer it now."
-        what == "not_delivered" -> "The answer didn’t reach Claude. Answer in the terminal."
+        what == "not_delivered" -> "The answer didn’t reach $agent. Answer in the terminal."
         what == "answers" -> "Answer every question first."
         else -> "The answer wasn’t sent. Answer in the terminal."
     }

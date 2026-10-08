@@ -292,7 +292,7 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
             val projectorOn by connection.projector.on.collectAsStateWithLifecycle()
             if (AgentConversation.offersSetting(daemon, projectorOn)) {
                 Separator()
-                SectionTitle("Claude")
+                SectionTitle("Agents")
                 Row(
                     Modifier.fillMaxWidth().testTag("runner-conversation-view"),
                     verticalAlignment = Alignment.CenterVertically,

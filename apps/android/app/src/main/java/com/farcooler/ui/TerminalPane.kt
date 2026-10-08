@@ -195,7 +195,7 @@ fun TerminalPane(
     val session = remember { TerminalSession(ref.terminalId, connection.core) }
     LaunchedEffect(reshape) { session.reshapeAllowed = reshape }
 
-    // The conversation view of a claude in a terminal (ov-374), where the runner
+    // The conversation view of a claude or codex in a terminal (ov-374, ov-416), where the runner
     // serves it. Gated on the build the layout reads (`daemon`, failing that
     // `lastDaemon`), so a reconnect doesn't take the view down for the round
     // trip until `host` answers.
@@ -205,8 +205,9 @@ fun TerminalPane(
     val lastDaemon by connection.lastDaemon.collectAsStateWithLifecycle()
     val native = rememberNativePane(
         terminalId = ref.terminalId,
-        claudeInTerminal = terminal != null &&
-            AgentConversation.isClaudeInATerminal(terminal.paneMode, terminal.preset),
+        agentInTerminal = terminal != null &&
+            AgentConversation.isAgentInATerminal(terminal.paneMode, terminal.preset, daemon ?: lastDaemon),
+        preset = terminal?.preset ?: "claude",
         offered = AgentConversation.offered(daemon, lastDaemon, terminal),
         live = live,
         rich = AgentConversation.rich(daemon ?: lastDaemon),

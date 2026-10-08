@@ -181,6 +181,12 @@ class NativePaneModel(
     /** Where Stop and Send now go, handed to [keys] where the runner offers them. */
     private val interruptSink: InterruptSink? = null,
 ) {
+    /** The agent the pane runs, as its preset says: `claude` or `codex` (ov-416). */
+    var preset by mutableStateOf("claude")
+
+    /** The agent's name, as the conversation's words say it. */
+    val agent: String get() = AgentConversation.agentName(preset)
+
     /** The held ask whose answer is on its way, by its id. */
     var answering by mutableStateOf<String?>(null)
         private set
@@ -207,10 +213,11 @@ class NativePaneModel(
                 throw e
             } catch (e: Exception) {
                 val issue = when (val failure = AgentConversation.failure(e)) {
-                    is AgentConversation.SendFailure.Refused -> AgentConversation.answerIssue(failure.what)
-                    is AgentConversation.SendFailure.TimedOut -> AgentConversation.answerIssue(null, timedOut = true)
+                    is AgentConversation.SendFailure.Refused -> AgentConversation.answerIssue(failure.what, agent = agent)
+                    is AgentConversation.SendFailure.TimedOut -> AgentConversation.answerIssue(null, timedOut = true, agent = agent)
                     is AgentConversation.SendFailure.Lost ->
-                        if (failure.notSent) AgentConversation.answerIssue(null) else AgentConversation.answerIssue(null, timedOut = true)
+                        if (failure.notSent) AgentConversation.answerIssue(null, agent = agent)
+                        else AgentConversation.answerIssue(null, timedOut = true, agent = agent)
                 }
                 answerIssues = answerIssues + (id to issue)
             } finally {
@@ -473,7 +480,7 @@ class NativePaneModel(
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                issue = AgentConversation.issue(AgentConversation.failure(e), command = text.trim().startsWith("/"))
+                issue = AgentConversation.issue(AgentConversation.failure(e), command = text.trim().startsWith("/"), agent = agent)
             } finally {
                 sending = false
             }
@@ -491,7 +498,7 @@ class NativePaneModel(
     val working: Boolean get() = AgentConversation.isWorking(AgentConversation.newestTurn(store.shown.value.rows))
 
     /** Whether Stop is offered: the runner serves it and claude is working. */
-    val offersStop: Boolean get() = keys != null && working && !store.shown.value.isStale
+    val offersStop: Boolean get() = keys != null && AgentConversation.pressesKeys(preset) && working && !store.shown.value.isStale
 
     /** Whether Send now is offered on a Queued row. */
     val offersSendNow: Boolean get() = offersStop

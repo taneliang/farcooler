@@ -40,12 +40,14 @@ class NativeAnswer(
     val answering: String?,
     val issues: Map<String, String>,
     val send: (ask: AgentRow.Ask, option: String, answers: Map<String, String>) -> Unit,
+    /** The agent asking, as the row's title names it. */
+    val agent: String = "Claude",
 )
 
 /** The rows' answering, where the runner takes answers. */
 fun nativeAnswer(model: NativePaneModel): NativeAnswer? {
     if (model.answers == null) return null
-    return NativeAnswer(model.answering, model.answerIssues) { ask, option, answers -> model.answer(ask, option, answers) }
+    return NativeAnswer(model.answering, model.answerIssues, { ask, option, answers -> model.answer(ask, option, answers) }, model.agent)
 }
 
 /**
@@ -74,7 +76,7 @@ fun NativeAskRow(ask: AgentRow.Ask, answer: NativeAnswer?, showTerminal: () -> U
     Column(attentionCard(waiting), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(if (waiting) Icons.Outlined.HelpOutline else Icons.Filled.Check, null, Modifier.size(18.dp))
-            Text(AgentConversation.askTitle(ask), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            Text(AgentConversation.askTitle(ask, answer?.agent ?: "Claude"), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
         }
         if (!drawnBelow) {
             Text(ask.text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 4, overflow = TextOverflow.Ellipsis)

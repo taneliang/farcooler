@@ -49,7 +49,7 @@ class NativePane(
  * follow while it is due, and lets it go when it isn't.
  *
  * - [offered] is [com.farcooler.model.AgentConversation.offered]: the runner
- *   serves it, and the pane is a running claude in a terminal. When it stops
+ *   serves it, and the pane is a running claude or codex in a terminal. When it stops
  *   being true (the setting went off, claude exited) the model lets go and starts
  *   afresh when it's offered again.
  * - [live] is the pane being on screen with the app in front. The follow runs
@@ -61,7 +61,10 @@ class NativePane(
 @Composable
 fun rememberNativePane(
     terminalId: String,
-    claudeInTerminal: Boolean,
+    /** Claude, or codex where the runner says so ([com.farcooler.model.AgentConversation.isAgentInATerminal]). */
+    agentInTerminal: Boolean,
+    /** The pane's preset, which names the agent for its words and its keys. */
+    preset: String,
     offered: Boolean,
     live: Boolean,
     /** What the runner's hello offers the composer: [AgentConversation.rich] and [AgentConversation.interrupts]. */
@@ -78,9 +81,10 @@ fun rememberNativePane(
 ): NativePane {
     // Held by the connection, not by this composable, so the draft and rows
     // outlive the pane being evicted from the deck.
-    val candidate = remember(terminalId, claudeInTerminal, panes) {
-        if (claudeInTerminal) panes.model(terminalId, memory) else null
+    val candidate = remember(terminalId, agentInTerminal, panes) {
+        if (agentInTerminal) panes.model(terminalId, memory) else null
     }
+    LaunchedEffect(candidate, preset) { candidate?.preset = preset }
     LaunchedEffect(candidate, offered, live) {
         candidate?.sync(offered, live)
     }

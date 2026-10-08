@@ -158,9 +158,9 @@ fun NativeAgentView(
                 val sendNow: (() -> Unit)? = if (model.offersSendNow) ({ model.sendNow() }) else null
                 items(queued.indices.reversed().toList(), key = { "queued-$it" }) { QueuedLine(queued[it], sendNow = sendNow) }
                 if (model.issue == AgentConversation.SendIssue.Handoff) {
-                    item(key = "handoff-issue") { HandoffRow(AgentConversation.HANDOFF, showTerminal) }
+                    item(key = "handoff-issue") { HandoffRow(AgentConversation.handoff(model.agent), showTerminal) }
                 } else if (model.issue == AgentConversation.SendIssue.Panel) {
-                    item(key = "panel-issue") { HandoffRow(AgentConversation.PANEL, showTerminal) }
+                    item(key = "panel-issue") { HandoffRow(AgentConversation.panel(model.agent), showTerminal) }
                 }
                 val answer = nativeAnswer(model)
                 items(shown.rows.asReversed(), key = { it.id }) { row -> NativeRowView(row, showTerminal, answer, sendNow) }
@@ -297,7 +297,7 @@ fun NativeComposer(model: NativePaneModel, showTerminal: () -> Unit) {
                     TextField(
                         value = model.draft,
                         onValueChange = model::onDraft,
-                        placeholder = { Text("Message Claude") },
+                        placeholder = { Text("Message ${model.agent}") },
                         singleLine = !model.rich,
                         maxLines = if (model.rich) 6 else 1,
                         keyboardOptions = KeyboardOptions(

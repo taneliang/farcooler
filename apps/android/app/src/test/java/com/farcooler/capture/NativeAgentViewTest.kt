@@ -127,7 +127,8 @@ class NativeAgentViewTest {
         if (!pane.present) return
         val native = rememberNativePane(
             terminalId = "t1",
-            claudeInTerminal = true,
+            agentInTerminal = true,
+            preset = claude.preset,
             offered = AgentConversation.offered(pane.daemon, pane.last, claude),
             live = pane.live,
             rich = AgentConversation.rich(pane.daemon ?: pane.last),

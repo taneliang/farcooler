@@ -58,5 +58,6 @@ enum class Capability(val wire: String) {
     AGENT_COMPOSE("agent_compose"),
     COMPOSE("compose"),
     COMPOSE_UPLOAD("compose_upload"),
-    TERMINAL_INTERRUPT("terminal_interrupt");
+    TERMINAL_INTERRUPT("terminal_interrupt"),
+    CODEX_VIEW("codex_view");
 }
