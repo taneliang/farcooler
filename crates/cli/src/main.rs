@@ -41,6 +41,7 @@ mod changes;
 mod files;
 mod clients;
 mod compose;
+mod bring_draft;
 mod interrupt;
 mod draft_prompt;
 mod board_reads;
@@ -964,6 +965,9 @@ enum TerminalCmd {
     Interrupt { terminal: String },
     /// Send what waits in claude's queue now (its ctrl+x ctrl+s), refused unless safe.
     SendNow { terminal: String },
+    /// Print the draft in claude's box in a terminal pane; `--expected <text|->`, what it printed,
+    /// clears the box too (Bring Here), only while it still holds exactly that.
+    BringDraft { terminal: String, #[arg(long)] expected: Option<String> },
     /// Answer a pending agent question, carrying the ids back exactly as the
     /// adapter sent them — inventing one here would make the answer
     /// unroutable and hang the agent on its own question.
@@ -3067,6 +3071,7 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
         TerminalCmd::Tell { terminal, text } => tell::run(runner, &terminal, text).await?,
         TerminalCmd::Compose { terminal, text, images } => compose::run(runner, &terminal, text, images, json).await?,
         cmd @ (TerminalCmd::Interrupt { .. } | TerminalCmd::SendNow { .. }) => interrupt::press(runner, cmd).await?,
+        TerminalCmd::BringDraft { terminal, expected } => bring_draft::run(runner, &terminal, expected, json).await?,
         TerminalCmd::AgentAnswer { terminal, request_id, option_id, answers } => {
             let answers = agent_answer::parse_answers(answers.as_deref())?;
             let (mut link, id) = terminal_by_record(runner, &terminal).await?;

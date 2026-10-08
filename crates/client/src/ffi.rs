@@ -3286,6 +3286,8 @@ mod files_phone_tests;
 #[cfg(test)]
 mod compose_upload_tests;
 #[cfg(test)]
+mod bring_draft_tests;
+#[cfg(test)]
 mod plan_phone_tests;
 #[cfg(test)]
 mod page_phone_tests;
