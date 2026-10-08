@@ -174,6 +174,19 @@ object AgentConversation {
     fun isWorking(newestTurn: AgentRow.Turn?): Boolean =
         newestTurn != null && newestTurn.outcome == null && newestTurn.activity == "Busy"
 
+    /**
+     * The prompt the composer offers as its placeholder (ov-409): the one claude's
+     * own box shows after a turn, carried on the newest turn's row. Only while the
+     * rows are live, the agent isn't working or holding a dialog (its box then shows
+     * hints, not predictions), and nothing is typed. A draft the person may take,
+     * never a message: nothing here sends.
+     */
+    fun suggestion(newestTurn: AgentRow.Turn?, draft: String, stale: Boolean): String? {
+        if (stale || newestTurn == null || newestTurn.activity == "Busy" || newestTurn.activity == "Waiting") return null
+        if (draft.isNotBlank()) return null
+        return newestTurn.suggestion?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
     /** The newest turn among [rows], in order. */
     fun newestTurn(rows: List<AgentRow>): AgentRow.Turn? =
         rows.lastOrNull { it.kind is AgentRow.Kind.OfTurn }?.let { (it.kind as AgentRow.Kind.OfTurn).turn }

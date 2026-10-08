@@ -405,6 +405,22 @@ class NativePaneModel(
     val canSend: Boolean
         get() = !sending && (hasText || images.isNotEmpty()) && outgoing.length <= longestNow && !store.shown.value.isStale
 
+    /**
+     * The prompt claude's own box suggests, offered as the composer's placeholder
+     * while nothing is typed ([AgentConversation.suggestion], ov-409).
+     */
+    val suggestion: String?
+        get() = AgentConversation.suggestion(
+            AgentConversation.newestTurn(store.shown.value.rows), draft, store.shown.value.isStale,
+        )
+
+    /** A tap on the suggestion, or Tab from a hardware keyboard: it becomes the draft, to edit. Never sent. True when there was one. */
+    fun takeSuggestion(): Boolean {
+        val words = suggestion ?: return false
+        onDraft(words)
+        return true
+    }
+
     /** The text field's change: as typed with `compose`; one line, and a trailing Return sends, without. */
     fun onDraft(text: String) {
         if (rich) {

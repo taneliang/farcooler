@@ -242,6 +242,29 @@ class NativeComposerViewTest {
         Capture.both("native-composer-send-now") { NativeAgentView(queuing, rememberLazyListState(), showTerminal = {}) }
     }
 
+    private fun resting(suggestion: String?, activity: String = "Idle") =
+        RowJson.page(4, 12, RowJson.turn(0, "Why does the parser test fail?", activity = activity, suggestion = suggestion))
+
+    @Test
+    fun `claude's suggestion stands in the empty box and a tap takes it as a draft (ov-409)`() {
+        val model = loaded(resting("Run the tests again"))
+        look(model) { assertEquals("Run the tests again", it.text["native-suggestion"]) }
+        Capture.both("native-composer-suggestion") { NativeAgentView(model, rememberLazyListState(), showTerminal = {}) }
+        val long = loaded(
+            resting("Add a regression test for the empty input case in parse.rs, run the whole suite, and then summarize what changed in the lexer"),
+        )
+        Capture.both("native-composer-suggestion-long") { NativeAgentView(long, rememberLazyListState(), showTerminal = {}) }
+        assertTrue(model.takeSuggestion())
+        look(model) {
+            assertFalse("a draft replaces the suggestion", it.composed("native-suggestion"))
+            assertEquals("Run the tests again", it.text["native-composer"])
+        }
+        Capture.both("native-composer-suggestion-taken") { NativeAgentView(model, rememberLazyListState(), showTerminal = {}) }
+        assertEquals("never sent", 0, composed.size)
+        // While claude works, its dim line is a hint, not a prediction.
+        look(loaded(resting("Run the tests again", activity = "Busy"))) { assertFalse(it.composed("native-suggestion")) }
+    }
+
     @Test
     fun `Send now is not on a Queued row under a dialog`() {
         queues = true

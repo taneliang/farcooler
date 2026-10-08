@@ -299,4 +299,55 @@ class NativeComposeModelTest {
     fun `the composed limit's words say the number the limit is`() {
         assertTrue(AgentConversation.TOO_LONG_COMPOSED.contains(String.format(java.util.Locale.US, "%,d", AgentConversation.LONGEST_COMPOSED)))
     }
+
+    // claude's suggested prompt (ov-409).
+
+    private fun resting(suggestion: String?, activity: String? = "Idle") =
+        RowJson.page(1, 2, RowJson.turn(0, "Hi", activity = activity, suggestion = suggestion))
+
+    @Test
+    fun `claude's suggestion is the placeholder, and taking it makes a draft that nothing sends`() {
+        val model = model()
+        live(model, resting("run the tests again"))
+        assertEquals("run the tests again", model.suggestion)
+        assertTrue(model.takeSuggestion())
+        assertEquals("run the tests again", model.draft)
+        assertNull("a draft hides it", model.suggestion)
+        assertFalse("and a second take has nothing to take", model.takeSuggestion())
+        Thread.sleep(300)
+        assertEquals("never sent on its own", 0, sent.size)
+        // Edited, then sent by the person's own Send.
+        model.onDraft(model.draft + " please")
+        model.send()
+        eventually("the send") { sent.size == 1 }
+        assertEquals("run the tests again please", sent[0].second)
+    }
+
+    @Test
+    fun `no suggestion while the agent works, holds a dialog, or the rows may be old`() {
+        val busy = model()
+        live(busy, resting("run the tests again", activity = "Busy"))
+        assertNull(busy.suggestion)
+        assertFalse(busy.takeSuggestion())
+        assertEquals("", busy.draft)
+
+        val waiting = model()
+        live(waiting, resting("run the tests again", activity = "Waiting"))
+        assertNull(waiting.suggestion)
+
+        val none = model()
+        live(none, resting(null))
+        assertNull(none.suggestion)
+    }
+
+    @Test
+    fun `the suggestion rules, on their own`() {
+        val turn = com.farcooler.model.AgentRow.Turn("go", "Typed", activity = "Idle", suggestion = " do it ")
+        assertEquals("do it", AgentConversation.suggestion(turn, "", stale = false))
+        assertEquals("do it", AgentConversation.suggestion(turn, " \n", stale = false))
+        assertNull(AgentConversation.suggestion(turn, "fix", stale = false))
+        assertNull(AgentConversation.suggestion(turn, "", stale = true))
+        assertNull(AgentConversation.suggestion(turn.copy(suggestion = "  "), "", stale = false))
+        assertNull(AgentConversation.suggestion(null, "", stale = false))
+    }
 }

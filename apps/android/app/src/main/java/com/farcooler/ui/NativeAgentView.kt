@@ -12,6 +12,7 @@ import androidx.compose.foundation.content.contentReceiver
 import androidx.compose.foundation.content.hasMediaType
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.NorthWest
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.AddPhotoAlternate
 import androidx.compose.runtime.produceState
@@ -20,7 +21,10 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -71,7 +75,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
@@ -294,10 +301,20 @@ fun NativeComposer(model: NativePaneModel, showTerminal: () -> Unit) {
                             )
                         }
                     }
+                    val field = remember { androidx.compose.ui.focus.FocusRequester() }
                     TextField(
                         value = model.draft,
                         onValueChange = model::onDraft,
-                        placeholder = { Text("Message ${model.agent}") },
+                        placeholder = {
+                            val suggestion = model.suggestion
+                            if (suggestion == null) {
+                                Text("Message ${model.agent}")
+                            } else {
+                                SuggestionPlaceholder(suggestion) {
+                                    if (model.takeSuggestion()) field.requestFocus()
+                                }
+                            }
+                        },
                         singleLine = !model.rich,
                         maxLines = if (model.rich) 6 else 1,
                         keyboardOptions = KeyboardOptions(
@@ -314,6 +331,14 @@ fun NativeComposer(model: NativePaneModel, showTerminal: () -> Unit) {
                         modifier = Modifier
                             .weight(1f)
                             .testTag("native-composer")
+                            .focusRequester(field)
+                            // A hardware keyboard's Tab takes claude's suggestion (ov-409) when there is one.
+                            .onPreviewKeyEvent { event ->
+                                val take = event.type == KeyEventType.KeyDown && event.key == Key.Tab &&
+                                    !event.isCtrlPressed && !event.isMetaPressed && !event.isShiftPressed && !event.isAltPressed &&
+                                    model.takeSuggestion()
+                                take
+                            }
                             // A hardware keyboard's Ctrl or Meta with Enter sends, as the Mac's Return.
                             .onPreviewKeyEvent { event ->
                                 val send = event.type == KeyEventType.KeyDown && event.key == Key.Enter &&
@@ -419,5 +444,31 @@ private fun IssueLine(issue: AgentConversation.SendIssue, showTerminal: () -> Un
             AgentConversation.SendIssue.Handoff, AgentConversation.SendIssue.Panel -> Unit
         }
         TextButton(onClick = dismiss) { Text("Dismiss") }
+    }
+}
+
+/**
+ * claude's suggested next prompt in the empty box's place (ov-409): one line, cut
+ * at the end, with the arrow that says "put this in the field". A tap takes it as
+ * a draft and brings up the keyboard to edit it; it is never sent. Only as wide as
+ * its words, so a tap beside them still puts the caret in the field.
+ */
+@Composable
+private fun SuggestionPlaceholder(suggestion: String, take: () -> Unit) {
+    Row(
+        Modifier
+            .clickable(onClickLabel = "Use suggestion", onClick = take)
+            .semantics(mergeDescendants = true) { contentDescription = "Suggested message: $suggestion" }
+            .testTag("native-suggestion"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(suggestion, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        Icon(
+            Icons.Filled.NorthWest,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+        )
     }
 }
