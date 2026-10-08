@@ -26,6 +26,8 @@ pub struct Prompt {
     pub text: String,
     /// How many images it carried.
     pub images: usize,
+    /// When the rollout dates it (milliseconds since the epoch), if it does.
+    pub at_ms: Option<i64>,
 }
 
 /// The messages recorded in the rollout at `path` from byte `from` on, in
@@ -67,7 +69,8 @@ fn prompt(line: &str) -> Option<Prompt> {
         .filter_map(|p| p.get("text").and_then(Value::as_str))
         .collect::<Vec<_>>()
         .join("\n");
-    Some(Prompt { text, images })
+    let at_ms = record.get("timestamp").and_then(Value::as_str).and_then(super::claude::parse_iso8601_millis);
+    Some(Prompt { text, images, at_ms })
 }
 
 #[cfg(test)]

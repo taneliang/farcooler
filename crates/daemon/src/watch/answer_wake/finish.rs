@@ -90,7 +90,7 @@ impl Watcher {
         if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= pasted) {
             return self.settle(wake, Some(task), Some(PASTE_LEFT.into()));
         }
-        let proven = super::Proven { preset, tty: String::new(), pid, turn };
+        let proven = super::Proven { preset, tty: String::new(), pid, turn, held: false };
         let witness = match (super::queues_mid_turn(preset), turn) {
             (true, _) => match self.witness(&proven, to, text).await {
                 Some(witness) => Some(witness.pasted_at(pasted)),

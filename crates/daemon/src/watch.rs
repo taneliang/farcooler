@@ -956,6 +956,10 @@ pub struct Watcher {
     /// capture, ahead of the Enter (`compose_codex`'s tests).
     #[cfg(test)]
     after_rollout: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    /// Run once, after the gate's rollout read and before its screen read
+    /// (`proven_tui`'s tests).
+    #[cfg(test)]
+    after_gate_rollout: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
     /// Run once, right before compose's first paste (`compose`'s tests).
     #[cfg(test)]
     before_paste: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
@@ -2850,6 +2854,8 @@ impl Watcher {
             before_enter: std::sync::Mutex::new(None),
             #[cfg(test)]
             after_rollout: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            after_gate_rollout: std::sync::Mutex::new(None),
             #[cfg(test)]
             before_paste: std::sync::Mutex::new(None),
             #[cfg(test)]

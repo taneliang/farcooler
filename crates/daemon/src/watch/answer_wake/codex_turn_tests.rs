@@ -233,3 +233,34 @@ async fn a_tell_gets_no_enter_into_a_turn_begun_during_the_read_back() {
     assert!(matches!(told, Err(DomainError::Conflict { what: "paste_left" })), "{told:?}");
     assert!(!si.log().contains("ENTER"), "{}", si.log());
 }
+
+/// `terminal tell` again (ov-428): the gate found codex's rollout, and the
+/// lookup before the Enter finds none (its file gone from under it): the text
+/// stays in the box, as a lost rollout is not a first prompt.
+#[tokio::test]
+async fn a_tell_gets_no_enter_when_the_rollout_is_lost_during_the_read_back() {
+    let b = board().await;
+    let orchestrator = b.adopted_shell().await;
+    // Under a codex home that isn't `~/.codex`, held open by the stand-in.
+    let rollout = b.dir.path().join("codex-home/sessions/2026/10/07/rollout-2026-10-07T16-04-08-01a1189c-23ea-7190-b6bf-1d9ac1940ade.jsonl");
+    std::fs::create_dir_all(rollout.parent().unwrap()).unwrap();
+    std::fs::write(&rollout, format!("{}\n", ROLLOUT.lines().next().unwrap())).unwrap();
+    let si = b.stand_in_with(&orchestrator, "codex", "codex", &format!("STAND_IN_ROLLOUT='{}'", rollout.display())).await;
+    si.show("slow").await;
+    b.doing(orchestrator.id, AgentActivity::Idle).await;
+    let (log, path) = (si.log.clone(), rollout.clone());
+    let loses = tokio::spawn(async move {
+        for _ in 0..2_500 {
+            if std::fs::read_to_string(&log).unwrap_or_default().contains("PASTE ") {
+                std::fs::remove_file(&path).unwrap();
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+        false
+    });
+    let told = b.watcher.tell_into(orchestrator.id, "hello").await;
+    assert!(loses.await.unwrap(), "the paste never reached the stand-in");
+    assert!(matches!(told, Err(DomainError::Conflict { what: "paste_left" })), "{told:?}");
+    assert!(!si.log().contains("ENTER"), "{}", si.log());
+}

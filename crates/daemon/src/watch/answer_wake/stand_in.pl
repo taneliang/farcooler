@@ -133,7 +133,9 @@ sub codex_turn {
     return if ($ENV{STAND_IN_ROLLOUT} // '') eq '';
     open_rollout() unless defined $rollout;
     use POSIX qw(strftime);
-    my $at = strftime("%Y-%m-%dT%H:%M:%S.000Z", gmtime);
+    use Time::HiRes qw(gettimeofday);
+    my ($sec, $usec) = gettimeofday;
+    my $at = strftime("%Y-%m-%dT%H:%M:%S", gmtime($sec)) . sprintf(".%03dZ", $usec / 1000);
     my $turn = "stand-in-turn-" . ++$turns;
     my $parts = join(",", (map { '{"type":"local_image","path":' . json($_) . '}' } @images),
         '{"type":"text","text":' . json($text) . ',"text_elements":[]}');

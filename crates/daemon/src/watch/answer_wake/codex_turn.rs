@@ -53,13 +53,25 @@ pub(crate) fn said(rollout: Option<&Path>, started: Option<i64>) -> Said {
 /// A pid's rollout as found: when, which file, and the process's start.
 type Join = (Instant, Option<PathBuf>, Option<i64>);
 
+/// The rollout `rollout_of` kept for `pid` in the last `JOIN_KEPT`, without
+/// looking it up.
+fn cached(pid: i32) -> Option<PathBuf> {
+    let joins = joins().lock().unwrap_or_else(|e| e.into_inner());
+    let (at, path, was) = joins.as_ref()?.get(&pid)?;
+    (at.elapsed() < JOIN_KEPT && *was == Kernel.started(pid)).then(|| path.clone()).flatten()
+}
+
+fn joins() -> &'static Mutex<Option<HashMap<i32, Join>>> {
+    static JOINS: Mutex<Option<HashMap<i32, Join>>> = Mutex::new(None);
+    &JOINS
+}
+
 /// The rollout `pid` holds open, from `JOIN_KEPT` ago or found now. Also
 /// what a codex pane's projector follows (`registry_join`).
 pub(crate) fn rollout_of(pid: i32) -> Option<PathBuf> {
-    static JOINS: Mutex<Option<HashMap<i32, Join>>> = Mutex::new(None);
     let started = Kernel.started(pid);
     {
-        let joins = JOINS.lock().unwrap_or_else(|e| e.into_inner());
+        let joins = joins().lock().unwrap_or_else(|e| e.into_inner());
         // The same process (a reused pid has another start) and recent.
         if let Some((at, path, was)) = joins.as_ref().and_then(|j| j.get(&pid)) {
             if at.elapsed() < JOIN_KEPT && *was == started {
@@ -68,15 +80,48 @@ pub(crate) fn rollout_of(pid: i32) -> Option<PathBuf> {
         }
     }
     let path = crate::log_join::codex_rollout_of(pid);
-    let mut joins = JOINS.lock().unwrap_or_else(|e| e.into_inner());
+    remember(pid, path.clone(), started);
+    path
+}
+
+/// Keep `path` as `pid`'s rollout for `JOIN_KEPT`, and drop what's older.
+fn remember(pid: i32, path: Option<PathBuf>, started: Option<i64>) {
+    let mut joins = joins().lock().unwrap_or_else(|e| e.into_inner());
     let joins = joins.get_or_insert_with(HashMap::new);
     joins.retain(|_, (at, ..)| at.elapsed() < JOIN_KEPT);
-    joins.insert(pid, (Instant::now(), path.clone(), started));
-    path
+    joins.insert(pid, (Instant::now(), path, started));
 }
 
 /// `said`, for the codex process `pid`, its rollout found by what it holds
 /// open. Off the executor: the join spawns `ps` and `lsof`.
 pub(crate) async fn said_of(pid: i32) -> Said {
     tokio::task::spawn_blocking(move || said(rollout_of(pid).as_deref(), Kernel.started(pid))).await.unwrap_or(Said::Nothing)
+}
+
+/// The rollout codex process `pid` holds open now, looked up afresh (not
+/// `rollout_of`'s join, kept for seconds): the one a send's record goes to.
+/// Off the executor: it spawns `ps` and `lsof`.
+pub(crate) async fn rollout_now(pid: i32) -> Option<PathBuf> {
+    tokio::task::spawn_blocking(move || crate::log_join::codex_rollout_of(pid)).await.ok().flatten()
+}
+
+/// `said_of`, for a gate that mustn't pass a rollout it has lost (ov-428,
+/// the compose path's rule): looked up afresh, and when none is held now but
+/// one was known (`held`: an earlier check found it; or the join kept from
+/// the last few seconds has it) the lookup missed, which is not a first
+/// prompt, so a turn may run: `NotIdle`. Also whether a rollout was found,
+/// for the next check's `held`.
+pub(crate) async fn said_held(pid: i32, held: bool) -> (Said, bool) {
+    let known = held || cached(pid).is_some();
+    let Some(now) = rollout_now(pid).await else {
+        return (if known { Said::NotIdle } else { Said::Nothing }, false);
+    };
+    let started = Kernel.started(pid);
+    let said = tokio::task::spawn_blocking(move || {
+        remember(pid, Some(now.clone()), started);
+        said(Some(&now), started)
+    })
+    .await
+    .unwrap_or(Said::Nothing);
+    (said, true)
 }

@@ -258,3 +258,40 @@ async fn a_rollout_lost_before_the_enter_leaves_the_paste() {
     assert!(si.log().contains("PASTE hello"), "{}", si.log());
     assert!(!si.log().contains("ENTER"), "{}", si.log());
 }
+
+/// The gate reads codex's rollout before its screen (ov-428): a turn that
+/// shows on the screen after the rollout was read is the screen's word.
+#[tokio::test]
+async fn the_gate_reads_the_screen_after_the_rollout() {
+    let b = board().await;
+    let path = rollout(&b);
+    let (agent, si) = idle_codex(&b, &path, false).await;
+    let (control, log) = (si.control.clone(), si.log.clone());
+    *b.watcher.after_gate_rollout.lock().unwrap() = Some(Box::new(move || {
+        std::fs::write(&control, "working").unwrap();
+        for _ in 0..750 {
+            if std::fs::read_to_string(&log).unwrap_or_default().contains("MODE working\n") {
+                std::thread::sleep(Duration::from_millis(1000));
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        panic!("the stand-in never showed working");
+    }));
+    assert_eq!(refused(b.watcher.compose_into(agent.id, "hello", &[]).await), "busy");
+    nothing_typed(&si);
+}
+
+/// A rollout the gate had (the join of a moment ago) that the lookup now
+/// misses: held as a turn that may run, not passed as a first prompt.
+#[tokio::test]
+async fn the_gate_holds_when_a_known_rollout_is_lost() {
+    let b = board().await;
+    let path = rollout(&b);
+    let (agent, si) = idle_codex(&b, &path, false).await;
+    // Through the gate, so the rollout is known; refused after it.
+    assert_eq!(refused(b.watcher.compose_into(agent.id, "/init", &[]).await), "handoff");
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(refused(b.watcher.compose_into(agent.id, "now", &[]).await), "busy");
+    nothing_typed(&si);
+}

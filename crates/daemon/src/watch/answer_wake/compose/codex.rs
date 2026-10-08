@@ -37,6 +37,7 @@ use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1::AgentActivity;
 use farcooler_store::models::Terminal;
 
+use super::super::codex_turn::rollout_now;
 use super::super::{Proven, Turn, codex_turn, registry_turn};
 use super::{CONFIRM_SETTLES, Composition, Unpasted, quoted};
 use crate::runtime::{Runtime, last_input};
@@ -98,9 +99,10 @@ impl Watcher {
             run();
         }
         self.codex_still_between(to, pid, started, &expected, before.is_some()).await?;
+        let entered = now_millis();
         runtime.send_bytes_hex(to.id, "0d").await?;
         self.mark_told(to.id);
-        let sent = Sent { text: composed.submitted(&placeholders), images: paths.len(), before, from };
+        let sent = Sent { text: composed.submitted(&placeholders), images: paths.len(), before, from, entered };
         if confirmed(pid, &sent).await { Ok(Turn::Between) } else { refuse("unconfirmed") }
     }
 
@@ -137,6 +139,9 @@ struct Sent {
     images: usize,
     before: Option<PathBuf>,
     from: u64,
+    /// When the Enter went (milliseconds since the epoch): a record dated
+    /// before it is an earlier message's, whatever its text.
+    entered: i64,
 }
 
 /// Whether codex recorded `sent` within `CONFIRM_SETTLES`: in the rollout it
@@ -165,17 +170,16 @@ async fn confirmed(pid: i32, sent: &Sent) -> bool {
 }
 
 /// Whether the rollout at `path` records `sent` past byte `from`: its text,
-/// whitespace aside (codex puts a space after each image's placeholder), and
-/// as many images.
+/// whitespace aside (codex puts a space after each image's placeholder), as
+/// many images, and dated at or after the Enter (review 1, L1: a rollout read
+/// from its start holds earlier messages, maybe the same words).
 fn records(path: &Path, from: u64, sent: &Sent) -> bool {
     let squeeze = |s: &str| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
     let want = squeeze(&sent.text);
-    codex_prompts::prompts_from(path, from).iter().any(|p| p.images == sent.images && squeeze(&p.text) == want)
+    codex_prompts::prompts_from(path, from).iter().any(|p| p.images == sent.images && p.at_ms.is_some_and(|at| at >= sent.entered) && squeeze(&p.text) == want)
 }
 
-/// The rollout codex process `pid` holds open now, looked up afresh (not
-/// `codex_turn::rollout_of`'s join, kept for seconds): the one a send's
-/// record goes to. Off the executor: it spawns `ps` and `lsof`.
-async fn rollout_now(pid: i32) -> Option<PathBuf> {
-    tokio::task::spawn_blocking(move || crate::log_join::codex_rollout_of(pid)).await.ok().flatten()
-}
+
+#[cfg(test)]
+#[path = "codex_tests.rs"]
+mod tests;

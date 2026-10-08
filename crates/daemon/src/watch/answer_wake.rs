@@ -313,6 +313,9 @@ pub(crate) struct Proven {
     /// The agent's process, which names its session (`mid_turn`).
     pub(crate) pid: i32,
     pub(crate) turn: Turn,
+    /// codex only: the gate found a rollout the pane's codex holds, so a
+    /// later lookup that finds none is a miss, and holds (`codex_turn::said_held`).
+    pub(crate) held: bool,
 }
 
 /// What a wake came to on one pass.
@@ -580,7 +583,7 @@ impl Watcher {
         // codex's rollout again, just before the Enter: the read-back can
         // take seconds, and a turn begun meanwhile waits for its end
         // (`finish_paste`, review 1, L1).
-        if preset == "codex" && witness.is_none() && codex_turn::said_of(proven.pid).await == registry_turn::Said::NotIdle {
+        if preset == "codex" && witness.is_none() && codex_turn::said_held(proven.pid, proven.held).await.0 == registry_turn::Said::NotIdle {
             return self.paste_waits(wake, task, started);
         }
         let entered = match &witness {
@@ -609,6 +612,14 @@ impl Watcher {
     /// whatever the screen says (`registry_turn`). Every check fails closed.
     async fn proven_tui(&self, to: &Terminal) -> std::result::Result<Proven, Held> {
         let (preset, tty, pid) = self.proven_agent(to).await?;
+        // codex's rollout is read before the screen, so the screen is the
+        // newest thing read: the rollout lookup is slow, and a turn begun
+        // meanwhile shows on the screen read after it (ov-428, as compose).
+        let (said, held) = if preset == "codex" { codex_turn::said_held(pid, false).await } else { (registry_turn::Said::Nothing, false) };
+        #[cfg(test)]
+        if let Some(run) = self.after_gate_rollout.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            run();
+        }
         let Ok(composer) = self.box_of(to, preset).await else { return Err(Held::Unfamiliar) };
         let turn = match composer {
             Ok((Composer::Empty, turn)) => turn,
@@ -622,12 +633,8 @@ impl Watcher {
         let not_idle = || async { registry_turn::said_of(pid).await == registry_turn::Said::NotIdle };
         let turn = if preset == "claude" && turn == Turn::Between && not_idle().await { Turn::During } else { turn };
         // codex's rollout likewise (ov-378): mid-turn, and codex waits.
-        let turn = if preset == "codex" && turn == Turn::Between && codex_turn::said_of(pid).await == registry_turn::Said::NotIdle {
-            Turn::During
-        } else {
-            turn
-        };
-        Ok(Proven { preset, tty, pid, turn })
+        let turn = if preset == "codex" && turn == Turn::Between && said == registry_turn::Said::NotIdle { Turn::During } else { turn };
+        Ok(Proven { preset, tty, pid, turn, held })
     }
 
     /// Check 5 of the gate: bracketed paste known to be on in `terminal`.
