@@ -18,6 +18,17 @@ shift 2
 log="$(mktemp -t farcooler-swift-test)"
 trap 'rm -f "$log"' EXIT
 
+# A Mac whose display is asleep (15 minutes idle) gives windows no display
+# ticks, so an animated scroll in a test window never lands and parks a pool
+# thread in NSAnimation. 64 parked threads starve the Swift concurrency pool
+# and the real-CLI tests stall behind them, and NavigatorRevealTests and
+# AgentScrollTests fail on the animation that never ran (ov-429). CI's virtual
+# display never sleeps. So wake the display, and hold it awake for the run.
+if command -v caffeinate >/dev/null 2>&1; then
+  caffeinate -u -t 1 || true
+  set -- caffeinate -d "$@"
+fi
+
 "$@" 2>&1 | tee "$log"
 rc="${PIPESTATUS[0]}"
 [ "$rc" -eq 0 ] || exit "$rc"
