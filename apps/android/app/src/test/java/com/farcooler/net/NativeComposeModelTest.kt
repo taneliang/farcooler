@@ -29,7 +29,9 @@ class NativeComposeModelTest {
     @After
     fun tearDown() = running.close()
 
-    private fun model(rich: Boolean = true, interrupts: Boolean = true): NativePaneModel {
+    private fun model(
+        rich: Boolean = true, interrupts: Boolean = true, source: FakeRowSource = this.source,
+    ): NativePaneModel {
         val model = NativePaneModel(
             terminal = "t1",
             store = AgentRowStore(running.scope, retryDelayMs = 1, followWaitMs = 1),
@@ -56,7 +58,11 @@ class NativeComposeModelTest {
         return model
     }
 
-    private fun live(model: NativePaneModel, page: kotlinx.serialization.json.JsonObject = RowJson.page(1, 2, RowJson.turn(0, "Hi"))) {
+    private fun live(
+        model: NativePaneModel,
+        page: kotlinx.serialization.json.JsonObject = RowJson.page(1, 2, RowJson.turn(0, "Hi")),
+        source: FakeRowSource = this.source,
+    ) {
         source.answerPage(page)
         model.setOnScreen(true)
         eventually("rows") { model.store.shown.value.rows.isNotEmpty() }
@@ -230,8 +236,8 @@ class NativeComposeModelTest {
 
     // Stop and Send now.
 
-    private fun working(model: NativePaneModel, activity: String = "Busy") =
-        live(model, RowJson.page(1, 2, RowJson.turn(0, "Go", outcome = null, activity = activity)))
+    private fun working(model: NativePaneModel, activity: String = "Busy", source: FakeRowSource = this.source) =
+        live(model, RowJson.page(1, 2, RowJson.turn(0, "Go", outcome = null, activity = activity)), source)
 
     @Test
     fun `Stop is offered only while claude works, and the runner serves it`() {
@@ -290,8 +296,13 @@ class NativeComposeModelTest {
         assertFalse("Send now on a stale pane", stale.offersSendNow)
         stale.sendNow()
         assertEquals("a press over stale rows is a no-op", emptyList<String>(), pressed.toList())
-        val waiting = model()
-        working(waiting, "Waiting")
+        // Its own source. The fake's queues are shared by every model reading it, and
+        // the stale model keeps retrying its page (needsPage after a failure), so it
+        // takes this model's page whenever it asks first: a race the test won or lost
+        // by how quickly the stale loop got back to `page()` (ov-426).
+        val dialogSource = FakeRowSource()
+        val waiting = model(source = dialogSource)
+        working(waiting, "Waiting", dialogSource)
         assertFalse("Send now under a dialog", waiting.offersSendNow)
     }
 
