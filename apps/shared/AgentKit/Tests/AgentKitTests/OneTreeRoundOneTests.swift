@@ -60,13 +60,28 @@ struct OneTreeRoundOneTests {
     func buildIsLinear() throws {
         let small = try Self.big(cards: 1000, lanes: 300), large = try Self.big(cards: 4000, lanes: 1200)
         let clock = ContinuousClock()
-        func best(_ input: OneTreeInput) -> Duration {
-            (0..<3).map { _ in clock.measure { _ = OneTree.build(input) } }.min()!
+        // Timings under load are noisy, and noise only ever adds time. So: the
+        // two sizes are sampled alternately (a busy spell lands on both, not
+        // on one), the best of seven of each is kept, and a ratio over the
+        // bar is measured again, up to four times in all. Linear passes the
+        // first time on a quiet machine and within a retry on a loaded one;
+        // quadratic is a ratio of about 16 every time and fails every attempt.
+        func attempt() -> Double {
+            var smallest = Duration.seconds(1_000), largest = Duration.seconds(1_000)
+            for _ in 0..<7 {
+                smallest = min(smallest, clock.measure { _ = OneTree.build(small) })
+                largest = min(largest, clock.measure { _ = OneTree.build(large) })
+            }
+            return largest / smallest
         }
         _ = OneTree.build(small)
-        let ratio = best(large) / best(small)
+        var ratios: [Double] = []
+        for _ in 0..<4 {
+            ratios.append(attempt())
+            if ratios.last! < 8 { break }
+        }
         // Linear is 4; quadratic was 16. Eight leaves room for noise.
-        #expect(ratio < 8, "4x the board took \(ratio)x as long")
+        #expect(ratios.last! < 8, "4x the board took \(ratios)x as long")
     }
 
     // MARK: H1, every row from the keyboard
