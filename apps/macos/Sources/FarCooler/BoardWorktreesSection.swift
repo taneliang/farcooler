@@ -242,7 +242,7 @@ private struct BoardWorktreeTerminalRow: View {
     var body: some View {
         Button(action: onOpen) {
             HStack(alignment: .firstTextBaseline, spacing: 0) {
-                Image(systemName: "terminal")
+                Image(systemName: terminal.glyph)
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(SidebarInk.secondary)
                     .glyphColumn()

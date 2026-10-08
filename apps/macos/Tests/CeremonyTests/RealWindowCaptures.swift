@@ -169,7 +169,8 @@ struct RealWindowCaptures {
                 // `FARCOOLER_CAPTURE_SCALE=1`: the same views drawn at CI's 1x,
                 // on a 2x Mac, to see where a rule or a glyph lands a pixel off.
                 let scale = Int(env["FARCOOLER_CAPTURE_SCALE"] ?? "") ?? max(1, Int(window.backingScaleFactor))
-                let rep = Self.withPopovers(try #require(view.lookBitmap(scale: scale)), of: window, scale: scale)
+                let drawn = Self.withPopovers(try #require(view.lookBitmap(scale: scale)), of: window, scale: scale)
+                let rep = await Self.withWebPages(drawn, in: view)
                 let png = try #require(rep.representation(using: .png, properties: [:]))
                 try png.write(to: out.appendingPathComponent("\(stage)-\(place.name)-\(variant.name).png"))
             }

@@ -509,6 +509,9 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// nothing switches it to a terminal or a chat.
     var isClientDrawn: Bool { isChangesPane || isWebPane }
 
+    /// Its glyph in a navigator row: a globe for a web page, else a terminal.
+    var glyph: String { isWebPane ? "globe" : "terminal" }
+
     /// Whether to offer the terminal/chat switch at all.
     ///
     /// Never on a changes pane. There is no TUI underneath it to switch back

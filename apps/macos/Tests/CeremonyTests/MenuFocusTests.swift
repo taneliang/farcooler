@@ -231,6 +231,7 @@ struct MenuWiringTests {
         "Terminal \\(n)": "picksTerminal(n",
         "Split Right": "\\.splits",
         "Split Down": "\\.splits",
+        "Open Web Page…": "\\.splits",
         "Move Pane Out": "\\.movesOut",
         "Zoom Pane": "zoomsPane",
         "Next Arrangement": "\\.arranges",
