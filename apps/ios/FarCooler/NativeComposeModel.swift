@@ -78,8 +78,9 @@ extension NativePaneModel {
         return false
     }
 
-    /// Whether Stop is offered: the runner serves it and claude is working.
-    var offersStop: Bool { keys != nil && working && !store.isStale }
+    /// Whether Stop is offered: the runner serves it, the pane is claude,
+    /// whose keys it presses (never codex's), and claude is working.
+    var offersStop: Bool { keys != nil && AgentConversation.pressesKeys(preset: preset) && working && !store.isStale }
 
     /// Whether Send Now is offered on a Queued row.
     var offersSendNow: Bool { offersStop }

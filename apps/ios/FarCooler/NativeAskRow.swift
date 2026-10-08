@@ -3,6 +3,8 @@ import SwiftUI
 /// What a row's buttons need from its pane (ov-370): where an answer goes,
 /// and how the last one went.
 struct NativeAskAnswer {
+    /// The agent asking, as the row's title names it.
+    var agent = "Claude"
     var answering: String?
     var issues: [String: String]
     let send: (_ ask: AgentRow.Ask, _ option: String, _ answers: [String: String]) -> Void
@@ -12,7 +14,7 @@ extension NativePaneModel {
     /// The rows' answering, where the runner takes answers.
     var nativeAskAnswer: NativeAskAnswer? {
         guard answers != nil else { return nil }
-        return NativeAskAnswer(answering: answering, issues: answerIssues) { [weak self] ask, option, answers in
+        return NativeAskAnswer(agent: agent, answering: answering, issues: answerIssues) { [weak self] ask, option, answers in
             Task { await self?.answer(ask, option: option, answers: answers) }
         }
     }
@@ -44,7 +46,7 @@ struct NativeAskRow: View {
         VStack(alignment: .leading, spacing: Spacing.group) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
                 Image(systemName: waiting ? "questionmark.bubble" : "checkmark")
-                Text(AgentConversation.askTitle(ask)).fontWeight(.medium)
+                Text(AgentConversation.askTitle(ask, agent: answer?.agent ?? "Claude")).fontWeight(.medium)
             }
             if !(waiting && (ask.kind == "Question" ? !ask.questionList.isEmpty : ask.kind == "PlanExit" && ask.plan != nil)) {
                 Text(ask.text).foregroundStyle(.secondary).lineLimit(4)

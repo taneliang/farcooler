@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// A terminal-mode claude pane with its conversation beside it (ov-373): both
+/// A terminal-mode claude or codex pane with its conversation beside it
+/// (ov-373, ov-416): both
 /// mounted, one shown, switched on the phone alone.
 ///
 /// The terminal is always the first child and never leaves the tree, so a
@@ -9,8 +10,8 @@ import SwiftUI
 /// `NativePaneModel`, which outlives this view. The switch, in the pane's
 /// bar, is there only where the conversation is offered: the runner serves
 /// rows and compose (`AgentConversation.served`), and the pane is claude in
-/// a terminal. Anywhere else this is the terminal and nothing more. Never a
-/// blank pane.
+/// a terminal, or codex where the runner says so (`codex_view`). Anywhere
+/// else this is the terminal and nothing more. Never a blank pane.
 struct NativeSwitch<Content: View>: View {
     let terminal: Terminal
     @ObservedObject var connection: Connection
@@ -31,10 +32,10 @@ struct NativeSwitch<Content: View>: View {
     /// (ov-373 review 1). Sends still go through the runner's own gate.
     private var model: NativePaneModel? {
         guard AgentConversation.served(by: build),
-            AgentConversation.isClaudeInATerminal(paneMode: terminal.paneMode, preset: terminal.preset),
+            AgentConversation.isAgentInATerminal(paneMode: terminal.paneMode, preset: terminal.preset, build: build),
             AgentConversation.isRunning(state: terminal.state)
         else { return nil }
-        return NativePanes.shared.model(for: terminal.id, core: connection.core)
+        return NativePanes.shared.model(for: terminal.id, core: connection.core, preset: terminal.preset)
     }
 
     /// The build the layout reads: see `model`.
@@ -299,9 +300,9 @@ struct NativeAgentView: View {
                     QueuedLine(text: model.queued[i], sendNow: sendNow)
                 }
                 if model.issue == .handoff {
-                    HandoffRow(reason: AgentConversation.handoff, showTerminal: showTerminal)
+                    HandoffRow(reason: AgentConversation.handoff(model.agent), showTerminal: showTerminal)
                 } else if model.issue == .panel {
-                    HandoffRow(reason: AgentConversation.panel, showTerminal: showTerminal)
+                    HandoffRow(reason: AgentConversation.panel(model.agent), showTerminal: showTerminal)
                 }
                 // An anchor rather than the last row's id: the last row
                 // changes in place while it streams.

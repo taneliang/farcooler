@@ -320,17 +320,17 @@ struct RunnerSettingsView: View {
             if model.offersConversation {
                 Section {
                     Toggle(
-                        "Conversation view for Claude panes",
+                        "Conversation view for Claude and Codex panes",
                         isOn: Binding(
                             get: { model.conversationOn },
                             set: { on in Task { await model.setConversation(on) } }))
                         .disabled(model.changingConversation)
                         .accessibilityIdentifier("runner-conversation-view")
                 } header: {
-                    Text("Claude")
+                    Text("Agents")
                 } footer: {
                     Text(
-                        "Shows a Claude pane that runs in a terminal as a conversation you can read and "
+                        "Shows a Claude or Codex pane that runs in a terminal as a conversation you can read and "
                             + "reply to, on every device that reaches this runner. Its terminal is one tap away.")
                 }
             }

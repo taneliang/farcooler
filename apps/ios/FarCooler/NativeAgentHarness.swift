@@ -131,7 +131,15 @@ struct NativeAgentHarness: View {
                 ["workspaces", "terminals", "agent", "projector_setting"]
                     + (rows ? ["agent_rows", "agent_compose"] : [])
                     + (CommandLine.arguments.contains("-native-no-compose") ? [] : ["compose", "compose_upload"])
-                    + (CommandLine.arguments.contains("-native-no-interrupt") ? [] : ["terminal_interrupt"])))
+                    + (CommandLine.arguments.contains("-native-no-interrupt") ? [] : ["terminal_interrupt"])
+                    + (CommandLine.arguments.contains("-native-codex-before") ? [] : ["codex_view"])))
+    }
+
+    /// The pane's agent: codex with `-native-codex` (ov-416; with
+    /// `-native-codex-before`, on a runner from before `codex_view`).
+    private static var agent: String {
+        let args = CommandLine.arguments
+        return args.contains("-native-codex") || args.contains("-native-codex-before") ? "codex" : "claude"
     }
 
     private static var worktree: Worktree {
@@ -140,7 +148,7 @@ struct NativeAgentHarness: View {
             state: "ready",
             terminals: [
                 Terminal(
-                    id: pane, short: "claude", title: "claude", preset: "claude", state: "running",
+                    id: pane, short: agent, title: agent, preset: agent, state: "running",
                     activity: "working", epoch: 1, paneMode: "terminal", chatCapable: false),
                 Terminal(
                     id: "native-shell", short: "shell", title: "shell", preset: "shell", state: "running", epoch: 1,
@@ -423,6 +431,8 @@ final class NativeHarnessRunner: ObservableObject {
             throw ClientCore.CoreError.rejected("The image is over 16 MB.", word: "resource-conflict", what: "image_too_large")
         case "backslash":
             throw ClientCore.CoreError.rejected("A backslash ends it.", word: "resource-conflict", what: "backslash")
+        case "look at @src":
+            throw ClientCore.CoreError.rejected("A picker would open.", word: "resource-conflict", what: "picker")
         case "change the reply":
             due = true
             return try json(["queued": false])

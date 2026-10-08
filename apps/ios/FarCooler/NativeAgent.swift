@@ -119,13 +119,17 @@ final class NativePanes: ObservableObject {
     }
 
     /// The pane's model, made once and kept.
-    func model(for terminal: String, core: ClientCore) -> NativePaneModel {
-        if let model = panes[terminal], model.core === core { return model }
+    func model(for terminal: String, core: ClientCore, preset: String = "claude") -> NativePaneModel {
+        if let model = panes[terminal], model.core === core {
+            model.preset = preset
+            return model
+        }
         let model = NativePaneModel(
             terminal: terminal, store: AgentRowStore(key: "phone-\(terminal)"),
             source: CoreRowSource(core: core, terminal: terminal), sink: CoreComposeSink(core: core),
             answers: CoreAnswerSink(core: core))
         model.core = core
+        model.preset = preset
         model.interruptSink = CoreInterruptSink(core: core)
         panes[terminal] = model
         return model
@@ -142,7 +146,8 @@ final class NativePanes: ObservableObject {
     }
 }
 
-/// One terminal-mode claude pane's conversation side (ov-373): its rows, the
+/// One terminal-mode claude or codex pane's conversation side (ov-373,
+/// ov-416): its rows, the
 /// composer's draft, and which of the two views shows.
 ///
 /// Nothing here touches the pane's process: the terminal under the
@@ -162,6 +167,10 @@ final class NativePaneModel: ObservableObject {
     /// The connection's core this model reads through, so a pane opened again
     /// on another connection gets a model of its own.
     weak var core: ClientCore?
+    /// The agent the pane runs, as its preset says: `claude` or `codex`.
+    var preset = "claude"
+    /// The agent's name, as the conversation's words say it.
+    var agent: String { AgentConversation.agentName(preset: preset) }
 
     /// The composer's text. Against a runner without `compose`, one line:
     /// line breaks become spaces as they arrive, so what you see is what's
@@ -354,7 +363,8 @@ final class NativePaneModel: ObservableObject {
             sent += 1
         } catch {
             issue = AgentConversation.issue(
-                for: Self.failure(error), command: text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/"))
+                for: Self.failure(error), command: text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/"),
+                agent: agent)
         }
     }
 
@@ -384,9 +394,9 @@ final class NativePaneModel: ObservableObject {
         } catch {
             switch error as? ClientCore.CoreError {
             case .timedOut?, .malformed?, .disconnected(_, notSent: false)?:
-                answerIssues[id] = AgentConversation.answerIssue(what: nil, timedOut: true)
-            case .rejected(_, _, let what)?: answerIssues[id] = AgentConversation.answerIssue(what: what)
-            default: answerIssues[id] = AgentConversation.answerIssue(what: nil)
+                answerIssues[id] = AgentConversation.answerIssue(what: nil, timedOut: true, agent: agent)
+            case .rejected(_, _, let what)?: answerIssues[id] = AgentConversation.answerIssue(what: what, agent: agent)
+            default: answerIssues[id] = AgentConversation.answerIssue(what: nil, agent: agent)
             }
         }
     }

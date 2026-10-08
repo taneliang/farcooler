@@ -126,6 +126,34 @@ final class NativeAgentViewTests: XCTestCase {
         XCTAssertEqual(mount.value as? String, mounted, "switching built the terminal again")
     }
 
+    /// A codex pane (ov-416) opens on its conversation where the runner says
+    /// it serves codex, its box and its refusals naming Codex, with no Stop
+    /// while it works: the runner presses keys in claude alone.
+    func testACodexPaneOffersItsConversation() {
+        let app = launch(["-native-codex", "-native-busy"])
+        _ = conversation(app)
+        let box = element(app, "native-composer")
+        XCTAssertTrue(box.waitForExistence(timeout: 30))
+        XCTAssertEqual(box.label, "Message Codex", "the box doesn't name Codex")
+        XCTAssertFalse(element(app, "native-stop").exists, "Stop in a codex pane")
+        send(app, "look at @src")
+        let said = element(app, "native-send-issue")
+        XCTAssertTrue(said.waitForExistence(timeout: 30), "the refusal wasn't said")
+        XCTAssertTrue(
+            app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Codex would open a picker'")).firstMatch.waitForExistence(timeout: 30),
+            "the picker refusal doesn't name Codex")
+        capture("codex")
+    }
+
+    /// The same pane on a runner from before `codex_view`: the terminal, and
+    /// no switch.
+    func testACodexPaneOnAnOlderRunnerShowsItsTerminal() {
+        let app = launch(["-native-codex-before"])
+        XCTAssertTrue(element(app, "terminal-surface").waitForExistence(timeout: 60))
+        XCTAssertTrue(wait(30) { showing(app).hasPrefix("terminal-only") }, "the pane shows \(showing(app))")
+        XCTAssertFalse(element(app, "native-switch").exists)
+    }
+
     /// The runner changes a row: the same row, drawn again with its new
     /// words, and no second one.
     func testAFollowUpdatesARowInPlace() {

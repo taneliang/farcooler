@@ -56,14 +56,14 @@ struct NativeComposer: View {
 
     private var field: some View {
         NativeComposerField(
-            text: $model.draft, height: $fieldHeight,
+            text: $model.draft, height: $fieldHeight, label: "Message \(model.agent)",
             onSend: { Task { await model.send() } },
             onPasteImages: model.rich ? { datas in Task { await model.attach(picked: datas) } } : nil
         )
         .frame(height: fieldHeight)
         .overlay(alignment: .topLeading) {
             if model.draft.isEmpty {
-                Text("Message Claude")
+                Text("Message \(model.agent)")
                     .foregroundStyle(.secondary)
                     // `NativeComposerField`'s own `textContainerInset`, so the
                     // placeholder sits where the first typed letter will land.
@@ -236,6 +236,8 @@ struct NativeComposerField: UIViewRepresentable {
     /// negotiated during layout (`AgentView`'s `ComposerTextView` learned
     /// this: a text view given a flexible frame takes the largest one).
     @Binding var height: CGFloat
+    /// What VoiceOver calls the field: `Message Claude`, `Message Codex`.
+    var label = "Message Claude"
     let onSend: () -> Void
     /// Nil leaves a paste to the text.
     var onPasteImages: (([Data]) -> Void)?
@@ -257,7 +259,7 @@ struct NativeComposerField: UIViewRepresentable {
         view.text = text
         view.delegate = context.coordinator
         view.accessibilityIdentifier = "native-composer"
-        view.accessibilityLabel = "Message Claude"
+        view.accessibilityLabel = label
         view.onCommandReturn = onSend
         view.onPasteImages = onPasteImages
         DispatchQueue.main.async { context.coordinator.report(view) }
@@ -266,6 +268,7 @@ struct NativeComposerField: UIViewRepresentable {
 
     func updateUIView(_ view: ComposerField, context: Context) {
         context.coordinator.parent = self
+        view.accessibilityLabel = label
         view.onCommandReturn = onSend
         view.onPasteImages = onPasteImages
         // Measured here as well as on change: at `makeUIView` the view has no
