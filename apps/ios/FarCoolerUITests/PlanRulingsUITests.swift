@@ -19,8 +19,11 @@ final class PlanRulingsUITests: XCTestCase {
         return root.appendingPathComponent("test/fixtures/plan-rulings-seeded.json").path
     }
 
+    /// `.firstMatch`: a row and the label inside it can carry one identifier,
+    /// and a query that matches both cannot give a frame at all ("Multiple
+    /// matching elements found").
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
-        app.descendants(matching: .any)[id]
+        app.descendants(matching: .any)[id].firstMatch
     }
 
     private func keep(_ app: XCUIApplication, _ name: String) {
@@ -47,12 +50,34 @@ final class PlanRulingsUITests: XCTestCase {
         return app
     }
 
+    /// Whether `target` exists and sits on screen, waiting up to `seconds` for
+    /// both. Judged from its frame, not `isHittable`: a row that is moving, or
+    /// half under the bar, makes `isHittable` fail the test outright with
+    /// "Failed to determine hittability ... Activation point invalid" instead
+    /// of answering no, and a loaded runner catches it moving every time. The
+    /// frame always answers. On screen is a touchable slice of it, at most 44
+    /// points, inside the window.
+    private func touchable(_ app: XCUIApplication, _ target: XCUIElement, within seconds: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        repeat {
+            if target.exists {
+                let frame = target.frame, window = app.windows.firstMatch.frame
+                let shown = frame.intersection(window)
+                if !frame.isEmpty, !shown.isNull, shown.width > 0, shown.height >= min(frame.height, 44) { return true }
+            }
+            if seconds > 0 { Thread.sleep(forTimeInterval: 0.2) }
+        } while Date() < deadline
+        return false
+    }
+
     /// Scrolls to `id`, down the list and then back up it: an element that
     /// was passed, or a list that moved when a ruling left it, is found too.
+    /// Ends by waiting for the row to settle where it can be touched.
     private func reveal(_ app: XCUIApplication, _ id: String) -> XCUIElement {
         let target = element(app, id)
-        for _ in 0..<8 where !(target.exists && target.isHittable) { app.swipeUp() }
-        for _ in 0..<16 where !(target.exists && target.isHittable) { app.swipeDown() }
+        for _ in 0..<8 where !touchable(app, target, within: 0.5) { app.swipeUp() }
+        for _ in 0..<16 where !touchable(app, target, within: 0.5) { app.swipeDown() }
+        _ = touchable(app, target, within: 10)
         return target
     }
 
