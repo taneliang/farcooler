@@ -1012,7 +1012,7 @@ fn spoken_name(t: &Terminal) -> String {
     if title.is_empty() { "the agent".into() } else { title }
 }
 
-mod bring;
+pub(in crate::watch) mod bring;
 pub(crate) mod codex_turn;
 mod compose;
 pub(crate) mod draft_hold;

@@ -249,10 +249,27 @@ final class NativeAgentViewTests: XCTestCase {
         XCTAssertTrue(wait(30) { harness(app).contains("sent=from the terminal⏎and the docs") }, harness(app))
     }
 
-    /// A clear that didn't go: the text is here and the line says it's in
-    /// the box too, with Show Terminal and no second Bring Here.
-    func testABringHereThatCantClearSaysTheTextIsInBoth() {
+    /// A clear refused with the box whole: the composer gives the text back,
+    /// so the only copy is the box's, and Bring Here is offered again. The line
+    /// never says to clear the box.
+    func testARefusedClearGivesTheTextBack() {
         let app = launch(["-native-draft", "-native-draft-stuck"])
+        _ = conversation(app)
+        send(app, "and the docs")
+        let bring = element(app, "native-bring-here")
+        XCTAssertTrue(bring.waitForExistence(timeout: 30), "no Bring Here")
+        bring.tap()
+        let field = element(app, "native-composer")
+        XCTAssertTrue(wait(30) { (field.value as? String) == "and the docs" }, "\(String(describing: field.value))")
+        XCTAssertTrue(bring.waitForExistence(timeout: 30), "Bring Here is offered again")
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Clear it there'")).firstMatch.exists)
+        XCTAssertFalse(harness(app).contains("brought=from"), harness(app))
+    }
+
+    /// A clear that went partly: the text is here and the line says it's in
+    /// the box too, with Show Terminal and no second Bring Here.
+    func testABringHereThatWentPartlySaysTheTextIsInBoth() {
+        let app = launch(["-native-draft", "-native-draft-partly"])
         _ = conversation(app)
         send(app, "and the docs")
         let bring = element(app, "native-bring-here")

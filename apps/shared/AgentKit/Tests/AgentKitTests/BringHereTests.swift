@@ -33,6 +33,7 @@ final class BringHereTests: XCTestCase {
         let issue = await BringHere.run(
             read: { steps.append("read"); return .success("fix the login") },
             place: { text in steps.append("place"); composer = BringHere.merged(box: text, native: composer) },
+            withdraw: { _ in steps.append("withdraw") },
             clear: { text in steps.append("clear \(text)"); return .success(true) })
         XCTAssertNil(issue)
         XCTAssertEqual(steps, ["read", "place", "clear fix the login"], "in the composer before the box is touched")
@@ -44,31 +45,83 @@ final class BringHereTests: XCTestCase {
         var steps: [String] = []
         let issue = await BringHere.run(
             read: { .failure(.refused(what: "pasted")) },
-            place: { _ in steps.append("place") },
+            place: { _ in steps.append("place") }, withdraw: { _ in steps.append("withdraw") },
             clear: { _ in steps.append("clear"); return .success(true) })
         XCTAssertEqual(steps, [])
         guard case .said(let words)? = issue else { return XCTFail("\(String(describing: issue))") }
         XCTAssertTrue(words.contains("pasted block"), words)
     }
 
-    /// A clear that didn't go leaves the text in both places: placed in the
-    /// composer, and said to be in the box still.
-    func testAFailedClearKeepsTheTextInTheComposer() async {
-        for failure: AgentConversation.SendFailure in [.refused(what: "changed"), .refused(what: "partly"), .timedOut] {
+    /// A clear that went `partly`, or never answered, may have taken some of
+    /// the box's text: the composer keeps its copy and says it's in both.
+    func testAClearThatMayHaveTakenTextKeepsItInTheComposer() async {
+        for failure: AgentConversation.SendFailure in [.refused(what: "partly"), .timedOut, .lost(notSent: false)] {
             var placed: String?
+            var withdrawn = false
             let issue = await BringHere.run(
-                read: { .success("from the box") }, place: { placed = $0 }, clear: { _ in .failure(failure) })
+                read: { .success("from the box") }, place: { placed = $0 }, withdraw: { _ in withdrawn = true },
+                clear: { _ in .failure(failure) })
             XCTAssertEqual(placed, "from the box", "\(failure)")
+            XCTAssertFalse(withdrawn, "\(failure)")
             guard case .draftLeftInTerminal(let words)? = issue else { return XCTFail("\(failure)") }
             XCTAssertTrue(words.hasPrefix("The draft is here"), words)
         }
+    }
+
+    /// A clear refused with the box whole leaves the text in the box alone:
+    /// the composer gives it back, and never says "Clear it there", which
+    /// would have the person delete text the composer lacks.
+    func testARefusedClearGivesTheTextBack() async {
+        for what in ["changed", "too_tall", "typing", "sending", "unfamiliar", "prompt"] {
+            var composer = "mine"
+            var withdrawn: String?
+            let issue = await BringHere.run(
+                read: { .success("from the box") },
+                place: { composer = BringHere.merged(box: $0, native: composer) },
+                withdraw: { withdrawn = $0; composer = BringHere.withdrawn(box: $0, from: composer) },
+                clear: { _ in .failure(.refused(what: what)) })
+            XCTAssertEqual(withdrawn, "from the box", what)
+            XCTAssertEqual(composer, "mine", what)
+            if case .draftLeftInTerminal(let words)? = issue { XCTFail("\(what): \(words)") }
+            XCTAssertNotNil(issue, what)
+        }
+        var gone: String?
+        let notConnected = await BringHere.run(
+            read: { .success("x") }, place: { _ in }, withdraw: { gone = $0 }, clear: { _ in .failure(.lost(notSent: true)) })
+        XCTAssertEqual(gone, "x", "a clear that never left")
+        guard case .said? = notConnected else { return XCTFail("\(String(describing: notConnected))") }
+    }
+
+    /// A clear that answers `cleared: false` found the box empty: sent from
+    /// the terminal or taken by another device. The composer's copy would send
+    /// it twice.
+    func testAClearThatClearedNothingGivesTheTextBack() async {
+        var composer = ""
+        let issue = await BringHere.run(
+            read: { .success("fix the login") },
+            place: { composer = BringHere.merged(box: $0, native: composer) },
+            withdraw: { composer = BringHere.withdrawn(box: $0, from: composer) },
+            clear: { _ in .success(false) })
+        XCTAssertEqual(composer, "")
+        guard case .said(let words)? = issue else { return XCTFail("\(String(describing: issue))") }
+        XCTAssertTrue(words.contains("emptied"), words)
+    }
+
+    /// Taking the box's text back out leaves what the composer held, and
+    /// what was typed after.
+    func testWithdrawnTakesOnlyTheBrought() {
+        let merged = BringHere.merged(box: "fix the login\nthen the tests", native: "and the docs")
+        XCTAssertEqual(BringHere.withdrawn(box: "fix the login\nthen the tests", from: merged), "and the docs")
+        XCTAssertEqual(BringHere.withdrawn(box: "fix the login", from: "fix the login"), "")
+        XCTAssertEqual(BringHere.withdrawn(box: "fix the login", from: "I rewrote it"), "I rewrote it", "left alone")
+        XCTAssertEqual(BringHere.merged(box: "    indented\nmore\n", native: ""), "    indented\nmore", "the indent is the draft's")
     }
 
     /// An empty box: nothing to bring, nothing cleared.
     func testAnEmptyBoxBringsNothing() async {
         var steps: [String] = []
         let issue = await BringHere.run(
-            read: { .success("") }, place: { _ in steps.append("place") },
+            read: { .success("") }, place: { _ in steps.append("place") }, withdraw: { _ in steps.append("withdraw") },
             clear: { _ in steps.append("clear"); return .success(false) })
         XCTAssertEqual(steps, [])
         XCTAssertNil(issue)

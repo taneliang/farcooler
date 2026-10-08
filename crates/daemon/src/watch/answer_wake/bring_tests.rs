@@ -111,8 +111,14 @@ async fn a_key_mid_clear_puts_it_back() {
     let (agent, si) = drafted(&b, "", "one\ntwo\nthree").await;
     let mark = crate::runtime::input_mark(b.svc.root_dir(), agent.id);
     std::fs::create_dir_all(mark.parent().unwrap()).unwrap();
-    *b.watcher.after_clear_key.lock().unwrap() = Some(Box::new(move || {
-        std::fs::write(&mark, now_millis().to_string()).unwrap();
+    // After the first ctrl+u, before the second.
+    *b.watcher.before_clear_key.lock().unwrap() = Some(Box::new(move |n| {
+        let mark = mark.clone();
+        Box::pin(async move {
+            if n == 1 {
+                std::fs::write(&mark, now_millis().to_string()).unwrap();
+            }
+        })
     }));
     assert_eq!(refused(b.watcher.bring_draft(agent.id, Some("one\ntwo\nthree".into())).await), "typing");
     assert!(si.log().contains("PUTBACK"), "{}", si.log());
@@ -216,4 +222,84 @@ async fn keys_before_a_clear_no_longer_hold_a_send() {
     assert!(!b.watcher.typed_lately(agent.id, now_millis()), "the keys that made the draft");
     std::fs::write(&mark, (now_millis() + 1).to_string()).unwrap();
     assert!(b.watcher.typed_lately(agent.id, now_millis() + 2), "a key after the clear");
+}
+
+/// Keys typed straight into tmux (no client mark) between a read and the
+/// next ctrl+u would go with the row: the box is read again first, and the
+/// clear stops, with what it took put back.
+#[tokio::test]
+async fn keys_typed_between_a_read_and_the_next_key_are_not_deleted() {
+    let b = board().await;
+    let (agent, si) = drafted(&b, "", "one\ntwo\nthree").await;
+    let id = agent.id;
+    let svc = b.svc.clone();
+    *b.watcher.before_clear_key.lock().unwrap() = Some(Box::new(move |n| {
+        let runtime = crate::runtime::Runtime { marks: None, ..svc.runtime() };
+        let svc = svc.clone();
+        Box::pin(async move {
+            if n == 1 {
+                runtime.send_bytes_hex(id, "7a7a").await.unwrap();
+                for _ in 0..600 {
+                    let screen = svc.screen(id).await.expect("a screen").0;
+                    if farcooler_core::composer::printed(&screen).contains("zz") {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            }
+        })
+    }));
+    // The typed "zz" is in the box, so the put-back can't be proven whole.
+    assert_eq!(refused(b.watcher.bring_draft(agent.id, Some("one\ntwo\nthree".into())).await), "partly");
+    assert_eq!(si.log().lines().filter(|l| *l == "CLEARROW").count(), 1, "no second ctrl+u: {}", si.log());
+    let (screen, _, _) = b.svc.screen(agent.id).await.unwrap();
+    assert!(farcooler_core::composer::printed(&screen).contains("zz"), "the typed keys are still there");
+}
+
+/// Hidden rows that read the same once whitespace is squeezed (here, all
+/// alike) scroll in as the shown ones go: the box keeps drawing as many
+/// rows, so it isn't the draft being cleared.
+#[tokio::test]
+async fn hidden_rows_that_look_alike_scrolling_in_put_it_back() {
+    let b = board().await;
+    let (agent, si) = drafted(&b, "STAND_IN_WINDOW=2", "x\nx\nx\nx").await;
+    let (text, _) = b.watcher.bring_draft(agent.id, None).await.expect("read");
+    assert_eq!(text, "x\nx");
+    assert_eq!(refused(b.watcher.bring_draft(agent.id, Some(text)).await), "too_tall");
+    assert!(si.log().contains("PUTBACK"), "{}", si.log());
+}
+
+/// A dialog that comes up mid-clear: ctrl+y isn't pressed there.
+#[tokio::test]
+async fn a_dialog_mid_clear_is_not_pasted_into() {
+    let b = board().await;
+    let (agent, si) = drafted(&b, "", "one\ntwo\nthree").await;
+    let (control, log, id, svc) = (si.control.clone(), si.log.clone(), agent.id, b.svc.clone());
+    *b.watcher.before_clear_key.lock().unwrap() = Some(Box::new(move |n| {
+        let show = StandIn { control: control.clone(), log: log.clone() };
+        let svc = svc.clone();
+        Box::pin(async move {
+            if n == 1 {
+                show.show("menu").await;
+                for _ in 0..300 {
+                    if svc.screen(id).await.expect("a screen").0.contains("Tab to amend") {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            }
+        })
+    }));
+    let word = refused(b.watcher.bring_draft(agent.id, Some("one\ntwo\nthree".into())).await);
+    assert_eq!(word, "partly");
+    assert!(!si.log().contains("PUTBACK"), "{}", si.log());
+}
+
+/// Vim's insert mode gives ctrl+y another meaning: refused before any key.
+#[tokio::test]
+async fn vim_insert_mode_is_refused() {
+    let b = board().await;
+    let (agent, si) = drafted(&b, "STAND_IN_VIM=INSERT", "a draft").await;
+    assert_eq!(refused(b.watcher.bring_draft(agent.id, None).await), "unfamiliar");
+    assert_eq!(keys(&si), 0, "{}", si.log());
 }

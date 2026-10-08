@@ -15,6 +15,7 @@ class NativeBringHereTest {
     private val calls = CopyOnWriteArrayList<String>()
     private var box = "fix the login\nthen the tests"
     private var clearFails: Exception? = null
+    private var clearsNothing = false
 
     @After
     fun tearDown() = running.close()
@@ -34,6 +35,7 @@ class NativeBringHereTest {
                 } else {
                     calls += "clear $expected"
                     clearFails?.let { throw it }
+                    if (clearsNothing) return@DraftSink "" to false
                     box = ""
                     expected to true
                 }
@@ -63,8 +65,30 @@ class NativeBringHereTest {
     }
 
     @Test
-    fun `a clear that fails keeps the text here and says so`() {
+    fun `a clear refused with the box whole gives the text back`() {
         clearFails = CoreException("changed", word = "resource-conflict", what = "changed")
+        val model = model()
+        model.onDraft("and the docs")
+        model.bringHere()
+        eventually("tried") { !model.bringing && calls.size == 2 }
+        assertEquals("and the docs", model.draft)
+        assertEquals(AgentConversation.SendIssue.DraftInTerminal, model.issue)
+    }
+
+    @Test
+    fun `a clear that cleared nothing gives the text back`() {
+        clearsNothing = true
+        val model = model()
+        model.onDraft("mine")
+        model.bringHere()
+        eventually("tried") { !model.bringing && calls.size == 2 }
+        assertEquals("mine", model.draft)
+        assertTrue(model.issue is AgentConversation.SendIssue.Said)
+    }
+
+    @Test
+    fun `a clear that went partly keeps the text here and says so`() {
+        clearFails = CoreException("partly", word = "resource-conflict", what = "partly")
         val model = model()
         model.bringHere()
         eventually("tried") { !model.bringing && calls.size == 2 }

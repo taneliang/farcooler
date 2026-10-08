@@ -18,7 +18,9 @@ import UIKit
 ///   `-native-dialog` refuses it for a dialog, `-native-draft` for a draft in
 ///   the terminal's box: "from the terminal" until Bring Here clears it
 ///   (`terminal.bring_draft`, ov-369, recorded as `brought=`), or refused as
-///   `changed` under `-native-draft-stuck`. `-native-no-bring`: a runner
+///   `changed` under `-native-draft-stuck` (the box is whole, so the composer
+///   gives the text back) or `partly` under `-native-draft-partly` (the text
+///   is in both places). `-native-no-bring`: a runner
 ///   without `bring_draft`, so Show Terminal alone.
 /// - The runner has `compose` and `terminal_interrupt` unless
 ///   `-native-no-compose` (one line, no photos) or `-native-no-interrupt`
@@ -343,6 +345,9 @@ final class NativeHarnessRunner: ObservableObject {
     /// `terminal.bring_draft`: the box read, or cleared of `expected`.
     private func bring(_ expected: String?) throws -> Data {
         guard let expected else { return try json(["text": box, "cleared": false]) }
+        if CommandLine.arguments.contains("-native-draft-partly") {
+            throw ClientCore.CoreError.rejected("Part of it is still there.", word: "resource-conflict", what: "partly")
+        }
         if CommandLine.arguments.contains("-native-draft-stuck") || expected != box {
             throw ClientCore.CoreError.rejected("The box changed.", word: "resource-conflict", what: "changed")
         }

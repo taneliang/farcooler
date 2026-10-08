@@ -59,6 +59,9 @@ const WORK_METHODS: &[&str] = &[
     // mid-turn, the queue's confirmation: give up early and the person sends
     // again what the runner then types anyway (ov-372 review).
     "terminal.compose",
+    // A clear presses ctrl+u a row at a time, reading the box back after each
+    // (about a second a row), after waiting up to 10 s for a send to let go.
+    "terminal.bring_draft",
 ];
 
 /// How the session makes a call to `method`.
@@ -90,6 +93,11 @@ mod tests {
         // in it: the FFI hands this over as `error`.
         assert_eq!(late.to_string(), "The runner took too long to answer. Try again.");
         assert!(!late.is_disconnect(), "a slow answer must not empty the session slot");
+    }
+
+    #[test]
+    fn a_bring_here_clear_gets_the_work_deadline() {
+        assert_eq!(for_method("terminal.bring_draft").deadline, Some(WORK));
     }
 
     #[test]

@@ -40,14 +40,25 @@
 //! A clear also needs the box to read exactly `expected` (`changed`), and no
 //! key in the pane in the last `TYPED_WITHIN_MS` (`typing`).
 //!
-//! **The clear.** ctrl+u, then the box read until it changes. Each read must
-//! show the start of `expected`. Anything else is a key someone typed, or a
-//! tall draft's hidden rows scrolling in: ctrl+y puts it all back, and the
+//! **The clear.** Before each ctrl+u the box is read once more and must
+//! still show what the last key left (a key typed straight into tmux since
+//! would be deleted with the row). Then ctrl+u, and the box read until it
+//! changes. Each read must show the start of what was there before, to the
+//! character, and to have lost a row or some text: a hidden row of a tall
+//! draft scrolling in is not that, even when it matches once whitespace is
+//! squeezed. Anything else is a key
+//! someone typed, or those hidden rows: ctrl+y puts it all back, and the
 //! clear is refused as `typing`, `changed` or `too_tall`. So is a key typed
-//! in the pane through a client meanwhile. It ends when the box reads empty,
-//! or after the box's rows and two more: then it's put back, `changed`. A
-//! box that can't be put back (a dialog came up, or the yank didn't show)
-//! is `partly`: claude's own hint says ctrl+y there brings it back.
+//! in the pane through a client meanwhile. It ends when the box reads empty
+//! or after the box's rows and two more: then it's put back,
+//! `changed`. A box that can't be put back (a dialog came up, or the yank
+//! didn't show) is `partly`: claude's own hint says ctrl+y there brings it
+//! back. ctrl+y is pressed only where the box and its idle or working
+//! screen show.
+//!
+//! A refusal other than `partly` leaves the draft whole in the box and
+//! nothing taken from it, so the client takes what it placed back out of
+//! its composer (`BringHere`).
 //!
 //! **After.** The time the box was emptied is kept per terminal
 //! (`Watcher::brought`): `typed_lately` ignores keys from before it, which
@@ -82,6 +93,11 @@ const KEY_SETTLES: Duration = Duration::from_millis(1_500);
 /// ctrl+u and ctrl+y.
 const CLEAR_ROW: &str = "15";
 const PUT_BACK: &str = "19";
+
+/// A test's hook before each key, with the key's number from 0.
+#[cfg(test)]
+pub(in crate::watch) type Hook =
+    Box<dyn Fn(usize) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync>;
 
 /// The box after a key.
 enum After {
@@ -152,6 +168,11 @@ impl Watcher {
             AgentActivity::Blocked => return Err(conflict("prompt")),
             _ => return Err(conflict("unfamiliar")),
         }
+        // Vim's insert mode gives ctrl+y a meaning of its own (copy the
+        // character above), so the put-back couldn't be trusted.
+        if farcooler_core::composer::printed(&screen).contains("-- INSERT --") {
+            return Err(conflict("unfamiliar"));
+        }
         let held = match draft::claude(&screen, columns) {
             Draft::Empty => return Ok(None),
             Draft::Unrecognized => return Err(conflict("unfamiliar")),
@@ -175,24 +196,76 @@ impl Watcher {
         let started = now_millis();
         let runtime = Runtime { marks: None, ..self.service.runtime() };
         let mut shown = held.text.clone();
-        for _ in 0..held.rows + 2 {
-            runtime.send_bytes_hex(to.id, CLEAR_ROW).await?;
+        let mut rows = held.rows;
+        for n in 0..held.rows + 2 {
             #[cfg(test)]
-            if let Some(run) = self.after_clear_key.lock().unwrap_or_else(|e| e.into_inner()).take() {
-                run();
+            {
+                let run = self.before_clear_key.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|hook| hook(n));
+                if let Some(run) = run {
+                    run.await;
+                }
             }
+            // Still what the last key left? Whatever was typed straight into
+            // tmux since would go with the row.
+            let typed = || last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started);
+            if typed() {
+                return self.stop(to, &runtime, held, n, "typing").await;
+            }
+            match self.settled(to).await {
+                After::Shown(Draft::Holds(now)) if now.text == shown => {}
+                _ => return self.stop(to, &runtime, held, n, "changed").await,
+            }
+            runtime.send_bytes_hex(to.id, CLEAR_ROW).await?;
             match self.after_key(to, &shown, started).await {
                 After::Shown(Draft::Empty) => return Ok(()),
-                After::Shown(Draft::Holds(now)) if draft::is_prefix_of(&now.text, &held.text) => shown = now.text,
+                // A key takes a row away or a row's text. A window that still
+                // draws as many rows, its text no shorter, has scrolled a
+                // hidden row in, whatever that row says.
+                After::Shown(Draft::Holds(now))
+                    if shown.starts_with(&now.text)
+                        && draft::is_prefix_of(&now.text, &held.text)
+                        && (now.rows < rows || now.text.len() < shown.len()) =>
+                {
+                    shown = now.text;
+                    rows = now.rows;
+                }
                 After::Shown(Draft::Holds(_)) => {
-                    let typed = last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started);
-                    return self.put_back(to, &runtime, held, if typed { "typing" } else { "too_tall" }).await;
+                    return self.put_back(to, &runtime, held, if typed() { "typing" } else { "too_tall" }).await;
                 }
                 After::Typed => return self.put_back(to, &runtime, held, "typing").await,
                 After::Shown(Draft::Unrecognized) | After::Gone => return Err(conflict("partly")),
             }
         }
         self.put_back(to, &runtime, held, "changed").await
+    }
+
+    /// Stop before key `n`: nothing has been taken from the box on the first,
+    /// so it is left as it is; later, what the earlier keys took goes back.
+    async fn stop(&self, to: &Terminal, runtime: &Runtime, held: &Held, n: usize, word: &'static str) -> Result<()> {
+        if n == 0 { Err(conflict(word)) } else { self.put_back(to, runtime, held, word).await }
+    }
+
+    /// The box now: one read, whatever it shows.
+    async fn read_box(&self, to: &Terminal) -> After {
+        let Ok((screen, columns, _)) = self.service.screen(to.id).await else { return After::Gone };
+        if !matches!(self.service.registry().classify("claude", &screen), AgentActivity::Idle | AgentActivity::Working) {
+            return After::Gone;
+        }
+        After::Shown(draft::claude(&screen, columns))
+    }
+
+    /// The box now, once a frame shows it: a repaint or a failed capture
+    /// isn't an answer.
+    async fn settled(&self, to: &Terminal) -> After {
+        let mut seen = After::Gone;
+        for _ in 0..5 {
+            seen = self.read_box(to).await;
+            if matches!(seen, After::Shown(Draft::Holds(_) | Draft::Empty)) {
+                break;
+            }
+            tokio::time::sleep(PASTE_POLL).await;
+        }
+        seen
     }
 
     /// Read `to`'s box until it shows something other than `shown`, or for
@@ -220,8 +293,16 @@ impl Watcher {
     }
 
     /// ctrl+y, and the box read until it holds `held` again: then `word`,
-    /// else `partly`.
+    /// else `partly`. Not pressed unless claude's box is in front: a dialog
+    /// or a picker a typed key opened could take it for input.
     async fn put_back(&self, to: &Terminal, runtime: &Runtime, held: &Held, word: &'static str) -> Result<()> {
+        let in_front = match self.service.screen(to.id).await {
+            Ok((screen, _, _)) => matches!(self.service.registry().classify("claude", &screen), AgentActivity::Idle | AgentActivity::Working),
+            Err(_) => false,
+        };
+        if !in_front {
+            return Err(conflict("partly"));
+        }
         runtime.send_bytes_hex(to.id, PUT_BACK).await?;
         let whole: String = held.text.chars().filter(|c| !c.is_whitespace()).collect();
         let deadline = tokio::time::Instant::now() + KEY_SETTLES;

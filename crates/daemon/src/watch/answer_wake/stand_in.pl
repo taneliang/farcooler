@@ -283,6 +283,8 @@ sub draw {
             # After a long paste claude 2.1.290 keeps `paste again to expand`
             # there, working or not: `working-long`, with its spinner row
             # above the box, as claude draws it; `working-hidden`, with none.
+            # STAND_IN_VIM=INSERT: vim's insert mode, named below the box.
+            push @rows, "  -- INSERT --" if ($ENV{STAND_IN_VIM} // "") eq "INSERT";
             push @rows, $mode =~ /^working-(hidden|long)$/ ? "  paste again to expand"
                 : working($mode) && $composer eq "" ? "  ⏸ manual mode on · esc to interrupt"
                 : working($mode) ? "  ⏸ manual mode on" : "  ⏸ manual mode on · ? for shortcuts";

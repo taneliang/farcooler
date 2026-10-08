@@ -41,6 +41,7 @@ extension NativePaneModel {
             agent: agent,
             read: { await BringHere.result({ try await drafts.bringDraft(terminal: terminal, expected: nil).text }, failure: Self.failure) },
             place: { text in self.draft = BringHere.merged(box: text, native: self.draft) },
+            withdraw: { text in self.draft = BringHere.withdrawn(box: text, from: self.draft) },
             clear: { text in
                 await BringHere.result({ try await drafts.bringDraft(terminal: terminal, expected: text).cleared }, failure: Self.failure)
             })

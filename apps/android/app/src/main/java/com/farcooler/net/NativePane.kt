@@ -608,6 +608,7 @@ class NativePaneModel(
                     agent = agent,
                     read = { answered { drafts.bringDraft(terminal, null).first } },
                     place = { text -> draft = BringHere.merged(text, draft) },
+                    withdraw = { text -> draft = BringHere.withdrawn(text, draft) },
                     clear = { text -> answered { drafts.bringDraft(terminal, text).second } },
                 )
             } finally {

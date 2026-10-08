@@ -20,10 +20,13 @@ struct NativeBringHereTests {
         var box = "fix the login\nthen the tests"
         var read: RunnerCore.Failure?
         var clear: RunnerCore.Failure?
+        /// The clear finds the box already empty.
+        var emptied = false
 
-        func set(read: RunnerCore.Failure? = nil, clear: RunnerCore.Failure? = nil) {
+        func set(read: RunnerCore.Failure? = nil, clear: RunnerCore.Failure? = nil, emptied: Bool = false) {
             self.read = read
             self.clear = clear
+            self.emptied = emptied
         }
 
         func bringDraft(terminal: String, expected: String?) async throws -> (text: String, cleared: Bool) {
@@ -34,6 +37,7 @@ struct NativeBringHereTests {
             }
             calls.append("clear \(expected)")
             if let clear { throw clear }
+            if emptied { return ("", false) }
             box = ""
             return (expected, true)
         }
@@ -96,10 +100,39 @@ struct NativeBringHereTests {
         #expect(words.contains("too long to bring here"))
     }
 
-    @Test("A clear that fails keeps the text here and says it's in the box too")
-    func aFailedClearKeepsTheText() async throws {
+    @Test("A clear refused with the box whole gives the text back, and never says to clear the box")
+    func aRefusedClearGivesTheTextBack() async throws {
         let drafts = StandInDrafts()
         await drafts.set(clear: Self.refused("changed"))
+        let model = try Self.model(drafts)
+        model.draft = "and the docs"
+        await model.bringHere()
+        #expect(model.draft == "and the docs", "the box holds the only copy")
+        #expect(model.issue == .draftInTerminal, "Bring Here and Show Terminal again, no \"clear it there\"")
+
+        await drafts.set(clear: Self.refused("typing"))
+        await model.bringHere()
+        #expect(model.draft == "and the docs")
+        guard case .said(let words)? = model.issue else { Issue.record("\(String(describing: model.issue))"); return }
+        #expect(words.contains("so its draft stayed there"))
+    }
+
+    @Test("A clear that answers cleared: false gives the text back, so a send can't repeat it")
+    func aClearThatClearedNothingGivesTheTextBack() async throws {
+        let drafts = StandInDrafts()
+        await drafts.set(emptied: true)
+        let model = try Self.model(drafts)
+        model.draft = "mine"
+        await model.bringHere()
+        #expect(model.draft == "mine")
+        guard case .said(let words)? = model.issue else { Issue.record("\(String(describing: model.issue))"); return }
+        #expect(words.contains("emptied"))
+    }
+
+    @Test("A clear that went partly or never answered keeps the text here and says it's in the box too")
+    func aPartlyClearKeepsTheText() async throws {
+        let drafts = StandInDrafts()
+        await drafts.set(clear: Self.refused("partly"))
         let model = try Self.model(drafts)
         await model.bringHere()
         #expect(model.draft == "fix the login\nthen the tests")

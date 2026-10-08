@@ -965,9 +965,9 @@ pub struct Watcher {
     /// Make an interrupt's checks under the fence take this many ms longer.
     #[cfg(test)]
     slow_recheck_ms: std::sync::atomic::AtomicU64,
-    /// Run once, after Bring Here's first ctrl+u (`bring`'s tests).
+    /// Run before each of Bring Here's keys, with its number (`bring`'s tests).
     #[cfg(test)]
-    after_clear_key: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    before_clear_key: std::sync::Mutex<Option<answer_wake::bring::Hook>>,
 }
 
 /// One client's claim about what it is showing, and when it said so.
@@ -2857,7 +2857,7 @@ impl Watcher {
             #[cfg(test)]
             slow_recheck_ms: std::sync::atomic::AtomicU64::new(0),
             #[cfg(test)]
-            after_clear_key: std::sync::Mutex::new(None),
+            before_clear_key: std::sync::Mutex::new(None),
             clears_pending: std::sync::Mutex::new(HashSet::new()),
             taps: std::sync::Mutex::new(None),
             task_notices: std::sync::Mutex::new(HashMap::new()),
