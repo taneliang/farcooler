@@ -4390,6 +4390,22 @@ message PlanCost {
   uint64 in_flight_tokens = 4;
   // Millionths of a US dollar of it; absent unless every turn was priced.
   optional int64 in_flight_cost_micros = 5;
+  // The same seven days split by harness and model, most tokens first; the
+  // tokens add up to `week_tokens` (ov-434). Empty from an older runner.
+  repeated WeekSpend week = 6;
+  // Millionths of a US dollar the week cost, API-equivalent; absent unless
+  // every pair in `week` was priced.
+  optional int64 week_cost_micros = 7;
+}
+
+// What one harness and model spent over the last seven days (ov-434).
+message WeekSpend {
+  string harness = 1;
+  // Empty when the harness named no model.
+  string model = 2;
+  uint64 tokens = 3;
+  // Millionths of a US dollar; absent unless every turn was priced.
+  optional int64 cost_micros = 4;
 }
 
 // What the finished cards a harness and model worked cost.

@@ -221,6 +221,30 @@ fn the_week_counts_seven_days_and_no_limit() {
     assert_eq!(store.plan(main, 0).unwrap().cost.week_tokens, 120);
 }
 
+/// The week's total is split by harness and model, the parts add up to the
+/// total in tokens and dollars, and one unpriced turn leaves the dollars out
+/// rather than understating them (ov-434).
+#[test]
+fn the_week_is_split_by_harness_and_model_and_the_parts_add_up() {
+    let (store, main, _) = board(0);
+    let now = now_millis();
+    turn(&store, "k1", None, "claude", "claude-opus-5", 100, Some(4_000), now - 1000);
+    turn(&store, "k2", None, "claude", "claude-opus-5", 50, Some(2_000), now - 2 * DAY);
+    turn(&store, "k3", None, "codex", "gpt-5.6", 20, Some(500), now - 6 * DAY);
+    turn(&store, "k4", None, "claude", "claude-opus-5", 9_999, Some(1), now - 8 * DAY);
+    let cost = store.plan(main, 0).unwrap().cost;
+    let said: Vec<_> = cost.week.iter().map(|w| (w.harness.as_str(), w.model.as_str(), w.tokens, w.cost_micros)).collect();
+    assert_eq!(said, [("claude", "claude-opus-5", 150, Some(6_000)), ("codex", "gpt-5.6", 20, Some(500))]);
+    assert_eq!((cost.week_tokens, cost.week_cost_micros), (170, Some(6_500)));
+    assert_eq!(cost.week.iter().map(|w| w.tokens).sum::<u64>(), cost.week_tokens);
+
+    turn(&store, "k5", None, "codex", "gpt-5.6", 30, None, now - 1000);
+    let cost = store.plan(main, 0).unwrap().cost;
+    assert_eq!(cost.week_tokens, 200);
+    assert_eq!(cost.week_cost_micros, None, "a week with an unpriced turn has no dollar total");
+    assert_eq!(cost.week.iter().find(|w| w.model == "claude-opus-5").unwrap().cost_micros, Some(6_000));
+}
+
 fn finish(store: &Store, task: &Task) {
     use crate::models::TaskStatus::*;
     for to in [Todo, InProgress, InReview, Done] {

@@ -80,6 +80,12 @@ pub struct PlanCost {
     /// The runner's tokens over the last seven days, every harness and every
     /// board. No limit and no share: see the module doc.
     pub week_tokens: u64,
+    /// The same week split by harness and model, most tokens first; the
+    /// tokens add up to `week_tokens` (ov-434).
+    pub week: Vec<WeekSpend>,
+    /// Millionths of a US dollar the week cost, API-equivalent; `None` unless
+    /// every pair in `week` was priced.
+    pub week_cost_micros: Option<i64>,
     /// Cost per landed card by harness and model, those with at least
     /// `MIN_CARDS_TO_COMPARE` landed cards' worth of share behind them, most
     /// share first.
@@ -93,6 +99,17 @@ pub struct PlanCost {
     /// How many harness-and-model pairs had finished cards but too few to
     /// compare, so a client can say some are held back.
     pub compare_held_back: u32,
+}
+
+/// What one harness and model spent over the last seven days (ov-434).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WeekSpend {
+    pub harness: String,
+    /// Empty when the harness named no model.
+    pub model: String,
+    pub tokens: u64,
+    /// Millionths of a US dollar; `None` unless every turn was priced.
+    pub cost_micros: Option<i64>,
 }
 
 /// What the cards a harness and model worked, once finished, cost.
@@ -196,20 +213,55 @@ pub(crate) fn cost_of(conn: &Connection, cards: &HashMap<Uuid, CardRef>, now_ms:
     // One window for the week and the trend: the same seven UTC days, today
     // so far, each run spread over the days it ran.
     let window = trend_start(now_ms);
+    // Per turn, harness and model, so the total can be split the way the
+    // comparison is. `week_tokens` is these rows' sum, never a second query.
     let mut stmt = conn
         .prepare(
-            "SELECT t.started_at, t.ended_at,
-                    sum(m.input_tokens + m.output_tokens + m.cache_read_tokens + m.cache_write_tokens)
+            "SELECT t.started_at, t.ended_at, t.harness, m.model,
+                    sum(m.input_tokens + m.output_tokens + m.cache_read_tokens + m.cache_write_tokens),
+                    coalesce(sum(m.cost_micros), 0), coalesce(sum(m.cost_micros IS NULL), 0)
                FROM agent_turns t JOIN agent_turn_models m ON m.turn_id = t.id
-              WHERE t.ended_at >= ?1 GROUP BY t.id",
+              WHERE t.ended_at >= ?1 GROUP BY t.id, t.harness, m.model",
         )
         .map_err(map_err)?;
     let week_rows = stmt
-        .query_map(params![window], |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, i64>(1)?, r.get::<_, f64>(2)?)))
+        .query_map(params![window], |r| {
+            Ok((
+                r.get::<_, Option<i64>>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, f64>(4)?,
+                r.get::<_, i64>(5)?,
+                r.get::<_, i64>(6)?,
+            ))
+        })
         .map_err(map_err)?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(map_err)?;
-    let week_tokens: f64 = week_rows.iter().map(|(s, e, t)| spread(*t, *s, *e, window).iter().sum::<f64>()).sum();
+    // A run that began before the window counts only the part inside it, for
+    // its dollars as for its tokens.
+    let mut week_pairs: HashMap<(String, String), (f64, f64, bool)> = HashMap::new();
+    for (started, ended, harness, model, tokens, micros, unpriced) in week_rows {
+        let inside: f64 = spread(1.0, started, ended, window).iter().sum();
+        let slot = week_pairs.entry((harness, model)).or_default();
+        slot.0 += tokens * inside;
+        slot.1 += micros as f64 * inside;
+        slot.2 |= unpriced > 0 && inside > 0.0;
+    }
+    let mut week: Vec<WeekSpend> = week_pairs
+        .into_iter()
+        .map(|((harness, model), (tokens, micros, unpriced))| WeekSpend {
+            harness,
+            model,
+            tokens: tokens.round().max(0.0) as u64,
+            cost_micros: (!unpriced).then(|| micros.round() as i64),
+        })
+        .filter(|w| w.tokens > 0)
+        .collect();
+    week.sort_by(|a, b| b.tokens.cmp(&a.tokens).then_with(|| (&a.harness, &a.model).cmp(&(&b.harness, &b.model))));
+    let week_tokens: u64 = week.iter().map(|w| w.tokens).sum();
+    let week_cost_micros = week.iter().try_fold(0i64, |sum, w| w.cost_micros.map(|m| sum + m));
 
     // Every pair's spend on every card on the board, so spend on cards that
     // didn't land is counted (as in flight) rather than left out, and a card's
@@ -285,7 +337,9 @@ pub(crate) fn cost_of(conn: &Connection, cards: &HashMap<Uuid, CardRef>, now_ms:
         b.card_share_milli.cmp(&a.card_share_milli).then_with(|| (&a.harness, &a.model).cmp(&(&b.harness, &b.model)))
     });
     Ok(PlanCost {
-        week_tokens: week_tokens.round().max(0.0) as u64,
+        week_tokens,
+        week,
+        week_cost_micros,
         compare,
         compare_held_back,
         in_flight_tokens: flying,

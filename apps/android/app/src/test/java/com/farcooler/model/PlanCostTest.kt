@@ -98,6 +98,22 @@ class PlanCostTest {
     }
 
     @Test
+    fun `the week's total leads in tokens and API-equivalent dollars, split by harness and model, and the split adds up`() {
+        val cost = Plan.decode(fixture).cost!!
+        assertEquals("the parts are the total", cost.weekTokens, cost.week.sumOf { it.tokens })
+        assertEquals(cost.weekCostMicros, cost.week.sumOf { it.costMicros ?: 0L })
+        assertEquals("about \$45.00 API-equivalent", PlanCostWords.weekDollars(cost, us))
+        val rows = cost.week.map { PlanCostWords.weekRow(it, us) }
+        assertEquals(listOf("Claude Code · opus", "Codex · gpt-5.6"), rows.map { it.title })
+        assertEquals("28M tokens · about \$41.20 API-equivalent", rows[0].detail)
+        assertEquals("6.2M tokens · about \$3.80 API-equivalent", rows[1].detail)
+        assertTrue(rows[0].spoken.contains("28 million tokens"))
+        assertEquals(PlanCostWords.DOLLARS_NOT_REPORTED, PlanCostWords.weekDollars(cost.copy(weekCostMicros = null), us))
+        assertNull("an older runner sent no split", PlanCostWords.weekDollars(PlanCostRead(weekTokens = 5), us))
+        assertEquals("900 tokens · API-equivalent dollars: Not reported", PlanCostWords.weekRow(PlanWeekSpend("cursor", "", 900), us).detail)
+    }
+
+    @Test
     fun `each comparison row says n, tokens a card, and dollars only when every turn was priced`() {
         val cost = Plan.decode(fixture).cost!!
         val claude = PlanCostWords.compareRow(cost.compare[0], us)

@@ -120,6 +120,8 @@ final class PlanUITests: XCTestCase {
         }
         XCTAssertTrue(said("Over budget"), "nothing says a theme or lane is over budget")
         XCTAssertTrue(said("tokens in the last 7 days"), "no week: \(app.debugDescription)")
+        XCTAssertTrue(said("about $37.80 API-equivalent"), "the week's total in dollars isn't said first: \(app.debugDescription)")
+        XCTAssertTrue(said("about $31.00 API-equivalent"), "no week row for Claude Code opus")
         XCTAssertTrue(said("held back until three cards have landed"), "the pair with too few cards isn't said to be held back")
         XCTAssertTrue(said("tokens on cards that haven’t landed"), "the spend on unlanded cards isn't said apart")
         XCTAssertTrue(said("3.6 finished cards"), "no comparison row with its share")

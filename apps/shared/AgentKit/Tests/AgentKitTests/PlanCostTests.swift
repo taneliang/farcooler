@@ -98,6 +98,26 @@ struct PlanCostTests {
         #expect(PlanWords.weekNote.contains("weekly limit"))
     }
 
+    @Test("the week's total leads in tokens and API-equivalent dollars, split by harness and model, and the split adds up")
+    func weekTotalAndSplit() throws {
+        let us = Locale(identifier: "en_US")
+        let cost = try #require(try PlanModelTests.fixture().cost)
+        #expect(cost.week.map(\.tokens).reduce(0, +) == cost.weekTokens, "the parts are the total")
+        #expect(cost.week.compactMap(\.costMicros).reduce(0, +) == cost.weekCostMicros)
+        #expect(PlanWords.weekDollars(cost, locale: us) == "about $45.00 API-equivalent")
+        let rows = cost.week.map { PlanWords.weekRow($0, locale: us) }
+        #expect(rows.map(\.title) == ["Claude Code · opus", "Codex · gpt-5.6"])
+        #expect(rows[0].detail == "28M tokens · about $41.20 API-equivalent")
+        #expect(rows[1].detail == "6.2M tokens · about $3.80 API-equivalent")
+        #expect(rows[0].spoken.contains("28 million tokens"))
+        var unpriced = cost
+        unpriced.weekCostMicros = nil
+        #expect(PlanWords.weekDollars(unpriced, locale: us) == PlanWords.dollarsNotReported, "never $0 for dollars we can't count")
+        #expect(PlanWords.weekDollars(PlanCostRead(weekTokens: 5), locale: us) == nil, "an older runner sent no split")
+        let none = PlanWords.weekRow(PlanWeekSpend(harness: "cursor", model: "", tokens: 900), locale: us)
+        #expect(none.detail == "900 tokens · API-equivalent dollars: Not reported")
+    }
+
     @Test("each comparison row says n, tokens a card, and dollars only when every turn was priced")
     func compareRows() throws {
         let us = Locale(identifier: "en_US")

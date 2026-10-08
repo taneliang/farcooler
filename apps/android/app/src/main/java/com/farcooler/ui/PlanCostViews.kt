@@ -133,6 +133,18 @@ fun PlanCostBlock(cost: PlanCostRead, modifier: Modifier = Modifier) {
                 modifier = Modifier.semantics(mergeDescendants = true) {}.testTag("plan-cost-week"),
             ) {
                 Text(PlanCostWords.week(cost.weekTokens), style = MaterialTheme.typography.bodyLarge)
+                PlanCostWords.weekDollars(cost)?.let {
+                    Text(it, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.testTag("plan-cost-week-dollars"))
+                }
+                for (row in cost.week.map { PlanCostWords.weekRow(it) }) {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                        modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = row.spoken }.testTag("plan-${row.id}"),
+                    ) {
+                        Text(row.title, style = MaterialTheme.typography.titleSmall)
+                        Text(row.detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 Text(PlanCostWords.WEEK_NOTE, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }

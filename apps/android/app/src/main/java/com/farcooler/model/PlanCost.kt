@@ -44,6 +44,18 @@ data class PlanHarnessCost(
     val id: String get() = "$harness/$model"
 }
 
+/** What one harness and model spent over the last seven days (ov-434). */
+data class PlanWeekSpend(
+    val harness: String,
+    /** Empty when the harness named no model. */
+    val model: String,
+    val tokens: Long,
+    /** Millionths of a dollar; null unless every turn was priced. */
+    val costMicros: Long? = null,
+) {
+    val id: String get() = "$harness/$model"
+}
+
 /** The week and the comparison, as one plan read carries them. */
 data class PlanCostRead(
     /** The runner's tokens over the last seven days, every harness and board. */
@@ -56,6 +68,10 @@ data class PlanCostRead(
     val inFlightTokens: Long = 0,
     /** Millionths of a dollar of it; null unless every turn was priced. */
     val inFlightCostMicros: Long? = null,
+    /** The same week split by harness and model, most tokens first; empty from a runner older than ov-434. */
+    val week: List<PlanWeekSpend> = emptyList(),
+    /** Millionths of a dollar the week cost, API-equivalent; null unless every pair in [week] was priced. */
+    val weekCostMicros: Long? = null,
 ) {
     /** Something to draw: tokens this week, a comparison, pairs held back, or spend in flight. */
     val isWorthShowing: Boolean get() = weekTokens > 0 || compare.isNotEmpty() || compareHeldBack > 0 || inFlightTokens > 0
@@ -78,6 +94,16 @@ data class PlanCostRead(
                 compareHeldBack = it["compare_held_back"]?.jsonPrimitive?.intOrNull ?: 0,
                 inFlightTokens = it["in_flight_tokens"]?.jsonPrimitive?.longOrNull ?: 0L,
                 inFlightCostMicros = it["in_flight_cost_micros"]?.jsonPrimitive?.longOrNull,
+                week = (it["week"] as? JsonArray).orEmpty().map { w ->
+                    val c = w.jsonObject
+                    PlanWeekSpend(
+                        harness = c["harness"]?.jsonPrimitive?.content.orEmpty(),
+                        model = c["model"]?.jsonPrimitive?.content.orEmpty(),
+                        tokens = c["tokens"]?.jsonPrimitive?.longOrNull ?: 0L,
+                        costMicros = c["cost_micros"]?.jsonPrimitive?.longOrNull,
+                    )
+                },
+                weekCostMicros = it["week_cost_micros"]?.jsonPrimitive?.longOrNull,
             )
         }
 
@@ -197,6 +223,27 @@ object PlanCostWords {
     /** "34M tokens in the last 7 days on this runner": the same seven UTC days as the trend, today so far. */
     fun week(tokens: Long, locale: Locale = Locale.getDefault()): String =
         "${TaskUsageFormat.tokens(tokens, locale)} tokens in the last 7 days on this runner"
+
+    /**
+     * "about $45.00 API-equivalent", Not reported when any turn went unpriced; null when the runner sent no split
+     * (an older one), so no claim is made about dollars it never counted.
+     */
+    fun weekDollars(cost: PlanCostRead, locale: Locale = Locale.getDefault()): String? {
+        if (cost.week.isEmpty()) return null
+        val micros = cost.weekCostMicros ?: return DOLLARS_NOT_REPORTED
+        return "about ${TaskUsageFormat.dollars(micros, locale)} API-equivalent"
+    }
+
+    /** One row of the week's split: "Claude Code · opus", then "28M tokens · about $41.20 API-equivalent". */
+    fun weekRow(w: PlanWeekSpend, locale: Locale = Locale.getDefault()): PlanCompareRow {
+        val model = w.model.ifEmpty { "no model named" }
+        val dollars = w.costMicros?.let { "about ${TaskUsageFormat.dollars(it, locale)} API-equivalent" } ?: DOLLARS_NOT_REPORTED
+        val name = harnessName(w.harness)
+        return PlanCompareRow(
+            "week/${w.id}", "$name · $model", "${TaskUsageFormat.tokens(w.tokens, locale)} tokens · $dollars",
+            "$name, $model. ${spokenTokens(w.tokens, locale)} tokens, $dollars",
+        )
+    }
 
     /** "4.2 finished cards", or "4 finished cards": a pair's share of the landed cards, with its decimal when it isn't whole. */
     fun cardShare(milli: Int): String =

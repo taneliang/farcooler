@@ -76,6 +76,21 @@
     "compare_held_back": 2,
     "in_flight_cost_micros": null,
     "in_flight_tokens": 1200000,
+    "week": [
+      {
+        "cost_micros": 41200000,
+        "harness": "claude",
+        "model": "opus",
+        "tokens": 28000000
+      },
+      {
+        "cost_micros": 3800000,
+        "harness": "codex",
+        "model": "gpt-5.6",
+        "tokens": 6200000
+      }
+    ],
+    "week_cost_micros": 45000000,
     "week_tokens": 34200000
   },
   "landed_not_closed": [],

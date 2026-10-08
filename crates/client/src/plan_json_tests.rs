@@ -171,6 +171,11 @@ fn the_plan() -> pb::Plan {
             compare_held_back: 2,
             in_flight_tokens: 1_200_000,
             in_flight_cost_micros: None,
+            week: vec![
+                pb::WeekSpend { harness: "claude".into(), model: "opus".into(), tokens: 28_000_000, cost_micros: Some(41_200_000) },
+                pb::WeekSpend { harness: "codex".into(), model: "gpt-5.6".into(), tokens: 6_200_000, cost_micros: Some(3_800_000) },
+            ],
+            week_cost_micros: Some(45_000_000),
         }),
     }
 }

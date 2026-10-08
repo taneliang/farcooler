@@ -136,6 +136,18 @@ public struct PlanCostBlock: View {
             if cost.weekTokens > 0 {
                 VStack(alignment: .leading, spacing: Spacing.tight) {
                     Text(PlanWords.week(cost.weekTokens)).font(bodyFont)
+                    if let dollars = PlanWords.weekDollars(cost) {
+                        Text(dollars).font(bodyFont).accessibilityIdentifier("plan-cost-week-dollars")
+                    }
+                    ForEach(cost.week.map { PlanWords.weekRow($0) }) { row in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(row.title).font(secondaryFont.weight(.medium))
+                            Text(row.detail).font(secondaryFont).foregroundStyle(.secondary)
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(row.spoken)
+                        .accessibilityIdentifier("plan-\(row.id)")
+                    }
                     Text(PlanWords.weekNote)
                         .font(secondaryFont)
                         .foregroundStyle(.secondary)

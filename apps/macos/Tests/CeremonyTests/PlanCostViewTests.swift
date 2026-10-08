@@ -87,4 +87,21 @@ struct PlanCostViewTests {
         #expect(withheld["plan-cost-section"] == nil, "a runner without board_cost sends none")
         #expect(withheld["plan-theme-entry-Visual language-over-budget"] == nil)
     }
+
+    @Test("The week's total and its split by harness and model take room in the Cost block; without the split, only the week line")
+    func theWeekSplitIsDrawn() throws {
+        let cost = try #require(try PlanModel.decode(PlanViewTests.fixture()).cost)
+        #expect(cost.week.count == 2 && cost.weekCostMicros == 45_000_000, "the fixture's runner sends the split")
+        func height(_ cost: PlanCostRead) -> CGFloat {
+            let host = NSHostingView(rootView: PlanCostBlock(cost: cost).frame(width: 300))
+            host.frame = CGRect(x: 0, y: 0, width: 300, height: 2000)
+            host.layoutSubtreeIfNeeded()
+            return host.fittingSize.height
+        }
+        var older = cost
+        older.week = []
+        older.weekCostMicros = nil
+        // The dollars line and two two-line rows: well over three lines of 13 pt text.
+        #expect(height(cost) - height(older) > 80, "\(height(cost)) against \(height(older))")
+    }
 }

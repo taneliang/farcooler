@@ -197,6 +197,11 @@ fn plan_cost() -> pb::PlanCost {
         compare_held_back: 2,
         in_flight_tokens: 1_200_000,
         in_flight_cost_micros: None,
+        week: vec![
+            pb::WeekSpend { harness: "claude".into(), model: "opus".into(), tokens: 28_000_000, cost_micros: Some(41_200_000) },
+            pb::WeekSpend { harness: "codex".into(), model: "gpt-5.6".into(), tokens: 6_200_000, cost_micros: Some(3_800_000) },
+        ],
+        week_cost_micros: Some(45_000_000),
     }
 }
 
@@ -427,7 +432,9 @@ async fn the_overview_reads_next_up_now_themes_and_landed() {
         "Decided for you",
         "  R-2    The inbox is amber.",
         "Cost",
-        "  Last 7 days  34M tokens on this runner, by UTC day (its weekly limit isn't known)",
+        "  Last 7 days  34M tokens · about $45.00 API-equivalent on this runner (its weekly limit isn't known)",
+        "    Claude Code opus · 28M tokens · about $41.20 API-equivalent",
+        "    Codex gpt-5.6 · 6.2M tokens · about $3.80 API-equivalent",
         "  Claude Code opus · 5 finished cards · 1.5M tokens a card · about $2.50 a card API-equivalent",
         "  Codex gpt-5.6 · 3.4 finished cards · 300K tokens a card · API-equivalent dollars: Not reported",
         "  2 other harness and model pairs held back until three cards have landed",
@@ -1250,7 +1257,7 @@ async fn the_plan_flags_what_is_over_budget_and_never_invents_a_limit() {
     let text = say(&mut link, "").await.unwrap();
     assert!(text.contains("Visual language  1 of 3 done · active · Over budget: 320K of 250K tokens"), "{text}");
     assert!(text.contains("470K of 500K tokens budgeted"), "{text}");
-    assert!(text.contains("Last 7 days  34M tokens on this runner, by UTC day (its weekly limit isn't known)"), "{text}");
+    assert!(text.contains("Last 7 days  34M tokens · about $45.00 API-equivalent on this runner (its weekly limit isn't known)"), "{text}");
     assert!(!text.contains('%'), "no share of a limit nobody can read: {text}");
     assert!(text.contains("Claude Code opus · 5 finished cards · 1.5M tokens a card · about $2.50 a card API-equivalent"), "{text}");
     assert!(text.contains("Codex gpt-5.6 · 3.4 finished cards · 300K tokens a card · API-equivalent dollars: Not reported"), "{text}");

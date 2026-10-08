@@ -118,11 +118,17 @@ pub(super) fn trend_words(trend: &[u64]) -> Option<String> {
 pub(super) fn overview_lines(plan: &pb::Plan) -> Vec<String> {
     let Some(cost) = &plan.cost else { return Vec::new() };
     let mut out = vec!["Cost".to_string()];
-    // No percentage: no harness reports the weekly limit to the runner.
+    // No percentage: no harness reports the weekly limit to the runner. The
+    // total comes first, then what each harness and model spent (ov-434).
+    let week_dollars = if cost.week.is_empty() { String::new() } else { dollars_words(cost.week_cost_micros, false) };
     out.push(format!(
-        "  Last 7 days  {} tokens on this runner, by UTC day (its weekly limit isn't known)",
+        "  Last 7 days  {} tokens{week_dollars} on this runner (its weekly limit isn't known)",
         tokens(cost.week_tokens)
     ));
+    for w in &cost.week {
+        let model = if w.model.is_empty() { "no model named" } else { w.model.as_str() };
+        out.push(format!("    {} {} · {} tokens{}", harness_name(&w.harness), model, tokens(w.tokens), dollars_words(w.cost_micros, false)));
+    }
     out.extend(compare_lines(cost));
     out
 }

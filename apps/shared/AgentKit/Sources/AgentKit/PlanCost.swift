@@ -49,10 +49,35 @@ public struct PlanHarnessCost: Decodable, Equatable, Identifiable, Sendable {
     }
 }
 
+/// What one harness and model spent over the last seven days (ov-434).
+public struct PlanWeekSpend: Decodable, Equatable, Identifiable, Sendable {
+    public var harness: String
+    /// Empty when the harness named no model.
+    public var model: String
+    public var tokens: UInt64
+    /// Millionths of a dollar; nil unless every turn was priced.
+    public var costMicros: Int64?
+
+    public var id: String { "\(harness)/\(model)" }
+
+    public init(harness: String, model: String, tokens: UInt64, costMicros: Int64? = nil) {
+        self.harness = harness
+        self.model = model
+        self.tokens = tokens
+        self.costMicros = costMicros
+    }
+}
+
 /// The week and the comparison, as one plan read carries them.
 public struct PlanCostRead: Decodable, Equatable, Sendable {
     /// The runner's tokens over the last seven days, every harness and board.
     public var weekTokens: UInt64
+    /// The same week split by harness and model, most tokens first; the tokens
+    /// add up to `weekTokens`. Empty from a runner older than ov-434.
+    public var week: [PlanWeekSpend]
+    /// Millionths of a dollar the week cost, API-equivalent; nil unless every
+    /// pair in `week` was priced.
+    public var weekCostMicros: Int64?
     /// Harness and model pairs with enough finished cards to compare, most
     /// cards first.
     public var compare: [PlanHarnessCost]
@@ -66,8 +91,10 @@ public struct PlanCostRead: Decodable, Equatable, Sendable {
 
     public init(
         weekTokens: UInt64 = 0, compare: [PlanHarnessCost] = [], compareHeldBack: Int = 0, inFlightTokens: UInt64 = 0,
-        inFlightCostMicros: Int64? = nil
+        inFlightCostMicros: Int64? = nil, week: [PlanWeekSpend] = [], weekCostMicros: Int64? = nil
     ) {
+        self.week = week
+        self.weekCostMicros = weekCostMicros
         self.weekTokens = weekTokens
         self.compare = compare
         self.compareHeldBack = compareHeldBack
@@ -78,13 +105,15 @@ public struct PlanCostRead: Decodable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         weekTokens = try c.decodeIfPresent(UInt64.self, forKey: .weekTokens) ?? 0
+        week = try c.decodeIfPresent([PlanWeekSpend].self, forKey: .week) ?? []
+        weekCostMicros = try c.decodeIfPresent(Int64.self, forKey: .weekCostMicros)
         compare = try c.decodeIfPresent([PlanHarnessCost].self, forKey: .compare) ?? []
         compareHeldBack = try c.decodeIfPresent(Int.self, forKey: .compareHeldBack) ?? 0
         inFlightTokens = try c.decodeIfPresent(UInt64.self, forKey: .inFlightTokens) ?? 0
         inFlightCostMicros = try c.decodeIfPresent(Int64.self, forKey: .inFlightCostMicros)
     }
 
-    private enum CodingKeys: String, CodingKey { case weekTokens, compare, compareHeldBack, inFlightTokens, inFlightCostMicros }
+    private enum CodingKeys: String, CodingKey { case weekTokens, week, weekCostMicros, compare, compareHeldBack, inFlightTokens, inFlightCostMicros }
 
     /// Something to draw: tokens this week, or a comparison, or pairs held back.
     public var isWorthShowing: Bool { weekTokens > 0 || !compare.isEmpty || compareHeldBack > 0 || inFlightTokens > 0 }
@@ -216,6 +245,27 @@ extension PlanWords {
     /// as the trend, today so far.
     public static func week(_ tokens: UInt64, locale: Locale = .current) -> String {
         "\(TaskUsageFormat.tokens(tokens, locale: locale)) tokens in the last 7 days on this runner"
+    }
+
+    /// "about $45.00 API-equivalent", or Not reported when any turn went
+    /// unpriced; nil when the runner sent no split (an older one), so no claim
+    /// is made about dollars it never counted.
+    public static func weekDollars(_ cost: PlanCostRead, locale: Locale = .current) -> String? {
+        guard !cost.week.isEmpty else { return nil }
+        guard let micros = cost.weekCostMicros else { return dollarsNotReported }
+        return "about \(TaskUsageFormat.dollars(micros, locale: locale)) API-equivalent"
+    }
+
+    /// One row of the week's split: "Claude Code · opus", then "28M tokens ·
+    /// about $41.20 API-equivalent".
+    public static func weekRow(_ w: PlanWeekSpend, locale: Locale = .current) -> PlanCompareRow {
+        let model = w.model.isEmpty ? "no model named" : w.model
+        let dollars = w.costMicros.map { "about \(TaskUsageFormat.dollars($0, locale: locale)) API-equivalent" }
+        let detail = ["\(TaskUsageFormat.tokens(w.tokens, locale: locale)) tokens", dollars ?? dollarsNotReported]
+        let spoken = ["\(spokenTokens(w.tokens, locale: locale)) tokens", dollars ?? dollarsNotReported]
+        return PlanCompareRow(
+            id: "week/\(w.id)", title: "\(harnessName(w.harness)) · \(model)", detail: detail.joined(separator: " · "),
+            spoken: "\(harnessName(w.harness)), \(model). \(spoken.joined(separator: ", "))")
     }
 
     /// Said once under the week: why there is no percentage, and which days.
