@@ -956,7 +956,7 @@ enum TerminalCmd {
     /// it's working; refused, typing nothing, unless safe. Put `--` before a
     /// message that starts with a dash.
     Tell { terminal: String, text: String },
-    /// Type a message into claude's box in a terminal pane and submit it, with its line breaks,
+    /// Type a message into claude's or codex's box in a terminal pane and submit it, with its line breaks,
     /// images (`--image`, repeated) and slash command; queued when it's working. Refused, typing
     /// nothing, unless safe. `--text -` reads stdin.
     Compose { terminal: String, #[arg(long)] text: String, #[arg(long = "image")] images: Vec<std::path::PathBuf> },
