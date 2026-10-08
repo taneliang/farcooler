@@ -97,7 +97,7 @@ impl Watcher {
         if let Some(run) = self.before_enter.lock().unwrap_or_else(|e| e.into_inner()).take() {
             run();
         }
-        self.codex_still_between(to, pid, started, &expected).await?;
+        self.codex_still_between(to, pid, started, &expected, before.is_some()).await?;
         runtime.send_bytes_hex(to.id, "0d").await?;
         self.mark_told(to.id);
         let sent = Sent { text: composed.submitted(&placeholders), images: paths.len(), before, from };
@@ -105,19 +105,25 @@ impl Watcher {
     }
 
     /// The last check before codex's Enter: nobody typed since the paste
-    /// began, a fresh capture reads idle with the box showing `expected`, and
-    /// the rollout doesn't say a turn runs. Anything else leaves the text in
-    /// the box: `paste_left`.
-    async fn codex_still_between(&self, to: &Terminal, pid: i32, started: i64, expected: &Expected) -> Result<()> {
+    /// began, the rollout doesn't say a turn runs, and then (last, so the
+    /// screen is the newest thing read) a fresh capture reads idle with the
+    /// box showing `expected`. `held`: the gate found a rollout, so a lookup
+    /// that finds none now is a miss, not a first prompt, and holds too.
+    /// Anything else leaves the text in the box: `paste_left`.
+    async fn codex_still_between(&self, to: &Terminal, pid: i32, started: i64, expected: &Expected, held: bool) -> Result<()> {
         let left = DomainError::Conflict { what: "paste_left" };
         if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started) {
             return Err(left);
         }
+        if (held && rollout_now(pid).await.is_none()) || codex_turn::said_of(pid).await == registry_turn::Said::NotIdle {
+            return Err(left);
+        }
+        #[cfg(test)]
+        if let Some(run) = self.after_rollout.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            run();
+        }
         let (screen, _, _) = self.service.screen(to.id).await?;
-        if self.service.registry().classify("codex", &screen) != AgentActivity::Idle
-            || !expected.shown_by(&composer::read("codex", &screen))
-            || codex_turn::said_of(pid).await == registry_turn::Said::NotIdle
-        {
+        if self.service.registry().classify("codex", &screen) != AgentActivity::Idle || !expected.shown_by(&composer::read("codex", &screen)) {
             return Err(left);
         }
         Ok(())

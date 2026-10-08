@@ -195,6 +195,12 @@ async fn a_watcher_that_lost_codex_defers_to_the_screen_and_rollout() {
     nothing_typed(&si);
     si.show("idle").await;
     b.doing(agent.id, AgentActivity::None).await;
+    // Idle on the screen, but the rollout says a turn runs: the rollout wins.
+    std::fs::OpenOptions::new().append(true).open(&path).unwrap().write_all(a_turn_starts().as_bytes()).unwrap();
+    assert_eq!(refused(b.watcher.compose_into(agent.id, "now", &[]).await), "busy");
+    nothing_typed(&si);
+    let closed = ROLLOUT.lines().find(|l| l.contains(r#""payload":{"type":"task_complete""#)).unwrap();
+    std::fs::OpenOptions::new().append(true).open(&path).unwrap().write_all(format!("{closed}\n").as_bytes()).unwrap();
     assert_eq!(b.watcher.compose_into(agent.id, "now", &[]).await.expect("sent"), Turn::Between, "{}", si.log());
     assert_eq!(si.submitted(), ["now"], "{}", si.log());
 }
@@ -211,6 +217,43 @@ async fn a_turn_begun_before_the_enter_leaves_the_paste() {
     *b.watcher.before_enter.lock().unwrap() = Some(Box::new(move || {
         std::fs::OpenOptions::new().append(true).open(&held).unwrap().write_all(start.as_bytes()).unwrap();
     }));
+    assert_eq!(refused(b.watcher.compose_into(agent.id, "hello", &[]).await), "paste_left");
+    assert!(si.log().contains("PASTE hello"), "{}", si.log());
+    assert!(!si.log().contains("ENTER"), "{}", si.log());
+}
+
+/// The screen is the last thing read before the Enter: a turn that shows
+/// after the rollout was checked leaves the paste.
+#[tokio::test]
+async fn the_screen_is_read_after_the_rollout_check() {
+    let b = board().await;
+    let path = rollout(&b);
+    let (agent, si) = idle_codex(&b, &path, false).await;
+    let (control, log) = (si.control.clone(), si.log.clone());
+    *b.watcher.after_rollout.lock().unwrap() = Some(Box::new(move || {
+        std::fs::write(&control, "working").unwrap();
+        for _ in 0..750 {
+            if std::fs::read_to_string(&log).unwrap_or_default().contains("MODE working\n") {
+                std::thread::sleep(Duration::from_millis(1000));
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        panic!("the stand-in never showed working");
+    }));
+    assert_eq!(refused(b.watcher.compose_into(agent.id, "hello", &[]).await), "paste_left");
+    assert!(!si.log().contains("ENTER"), "{}", si.log());
+}
+
+/// The gate found codex's rollout and the lookup before the Enter finds none
+/// (its file gone from under the process): held, not passed as a first prompt.
+#[tokio::test]
+async fn a_rollout_lost_before_the_enter_leaves_the_paste() {
+    let b = board().await;
+    let path = rollout(&b);
+    let (agent, si) = idle_codex(&b, &path, false).await;
+    let held = path.clone();
+    *b.watcher.before_enter.lock().unwrap() = Some(Box::new(move || std::fs::remove_file(&held).unwrap()));
     assert_eq!(refused(b.watcher.compose_into(agent.id, "hello", &[]).await), "paste_left");
     assert!(si.log().contains("PASTE hello"), "{}", si.log());
     assert!(!si.log().contains("ENTER"), "{}", si.log());

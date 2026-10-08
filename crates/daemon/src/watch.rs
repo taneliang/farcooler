@@ -949,6 +949,10 @@ pub struct Watcher {
     /// Enter (`compose`'s tests): a key typed after the box read back.
     #[cfg(test)]
     before_enter: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    /// Run once, after codex's last rollout check and before its last
+    /// capture, ahead of the Enter (`compose_codex`'s tests).
+    #[cfg(test)]
+    after_rollout: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
     /// Run once, right before compose's first paste (`compose`'s tests).
     #[cfg(test)]
     before_paste: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
@@ -2837,6 +2841,8 @@ impl Watcher {
             slow_enter_ms: std::sync::atomic::AtomicU64::new(0),
             #[cfg(test)]
             before_enter: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            after_rollout: std::sync::Mutex::new(None),
             #[cfg(test)]
             before_paste: std::sync::Mutex::new(None),
             #[cfg(test)]
