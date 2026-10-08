@@ -198,7 +198,17 @@ final class ComposerWidthUITests: XCTestCase {
         // The main checkout, which opens its shell over the columns.
         let tree = element(app, "pad-tree")
         let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'pad-tree-row-' AND label CONTAINS[c] 'Main Checkout'")).firstMatch
-        for _ in 0..<16 where !row.exists { tree.swipeUp() }
+        // The tree reads its rows after the screen is up, so wait for each swipe's
+        // result instead of swiping and judging at once (ov-425).
+        // A drag from the tree's upper half, not `swipeUp()`, which starts at the
+        // element's centre: with the keyboard up that swipe sometimes scrolled
+        // nothing, and sixteen of them left the list at its first screen.
+        for _ in 0..<16 where !row.waitForExistence(timeout: 3) {
+            let top = tree.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45))
+            let bottom = tree.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1))
+            top.press(forDuration: 0.1, thenDragTo: bottom)
+        }
+        _ = row.waitForExistence(timeout: 30)
         XCTAssertTrue(row.exists, "no main checkout row: \(app.buttons.allElementsBoundByIndex.map(\.identifier))")
         row.tap()
         let back = app.buttons["BackButton"]
