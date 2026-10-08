@@ -2416,6 +2416,7 @@ pub(crate) fn pane_mode_label(mode: i32) -> &'static str {
     match farcooler_protocol::v1::PaneMode::try_from(mode) {
         Ok(farcooler_protocol::v1::PaneMode::Agent) => "agent",
         Ok(farcooler_protocol::v1::PaneMode::Changes) => "changes",
+        Ok(farcooler_protocol::v1::PaneMode::Web) => "web",
         // Unspecified from an older daemon is terminal: the mode that needs no
         // adapter and always works.
         _ => "terminal",

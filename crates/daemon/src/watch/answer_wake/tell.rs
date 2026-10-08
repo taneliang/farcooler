@@ -99,7 +99,7 @@ impl Watcher {
             // A chat orchestrator takes a prompt on its own channel.
             return Err(DomainError::InvalidArgument { what: "terminal" });
         }
-        if to.pane_mode == PaneMode::Changes || !may_be_typed_to(&to.command_preset, to.role) {
+        if to.pane_mode.is_client_drawn() || !may_be_typed_to(&to.command_preset, to.role) {
             return Err(DomainError::Conflict { what: "not_an_agent" });
         }
         if !self.service.is_running(&to) {

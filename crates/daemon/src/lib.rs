@@ -73,6 +73,7 @@ pub mod usage;
 pub(crate) mod test_support;
 pub mod transcript_tail;
 pub mod watch;
+pub mod web_pane;
 pub mod wire;
 pub mod worker_seen;
 pub mod workspace_home;

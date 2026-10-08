@@ -397,6 +397,8 @@ pub fn terminal(view: &TerminalView) -> wire::Terminal {
         // The record's own too: set once, when a split made the terminal.
         split_of: t.split_of.map(id_bytes),
         split_of_orchestrator: t.split_of_orchestrator,
+        // The record's own: the page a web pane opened on (ov-435).
+        web_url: t.web_url.clone(),
         // The runner's `task_link::stamp_notice_task` sets it, where the store is
         // at hand; this converter has none.
         notice_task_id: None,
@@ -705,6 +707,7 @@ pub fn pane_mode(mode: models::PaneMode) -> i32 {
         models::PaneMode::Terminal => wire::PaneMode::Terminal as i32,
         models::PaneMode::Agent => wire::PaneMode::Agent as i32,
         models::PaneMode::Changes => wire::PaneMode::Changes as i32,
+        models::PaneMode::Web => wire::PaneMode::Web as i32,
     }
 }
 

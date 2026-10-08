@@ -1670,6 +1670,14 @@ message Terminal {
   // when there is none, and from a runner without the `draft_hold`
   // capability. The runner keeps it in memory: a restart drops it.
   optional DraftHold draft_hold = 45;
+
+  // The page a web pane opened on (ov-435), as given to `layout.split`: an
+  // http or https URL the runner checked. Set once, when the pane is made,
+  // and never moved: where the owner navigated from there stays on the Mac
+  // that drew it, so nothing an agent can read says what the owner browsed
+  // (R-41). Absent for every other pane, for a web pane opened with no page,
+  // and from a runner without the `web_pane` capability.
+  optional string web_url = 46;
 }
 
 // What a terminal is for. At most one live orchestrator per workspace.
@@ -1703,6 +1711,11 @@ enum PaneMode {
   // what a pane created with the `changes` preset IS, for its whole life. There
   // is no TUI underneath to switch back to.
   PANE_MODE_CHANGES = 3;
+  // A web page the client draws (ov-435): `Terminal.web_url` is where it
+  // opened. Like CHANGES, what a pane made with the `web` preset IS, for its
+  // whole life, and never a mode a pane switches to or from. Its process
+  // only holds the rectangle (`farcooler pane-host --kind web`).
+  PANE_MODE_WEB = 4;
 }
 
 // The four states a coding agent is in, plus the two non-answers.
@@ -2300,6 +2313,15 @@ message LayoutUpdate {
   // screen rather than for whatever the last client asked for.
   optional uint32 columns = 14;
   optional uint32 rows = 15;
+  // The page a split with the `web` command preset opens (ov-435): http or
+  // https only, refused before anything is made otherwise. Required with
+  // that preset and refused with any other. A client that sets it names the
+  // `web_pane` capability in `Request.required_capabilities`: an older
+  // runner drops the field and would launch a program called `web`.
+  //
+  // With no layout to split, the page opens in a window of its own, so an
+  // agent needn't look first.
+  optional string url = 16;
 }
 
 // The attachment exists; bytes follow as `Event.terminal_output`.

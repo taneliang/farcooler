@@ -66,6 +66,7 @@ mod workspaces;
 mod workspace_settings;
 mod repo_landing;
 mod worktree_lfs;
+mod web_pane;
 use terminal_requests::terminal_create_request;
 pub(crate) use daemon_link::{Link, connect_to, expect_value, req, req_for, with};
 use farcooler_client::actions::RemoveRootOutcome;
@@ -370,6 +371,8 @@ enum LayoutCmd {
         #[arg(long)]
         layout: Option<String>,
     },
+    /// Open a web page in a pane, beside the focused one. http and https only.
+    OpenUrl(web_pane::OpenUrl),
     /// Move an existing pane against another, on an edge.
     ///
     /// A drag and drop. Works across layouts: the pane leaves the one it was in.
@@ -1335,10 +1338,11 @@ async fn run() -> Fallible {
 /// would look to both of them like a program that had crashed.
 async fn pane_host(kind: &str) -> Fallible {
     let what = match kind {
-        "changes" => "changes",
+        "changes" => "worktree's changes",
+        "web" => "web page",
         other => return Err(format!("unknown pane kind: {other}").into()),
     };
-    println!("Far Cooler is drawing this worktree's {what} here.");
+    println!("Far Cooler is drawing this {what} here.");
     // No signal handling: tmux kills the pane's process group, and a wait that
     // caught SIGHUP to exit tidily would only be a slower way to be killed.
     std::future::pending::<()>().await;
@@ -2595,6 +2599,7 @@ async fn layout(runner: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
     let worktree_arg = match &cmd {
         LayoutCmd::Show { worktree }
         | LayoutCmd::Split { worktree, .. }
+        | LayoutCmd::OpenUrl(web_pane::OpenUrl { worktree, .. })
         | LayoutCmd::Move { worktree, .. }
         | LayoutCmd::Preset { worktree, .. }
         | LayoutCmd::Cycle { worktree, .. }
@@ -2617,7 +2622,7 @@ async fn layout(runner: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
 
     let method = match &cmd {
         LayoutCmd::Show { .. } => "layout.list",
-        LayoutCmd::Split { .. } => "layout.split",
+        LayoutCmd::Split { .. } | LayoutCmd::OpenUrl(_) => "layout.split",
         LayoutCmd::Move { .. } => "layout.move",
         LayoutCmd::Preset { .. } => "layout.preset",
         LayoutCmd::Cycle { .. } => "layout.cycle",
@@ -2641,6 +2646,7 @@ async fn layout(runner: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
                 update.target = Some(pick(given)?);
             }
         }
+        LayoutCmd::OpenUrl(open) => web_pane::fill(open, &mut update, pick)?,
         LayoutCmd::Move { terminal, onto, side, .. } => {
             update.terminals = vec![pick(terminal)?];
             update.target = Some(pick(onto)?);
@@ -2702,6 +2708,7 @@ async fn layout(runner: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
     } else {
         with(req_for(method, worktree_id), request::Payload::LayoutUpdate(update))
     };
+    let request = web_pane::required(matches!(cmd, LayoutCmd::OpenUrl(_)), request);
     let r = link.call(request).await?;
     let result::Value::PaneGroupList(list) = expect_value(r.value)? else {
         return Err(crate::daemon_link::UNREADABLE.into());
@@ -2717,6 +2724,7 @@ async fn layout(runner: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
 fn named_layout(cmd: &LayoutCmd) -> Option<&str> {
     match cmd {
         LayoutCmd::Split { layout, .. }
+        | LayoutCmd::OpenUrl(web_pane::OpenUrl { layout, .. })
         | LayoutCmd::Preset { layout, .. }
         | LayoutCmd::Cycle { layout, .. }
         | LayoutCmd::Focus { layout, .. }
@@ -3418,6 +3426,7 @@ fn pane_mode_label(mode: i32) -> &'static str {
     match farcooler_protocol::v1::PaneMode::try_from(mode) {
         Ok(farcooler_protocol::v1::PaneMode::Agent) => "agent",
         Ok(farcooler_protocol::v1::PaneMode::Changes) => "changes",
+        Ok(farcooler_protocol::v1::PaneMode::Web) => "web",
         _ => "terminal",
     }
 }
@@ -3735,6 +3744,7 @@ fn worktree_list_terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_js
         // forever, so an agent pane silently drew
         // a terminal and chat mode looked missing.
         "paneMode": pane_mode_label(t.pane_mode),
+        "webUrl": t.web_url,
         "chatCapable": t.chat_capable,
         "agentSessionId": t.agent_session_id,
         "agentMode": t.agent_mode,
@@ -3965,6 +3975,7 @@ fn terminal_event_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Valu
         // refresh would mean toggling to chat did nothing until something
         // else happened to reload the fleet.
         "paneMode": pane_mode_label(t.pane_mode),
+        "webUrl": t.web_url,
         // Watched for the identical reason — see the function comment above.
         "chatCapable": t.chat_capable,
         "agentSessionId": t.agent_session_id,

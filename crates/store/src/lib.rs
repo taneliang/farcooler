@@ -34,6 +34,7 @@ mod store;
 mod tasks;
 pub mod usage;
 mod wakes;
+mod web_panes;
 pub mod waits;
 pub mod workers;
 #[cfg(any(test, feature = "testing"))]

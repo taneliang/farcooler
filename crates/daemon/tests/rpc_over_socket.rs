@@ -4309,3 +4309,124 @@ async fn closing_a_pane_announces_the_layout_it_left_behind() {
     assert_eq!(survivor.terminal_id, first.id);
     assert_eq!(survivor.columns, 120, "the survivor took the whole window: {survivor:?}");
 }
+
+/// The terminals `worktree` has, from `terminal.list`.
+async fn terminals_of(
+    client: &mut Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
+    worktree: &bytes::Bytes,
+) -> Vec<farcooler_protocol::v1::Terminal> {
+    let mut list = request("terminal.list");
+    list.target_resource_id = Some(worktree.clone());
+    let result = client.call(list).await.expect("terminal.list");
+    let Some(result::Value::TerminalList(terminals)) = result.value else { panic!("wrong result") };
+    terminals.items
+}
+
+/// A web page opens as a pane beside the focused one (ov-435): a real pane in
+/// the layout, in web mode, with its page on the record, held open by
+/// `pane-host`, and not a mode anything switches to or from.
+#[tokio::test]
+async fn a_web_page_opens_as_a_pane_beside_the_focused_one() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = tempfile::tempdir().unwrap();
+    let worktree = a_worktree(&mut client, dir.path()).await;
+    let original = a_terminal(&mut client, &worktree.id, "one").await;
+
+    let list = layout_call(
+        &mut client,
+        "layout.split",
+        &worktree.id,
+        farcooler_protocol::v1::LayoutUpdate {
+            command_preset: "web".into(),
+            url: Some("https://github.com/".into()),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(list.items.len(), 1, "the page joins the layout");
+    assert_eq!(list.items[0].panes.len(), 2, "two panes: the terminal and the page");
+
+    let terminals = terminals_of(&mut client, &worktree.id).await;
+    let web = terminals.iter().find(|t| t.id != original.id).expect("the pane the split created");
+    assert_eq!(web.pane_mode, farcooler_protocol::v1::PaneMode::Web as i32, "{web:?}");
+    assert_eq!(web.web_url.as_deref(), Some("https://github.com/"));
+    assert_eq!(
+        web.state(),
+        farcooler_protocol::v1::TerminalState::Running,
+        "pane-host holds the rectangle (running: {:?}, exit: {:?})",
+        web.current_command,
+        web.exit_status,
+    );
+    assert_eq!(original.web_url, None, "a shell has no page");
+
+    for (terminal, mode) in [
+        (&web.id, farcooler_protocol::v1::PaneMode::Terminal),
+        (&original.id, farcooler_protocol::v1::PaneMode::Web),
+    ] {
+        let mut switch = request("terminal.set_pane_mode");
+        switch.payload = Some(request::Payload::SetPaneMode(farcooler_protocol::v1::SetPaneMode {
+            terminal_id: terminal.clone(),
+            pane_mode: mode as i32,
+            force: false,
+        }));
+        assert!(client.call(switch).await.is_err(), "a web pane is opened and closed, never switched: {mode:?}");
+    }
+}
+
+/// With nothing to split, the page opens in a window of its own, so an agent
+/// needn't check for a layout first.
+#[tokio::test]
+async fn a_web_page_with_no_layout_opens_in_a_window_of_its_own() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = tempfile::tempdir().unwrap();
+    let worktree = a_worktree(&mut client, dir.path()).await;
+
+    let list = layout_call(
+        &mut client,
+        "layout.split",
+        &worktree.id,
+        farcooler_protocol::v1::LayoutUpdate {
+            command_preset: "web".into(),
+            url: Some("https://linear.app/".into()),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(list.items.len(), 1, "one layout: the page's own window");
+    let terminals = terminals_of(&mut client, &worktree.id).await;
+    assert_eq!(terminals.len(), 1, "{terminals:?}");
+    assert_eq!(terminals[0].web_url.as_deref(), Some("https://linear.app/"));
+    assert_eq!(terminals[0].pane_mode, farcooler_protocol::v1::PaneMode::Web as i32);
+}
+
+/// Anything but http and https is refused before anything is made, and so is
+/// a URL on any other preset, or a web pane with none.
+#[tokio::test]
+async fn a_web_pane_refuses_anything_but_http_and_https() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = tempfile::tempdir().unwrap();
+    let worktree = a_worktree(&mut client, dir.path()).await;
+    a_terminal(&mut client, &worktree.id, "one").await;
+
+    for (preset, url) in [
+        ("web", Some("file:///etc/passwd")),
+        ("web", Some("javascript:alert(document.cookie)")),
+        ("web", Some("https://")),
+        ("web", None),
+        ("shell", Some("https://github.com/")),
+    ] {
+        let mut req = request("layout.split");
+        req.target_resource_id = Some(worktree.id.clone());
+        req.payload = Some(request::Payload::LayoutUpdate(farcooler_protocol::v1::LayoutUpdate {
+            command_preset: preset.into(),
+            url: url.map(str::to_string),
+            ..Default::default()
+        }));
+        let refused = client.call(req).await;
+        assert!(refused.is_err(), "{preset} {url:?} was opened");
+        assert_eq!(terminals_of(&mut client, &worktree.id).await.len(), 1, "{preset} {url:?} made a pane");
+    }
+}

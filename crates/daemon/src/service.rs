@@ -93,7 +93,7 @@ pub fn shell_quote(value: &str) -> String {
 /// one.
 pub const CHANGES_PRESET: &str = "changes";
 
-/// The process a Changes pane runs.
+/// The process a Changes or web pane runs (`kind` is its preset).
 ///
 /// tmux has no concept of a pane without one, so a surface the client draws
 /// still needs something to own the rectangle. This is that something and it
@@ -104,9 +104,9 @@ pub const CHANGES_PRESET: &str = "changes";
 /// `agent-host` is one: the pane's command is read back by the daemon, printed
 /// by `terminal list` and shown on a phone, and `sleep` in all three of those
 /// places says nothing about what the pane is.
-fn changes_host_command() -> String {
+fn pane_host_command(kind: &str) -> String {
     let binary = shim_binary(std::env::current_exe().ok().as_deref());
-    format!("{} pane-host --kind changes", shell_quote(&binary))
+    format!("{} pane-host --kind {kind}", shell_quote(&binary))
 }
 
 /// What Far Cooler hands a claude pane beyond its preset: both are files in
@@ -367,7 +367,7 @@ pub fn preset_command_with_hooks(
         // login shell would put a `.zshrc` between tmux and the process, and
         // the one thing this pane has to do is exist for as long as tmux says
         // it does.
-        CHANGES_PRESET => changes_host_command(),
+        CHANGES_PRESET | crate::web_pane::WEB_PRESET => pane_host_command(agent),
         // `shell_quote` around the whole payload rather than the bare `'…'`
         // every other arm writes, because this is the only arm that can carry
         // a quote of its own: `settings` is `shell_quote`d in turn, and a
@@ -836,7 +836,7 @@ pub(crate) mod test_agent {
 /// `a_pane_is_named_an_agent_exactly_when_one_was_launched_in_it`.
 fn preset_runs_an_agent(preset: &str) -> bool {
     let head = preset.split_once(':').map(|(a, _)| a).unwrap_or(preset);
-    head != "shell" && head != CHANGES_PRESET && is_safe_model(head)
+    head != "shell" && head != CHANGES_PRESET && head != crate::web_pane::WEB_PRESET && is_safe_model(head)
 }
 
 /// Where an orchestrator's chat runs and its recipe, both halves of it
@@ -4509,13 +4509,15 @@ impl Service {
         term: models::Terminal,
         command_preset: &str,
     ) -> Result<models::Terminal> {
-        if command_preset != CHANGES_PRESET {
-            return Ok(term);
-        }
+        let mode = match command_preset {
+            CHANGES_PRESET => models::PaneMode::Changes,
+            crate::web_pane::WEB_PRESET => models::PaneMode::Web,
+            _ => return Ok(term),
+        };
         self.store.set_pane_mode(
             term.id,
             term.resource_version,
-            models::PaneMode::Changes,
+            mode,
             None,
             // Called from `create_terminal` and `split_terminal` on a terminal
             // whose window has not been made yet. Nothing is reading it.
@@ -4590,14 +4592,14 @@ impl Service {
         // would respawn whatever was running in it, which for an agent
         // mid-turn is work nobody can get back. Opening a changes pane is
         // `layout split --preset changes`; closing one is closing the pane.
-        if term.pane_mode == models::PaneMode::Changes {
+        if matches!(term.pane_mode, models::PaneMode::Changes | models::PaneMode::Web) {
             return Err(DomainError::InvalidArgument {
-                what: "a changes pane has no terminal to switch to; close it instead",
+                what: "a changes or web pane has no terminal to switch to; close it instead",
             });
         }
-        if pane_mode == models::PaneMode::Changes {
+        if matches!(pane_mode, models::PaneMode::Changes | models::PaneMode::Web) {
             return Err(DomainError::InvalidArgument {
-                what: "changes is a pane you open, not a mode you switch to",
+                what: "changes and web are panes you open, not modes you switch to",
             });
         }
 
@@ -4758,9 +4760,9 @@ impl Service {
             // than folded into a wildcard so that a fourth mode arriving here
             // is a compile error instead of a pane quietly respawned as a
             // login shell.
-            models::PaneMode::Changes => {
+            models::PaneMode::Changes | models::PaneMode::Web => {
                 return Err(DomainError::InvalidArgument {
-                    what: "changes is a pane you open, not a mode you switch to",
+                    what: "changes and web are panes you open, not modes you switch to",
                 });
             }
             models::PaneMode::Terminal => {
@@ -8287,7 +8289,7 @@ mod pane_actor_tests {
     #[test]
     fn a_pane_is_named_an_agent_exactly_when_one_was_launched_in_it() {
         let a_persons_shell = format!("{} -il", farcooler_core::shell::login_shell());
-        let the_changes_host = changes_host_command();
+        let (the_changes_host, the_web_host) = (pane_host_command("changes"), pane_host_command("web"));
 
         for preset in [
             // Agents, including one from an adapter this build never heard of.
@@ -8306,6 +8308,7 @@ mod pane_actor_tests {
             // The diff rectangle, with and without a suffix.
             CHANGES_PRESET,
             "changes:anything",
+            crate::web_pane::WEB_PRESET, // and the web page's (ov-435)
             // Presets that reach the builder's final arm and are NOT RUN. The
             // pane gets a login shell, so the person at it is a person.
             "a b",
@@ -8314,7 +8317,7 @@ mod pane_actor_tests {
         ] {
             let command = preset_command_with_hooks(preset, None, &LaunchExtras::NONE);
             let launched_an_agent =
-                command != a_persons_shell && command != the_changes_host;
+                command != a_persons_shell && command != the_changes_host && command != the_web_host;
             assert_eq!(
                 preset_runs_an_agent(preset),
                 launched_an_agent,

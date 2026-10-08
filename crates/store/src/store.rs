@@ -722,7 +722,7 @@ impl Store {
                 r#"SELECT id, worktree_id, title, command_preset, intent, runtime_confirmed,
                           exit_code, exit_signal, lease_generation, epoch,
                           "columns", "rows", resource_version, pane_mode, agent_session_id, task_id,
-                          workspace_id, role, split_of, split_of_orchestrator
+                          workspace_id, role, split_of, split_of_orchestrator, web_url
                    FROM terminals WHERE id = ?1"#,
                 params![uuid_blob(id)],
                 row_to_terminal,
@@ -737,7 +737,7 @@ impl Store {
                 r#"SELECT id, worktree_id, title, command_preset, intent, runtime_confirmed,
                           exit_code, exit_signal, lease_generation, epoch,
                           "columns", "rows", resource_version, pane_mode, agent_session_id, task_id,
-                          workspace_id, role, split_of, split_of_orchestrator
+                          workspace_id, role, split_of, split_of_orchestrator, web_url
                    FROM terminals WHERE worktree_id = ?1"#,
             )
             .map_err(map_err)?;
@@ -754,7 +754,7 @@ impl Store {
                 r#"SELECT id, worktree_id, title, command_preset, intent, runtime_confirmed,
                           exit_code, exit_signal, lease_generation, epoch,
                           "columns", "rows", resource_version, pane_mode, agent_session_id, task_id,
-                          workspace_id, role, split_of, split_of_orchestrator
+                          workspace_id, role, split_of, split_of_orchestrator, web_url
                    FROM terminals WHERE task_id = ?1 ORDER BY rowid"#,
             )
             .map_err(map_err)?;
@@ -791,7 +791,7 @@ impl Store {
                 r#"SELECT id, worktree_id, title, command_preset, intent, runtime_confirmed,
                           exit_code, exit_signal, lease_generation, epoch,
                           "columns", "rows", resource_version, pane_mode, agent_session_id, task_id,
-                          workspace_id, role, split_of, split_of_orchestrator
+                          workspace_id, role, split_of, split_of_orchestrator, web_url
                    FROM terminals WHERE agent_session_id = ?1"#,
             )
             .map_err(map_err)?;
@@ -1053,6 +1053,8 @@ mod tests {
             // never moved.
             "split_of",
             "split_of_orchestrator",
+            // Intent too: the page a web pane was opened on (ov-435).
+            "web_url",
         ];
         assert_eq!(cols.len(), expected.len(), "unexpected column set: {cols:?}");
         for e in expected {

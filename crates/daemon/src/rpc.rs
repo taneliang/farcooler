@@ -2436,12 +2436,10 @@ impl Rpc {
                         } else {
                             p.command_preset.as_str()
                         };
-                        let anchor = match target {
-                            Some(id) => id,
-                            None => svc.focused_pane(worktree, group).await?,
-                        };
                         let title = if p.name.is_empty() { preset } else { p.name.as_str() };
-                        svc.split_terminal(worktree, anchor, side, title, preset).await?;
+                        // A `web` pane takes its URL, and may open in a
+                        // window of its own (ov-435). See `web_pane`.
+                        svc.split_for_wire(worktree, target, group, side, title, preset, p.url.as_deref()).await?;
                         // A split is the one layout verb that CREATES a
                         // terminal, so it is the one that changes the fleet.
                         //

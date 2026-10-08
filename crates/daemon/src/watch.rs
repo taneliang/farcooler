@@ -4680,7 +4680,7 @@ impl Watcher {
                 // changes pane in the fleet and kill the panes on the way past,
                 // for a runner that was fine a second later.
                 if panes.inventory_healthy
-                    && terminal.terminal.pane_mode == farcooler_store::models::PaneMode::Changes
+                    && terminal.terminal.pane_mode.is_client_drawn()
                     && matches!(
                         terminal.state(),
                         // Exited is a pane that ran `exit` and was retained, or
@@ -4889,12 +4889,13 @@ impl Watcher {
                     AgentActivity::None,
                     false,
                 )
-            } else if pane_mode == farcooler_store::models::PaneMode::Changes {
+            } else if pane_mode.is_client_drawn() {
                 // No screen read, because there is nothing on it to read. A
-                // changes pane runs a process that prints one line and waits;
-                // classifying it would spend a `capture-pane` per sample to
-                // learn, every time, that a diff is not an agent.
-                ("changes".to_string(), AgentActivity::None, false)
+                // changes or web pane runs a process that prints one line and
+                // waits; classifying it would spend a `capture-pane` per sample
+                // to learn, every time, that a diff or a page is not an agent.
+                let web = pane_mode == farcooler_store::models::PaneMode::Web;
+                ((if web { "web" } else { "changes" }).to_string(), AgentActivity::None, false)
             } else if pane_mode == farcooler_store::models::PaneMode::Agent {
                 // The protocol, not the screen. An agent-mode pane shows the
                 // shim's status log, which matches no agent signature, so the

@@ -636,6 +636,11 @@ pub mod capability {
     /// can take it. Its own word, so a client offers Bring Here only where
     /// it's served, and Show Terminal alone elsewhere.
     pub const BRING_DRAFT: &str = "bring_draft";
+    /// Web pages as panes (ov-435): `PANE_MODE_WEB`, `Terminal.web_url`, and
+    /// `layout.split` with the `web` preset and `LayoutUpdate.url`. A field on
+    /// an existing payload, so a client that sets it names this in the
+    /// request: an older runner drops the URL and launches `web` as a program.
+    pub const WEB_PANE: &str = "web_pane";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -652,7 +657,7 @@ pub mod capability {
             READ_ONLY_FOLDERS, AGENT_QUEUE, BOARD_PLAN, LFS_POINTERS, BOARD_PAGES, BOARD_RULINGS,
             BOARD_TRAINS, BOARD_COST, LANDING, BOARD_RULING_ACTIONS, AGENT_ROWS, DRAFT_HOLD,
             PROJECTOR_SETTING, AGENT_COMPOSE,
-            COMPOSE, COMPOSE_UPLOAD, TERMINAL_INTERRUPT, CODEX_VIEW, BRING_DRAFT,
+            COMPOSE, COMPOSE_UPLOAD, TERMINAL_INTERRUPT, CODEX_VIEW, BRING_DRAFT, WEB_PANE,
         ];
 
     /// Capabilities this process has but does not offer: a feature behind a

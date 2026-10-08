@@ -691,7 +691,7 @@ impl Watcher {
             // A chat pane has a composer of the app's own; no TUI to paste to.
             return Err(DomainError::InvalidArgument { what: "terminal" });
         }
-        if to.pane_mode == PaneMode::Changes
+        if to.pane_mode.is_client_drawn()
             || !may_be_typed_to(&to.command_preset, to.role)
             || !self.service.is_running(&to)
         {
@@ -814,7 +814,7 @@ impl Watcher {
         let eligible = |t: &Terminal, role: TerminalRole| {
             t.workspace_id == Some(task.workspace_id)
                 && t.role == role
-                && t.pane_mode != PaneMode::Changes
+                && !t.pane_mode.is_client_drawn()
                 && (t.pane_mode == PaneMode::Agent || may_be_typed_to(&t.command_preset, t.role))
                 && self.service.is_running(t)
         };

@@ -274,6 +274,10 @@ pub enum PaneMode {
     /// there is no TUI underneath to switch back to, so this is what the pane
     /// IS rather than a posture it is currently in.
     Changes,
+    /// `farcooler pane-host --kind web`, holding the rectangle a client draws
+    /// a web page into (ov-435). Set at creation and never changed, as
+    /// `Changes` is: `Terminal::web_url` says where it opened.
+    Web,
 }
 
 impl PaneMode {
@@ -282,13 +286,22 @@ impl PaneMode {
             PaneMode::Terminal => 0,
             PaneMode::Agent => 1,
             PaneMode::Changes => 2,
+            PaneMode::Web => 3,
         }
+    }
+
+    /// Whether the client draws this pane's contents, so its process only
+    /// holds the rectangle: a changes or a web pane. Nothing types into one,
+    /// nothing reads its screen, and closing it leaves no record behind.
+    pub fn is_client_drawn(self) -> bool {
+        matches!(self, PaneMode::Changes | PaneMode::Web)
     }
 
     pub fn from_i64(raw: i64) -> Self {
         match raw {
             1 => PaneMode::Agent,
             2 => PaneMode::Changes,
+            3 => PaneMode::Web,
             // Anything unrecognized is the mode that always works.
             _ => PaneMode::Terminal,
         }
@@ -334,6 +347,9 @@ pub struct Terminal {
     /// not known. Set at creation and never moved; later role changes on
     /// either terminal leave it as it was, which is the point.
     pub split_of_orchestrator: Option<bool>,
+    /// The page a web pane opened on (ov-435), checked http or https. `None`
+    /// for every other pane. Set once, by `Store::set_web_url`.
+    pub web_url: Option<String>,
 }
 
 pub(crate) fn row_to_terminal(row: &Row) -> rusqlite::Result<Terminal> {
@@ -358,6 +374,7 @@ pub(crate) fn row_to_terminal(row: &Row) -> rusqlite::Result<Terminal> {
         role: TerminalRole::from_i64(row.get(17)?),
         split_of: get_optional_uuid(row, 18)?,
         split_of_orchestrator: row.get(19)?,
+        web_url: row.get(20)?,
     })
 }
 

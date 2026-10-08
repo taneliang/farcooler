@@ -58,4 +58,5 @@ public enum Capability: String, CaseIterable, Sendable {
     case terminalInterrupt = "terminal_interrupt"
     case codexView = "codex_view"
     case bringDraft = "bring_draft"
+    case webPane = "web_pane"
 }

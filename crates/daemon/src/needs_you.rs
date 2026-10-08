@@ -562,6 +562,7 @@ mod tests {
                 role,
                 split_of: None,
                 split_of_orchestrator: None,
+                web_url: None,
             });
             if let Some(task) = task.filter(|_| role != TerminalRole::Orchestrator) {
                 self.inputs.task_of.insert(id, task);

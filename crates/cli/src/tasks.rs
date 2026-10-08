@@ -2166,11 +2166,11 @@ fn move_task_requests(task: &pb::Task, worktree: Uuid, actor: Actor) -> [pb::Req
 }
 
 /// A running agent pane in a lane: the only kind that is writing there. Any
-/// preset but a person's shell or the changes view; a lane is busy whatever
-/// agent is in it.
+/// preset but a person's shell, the changes view or a web page; a lane is
+/// busy whatever agent is in it.
 fn working(t: &pb::Terminal) -> bool {
     let head = t.command_preset.split_once(':').map_or(t.command_preset.as_str(), |(a, _)| a);
-    t.state == pb::TerminalState::Running as i32 && head != "shell" && head != "changes"
+    t.state == pb::TerminalState::Running as i32 && !matches!(head, "shell" | "changes" | "web")
 }
 
 /// A pane opened for `task` that may still be working it. Running, and also

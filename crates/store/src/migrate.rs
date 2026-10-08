@@ -81,6 +81,7 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     (crate::landing::migration_0029_workspace_landing, Older::Welcome), // ov-313: one new table (landing.rs says why)
     (crate::rulings::migration_0030_ruling_reversals, Older::Welcome), // ov-333: one column on 0026's own table (rulings.rs says why)
     (crate::wakes::migration_0038_wake_pasted, Older::Welcome), // ov-385: one nullable column per wake queue (wakes.rs says why)
+    (crate::web_panes::migration_0040_web_url, Older::Welcome), // ov-435: one nullable column (web_panes.rs says why)
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -899,6 +900,10 @@ pub(crate) fn migrate_only_to(conn: &mut Connection, version: u32) {
     .unwrap();
     tx.commit().unwrap();
 }
+
+#[cfg(test)]
+#[path = "migrate_tests.rs"]
+mod more_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1778,25 +1783,5 @@ mod tests {
             .expect("the old split is still there, with the column");
         assert_eq!(split_of, Some(vec![7]), "its origin stands");
         assert_eq!(from_orchestrator, None, "whether that was the orchestrator isn't known");
-    }
-
-    /// One Main per repository, held by the schema.
-    #[test]
-    fn a_repository_has_one_main() {
-        let mut conn = open();
-        migrate(&mut conn, 0).unwrap();
-        conn.execute_batch(
-            "INSERT INTO repository_roots VALUES (x'01', x'02', '/r', 0, 1);
-             INSERT INTO repositories VALUES (x'03', x'02', x'01', 'r', '/r/.git', '', 1, '');
-             INSERT INTO workspaces (id, repository_id, name, task_prefix, is_main, ordinal, created_at)
-                 VALUES (x'04', x'03', 'Main', 'r', 1, 0, 0);",
-        )
-        .unwrap();
-        let second = conn.execute(
-            "INSERT INTO workspaces (id, repository_id, name, task_prefix, is_main, ordinal, created_at)
-                 VALUES (x'05', x'03', 'Main', 'r2', 1, 1, 0)",
-            [],
-        );
-        assert!(second.is_err(), "a second Main is refused");
     }
 }
