@@ -241,10 +241,41 @@ struct NativeComposer: View {
 
     @ViewBuilder
     private func issueLine(_ issue: AgentConversation.SendIssue) -> some View {
+        // Three buttons beside the words squeeze them to a column on a phone:
+        // with Bring Here, the words go above and the buttons below.
+        if issue == .draftInTerminal, model.offersBringHere {
+            VStack(alignment: .leading, spacing: Spacing.tight) {
+                Text(AgentConversation.draftInTerminalBring)
+                HStack(spacing: Spacing.group) {
+                    Spacer(minLength: 0)
+                    Button("Bring Here") { Task { await model.bringHere() } }
+                        .disabled(model.bringing)
+                        .accessibilityIdentifier("native-bring-here")
+                    Button("Show Terminal", action: showTerminal)
+                    Button("Dismiss") { model.issue = nil }
+                }
+            }
+            .font(.callout)
+            .padding(.horizontal, Spacing.inset)
+            .padding(.vertical, Spacing.group)
+            .surface(.floating, in: .card)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("native-send-issue")
+        } else {
+            plainIssueLine(issue)
+        }
+    }
+
+    private func plainIssueLine(_ issue: AgentConversation.SendIssue) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
             switch issue {
             case .draftInTerminal:
+                // R-28: refused, with the terminal (Bring Here is drawn above).
                 Text(AgentConversation.draftInTerminal)
+                Spacer(minLength: Spacing.group)
+                Button("Show Terminal", action: showTerminal)
+            case .draftLeftInTerminal(let words):
+                Text(words)
                 Spacer(minLength: Spacing.group)
                 Button("Show Terminal", action: showTerminal)
             case .said(let words):

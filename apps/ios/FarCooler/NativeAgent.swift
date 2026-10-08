@@ -131,6 +131,7 @@ final class NativePanes: ObservableObject {
         model.core = core
         model.preset = preset
         model.interruptSink = CoreInterruptSink(core: core)
+        model.draftSink = CoreDraftSink(core: core)
         panes[terminal] = model
         return model
     }
@@ -202,6 +203,14 @@ final class NativePaneModel: ObservableObject {
     @Published var pressing: AgentConversation.PaneKey?
     /// The connection's interrupt sink, handed to `keys` where it's offered.
     var interruptSink: (any InterruptSink)?
+    /// Where Bring Here reads and clears claude's box (ov-369): the runner's
+    /// connection, where it serves `bring_draft`; nil, and only Show
+    /// Terminal is offered, where not.
+    @Published private(set) var drafts: (any DraftSink)?
+    /// The connection's draft sink, handed to `drafts` where it's offered.
+    var draftSink: (any DraftSink)?
+    /// A Bring Here on its way, until the runner answers the clear.
+    @Published var bringing = false
     @Published private(set) var sending = false
     /// How many times the person took claude's suggestion (ov-409): the
     /// field claims the keyboard on each, so the draft can be edited.
@@ -309,7 +318,10 @@ final class NativePaneModel: ObservableObject {
     /// What the runner offers this pane, from its hello's capabilities: line
     /// breaks, images and commands with `compose` (ov-367), Stop and Send Now
     /// with `terminal_interrupt` (ov-368).
-    func offer(rich: Bool, interrupts: Bool) {
+    /// Bring Here with `bring_draft` (ov-369).
+    func offer(rich: Bool, interrupts: Bool, bring: Bool = false) {
+        let drafting: (any DraftSink)? = bring ? draftSink : nil
+        if (drafts == nil) != (drafting == nil) { drafts = drafting }
         if self.rich != rich {
             self.rich = rich
             if !rich { images = []; thumbnails = [:] }

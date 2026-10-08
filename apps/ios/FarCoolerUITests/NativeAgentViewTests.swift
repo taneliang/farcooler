@@ -215,16 +215,55 @@ final class NativeAgentViewTests: XCTestCase {
         XCTAssertTrue(wait(30) { showing(app).hasPrefix("terminal ") }, "Show Terminal didn't show it")
     }
 
-    /// R-28: a draft in the terminal's box refuses, with Show Terminal.
+    /// R-28: a draft in the terminal's box refuses, with Show Terminal; on a
+    /// runner without `bring_draft`, nothing else.
     func testADraftInTheTerminalRefusesWithShowTerminal() {
-        let app = launch(["-native-draft"])
+        let app = launch(["-native-draft", "-native-no-bring"])
         _ = conversation(app)
         send(app, "Anything")
         let issue = element(app, "native-send-issue")
         XCTAssertTrue(issue.waitForExistence(timeout: 30))
         XCTAssertTrue(app.staticTexts["The terminal’s box already holds a draft. Send or clear it there first."].exists)
+        XCTAssertFalse(element(app, "native-bring-here").exists, "Bring Here on a runner that doesn't serve it")
         issue.buttons["Show Terminal"].tap()
         XCTAssertTrue(wait(30) { showing(app).hasPrefix("terminal ") }, "Show Terminal didn't show it")
+    }
+
+    /// R-28, ov-369: Bring Here moves the box's draft ahead of the
+    /// composer's, the runner clears the box of exactly that, and the send
+    /// then goes with both.
+    func testBringHereMovesTheTerminalsDraftAndTheSendGoes() {
+        let app = launch(["-native-draft"])
+        _ = conversation(app)
+        send(app, "and the docs")
+        let bring = element(app, "native-bring-here")
+        XCTAssertTrue(bring.waitForExistence(timeout: 30), "no Bring Here")
+        XCTAssertTrue(app.staticTexts["The terminal’s box already holds a draft of its own."].exists)
+        capture("bring-here")
+        bring.tap()
+        XCTAssertTrue(wait(30) { harness(app).contains("brought=from the terminal") }, harness(app))
+        let field = element(app, "native-composer")
+        XCTAssertTrue(wait(30) { (field.value as? String) == "from the terminal\nand the docs" }, "\(String(describing: field.value))")
+        XCTAssertFalse(element(app, "native-send-issue").exists, "the line stays after a Bring Here that went")
+        element(app, "native-send").tap()
+        XCTAssertTrue(wait(30) { harness(app).contains("sent=from the terminal⏎and the docs") }, harness(app))
+    }
+
+    /// A clear that didn't go: the text is here and the line says it's in
+    /// the box too, with Show Terminal and no second Bring Here.
+    func testABringHereThatCantClearSaysTheTextIsInBoth() {
+        let app = launch(["-native-draft", "-native-draft-stuck"])
+        _ = conversation(app)
+        send(app, "and the docs")
+        let bring = element(app, "native-bring-here")
+        XCTAssertTrue(bring.waitForExistence(timeout: 30), "no Bring Here")
+        bring.tap()
+        let field = element(app, "native-composer")
+        XCTAssertTrue(wait(30) { (field.value as? String) == "from the terminal\nand the docs" }, "\(String(describing: field.value))")
+        let issue = element(app, "native-send-issue")
+        XCTAssertTrue(wait(30) { issue.exists && !bring.exists }, "the line still offers Bring Here")
+        XCTAssertTrue(issue.buttons["Show Terminal"].exists)
+        XCTAssertFalse(harness(app).contains("brought=from"), harness(app))
     }
 
     /// A runner whose projector is off: the terminal, and no switch.

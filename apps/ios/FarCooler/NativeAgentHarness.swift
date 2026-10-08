@@ -16,7 +16,10 @@ import UIKit
 /// - `terminal.compose` takes the message and the next follow shows it as a
 ///   turn; `-native-busy` answers that claude's queue took it,
 ///   `-native-dialog` refuses it for a dialog, `-native-draft` for a draft in
-///   the terminal's box.
+///   the terminal's box: "from the terminal" until Bring Here clears it
+///   (`terminal.bring_draft`, ov-369, recorded as `brought=`), or refused as
+///   `changed` under `-native-draft-stuck`. `-native-no-bring`: a runner
+///   without `bring_draft`, so Show Terminal alone.
 /// - The runner has `compose` and `terminal_interrupt` unless
 ///   `-native-no-compose` (one line, no photos) or `-native-no-interrupt`
 ///   (no Stop, no Send Now). The reply's turn is `Busy`, so Stop shows, unless
@@ -138,6 +141,7 @@ struct NativeAgentHarness: View {
                     + (rows ? ["agent_rows", "agent_compose"] : [])
                     + (CommandLine.arguments.contains("-native-no-compose") ? [] : ["compose", "compose_upload"])
                     + (CommandLine.arguments.contains("-native-no-interrupt") ? [] : ["terminal_interrupt"])
+                    + (CommandLine.arguments.contains("-native-no-bring") ? [] : ["bring_draft"])
                     + (CommandLine.arguments.contains("-native-codex-before") ? [] : ["codex_view"])))
     }
 
@@ -253,7 +257,7 @@ final class NativeHarnessRunner: ObservableObject {
     /// sent=a|b images=mime:bytes,mime:bytes pressed=stop,sendnow
     /// answered=<ask> <option> <answers>|…`. A line break in a sent message
     /// reads `⏎`.
-    @Published private(set) var said = "follows=0 background=0 changed=false linked=0 sent= images= pressed= answered="
+    @Published private(set) var said = "follows=0 background=0 changed=false linked=0 sent= images= pressed= answered= brought="
     /// Each answer the held ask was given (ov-370).
     private var answered: [String] = []
     /// The held ask was answered, and the next follow is to say so.
@@ -268,6 +272,10 @@ final class NativeHarnessRunner: ObservableObject {
     private var images: [String] = []
     /// The keys pressed, in order: `stop`, `sendnow`.
     private var pressed: [String] = []
+    /// claude's box under `-native-draft`, until Bring Here clears it.
+    private var box = CommandLine.arguments.contains("-native-draft") ? "from the terminal" : ""
+    /// What Bring Here cleared from the box.
+    private var brought: [String] = []
     /// Messages sent and not yet shown by a follow.
     private var unshown: [String] = []
     private var rev: UInt64 = 10
@@ -299,6 +307,9 @@ final class NativeHarnessRunner: ObservableObject {
                 "\(image["mime"] as? String ?? "?"):\(Data(base64Encoded: image["base64"] as? String ?? "")?.count ?? -1)"
             }
             return try await MainActor.run { try compose(text, images: images) }
+        case "terminal.bring_draft":
+            let expected = args["expected"] as? String
+            return try await MainActor.run { try bring(expected) }
         case "terminal.interrupt", "terminal.send_now":
             let key = method == "terminal.interrupt" ? "stop" : "sendnow"
             return try await MainActor.run { try press(key) }
@@ -326,7 +337,19 @@ final class NativeHarnessRunner: ObservableObject {
         said = "follows=\(follows) background=\(background) changed=\(updated) linked=\(linked) "
             + "sent=\(sent.joined(separator: "|").replacingOccurrences(of: "\n", with: "⏎")) "
             + "images=\(images.joined(separator: ",")) pressed=\(pressed.joined(separator: ",")) "
-            + "answered=\(answered.joined(separator: "|"))"
+            + "answered=\(answered.joined(separator: "|")) brought=\(brought.joined(separator: "|"))"
+    }
+
+    /// `terminal.bring_draft`: the box read, or cleared of `expected`.
+    private func bring(_ expected: String?) throws -> Data {
+        guard let expected else { return try json(["text": box, "cleared": false]) }
+        if CommandLine.arguments.contains("-native-draft-stuck") || expected != box {
+            throw ClientCore.CoreError.rejected("The box changed.", word: "resource-conflict", what: "changed")
+        }
+        brought.append(box)
+        box = ""
+        report()
+        return try json(["text": expected, "cleared": true])
     }
 
     /// The held ask under `-native-held-ask`, or nil.
@@ -447,7 +470,7 @@ final class NativeHarnessRunner: ObservableObject {
         if args.contains("-native-dialog") {
             throw ClientCore.CoreError.rejected("A dialog is open.", word: "resource-conflict", what: "dialog")
         }
-        if args.contains("-native-draft") {
+        if args.contains("-native-draft"), !box.isEmpty {
             throw ClientCore.CoreError.rejected("The box holds a draft.", word: "resource-conflict", what: "draft")
         }
         sent.append(text)

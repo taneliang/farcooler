@@ -55,10 +55,13 @@ struct NativeSwitch<Content: View>: View {
 struct NativeOffer: Equatable {
     var rich = false
     var interrupts = false
+    /// Bring Here, with `bring_draft` (ov-369).
+    var bring = false
 
     init(_ build: DaemonBuild?) {
         rich = build?.can(.compose) == true
         interrupts = build?.can(.terminalInterrupt) == true
+        bring = build?.can(.bringDraft) == true
     }
 }
 
@@ -161,14 +164,14 @@ private struct NativeSwitchBody<Content: View>: View {
             #endif
         }
         .onChange(of: isOnScreen, initial: true) { _, now in model?.setOnScreen(now) }
-        .onChange(of: offer, initial: true) { _, now in model?.offer(rich: now.rich, interrupts: now.interrupts) }
+        .onChange(of: offer, initial: true) { _, now in model?.offer(rich: now.rich, interrupts: now.interrupts, bring: now.bring) }
         .onChange(of: model.map(ObjectIdentifier.init)) { _, _ in
             #if DEBUG
             if held != nil, model == nil { NativeProbe.dropped[terminal, default: 0] += 1 }
             #endif
             if let held, held !== model { held.release() }
             held = model
-            model?.offer(rich: offer.rich, interrupts: offer.interrupts)
+            model?.offer(rich: offer.rich, interrupts: offer.interrupts, bring: offer.bring)
             model?.setOnScreen(isOnScreen)
         }
         .onAppear {
