@@ -80,6 +80,8 @@ struct NativeAgentHarness: View {
     private static let preparedOnce: Void = {
         AgentConversation.remember(
             conversation: !CommandLine.arguments.contains("-native-terminal"), for: pane)
+        // The saved composer draft (ov-369 F4) is the last launch's, not this one's.
+        NativeDraftStore.write("", for: pane)
         if let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
             try? FileManager.default.removeItem(at: caches.appendingPathComponent("agent-rows/phone-\(pane).json"))
         }

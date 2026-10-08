@@ -54,6 +54,7 @@ final class NativePaneModel: ObservableObject {
     /// what's sent.
     @Published var draft = "" {
         didSet {
+            draftKeeper?.changed(draft)
             if !rich, draft.contains(where: \.isNewline) {
                 draft = draft.replacingOccurrences(of: "\r\n", with: " ").replacingOccurrences(of: "\n", with: " ")
                     .replacingOccurrences(of: "\r", with: " ")
@@ -157,11 +158,17 @@ final class NativePaneModel: ObservableObject {
         }
     }
 
-    init(terminal: String, store: AgentRowStore, sink: (any ComposeSink)?) {
+    /// Keeps the draft on disk per terminal (ov-369 F4, R-38); nil in tests
+    /// that don't care.
+    let draftKeeper: DraftKeeper?
+
+    init(terminal: String, store: AgentRowStore, sink: (any ComposeSink)?, draftKeeper: DraftKeeper? = nil) {
         self.terminal = terminal
         self.store = store
         self.sink = sink
+        self.draftKeeper = draftKeeper
         showsNative = NativePaneModel.remembered(for: terminal)
+        if let draftKeeper { draft = draftKeeper.restored }
     }
 
     /// The longest message the box takes from here (`tell.rs`'s

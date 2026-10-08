@@ -225,6 +225,17 @@ class Settings(context: Context) : com.farcooler.net.PaneViewMemory {
         preferences.edit().putBoolean(com.farcooler.model.AgentConversation.viewKey(terminal), conversation).apply()
     }
 
+    /** The conversation composer's draft for [terminal], kept across process death (ov-369 F4, R-38). */
+    override fun draft(terminal: String): String = preferences.getString(draftKey(terminal), null) ?: ""
+
+    override fun saveDraft(terminal: String, text: String) {
+        val edit = preferences.edit()
+        if (text.isEmpty()) edit.remove(draftKey(terminal)) else edit.putString(draftKey(terminal), text)
+        edit.apply()
+    }
+
+    private fun draftKey(terminal: String) = "native.draft.$terminal"
+
     companion object {
         private const val KEY_WORKSPACE_TAB = "workspace.tab."
         private const val KEY_LAST_WORKSPACE = "workspace.last"

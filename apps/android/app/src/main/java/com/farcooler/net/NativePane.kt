@@ -137,6 +137,33 @@ interface PaneViewMemory {
     fun wantsConversation(terminal: String): Boolean
 
     fun remember(terminal: String, conversation: Boolean)
+
+    /** The composer's text saved for [terminal] (ov-369 F4, R-38), or "" for none. */
+    fun draft(terminal: String): String = ""
+
+    /** Save [text] as [terminal]'s composer draft; "" removes it. Text only, already capped by [NativeDraft.capped]. */
+    fun saveDraft(terminal: String, text: String) {}
+}
+
+/** The composer's saved draft (ov-369 F4, R-38): at most 64 KB of UTF-8, written after a quiet 300 ms. */
+object NativeDraft {
+    const val CAP_BYTES = 64 * 1024
+    const val DELAY_MS = 300L
+
+    /** [text] cut to at most [CAP_BYTES] of UTF-8, never inside a character. */
+    fun capped(text: String): String {
+        if (text.toByteArray(Charsets.UTF_8).size <= CAP_BYTES) return text
+        var used = 0
+        var end = 0
+        while (end < text.length) {
+            val point = text.codePointAt(end)
+            val size = String(Character.toChars(point)).toByteArray(Charsets.UTF_8).size
+            if (used + size > CAP_BYTES) break
+            used += size
+            end += Character.charCount(point)
+        }
+        return text.substring(0, end)
+    }
 }
 
 /** A memory that lasts as long as the process, for tests and for a harness. */
@@ -145,6 +172,12 @@ class InMemoryPaneViews : PaneViewMemory {
     override fun wantsConversation(terminal: String): Boolean = views[terminal] ?: true
     override fun remember(terminal: String, conversation: Boolean) {
         views[terminal] = conversation
+    }
+
+    private val drafts = HashMap<String, String>()
+    override fun draft(terminal: String): String = drafts[terminal] ?: ""
+    override fun saveDraft(terminal: String, text: String) {
+        if (text.isEmpty()) drafts.remove(terminal) else drafts[terminal] = text
     }
 }
 
@@ -210,6 +243,8 @@ class NativePaneModel(
     private val interruptSink: InterruptSink? = null,
     /** Where Bring here goes, handed to [drafts] where the runner offers it (ov-369). */
     private val draftSink: DraftSink? = null,
+    /** How long the draft is quiet before it is saved (ov-369 F4); tests shorten it. */
+    private val draftDelayMs: Long = NativeDraft.DELAY_MS,
 ) {
     /** The agent the pane runs, as its preset says: `claude` or `codex` (ov-416). */
     var preset by mutableStateOf("claude")
@@ -262,8 +297,30 @@ class NativePaneModel(
      * Return typed at the end sends, as the keyboard's Send key says. With it, as
      * typed: Return is a new line, and Send sends. Set through [onDraft].
      */
-    var draft by mutableStateOf("")
+    var draft by mutableStateOf(memory.draft(terminal))
         private set
+
+    private var savingDraft: kotlinx.coroutines.Job? = null
+
+    /** Every change to [draft] goes through here, so it is saved: after [draftDelayMs] quiet, or at once when empty (a confirmed send must not be undone by a late write). */
+    private fun changeDraft(text: String) {
+        draft = text
+        savingDraft?.cancel()
+        savingDraft = null
+        if (text.isEmpty()) {
+            memory.saveDraft(terminal, "")
+            return
+        }
+        savingDraft = scope.launch {
+            kotlinx.coroutines.delay(draftDelayMs)
+            memory.saveDraft(terminal, NativeDraft.capped(text))
+        }
+    }
+
+    /** The draft's pending save, finished. For tests. */
+    suspend fun draftSaved() {
+        savingDraft?.join()
+    }
 
     /**
      * Whether the runner takes line breaks, images and slash commands (`compose`,
@@ -425,7 +482,7 @@ class NativePaneModel(
             if (!rich) {
                 images = emptyList()
                 // The draft was kept as typed, or flattened as it came in.
-                draft = AgentConversation.flattened(draft)
+                changeDraft(AgentConversation.flattened(draft))
             }
         }
         val sink = if (interrupts) interruptSink else null
@@ -469,14 +526,14 @@ class NativePaneModel(
     /** The text field's change: as typed with `compose`; one line, and a trailing Return sends, without. */
     fun onDraft(text: String) {
         if (rich) {
-            draft = text
+            changeDraft(text)
             return
         }
         if (text.endsWith("\n") && text.dropLast(1) == draft) {
             send()
             return
         }
-        draft = AgentConversation.flattened(text)
+        changeDraft(AgentConversation.flattened(text))
     }
 
     /**
@@ -534,7 +591,7 @@ class NativePaneModel(
         scope.launch {
             try {
                 val wasQueued = sink.compose(terminal, text, going)
-                if (outgoing == text) draft = ""
+                if (outgoing == text) changeDraft("")
                 detachAll(going)
                 if (wasQueued) queued = queued + AgentConversation.echo(text, going.size)
                 sent += 1
@@ -607,8 +664,8 @@ class NativePaneModel(
                 issue = BringHere.run(
                     agent = agent,
                     read = { answered { drafts.bringDraft(terminal, null).first } },
-                    place = { text -> draft = BringHere.merged(text, draft) },
-                    withdraw = { text -> draft = BringHere.withdrawn(text, draft) },
+                    place = { text -> changeDraft(BringHere.merged(text, draft)) },
+                    withdraw = { text -> changeDraft(BringHere.withdrawn(text, draft)) },
                     clear = { text -> answered { drafts.bringDraft(terminal, text).second } },
                 )
             } finally {

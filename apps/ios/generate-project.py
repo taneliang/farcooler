@@ -450,6 +450,8 @@ AGENTKIT_SOURCES = [
     # on this file's growth are rules with no screen in them. Not in the watch
     # or extension lists: none of them has a composer. See `PaneDraftTests`.
     "PaneDrafts.swift",
+    # The native conversation composer's draft, kept per terminal (ov-369 F4).
+    "DraftKeeper.swift",
     # The shapes the FFI sends, which this app used to call `Model.swift` and
     # keep in `SOURCES`. Only in THIS list, and that is the point of the move
     # rather than a detail of it: everything in the file is `internal`, so the

@@ -44,7 +44,9 @@ final class NativeAnswersUITests: XCTestCase {
     private func answered(_ app: XCUIApplication) -> String {
         let said = element(app, "native-harness").value as? String ?? ""
         guard let range = said.range(of: "answered=") else { return "" }
-        return String(said[range.upperBound...])
+        // `brought=` follows `answered=` in the harness's line (ov-369).
+        let rest = said[range.upperBound...]
+        return String(rest.range(of: " brought=").map { rest[..<$0.lowerBound] } ?? rest)
     }
 
     /// The ask's row, once the conversation shows it.

@@ -297,7 +297,7 @@ final class NativeAgents: ObservableObject {
         }
         let store = AgentRowStore(key: target.isEmpty ? "local-\(terminal)" : "remote-\(terminal)")
         let core = links[target]?.core
-        let model = NativePaneModel(terminal: terminal, store: store, sink: core)
+        let model = NativePaneModel(terminal: terminal, store: store, sink: core, draftKeeper: DraftKeeper(terminal: terminal, defaults: defaults))
         if let program { model.program = program }
         panes[terminal] = model
         paneTargets[terminal] = target

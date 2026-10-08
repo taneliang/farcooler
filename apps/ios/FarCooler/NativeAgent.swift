@@ -179,6 +179,7 @@ final class NativePaneModel: ObservableObject {
     /// says. With it, as typed: Return is a new line, and Send sends.
     @Published var draft = "" {
         didSet {
+            draftKeeper.changed(draft)
             guard !rich else { return }
             if draft.hasSuffix("\n"), draft.dropLast() == oldValue {
                 draft = oldValue
@@ -244,12 +245,15 @@ final class NativePaneModel: ObservableObject {
     private(set) var stops = 0
 
     private let defaults: UserDefaults
+    /// Keeps the draft on disk per terminal (ov-369 F4, R-38).
+    let draftKeeper: DraftKeeper
     /// Whether this pane is the one on screen, and the app in front.
     private var onScreen = false
 
     init(
         terminal: String, store: AgentRowStore, source: any AgentRowSource, sink: any ConversationSink,
-        answers: (any AgentAnswerSink)? = nil, defaults: UserDefaults = .standard
+        answers: (any AgentAnswerSink)? = nil, defaults: UserDefaults = .standard,
+        draftDelay: Duration = .milliseconds(300)
     ) {
         self.terminal = terminal
         self.store = store
@@ -257,7 +261,9 @@ final class NativePaneModel: ObservableObject {
         self.sink = sink
         self.answers = answers
         self.defaults = defaults
+        draftKeeper = DraftKeeper(terminal: terminal, defaults: defaults, delay: draftDelay)
         wantsConversation = AgentConversation.showsConversation(terminal, defaults: defaults)
+        draft = draftKeeper.restored
         updateShowing()
     }
 
