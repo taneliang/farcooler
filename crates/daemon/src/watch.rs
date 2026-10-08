@@ -5003,7 +5003,7 @@ impl Watcher {
                             .turn_from_log(
                                 id,
                                 PaneJoin {
-                                    preset: agent,
+                                    preset: agent.or_else(|| registry_join::codex_under_a_shell(&preset, &command)),
                                     pid,
                                     cwd: cwd.clone(),
                                     title: title.clone(),

@@ -56,6 +56,17 @@ pub(super) fn feed_projector(registry: &Registry, terminal: Uuid, pane: &PaneJoi
     projectors.tick(terminal, entry.and_then(|e| e.status));
 }
 
+/// A codex this daemon launched, in a pane whose foreground command reads
+/// as the shell that launched it: fish runs `-c` without job control, so the
+/// pane's command stays `fish`, and once codex's banner scrolls away its
+/// screen names it nowhere (measured, ov-416). Named codex for the log join
+/// and its projector alone, which then prove it by the rollout its process
+/// holds open: a codex that has exited holds none, and nothing is joined.
+pub(super) fn codex_under_a_shell(launched: &str, command: &str) -> Option<String> {
+    let shell = matches!(command.rsplit('/').next().unwrap_or(command).trim_start_matches('-'), "fish" | "sh" | "bash" | "zsh");
+    (launched.split(':').next() == Some("codex") && shell).then(|| "codex".to_string())
+}
+
 fn is_codex(pane: &PaneJoin) -> bool {
     pane.preset.as_deref().is_some_and(|p| p.starts_with("codex"))
 }
@@ -190,6 +201,17 @@ mod tests {
     const NEW_ROLLOUT: &str = include_str!(
         "../../../core/fixtures/session-logs/codex-tui-0.153.4/rollout-2026-10-07T12-28-45-01a117d6-f550-7013-a939-b02d182c0321.jsonl"
     );
+
+    /// A codex launched here, under a shell that keeps the pane's command
+    /// (fish), is codex to the join; a shell pane, or claude's, is not.
+    #[test]
+    fn a_codex_under_fish_is_joined_as_codex() {
+        assert_eq!(codex_under_a_shell("codex", "fish").as_deref(), Some("codex"));
+        assert_eq!(codex_under_a_shell("codex:gpt-5", "-zsh").as_deref(), Some("codex"));
+        assert_eq!(codex_under_a_shell("shell", "fish"), None);
+        assert_eq!(codex_under_a_shell("claude", "fish"), None);
+        assert_eq!(codex_under_a_shell("codex", "vim"), None, "something else in front");
+    }
 
     /// A codex pane's projector opens on the rollout the watcher's join reads,
     /// its rows and its activity the rollout's own, and moves with `/new`.
