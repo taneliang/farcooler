@@ -40,6 +40,12 @@ final class TaskUsageUITests: XCTestCase {
         element(app, "task-usage-breakdown").tap()
         let rows = app.descendants(matching: .any)
         let claude = rows.matching(NSPredicate(format: "label CONTAINS '$2.87 partly not reported'")).firstMatch
+        // The task screen's ask section grew into a radio list (ov-431), so
+        // the breakdown can open entirely below the fold: scroll to claude's
+        // row too, as a reader would.
+        for _ in 0..<4 where !(claude.exists && claude.isHittable) {
+            app.swipeUp()
+        }
         XCTAssertTrue(claude.waitForExistence(timeout: 5), "claude's row hides its caveat: \(app.debugDescription)")
         // The breakdown opens below the fold since the task screen grew its
         // Ask the Orchestrator section (ov-241): on an iPhone 17 claude's row
