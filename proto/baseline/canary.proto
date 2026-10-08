@@ -1,4 +1,4 @@
-// Shipped by Canary at f9ada74b9f401c71787d1c0ca4990fefe7308fca. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 67a651c0c10256576f20e53e21396a8513c48ece. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -461,6 +461,11 @@ message AgentRowsPage {
   optional uint64 before = 2;
   // 0 is the runner's default, 100. Capped at 500.
   uint32 limit = 3;
+  // Whether the client draws a `Hint` row (ov-409). A client released before
+  // it decodes the row as unknown and draws nothing, but still counts it, so
+  // a fresh session would lose its empty state: the runner leaves the row
+  // out unless this is set.
+  bool hint_rows = 4;
 }
 
 // `agent.rows_follow`: what changed after `after_rev`, held open up to
@@ -474,6 +479,8 @@ message AgentRowsFollow {
   // How long the runner may hold the call while nothing changes. 0 answers
   // at once; capped at 25 s.
   uint32 wait_ms = 4;
+  // As on `AgentRowsPage`: the `Hint` row is sent only when this is set.
+  bool hint_rows = 5;
 }
 
 message AgentRow {
