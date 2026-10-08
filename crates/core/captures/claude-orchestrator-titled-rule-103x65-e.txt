@@ -1,0 +1,65 @@
+    placeholder. Tab, or a tap on the phones, takes a real predicted prompt into the draft. Nothing
+    sends without you.
+  - [1mBring Here[0m (ov-369): when claude's own input box already holds text, you can move it into the
+    composer instead of being stuck. Composer drafts are now also saved per terminal, so quitting the
+    app doesn't lose them.
+  - [1mPhone fixes[0m for the largest text sizes, and the iPad Hide Keyboard bug.
+
+  [1mCI and local testing:[0m
+  - iOS UI tests run in five shards now, each at about 57% of its timeout.
+  - Several flaky tests are fixed.
+  - The Mac suite now finishes overnight. It had been hanging because your display goes to sleep. While
+    the Mac tests run, the display now lights up for a few minutes (ruling R-40 covers the shard
+    change, R-39 the display wake-up).
+
+  [1mCalls I made for you, all reversible:[0m
+  - [1mR-37:[0m [38;5;153mTry "…"[39m examples show as a placeholder hint only.
+  - [1mR-38:[0m composer drafts are saved per terminal.
+  - [1mR-39:[0m the test runner wakes your display during the Mac suite.
+  - [1mR-40:[0m five iOS shards instead of four. Main was red on the time budget, and it was my
+    recommendation on ov-420.
+
+  [1mWaiting on you:[0m
+  - [1mov-399:[0m turn the conversation view on by default? I recommend yes.
+  - [1mov-407:[0m should your own sends wait 3 seconds after a keystroke, instead of 15? I recommend 3.
+  - [1mov-418:[0m a ruling's hover buttons. Fade them in over the row (recommended), keep the reserved space,
+    or always show them dimmed?
+  - [1mA pre-command hook:[0m lanes slipped on [38;5;153mpkill[39m and [38;5;153mgit checkout <path>[39m several times. No harm done, and
+    your app was never affected. Want me to draft a hook that blocks those commands in lane sessions?
+
+[38;5;246m✻[39m [38;5;246mCrunched for 26s · done 7:47 AM[39m
+
+[38;5;239m[48;5;237m❯ [38;5;231mhow to switch to conversation view for the orchestrator. I tried clikcing a button but got this [39m
+  [38;5;231m[Image #56][39m
+[38;5;246m[49m  ⎿  [39m]8;id=mps3lf;file:///private/tmp/claude-502/-Users-e-liang-Dev-overnight/76e86926-2ff8-4d8c-8aaa-96e76c62afb4/images/56.png\[Image #56]]8;;\
+
+[38;5;231m⏺[39m Two separate things here. You've answered ov-407 (3 seconds for your own sends, 15 for automatic
+  ones), so I'll record that and start it. The note in your screenshot is a different problem: the
+  runner can't read the orchestrator's screen, which can also keep the conversation view's sending from
+  working there. Checking what the runner sees.
+
+  [38;5;246mRan [1m6[0m[38;5;246m shell commands [39m
+
+[38;5;231m⏺[39m Found the orchestrator's terminal. Reading its screen through the runner to see what it doesn't
+  recognize. This is read-only.
+
+  [38;5;246mRan [1m1[0m[38;5;246m shell command [39m
+
+[38;5;231m⏺[39m Found a real bug: the session title drawn into the input box's border isn't recognized by the screen
+  reader, with "Update installed" and the footer's [38;5;153m⧉ 2[39m as other likely culprits. I'll save this screen
+  as a test fixture and pass it to a lane along with the 3s/15s timing answer, since both touch the
+  same daemon code.
+
+[38;5;246m [39m Saving the screen; record the decision; file the bug
+[38;5;246m  ⎿  $ mkdir -p .claude/agent/reports/orch-screen && farcooler-canary terminal screen [39m
+     [38;5;246m01a06b20-60b9-77c0-8115-d71e5a7573bd > .claude/agent/reports/orch-screen/orchestrator-screen.ansi
+[39m     [38;5;246m2>&1; wc -c < .claude/agent/reports/orch-screen/orchestrator-screen.ansi; farcooler-canary task [39m
+     [38;5;246mnote ov-407 --kind decis…[39m
+
+[38;5;215m·[39m [38;5;216mCoalescing…[38;5;215m [38;5;246m(45s · ↓[39m [38;5;246m3.5k tokens)[39m
+[38;5;246m  ⎿  Tip: Use /btw to ask a quick side question without interrupting Claude's current work[39m
+                                                               [38;5;75m✔ Update installed · Restart to update[39m
+[38;5;244m──────────────────────────────────────────────────────────── User test issues and onboarding flow (2) ─
+[38;5;246m❯ [39m
+[38;5;244m───────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m  [38;5;220m⏵⏵ auto mode on[38;5;246m (shift+tab to cycle) · [38;5;215m⧉[39m [38;5;246m2 · esc to interrupt · ← 3 agents[39m

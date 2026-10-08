@@ -122,7 +122,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "unconfirmed" => "the message was submitted, but the agent never said it took it. check its pane before sending it again",
         "prompt" => "the agent is showing a question, a menu or a panel. answer it in the terminal first",
         "draft" => "there's a draft in the agent's box. send or clear it first, or bring it here",
-        "typing" => "someone typed in the agent's pane in the last 15 seconds, so nothing was sent. try again once they stop",
+        "typing" => "someone typed in the agent's pane in the last 3 seconds, so nothing was sent. try again once they stop",
         other => return tell::said_about(other),
     })
 }
@@ -152,6 +152,14 @@ mod tests {
             let said = said_about(what).unwrap_or_else(|| panic!("no line for {what}"));
             assert!(!said.ends_with('.') && said.chars().next().is_some_and(char::is_lowercase), "{said}");
         }
+    }
+
+    /// A person's send is held three seconds after a key (ov-407); an
+    /// automatic one (`tell`) keeps fifteen. The copy names each.
+    #[test]
+    fn typing_names_the_window_of_each_path() {
+        assert!(said_about("typing").is_some_and(|s| s.contains("last 3 seconds")));
+        assert!(tell::said_about("typing").is_some_and(|s| s.contains("last 15 seconds")));
     }
 }
 

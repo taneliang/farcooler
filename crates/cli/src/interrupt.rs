@@ -34,7 +34,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "idle" => "claude isn't working on a turn, so there's nothing to stop or send",
         "prompt" => "claude is showing a question or a dialog, or may be about to. answer it in its pane",
         "draft" => "there's a draft in claude's box, which send-now would send too. send or clear it first",
-        "typing" => "someone typed in the pane in the last two seconds. try again in a moment",
+        "typing" => "someone typed in the pane in the last three seconds. try again in a moment",
         "too_soon" => "a key was pressed there in the last second and a half. try again in a moment",
         "sending" => "a message is still being typed there. try again in a moment",
         "nothing_queued" => "nothing is waiting in claude's queue",

@@ -63,7 +63,7 @@
 //! **After.** The time the box was emptied is kept per terminal
 //! (`Watcher::brought`): `typed_lately` ignores keys from before it, which
 //! made the draft now in the composer. Without that, the send that follows
-//! would wait out the 15 s a key holds an automatic send for (ov-407).
+//! would wait out the 15 s a key holds an automatic send for, not the 3 s that holds a person's (ov-407).
 
 use std::time::Duration;
 

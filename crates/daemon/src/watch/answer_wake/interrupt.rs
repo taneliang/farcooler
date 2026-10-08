@@ -88,7 +88,7 @@ use crate::watch::{Watcher, now_millis};
 pub(crate) const LOCKOUT: Duration = Duration::from_millis(1_500);
 
 /// How recently a person's key in the pane stops one of these.
-pub(crate) const TYPED_WITHIN_MS: i64 = 2_000;
+pub(crate) const TYPED_WITHIN_MS: i64 = 3_000;
 
 /// The longest the key waits for another send to let go of the box.
 const TYPING_WAIT: Duration = Duration::from_secs(10);

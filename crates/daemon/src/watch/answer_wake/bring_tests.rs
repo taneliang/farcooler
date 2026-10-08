@@ -89,7 +89,7 @@ async fn a_changed_box_is_left_alone() {
     assert_eq!(keys(&si), 0, "{}", si.log());
 }
 
-/// A key typed through a client in the last two seconds: the person is
+/// A key typed through a client in the last three seconds: the person is
 /// there. Three seconds on, it clears.
 #[tokio::test]
 async fn a_key_just_now_holds_the_clear() {

@@ -369,3 +369,24 @@ async fn bracketed_paste_off_before_the_paste_gets_nothing() {
     assert!(["unfamiliar", "unproven"].contains(&refusal), "{refusal}");
     nothing_typed(&si);
 }
+
+/// A send the person makes waits three seconds after a key, not the fifteen
+/// an automatic send does (ov-407): four seconds on, it goes; one second
+/// on, it's held.
+#[tokio::test]
+async fn a_persons_send_holds_three_seconds_after_a_key() {
+    let b = board().await;
+    let (agent, si) = idle_claude(&b).await;
+    b.doing(agent.id, AgentActivity::None).await;
+    si.show("working").await;
+    b.screen_with(agent.id, "esc to interrupt").await;
+    let mark = crate::runtime::input_mark(b.svc.root_dir(), agent.id);
+    std::fs::create_dir_all(mark.parent().unwrap()).unwrap();
+    std::fs::write(&mark, (now_millis() - 1_000).to_string()).unwrap();
+    assert_eq!(refused(b.watcher.compose_into(agent.id, "now", &[]).await), "typing");
+    nothing_typed(&si);
+    std::fs::write(&mark, (now_millis() - 4_000).to_string()).unwrap();
+    assert_eq!(b.watcher.compose_into(agent.id, "now", &[]).await.expect("queued"), Turn::During);
+    // The automatic path keeps its window.
+    assert!(b.watcher.typed_lately(agent.id, now_millis()), "an answer wake still waits");
+}

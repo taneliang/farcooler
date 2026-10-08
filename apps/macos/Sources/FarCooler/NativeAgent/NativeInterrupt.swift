@@ -87,7 +87,7 @@ extension NativePaneModel {
         case "idle", "too_soon": return nil
         case "prompt": return .handoff
         case "draft": return .draftInTerminal
-        case "typing": return .said("Someone typed in the terminal in the last 2 seconds. Try again in a moment.")
+        case "typing": return .said("Someone typed in the terminal in the last 3 seconds. Try again in a moment.")
         case "sending": return .said("A message is still going in. Try again in a moment.")
         case "nothing_queued": return .said("Nothing is waiting in Claude’s queue.")
         case "settling":

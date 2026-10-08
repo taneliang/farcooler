@@ -844,13 +844,24 @@ impl Watcher {
             .filter(|t| eligible(t, TerminalRole::Orchestrator))
     }
 
-    /// Whether someone typed into `terminal` too recently to type over.
+    /// Whether someone typed into `terminal` too recently for an automatic
+    /// send (an answer wake, a tell) to type over.
     fn typed_lately(&self, terminal: Uuid, now: i64) -> bool {
         let watched = {
             let watched = self.watched.lock().unwrap_or_else(|e| e.into_inner());
             anyone_watching(&watched, terminal, now)
         };
-        let quiet = if watched { QUIET_WATCHED_MS } else { QUIET_MS };
+        self.typed_within(terminal, now, if watched { QUIET_WATCHED_MS } else { QUIET_MS })
+    }
+
+    /// The same for a send the person makes (`terminal.compose`): they know
+    /// what they typed, and it re-reads the box before Enter, so a short
+    /// window is enough (`interrupt::TYPED_WITHIN_MS`, ov-407).
+    fn typed_by_hand_lately(&self, terminal: Uuid, now: i64) -> bool {
+        self.typed_within(terminal, now, interrupt::TYPED_WITHIN_MS)
+    }
+
+    fn typed_within(&self, terminal: Uuid, now: i64, quiet: i64) -> bool {
         // Keys from before Bring Here emptied the box made the draft a
         // composer now holds: no sign of anyone typing now (ov-369).
         let brought = self.brought.lock().unwrap_or_else(|e| e.into_inner()).get(&terminal).copied();

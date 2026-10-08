@@ -37,6 +37,8 @@ pub mod codex;
 pub mod draft;
 pub mod drawn;
 mod suggestion;
+#[cfg(test)]
+mod titled_rule_tests;
 
 pub use suggestion::{hint, suggestion};
 
@@ -216,9 +218,26 @@ fn content(rows: &[&[(char, bool)]]) -> Composer {
 }
 
 fn is_rule(row: &[(char, bool)]) -> bool {
-    let t = text(row);
-    let t = t.trim_end();
-    t.chars().count() >= 10 && t.chars().all(|c| c == '─')
+    is_rule_text(&text(row))
+}
+
+/// Whether a printed row is claude's rule above or below its box: a run of
+/// `─`, which claude may break once for the session's title,
+/// `──── User test issues (2) ─` (`claude-orchestrator-titled-rule-103x65-e.txt`,
+/// ov-430). The title is set off by a space on each side, and the rule
+/// goes on after it by at least one `─`.
+pub(crate) fn is_rule_text(row: &str) -> bool {
+    let t = row.trim_end();
+    let lead = t.chars().take_while(|&c| c == '─').count();
+    if lead < 10 {
+        return false;
+    }
+    let rest = &t[t.char_indices().nth(lead).map_or(t.len(), |(i, _)| i)..];
+    if rest.is_empty() {
+        return true;
+    }
+    let tail = rest.trim_end_matches('─');
+    rest.starts_with(' ') && tail.len() < rest.len() && tail.ends_with(' ') && !tail.trim().is_empty()
 }
 
 fn indented(row: &[(char, bool)]) -> bool {

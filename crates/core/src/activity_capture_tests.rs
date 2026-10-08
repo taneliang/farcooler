@@ -37,6 +37,7 @@ fn every_capture_classifies_as_it_was_read() {
         ("claude-idle-fresh.txt", "claude", Idle),
         ("claude-idle-nothing-running.txt", "claude", Idle),
         ("claude-idle-transcript-says-esc-to-interrupt.txt", "claude", Idle),
+        ("claude-orchestrator-titled-rule-103x65-e.txt", "claude", Working),
         ("claude-permission-hook-waiting.txt", "claude", Blocked),
         ("claude-trust-gate.txt", "claude", Blocked),
         ("claude-working.txt", "claude", Working),

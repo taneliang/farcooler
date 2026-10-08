@@ -88,6 +88,10 @@ import Testing
             AgentConversation.issue(for: .refused(what: nil, word: "scope-denied"))
                 == .said("This device can’t send messages to this runner."))
         #expect(AgentConversation.issue(for: .refused(what: "busy", word: "resource-conflict")) != .said("The message wasn’t sent."))
+        // A person's send holds three seconds after a key (ov-407); the copy names that.
+        #expect(
+            AgentConversation.issue(for: .refused(what: "typing", word: "resource-conflict"))
+                == .said("Someone typed in the terminal in the last 3 seconds, so the message wasn’t sent. Try again once they stop."))
     }
 
     @Test func onlyARunningPaneIsTalkedTo() {

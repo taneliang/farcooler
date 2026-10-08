@@ -141,7 +141,7 @@ object AgentConversation {
             "prompt", "dialog" -> SendIssue.Handoff
             "handoff" -> SendIssue.Panel
             "draft" -> SendIssue.DraftInTerminal
-            "typing" -> SendIssue.Said("Someone typed in the terminal in the last 15 seconds, so the message wasn’t sent. Try again once they stop.")
+            "typing" -> SendIssue.Said("Someone typed in the terminal in the last 3 seconds, so the message wasn’t sent. Try again once they stop.")
             "busy" -> SendIssue.Said("$agent is working and can’t take a message from here right now.")
             "too_long" -> SendIssue.Said(TOO_LONG)
             "command" -> SendIssue.Said(commandRefused(agent))

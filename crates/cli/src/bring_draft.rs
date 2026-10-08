@@ -47,7 +47,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "too_tall" => "claude's box is too tall to read whole. use the terminal",
         "cursor" => "the cursor in claude's box isn't at the end. move it there, or use the terminal",
         "changed" => "claude's box no longer holds what was read, so it was left as it is",
-        "typing" => "someone typed in the pane in the last two seconds. try again in a moment",
+        "typing" => "someone typed in the pane in the last three seconds. try again in a moment",
         "sending" => "a message is still being typed there. try again in a moment",
         "prompt" => "claude is showing a question or a dialog. answer it in its pane",
         "unfamiliar" => "the pane's screen isn't one Far Cooler recognizes, so nothing was read",

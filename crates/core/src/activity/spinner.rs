@@ -28,8 +28,7 @@ pub(super) fn spinning(rules: &AgentRules, screen: &str) -> bool {
     }
     // The last prompt line: the box is drawn below everything.
     let Some(prompt) = lines.iter().rposition(|l| l.starts_with('❯')) else { return false };
-    let is_rule = |l: &str| l.chars().count() >= 10 && l.chars().all(|c| c == '─');
-    if prompt == 0 || !is_rule(lines[prompt - 1]) {
+    if prompt == 0 || !crate::composer::is_rule_text(lines[prompt - 1]) {
         return false;
     }
     let mut blank = false;

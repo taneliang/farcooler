@@ -265,7 +265,7 @@ impl Watcher {
             // capture and the rollout `proven_tui` just read are the word
             // then, as claude's registry is for claude: between turns, and
             // nobody typing, goes on.
-            if ready.is_err() && (proven.turn == Turn::During || self.typed_lately(to.id, now_millis())) {
+            if ready.is_err() && (proven.turn == Turn::During || self.typed_by_hand_lately(to.id, now_millis())) {
                 return Err(DomainError::Conflict { what: if proven.turn == Turn::During { "busy" } else { "typing" } });
             }
             return self.compose_codex(to, composed, &proven, &paths, &mut unpasted).await;
@@ -287,7 +287,7 @@ impl Watcher {
         let Some((session, transcript, busy)) = session_of(proven.pid).await else {
             return Err(DomainError::Conflict { what: "unconfirmable" });
         };
-        if ready.is_err() && (!busy || self.typed_lately(to.id, now_millis())) {
+        if ready.is_err() && (!busy || self.typed_by_hand_lately(to.id, now_millis())) {
             return Err(DomainError::Conflict { what: if busy { "typing" } else { "busy" } });
         }
         let proven = super::Proven { turn: if busy { Turn::During } else { proven.turn }, ..proven };

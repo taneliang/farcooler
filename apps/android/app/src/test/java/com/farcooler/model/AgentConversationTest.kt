@@ -101,6 +101,10 @@ class AgentConversationTest {
         assertEquals(SendIssue.Said(AgentConversation.TOO_LONG), said("too_long"))
         assertEquals(SendIssue.Said(AgentConversation.COMMAND_REFUSED), said("command"))
         assertEquals(SendIssue.Said("Claude isn’t running in this pane."), said("not_running"))
+        assertEquals(
+            SendIssue.Said("Someone typed in the terminal in the last 3 seconds, so the message wasn’t sent. Try again once they stop."),
+            said("typing"),
+        )
         assertEquals(SendIssue.Said("The message wasn’t sent."), said("something-new"))
         assertEquals(SendIssue.Said("The message wasn’t sent."), said(null))
         // A read-only device is told so, not "wasn't sent" on every try.

@@ -104,7 +104,7 @@ async fn nothing_is_pressed_while_an_ask_is_held() {
     assert!(!si.log().contains("ESC"), "{}", si.log());
 }
 
-/// A key typed in the pane in the last two seconds: the person is there.
+/// A key typed in the pane in the last three seconds: the person is there.
 #[tokio::test]
 async fn nothing_is_pressed_just_after_someone_typed() {
     let b = board().await;
