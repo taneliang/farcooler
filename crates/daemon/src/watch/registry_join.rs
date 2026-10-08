@@ -19,21 +19,24 @@ pub(super) fn registered_log(registry: &Registry, pane: &PaneJoin) -> Option<Pat
     crate::registry_binding::registered_log(registry, pane.preset.as_deref(), pane.pid, &pane.cwd)
 }
 
-/// The prompt claude's box suggests, for its pane's projector (ov-409). Only
-/// a claude at rest has one to offer: mid-turn, the dim text is a hint, never
-/// a prediction (`composer::suggestion`). Read from the screen the watcher
-/// already holds; a pane with no projector open ignores it.
+/// What claude's box shows, for its pane's projector (ov-409): the prompt it
+/// suggests and its generic `Try` example. Only a claude at rest has either:
+/// mid-turn, a dim line is a hint, never a prediction (`composer::suggestion`).
+/// Read from the screen the watcher already holds; a pane with no projector
+/// open ignores it.
 pub(super) fn feed_suggestion(terminal: Uuid, agent: Option<&str>, screen: &str, resting: bool) {
     if !crate::session_projectors::shadowing() {
         return;
     }
-    crate::session_projectors::global().suggest(terminal, offered(agent, screen, resting));
+    let (suggestion, hint) = offered(agent, screen, resting);
+    crate::session_projectors::global().suggest(terminal, suggestion, hint);
 }
 
-/// What `feed_suggestion` hands the projector: the box's prediction while the
-/// agent rests, nothing otherwise.
-pub(super) fn offered(agent: Option<&str>, screen: &str, resting: bool) -> Option<String> {
-    agent.filter(|_| resting).and_then(|preset| farcooler_core::composer::suggestion(preset, screen))
+/// What `feed_suggestion` hands the projector, as the prediction and the
+/// example: each only while the agent rests.
+pub(super) fn offered(agent: Option<&str>, screen: &str, resting: bool) -> (Option<String>, Option<String>) {
+    let read = |f: fn(&str, &str) -> Option<String>| agent.filter(|_| resting).and_then(|preset| f(preset, screen));
+    (read(farcooler_core::composer::suggestion), read(farcooler_core::composer::hint))
 }
 
 /// The pane's tick for its session projector (`session_projectors`): what its

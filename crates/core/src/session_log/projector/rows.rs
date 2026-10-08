@@ -83,6 +83,7 @@ pub enum RowKind {
     Notice(Notice),
     Handoff(Handoff),
     Gap(Gap),
+    Hint(Hint),
 }
 
 /// One prompt and everything the agent did about it.
@@ -333,6 +334,18 @@ pub enum NoticeKind {
 pub struct Handoff {
     pub reason: String,
     pub at_ms: Option<i64>,
+}
+
+/// The row `Hint` has: one per session, never renumbered, found by this id.
+pub const HINT_ID: &str = "hint:composer";
+
+/// What claude's empty box shows as a generic example, `Try "…"` (ov-409):
+/// not part of the conversation, so a view keeps this row out of its
+/// transcript and shows its words as the composer's placeholder. `text` is
+/// empty once the box shows something else (a row is never removed).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Hint {
+    pub text: String,
 }
 
 /// Where the projection cannot say what happened.

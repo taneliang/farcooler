@@ -65,3 +65,33 @@ fn the_screen_prediction_rides_the_newest_turn_and_clears_with_it() {
     let json = serde_json::to_string(p.rows().iter().find(|r| r.id == "turn:p2").unwrap()).unwrap();
     assert!(!json.contains("suggestion"), "absent, not null: {json}");
 }
+
+/// The `Try` example needs no turn: a fresh session has none. It is one row,
+/// made when first seen, its words emptied (never removed) when the box
+/// shows another text, and a follower is told of each change.
+#[test]
+fn the_try_example_rides_its_own_row_and_empties_with_the_box() {
+    let fresh = std::fs::read_to_string(format!("{}/captures/claude-2.1.292-idle-placeholder-160x45-e.txt", env!("CARGO_MANIFEST_DIR"))).unwrap();
+    let example = crate::composer::hint("claude", &fresh);
+    assert_eq!(example.as_deref(), Some("Try \"how does <filepath> work?\""));
+    let mut p = Projection::new();
+    p.set_hint(None);
+    assert!(p.rows().is_empty(), "no example, no row");
+    let rev = p.revision();
+    p.set_hint(example.clone());
+    let row = p.rows().iter().find(|r| r.id == HINT_ID).expect("the hint row");
+    assert_eq!(row.kind, RowKind::Hint(Hint { text: example.clone().unwrap() }));
+    assert_eq!(serde_json::to_string(&row.kind).unwrap(), r#"{"Hint":{"text":"Try \"how does <filepath> work?\""}}"#);
+    assert!(p.changes_since(rev, 10).unwrap().iter().any(|c| c.id() == HINT_ID), "a follower is told");
+    let rev = p.revision();
+    p.set_hint(example);
+    assert_eq!(p.revision(), rev, "the same words change nothing");
+    let rev = p.revision();
+    p.set_hint(None);
+    assert!(p.changes_since(rev, 10).unwrap().iter().any(|c| c.id() == HINT_ID), "and told when it empties");
+    assert_eq!(p.rows().len(), 1, "never removed");
+    assert_eq!(p.rows()[0].kind, RowKind::Hint(Hint { text: String::new() }));
+    // A turn arriving does not disturb it, and the example is not a suggestion.
+    line(&mut p, prompt("p1", "go"));
+    assert!(turns(&p).iter().all(|(_, suggestion)| suggestion.is_none()));
+}

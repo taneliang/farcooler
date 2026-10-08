@@ -261,6 +261,18 @@
         "provisional": false,
         "rev": 9,
         "turn": "turn:p1"
+      },
+      {
+        "id": "hint:composer",
+        "kind": {
+          "Hint": {
+            "text": "Try \"how does <filepath> work?\""
+          }
+        },
+        "ord": 10,
+        "provisional": false,
+        "rev": 9,
+        "turn": null
       }
     ]
   }

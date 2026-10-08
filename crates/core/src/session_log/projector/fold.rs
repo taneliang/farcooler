@@ -432,6 +432,26 @@ impl Projection {
         self.show_suggestion();
     }
 
+    /// The `Try "…"` example claude's empty box shows now (`None` when it
+    /// shows another text), as the one `Hint` row: made when first seen, its
+    /// words emptied when the box says something else. Not a message and
+    /// never taken into a draft.
+    pub fn set_hint(&mut self, hint: Option<String>) {
+        let text = hint.unwrap_or_default();
+        let Some(&i) = self.index.get(HINT_ID) else {
+            if !text.is_empty() {
+                self.push(HINT_ID.to_string(), None, false, RowKind::Hint(Hint { text }));
+            }
+            return;
+        };
+        if let RowKind::Hint(hint) = &mut self.rows[i].kind {
+            if hint.text != text {
+                hint.text = text;
+                self.touch(i);
+            }
+        }
+    }
+
     fn show_suggestion(&mut self) {
         let Some(newest) = self.newest_turn else { return };
         let shown = self.suggestion_shown.replace(newest);

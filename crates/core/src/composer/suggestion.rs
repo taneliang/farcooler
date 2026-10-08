@@ -1,55 +1,84 @@
-//! The next prompt claude suggests, read off its empty box (ov-409).
+//! What claude's empty box says, dim or grey, read off its screen (ov-409).
 //!
-//! After a turn claude can draw a predicted next prompt, dim, in its empty
-//! input box; Tab takes it into the draft. It is written nowhere else: the
+//! After a turn claude can draw a predicted next prompt in its empty input
+//! box; Tab takes it into the draft. It is written nowhere else: the
 //! transcript and the hooks never carry it (in the TUI it is held in memory;
 //! only `--output-format stream-json` surfaces it), so the screen is the one
-//! source, read with its escapes like the rest of this module.
+//! source, read with its escapes like the rest of this module. It is drawn
+//! dim (SGR 2) like claude's other placeholders; a grey foreground (SGR 90,
+//! a 256 or true color grey) counts too, so a prediction drawn in color is
+//! not missed.
 //!
-//! The same dim slot also shows hints that are not predictions, and these
-//! are NOT offered:
+//! The same slot shows three kinds of text, told apart by their words:
 //!
-//! - `Try "how does <filepath> work?"`: a rotating example in a fresh
-//!   session's box. It is a hint about what can be asked, carries
-//!   placeholders such as `<filepath>`, and Tab does not take it in claude
-//!   either (`claude-2.1.292-idle-placeholder-160x45-e.txt`).
-//! - `Press up to edit queued messages` and its siblings, shown while a
-//!   queue exists (`claude-2.1.290-working-queued-160x45-e.txt`).
+//! - a prediction (`suggestion`): anything else. The composer offers it, and
+//!   Tab or a tap takes it into the draft.
+//! - the generic example (`hint`), `Try "how does <filepath> work?"`, in a
+//!   fresh session's box (`claude-2.1.292-idle-placeholder-160x45-e.txt`).
+//!   The composer shows it as its placeholder, as a hint: claude does not
+//!   take it on Tab either, and it has placeholders such as `<filepath>`.
+//! - a queue hint, `Press up to edit queued messages` and its siblings
+//!   (`claude-2.1.290-working-queued-160x45-e.txt`): shown by neither.
 //!
-//! The caller offers a suggestion only while the agent rests: a hint shown
+//! The caller reads these only while the agent rests: a dim line shown
 //! mid-turn is never a prediction.
 
-use super::{Composer, cells, claude_box, content, text};
+use super::{cells, claude_box_at, styled};
 
-/// The longest suggestion kept, in characters. claude's are a sentence; a
-/// dim paragraph is something else.
+/// The longest text kept, in characters. claude's are a sentence; a dim
+/// paragraph is something else.
 const MAX_CHARS: usize = 300;
 
-/// The suggestion in `preset`'s empty box on `screen`, if there is one.
-/// Only claude draws one. `None` for a box holding anything typed, for no
-/// box, and for the hints above.
+/// The prediction in `preset`'s empty box on `screen`, if there is one. Only
+/// claude draws one. `None` for a box holding anything typed, for no box,
+/// and for the example and the queue hints.
 pub fn suggestion(preset: &str, screen: &str) -> Option<String> {
+    placeholder(preset, screen).filter(|words| !is_example(words) && !is_queue_hint(words))
+}
+
+/// The generic `Try "…"` example in claude's empty box, if that is what it
+/// shows.
+pub fn hint(preset: &str, screen: &str) -> Option<String> {
+    placeholder(preset, screen).filter(|words| is_example(words))
+}
+
+/// The dim or grey words of claude's box, when nothing else is in it.
+fn placeholder(preset: &str, screen: &str) -> Option<String> {
     if preset.split(':').next() != Some("claude") {
         return None;
     }
-    let lines: Vec<_> = screen.lines().map(cells).collect();
-    let rows = claude_box(&lines)?;
-    if content(&rows) != Composer::Empty {
-        return None;
+    let plain: Vec<_> = screen.lines().map(cells).collect();
+    let lines: Vec<_> = screen.lines().map(styled).collect();
+    let (start, end) = claude_box_at(&plain)?;
+    let mut words = String::new();
+    for row in &lines[start..end] {
+        for &(c, dim, grey) in row.iter().skip(2) {
+            if c.is_whitespace() {
+                words.push(' ');
+            } else if dim || grey {
+                words.push(c);
+            } else {
+                // Typed: a draft, not a placeholder.
+                return None;
+            }
+        }
+        words.push(' ');
     }
-    let dim: String = rows.iter().map(|row| row.iter().filter(|(_, dim)| *dim).map(|(c, _)| *c).collect::<String>()).collect::<Vec<_>>().join(" ");
-    let dim = dim.split_whitespace().collect::<Vec<_>>().join(" ");
-    let blank = rows.iter().all(|row| text(row).trim().is_empty());
-    (!blank && !is_hint(&dim) && dim.chars().count() <= MAX_CHARS).then_some(dim)
+    let words = words.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!words.is_empty() && words.chars().count() <= MAX_CHARS).then_some(words)
 }
 
-/// Whether `dim` is one of claude's hints rather than a prediction.
-fn is_hint(dim: &str) -> bool {
-    dim.is_empty() || dim.starts_with("Try \"") || dim.starts_with("Press ")
+fn is_example(words: &str) -> bool {
+    words.starts_with("Try \"")
+}
+
+fn is_queue_hint(words: &str) -> bool {
+    words.starts_with("Press ")
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::Composer;
     use super::*;
     use farcooler_protocol::v1::AgentActivity;
 
@@ -101,14 +130,22 @@ mod tests {
         assert!(super::super::printed(&fresh).contains("❯\u{a0}Try \"how does <filepath> work?\""));
         assert_eq!(super::super::read("claude", &fresh), Composer::Empty);
         assert_eq!(suggestion("claude", &fresh), None);
+        // The example is the box's hint, and only the example is.
+        assert_eq!(hint("claude", &fresh).as_deref(), Some("Try \"how does <filepath> work?\""));
+        assert_eq!(hint("claude:opus", &fresh).as_deref(), Some("Try \"how does <filepath> work?\""));
+        assert_eq!(hint("codex", &fresh), None);
         assert_eq!(suggestion("claude", &capture("claude-2.1.292-working-160x45-e.txt")), None);
+        assert_eq!(hint("claude", &capture("claude-2.1.292-working-160x45-e.txt")), None);
+        assert_eq!(hint("claude", &capture("claude-2.1.292-after-turn-160x45-e.txt")), None);
         assert_eq!(suggestion("claude", &capture("claude-2.1.292-after-turn-160x45-e.txt")), None);
         let queued = capture("claude-2.1.290-working-queued-160x45-e.txt");
         assert_eq!(super::super::read("claude", &queued), Composer::Empty);
         assert_eq!(suggestion("claude", &queued), None);
+        assert_eq!(hint("claude", &queued), None, "a queue hint is shown by neither");
         // The words of a prediction in the very slot of the example: offered.
         let swapped = fresh.replace("Try \"how does <filepath> work?\"", "run the tests again");
         assert_eq!(suggestion("claude", &swapped).as_deref(), Some("run the tests again"));
+        assert_eq!(hint("claude", &swapped), None, "a prediction is not the example");
     }
 
     #[test]
@@ -118,5 +155,32 @@ mod tests {
         assert_eq!(suggestion("claude", ""), None);
         let long = predicted().replace("wait for the background shell to finish", &"word ".repeat(80));
         assert_eq!(suggestion("claude", &long), None);
+    }
+
+    /// A prediction drawn in a grey foreground rather than dim: SGR 90, a 256
+    /// grey and a true color grey are each offered; a color, or the default
+    /// foreground a person's typing gets, is not.
+    #[test]
+    fn a_grey_prediction_is_offered_like_a_dim_one() {
+        let words = "wait for the background shell to finish";
+        let plain = capture("claude-idle-nothing-running.txt");
+        let drawn = |sgr: &str| plain.replace(&format!("❯\u{a0}{words}"), &format!("❯\u{a0}\x1b[{sgr}m{words}\x1b[0m"));
+        for sgr in ["90", "38;5;246", "38;5;244", "38;5;8", "38;2;128;128;128"] {
+            assert_eq!(suggestion("claude", &drawn(sgr)).as_deref(), Some(words), "SGR {sgr}");
+        }
+        // Not greys: a color, white, and black-ish ones are a person's or claude's own text.
+        for sgr in ["32", "91", "38;5;2", "38;5;196", "38;2;200;40;40", "38;2;255;255;255", "38;2;20;20;20", "37"] {
+            assert_eq!(suggestion("claude", &drawn(sgr)), None, "SGR {sgr}");
+        }
+        // A reset ends the grey: what follows in the default color is typed.
+        let mixed = plain.replace(&format!("❯\u{a0}{words}"), "❯\u{a0}\x1b[90mwait\x1b[0m for");
+        assert_eq!(suggestion("claude", &mixed), None);
+        // And the Try example, drawn grey, is still the hint.
+        let fresh = capture("claude-2.1.292-idle-placeholder-160x45-e.txt").replace("\x1b[2mTry", "\x1b[90mTry");
+        assert_eq!(hint("claude", &fresh).as_deref(), Some("Try \"how does <filepath> work?\""));
+        assert_eq!(suggestion("claude", &fresh), None);
+        // The cursor on the first letter, in reverse video, over grey words.
+        let cursor = drawn("90").replace("\x1b[90mwait", "\x1b[7mw\x1b[0;90mait");
+        assert_eq!(suggestion("claude", &cursor).as_deref(), Some(words));
     }
 }

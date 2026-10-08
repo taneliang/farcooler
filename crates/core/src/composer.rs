@@ -37,7 +37,7 @@ pub mod codex;
 pub mod drawn;
 mod suggestion;
 
-pub use suggestion::suggestion;
+pub use suggestion::{hint, suggestion};
 
 /// What an input box holds.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,14 +78,36 @@ pub fn printed(screen: &str) -> String {
 /// The cursor on a dim placeholder's first character counts as dim (see
 /// this module's docs): SGR 7 turns reverse video on, 27 and a reset off.
 fn cells(line: &str) -> Vec<(char, bool)> {
-    let mut out = Vec::new();
+    styled(line).into_iter().map(|(c, dim, _)| (c, dim)).collect()
+}
+
+/// Whether foreground color `256` (an xterm palette index) is a grey: the
+/// bright black (8) and the grey ramp (232 to 255) read as one, as claude's
+/// own footers draw (`38;5;244`, `38;5;246`).
+fn grey_index(n: &str) -> bool {
+    n.parse::<u8>().is_ok_and(|n| n == 8 || n >= 232)
+}
+
+/// Whether true color `r;g;b` is a mid grey: equal channels, within a few
+/// steps, neither near black nor near white.
+fn grey_rgb(r: &str, g: &str, b: &str) -> bool {
+    let (Ok(r), Ok(g), Ok(b)) = (r.parse::<i32>(), g.parse::<i32>(), b.parse::<i32>()) else { return false };
+    (r - g).abs() <= 8 && (g - b).abs() <= 8 && (r - b).abs() <= 8 && (60..=200).contains(&g)
+}
+
+/// `cells`, each also with whether it was drawn in a grey foreground
+/// (SGR 90, or a 256 or true color grey). A placeholder a program colors
+/// rather than dims is a grey one; only `composer::suggestion` asks, since a
+/// grey draft would otherwise read as no draft at all.
+fn styled(line: &str) -> Vec<(char, bool, bool)> {
+    let mut out: Vec<(char, bool, bool)> = Vec::new();
     let mut reversed = Vec::new();
-    let (mut dim, mut reverse) = (false, false);
+    let (mut dim, mut reverse, mut grey) = (false, false, false);
     let mut chars = line.chars().peekable();
     while let Some(c) = chars.next() {
         if c != '\x1b' {
             if !c.is_control() {
-                out.push((c, dim));
+                out.push((c, dim, grey));
                 reversed.push(reverse);
             }
             continue;
@@ -108,37 +130,59 @@ fn cells(line: &str) -> Vec<(char, bool)> {
         if last == Some('m') {
             let mut fields = params.split(';').peekable();
             if params.is_empty() {
-                (dim, reverse) = (false, false);
+                (dim, reverse, grey) = (false, false, false);
             }
             while let Some(f) = fields.next() {
                 match f {
-                    "" | "0" => (dim, reverse) = (false, false),
+                    "" | "0" => (dim, reverse, grey) = (false, false, false),
+                    "90" => grey = true,
+                    other if matches!(other.parse::<u8>(), Ok(30..=37 | 39 | 91..=97)) => grey = false,
                     "2" => dim = true,
                     "22" => dim = false,
                     "7" => reverse = true,
                     "27" => reverse = false,
                     // Colors carry their own operands, which are not
                     // attributes: `38;5;2` is a color, not dim.
-                    "38" | "48" | "58" => match fields.next() {
-                        Some("5") => {
-                            fields.next();
+                    "38" | "48" | "58" => {
+                        let foreground = f == "38";
+                        match fields.next() {
+                            Some("5") => {
+                                let n = fields.next().unwrap_or_default();
+                                if foreground {
+                                    grey = grey_index(n);
+                                }
+                            }
+                            Some("2") => {
+                                let (r, g, b) = (
+                                    fields.next().unwrap_or_default(),
+                                    fields.next().unwrap_or_default(),
+                                    fields.next().unwrap_or_default(),
+                                );
+                                if foreground {
+                                    grey = grey_rgb(r, g, b);
+                                }
+                            }
+                            _ => {
+                                if foreground {
+                                    grey = false;
+                                }
+                            }
                         }
-                        Some("2") => {
-                            fields.next();
-                            fields.next();
-                            fields.next();
-                        }
-                        _ => {}
-                    },
+                    }
                     _ => {}
                 }
             }
         }
     }
     for i in 0..out.len().saturating_sub(1) {
-        let (next, next_dim) = out[i + 1];
-        if reversed[i] && next_dim && !next.is_whitespace() {
-            out[i].1 = true;
+        let (next, next_dim, next_grey) = out[i + 1];
+        if reversed[i] && !next.is_whitespace() {
+            if next_dim {
+                out[i].1 = true;
+            }
+            if next_grey {
+                out[i].2 = true;
+            }
         }
     }
     out
@@ -172,9 +216,9 @@ fn claude(lines: &[Vec<(char, bool)>]) -> Composer {
     claude_box(lines).map_or(Composer::Unrecognized, |rows| content(&rows))
 }
 
-/// claude's input box on a screen, as its rows past the `❯ ` marker; `None`
-/// where it is no box this module recognizes.
-fn claude_box(lines: &[Vec<(char, bool)>]) -> Option<Vec<&[(char, bool)]>> {
+/// Where claude's box sits in `lines`: the prompt line and the row of the
+/// rule that closes it.
+fn claude_box_at(lines: &[Vec<(char, bool)>]) -> Option<(usize, usize)> {
     // The last prompt line on the screen: the box is drawn below everything.
     let start = lines.iter().rposition(|row| {
         row.first().map(|c| c.0) == Some('❯') && matches!(row.get(1).map(|c| c.0), None | Some(' ' | '\u{a0}'))
@@ -197,6 +241,13 @@ fn claude_box(lines: &[Vec<(char, bool)>]) -> Option<Vec<&[(char, bool)]>> {
     if below.contains("NORMAL") {
         return None;
     }
+    Some((start, end))
+}
+
+/// claude's input box on a screen, as its rows past the `❯ ` marker; `None`
+/// where it is no box this module recognizes.
+fn claude_box(lines: &[Vec<(char, bool)>]) -> Option<Vec<&[(char, bool)]>> {
+    let (start, end) = claude_box_at(lines)?;
     let first = &lines[start][2.min(lines[start].len())..];
     Some(std::iter::once(first).chain(lines[start + 1..end].iter().map(|r| &r[2.min(r.len())..])).collect())
 }

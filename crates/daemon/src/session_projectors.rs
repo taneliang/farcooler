@@ -513,12 +513,15 @@ impl SessionProjectors {
         open.publish(&session);
     }
 
-    /// What claude's box suggests on `terminal`'s screen now (ov-409), for its
-    /// newest turn row. Nothing when the terminal has no projector open.
-    pub fn suggest(&self, terminal: Uuid, suggestion: Option<String>) {
+    /// What claude's box shows on `terminal`'s screen now (ov-409): the
+    /// prompt it suggests, for its newest turn row, and its generic `Try`
+    /// example, for the hint row. Nothing when the terminal has no projector
+    /// open.
+    pub fn suggest(&self, terminal: Uuid, suggestion: Option<String>, hint: Option<String>) {
         let Some(open) = self.get(terminal) else { return };
         let mut session = open.lock();
         session.projection_mut().set_suggestion(suggestion);
+        session.projection_mut().set_hint(hint);
         open.publish(&session);
     }
 

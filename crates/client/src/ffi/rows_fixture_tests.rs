@@ -84,6 +84,7 @@ fn rows() -> Vec<Row> {
         row(7, 7, "notice:1", t, RowKind::Notice(Notice { kind: NoticeKind::Compacted, text: "Context compacted".into(), at_ms: None })),
         row(8, 9, "handoff:1", t, RowKind::Handoff(Handoff { reason: "A panel is open".into(), at_ms: Some(9_500) })),
         row(9, 9, "gap:1", t, RowKind::Gap(Gap { reason: GapReason::Unknown("x-new".into()), count: 2 })),
+        row(10, 9, "hint:composer", None, RowKind::Hint(Hint { text: "Try \"how does <filepath> work?\"".into() })),
     ]
 }
 
@@ -139,5 +140,5 @@ fn the_fixture_holds_every_row_kind() {
         .iter()
         .filter_map(|row| row["kind"].as_object().and_then(|k| k.keys().next().cloned()))
         .collect();
-    assert_eq!(kinds, ["Turn", "Prose", "Thinking", "Tool", "Subagent", "Ask", "Queued", "Notice", "Handoff", "Gap"]);
+    assert_eq!(kinds, ["Turn", "Prose", "Thinking", "Tool", "Subagent", "Ask", "Queued", "Notice", "Handoff", "Gap", "Hint"]);
 }
