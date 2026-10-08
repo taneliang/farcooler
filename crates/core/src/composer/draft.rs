@@ -202,7 +202,7 @@ mod tests {
         // Fits after the row: typed.
         assert_eq!(joint("short", "next", 96), "\n");
         // Doesn't fit: wrapped at a space.
-        assert_eq!(joint(&"w ".repeat(47).trim_end().to_string(), "next", 96), " ");
+        assert_eq!(joint("w ".repeat(47).trim_end(), "next", 96), " ");
         // A word longer than a row, split at the edge.
         assert_eq!(joint(&format!("x {}", "a".repeat(94)), &"a".repeat(30), 96), "");
         // A line's own indent, and blank lines.
