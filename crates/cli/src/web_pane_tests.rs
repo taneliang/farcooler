@@ -81,3 +81,22 @@ fn a_web_panes_json_is_the_shape_the_mac_reads() {
     assert_eq!(v["paneMode"], "web");
     assert_eq!(v["webUrl"], "https://github.com/");
 }
+
+/// The request `layout open-url` really sends, built by the path `layout()`
+/// uses (a test of `required` alone passes with its call deleted): it names
+/// the capability, carries the page, and an ordinary split names nothing.
+#[test]
+fn the_request_layout_sends_names_the_capability_only_for_a_page() {
+    let worktree = uuid::Uuid::from_u128(7);
+    let open = parsed(&["billing", "https://github.com/"]);
+    let mut update = LayoutUpdate::default();
+    fill(&open, &mut update, no_panes).unwrap();
+    let request = crate::layout_request(&crate::LayoutCmd::OpenUrl(open), "layout.split", worktree, update);
+    assert_eq!(request.required_capabilities, vec!["web_pane".to_string()]);
+    let Some(pb::request::Payload::LayoutUpdate(sent)) = request.payload else { panic!("no update") };
+    assert_eq!(sent.url.as_deref(), Some("https://github.com/"));
+
+    let split = crate::LayoutCmd::Show { worktree: "billing".into() };
+    let listing = crate::layout_request(&split, "layout.list", worktree, LayoutUpdate::default());
+    assert!(listing.required_capabilities.is_empty());
+}

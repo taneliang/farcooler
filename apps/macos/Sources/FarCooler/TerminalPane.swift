@@ -81,7 +81,7 @@ struct TerminalPane: View {
                 let model = WebPanes.shared.model(for: terminal.id)
                 VStack(spacing: 0) {
                     WebPaneBar(model: model)
-                    WebPane(model: model, opened: terminal.webPage, isFocused: hasKeyboard)
+                    WebPane(model: model, opened: terminal.webPage)
                 }
                 .id("\(terminal.id)#web")
             } else if isLive, terminal.isAgentPane {

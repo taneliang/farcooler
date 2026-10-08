@@ -1447,3 +1447,6 @@ mod codex_turn_tests;
 
 #[path = "bring_tests.rs"]
 mod bring_tests;
+
+#[path = "web_tests.rs"]
+mod web_tests;

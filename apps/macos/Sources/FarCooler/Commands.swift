@@ -357,7 +357,7 @@ struct FarCoolerCommands: Commands {
             Button("Split Down") { TileCommand.splitDown.post() }
                 .disabled(!MainWindowFocus.lays(\.splits, mainWindow))
             Button("Open Web Page…") { TileCommand.openWebPage.post() }
-                .disabled(!MainWindowFocus.lays(\.splits, mainWindow))
+                .disabled(!MainWindowFocus.lays(\.opensWebPage, mainWindow))
             Button("Move Pane Out") { TileCommand.breakPane.post() }
                 .disabled(!MainWindowFocus.lays(\.movesOut, mainWindow))
             Divider()  // style-exempt: menu

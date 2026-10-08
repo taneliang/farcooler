@@ -54,10 +54,63 @@ enum WebAddress {
     }
 }
 
+/// Where a page really is, as the header must say it (H2, ov-435 review 1).
+///
+/// A page chooses its own title, and an agent chooses the page, so neither
+/// can be what tells the owner whether this is the site they expect to sign
+/// in to. The host is: read from the address WebKit is showing (the
+/// punycode form WebKit itself loads, so a look-alike spelling reads as the
+/// `xn--` name it really is), never from the address the pane was opened on,
+/// which an open redirect leaves behind.
+struct WebOrigin: Equatable {
+    /// The host, with a port that isn't the scheme's own.
+    let host: String
+    let isSecure: Bool
+
+    init?(_ url: URL?) {
+        guard let url, let page = WebAddress.page(url) else { return nil }
+        let isSecure = page.scheme?.lowercased() == "https"
+        // The authority of the address as WebKit loads it: after `//`, before
+        // the path, without any `user@` (`https://www.google.com@evil.example`
+        // is evil.example).
+        let address = page.absoluteString
+        guard let start = address.range(of: "://") else { return nil }
+        let rest = address[start.upperBound...]
+        var authority = rest.prefix { $0 != "/" && $0 != "?" && $0 != "#" }
+        if let at = authority.lastIndex(of: "@") { authority = authority[authority.index(after: at)...] }
+        var host = String(authority).lowercased()
+        // `:port` only when it isn't the scheme's own (`:443`, `:80`).
+        if let colon = host.lastIndex(of: ":"), !host[colon...].contains("]") {
+            let port = host[host.index(after: colon)...]
+            host = String(host[..<colon])
+            if !port.isEmpty, port != (isSecure ? "443" : "80") { host += ":" + port }
+        }
+        guard !host.isEmpty else { return nil }
+        self.host = host
+        self.isSecure = isSecure
+    }
+
+    /// For VoiceOver and the window of a sign-in popup.
+    var spoken: String { isSecure ? "Secure connection to \(host)" : "Not secure connection to \(host)" }
+}
+
+/// The page's own web view. The tiling prefix gets the first look at a key,
+/// as it does in a terminal, so ⌃B reaches the layout instead of the page
+/// and a page can't trap the keyboard (M3, ov-435 review 1).
+final class PaneWebView: WKWebView {
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if MainActor.assumeIsolated({ PrefixMode.shared.handle(event) }) == .handled { return true }
+        return super.performKeyEquivalent(with: event)
+    }
+}
+
 /// The one place web panes keep cookies and logins: a persistent data store
 /// of its own, shared by every web pane, so signing in to Linear once covers
 /// every Linear pane and survives relaunch. Its own identifier, rather than
 /// the default store, so it can be cleared on its own later.
+///
+/// A plain file store under `~/Library/WebKit`, readable by any agent running
+/// as the owner; the options for that are the design's H3 section.
 @MainActor
 enum WebSession {
     static let identifier = UUID(uuidString: "0435F00D-7EB0-4A5E-9C0D-FA2C0001E0B5")!
@@ -85,6 +138,13 @@ struct WebPaneMemory {
     func page(for terminal: String) -> URL? {
         let pages = defaults.dictionary(forKey: Self.key) as? [String: [String: Any]]
         return WebAddress.page(pages?[terminal]?["url"] as? String)
+    }
+
+    /// A closed pane's place is forgotten with it.
+    func forget(_ terminal: String) {
+        var pages = defaults.dictionary(forKey: Self.key) as? [String: [String: Any]] ?? [:]
+        guard pages.removeValue(forKey: terminal) != nil else { return }
+        defaults.set(pages, forKey: Self.key)
     }
 
     func remember(_ url: URL, for terminal: String, at now: Date = .now) {
@@ -117,14 +177,15 @@ final class WebPaneModel: NSObject, ObservableObject {
     @Published private(set) var failure: String?
 
     private let memory: WebPaneMemory
-    private var started = false
+    /// Whether the first page has been asked for.
+    private(set) var started = false
     private var watching: Set<AnyCancellable> = []
     private var popups: [WebPopup] = []
 
     init(terminal: String, memory: WebPaneMemory = WebPaneMemory()) {
         self.terminal = terminal
         self.memory = memory
-        webView = WKWebView(frame: .zero, configuration: WebSession.configuration())
+        webView = PaneWebView(frame: .zero, configuration: WebSession.configuration())
         super.init()
         webView.navigationDelegate = self
         webView.uiDelegate = self
@@ -164,10 +225,24 @@ final class WebPaneModel: NSObject, ObservableObject {
         NSWorkspace.shared.open(page)
     }
 
-    /// What the header calls the page: its title, else its host.
-    var name: String {
-        if !title.isEmpty { return title }
-        return url?.host() ?? "Web Page"
+    /// Where the page is now, or nil before the first address.
+    var origin: WebOrigin? { WebOrigin(url) }
+
+    /// The page's own title, when it says something its origin doesn't:
+    /// shown beside the origin, never in place of it.
+    var pageTitle: String? {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty || title == origin?.host ? nil : title
+    }
+
+    /// Let go of the page: a pane that was closed must not keep playing
+    /// audio or video, holding sockets or running timers, and its sign-in
+    /// popups go with it (M2, ov-435 review 1).
+    func close() {
+        webView.stopLoading()
+        webView.load(URLRequest(url: URL(string: "about:blank")!))
+        for popup in popups { popup.close() }
+        popups.removeAll()
     }
 
     private func watch() {
@@ -261,6 +336,85 @@ extension WebPaneModel: WKUIDelegate {
         popups.append(popup)
         return popup.webView
     }
+
+    /// A page never gets the camera or the microphone: the app holds the
+    /// camera entitlement for scanning a device code, so a prompt from a page
+    /// an agent opened would read as Far Cooler asking (M4, ov-435 review 1).
+    nonisolated static let mediaCapture: WKPermissionDecision = .deny
+
+    func webView(
+        _ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+        initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
+        decisionHandler: @escaping @MainActor (WKPermissionDecision) -> Void
+    ) {
+        decisionHandler(Self.mediaCapture)
+    }
+
+    // The page's own dialogs (L4). Without them `confirm()` answers no, so
+    // GitHub's "Are you sure?" buttons do nothing, and a file input never
+    // opens. Each says which site is asking.
+
+    func webView(
+        _ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo
+    ) async {
+        _ = await WebDialogs.ask(message, from: frame, in: webView, cancellable: false)
+    }
+
+    func webView(
+        _ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo
+    ) async -> Bool {
+        await WebDialogs.ask(message, from: frame, in: webView, cancellable: true)
+    }
+
+    func webView(
+        _ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
+        initiatedByFrame frame: WKFrameInfo
+    ) async -> [URL]? {
+        await WebDialogs.chooseFiles(parameters, in: webView)
+    }
+}
+
+/// A page's alert, confirm and file chooser, as sheets on the window the
+/// page is in.
+@MainActor
+enum WebDialogs {
+    /// Who is asking, as the dialog's title: the frame's own host, since an
+    /// embedded frame is not the site in the header.
+    static func title(for frame: WKFrameInfo) -> String {
+        let host = WebOrigin(frame.request.url)?.host ?? "This page"
+        return "\(host) says"
+    }
+
+    static func ask(_ message: String, from frame: WKFrameInfo, in webView: WKWebView, cancellable: Bool) async -> Bool {
+        let alert = NSAlert()
+        alert.messageText = title(for: frame)
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        if cancellable { alert.addButton(withTitle: "Cancel") }
+        let response: NSApplication.ModalResponse
+        if let window = webView.window {
+            response = await alert.beginSheetModal(for: window)
+        } else {
+            response = alert.runModal()
+        }
+        return response == .alertFirstButtonReturn
+    }
+
+    static func chooseFiles(_ parameters: WKOpenPanelParameters, in webView: WKWebView) async -> [URL]? {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        panel.canChooseDirectories = parameters.allowsDirectories
+        panel.canChooseFiles = true
+        let response: NSApplication.ModalResponse
+        if let window = webView.window {
+            response = await panel.beginSheetModal(for: window)
+        } else {
+            response = panel.runModal()
+        }
+        return response == .OK ? panel.urls : nil
+    }
 }
 
 /// A page's own popup window: a sign-in, mostly. Closes when the page closes
@@ -293,6 +447,31 @@ final class WebPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSWindowDele
 
     func webViewDidClose(_ webView: WKWebView) { window.close() }
 
+    /// Close the window from the pane that owns it.
+    func close() { window.close() }
+
+    func webView(
+        _ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+        initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
+        decisionHandler: @escaping @MainActor (WKPermissionDecision) -> Void
+    ) {
+        decisionHandler(WebPaneModel.mediaCapture)
+    }
+
+    /// What the window's title bar says about the page: its origin, always,
+    /// with a not-secure mark, and the page's own title under it (H2).
+    static func titles(for url: URL?, title: String?) -> (title: String, subtitle: String) {
+        guard let origin = WebOrigin(url) else { return (title ?? "", "") }
+        let shown = (title ?? "") == origin.host ? "" : (title ?? "")
+        return ((origin.isSecure ? "" : "Not Secure  ") + origin.host, shown)
+    }
+
+    private func retitle() {
+        let titles = Self.titles(for: webView.url, title: webView.title)
+        window.title = titles.title
+        window.subtitle = titles.subtitle
+    }
+
     func windowWillClose(_ notification: Notification) { onClose(self) }
 
     func webView(
@@ -302,9 +481,9 @@ final class WebPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSWindowDele
         decisionHandler(WebPaneModel.allows(action.request.url, mainFrame: action.targetFrame?.isMainFrame ?? true) ? .allow : .cancel)
     }
 
-    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        window.title = webView.title ?? webView.url?.host() ?? ""
-    }
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { retitle() }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { retitle() }
 }
 
 /// Every web pane's page, by terminal id, so a pane keeps its page while
@@ -323,9 +502,32 @@ final class WebPanes {
         if let model = models[terminal] { return model }
         let model = WebPaneModel(terminal: terminal)
         models[terminal] = model
-        while order.count > Self.limit {
-            models[order.removeFirst()] = nil
+        // Only a page nobody is looking at is let go: evicting one on screen
+        // reloads it, and past the limit every redraw would reload another.
+        while order.count > Self.limit,
+            let idle = order.first(where: { models[$0]?.webView.superview == nil && $0 != terminal })
+        {
+            release(idle)
         }
         return model
+    }
+
+    /// Whether a page is held for `terminal`, without making one.
+    func holds(_ terminal: String) -> Bool { models[terminal] != nil }
+
+    /// The panes that were closed: their pages stop, and nothing remembers
+    /// where they were (M2, ov-435 review 1).
+    func close(terminals: some Sequence<String>, memory: WebPaneMemory = WebPaneMemory()) {
+        for terminal in terminals {
+            memory.forget(terminal)
+            guard let model = models[terminal] else { continue }
+            model.close()
+            release(terminal)
+        }
+    }
+
+    private func release(_ terminal: String) {
+        models[terminal] = nil
+        order.removeAll { $0 == terminal }
     }
 }

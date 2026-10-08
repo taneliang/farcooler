@@ -12,7 +12,7 @@
 //! where the owner navigated stays on the Mac.
 
 use farcooler_core::{DomainError, Result};
-use farcooler_protocol::v1::SplitSide;
+use farcooler_protocol::v1::{SplitSide, TerminalIntent};
 use farcooler_store::models;
 use uuid::Uuid;
 
@@ -27,6 +27,23 @@ pub const WEB_PRESET: &str = "web";
 /// Notion, Linear or GitHub link (a few hundred), short enough that a URL is
 /// never a way to carry a document.
 pub const LONGEST_URL: usize = 8 * 1024;
+
+/// The most web panes one worktree holds. An agent that loops on `open-url`
+/// would otherwise tile the owner's screen with pages, each a live WebKit
+/// process on the Mac.
+pub const MOST_PER_WORKTREE: usize = 8;
+
+/// A web pane is made only by `layout.split` with a page, which checks the
+/// page. Any other way of asking for the `web` preset (`terminal.create`)
+/// would make a pane with no page that nothing can fill in, so it's refused.
+pub fn refuse_without_page(preset: &str) -> Result<()> {
+    if preset.split(':').next() == Some(WEB_PRESET) {
+        return Err(DomainError::InvalidArgument {
+            what: "a web pane is opened with an address, by layout open-url",
+        });
+    }
+    Ok(())
+}
 
 /// `raw`, if a web pane may open it: an absolute http or https URL with a
 /// host, no whitespace or control characters, at most [`LONGEST_URL`].
@@ -56,10 +73,43 @@ pub fn checked_url(raw: &str) -> Result<&str> {
     if host.is_empty() {
         return Err(REFUSED);
     }
+    if scheme.eq_ignore_ascii_case("http") && !plain_http_loads(host) {
+        return Err(DomainError::InvalidArgument {
+            what: "a web pane opens http only on this network; use the https address",
+        });
+    }
     Ok(raw)
 }
 
+/// Whether the Mac loads plain http from `host`. App Transport Security
+/// refuses it to a public name and exempts an IP address, a name with no dot
+/// (`localhost`, `devbox`) and `.local`. A pane opened on any other http
+/// address could only show the system's error, so it's refused here, in words
+/// an agent can act on, rather than there.
+fn plain_http_loads(host: &str) -> bool {
+    let bare = host.trim_start_matches('[').trim_end_matches(']');
+    bare.parse::<std::net::IpAddr>().is_ok()
+        || !bare.contains('.')
+        || bare.to_ascii_lowercase().ends_with(".local")
+}
+
 impl Service {
+    /// Whether `worktree` can hold another web pane (L9, ov-435).
+    pub(crate) fn room_for_another_page(&self, worktree: Uuid) -> Result<()> {
+        let held = self
+            .store
+            .list_terminals_for_worktree(worktree)?
+            .iter()
+            .filter(|t| t.pane_mode == models::PaneMode::Web && t.intent == TerminalIntent::Running)
+            .count();
+        if held >= MOST_PER_WORKTREE {
+            return Err(DomainError::InvalidArgument {
+                what: "this worktree already has as many web panes as it can hold; close one first",
+            });
+        }
+        Ok(())
+    }
+
     /// `layout.split`, for any preset: a new pane beside `target`, or beside
     /// the focused pane of the layout `group` names, or of the active one.
     ///
@@ -101,6 +151,7 @@ impl Service {
                 view.focused().or(view.panes.first()).map(|pane| pane.terminal_id)
             }),
         };
+        self.room_for_another_page(worktree)?;
         let term = match anchor {
             Some(anchor) => self.split_terminal(worktree, anchor, side, title, WEB_PRESET).await?,
             None => self.create_terminal(worktree, title, WEB_PRESET).await?,

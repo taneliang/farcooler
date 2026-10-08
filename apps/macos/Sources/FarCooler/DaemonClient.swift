@@ -843,6 +843,8 @@ final class DaemonClient: ObservableObject {
                 Notifier.shared.forget(id)
                 VisitLog.shared.forget(id)
             }
+            // A web pane that closed stops its page (M2, ov-435 review 1).
+            WebPanes.shared.close(terminals: PaneBanner.closed(before: before, after: after))
             if read != fleet { fleet = read }
             if !hasLoaded { hasLoaded = true }
             // Diff status for the whole sidebar, in one more call. Cheap by

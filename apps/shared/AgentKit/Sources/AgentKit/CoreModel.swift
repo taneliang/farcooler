@@ -532,6 +532,17 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// bytes were on a pane that is not a tty. See `ChangesView`.
     var isChangesPane: Bool { paneMode == "changes" }
 
+    /// Whether this pane is a web page the Mac draws (ov-435). Nothing runs in
+    /// it but `farcooler pane-host`, which holds the rectangle, so a phone
+    /// that opened a terminal session onto it would show a line that is false
+    /// here, and a ⌃C typed into that session would end the process and close
+    /// the Mac's page (M6, ov-435 review 1). The phone doesn't list it.
+    var isWebPane: Bool { paneMode == "web" }
+
+    /// A pane some client draws and nothing types into: a diff or a page.
+    /// What every phone list that leaves out a changes pane leaves out.
+    var isClientDrawn: Bool { isChangesPane || isWebPane }
+
     /// Whether a pane of this mode needs a `TerminalSession` behind it.
     ///
     /// **Only the pane that DRAWS a VT grid.** A chat reads its own subscribe
@@ -554,7 +565,7 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// worktree's pane to a chat while this phone is on it, and a session
     /// nobody re-asked about would be left open behind a screen that has
     /// stopped drawing it.
-    var needsTerminalSession: Bool { !isAgentPane && !isChangesPane }
+    var needsTerminalSession: Bool { !isAgentPane && !isClientDrawn }
 
     /// Whether this pane can be shown as a chat.
     ///
@@ -1196,7 +1207,7 @@ extension StateKind: Equatable {}
 extension Terminal: TaskBoardPane {
     var boardTaskID: String? { taskId }
     var boardState: String { state }
-    var runsAgent: Bool { TaskAgentLink.runsAgent(preset: preset, isChangesPane: isChangesPane) }
+    var runsAgent: Bool { TaskAgentLink.runsAgent(preset: preset, isChangesPane: isClientDrawn) }
 }
 
 extension Fleet {

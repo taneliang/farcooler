@@ -207,7 +207,7 @@ fun trackFleet(
     /** Orchestrators' tab titles, by terminal id ([com.farcooler.model.FleetLayout.orchestratorTitles]). */
     titles: Map<String, String> = emptyMap(),
 ): ShellFleet {
-    val terminals = worktree?.terminals.orEmpty().filterNot { it.isChangesPane }
+    val terminals = worktree?.terminals.orEmpty().filterNot { it.isClientDrawn }
     val tabs = buildList {
         add(ShellTab(id = Pane.CHANGES_ID, title = "Changes", mark = null))
         terminals.forEach {

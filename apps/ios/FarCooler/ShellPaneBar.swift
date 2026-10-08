@@ -209,7 +209,7 @@ struct ShellPaneChromeModifier: ViewModifier {
                     }
                     // Not while a conversation covers the terminal (ov-373):
                     // the path would land in a box nobody can see.
-                    if let live, !live.isAgentPane, !live.isChangesPane, !nativePanes.covered.contains(live.id) {
+                    if let live, !live.isAgentPane, !live.isClientDrawn, !nativePanes.covered.contains(live.id) {
                         imageMenu(live)
                     }
                     if hasOverflow {

@@ -361,6 +361,19 @@ class ModelTest {
         assertEquals(Long.MAX_VALUE, terminal().sortRank)
     }
 
+    /** A web page the Mac draws is not a terminal here either (ov-435 review 1, M6). */
+    @Test
+    fun aWebPaneIsDrawnByTheMacAndNeverGivenATerminalSession() {
+        val page = terminal(paneMode = "web")
+        assertTrue(page.isWebPane)
+        assertTrue(page.isClientDrawn)
+        assertFalse(page.isAgentPane)
+        assertFalse(page.isChangesPane)
+        assertTrue(terminal(paneMode = "changes").isClientDrawn)
+        assertFalse(terminal(paneMode = "agent").isClientDrawn)
+        assertFalse(terminal().isClientDrawn)
+    }
+
     @Test
     fun aChangesPaneIsNeitherAChatNorATerminal() {
         // Which is the defect it exists to let a later phase fix: a `changes`

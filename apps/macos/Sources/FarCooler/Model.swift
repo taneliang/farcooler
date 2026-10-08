@@ -581,7 +581,11 @@ struct Terminal: Decodable, Identifiable, Hashable {
         // needs, and both are answers to a question about a program rather than
         // about the pane.
         if isChangesPane { return "Changes" }
-        if isWebPane { return webPage?.host() ?? "Web Page" }
+        // Never the host it was opened on: the page may have moved on from it
+        // (an open redirect), and a navigator row that names the wrong site
+        // is how a phishing page passes. The pane's header shows where the
+        // page is (`WebOriginLabel`).
+        if isWebPane { return "Web Page" }
         if !title.isEmpty, !Self.isPlaceholder(title) { return title }
         return Self.name(of: preset)
     }

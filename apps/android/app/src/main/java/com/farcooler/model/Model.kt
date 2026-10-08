@@ -611,6 +611,17 @@ data class Terminal(
     val isChangesPane: Boolean get() = paneMode == "changes"
 
     /**
+     * A web page the Mac draws (ov-435). Only `farcooler pane-host` runs in it,
+     * so a terminal session onto it would show a line that is false here, and a
+     * Ctrl-C typed there would end the process and close the Mac's page. The
+     * phone doesn't list it (M6, ov-435 review 1).
+     */
+    val isWebPane: Boolean get() = paneMode == "web"
+
+    /** A pane some client draws and nothing types into: a diff or a page. */
+    val isClientDrawn: Boolean get() = isChangesPane || isWebPane
+
+    /**
      * Whether this pane can be shown as a chat.
      *
      * Answered on the host, because identifying an agent takes a screen read —

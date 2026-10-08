@@ -79,7 +79,7 @@ extension PaneFocus {
         // A `changes` pane the host happens to have open is not an agent and is
         // not a candidate: the diff it shows is the Changes tab, which is
         // already the second branch below.
-        let panes = worktree.terminals.filter { !$0.isChangesPane }
+        let panes = worktree.terminals.filter { !$0.isClientDrawn }
 
         if let blocked = panes.filter({ $0.agent == .blocked })
             .min(by: { ($0.sortRank, $0.id) < ($1.sortRank, $1.id) })

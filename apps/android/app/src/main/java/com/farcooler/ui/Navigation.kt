@@ -365,7 +365,7 @@ sealed interface Pane {
 
         /** The tab a pane on the runner belongs on. See the type's own note on folding. */
         fun of(terminal: com.farcooler.model.Terminal): Pane =
-            if (terminal.isChangesPane) Changes else Terminal(terminal.id)
+            if (terminal.isClientDrawn) Changes else Terminal(terminal.id)
 
         /**
          * Read back an [id].

@@ -58,4 +58,26 @@ struct PaneSessionTests {
     @Test func anUnknownModeIsTreatedAsAGrid() throws {
         #expect(try terminal(mode: "something-newer").needsTerminalSession)
     }
+
+    /// A web page the Mac draws (ov-435): the process behind it only holds the
+    /// rectangle, so a session onto it would show a false line, and a ⌃C typed
+    /// there would end it and close the Mac's page (review 1, M6).
+    @Test func aWebPaneNeedsNoSessionAndIsNotListed() throws {
+        let page = try terminal(mode: "web")
+        #expect(page.isWebPane && page.isClientDrawn)
+        #expect(!page.needsTerminalSession)
+        #expect(!page.runsAgent, "a web page is no agent, whatever its preset says (L8)")
+        #expect(try terminal(mode: "changes").isClientDrawn)
+        #expect(try !terminal(mode: "agent").isClientDrawn)
+        #expect(try !terminal(mode: "terminal").isClientDrawn)
+
+        let row = #"""
+            {"id":"w1","short":"w1","task":"t","branch":"b","worktree":"/x","state":"ready","terminals":[
+            {"id":"t1","short":"t1","title":"Shell","preset":"shell","state":"running","paneMode":"terminal","epoch":1},
+            {"id":"t2","short":"t2","title":"Web","preset":"web","state":"running","paneMode":"web","epoch":1},
+            {"id":"t3","short":"t3","title":"Changes","preset":"changes","state":"running","paneMode":"changes","epoch":1}]}
+            """#
+        let worktree = try JSONDecoder().decode(Worktree.self, from: Data(row.utf8))
+        #expect(PhoneTree.treeWorktree(worktree).terminals.map(\.id) == ["t1"], "only the shell is a row on the phone")
+    }
 }

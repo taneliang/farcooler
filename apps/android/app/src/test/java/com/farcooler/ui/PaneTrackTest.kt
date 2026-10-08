@@ -22,8 +22,8 @@ import org.junit.Test
  */
 class PaneTrackTest {
 
-    private fun terminal(id: String, changes: Boolean = false) =
-        Terminal(id = id, title = id, paneMode = if (changes) "changes" else "agent")
+    private fun terminal(id: String, changes: Boolean = false, web: Boolean = false) =
+        Terminal(id = id, title = id, paneMode = if (changes) "changes" else if (web) "web" else "agent")
 
     private fun worktree(vararg terminals: Terminal) =
         Worktree(id = "w", short = "auth-refactor", terminals = terminals.toList())
@@ -60,6 +60,22 @@ class PaneTrackTest {
             listOf(Pane.CHANGES_ID, Pane.Terminal("t1").id),
             folded.worktrees.single().tabs.map { it.id },
         )
+    }
+
+    /**
+     * A web page the Mac draws gets no tab and no chip: a terminal session onto
+     * it would show a false line, and a Ctrl-C there would close the Mac's page
+     * (ov-435 review 1, M6).
+     */
+    @Test
+    fun aWebPaneIsNotATab() {
+        val shown = trackFleet(
+            worktree(terminal("t1"), terminal("page", web = true)), "w", "laptop")
+        assertEquals(
+            listOf(Pane.CHANGES_ID, Pane.Terminal("t1").id),
+            shown.worktrees.single().tabs.map { it.id },
+        )
+        assertEquals(Pane.Changes, Pane.of(terminal("page", web = true)))
     }
 
     /** A worktree the runner has not described yet still has its diff. */

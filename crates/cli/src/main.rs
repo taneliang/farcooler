@@ -2703,12 +2703,7 @@ async fn layout(runner: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
         };
     }
 
-    let request = if matches!(cmd, LayoutCmd::Show { .. }) {
-        req_for(method, worktree_id)
-    } else {
-        with(req_for(method, worktree_id), request::Payload::LayoutUpdate(update))
-    };
-    let request = web_pane::required(matches!(cmd, LayoutCmd::OpenUrl(_)), request);
+    let request = layout_request(&cmd, method, worktree_id, update);
     let r = link.call(request).await?;
     let result::Value::PaneGroupList(list) = expect_value(r.value)? else {
         return Err(crate::daemon_link::UNREADABLE.into());
@@ -2718,6 +2713,23 @@ async fn layout(runner: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
     let terminals = list_terminals(&mut link, Some(worktree_id)).await?;
     print_layout(&list, &terminals, json);
     Ok(())
+}
+
+/// The request a `layout` verb sends: `update` as the payload (a listing has
+/// none), and for `open-url` the capability an older runner would otherwise
+/// answer by launching a program called `web` (`web_pane::required`).
+fn layout_request(
+    cmd: &LayoutCmd,
+    method: &str,
+    worktree: Uuid,
+    update: farcooler_protocol::v1::LayoutUpdate,
+) -> farcooler_protocol::v1::Request {
+    let request = if matches!(cmd, LayoutCmd::Show { .. }) {
+        req_for(method, worktree)
+    } else {
+        with(req_for(method, worktree), request::Payload::LayoutUpdate(update))
+    };
+    web_pane::required(matches!(cmd, LayoutCmd::OpenUrl(_)), request)
 }
 
 /// The layout a verb's `--layout` names, as given.

@@ -341,6 +341,8 @@ class TaskBoardTest {
             assertFalse(preset, TaskAgentLink.runsAgent(preset, isChangesPane = false))
         }
         assertFalse(TaskAgentLink.runsAgent("claude", isChangesPane = true))
+        // A web page the Mac draws is no agent either (ov-435 review 1, L8).
+        assertFalse(TaskAgentLink.runsAgent(pane(preset = "claude", paneMode = "web")))
         // The first non-empty piece names it, as Swift's split does.
         assertTrue(TaskAgentLink.runsAgent(":claude", isChangesPane = false))
         assertFalse(TaskAgentLink.runsAgent(":zsh", isChangesPane = false))

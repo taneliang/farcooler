@@ -11,11 +11,10 @@ struct WebPane: View {
     @ObservedObject var model: WebPaneModel
     /// The page the runner says this pane opened on.
     let opened: URL?
-    let isFocused: Bool
 
     var body: some View {
         ZStack {
-            WebPageView(model: model, isFocused: isFocused)
+            WebPageView(model: model)
             if let failure = model.failure {
                 ContentUnavailableView {
                     Label("Can’t Open Page", systemImage: "exclamationmark.triangle")
@@ -32,7 +31,11 @@ struct WebPane: View {
                 .background(.background)
             }
         }
+        // Also when the page arrives after the pane does: the runner makes
+        // the pane, then records its page, and a layout event can land
+        // between the two (M1, ov-435 review 1).
         .onAppear { model.start(opened: opened) }
+        .onChange(of: opened) { _, page in model.start(opened: page) }
     }
 }
 
@@ -40,13 +43,6 @@ struct WebPane: View {
 /// layout switch keeps the page (`WebPanes`).
 struct WebPageView: NSViewRepresentable {
     let model: WebPaneModel
-    let isFocused: Bool
-
-    final class Coordinator {
-        var wasFocused = false
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> NSView {
         let container = NSView()
@@ -54,14 +50,13 @@ struct WebPageView: NSViewRepresentable {
         return container
     }
 
+    /// Never takes the keyboard. The page gets it when the owner clicks in it
+    /// (WebKit does that itself), not when a layout event says this pane is
+    /// the focused one: an agent can make that event (`layout focus`), and
+    /// the keystrokes that follow, a password or a pasted token, are the
+    /// owner's (H1, ov-435 review 1).
     func updateNSView(_ container: NSView, context: Context) {
         if model.webView.superview !== container { place(in: container) }
-        // The keyboard follows the focus ring when it arrives here, as it
-        // does into a terminal; never taken back once the page has it.
-        if isFocused, !context.coordinator.wasFocused, let window = container.window {
-            window.makeFirstResponder(model.webView)
-        }
-        context.coordinator.wasFocused = isFocused
     }
 
     private func place(in container: NSView) {
@@ -73,28 +68,39 @@ struct WebPageView: NSViewRepresentable {
     }
 }
 
-/// Back, Forward, Reload and the page's name, for a pane's header strip.
+/// Back, Forward, Reload and where the page is, for a pane's header strip.
 struct WebPaneNavigation: View {
     @ObservedObject var model: WebPaneModel
     let isFocused: Bool
 
+    /// How much header the controls leave the origin. A tiled pane can be a
+    /// couple of hundred points wide, and the host is the one thing that must
+    /// stay: Back and Forward go first, then Reload, so the origin never
+    /// shrinks to nothing beside them (H2).
+    @State private var width: CGFloat = 400
+    static let showsHistory: CGFloat = 270
+    static let showsReload: CGFloat = 210
+    /// Below this the title and the words Not Secure go, leaving the lock
+    /// (or the warning mark) and the host.
+    static let showsTitle: CGFloat = 320
+
     var body: some View {
         HStack(spacing: 2) {
-            control("chevron.left", help: "Back", enabled: model.canGoBack) { model.goBack() }
-            control("chevron.right", help: "Forward", enabled: model.canGoForward) { model.goForward() }
-            control(
-                model.isLoading ? "xmark" : "arrow.clockwise",
-                help: model.isLoading ? "Stop Loading" : "Reload Page", enabled: model.url != nil
-            ) { model.reloadOrStop() }
-            Text(model.name)
-                .font(WorkspaceStyle.paneTitle)
-                .fontWeight(isFocused ? .semibold : .medium)
-                .foregroundStyle(isFocused ? .primary : .secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
+            if width >= Self.showsHistory {
+                control("chevron.left", help: "Back", enabled: model.canGoBack) { model.goBack() }
+                control("chevron.right", help: "Forward", enabled: model.canGoForward) { model.goForward() }
+            }
+            if width >= Self.showsReload {
+                control(
+                    model.isLoading ? "xmark" : "arrow.clockwise",
+                    help: model.isLoading ? "Stop Loading" : "Reload Page", enabled: model.url != nil
+                ) { model.reloadOrStop() }
+            }
+            WebOriginLabel(model: model, isFocused: isFocused, compact: width < Self.showsTitle)
                 .padding(.leading, Spacing.tight)
-                .help(model.url?.absoluteString ?? "")
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { width = $0 }
     }
 
     private func control(_ symbol: String, help: String, enabled: Bool, action: @escaping () -> Void) -> some View {
@@ -110,6 +116,65 @@ struct WebPaneNavigation: View {
         .opacity(enabled ? 1 : 0.4)
         .help(help)
         .accessibilityLabel(help)
+    }
+}
+
+/// Where the page is, always: a lock and the host, with the page's own title
+/// after it and quieter (H2, ov-435 review 1). The title is the page's to
+/// choose, so it can say "Sign In to Google"; the host is what the address
+/// really is. A narrow header drops the title first and then the front of
+/// the host, never the end of it, which is the part that names the site
+/// (`accounts.google.com.example.net` must not shorten to `accounts.google`).
+/// Plain http is marked in words and in the attention color.
+struct WebOriginLabel: View {
+    @ObservedObject var model: WebPaneModel
+    let isFocused: Bool
+    /// A narrow header: the host alone, after its mark.
+    var compact = false
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let origin = model.origin {
+                Image(systemName: origin.isSecure ? "lock.fill" : "exclamationmark.triangle.fill")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(origin.isSecure ? AnyShapeStyle(.secondary) : AnyShapeStyle(Tint.attention(scheme)))
+                    .accessibilityHidden(true)
+                    .identified("web-origin-lock")
+                Text(origin.host)
+                    .font(WorkspaceStyle.paneTitle)
+                    .fontWeight(isFocused ? .semibold : .medium)
+                    .foregroundStyle(origin.isSecure ? (isFocused ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary)) : AnyShapeStyle(Tint.attention(scheme)))
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                    .layoutPriority(2)
+                    .identified("web-origin-host")
+                if !origin.isSecure, !compact {
+                    Text("Not Secure")
+                        .font(WorkspaceStyle.paneTitle)
+                        .foregroundStyle(Tint.attention(scheme))
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                }
+                if let title = model.pageTitle, !compact {
+                    Text(title)
+                        .font(WorkspaceStyle.paneTitle)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .identified("web-origin-title")
+                }
+            } else {
+                Text("Web Page")
+                    .font(WorkspaceStyle.paneTitle)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .help(model.url?.absoluteString ?? "")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(model.origin?.spoken ?? "Web Page")
+        .accessibilityValue(model.pageTitle ?? "")
     }
 }
 
@@ -151,7 +216,9 @@ struct WebPaneBar: View {
 /// Layout ▸ Open Web Page: an address, asked for in a sheet on the window.
 enum WebPagePrompt {
     static let title = "Open Web Page"
-    static let message = "Enter an address to open beside the focused pane."
+    static let message = "Enter a web address. It opens in a new pane."
+    /// What a refused address says: what to type, not which schemes are allowed.
+    static let refusal = "Enter a web address, like linear.app/acme or https://github.com."
 
     @MainActor
     static func makeAlert() -> (NSAlert, NSTextField) {
@@ -193,7 +260,7 @@ extension ContentView {
     func openWebPage(in worktree: Worktree, beside here: PaneRect?, layout shown: String?) async {
         guard let typed = await WebPagePrompt.ask(on: NSApp.keyWindow) else { return }
         guard let page = WebAddress.typed(typed) else {
-            errorBanner = "Far Cooler opens only web addresses that start with http or https."
+            errorBanner = WebPagePrompt.refusal
             return
         }
         let inOrchestrator = WorkspaceScreen.opensShellInstead(.splitRight, key: selectedPane, in: self.shown)

@@ -485,7 +485,7 @@ struct TilePane: View {
         } else if terminal.isWebPane {
             // Not gated on `isLive` either, for the changes pane's reason:
             // the page is this app's, whatever holds the rectangle (ov-435).
-            WebPane(model: WebPanes.shared.model(for: terminal.id), opened: terminal.webPage, isFocused: isFocused)
+            WebPane(model: WebPanes.shared.model(for: terminal.id), opened: terminal.webPage)
                 .id("\(terminal.id)#web")
         } else if isLive, terminal.isAgentPane {
             // Same empty `onResize` as the terminal case just below, and

@@ -21,8 +21,12 @@ use crate::store::Store;
 
 /// The column. Nullable, and NULL is already "not a web pane", so an older
 /// build that never names it reads every row the way it always did. It reads
-/// a web pane's mode (3) as a terminal, `PaneMode::from_i64`'s fallback: the
-/// pane shows its host's one line, which is honest.
+/// a web pane's mode (3) as a terminal, `PaneMode::from_i64`'s fallback, and
+/// that build's `preset_runs_an_agent("web")` is true. So on a downgrade the
+/// pane shows its host's one line until something respawns it, and a respawn
+/// (a restart, or a tmux server that came back) runs the preset `web` as a
+/// program through a login shell: "command not found", in a pane that has no
+/// page to show. Close such a pane; there is nothing in it to save.
 pub(crate) fn migration_0040_web_url(tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
     tx.execute_batch("ALTER TABLE terminals ADD COLUMN web_url TEXT;")
 }
@@ -93,6 +97,18 @@ mod tests {
         assert_eq!(PaneMode::from_i64(PaneMode::Web.as_i64()), PaneMode::Web);
         assert_eq!(PaneMode::Web.as_i64(), 3);
         assert_eq!(PaneMode::from_i64(4), PaneMode::Terminal);
+    }
+
+    /// Everything that keeps a keystroke, a screen read and a lingering record
+    /// away from a pane the client draws (`tell`, `compose`, `bring`,
+    /// `interrupt`, the watcher's sample and its reaping) asks this one
+    /// question, so both pages the client draws answer yes and no other does.
+    #[test]
+    fn a_pane_the_client_draws_is_a_changes_or_a_web_pane_and_nothing_else() {
+        assert!(PaneMode::Web.is_client_drawn());
+        assert!(PaneMode::Changes.is_client_drawn());
+        assert!(!PaneMode::Terminal.is_client_drawn());
+        assert!(!PaneMode::Agent.is_client_drawn());
     }
 
     #[test]

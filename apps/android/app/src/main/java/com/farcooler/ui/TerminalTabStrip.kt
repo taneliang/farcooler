@@ -187,7 +187,7 @@ fun TerminalTabStrip(
 
     val numbering = worktree?.ordinals() ?: emptyMap()
     val chips = worktree?.terminals.orEmpty()
-        .filterNot { it.isChangesPane }
+        .filterNot { it.isClientDrawn }
         .map { terminal ->
             Chip(
                 pane = Pane.Terminal(terminal.id),

@@ -409,7 +409,7 @@ object TaskAgentLink {
         return name != "shell" && name.lowercase() !in SHELLS
     }
 
-    fun runsAgent(terminal: Terminal): Boolean = runsAgent(terminal.preset, terminal.isChangesPane)
+    fun runsAgent(terminal: Terminal): Boolean = runsAgent(terminal.preset, terminal.isClientDrawn)
 
     /** Whether [pane] is working the task with id [taskId], whatever that task's status. */
     fun isWorking(pane: Terminal, taskId: String): Boolean {

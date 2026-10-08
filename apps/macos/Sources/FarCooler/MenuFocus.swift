@@ -72,6 +72,10 @@ struct LayoutMenuFocus: Equatable {
     /// The key pane is Claude in a terminal, and its conversation view is
     /// offered (`NativeAgents.offers`).
     var switchesConversation = false
+    /// The runner serves web panes (`web_pane`): against an older one, Open
+    /// Web Page would take an address and then only fail (M5, ov-435 review
+    /// 1). HIG: dim an item that can't act.
+    var opensWebPage = false
 
     /// Splitting and New Layout need only a worktree.
     var splits: Bool { true }
@@ -88,7 +92,7 @@ struct LayoutMenuFocus: Equatable {
     /// finds it; `layouts` the ones the bar offers.
     static func make(
         group: PaneGroup?, here: PaneRect?, layouts: [PaneGroup], switchesMode: Bool,
-        switchesConversation: Bool = false
+        switchesConversation: Bool = false, opensWebPage: Bool = false
     ) -> LayoutMenuFocus {
         let neighbors = Set(TileDirection.allCases.filter { side in
             guard let group, let here else { return false }
@@ -99,7 +103,8 @@ struct LayoutMenuFocus: Equatable {
             // `ContentView.layout(stepping:from:in:)`'s rule: somewhere else
             // to go only with another layout, from one the bar lists.
             stepsLayouts: layouts.count > 1 && layouts.contains { $0.id == group?.id },
-            switchesMode: switchesMode, switchesConversation: switchesConversation)
+            switchesMode: switchesMode, switchesConversation: switchesConversation,
+            opensWebPage: opensWebPage)
     }
 }
 

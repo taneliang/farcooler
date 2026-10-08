@@ -1480,6 +1480,8 @@ impl Rpc {
                 let Some(request::Payload::TerminalCreate(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
+                // A web pane is opened with a page, by `layout.split` only.
+                crate::web_pane::refuse_without_page(&p.command_preset)?;
                 // Before anything is made, so a key that isn't on this
                 // worktree's board opens no pane and writes no record.
                 let task = match p.task_key.as_deref().map(str::trim).filter(|k| !k.is_empty()) {

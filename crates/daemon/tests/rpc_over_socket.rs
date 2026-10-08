@@ -4425,8 +4425,132 @@ async fn a_web_pane_refuses_anything_but_http_and_https() {
             url: url.map(str::to_string),
             ..Default::default()
         }));
-        let refused = client.call(req).await;
-        assert!(refused.is_err(), "{preset} {url:?} was opened");
+        match client.call(req).await {
+            Err(ClientError::Daemon { code, .. }) => {
+                assert_eq!(code, ErrorCode::InvalidArgument as i32, "{preset} {url:?}")
+            }
+            other => panic!("{preset} {url:?} was opened, or failed another way: {other:?}"),
+        }
         assert_eq!(terminals_of(&mut client, &worktree.id).await.len(), 1, "{preset} {url:?} made a pane");
     }
+
+    // Plain http to a public name only ever shows the system's error.
+    let mut req = request("layout.split");
+    req.target_resource_id = Some(worktree.id.clone());
+    req.payload = Some(request::Payload::LayoutUpdate(farcooler_protocol::v1::LayoutUpdate {
+        command_preset: "web".into(),
+        url: Some("http://example.com/".into()),
+        ..Default::default()
+    }));
+    assert!(client.call(req).await.is_err(), "http to a public name was opened");
+
+    // L1: the web preset is `layout.split`'s, with a page; a pane made any
+    // other way has no page and nothing can fill it in.
+    for join_active_group in [false, true] {
+        let mut create = request("terminal.create");
+        create.target_resource_id = Some(worktree.id.clone());
+        create.payload = Some(request::Payload::TerminalCreate(farcooler_protocol::v1::TerminalCreate {
+            title: "page".into(),
+            command_preset: "web".into(),
+            join_active_group,
+            prompt: None,
+            task_key: None,
+        }));
+        match client.call(create).await {
+            Err(ClientError::Daemon { code, .. }) => assert_eq!(code, ErrorCode::InvalidArgument as i32),
+            other => panic!("terminal.create made a web pane with no page: {other:?}"),
+        }
+    }
+    assert_eq!(terminals_of(&mut client, &worktree.id).await.len(), 1, "no pane was made");
+}
+
+/// H1: an agent's `open-url` must not take the owner's keyboard. The owner's
+/// shell is the focused pane before the page opens and after, and the page
+/// is not; a shell split beside it (the control) does take the keyboard, so
+/// the test is about web panes and not about splits never focusing.
+#[tokio::test]
+async fn a_web_page_never_takes_the_keyboard() {
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = tempfile::tempdir().unwrap();
+    let worktree = a_worktree(&mut client, dir.path()).await;
+    let original = a_terminal(&mut client, &worktree.id, "one").await;
+
+    let list = layout_call(
+        &mut client,
+        "layout.split",
+        &worktree.id,
+        farcooler_protocol::v1::LayoutUpdate {
+            command_preset: "web".into(),
+            url: Some("https://github.com/".into()),
+            ..Default::default()
+        },
+    )
+    .await;
+    let panes = &list.items[0].panes;
+    assert_eq!(panes.len(), 2, "the page joined the layout");
+    let focused: Vec<_> = panes.iter().filter(|p| p.focused).collect();
+    assert_eq!(focused.len(), 1, "one pane holds the keyboard: {panes:?}");
+    assert_eq!(focused[0].terminal_id, original.id, "the owner's shell kept it: {panes:?}");
+
+    // Control: an ordinary split does take it.
+    let list = layout_call(
+        &mut client,
+        "layout.split",
+        &worktree.id,
+        farcooler_protocol::v1::LayoutUpdate { command_preset: "shell".into(), ..Default::default() },
+    )
+    .await;
+    let panes = &list.items[0].panes;
+    let focused: Vec<_> = panes.iter().filter(|p| p.focused).collect();
+    assert_eq!(focused.len(), 1);
+    assert_ne!(focused[0].terminal_id, original.id, "a shell split takes the keyboard: {panes:?}");
+}
+
+/// L9: an agent that loops on `open-url` stops at the cap instead of tiling
+/// the owner's screen with live pages, and the pane it was refused is not
+/// made. Each page splits the last one, alternating sides, so eight fit in
+/// the window.
+#[tokio::test]
+async fn a_worktree_holds_only_so_many_web_pages() {
+    use farcooler_protocol::v1::SplitSide;
+    let h = start(Scope::HostAdmin).await;
+    let mut client = connect(&h).await;
+    let dir = tempfile::tempdir().unwrap();
+    let worktree = a_worktree(&mut client, dir.path()).await;
+    let original = a_terminal(&mut client, &worktree.id, "one").await;
+
+    let mut last = original.id.clone();
+    for n in 0..farcooler_daemon::web_pane::MOST_PER_WORKTREE {
+        let side = if n % 2 == 0 { SplitSide::Right } else { SplitSide::Bottom };
+        layout_call(
+            &mut client,
+            "layout.split",
+            &worktree.id,
+            farcooler_protocol::v1::LayoutUpdate {
+                command_preset: "web".into(),
+                url: Some(format!("https://example.com/{n}")),
+                target: Some(last.clone()),
+                side: side as i32,
+                ..Default::default()
+            },
+        )
+        .await;
+        let terminals = terminals_of(&mut client, &worktree.id).await;
+        last = terminals.iter().find(|t| t.web_url.as_deref() == Some(&format!("https://example.com/{n}"))).unwrap().id.clone();
+    }
+    let mut req = request("layout.split");
+    req.target_resource_id = Some(worktree.id.clone());
+    req.payload = Some(request::Payload::LayoutUpdate(farcooler_protocol::v1::LayoutUpdate {
+        command_preset: "web".into(),
+        url: Some("https://example.com/one-too-many".into()),
+        target: Some(last),
+        ..Default::default()
+    }));
+    match client.call(req).await {
+        Err(ClientError::Daemon { code, .. }) => assert_eq!(code, ErrorCode::InvalidArgument as i32),
+        other => panic!("a ninth page was opened: {other:?}"),
+    }
+    let made = terminals_of(&mut client, &worktree.id).await;
+    assert_eq!(made.len(), farcooler_daemon::web_pane::MOST_PER_WORKTREE + 1, "no ninth pane");
 }

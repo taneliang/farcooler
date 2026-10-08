@@ -187,7 +187,7 @@ struct ShellFleetMap {
         // A host-side `changes` pane is not a tab of its own: it IS the
         // Changes tab, and both resolve to the same `ChangesStore`. Two
         // chips for one diff is what `Pane.init(_:)` exists to prevent.
-        let terminals = worktree.terminals.filter { !$0.isChangesPane }
+        let terminals = worktree.terminals.filter { !$0.isClientDrawn }
 
         // **Changes leads, then fleet order, and never `sortRank`.**
         //

@@ -4266,7 +4266,13 @@ impl Service {
         };
 
         // The new pane takes the keyboard: you split in order to type in it.
-        let _ = self.tmux.select_pane(&pane_id).await;
+        // Except a web page, which nobody types into by splitting: an agent
+        // chose that page, and the owner's next keystrokes, a password or a
+        // pasted token, are not for it. `split-window -d` already left the
+        // focus where it was (H1, ov-435 review 1).
+        if command_preset != crate::web_pane::WEB_PRESET {
+            let _ = self.tmux.select_pane(&pane_id).await;
+        }
 
         let snapshot = self.inventory.refresh().await;
         if snapshot.claimants(term.id).iter().any(|p| p.proves_life()) {

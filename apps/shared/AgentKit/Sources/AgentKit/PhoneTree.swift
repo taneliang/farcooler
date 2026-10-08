@@ -48,7 +48,7 @@ enum PhoneTree {
                     isMainCheckout: true,
                     // The project's own: not an orchestrator, not a task's
                     // agent, not a changes pane (the Mac's `ProjectTerminals`).
-                    terminals: checkout.terminals.filter { !$0.isOrchestrator && $0.taskId == nil && !$0.isChangesPane }
+                    terminals: checkout.terminals.filter { !$0.isOrchestrator && $0.taskId == nil && !$0.isClientDrawn }
                         .map(treeTerminal))
             },
             pages: pages.map(OneTreePage.init),
@@ -87,7 +87,7 @@ enum PhoneTree {
         OneTreeWorktree(
             id: worktree.id, name: worktree.task, path: worktree.worktree ?? "", branch: worktree.branch,
             isMainCheckout: worktree.isPrimaryCheckout, isHidden: worktree.isHidden,
-            terminals: worktree.terminals.filter { !$0.isChangesPane }.map(treeTerminal),
+            terminals: worktree.terminals.filter { !$0.isClientDrawn }.map(treeTerminal),
             taskIDs: taskIDs(of: worktree))
     }
 

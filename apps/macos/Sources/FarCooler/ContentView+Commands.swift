@@ -254,7 +254,8 @@ extension ContentView {
                 switchesMode: target.map { $0.canSwitchPaneMode || $0.isAgentPane } ?? false,
                 switchesConversation: target.map {
                     nativeAgents.offers($0, target: store.client(for: worktree)?.target ?? "")
-                } ?? false)
+                } ?? false,
+                opensWebPage: store.client(for: worktree)?.daemonBuild?.can(.webPane) == true)
         }
         return focus
     }
