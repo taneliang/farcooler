@@ -260,6 +260,20 @@ public enum AgentConversation {
         return nil
     }
 
+    // MARK: - claude's suggested prompt (ov-409)
+
+    /// The prompt the composer offers as its placeholder: the one claude's own
+    /// box shows after a turn, carried on the newest turn's row. Only while
+    /// the rows are live, the agent isn't working or holding a dialog (its
+    /// box then shows hints, not predictions), and nothing is typed. A
+    /// draft the person may take, never a message: nothing here sends.
+    public static func suggestion(newestTurn turn: AgentRow.Turn?, draft: String, stale: Bool) -> String? {
+        guard !stale, let turn, turn.activity != "Busy", turn.activity != "Waiting" else { return nil }
+        guard draft.allSatisfy(\.isWhitespace) else { return nil }
+        guard let words = turn.suggestion?.trimmingCharacters(in: .whitespacesAndNewlines), !words.isEmpty else { return nil }
+        return words
+    }
+
     /// What the composer says when the runner didn't press `key`, or nil when
     /// there's nothing to say: the turn ended on its own (`idle`), or a
     /// second press came too soon after the first (`too_soon`).
@@ -417,4 +431,20 @@ public enum AgentConversation {
 /// The first answer from any device wins; a later one is refused `not_held`.
 public protocol AgentAnswerSink: Sendable {
     func answer(terminal: String, ask: String, option: String, answers: [String: String]) async throws
+}
+
+extension AgentRowStore {
+    /// The newest turn held, whose row carries what claude's box shows now.
+    public var newestTurn: AgentRow.Turn? {
+        for id in ids.reversed() {
+            if case .turn(let turn)? = box(id)?.row.kind { return turn }
+        }
+        return nil
+    }
+
+    /// The prompt claude suggests, for a composer whose draft is `draft`
+    /// (`AgentConversation.suggestion`).
+    public func suggestion(draft: String) -> String? {
+        AgentConversation.suggestion(newestTurn: newestTurn, draft: draft, stale: isStale)
+    }
 }

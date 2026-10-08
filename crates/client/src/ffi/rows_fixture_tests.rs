@@ -32,6 +32,7 @@ fn rows() -> Vec<Row> {
             outcome: Some(TurnOutcome::Failed { detail: "API error".into() }),
             background_running: 1,
             activity: Some(Activity::Busy),
+            suggestion: Some("run the tests again".into()),
         })),
         row(1, 2, "prose:1", t, RowKind::Prose(Prose { text: "Looking at **main.rs**.".into(), conclusion: false, at_ms: Some(2_000) })),
         row(2, 3, "think:1", t, RowKind::Thinking(Thinking { started_ms: Some(2_500), ended_ms: Some(4_500) })),

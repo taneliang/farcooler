@@ -62,6 +62,10 @@ public struct AgentRow: Sendable, Equatable, Identifiable, Codable {
         /// `Busy`, `Idle`, `Shell` or `Waiting` (a dialog up, ov-368), on the
         /// newest turn only.
         public var activity: String?
+        /// The next prompt claude's empty box suggests, on the newest turn
+        /// only, once the agent rests (ov-409). A draft the person may take,
+        /// never something to send.
+        public var suggestion: String?
 
         public enum Outcome: Sendable, Equatable, Codable {
             case finished, interrupted, unrecorded
@@ -339,7 +343,8 @@ extension AgentRow {
                 startedMs: AgentRowJSON.ms(p["started_ms"]), endedMs: AgentRowJSON.ms(p["ended_ms"]),
                 durationMs: AgentRowJSON.ms(p["duration_ms"]), outcome: outcome,
                 backgroundRunning: AgentRowJSON.int(p["background_running"]),
-                activity: AgentRowJSON.tag(p["activity"])?.name))
+                activity: AgentRowJSON.tag(p["activity"])?.name,
+                suggestion: (p["suggestion"] as? String).flatMap { $0.isEmpty ? nil : $0 }))
         case "Prose":
             return .prose(Prose(text: text("text"), conclusion: p["conclusion"] as? Bool ?? false, atMs: AgentRowJSON.ms(p["at_ms"])))
         case "Thinking":

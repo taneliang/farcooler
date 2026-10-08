@@ -30,6 +30,7 @@ class AgentRowWireTest {
         assertEquals(1_000L, turn.startedMs)
         assertEquals(60_000L, turn.durationMs)
         assertEquals(AgentRow.Turn.Outcome.Failed("API error"), turn.outcome)
+        assertEquals("run the tests again", turn.suggestion)
         assertNull(page.rows[0].turn)
         assertEquals("turn:p1", page.rows[1].turn)
 

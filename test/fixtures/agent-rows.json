@@ -84,7 +84,8 @@
               }
             },
             "prompt": "Fix the build\nand the tests",
-            "started_ms": 1000
+            "started_ms": 1000,
+            "suggestion": "run the tests again"
           }
         },
         "ord": 0,

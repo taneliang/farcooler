@@ -60,6 +60,7 @@ func theSharedRowFixtureDecodes() throws {
     #expect(turn.origin == "Typed" && turn.activity == "Busy" && turn.backgroundRunning == 1)
     #expect(turn.startedMs == 1_000 && turn.durationMs == 60_000)
     #expect(turn.outcome == .failed("API error"))
+    #expect(turn.suggestion == "run the tests again", "ov-409: claude's suggested prompt rides the turn")
     #expect(page.rows[0].turn == nil && page.rows[1].turn == "turn:p1")
 
     guard case .tool(let tool) = page.rows[3].kind else { Issue.record("not a tool"); return }

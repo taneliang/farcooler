@@ -14,6 +14,9 @@ fn prompt(id: &str, text: &str) -> serde_json::Value {
     json!({"type":"user","promptId":id,"promptSource":"typed","timestamp":"2026-10-06T10:00:00Z","message":{"role":"user","content":text}})
 }
 
+/// The newest turn's row as `agent.rows` carries it, with a suggestion.
+const GOLDEN: &str = r#"{"ord":0,"rev":2,"id":"turn:p1","turn":null,"provisional":false,"kind":{"Turn":{"prompt":"first","origin":"Typed","started_ms":1791280800000,"ended_ms":null,"duration_ms":null,"outcome":null,"background_running":0,"activity":null,"suggestion":"wait for the background shell to finish"}}}"#;
+
 fn turns(p: &Projection) -> Vec<(String, Option<String>)> {
     p.rows()
         .iter()
@@ -44,6 +47,8 @@ fn the_screen_prediction_rides_the_newest_turn_and_clears_with_it() {
     assert!(p.changes_since(rev, 10).unwrap().iter().any(|c| c.id() == "turn:p1"), "a follower is told");
     let json = serde_json::to_string(p.rows().iter().find(|r| r.id == "turn:p1").unwrap()).unwrap();
     assert!(json.contains("\"suggestion\":\"wait for the background shell to finish\""), "{json}");
+    // The bytes the apps decode: Swift's and Kotlin's row tests read this very string.
+    assert_eq!(json, GOLDEN, "the turn row on the wire");
 
     // The same answer again changes nothing.
     let rev = p.revision();

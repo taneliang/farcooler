@@ -64,6 +64,8 @@ data class AgentRow(
         val backgroundRunning: Int = 0,
         /** `Busy`, `Idle`, `Shell` or `Waiting` (a dialog up, ov-368), on the newest turn only. */
         val activity: String? = null,
+        /** The next prompt claude's empty box suggests, on the newest turn only, once the agent rests (ov-409). A draft to take, never to send. */
+        val suggestion: String? = null,
     ) {
         sealed interface Outcome {
             data object Finished : Outcome
@@ -294,6 +296,7 @@ internal object AgentRowJson {
                     },
                     backgroundRunning = int(p["background_running"]),
                     activity = tag(p["activity"])?.first,
+                    suggestion = string(p["suggestion"])?.takeIf { it.isNotEmpty() },
                 ),
             )
             "Prose" -> AgentRow.Kind.OfProse(
