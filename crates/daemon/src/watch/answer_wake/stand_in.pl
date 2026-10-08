@@ -59,6 +59,7 @@ use strict;
 use warnings;
 use utf8;
 use Encode qw(decode_utf8);
+use Time::HiRes ();
 
 my ($agent, $control, $log) = @ARGV;
 # STAND_IN_HOLD names a file to hold open, as codex holds its rollout.
@@ -344,7 +345,7 @@ while (1) {
         draw();
         logit("MODE $mode");
     }
-    if ($late ne "" && time() >= $late_at) {
+    if ($late ne "" && Time::HiRes::time() >= $late_at) {
         take($late);
         $late = "";
         draw();
@@ -363,7 +364,7 @@ while (1) {
             $buf = substr($buf, $end + 6);
             $pasting = 0;
             if ($mode eq 'slow') {
-                ($late, $late_at) = ($text, time() + 2);
+                ($late, $late_at) = ($text, Time::HiRes::time() + 1);
             } elsif ($agent eq 'claude' && $mode ne 'mangle' && $text =~ m{^'?(/.*\.(?:png|jpe?g|gif|webp))'?$} && -f $1) {
                 $pasted++;
                 take("[Image #$pasted]");
