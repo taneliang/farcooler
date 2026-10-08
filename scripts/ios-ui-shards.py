@@ -31,6 +31,10 @@ WORKFLOW = ROOT / ".github/workflows/ci.yml"
 # Rebalance by class durations from a CI log ("Test Suite '<Class>' started/passed"),
 # not by test count: PlanRulingsUITests alone is eleven minutes.
 #
+# Four shards (ov-384; since ov-420 all four are about the same size, 1,240 to
+# 1,280 s, and the 810 s `phone2` below is history).
+#
+# The text below is the ov-384 reasoning, kept for the runner arithmetic.
 # Four shards, three big and one small (ov-384). The account has five macOS
 # runners; `rust` (macOS) and `swift` hold two of them for 13 to 16.5 and 17 to
 # 25 minutes, so when `ios` ends only three are free. `shell`, `agent` and
@@ -47,69 +51,68 @@ WORKFLOW = ROOT / ".github/workflows/ci.yml"
 # bigger than about 1,500 s. Level them against each other by measured seconds;
 # change `phone2` only with the above in mind.
 SHARDS = {
-    # Seconds are the mean of each class's time in runs 37503739914,
-    # 37509877259 and 37523241692 (test start to test end), rounded. Runner
-    # variance is large, +/- 25%: PagesUITests took 503 s and 762 s, so
-    # rebalance from more than one run when a shard drifts. Shard totals:
-    # shell 1,267 s, agent 1,370 s, phone 1,342 s, phone2 808 s. AgentFollowTests
-    # (60 s) and WorkingShimmerTests (30 s) are estimates: not yet timed.
+    # ov-420: rebalanced on measured seconds. Each number is a class's mean
+    # test time (suite start to suite end in the CI log) over six main runs,
+    # 37625605464, 37643360588, 37666953614, 37691622223, 37697875515 and
+    # 37707693120; the three classes that landed late (NativeAgentViewTests,
+    # NativeAnswersUITests, NativeComposerTests) are the mean of the three or
+    # four runs that have them. Shard totals: shell 1,279 s, agent 1,280,
+    # phone 1,277, phone2 1,240. Replayed on each run's own per-class times
+    # the worst shard is 1,396 s of tests, and a shard's job adds 400 to 570 s,
+    # so about 1,800 to 1,950 s of 2,700: 67 to 72%. The runner variance (the
+    # same class took 118 s and 358 s) is bigger than any split can absorb;
+    # a fifth shard is the next step, not another reshuffle. Before this the
+    # agent shard ran 33 min (74%) in run 37666953614 and phone2 33 min in
+    # 37707693120.
     #
-    # ov-401, from runs 37614866658 and 37619557826: the seconds above had
-    # drifted. Measured, the shards held shell 1,244 and 1,346 s, agent 1,631
-    # and 1,718, phone 1,414 and 1,630, phone2 930 and 771. With
-    # ActionFailureTests (163 and 293 s) since moved to phone2, ov-401 put
-    # NativeAgentViewTests (about 440 s) in phone2 and FirstRunUITests (197
-    # and 448 s) in shell: shell about 1,550 s, agent about 1,450, phone2
-    # about 1,270, so phone2 is no longer the small one and ends several
-    # minutes after the others.
+    # The classes are no longer grouped by the harness they launch with; each
+    # class launches its own app, so only the seconds matter.
     "shell": [
-        "PlanRulingsUITests",  # -phone-harness -phone-plan -phone-rulings (ov-304); 583 s
-        "ShellGestureTests",  # -shell-harness; 290 s
-        "ShellPaneScrollTests",  # -shell-harness; one live method, in SKIP; 195 s
-        "ShellColumnCloseTests",  # -shell-harness; 119 s
-        "TerminalLigatureTests",  # -terminal-ligature; 9 s
-        "HarnessRetryTests",  # no app (ov-397); 1 s
-        "TaskUsageUITests",  # -phone-harness (ov-195); 47 s
-        "ReadScopeTests",  # -phone-harness (TaskScreenTests.swift); 24 s
-        "FirstRunUITests",  # -phone-harness (ov-205 lane P, placed by integ-9); 197 and 448 s; from phone2 for ov-401
+        "PlanRulingsUITests",  # 389 s; -phone-harness -phone-plan -phone-rulings (ov-304)
+        "NativeComposerTests",  # 329 s
+        "NativeAgentViewTests",  # 285 s
+        "PhoneReopenTests",  # 127 s; -phone-harness
+        "AgentEndedSessionTests",  # 98 s; -agent-layout-harness (KeyboardTabStripTests.swift)
+        "TaskUsageUITests",  # 48 s; -phone-harness (ov-195)
+        "HarnessRetryTests",  # 3 s; no app (ov-397)
     ],
     "agent": [
-        "PhoneTreeUITests",  # -phone-harness -phone-plan (ov-300); 298 s
-        "AgentEmptyStateTests",  # -agent-layout-harness (KeyboardTabStripTests.swift); 146 s
-        "AgentTranscriptScrollTests",  # -agent-layout-harness (KeyboardTabStripTests.swift); 109 s
-        "AgentFollowTests",  # -agent-layout-harness (ov-383); not yet timed, 2 tests
-        "WorkingShimmerTests",  # -agent-layout-harness (ov-382); not yet timed, 1 test
-        "AgentDraftTests",  # -agent-layout-harness; 95 s
-        "AgentEndedSessionTests",  # -agent-layout-harness (KeyboardTabStripTests.swift); 86 s
-        "ComposerKeyboardTests",  # -agent-layout-harness; 36 s
-        "DynamicTypeTests",  # -agent-layout-harness; 32 s
-        "AgentStoppedTests",  # -agent-layout-harness -stopped; 28 s
-        "AgentRetrySendTests",  # -agent-layout-harness; 21 s
-        "TaskScreenTests",  # -phone-harness; 190 s
+        "PlanUITests",  # 368 s; -phone-harness -phone-plan (ov-274)
+        "PhoneTreeUITests",  # 274 s; -phone-harness -phone-plan (ov-300)
+        "ActionFailureTests",  # 175 s; -phone-harness and -agent-layout-harness
+        "AgentFollowTests",  # 107 s; -agent-layout-harness (ov-383)
+        "AgentTranscriptScrollTests",  # 100 s; -agent-layout-harness (KeyboardTabStripTests.swift)
+        "BoardUnreadUITests",  # 76 s; -phone-harness (ov-113)
+        "NativeAnswersUITests",  # 71 s; -native-agent-harness -native-held-ask (ov-370)
+        "ComposerKeyboardTests",  # 52 s; -agent-layout-harness
+        "ReadScopeTests",  # 41 s; -phone-harness (TaskScreenTests.swift)
+        "WorkingShimmerTests",  # 16 s; -agent-layout-harness (ov-382)
     ],
     "phone": [
-        "PagesUITests",  # -phone-harness -phone-plan -phone-pages (ov-285); 612 s
-        "PlanUITests",  # -phone-harness -phone-plan (ov-274); 395 s
-        "PhoneReopenTests",  # -phone-harness; 113 s
-        "WorkspaceScreenTests",  # -phone-harness; 223 s
+        "PagesUITests",  # 460 s; -phone-harness -phone-plan -phone-pages (ov-285)
+        "WorkspaceScreenTests",  # 233 s; -phone-harness
+        "TaskScreenTests",  # 207 s; -phone-harness
+        "AgentDraftTests",  # 161 s; -agent-layout-harness
+        "WorkspaceChromeTests",  # 64 s; -phone-harness -phone-plan (ov-342)
+        "ChangesPatchNoticeTests",  # 64 s; -changes-layout-harness
+        "ChangesLfsNoticeTests",  # 40 s; -changes-layout-harness -lfs-pointers (ov-199)
+        "AgentStoppedTests",  # 26 s; -agent-layout-harness -stopped
+        "AgentRetrySendTests",  # 22 s; -agent-layout-harness
     ],
-    # The late shard: ci.yml's `ios-ui-late`, not a matrix entry.
+    # The late shard: ci.yml's `ios-ui-late`, not a matrix entry. It starts last,
+    # so it gets the smallest total.
     "phone2": [
-        "ActionFailureTests",  # -phone-harness and -agent-layout-harness; 239 s; moved from agent at 78% of 45 min (run 37619557826)
-        "FilesBrowserTests",  # -phone-harness (ov-259); 159 s
-        "BoardUnreadUITests",  # -phone-harness (ov-113); 112 s
-        "ChangesPatchNoticeTests",  # -changes-layout-harness; 80 s
-        "TerminalTaskKeyTests",  # -phone-harness -phone-terminal-key (ov-215); 69 s
-        "ChangesPullRequestTests",  # -changes-layout-harness; 49 s
-        "ChangesLfsNoticeTests",  # -changes-layout-harness -lfs-pointers (ov-199); 48 s
-        "WorkspaceChromeTests",  # -phone-harness -phone-plan (ov-342); 68 s
-        "RunnerReachTests",  # seeded -hosts at an address that never answers; 11 s
-        # -native-agent-harness (ov-373). Back from LOCAL (ov-401): about
-        # 440 s in runs 37612748019 and 37616804607.
-        "NativeAgentViewTests",
-        "NativeAnswersUITests",  # -native-agent-harness -native-held-ask (ov-370); about 60 s locally
-        # The same harness (ov-404): 17 tests, about 210 s locally.
-        "NativeComposerTests",
+        "ShellGestureTests",  # 306 s; -shell-harness
+        "FirstRunUITests",  # 218 s; -phone-harness (ov-205 lane P, placed by integ-9)
+        "ShellPaneScrollTests",  # 196 s; -shell-harness; one live method, in SKIP
+        "AgentEmptyStateTests",  # 137 s; -agent-layout-harness (KeyboardTabStripTests.swift)
+        "FilesBrowserTests",  # 129 s; -phone-harness (ov-259)
+        "ShellColumnCloseTests",  # 103 s; -shell-harness
+        "ChangesPullRequestTests",  # 52 s; -changes-layout-harness
+        "TerminalTaskKeyTests",  # 44 s; -phone-harness -phone-terminal-key (ov-215)
+        "DynamicTypeTests",  # 37 s; -agent-layout-harness
+        "TerminalLigatureTests",  # 9 s; -terminal-ligature
+        "RunnerReachTests",  # 9 s; seeded -hosts at an address that never answers
     ],
 }
 
