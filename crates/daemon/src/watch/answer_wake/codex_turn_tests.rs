@@ -157,7 +157,7 @@ async fn a_resumed_codex_is_told_over_its_dead_turn() {
 async fn live_codex_gate() {
     let Some(pid) = std::env::var("FARCOOLER_CODEX_PID").ok().and_then(|p| p.parse::<i32>().ok()) else { return };
     let rollout = crate::log_join::codex_rollout_of(pid);
-    let said = super::super::codex_turn::said_of(pid).await;
+    let said = super::super::codex_turn::said_held(pid, false).await.0;
     println!("rollout {rollout:?}\nsaid {said:?}");
 }
 
@@ -263,4 +263,30 @@ async fn a_tell_gets_no_enter_when_the_rollout_is_lost_during_the_read_back() {
     assert!(loses.await.unwrap(), "the paste never reached the stand-in");
     assert!(matches!(told, Err(DomainError::Conflict { what: "paste_left" })), "{told:?}");
     assert!(!si.log().contains("ENTER"), "{}", si.log());
+}
+
+/// A pasted answer whose codex rollout is gone gets no Enter (ov-428): the
+/// paste was made on a pane whose rollout was found, so a miss is a lost
+/// rollout, not a first prompt. It waits, pasted.
+#[tokio::test]
+async fn a_pasted_answer_waits_while_codex_s_rollout_is_lost() {
+    let b = board().await;
+    let agent = b.agent("Agent 2", "codex").await;
+    let rollout = b.dir.path().join("codex-home/sessions/2026/10/07/rollout-2026-10-07T16-04-08-01a1189c-23ea-7190-b6bf-1d9ac1940ade.jsonl");
+    std::fs::create_dir_all(rollout.parent().unwrap()).unwrap();
+    std::fs::write(&rollout, format!("{}\n", ROLLOUT.lines().next().unwrap())).unwrap();
+    let si = b.stand_in_with(&agent, "codex", "codex", &format!("STAND_IN_ROLLOUT='{}'", rollout.display())).await;
+    b.doing(agent.id, AgentActivity::Idle).await;
+    // The gate sees the rollout (a slash command is refused after it).
+    assert!(b.watcher.compose_into(agent.id, "/init", &[]).await.is_err());
+    b.answer("Drill in");
+    let wake = b.pending().remove(0);
+    si.show(&format!("draft:{}", b.told("Drill in"))).await;
+    b.screen_with(agent.id, "Continue.").await;
+    assert!(b.svc.store.claim_wake(&wake).unwrap());
+    assert!(b.svc.store.mark_wake_pasted(&wake, now_millis() - 1).unwrap());
+    std::fs::remove_file(&rollout).unwrap();
+    b.pump().await;
+    assert!(!si.log().contains("ENTER"), "an Enter with the rollout lost: {}", si.log());
+    assert!(b.settled().is_empty(), "{:?}", b.settled());
 }

@@ -61,6 +61,15 @@ fn cached(pid: i32) -> Option<PathBuf> {
     (at.elapsed() < JOIN_KEPT && *was == Kernel.started(pid)).then(|| path.clone()).flatten()
 }
 
+/// The processes (pid and start) that have been seen holding a rollout:
+/// codex doesn't close it short of exiting, so a later miss is a lost
+/// rollout however long ago the last hit was.
+static HAD: Mutex<Vec<(i32, Option<i64>)>> = Mutex::new(Vec::new());
+
+fn had(pid: i32) -> bool {
+    HAD.lock().unwrap_or_else(|e| e.into_inner()).contains(&(pid, Kernel.started(pid)))
+}
+
 fn joins() -> &'static Mutex<Option<HashMap<i32, Join>>> {
     static JOINS: Mutex<Option<HashMap<i32, Join>>> = Mutex::new(None);
     &JOINS
@@ -86,16 +95,19 @@ pub(crate) fn rollout_of(pid: i32) -> Option<PathBuf> {
 
 /// Keep `path` as `pid`'s rollout for `JOIN_KEPT`, and drop what's older.
 fn remember(pid: i32, path: Option<PathBuf>, started: Option<i64>) {
+    if path.is_some() {
+        let mut had = HAD.lock().unwrap_or_else(|e| e.into_inner());
+        if had.len() > 1024 {
+            had.clear();
+        }
+        if !had.contains(&(pid, started)) {
+            had.push((pid, started));
+        }
+    }
     let mut joins = joins().lock().unwrap_or_else(|e| e.into_inner());
     let joins = joins.get_or_insert_with(HashMap::new);
     joins.retain(|_, (at, ..)| at.elapsed() < JOIN_KEPT);
     joins.insert(pid, (Instant::now(), path, started));
-}
-
-/// `said`, for the codex process `pid`, its rollout found by what it holds
-/// open. Off the executor: the join spawns `ps` and `lsof`.
-pub(crate) async fn said_of(pid: i32) -> Said {
-    tokio::task::spawn_blocking(move || said(rollout_of(pid).as_deref(), Kernel.started(pid))).await.unwrap_or(Said::Nothing)
 }
 
 /// The rollout codex process `pid` holds open now, looked up afresh (not
@@ -112,7 +124,7 @@ pub(crate) async fn rollout_now(pid: i32) -> Option<PathBuf> {
 /// prompt, so a turn may run: `NotIdle`. Also whether a rollout was found,
 /// for the next check's `held`.
 pub(crate) async fn said_held(pid: i32, held: bool) -> (Said, bool) {
-    let known = held || cached(pid).is_some();
+    let known = held || had(pid) || cached(pid).is_some();
     let Some(now) = rollout_now(pid).await else {
         return (if known { Said::NotIdle } else { Said::Nothing }, false);
     };

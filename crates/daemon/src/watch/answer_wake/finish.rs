@@ -75,6 +75,10 @@ impl Watcher {
         if !matches!(preset, "claude" | "codex") {
             return self.settle(wake, Some(task), Some(PASTE_LEFT.into()));
         }
+        // codex's rollout first, so the screen is the newest read. The paste
+        // is in the box because an earlier pass proved the agent, so a
+        // rollout seen on this process and missed now is a lost one.
+        let said = if preset == "codex" { super::codex_turn::said_held(pid, false).await.0 } else { super::registry_turn::Said::Nothing };
         let turn = match self.box_of(to, preset).await {
             Ok(Ok((now, Turn::Between))) if composer::holds_exactly(&now, text) => seen,
             Ok(Ok((now, Turn::During))) if composer::holds_exactly(&now, text) => Turn::During,
@@ -84,7 +88,7 @@ impl Watcher {
         };
         // A screen between turns while codex's rollout says one runs: wait.
         let turn = match (preset, turn) {
-            ("codex", Turn::Between) if super::codex_turn::said_of(pid).await == super::registry_turn::Said::NotIdle => Turn::During,
+            ("codex", Turn::Between) if said == super::registry_turn::Said::NotIdle => Turn::During,
             _ => turn,
         };
         if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= pasted) {

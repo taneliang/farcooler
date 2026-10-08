@@ -98,7 +98,7 @@ impl Watcher {
         if let Some(run) = self.before_enter.lock().unwrap_or_else(|e| e.into_inner()).take() {
             run();
         }
-        self.codex_still_between(to, pid, started, &expected, before.is_some()).await?;
+        self.codex_still_between(to, pid, started, &expected, before.is_some() || proven.held).await?;
         let entered = now_millis();
         runtime.send_bytes_hex(to.id, "0d").await?;
         self.mark_told(to.id);
@@ -117,7 +117,7 @@ impl Watcher {
         if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started) {
             return Err(left);
         }
-        if (held && rollout_now(pid).await.is_none()) || codex_turn::said_of(pid).await == registry_turn::Said::NotIdle {
+        if codex_turn::said_held(pid, held).await.0 == registry_turn::Said::NotIdle {
             return Err(left);
         }
         #[cfg(test)]
@@ -178,7 +178,6 @@ fn records(path: &Path, from: u64, sent: &Sent) -> bool {
     let want = squeeze(&sent.text);
     codex_prompts::prompts_from(path, from).iter().any(|p| p.images == sent.images && p.at_ms.is_some_and(|at| at >= sent.entered) && squeeze(&p.text) == want)
 }
-
 
 #[cfg(test)]
 #[path = "codex_tests.rs"]
