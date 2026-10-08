@@ -42,6 +42,10 @@ extension NativePaneModel {
         return false
     }
 
+    /// The prompt claude's own box suggests, offered as the composer's
+    /// placeholder while nothing is typed (ov-409).
+    var suggestion: String? { store.suggestion(draft: draft) }
+
     /// Whether Stop is offered: the runner serves it and claude is working.
     var offersStop: Bool { keys != nil && AgentConversation.pressesKeys(preset: program) && working && !store.isStale }
 

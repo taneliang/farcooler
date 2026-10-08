@@ -87,6 +87,7 @@ struct ComposerField: NSViewRepresentable {
         view.takesKeyboard = !context.environment.outOfSight
         let coordinator = context.coordinator
         view.onSubmit = { coordinator.send() }
+        view.onTab = { coordinator.takeSuggestion() }
         view.onImages = { coordinator.take(from: $0) }
         view.offersImages = { coordinator.offers($0) }
     }
@@ -111,6 +112,15 @@ struct ComposerField: NSViewRepresentable {
             guard let view = notification.object as? NSTextView else { return }
             if model.draft != view.string { model.draft = view.string }
             report(view)
+        }
+
+        /// Tab with a suggestion on offer (ov-409): its words typed into the
+        /// empty box, so the caret ends after them and Undo takes them out.
+        /// Nothing is sent; false, and Tab is a Tab, when none is on offer.
+        func takeSuggestion() -> Bool {
+            guard let words = model.suggestion, let view else { return false }
+            view.insertText(words, replacementRange: view.selectedRange())
+            return true
         }
 
         func send() {

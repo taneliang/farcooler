@@ -1071,6 +1071,9 @@ final class ComposerTextView: NSTextView {
     var onPasteImage: ((NSImage) -> Void)?
     var onApprove: (() -> Void)?
     var onReject: (() -> Void)?
+    /// Tab with nothing else to do: true when it took the key (the native
+    /// composer's suggestion, ov-409), else Tab is a Tab.
+    var onTab: (() -> Bool)?
     var placeholder: String = "" { didSet { needsDisplay = true } }
     /// Where Paste reads: the system's pasteboard, or a test's own.
     var pasteboard: NSPasteboard = .general
@@ -1121,6 +1124,12 @@ final class ComposerTextView: NSTextView {
             case 53: onDismissPicker?(); return  // Esc closes the picker, not the compose
             default: break
             }
+        }
+
+        if event.keyCode == 48, event.modifierFlags.intersection([.command, .shift, .option, .control]).isEmpty,
+            onTab?() == true
+        {
+            return
         }
 
         let isReturn = event.keyCode == 36 || event.keyCode == 76

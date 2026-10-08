@@ -144,14 +144,39 @@ struct NativeComposer: View {
             .frame(height: fieldHeight)
             .overlay(alignment: .topLeading) {
                 if model.draft.isEmpty {
-                    Text("Message \(model.agent)")
-                        .font(Font(ComposerField.font))
-                        .foregroundStyle(.tertiary)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
+                    if let suggestion = model.suggestion {
+                        suggestionLine(suggestion)
+                    } else {
+                        Text("Message \(model.agent)")
+                            .font(Font(ComposerField.font))
+                            .foregroundStyle(.tertiary)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
                 }
             }
             .identified("native-composer")
+    }
+
+    /// claude's suggested next prompt in the empty box's place (ov-409), with
+    /// the key that takes it into the draft. One line, cut at the end with an
+    /// ellipsis; the whole of it is what Tab brings in.
+    private func suggestionLine(_ suggestion: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
+            Text(suggestion)
+                .font(Font(ComposerField.font))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+            Text("Tab")
+                .font(.caption)
+                .layoutPriority(1)
+        }
+        .foregroundStyle(.tertiary)
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Suggested message: \(suggestion). Press Tab to use it.")
+        .identified("native-suggestion")
     }
 
     /// The images waiting to go, each with a button to take it out.
