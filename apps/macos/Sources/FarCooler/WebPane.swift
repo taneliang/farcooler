@@ -97,10 +97,15 @@ struct WebOrigin: Equatable {
 /// The page's own web view. The tiling prefix gets the first look at a key,
 /// as it does in a terminal, so ⌃B reaches the layout instead of the page
 /// and a page can't trap the keyboard (M3, ov-435 review 1).
+///
+/// In `keyDown`, as `TerminalRenderView` does. AppKit offers an ordinary
+/// ⌃ chord to the first responder alone and never to `performKeyEquivalent`,
+/// which only ⌘ chords reach, so the override that review added there left
+/// ⌃B going to the page once it had the keyboard (ov-436).
 final class PaneWebView: WKWebView {
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if MainActor.assumeIsolated({ PrefixMode.shared.handle(event) }) == .handled { return true }
-        return super.performKeyEquivalent(with: event)
+    override func keyDown(with event: NSEvent) {
+        if MainActor.assumeIsolated({ PrefixMode.shared.handle(event) }) == .handled { return }
+        super.keyDown(with: event)
     }
 }
 
@@ -291,13 +296,54 @@ extension WebPaneModel: WKNavigationDelegate {
         _ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
         decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
     ) {
-        decisionHandler(WebPaneModel.allows(action.request.url, mainFrame: action.targetFrame?.isMainFrame ?? true) ? .allow : .cancel)
+        decisionHandler(WebPaneModel.policy(for: action))
     }
 
     nonisolated static func allows(_ url: URL?, mainFrame: Bool) -> Bool {
         guard mainFrame else { return true }
         guard let url else { return false }
         return WebAddress.page(url) != nil || url.absoluteString == "about:blank"
+    }
+
+    /// Where a navigation goes: in the pane, to another app, or nowhere.
+    enum Route: Equatable {
+        case page, app, refused
+    }
+
+    /// Schemes a link never hands to the system: they name a file on this
+    /// Mac, run script, or open a remote session, and a page an agent chose
+    /// has no business launching any of them.
+    nonisolated static let keptHere: Set<String> = [
+        "file", "javascript", "data", "blob", "about", "applescript", "ssh", "telnet", "vnc", "smb", "afp", "nfs",
+        "ftp", "x-apple.systempreferences", "x-man-page",
+    ]
+
+    /// The main frame stays on http and https. A link the owner clicked to
+    /// another scheme (`mailto:`, `linear://`, `notion://`, `slack://`) goes
+    /// to the app registered for it, as in a browser; one a page made
+    /// happen on its own (a redirect, a script) is refused, so a page can't
+    /// launch apps (ov-436).
+    nonisolated static func route(_ url: URL?, mainFrame: Bool, clicked: Bool) -> Route {
+        if allows(url, mainFrame: mainFrame) { return .page }
+        guard mainFrame, clicked, let scheme = url?.scheme?.lowercased(), !scheme.isEmpty,
+            !keptHere.contains(scheme)
+        else { return .refused }
+        return .app
+    }
+
+    /// Hand a link to the app that handles it. Nothing when none does.
+    static var openExternally: (URL) -> Void = { url in
+        guard NSWorkspace.shared.urlForApplication(toOpen: url) != nil else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    /// Apply `route` to a navigation, and say whether the web view may load it.
+    static func policy(for action: WKNavigationAction) -> WKNavigationActionPolicy {
+        let route = route(
+            action.request.url, mainFrame: action.targetFrame?.isMainFrame ?? true,
+            clicked: action.navigationType == .linkActivated)
+        if route == .app, let url = action.request.url { openExternally(url) }
+        return route == .page ? .allow : .cancel
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
@@ -324,6 +370,12 @@ extension WebPaneModel: WKUIDelegate {
     ) -> WKWebView? {
         let url = action.request.url
         guard url == nil || url?.absoluteString.isEmpty == true || WebPaneModel.allows(url, mainFrame: true) else {
+            // A `target=_blank` link to another app (`mailto:`) opens it.
+            if WebPaneModel.route(url, mainFrame: true, clicked: action.navigationType == .linkActivated) == .app,
+                let url
+            {
+                WebPaneModel.openExternally(url)
+            }
             return nil
         }
         if action.navigationType == .linkActivated, let url {
@@ -478,7 +530,7 @@ final class WebPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSWindowDele
         _ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
         decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
     ) {
-        decisionHandler(WebPaneModel.allows(action.request.url, mainFrame: action.targetFrame?.isMainFrame ?? true) ? .allow : .cancel)
+        decisionHandler(WebPaneModel.policy(for: action))
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { retitle() }

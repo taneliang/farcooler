@@ -193,7 +193,7 @@ struct WebPaneReviewTests {
         #expect(model.webView is PaneWebView)
         PrefixMode.shared.cancel()
         defer { PrefixMode.shared.cancel() }
-        #expect(model.webView.performKeyEquivalent(with: try controlB()))
+        model.webView.keyDown(with: try controlB())
         #expect(PrefixMode.shared.armed, "⌃B armed the prefix instead of going to the page")
         PrefixMode.shared.cancel()
 
@@ -204,6 +204,69 @@ struct WebPaneReviewTests {
         #expect(PrefixMode.shared.handle(letter) == .passThrough)
         #expect(!PrefixMode.shared.armed)
     }
+
+    @Test("⌃B sent to a window whose web page has the keyboard arms the prefix (ov-436)")
+    func thePrefixWorksThroughTheWindow() throws {
+        let model = WebPaneModel(terminal: "prefix-2", memory: WebPaneMemory(defaults: Self.defaults()))
+        let host = NSHostingView(rootView: WebPageView(model: model))
+        let window = Self.offscreen(host)
+        defer { window.close() }
+        host.layoutSubtreeIfNeeded()
+        #expect(model.webView.window === window)
+        #expect(window.makeFirstResponder(model.webView), "the page has the keyboard")
+        PrefixMode.shared.cancel()
+        defer { PrefixMode.shared.cancel() }
+        let event = try #require(
+            NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: .control, timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, characters: "\u{02}",
+                charactersIgnoringModifiers: "b", isARepeat: false, keyCode: 11))
+        window.sendEvent(event)
+        #expect(PrefixMode.shared.armed, "⌃B went to the page, not the layout")
+    }
+
+    // MARK: - ov-436: links to other apps
+
+    @Test("A clicked mailto:, linear:// or notion:// link goes to the system; the main frame stays on http and https")
+    func appLinksGoToTheSystem() {
+        for link in ["mailto:a@b.c", "linear://acme/issue/ENG-1", "notion://www.notion.so/x", "slack://open"] {
+            let url = URL(string: link)
+            #expect(WebPaneModel.route(url, mainFrame: true, clicked: true) == .app, "\(link)")
+            #expect(WebPaneModel.route(url, mainFrame: true, clicked: false) == .refused, "\(link) without a click")
+        }
+        for link in ["file:///Applications/Calculator.app", "javascript:alert(1)", "data:text/html,hi", "ssh://h", "vnc://h"] {
+            #expect(WebPaneModel.route(URL(string: link), mainFrame: true, clicked: true) == .refused, "\(link)")
+        }
+        #expect(WebPaneModel.route(URL(string: "https://notion.so/x"), mainFrame: true, clicked: true) == .page)
+        #expect(WebPaneModel.route(URL(string: "linear://x"), mainFrame: false, clicked: false) == .page, "a frame's own")
+    }
+
+    @Test("A link click in a real page reaches NSWorkspace, and a redirect does not")
+    func aClickedLinkOpensItsApp() async throws {
+        let opened = Box()
+        let saved = WebPaneModel.openExternally
+        WebPaneModel.openExternally = { opened.urls.append($0) }
+        defer { WebPaneModel.openExternally = saved }
+        let model = WebPaneModel(terminal: "app-link-1", memory: WebPaneMemory(defaults: Self.defaults()))
+        let window = Self.offscreen(model.webView)
+        defer { window.close() }
+        // A page of its own with one link, loaded without the network.
+        model.webView.loadHTMLString(
+            "<a id=l href='linear://acme/issue/ENG-1'>x</a><script>setTimeout(()=>{location.href='notion://auto'},50)</script>",
+            baseURL: nil)
+        // Loaded, then long enough for the page's own redirect to have fired.
+        for _ in 0..<300 {
+            try await Task.sleep(for: .milliseconds(100))
+            if (try? await model.webView.evaluateJavaScript("document.getElementById('l') !== null") as? Bool) == true { break }
+        }
+        try await Task.sleep(for: .seconds(1))
+        #expect(opened.urls.isEmpty, "a page's own redirect launched an app: \(opened.urls)")
+        _ = try await model.webView.evaluateJavaScript("document.getElementById('l').click()")
+        for _ in 0..<300 where opened.urls.isEmpty { try await Task.sleep(for: .milliseconds(100)) }
+        #expect(opened.urls == [URL(string: "linear://acme/issue/ENG-1")!])
+    }
+
+    final class Box { var urls: [URL] = [] }
 
     // MARK: - M1: a page that arrives late
 
