@@ -144,6 +144,51 @@ final class NativeComposerTests: XCTestCase {
         XCTAssertTrue(wait(30) { self.said(app, "sent") == "One line" }, "Return didn't send on a one-line runner: \(harness(app))")
     }
 
+    // MARK: claude's suggestion (ov-409)
+
+    /// The suggestion stands where "Message Claude" does; a tap on it makes it
+    /// the draft, the box takes the keyboard, and nothing is sent.
+    func testATapTakesClaudesSuggestionAsADraftAndSendsNothing() {
+        let app = launch(["-native-suggestion"])
+        let suggestion = element(app, "native-suggestion")
+        XCTAssertTrue(suggestion.waitForExistence(timeout: 60), "the suggestion never showed")
+        XCTAssertEqual(suggestion.label, "Suggested message: Run the tests again.")
+        capture("suggestion")
+        suggestion.tap()
+        let field = element(app, "native-composer")
+        XCTAssertTrue(
+            wait(30) { field.value as? String == "Run the tests again." }, "the draft is \(field.value as? String ?? "nil")")
+        XCTAssertTrue(wait(30) { !suggestion.exists }, "a draft leaves the suggestion standing")
+        XCTAssertTrue(
+            wait(30) { field.value(forKey: "hasKeyboardFocus") as? Bool == true }, "the box never took the keyboard to edit")
+        capture("suggestion-taken")
+        // Nothing went to the runner on its own; the person's Send does it.
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertEqual(said(app, "sent"), "", "taking the suggestion sent it: \(harness(app))")
+        sendButton(app).tap()
+        XCTAssertTrue(wait(30) { self.said(app, "sent") == "Run the tests again." }, "Send never sent: \(harness(app))")
+    }
+
+    /// Typing replaces the suggestion, as it does "Message Claude".
+    func testTypingReplacesTheSuggestion() {
+        let app = launch(["-native-suggestion"])
+        XCTAssertTrue(element(app, "native-suggestion").waitForExistence(timeout: 60))
+        // A tap beside the suggestion's words, not on them, puts the caret in the box.
+        let field = element(app, "native-composer")
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
+        XCTAssertTrue(wait(30) { field.value(forKey: "hasKeyboardFocus") as? Bool == true }, "the box never took the keyboard")
+        XCTAssertTrue(element(app, "native-suggestion").exists, "a tap beside the words took the suggestion")
+        app.typeText("No")
+        XCTAssertTrue(wait(30) { !self.element(app, "native-suggestion").exists }, "the suggestion stayed over typed text")
+        XCTAssertEqual(element(app, "native-composer").value as? String, "No")
+    }
+
+    /// While claude works, its dim line is a hint and none is offered.
+    func testNoSuggestionWhileClaudeWorks() {
+        let app = launch()
+        XCTAssertFalse(element(app, "native-suggestion").exists)
+    }
+
     // MARK: Photos
 
     /// A photo is a chip with a button to take it out, goes with the message,

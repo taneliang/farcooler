@@ -27,6 +27,9 @@ import UIKit
 ///   and `native-paste` (an image on the pasteboard, pasted into the box)
 ///   are what a UI test posts for the system's picker and paste menu, which
 ///   it can't drive. Each goes through the composer's own path.
+/// - `-native-suggestion` (ov-409): the last turn is at rest (`Idle`) and
+///   carries claude's suggested prompt, `suggestedPrompt` below, which the
+///   composer offers as its placeholder.
 /// - `-native-flag-off`: a runner whose projector is off, so no `agent_rows`.
 /// - `-native-reconnect`: once the box holds a draft, the link comes up
 ///   again, so the build is unread for two seconds.
@@ -490,6 +493,7 @@ final class NativeHarnessRunner: ObservableObject {
         }
     }
 
+    static let suggestedPrompt = "Run the tests again."
     static let firstReply = "Reading the parser now."
     static let updatedReply = "Read the parser. It’s tidy now: three functions, no globals."
 
@@ -523,7 +527,12 @@ final class NativeHarnessRunner: ObservableObject {
     private static func turn(_ prompt: String, origin: String, open: Bool = false) -> [String: Any] {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         var turn: [String: Any] = ["prompt": prompt, "origin": origin, "background_running": 0]
-        if open {
+        if open, CommandLine.arguments.contains("-native-suggestion") {
+            // At rest, with claude's box suggesting the next prompt (ov-409).
+            turn["activity"] = "Idle"
+            turn["outcome"] = "Finished"
+            turn["suggestion"] = suggestedPrompt
+        } else if open {
             // No start time: see the thinking row.
             turn["activity"] = CommandLine.arguments.contains("-native-waiting") ? "Waiting" : "Busy"
         } else {

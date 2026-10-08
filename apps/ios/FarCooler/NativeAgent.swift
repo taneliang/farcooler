@@ -203,6 +203,9 @@ final class NativePaneModel: ObservableObject {
     /// The connection's interrupt sink, handed to `keys` where it's offered.
     var interruptSink: (any InterruptSink)?
     @Published private(set) var sending = false
+    /// How many times the person took claude's suggestion (ov-409): the
+    /// field claims the keyboard on each, so the draft can be edited.
+    @Published var suggestionsTaken = 0
     /// What stopped the last send, until the next one or a dismissal.
     @Published var issue: AgentConversation.SendIssue?
     /// Messages claude's queue took that its transcript hasn't shown yet,

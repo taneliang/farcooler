@@ -65,6 +65,20 @@ extension NativePaneModel {
     static let unreadableImage =
         "That photo couldn’t be read. If it lives in iCloud, open it in Photos first so it downloads."
 
+    // MARK: - claude's suggested prompt (ov-409)
+
+    /// The prompt claude's own box suggests, offered as the composer's
+    /// placeholder while nothing is typed (`AgentConversation.suggestion`).
+    var suggestion: String? { store.suggestion(draft: draft) }
+
+    /// A tap on the suggestion, or Tab from a hardware keyboard: it becomes
+    /// the draft, to edit. Never sent.
+    func takeSuggestion() {
+        guard let words = suggestion else { return }
+        draft = words
+        suggestionsTaken += 1
+    }
+
     // MARK: - Stop and Send Now
 
     /// Whether claude is working on a turn, as the newest turn's row says

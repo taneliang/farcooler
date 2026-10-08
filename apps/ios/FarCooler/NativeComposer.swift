@@ -58,11 +58,13 @@ struct NativeComposer: View {
         NativeComposerField(
             text: $model.draft, height: $fieldHeight, label: "Message \(model.agent)",
             onSend: { Task { await model.send() } },
-            onPasteImages: model.rich ? { datas in Task { await model.attach(picked: datas) } } : nil
+            onPasteImages: model.rich ? { datas in Task { await model.attach(picked: datas) } } : nil,
+            claimsKeyboard: model.suggestionsTaken,
+            offersTab: { model.suggestion != nil }, onTab: { model.takeSuggestion() }
         )
         .frame(height: fieldHeight)
         .overlay(alignment: .topLeading) {
-            if model.draft.isEmpty {
+            if model.draft.isEmpty, model.suggestion == nil {
                 Text("Message \(model.agent)")
                     .foregroundStyle(.secondary)
                     // `NativeComposerField`'s own `textContainerInset`, so the
@@ -75,6 +77,38 @@ struct NativeComposer: View {
         // Centered in the row's 44 pt of target when it is one line, so the
         // field's line and the buttons beside it share a middle.
         .frame(minHeight: 44, alignment: .center)
+        .overlay(alignment: .leading) { suggestionButton }
+    }
+
+    /// claude's suggested next prompt in the empty box's place (ov-409): one
+    /// line, cut at the end, with the arrow every suggestion row uses for
+    /// "put this in the field". A tap takes it as a draft and brings up the
+    /// keyboard to edit it; it is never sent.
+    @ViewBuilder
+    private var suggestionButton: some View {
+        if model.draft.isEmpty, let suggestion = model.suggestion {
+            Button {
+                model.takeSuggestion()
+            } label: {
+                HStack(spacing: Spacing.group) {
+                    Text(suggestion)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Image(systemName: "arrow.up.left")
+                        .font(.footnote)
+                        .foregroundStyle(.tertiary)
+                }
+                .foregroundStyle(.secondary)
+                .frame(maxHeight: .infinity)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            // Only as wide as its words, so a tap beside them still puts the
+            // caret in the field to type something else.
+            .accessibilityLabel("Suggested message: \(suggestion)")
+            .accessibilityHint("Puts it in the message to edit.")
+            .accessibilityIdentifier("native-suggestion")
+        }
     }
 
     /// The photo picker: photos added as chips, up to what the message takes.
@@ -241,6 +275,14 @@ struct NativeComposerField: UIViewRepresentable {
     let onSend: () -> Void
     /// Nil leaves a paste to the text.
     var onPasteImages: (([Data]) -> Void)?
+    /// Counts the times something put words in the field from outside (the
+    /// suggestion, ov-409): on each, the field takes the keyboard with the
+    /// caret after them.
+    var claimsKeyboard = 0
+    /// Tab on a hardware keyboard: whether it takes a suggestion now, and
+    /// taking it.
+    var offersTab: (() -> Bool)?
+    var onTab: (() -> Void)?
 
     static var font: UIFont { .preferredFont(forTextStyle: .body) }
     static var lineHeight: CGFloat { font.lineHeight + 2 * inset }
@@ -262,6 +304,8 @@ struct NativeComposerField: UIViewRepresentable {
         view.accessibilityLabel = label
         view.onCommandReturn = onSend
         view.onPasteImages = onPasteImages
+        view.offersTab = offersTab
+        view.onTab = onTab
         DispatchQueue.main.async { context.coordinator.report(view) }
         return view
     }
@@ -271,6 +315,8 @@ struct NativeComposerField: UIViewRepresentable {
         view.accessibilityLabel = label
         view.onCommandReturn = onSend
         view.onPasteImages = onPasteImages
+        view.offersTab = offersTab
+        view.onTab = onTab
         // Measured here as well as on change: at `makeUIView` the view has no
         // width yet.
         context.coordinator.report(view)
@@ -279,13 +325,22 @@ struct NativeComposerField: UIViewRepresentable {
         guard view.text != text else { return }
         view.text = text
         context.coordinator.report(view)
+        if claimsKeyboard != context.coordinator.claimed {
+            context.coordinator.claimed = claimsKeyboard
+            view.selectedRange = NSRange(location: (text as NSString).length, length: 0)
+            DispatchQueue.main.async { view.becomeFirstResponder() }
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: NativeComposerField
-        init(_ parent: NativeComposerField) { self.parent = parent }
+        var claimed: Int
+        init(_ parent: NativeComposerField) {
+            self.parent = parent
+            claimed = parent.claimsKeyboard
+        }
 
         func textViewDidChange(_ textView: UITextView) {
             parent.text = textView.text

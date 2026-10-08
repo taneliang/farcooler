@@ -90,12 +90,28 @@ final class ComposerField: UITextView {
         super.paste(sender)
     }
 
+    /// Whether Tab from a hardware keyboard takes something now (the native
+    /// composer's suggestion, ov-409), asked as each key is pressed; when it
+    /// doesn't, Tab is a Tab.
+    var offersTab: (() -> Bool)?
+    var onTab: (() -> Void)?
+
     override var keyCommands: [UIKeyCommand]? {
-        guard onCommandReturn != nil else { return super.keyCommands }
-        let send = UIKeyCommand(title: "Send", action: #selector(commandReturn), input: "\r", modifierFlags: .command)
-        send.wantsPriorityOverSystemBehavior = true
-        return (super.keyCommands ?? []) + [send]
+        var commands = super.keyCommands ?? []
+        if onCommandReturn != nil {
+            let send = UIKeyCommand(title: "Send", action: #selector(commandReturn), input: "\r", modifierFlags: .command)
+            send.wantsPriorityOverSystemBehavior = true
+            commands.append(send)
+        }
+        if offersTab?() == true {
+            let take = UIKeyCommand(title: "Use Suggestion", action: #selector(takeTab), input: "\t", modifierFlags: [])
+            take.wantsPriorityOverSystemBehavior = true
+            commands.append(take)
+        }
+        return commands.isEmpty ? super.keyCommands : commands
     }
+
+    @objc private func takeTab() { onTab?() }
 
     @objc private func commandReturn() { onCommandReturn?() }
 }
