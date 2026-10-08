@@ -203,6 +203,8 @@ SOURCES = [
     # lines, Stop and Send Now.
     "NativeComposer.swift",
     "NativeComposeModel.swift",
+    # Bring Here: claude's box's draft moved into the composer (ov-369).
+    "NativeBringHere.swift",
 ]
 
 # The enrollment ceremony, in `Far Cooler/Ceremony/`.
@@ -693,6 +695,8 @@ AGENTKIT_SOURCES = [
     "AgentRowStore.swift",
     "AgentRowCache.swift",
     "AgentConversation.swift",
+    # Bring Here: claude's box's draft moved into the composer (ov-369).
+    "BringHere.swift",
     # What a phone's composer sends with a message: a picked or pasted image as
     # the runner takes it, converted where it doesn't (ov-404).
     "OutgoingImage.swift",

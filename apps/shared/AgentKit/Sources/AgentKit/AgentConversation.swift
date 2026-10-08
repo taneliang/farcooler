@@ -103,8 +103,11 @@ public enum AgentConversation {
         /// acts at once (`handoff`): the Handoff row, with Show Terminal.
         case panel
         /// The terminal's box holds text of its own (R-28): refused, with
-        /// Show Terminal. Bring Here is a later card.
+        /// Bring Here where it's offered (`BringHere`), and Show Terminal.
         case draftInTerminal
+        /// Bring Here put the box's text in the composer, but couldn't clear
+        /// the box: the text is in both, as this says. Show Terminal.
+        case draftLeftInTerminal(String)
         /// Something only words can say.
         case said(String)
     }
@@ -199,6 +202,8 @@ public enum AgentConversation {
     public static let mayHaveBeenSent =
         "The runner didn’t answer in time. The message may have been sent, so check the terminal before sending it again."
     public static let draftInTerminal = "The terminal’s box already holds a draft. Send or clear it there first."
+    /// `draftInTerminal`, where Bring Here is offered beside Show Terminal.
+    public static let draftInTerminalBring = "The terminal’s box already holds a draft. Bring it here to send it from this box."
     public static let handoff = handoff("Claude")
     public static func handoff(_ agent: String) -> String { "\(agent) is showing something only the terminal can." }
 
