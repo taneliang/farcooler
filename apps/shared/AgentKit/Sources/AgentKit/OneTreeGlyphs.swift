@@ -42,4 +42,7 @@ public enum OneTreeGlyph {
 
     /// A terminal's: an agent's sparkles, a shell's prompt.
     public static func terminal(isAgent: Bool) -> String { isAgent ? "sparkles" : "terminal" }
+
+    /// A web pane's (ov-435).
+    public static let web = "globe"
 }

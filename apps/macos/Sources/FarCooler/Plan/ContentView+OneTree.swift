@@ -133,7 +133,7 @@ extension ContentView {
     nonisolated static func treeTerminal(_ terminal: Terminal) -> OneTreeTerminal {
         OneTreeTerminal(
             id: terminal.id, title: terminal.label,
-            isAgent: isAgent(terminal), isOrchestrator: terminal.isOrchestrator)
+            isAgent: isAgent(terminal), isOrchestrator: terminal.isOrchestrator, isWeb: terminal.isWebPane)
     }
 
     /// Whether the tree draws `terminal` as an agent's, and so the jump

@@ -81,12 +81,15 @@ public struct OneTreeTerminal: Equatable, Sendable {
     public var isAgent: Bool
     /// The orchestrator's own seat, which only its conversation shows.
     public var isOrchestrator: Bool
+    /// A web page drawn in the pane (ov-435), which its row marks with a globe.
+    public var isWeb: Bool
 
-    public init(id: String, title: String, isAgent: Bool, isOrchestrator: Bool = false) {
+    public init(id: String, title: String, isAgent: Bool, isOrchestrator: Bool = false, isWeb: Bool = false) {
         self.id = id
         self.title = title
         self.isAgent = isAgent
         self.isOrchestrator = isOrchestrator
+        self.isWeb = isWeb
     }
 }
 
@@ -694,7 +697,7 @@ struct OneTreeBuilder {
         worktree.terminals.filter { !$0.isOrchestrator }.map { terminal in
             var node = OneTreeNode(
                 id: "\(parent)/terminal:\(terminal.id)", kind: .terminal, title: terminal.title,
-                detail: terminal.isAgent ? "Agent" : "", glyph: OneTreeGlyph.terminal(isAgent: terminal.isAgent),
+                detail: terminal.isAgent ? "Agent" : "", glyph: terminal.isWeb ? OneTreeGlyph.web : OneTreeGlyph.terminal(isAgent: terminal.isAgent),
                 target: .terminal(worktree: worktree.id, terminal: terminal.id), worktreeID: worktree.id)
             node.asks = input.asks.terminals.contains(terminal.id)
             node.holdsAsk = node.asks

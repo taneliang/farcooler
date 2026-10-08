@@ -1,3 +1,4 @@
+import AgentKit
 import AppKit
 import Foundation
 import Testing
@@ -38,6 +39,8 @@ struct WebPaneTests {
         #expect(!terminal.runsAgent)
         #expect(!terminal.canSwitchPaneMode)
         #expect(!DaemonClient.isLiveAgent(terminal))
+        #expect(ContentView.treeTerminal(terminal).isWeb, "its navigator row draws a globe")
+        #expect(OneTreeGlyph.web == "globe")
     }
 
     @Test("A lone web pane keeps its header, where its controls are")
