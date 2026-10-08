@@ -25,8 +25,16 @@ async fn drafted(b: &Board, env: &str, draft: &str) -> (Terminal, StandIn) {
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in_with(&agent, "claude", "claude", &format!("STAND_IN_DRAFT=1 {env}")).await;
     si.show(&format!("draft:{draft}")).await;
+    // Read as printed: a moved cursor's reverse-video cell sits inside the
+    // last line's escapes, which a raw match would never find.
     let last = draft.lines().last().unwrap_or_default().to_string();
-    b.screen_with(agent.id, &last).await;
+    for _ in 0..600 {
+        let screen = b.svc.screen(agent.id).await.expect("a screen").0;
+        if farcooler_core::composer::printed(&screen).contains(&last) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     (agent, si)
 }
 
