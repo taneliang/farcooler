@@ -30,6 +30,9 @@ import UIKit
 /// - `-native-suggestion` (ov-409): the last turn is at rest (`Idle`) and
 ///   carries claude's suggested prompt, `suggestedPrompt` below, which the
 ///   composer offers as its placeholder.
+/// - `-native-hint` (ov-409): the page ends on the `Hint` row, claude's
+///   `Try "…"` example (`exampleHint`), shown as the placeholder and taken
+///   by nothing.
 /// - `-native-flag-off`: a runner whose projector is off, so no `agent_rows`.
 /// - `-native-reconnect`: once the box holds a draft, the link comes up
 ///   again, so the build is unread for two seconds.
@@ -493,6 +496,7 @@ final class NativeHarnessRunner: ObservableObject {
         }
     }
 
+    static let exampleHint = "Try \"how does <filepath> work?\""
     static let suggestedPrompt = "Run the tests again."
     static let firstReply = "Reading the parser now."
     static let updatedReply = "Read the parser. It’s tidy now: three functions, no globals."
@@ -521,6 +525,8 @@ final class NativeHarnessRunner: ObservableObject {
             // second makes every XCUITest query slow on a loaded runner.
             Self.row("thinking:k1", ord: 10, rev: 10, kind: ["Thinking": [String: Any]()]),
         ] + (Self.heldAsk.map { [Self.heldAskRow($0, rev: 10, answered: false)] } ?? [])
+            + (CommandLine.arguments.contains("-native-hint")
+                ? [Self.row("hint:composer", ord: 11, rev: 11, kind: ["Hint": ["text": Self.exampleHint]])] : [])
         return ["epoch": Self.epoch, "rev": rev, "moreBefore": false, "rows": rows]
     }
 

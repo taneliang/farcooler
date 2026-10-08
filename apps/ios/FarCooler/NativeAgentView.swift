@@ -287,10 +287,10 @@ struct NativeAgentView: View {
                         .frame(maxWidth: .infinity)
                         .onAppear { model.loadOlder() }
                 }
-                let last = store.ids.last
+                let last = store.shownIds.last
                 let answer = model.nativeAskAnswer
                 let sendNow: (() -> Void)? = model.offersSendNow ? { Task { await model.sendNow() } } : nil
-                ForEach(store.ids, id: \.self) { id in
+                ForEach(store.shownIds, id: \.self) { id in
                     if let box = store.box(id) {
                         NativeRowView(
                             box: box, isLast: id == last, showTerminal: showTerminal, answer: answer, sendNow: sendNow)
@@ -354,10 +354,10 @@ struct NativeAgentView: View {
         .accessibilityIdentifier("native-transcript")
         #if DEBUG
         // For the UI tests only: VoiceOver mustn't read it.
-        .accessibilityValue(String("tail=\(pinned) rows=\(store.ids.count) following=\(model.following)"))
+        .accessibilityValue(String("tail=\(pinned) rows=\(store.shownIds.count) following=\(model.following)"))
         #endif
         .overlay {
-            if store.ids.isEmpty { emptyState(store.phase) }
+            if store.shownIds.isEmpty { emptyState(store.phase) }
         }
         .overlay(alignment: .bottomTrailing) {
             if !pinned {
@@ -379,7 +379,7 @@ struct NativeAgentView: View {
             // Rows held and the runner not answering: said over them, so
             // stale rows never pass for live ones, and the box waits
             // (`canSend`).
-            if !store.ids.isEmpty, store.isStale { staleBanner(store.phase) }
+            if !store.shownIds.isEmpty, store.isStale { staleBanner(store.phase) }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             NativeComposer(model: model, showTerminal: showTerminal)

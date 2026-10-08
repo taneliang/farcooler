@@ -183,6 +183,25 @@ final class NativeComposerTests: XCTestCase {
         XCTAssertEqual(element(app, "native-composer").value as? String, "No")
     }
 
+    /// claude's `Try "…"` example stands where "Message Claude" does, as a
+    /// hint: a tap puts the caret in the box and takes nothing, and the hint's
+    /// row is not in the transcript.
+    func testTheTryExampleIsAHintAndNothingTakesIt() {
+        let app = launch(["-native-hint"])
+        let hint = element(app, "native-hint")
+        XCTAssertTrue(hint.waitForExistence(timeout: 60), "the example never showed")
+        XCTAssertEqual(hint.label, "Try \"how does <filepath> work?\"")
+        XCTAssertFalse(element(app, "native-suggestion").exists, "an example is not a prediction")
+        XCTAssertFalse(element(app, "native-row-hint:composer").exists, "the hint's row is in the transcript")
+        capture("hint")
+        let field = focusField(app)
+        XCTAssertEqual(field.value as? String, "", "a tap took the example")
+        XCTAssertTrue(hint.exists, "the example stays until something is typed")
+        app.typeText("No")
+        XCTAssertTrue(wait(30) { !hint.exists }, "the example stayed over typed text")
+        XCTAssertEqual(said(app, "sent"), "")
+    }
+
     /// While claude works, its dim line is a hint and none is offered.
     func testNoSuggestionWhileClaudeWorks() {
         let app = launch()

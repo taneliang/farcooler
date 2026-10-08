@@ -1,0 +1,19 @@
+{
+  "epoch": 7,
+  "moreBefore": false,
+  "rev": 3,
+  "rows": [
+    {
+      "id": "hint:composer",
+      "kind": {
+        "Hint": {
+          "text": "Try \"how does <filepath> work?\""
+        }
+      },
+      "ord": 0,
+      "provisional": false,
+      "rev": 3,
+      "turn": null
+    }
+  ]
+}

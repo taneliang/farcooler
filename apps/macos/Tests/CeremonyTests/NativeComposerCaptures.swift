@@ -113,4 +113,26 @@ struct NativeComposerCaptures {
             }
         }
     }
+
+    /// claude's `Try "…"` example (ov-409) as the placeholder of a fresh
+    /// session's box, in the four appearances.
+    @Test func composerWithTheTryHint() async throws {
+        let out = try #require(ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"])
+        try FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
+        for (name, appearance) in RealWindowCaptures.variants {
+            let model = NativeAgentTests.model(try NativeAgentTests.terminal(), sink: NativeAgentTests.StandInSink())
+            model.rich = true
+            model.store.apply(try await model.store.ledger.page(NativeAgentTests.page([
+                NativeAgentTests.row(0, "hint:composer", ["Hint": ["text": "Try \"how does <filepath> work?\""]]),
+            ])))
+            let window = NativeAgentTests.window(NativeAgentView(model: model, isFocused: true, showTerminal: {}))
+            window.appearance = NSAppearance(named: appearance)
+            await NativeAgentTests.settle(window, 400)
+            #expect(model.hint != nil)
+            let image = try #require(RealWindowCaptures.windowImage(window), "screencapture -l isn't allowed here")
+            try #require(image.representation(using: .png, properties: [:]))
+                .write(to: URL(fileURLWithPath: out).appendingPathComponent("hint-\(name).png"))
+            window.close()
+        }
+    }
 }

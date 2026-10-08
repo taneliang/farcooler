@@ -60,4 +60,30 @@ import Testing
         #expect(other.suggestion(draft: "") == "wait for the background shell to finish")
         #expect(other.suggestion(draft: "x") == nil)
     }
+
+    /// claude's `Try "…"` example: the composer's placeholder, on live rows
+    /// and an empty draft, and not part of the transcript.
+    @Test func theTryExampleIsTheComposersHintAndNotATranscriptRow() async throws {
+        let example = "Try \"how does <filepath> work?\""
+        #expect(AgentConversation.hint(example, draft: "", stale: false) == example)
+        #expect(AgentConversation.hint(example, draft: "x", stale: false) == nil, "typing wins")
+        #expect(AgentConversation.hint(example, draft: "", stale: true) == nil)
+        #expect(AgentConversation.hint("", draft: "", stale: false) == nil, "emptied once the box shows another text")
+        #expect(AgentConversation.hint(nil, draft: "", stale: false) == nil)
+
+        // The page a fresh session has: the example's row alone, as the
+        // client core writes it (`test/fixtures/agent-rows-hint.json`).
+        let data = try Data(contentsOf: RowFixture.root.appendingPathComponent("test/fixtures/agent-rows-hint.json"))
+        let page = try AgentRowPage.decode(data)
+        #expect(page.rows.map(\.kind) == [.hint(.init(text: example))])
+        let store = AgentRowStore(key: "hint-\(UUID())", cache: nil)
+        store.apply(try await store.ledger.page(data))
+        #expect(store.hint(draft: "") == example)
+        #expect(store.hint(draft: "x") == nil)
+        #expect(store.ids.contains(AgentRow.hintID))
+        #expect(!store.shownIds.contains(AgentRow.hintID), "the hint is the composer's, not a row")
+        #expect(store.shownIds.isEmpty, "a fresh session's transcript is still empty")
+        // An example is never a prediction.
+        #expect(store.suggestion(draft: "") == nil)
+    }
 }

@@ -12,6 +12,13 @@ import org.junit.Test
 /** The wire decoder, against the file the Rust boundary writes (AgentKit's `theSharedRowFixtureDecodes`). */
 class AgentRowWireTest {
     @Test
+    fun `the hint fixture decodes to claude's Try example on its own row`() {
+        val page = AgentRowPage.decode(AgentRowFixture.hintPage)
+        assertEquals(listOf(AgentRow.HINT_ID), page.rows.map { it.id })
+        assertEquals(AgentRow.Kind.OfHint(AgentRow.Hint("Try \"how does <filepath> work?\"")), page.rows[0].kind)
+    }
+
+    @Test
     fun `the shared fixture decodes every row kind to the values it holds`() {
         val page = AgentRowPage.decode(AgentRowFixture.page)
         assertEquals(4L, page.epoch)

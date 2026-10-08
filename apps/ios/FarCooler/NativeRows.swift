@@ -30,7 +30,7 @@ struct NativeRowView: View {
             case .notice(let notice): NoticeLine(text: notice.text)
             case .handoff(let handoff): HandoffRow(reason: handoff.reason, showTerminal: showTerminal)
             case .gap(let gap): NoticeLine(text: AgentConversation.gap(gap))
-            case .unknown: EmptyView()
+            case .hint, .unknown: EmptyView()
             }
         }
         .opacity(row.provisional ? 0.75 : 1)

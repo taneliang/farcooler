@@ -88,4 +88,28 @@ struct NativeComposerSuggestionTests {
         Self.tab(c.text, modifiers: .shift)
         #expect(c.model.draft != "run the tests again")
     }
+
+    @Test("claude's Try example is the placeholder as a hint: Tab takes nothing, and its row is not drawn")
+    func theTryExampleIsAHint() async throws {
+        let c = try await NativeComposerTests.composer(rich: true)
+        defer { c.window.close() }
+        let example = "Try \"how does <filepath> work?\""
+        c.model.store.apply(try await c.model.store.ledger.page(NativeAgentTests.page([
+            NativeAgentTests.row(0, "hint:composer", ["Hint": ["text": example]]),
+        ])))
+        await NativeAgentTests.settle(c.window)
+        #expect(c.model.hint == example)
+        #expect(c.model.suggestion == nil, "an example is not a prediction")
+        #expect(!c.seen.ids.contains("native-suggestion"))
+        #expect(!c.seen.ids.contains("native-row-hint:composer"), "the hint is not a transcript row")
+        Self.tab(c.text)
+        #expect(c.model.draft != example, "Tab took the example")
+        #expect(await c.sink.sent.isEmpty)
+        // And it empties with the box.
+        c.model.draft = ""
+        c.model.store.apply(try await c.model.store.ledger.page(NativeAgentTests.page([
+            NativeAgentTests.row(0, "hint:composer", ["Hint": ["text": ""]]),
+        ])))
+        #expect(c.model.hint == nil)
+    }
 }

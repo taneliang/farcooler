@@ -44,6 +44,9 @@ public struct AgentRow: Sendable, Equatable, Identifiable, Codable {
         case notice(Notice)
         case handoff(Handoff)
         case gap(Gap)
+        /// claude's generic `Try "…"` example (ov-409): not part of the
+        /// conversation, shown as the composer's placeholder.
+        case hint(Hint)
         /// A kind this build doesn't know, by its name.
         case unknown(String)
     }
@@ -193,6 +196,14 @@ public struct AgentRow: Sendable, Equatable, Identifiable, Codable {
     public struct Handoff: Sendable, Equatable, Codable {
         public var reason: String
         public var atMs: Int64?
+    }
+
+    /// The id of the one `Hint` row a session has.
+    public static let hintID = "hint:composer"
+
+    public struct Hint: Sendable, Equatable, Codable {
+        /// Empty once claude's box shows something else.
+        public var text: String
     }
 
     public struct Gap: Sendable, Equatable, Codable {
@@ -392,6 +403,8 @@ extension AgentRow {
                 (tag.payload as? String).map { "\(tag.name) \($0)" } ?? tag.name
             }
             return .gap(Gap(reason: reason ?? "", count: AgentRowJSON.int(p["count"])))
+        case "Hint":
+            return .hint(Hint(text: text("text")))
         default:
             return .unknown(name)
         }

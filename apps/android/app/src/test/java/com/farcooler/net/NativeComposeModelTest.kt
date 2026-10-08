@@ -350,4 +350,26 @@ class NativeComposeModelTest {
         assertNull(AgentConversation.suggestion(turn.copy(suggestion = "  "), "", stale = false))
         assertNull(AgentConversation.suggestion(null, "", stale = false))
     }
+
+    @Test
+    fun `claude's Try example is the placeholder, and neither a tap nor Tab takes it`() {
+        val example = "Try \"how does <filepath> work?\""
+        val hint = RowJson.hint(1, example)
+        val model = model()
+        live(model, RowJson.page(1, 2, RowJson.turn(0, "Hi", activity = "Idle"), hint))
+        assertEquals(example, model.hint)
+        assertNull("an example is not a prediction", model.suggestion)
+        assertFalse(model.takeSuggestion())
+        assertEquals("", model.draft)
+        model.onDraft("x")
+        assertNull("typing wins", model.hint)
+        model.onDraft("")
+        val rows = model.store.shown.value.rows
+        assertEquals(null, AgentConversation.hint(rows, "", stale = true))
+        assertEquals(example, AgentConversation.hint(rows, "", stale = false))
+        // Emptied once the box shows something else.
+        val emptied = model()
+        live(emptied, RowJson.page(1, 2, RowJson.turn(0, "Hi"), RowJson.hint(1, "")))
+        assertNull(emptied.hint)
+    }
 }

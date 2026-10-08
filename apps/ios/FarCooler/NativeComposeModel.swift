@@ -71,6 +71,10 @@ extension NativePaneModel {
     /// placeholder while nothing is typed (`AgentConversation.suggestion`).
     var suggestion: String? { store.suggestion(draft: draft) }
 
+    /// claude's generic `Try "…"` example, in place of "Message Claude" while
+    /// nothing is typed. A hint: a tap and Tab do not take it, as in claude.
+    var hint: String? { store.hint(draft: draft) }
+
     /// A tap on the suggestion, or Tab from a hardware keyboard: it becomes
     /// the draft, to edit. Never sent.
     func takeSuggestion() {

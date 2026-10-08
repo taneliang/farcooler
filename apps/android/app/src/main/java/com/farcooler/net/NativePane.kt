@@ -414,6 +414,10 @@ class NativePaneModel(
             AgentConversation.newestTurn(store.shown.value.rows), draft, store.shown.value.isStale,
         )
 
+    /** claude's generic `Try "…"` example, in place of "Message Claude" while nothing is typed. A hint: a tap and Tab do not take it. */
+    val hint: String?
+        get() = AgentConversation.hint(store.shown.value.rows, draft, store.shown.value.isStale)
+
     /** A tap on the suggestion, or Tab from a hardware keyboard: it becomes the draft, to edit. Never sent. True when there was one. */
     fun takeSuggestion(): Boolean {
         val words = suggestion ?: return false

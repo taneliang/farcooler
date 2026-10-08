@@ -24,10 +24,10 @@ struct NativeAgentView: View {
                         .frame(maxWidth: .infinity)
                         .onAppear { model.loadOlder() }
                 }
-                let last = store.ids.last
+                let last = store.shownIds.last
                 let sendNow: (() -> Void)? = model.offersSendNow ? { Task { await model.sendNow() } } : nil
                 let answer = model.nativeAnswer
-                ForEach(store.ids, id: \.self) { id in
+                ForEach(store.shownIds, id: \.self) { id in
                     if let box = store.box(id) {
                         NativeRowView(box: box, isLast: id == last, showTerminal: showTerminal, sendNow: sendNow, answer: answer)
                     }
@@ -48,12 +48,12 @@ struct NativeAgentView: View {
         .defaultScrollAnchor(.bottom)
         .scrollEdgeEffectStyle(.soft, for: .bottom)
         .overlay {
-            if store.ids.isEmpty { emptyState(store.phase) }
+            if store.shownIds.isEmpty { emptyState(store.phase) }
         }
         // Rows held and the runner not answering: said over them, so stale
         // rows never pass for live ones, and the box waits (`canSend`).
         .overlay(alignment: .top) {
-            if !store.ids.isEmpty, store.isStale { staleBanner(store.phase) }
+            if !store.shownIds.isEmpty, store.isStale { staleBanner(store.phase) }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             NativeComposer(model: model, isFocused: isFocused, showTerminal: showTerminal)
@@ -147,8 +147,9 @@ struct NativeComposer: View {
                     if let suggestion = model.suggestion {
                         suggestionLine(suggestion)
                     } else {
-                        Text("Message \(model.agent)")
+                        Text(model.hint ?? "Message \(model.agent)")
                             .font(Font(ComposerField.font))
+                            .lineLimit(1)
                             .foregroundStyle(.tertiary)
                             .allowsHitTesting(false)
                             .accessibilityHidden(true)

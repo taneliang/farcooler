@@ -47,6 +47,9 @@ data class AgentRow(
         data class OfHandoff(val handoff: Handoff) : Kind
         data class OfGap(val gap: Gap) : Kind
 
+        /** claude's generic `Try "…"` example (ov-409): the composer's placeholder, not part of the conversation. */
+        data class OfHint(val hint: Hint) : Kind
+
         /** A kind this build doesn't know, by its name. */
         data class Unknown(val name: String) : Kind
     }
@@ -179,6 +182,14 @@ data class AgentRow(
     )
 
     data class Handoff(val reason: String, val atMs: Long? = null)
+
+    /** The id of the one `Hint` row a session has. */
+    companion object {
+        const val HINT_ID = "hint:composer"
+    }
+
+    /** [text] is empty once claude's box shows something else. */
+    data class Hint(val text: String)
 
     data class Gap(
         /** `Unparsed`, `TooLarge`, `Rewritten`, or `Unknown <name>`. */
@@ -373,6 +384,7 @@ internal object AgentRowJson {
                     count = int(p["count"]),
                 ),
             )
+            "Hint" -> AgentRow.Kind.OfHint(AgentRow.Hint(text("text")))
             else -> AgentRow.Kind.Unknown(name)
         }
     }

@@ -65,13 +65,18 @@ struct NativeComposer: View {
         .frame(height: fieldHeight)
         .overlay(alignment: .topLeading) {
             if model.draft.isEmpty, model.suggestion == nil {
-                Text("Message \(model.agent)")
+                // claude's own `Try "…"` example where it shows one (ov-409):
+                // read to VoiceOver as the hint it is, and never taken by a
+                // tap, which puts the caret in the box.
+                Text(model.hint ?? "Message \(model.agent)")
+                    .lineLimit(1)
                     .foregroundStyle(.secondary)
                     // `NativeComposerField`'s own `textContainerInset`, so the
                     // placeholder sits where the first typed letter will land.
                     .padding(.top, NativeComposerField.inset)
                     .allowsHitTesting(false)
-                    .accessibilityHidden(true)
+                    .accessibilityHidden(model.hint == nil)
+                    .accessibilityIdentifier(model.hint == nil ? "native-placeholder" : "native-hint")
             }
         }
         // Centered in the row's 44 pt of target when it is one line, so the

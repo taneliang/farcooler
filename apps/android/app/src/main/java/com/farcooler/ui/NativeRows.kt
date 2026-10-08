@@ -78,7 +78,7 @@ fun NativeRowView(row: AgentRow, showTerminal: () -> Unit, answer: NativeAnswer?
             is AgentRow.Kind.OfNotice -> NoticeLine(kind.notice.text)
             is AgentRow.Kind.OfHandoff -> HandoffRow(kind.handoff.reason, showTerminal)
             is AgentRow.Kind.OfGap -> NoticeLine(AgentConversation.gap(kind.gap))
-            is AgentRow.Kind.Unknown -> Unit
+            is AgentRow.Kind.OfHint, is AgentRow.Kind.Unknown -> Unit
         }
     }
 }

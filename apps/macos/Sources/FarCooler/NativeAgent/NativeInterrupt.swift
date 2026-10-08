@@ -46,6 +46,10 @@ extension NativePaneModel {
     /// placeholder while nothing is typed (ov-409).
     var suggestion: String? { store.suggestion(draft: draft) }
 
+    /// claude's generic `Try "…"` example, in place of "Message Claude" while
+    /// nothing is typed (ov-409). A hint: Tab does not take it, as in claude.
+    var hint: String? { store.hint(draft: draft) }
+
     /// Whether Stop is offered: the runner serves it and claude is working.
     var offersStop: Bool { keys != nil && AgentConversation.pressesKeys(preset: program) && working && !store.isStale }
 

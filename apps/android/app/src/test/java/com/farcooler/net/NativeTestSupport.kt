@@ -92,6 +92,9 @@ object RowJson {
             .let { base -> if (suggestion == null) base else JsonObject(base + ("suggestion" to text(suggestion))) },
     )
 
+    /** claude's `Try "…"` example (ov-409): the one `Hint` row, its text empty once the box shows something else. */
+    fun hint(ord: Long, words: String) = row("hint:composer", ord, "Hint", obj("text" to text(words)))
+
     /** A held ask (ov-370): `question`, `plan` or `permission`, held under `hook-ask-1` unless [held] is null. */
     fun heldAsk(ord: Long, which: String, held: String? = "hook-ask-1", answeredBy: String? = null): JsonObject {
         val base = when (which) {

@@ -187,6 +187,17 @@ object AgentConversation {
         return newestTurn.suggestion?.trim()?.takeIf { it.isNotEmpty() }
     }
 
+    /**
+     * claude's generic `Try "…"` example, shown as the composer's placeholder in
+     * place of "Message Claude" (ov-409): only while the rows are live and nothing
+     * is typed. A hint: Tab and a tap do not take it, as in claude.
+     */
+    fun hint(rows: List<AgentRow>, draft: String, stale: Boolean): String? {
+        if (stale || draft.isNotBlank()) return null
+        val kind = rows.lastOrNull { it.id == AgentRow.HINT_ID }?.kind as? AgentRow.Kind.OfHint
+        return kind?.hint?.text?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
     /** The newest turn among [rows], in order. */
     fun newestTurn(rows: List<AgentRow>): AgentRow.Turn? =
         rows.lastOrNull { it.kind is AgentRow.Kind.OfTurn }?.let { (it.kind as AgentRow.Kind.OfTurn).turn }

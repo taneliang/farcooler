@@ -84,7 +84,6 @@ fn rows() -> Vec<Row> {
         row(7, 7, "notice:1", t, RowKind::Notice(Notice { kind: NoticeKind::Compacted, text: "Context compacted".into(), at_ms: None })),
         row(8, 9, "handoff:1", t, RowKind::Handoff(Handoff { reason: "A panel is open".into(), at_ms: Some(9_500) })),
         row(9, 9, "gap:1", t, RowKind::Gap(Gap { reason: GapReason::Unknown("x-new".into()), count: 2 })),
-        row(10, 9, "hint:composer", None, RowKind::Hint(Hint { text: "Try \"how does <filepath> work?\"".into() })),
     ]
 }
 
@@ -140,5 +139,27 @@ fn the_fixture_holds_every_row_kind() {
         .iter()
         .filter_map(|row| row["kind"].as_object().and_then(|k| k.keys().next().cloned()))
         .collect();
-    assert_eq!(kinds, ["Turn", "Prose", "Thinking", "Tool", "Subagent", "Ask", "Queued", "Notice", "Handoff", "Gap", "Hint"]);
+    assert_eq!(kinds, ["Turn", "Prose", "Thinking", "Tool", "Subagent", "Ask", "Queued", "Notice", "Handoff", "Gap"]);
+}
+
+const HINT_FIXTURE: &str = include_str!("../../../../test/fixtures/agent-rows-hint.json");
+
+/// A fresh session's page: no turn, only claude's `Try` example on its
+/// `Hint` row (ov-409), as the boundary writes it. Swift and Kotlin decode
+/// the same file.
+fn hint_written() -> Value {
+    let hint = row(0, 3, "hint:composer", None, RowKind::Hint(Hint { text: "Try \"how does <filepath> work?\"".into() }));
+    let page = AgentRowPage { terminal_id: Default::default(), epoch: 7, rev: 3, rows: vec![wire(&hint)], more_before: false };
+    super::rows_args::page_of(&page)
+}
+
+#[test]
+fn the_hint_fixture_is_what_the_rows_boundary_writes() {
+    let fixture: Value = serde_json::from_str(HINT_FIXTURE).expect("the fixture is JSON");
+    assert_eq!(
+        fixture,
+        hint_written(),
+        "test/fixtures/agent-rows-hint.json is not what rows_args writes; regenerate it:\n{}",
+        serde_json::to_string_pretty(&hint_written()).unwrap_or_default()
+    );
 }

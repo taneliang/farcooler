@@ -23,4 +23,15 @@ object AgentRowFixture {
 
     val page: JsonObject get() = root.getValue("page").jsonObject
     val follow: JsonObject get() = root.getValue("follow").jsonObject
+
+    /** A fresh session's page (ov-409): claude's `Try` example on its `Hint` row alone, `test/fixtures/agent-rows-hint.json`. */
+    val hintPage: JsonObject by lazy {
+        var directory: File? = File(System.getProperty("user.dir") ?: ".").absoluteFile
+        while (directory != null) {
+            val candidate = File(directory, "test/fixtures/agent-rows-hint.json")
+            if (candidate.isFile) return@lazy Json.parseToJsonElement(candidate.readText()).jsonObject
+            directory = directory.parentFile
+        }
+        throw AssertionError("Could not find test/fixtures/agent-rows-hint.json above ${System.getProperty("user.dir")}.")
+    }
 }

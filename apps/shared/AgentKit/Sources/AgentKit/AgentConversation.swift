@@ -274,6 +274,16 @@ public enum AgentConversation {
         return words
     }
 
+    /// claude's generic `Try "…"` example, shown as the composer's placeholder
+    /// in place of "Message Claude" (ov-409): only while the rows are live and
+    /// nothing is typed. It is a hint: Tab and a tap do not take it, as in
+    /// claude.
+    public static func hint(_ text: String?, draft: String, stale: Bool) -> String? {
+        guard !stale, draft.allSatisfy(\.isWhitespace) else { return nil }
+        guard let words = text?.trimmingCharacters(in: .whitespacesAndNewlines), !words.isEmpty else { return nil }
+        return words
+    }
+
     /// What the composer says when the runner didn't press `key`, or nil when
     /// there's nothing to say: the turn ended on its own (`idle`), or a
     /// second press came too soon after the first (`too_soon`).
@@ -440,6 +450,18 @@ extension AgentRowStore {
             if case .turn(let turn)? = box(id)?.row.kind { return turn }
         }
         return nil
+    }
+
+    /// The ids a transcript draws: every row but the hint (`AgentRow.hintID`),
+    /// which is the composer's. Filtered by id, so a view reads no row.
+    public var shownIds: [String] { ids.filter { $0 != AgentRow.hintID } }
+
+    /// The `Try` example claude's box shows, for a composer whose draft is
+    /// `draft` (`AgentConversation.hint`).
+    public func hint(draft: String) -> String? {
+        var text: String?
+        if case .hint(let hint)? = box(AgentRow.hintID)?.row.kind { text = hint.text }
+        return AgentConversation.hint(text, draft: draft, stale: isStale)
     }
 
     /// The prompt claude suggests, for a composer whose draft is `draft`

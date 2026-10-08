@@ -84,6 +84,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.model.AgentConversation
+import com.farcooler.model.AgentRow
 import com.farcooler.net.AgentRowStore
 import com.farcooler.net.NativePaneModel
 import kotlinx.coroutines.delay
@@ -145,11 +146,13 @@ fun NativeAgentView(
         if (model.sent > 0) listState.scrollToItem(0)
     }
     LaunchedEffect(shown.rows.size) { model.settleQueued() }
+    // The hint row is the composer's, not the conversation's (ov-409).
+    val transcript = remember(shown.rows) { shown.rows.filter { it.id != AgentRow.HINT_ID } }
 
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // Rows held and the runner not answering: said over them, so stale rows
         // never pass for live ones, and the box waits (`canSend`).
-        if (shown.rows.isNotEmpty() && shown.isStale) StaleBanner(shown.phase, showTerminal)
+        if (transcript.isNotEmpty() && shown.isStale) StaleBanner(shown.phase, showTerminal)
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
             LazyColumn(
@@ -170,7 +173,7 @@ fun NativeAgentView(
                     item(key = "panel-issue") { HandoffRow(AgentConversation.panel(model.agent), showTerminal) }
                 }
                 val answer = nativeAnswer(model)
-                items(shown.rows.asReversed(), key = { it.id }) { row -> NativeRowView(row, showTerminal, answer, sendNow) }
+                items(transcript.asReversed(), key = { it.id }) { row -> NativeRowView(row, showTerminal, answer, sendNow) }
                 if (shown.moreBefore) {
                     item(key = "older") {
                         Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {
@@ -187,7 +190,7 @@ fun NativeAgentView(
                     }
                 }
             }
-            if (shown.rows.isEmpty()) EmptyState(shown.phase)
+            if (transcript.isEmpty()) EmptyState(shown.phase)
             if (!pinned) {
                 SmallFloatingActionButton(
                     onClick = { scope.launch { listState.animateScrollToItem(0) } },
@@ -308,7 +311,7 @@ fun NativeComposer(model: NativePaneModel, showTerminal: () -> Unit) {
                         placeholder = {
                             val suggestion = model.suggestion
                             if (suggestion == null) {
-                                Text("Message ${model.agent}")
+                                Text(model.hint ?: "Message ${model.agent}", maxLines = 1)
                             } else {
                                 SuggestionPlaceholder(suggestion) {
                                     if (model.takeSuggestion()) field.requestFocus()
