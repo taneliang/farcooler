@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.farcooler.model.AgentConversation
 import com.farcooler.model.AgentRow
+import com.farcooler.model.BringHere
 import com.farcooler.model.OutgoingImage
 import java.util.Base64
 import kotlinx.coroutines.CoroutineScope
@@ -13,6 +14,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 
@@ -106,6 +108,29 @@ class CoreInterruptSink(private val core: ClientCall) : InterruptSink {
     }
 }
 
+/**
+ * Bring here (ov-369, R-28): the runner's `terminal.bring_draft` reads claude's
+ * box with nothing typed, or with [expected], clears it of exactly that.
+ */
+fun interface DraftSink {
+    suspend fun bringDraft(terminal: String, expected: String?): Pair<String, Boolean>
+}
+
+/** The runner's `terminal.bring_draft`, over this phone's client core. */
+class CoreDraftSink(private val core: ClientCall) : DraftSink {
+    override suspend fun bringDraft(terminal: String, expected: String?): Pair<String, Boolean> {
+        val answer = core.call(
+            "terminal.bring_draft",
+            buildJsonObject {
+                put("terminal", JsonPrimitive(terminal))
+                if (expected != null) put("expected", JsonPrimitive(expected))
+            },
+        )
+        val text = (answer["text"] as? JsonPrimitive)?.contentOrNull ?: ""
+        return text to ((answer["cleared"] as? JsonPrimitive)?.booleanOrNull ?: false)
+    }
+}
+
 /** Which view each pane remembers (R-27): the conversation, until it was switched to its terminal. */
 interface PaneViewMemory {
     /** Whether [terminal] shows the conversation: yes until the pane was switched to its terminal. */
@@ -139,6 +164,8 @@ class NativePanes(
     /** Where a held ask's answer goes (ov-370). */
     private val answers: AnswerSink? = CoreAnswerSink(core),
     private val interruptSink: InterruptSink = CoreInterruptSink(core),
+    /** Where Bring here reads and clears claude's box (ov-369). */
+    private val draftSink: DraftSink = CoreDraftSink(core),
 ) {
     private val panes = HashMap<String, NativePaneModel>()
 
@@ -154,6 +181,7 @@ class NativePanes(
             scope = scope,
             answers = answers,
             interruptSink = interruptSink,
+            draftSink = draftSink,
         )
     }
 }
@@ -180,6 +208,8 @@ class NativePaneModel(
     val answers: AnswerSink? = null,
     /** Where Stop and Send now go, handed to [keys] where the runner offers them. */
     private val interruptSink: InterruptSink? = null,
+    /** Where Bring here goes, handed to [drafts] where the runner offers it (ov-369). */
+    private val draftSink: DraftSink? = null,
 ) {
     /** The agent the pane runs, as its preset says: `claude` or `codex` (ov-416). */
     var preset by mutableStateOf("claude")
@@ -252,6 +282,14 @@ class NativePaneModel(
 
     /** A Stop or a Send now on its way, until the runner answers. */
     var pressing by mutableStateOf<AgentConversation.PaneKey?>(null)
+        private set
+
+    /** Where Bring here reads and clears claude's box (ov-369): the runner's connection where it serves `bring_draft`; null, and Show terminal alone. */
+    var drafts by mutableStateOf<DraftSink?>(null)
+        private set
+
+    /** A Bring here on its way, until the runner answers the clear. */
+    var bringing by mutableStateOf(false)
         private set
 
     private val nextImage = java.util.concurrent.atomic.AtomicInteger()
@@ -378,7 +416,10 @@ class NativePaneModel(
      * breaks, images and commands with `compose` (ov-367), Stop and Send now with
      * `terminal_interrupt` (ov-368).
      */
-    fun offer(rich: Boolean, interrupts: Boolean) {
+    fun offer(rich: Boolean, interrupts: Boolean, bring: Boolean = false) {
+        // Bring here with `bring_draft` (ov-369).
+        val drafting = if (bring) draftSink else null
+        if (drafts !== drafting) drafts = drafting
         if (this.rich != rich) {
             this.rich = rich
             if (!rich) {
@@ -548,6 +589,39 @@ class NativePaneModel(
                 pressing = null
             }
         }
+    }
+
+    // Bring here (ov-369, R-28).
+
+    /** Whether the draft line offers Bring here: claude, on a runner that serves it. */
+    val offersBringHere: Boolean get() = drafts != null && preset.startsWith("claude")
+
+    /** Move the box's draft into the composer, ahead of what it holds, and clear the box. The draft line's Bring here. */
+    fun bringHere() {
+        val drafts = drafts ?: return
+        if (bringing || !offersBringHere) return
+        bringing = true
+        issue = null
+        scope.launch {
+            try {
+                issue = BringHere.run(
+                    agent = agent,
+                    read = { answered { drafts.bringDraft(terminal, null).first } },
+                    place = { text -> draft = BringHere.merged(text, draft) },
+                    clear = { text -> answered { drafts.bringDraft(terminal, text).second } },
+                )
+            } finally {
+                bringing = false
+            }
+        }
+    }
+
+    private suspend fun <T> answered(call: suspend () -> T): BringHere.Answer<T> = try {
+        BringHere.Answer.Took(call())
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        BringHere.Answer.Failed(AgentConversation.failure(e))
     }
 
     /** The page above the oldest row held. */

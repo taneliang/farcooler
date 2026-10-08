@@ -273,19 +273,39 @@ struct NativeComposer: View {
         .accessibilityLabel("Send")
     }
 
+    /// Bring Here and Show Terminal, for a draft in claude's box (R-28).
+    @ViewBuilder
+    private var bringButtons: some View {
+        Button("Bring Here") { Task { await model.bringHere() } }
+            .disabled(model.bringing)
+            .identified("native-bring-here")
+        Button("Show Terminal", action: showTerminal)
+    }
+
     @ViewBuilder
     private func issueLine(_ issue: NativePaneModel.SendIssue) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
             switch issue {
-            case .draftInTerminal:
+            case .draftInTerminal where model.offersBringHere:
                 // R-28: refused, and the draft offered here or the terminal.
-                Text(model.offersBringHere ? AgentConversation.draftInTerminalBring : AgentConversation.draftInTerminal)
-                Spacer(minLength: Spacing.group)
-                if model.offersBringHere {
-                    Button("Bring Here") { Task { await model.bringHere() } }
-                        .disabled(model.bringing)
-                        .identified("native-bring-here")
+                // In a narrow tile the words go above the buttons, not to a column.
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
+                        Text(AgentConversation.draftInTerminalBring).fixedSize()
+                        Spacer(minLength: Spacing.group)
+                        bringButtons
+                    }
+                    VStack(alignment: .leading, spacing: Spacing.tight) {
+                        Text(AgentConversation.draftInTerminalBring)
+                        HStack(spacing: Spacing.group) {
+                            Spacer(minLength: 0)
+                            bringButtons
+                        }
+                    }
                 }
+            case .draftInTerminal:
+                Text(AgentConversation.draftInTerminal)
+                Spacer(minLength: Spacing.group)
                 Button("Show Terminal", action: showTerminal)
             case .draftLeftInTerminal(let words):
                 Text(words)

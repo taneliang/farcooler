@@ -22,6 +22,9 @@ object AgentConversation {
     /** Whether the runner presses Stop and Send now (`terminal_interrupt`, ov-368). */
     fun interrupts(build: DaemonBuild?): Boolean = build?.can(Capability.TERMINAL_INTERRUPT) == true
 
+    /** Whether the runner reads and clears claude's box for Bring here (`bring_draft`, ov-369). */
+    fun bring(build: DaemonBuild?): Boolean = build?.can(Capability.BRING_DRAFT) == true
+
     /**
      * Whether a pane is an agent in a terminal the runner projects rows for and
      * composes into: claude, or codex where the runner says it does (`codex_view`,
@@ -102,8 +105,11 @@ object AgentConversation {
         /** The message is one of claude's own commands that opens a panel or acts at once (`handoff`): the Handoff row. */
         data object Panel : SendIssue
 
-        /** The terminal's box holds text of its own (R-28): refused, with Show terminal. */
+        /** The terminal's box holds text of its own (R-28): refused, with Bring here where it's offered ([BringHere]), and Show terminal. */
         data object DraftInTerminal : SendIssue
+
+        /** Bring here put the box's text in the composer but couldn't clear the box: the text is in both, as [words] says. Show terminal. */
+        data class DraftLeftInTerminal(val words: String) : SendIssue
 
         /** Something only words can say. */
         data class Said(val words: String) : SendIssue
@@ -305,6 +311,9 @@ object AgentConversation {
     const val MAY_HAVE_BEEN_SENT =
         "The runner didn’t answer in time. The message may have been sent, so check the terminal before sending it again."
     const val DRAFT_IN_TERMINAL = "The terminal’s box already holds a draft. Send or clear it there first."
+
+    /** [DRAFT_IN_TERMINAL], where Bring here is offered beside Show terminal. */
+    const val DRAFT_IN_TERMINAL_BRING = "The terminal’s box already holds a draft of its own."
     const val HANDOFF = "Claude is showing something only the terminal can."
     const val STALE_UNAVAILABLE = "This session isn’t being read anymore. The terminal has it."
     const val STALE_TROUBLE = "Can’t reach the runner, so this may be out of date. Trying again…"

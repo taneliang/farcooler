@@ -203,7 +203,7 @@ public enum AgentConversation {
         "The runner didn’t answer in time. The message may have been sent, so check the terminal before sending it again."
     public static let draftInTerminal = "The terminal’s box already holds a draft. Send or clear it there first."
     /// `draftInTerminal`, where Bring Here is offered beside Show Terminal.
-    public static let draftInTerminalBring = "The terminal’s box already holds a draft. Bring it here to send it from this box."
+    public static let draftInTerminalBring = "The terminal’s box already holds a draft of its own."
     public static let handoff = handoff("Claude")
     public static func handoff(_ agent: String) -> String { "\(agent) is showing something only the terminal can." }
 

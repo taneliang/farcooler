@@ -16,6 +16,7 @@ import com.farcooler.model.AgentConversation
 import com.farcooler.model.OutgoingImage
 import com.farcooler.net.AgentRowStore
 import com.farcooler.net.ConversationSink
+import com.farcooler.net.DraftSink
 import com.farcooler.net.FakeRowSource
 import com.farcooler.net.InMemoryPaneViews
 import com.farcooler.net.InterruptSink
@@ -87,7 +88,7 @@ class NativeComposerViewTest {
         running.close()
     }
 
-    private fun loaded(page: JsonObject, rich: Boolean = true, interrupts: Boolean = true): NativePaneModel {
+    private fun loaded(page: JsonObject, rich: Boolean = true, interrupts: Boolean = true, bring: Boolean = true): NativePaneModel {
         val model = NativePaneModel(
             terminal = "t1",
             store = AgentRowStore(running.scope, retryDelayMs = 1, followWaitMs = 1),
@@ -99,8 +100,12 @@ class NativeComposerViewTest {
                 override suspend fun interrupt(terminal: String) { pressed.add("stop") }
                 override suspend fun sendNow(terminal: String) { pressed.add("sendnow") }
             },
+            draftSink = DraftSink { _, expected ->
+                pressed.add(if (expected == null) "read" else "clear $expected")
+                (expected ?: "from the terminal") to (expected != null)
+            },
         )
-        model.offer(rich, interrupts)
+        model.offer(rich, interrupts, bring)
         models.add(model)
         source.answerPage(page)
         model.setOnScreen(true)
@@ -263,6 +268,29 @@ class NativeComposerViewTest {
         assertEquals("never sent", 0, composed.size)
         // While claude works, its dim line is a hint, not a prediction.
         look(loaded(resting("Run the tests again", activity = "Busy"))) { assertFalse(it.composed("native-suggestion")) }
+    }
+
+    @Test
+    fun `a draft in the terminal offers Bring here where the runner serves it, and it moves the draft (ov-369)`() {
+        val model = loaded(busy())
+        model.onDraft("and the docs")
+        model.issue = AgentConversation.issue(AgentConversation.SendFailure.Refused("draft"))
+        look(model) {
+            assertTrue("Bring here beside Show terminal", it.composed("native-bring-here"))
+            assertEquals("${AgentConversation.DRAFT_IN_TERMINAL_BRING} Bring here Show terminal Dismiss", it.text["native-send-issue"])
+        }
+        Capture.both("native-composer-bring-here") { NativeAgentView(model, rememberLazyListState(), showTerminal = {}) }
+        model.bringHere()
+        eventually("brought") { !model.bringing && pressed.size == 2 }
+        assertEquals(listOf("read", "clear from the terminal"), pressed.toList())
+        assertEquals("from the terminal\nand the docs", model.draft)
+
+        val unserved = loaded(busy(), bring = false)
+        unserved.issue = AgentConversation.issue(AgentConversation.SendFailure.Refused("draft"))
+        look(unserved) {
+            assertFalse("Bring here on a runner without bring_draft", it.composed("native-bring-here"))
+            assertEquals("${AgentConversation.DRAFT_IN_TERMINAL} Show terminal Dismiss", it.text["native-send-issue"])
+        }
     }
 
     @Test

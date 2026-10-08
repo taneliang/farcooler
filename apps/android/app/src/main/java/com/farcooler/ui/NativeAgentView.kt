@@ -279,7 +279,9 @@ fun NativeComposer(model: NativePaneModel, showTerminal: () -> Unit) {
     ) {
         val issue = model.issue
         if (issue != null && issue != AgentConversation.SendIssue.Handoff && issue != AgentConversation.SendIssue.Panel) {
-            IssueLine(issue, showTerminal) { model.issue = null }
+            IssueLine(issue, showTerminal, bringHere = if (model.offersBringHere) ({ model.bringHere() }) else null, bringing = model.bringing) {
+                model.issue = null
+            }
         }
         Surface(
             shape = RoundedCornerShape(Radius.large),
@@ -428,7 +430,35 @@ private fun ImageChips(model: NativePaneModel) {
 }
 
 @Composable
-private fun IssueLine(issue: AgentConversation.SendIssue, showTerminal: () -> Unit, dismiss: () -> Unit) {
+private fun IssueLine(
+    issue: AgentConversation.SendIssue,
+    showTerminal: () -> Unit,
+    /** Bring here, where the runner serves it (ov-369); null for Show terminal alone. */
+    bringHere: (() -> Unit)? = null,
+    bringing: Boolean = false,
+    dismiss: () -> Unit,
+) {
+    // Three buttons beside the words squeeze them to a column on a phone:
+    // with Bring here, the words go above and the buttons below.
+    if (issue == AgentConversation.SendIssue.DraftInTerminal && bringHere != null) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(Radius.medium))
+                .padding(start = 12.dp, top = 8.dp, bottom = 4.dp, end = 4.dp)
+                .testTag("native-send-issue"),
+        ) {
+            Text(AgentConversation.DRAFT_IN_TERMINAL_BRING, style = MaterialTheme.typography.bodyMedium)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = bringHere, enabled = !bringing, modifier = Modifier.testTag("native-bring-here")) {
+                    Text("Bring here")
+                }
+                TextButton(onClick = showTerminal) { Text("Show terminal") }
+                TextButton(onClick = dismiss) { Text("Dismiss") }
+            }
+        }
+        return
+    }
     Row(
         Modifier
             .fillMaxWidth()
@@ -439,7 +469,21 @@ private fun IssueLine(issue: AgentConversation.SendIssue, showTerminal: () -> Un
     ) {
         when (issue) {
             AgentConversation.SendIssue.DraftInTerminal -> {
-                Text(AgentConversation.DRAFT_IN_TERMINAL, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                // R-28: refused, and the draft offered here or the terminal.
+                Text(
+                    if (bringHere != null) AgentConversation.DRAFT_IN_TERMINAL_BRING else AgentConversation.DRAFT_IN_TERMINAL,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                if (bringHere != null) {
+                    TextButton(onClick = bringHere, enabled = !bringing, modifier = Modifier.testTag("native-bring-here")) {
+                        Text("Bring here")
+                    }
+                }
+                TextButton(onClick = showTerminal) { Text("Show terminal") }
+            }
+            is AgentConversation.SendIssue.DraftLeftInTerminal -> {
+                Text(issue.words, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                 TextButton(onClick = showTerminal) { Text("Show terminal") }
             }
             is AgentConversation.SendIssue.Said ->

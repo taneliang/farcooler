@@ -213,6 +213,7 @@ fun TerminalPane(
         rich = AgentConversation.rich(daemon ?: lastDaemon),
         interrupts = AgentConversation.interrupts(daemon ?: lastDaemon),
         panes = connection.nativePanes,
+        bring = AgentConversation.bring(daemon ?: lastDaemon),
         memory = model.settings,
         onCovered = { dismissRequest += 1 },
     )
