@@ -414,6 +414,10 @@ private struct SegmentBar: View {
             HStack(spacing: 2) { buttons(stacked: false) }
             VStack(spacing: 2) { buttons(stacked: true) }
         }
+        // Three titles are a switch, not reading matter: past this size the
+        // stacked bar took a third of the screen (ov-423). The text below stays
+        // at the reader's size.
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .padding(3)
         .background(Capsule().fill(Fill.inset()))
         .padding(.horizontal, 16)

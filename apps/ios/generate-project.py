@@ -87,6 +87,7 @@ SOURCES = [
     # plan and the chat in columns (ov-348).
     "PhonePlanStrip.swift",
     "PhoneTreeScreens.swift",
+    "LayoutProbe.swift",
     "PadWorkspace.swift",
     "ComposerField.swift",
     "ComposerModel.swift",

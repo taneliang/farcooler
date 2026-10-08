@@ -586,6 +586,7 @@ struct NeedsYouRow: View {
     @State private var draft = ""
 
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -603,6 +604,7 @@ struct NeedsYouRow: View {
             }
         }
         .padding(.vertical, 2)
+        .probesShown()
         .alert("Answer", isPresented: $writing) {
             TextField("Your answer", text: $draft)
             Button("Cancel", role: .cancel) { draft = "" }
@@ -614,21 +616,23 @@ struct NeedsYouRow: View {
 
     private var words: some View {
         VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                Image(systemName: symbol)
-                    .foregroundStyle(tint)
-                    .accessibilityHidden(true)
-                Text(context)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                if let since = item.since {
-                    BoardTick { now in
-                        Text(TaskRow.ago(now.timeIntervalSince(since)))
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
+            if typeSize.isAccessibilitySize {
+                // The age goes under the context, not beside it: beside it the
+                // two shared a line too narrow for either, and the context was
+                // cut to "Billing · b…" (ov-422).
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        mark
+                        contextText(lineLimit: 3)
                     }
+                    age
+                }
+            } else {
+                HStack(spacing: 6) {
+                    mark
+                    contextText(lineLimit: 1)
+                    Spacer(minLength: 4)
+                    age
                 }
             }
             Text(item.question)
@@ -644,6 +648,35 @@ struct NeedsYouRow: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(.rect)
+    }
+
+    private var mark: some View {
+        Image(systemName: symbol)
+            .foregroundStyle(tint)
+            .accessibilityHidden(true)
+    }
+
+    private func contextText(lineLimit: Int) -> some View {
+        Text(context)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(lineLimit)
+            .textFitProbe("needs-you-context", text: context, font: .caption)
+    }
+
+    @ViewBuilder
+    private var age: some View {
+        if let since = item.since {
+            BoardTick { now in
+                let ago = TaskRow.ago(now.timeIntervalSince(since))
+                Text(ago)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .fixedSize()  // never "2m / ago"
+                    .textFitProbe("needs-you-age", text: ago, font: .caption2)
+            }
+        }
     }
 
     /// Where it is and what it's about: "Billing · bil-7", or the agent.

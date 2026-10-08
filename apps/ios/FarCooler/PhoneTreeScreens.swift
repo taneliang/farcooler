@@ -301,6 +301,9 @@ struct TreeRow: View {
 
     @Environment(\.phoneNavigator) private var navigator
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.dynamicTypeSize) private var typeSize
+    /// The glyph's column, which grows with the glyph so it never reaches the title (ov-424).
+    @ScaledMetric(relativeTo: .body) private var glyphWidth: CGFloat = 22
 
     var body: some View {
         let tap = PhoneTree.tap(node)
@@ -346,7 +349,8 @@ struct TreeRow: View {
         return HStack(alignment: .firstTextBaseline, spacing: 10) {
             Image(systemName: node.glyph)
                 .foregroundStyle(.secondary)
-                .frame(width: 22)
+                .frameProbe("tree-row-icon")  // the glyph's own size, which a fixed column does not contain
+                .frame(width: glyphWidth)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -358,12 +362,20 @@ struct TreeRow: View {
                     Text(node.title)
                         .foregroundStyle(node.quiet ? .secondary : .primary)
                         .lineLimit(2)
+                        .frameProbe("tree-row-title")
                 }
                 if !node.also.isEmpty {
                     Text(node.also).font(.caption).foregroundStyle(.secondary)
                 }
                 if !node.caption.isEmpty {
                     Text(node.caption).font(.caption).foregroundStyle(.secondary)
+                }
+                // Under the title at the accessibility sizes, where beside it
+                // the count took the title's room and broke it ("Invoic-/es").
+                if !node.detail.isEmpty, typeSize.isAccessibilitySize {
+                    Text(node.detail)
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(.secondary)
                 }
                 // Its branch, as the Worktrees list's row said it (review 13).
                 if let branch = worktree?.branch, !branch.isEmpty {
@@ -392,7 +404,7 @@ struct TreeRow: View {
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("tree-row-diff")
             }
-            if !node.detail.isEmpty {
+            if !node.detail.isEmpty, !typeSize.isAccessibilitySize {
                 Text(node.detail)
                     .font(.subheadline.monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -406,5 +418,6 @@ struct TreeRow: View {
         }
         .contentShape(.rect)
         .accessibilityElement(children: .combine)
+        .probesShown()
     }
 }

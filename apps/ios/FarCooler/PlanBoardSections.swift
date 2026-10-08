@@ -294,6 +294,8 @@ struct PlanLaneRow: View {
     let waitsOnOwner: Bool
     let action: () -> Void
     @Environment(\.colorScheme) private var scheme
+    /// The mark's column, which grows with its glyph so the glyph never reaches the name (ov-424).
+    @ScaledMetric(relativeTo: .subheadline) private var markWidth: CGFloat = 22
 
     /// Stale, or waiting on you: the only lanes drawn in color.
     private var warning: String? {
@@ -306,7 +308,7 @@ struct PlanLaneRow: View {
     var body: some View {
         Button(action: action) {
             HStack(alignment: .firstTextBaseline, spacing: PaneMetrics.card) {
-                mark.frame(width: 22, alignment: .leading)
+                mark.frameProbe("plan-lane-mark").frame(width: markWidth, alignment: .leading)
                 VStack(alignment: .leading, spacing: 2) {
                     // Which theme it serves (the owner's ask, ov-273): beside
                     // the name, or under it when the name takes the line.
@@ -346,6 +348,7 @@ struct PlanLaneRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("plan-lane-\(lane.name)")
+        .probesShown()
     }
 
     private var name: some View {
@@ -353,6 +356,7 @@ struct PlanLaneRow: View {
             .font(.subheadline.weight(.medium))
             .lineLimit(1)
             .layoutPriority(1)
+            .frameProbe("plan-lane-name")
     }
 
     @ViewBuilder private var themeName: some View {
