@@ -1,0 +1,40 @@
+[38;5;174m▝▜[48;5;16m█████[49m█▀[39m  [38;5;246mHaiku 4.5 · API Usage Billing[39m
+[38;5;174m ▝▝   ▝▝ [39m  [38;5;246m/private/tmp/fc-t/draft-owner/work[39m
+
+
+[38;5;246m[48;5;237m❯ [38;5;231mhello there[39m
+
+[38;5;231m[49m⏺[39m ok
+
+[38;5;246m✻[39m [38;5;246mCooked for 20s · done 9:36 PM[39m
+
+[38;5;246m[48;5;237m❯ [38;5;231mRUNTOOL please[39m
+
+[49m  [38;5;246mRan [1m1[0m[38;5;246m shell command [39m
+
+[38;5;231m⏺[39m ok
+
+[38;5;246m✻[39m [38;5;246mCogitated for 0s · done 9:36 PM[39m
+
+[38;5;246m[48;5;237m❯ [38;5;231mRUNTOOL again[39m
+
+[38;5;231m[49m⏺[39m ok
+
+[38;5;246m✻[39m [38;5;246mBrewed for 0s · done 9:36 PM[39m
+
+[38;5;246m[48;5;237m❯ [38;5;231mRUNTOOL third[39m
+
+[49m  [38;5;246mRan [1m1[0m[38;5;246m shell command [39m
+[38;5;246m  ⎿  Interrupted · What should Claude do instead?[39m
+
+[38;5;246m✻[39m [38;5;246mBrewed for 0s · done 9:37 PM[39m
+                                                                             [38;5;246mctrl+g to edit in Vim[39m
+[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m❯ Fix the login bug first.
+
+  Then check that the session cookie survives a restart, and that the redirect after sign-in goes
+  back to the page the person was on rather than the home page.
+    indented: https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa end[7m [0m
+[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m  [38;5;246m⏸ manual mode on[39m

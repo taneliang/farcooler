@@ -34,6 +34,7 @@
 //! codebase` and claude's suggested prompt both read as `Holds`.
 
 pub mod codex;
+pub mod draft;
 pub mod drawn;
 mod suggestion;
 
@@ -100,6 +101,18 @@ fn grey_rgb(r: &str, g: &str, b: &str) -> bool {
 /// rather than dims is a grey one; only `composer::suggestion` asks, since a
 /// grey draft would otherwise read as no draft at all.
 fn styled(line: &str) -> Vec<(char, bool, bool)> {
+    attributed(line).into_iter().map(|(c, dim, grey, _)| (c, dim, grey)).collect()
+}
+
+/// `cells`, each with whether it was drawn in reverse video too: claude
+/// draws its own cursor as one reverse-video cell (`draft`).
+fn cells_with_reverse(line: &str) -> Vec<(char, bool, bool)> {
+    attributed(line).into_iter().map(|(c, dim, _, reverse)| (c, dim, reverse)).collect()
+}
+
+/// A line's printed characters, each with whether it was drawn dim, grey
+/// and in reverse video: `styled` and `cells_with_reverse` both read it.
+fn attributed(line: &str) -> Vec<(char, bool, bool, bool)> {
     let mut out: Vec<(char, bool, bool)> = Vec::new();
     let mut reversed = Vec::new();
     let (mut dim, mut reverse, mut grey) = (false, false, false);
@@ -185,7 +198,7 @@ fn styled(line: &str) -> Vec<(char, bool, bool)> {
             }
         }
     }
-    out
+    out.into_iter().zip(reversed).map(|((c, dim, grey), rev)| (c, dim, grey, rev)).collect()
 }
 
 fn text(cells: &[(char, bool)]) -> String {
@@ -236,7 +249,6 @@ fn claude_box_at(lines: &[Vec<(char, bool)>]) -> Option<(usize, usize)> {
     if end == lines.len() {
         return None;
     }
-    // Vim mode's NORMAL: keys there are commands, not text.
     let below: String = lines[end + 1..].iter().map(|r| text(r)).collect::<Vec<_>>().join(" ");
     if below.contains("NORMAL") {
         return None;

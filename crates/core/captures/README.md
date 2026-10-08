@@ -178,3 +178,20 @@ its API, each after one or two bracketed pastes and no Enter.
 | `codex-0.153.4-mention-popup-160x45-e.txt` | `look at @READ`: the file picker, `enter insert` |
 | `codex-0.153.4-mention-no-matches-160x45-e.txt` | `try @zzzq`: the picker with no matches |
 | `codex-0.153.4-skill-no-matches-160x45-e.txt` | `try $zzzq`: the skill picker with no matches |
+
+## The ones with a draft left in claude's box (ov-369)
+
+Captured 2026-10-07 with `tmux capture-pane -p -e` on a 100x40 pane, against
+claude 2.1.292 (haiku) in a sandbox HOME, on a stand-in for its API. Each was
+typed into the box (ctrl+j for a line break) and never sent. Bring Here reads
+them back with their line breaks (`composer::draft`).
+
+| file | what it shows |
+| --- | --- |
+| `claude-2.1.292-draft-one-line-100x40-e.txt` | one line; the cursor, a reverse-video space, after it |
+| `claude-2.1.292-draft-multiline-100x40-e.txt` | a line, a blank line, a line claude wrapped at a space, then an indented line whose 129-character word is split at the row's edge |
+| `claude-2.1.292-draft-cursor-moved-100x40-e.txt` | the same, the cursor five characters back: a reverse-video `a` |
+| `claude-2.1.292-draft-working-100x40-e.txt` | two lines typed while a turn runs |
+| `claude-2.1.292-draft-working-after-ctrl-u-100x40-e.txt` | the same after one ctrl+u: the last line gone, and `Ctrl+Y to paste deleted text` above the box |
+| `claude-2.1.292-draft-pasted-100x40-e.txt` | a four-line paste collapsed to `[Pasted text #1 +3 lines]`, then typed text |
+| `claude-2.1.292-draft-tall-100x40-e.txt` | twenty lines: the box shows 15, rows 6 to 20, `❯` drawn on row 6 |
