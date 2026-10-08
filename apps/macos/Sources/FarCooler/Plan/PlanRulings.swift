@@ -150,24 +150,66 @@ struct PlanRulingRow: View {
     /// things. Keep and Discuss don't.
     @State private var confirming = false
     @State private var rowWidth: CGFloat = 0
-    @State private var actionsWidth: CGFloat = 0
+    @State private var actionsSize: CGSize = .zero
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var copyWidth: CGFloat = 0
 
     /// The share of the row the controls may take beside the decision.
     static let controlsShare: CGFloat = 0.4
 
-    /// Whether the row is too short for the controls beside the decision:
-    /// they'd take more than `controlsShare` of it. Measured from the
+    /// Whether the row is too short for the actions over the decision's
+    /// trailing edge: they'd cover more than `controlsShare` of it. Measured from the
     /// controls' own natural widths, never a constant.
     var compact: Bool {
-        rowWidth > 0 && actionsWidth + copyWidth + Spacing.group > rowWidth * Self.controlsShare
+        rowWidth > 0 && actionsSize.width + copyWidth + Spacing.group > rowWidth * Self.controlsShare
     }
+
+    private var actionsShown: Bool { hovering || actions.alwaysShown }
 
     private var actionButtons: some View {
         RulingRowActions(ruling: ruling, onReverse: { confirming = true })
-            .opacity(hovering || actions.alwaysShown ? 1 : 0)
-            .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { actionsWidth = $0 }
+            .opacity(actionsShown ? 1 : 0)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: actionsShown)
+            .onGeometryChange(for: CGSize.self, of: { $0.size }) { actionsSize = $0 }
     }
+
+    /// The height of the decision's first line, so the fade under the
+    /// overlaid actions covers that line and no more.
+    static let firstLine: CGFloat = {
+        let font = NSFont.systemFont(ofSize: WorkspaceStyle.PaneText.body, weight: .medium)
+        return ceil(font.ascender - font.descender + font.leading)
+    }()
+
+    /// The decision, using the row's whole width up to the copy icon. On hover
+    /// its first line fades out under the actions, which float over that
+    /// trailing edge (ov-418): the text under them stays legible, none of it
+    /// moves, and no width is held for them while they're hidden.
+    private var decisionText: some View {
+        TaskKeyText(keysIn: ruling.decision)
+            .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
+            .fixedSize(horizontal: false, vertical: true)
+            .probed("plan-ruling-\(ruling.short)-decision")
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .mask {
+                Rectangle().overlay(alignment: .topTrailing) {
+                    HStack(spacing: 0) {
+                        LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing)
+                            .frame(width: Self.fade)
+                        Color.black.frame(width: actionsSize.width)
+                    }
+                    .frame(height: Self.firstLine)
+                    .opacity(actionsShown && !compact ? 1 : 0)
+                    .blendMode(.destinationOut)
+                }
+                .compositingGroup()
+            }
+            .overlay(alignment: Alignment(horizontal: .trailing, vertical: .firstTextBaseline)) {
+                if !compact { actionButtons }
+            }
+    }
+
+    /// How far the decision fades before the actions begin.
+    static let fade: CGFloat = 24
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 0) {
@@ -179,24 +221,12 @@ struct PlanRulingRow: View {
                 .frame(width: NavigatorGrid.textInset + Spacing.inset, alignment: .leading)
             VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
-                    TaskKeyText(keysIn: ruling.decision)
-                        .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
-                        .fixedSize(horizontal: false, vertical: true)
+                    decisionText
                         .layoutPriority(1)
-                        .probed("plan-ruling-\(ruling.short)-decision")
-                    Spacer(minLength: 0)
-                    // The controls keep their natural size and ask for their
-                    // room first (ov-405): a long decision wraps in what's
-                    // left, rather than the squeezed buttons wrapping a
-                    // letter to a line. The actions keep their room while
-                    // hidden, so the hover never reflows the decision.
-                    HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
-                        if !compact { actionButtons }
-                        CopyReferenceButton(ruling: ruling, copy: copy)
-                            .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { copyWidth = $0 }
-                    }
-                    .fixedSize()
-                    .layoutPriority(2)
+                    CopyReferenceButton(ruling: ruling, copy: copy)
+                        .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { copyWidth = $0 }
+                        .fixedSize()
+                        .layoutPriority(2)
                 }
                 // In a short row the actions would take a third of the width
                 // and leave the decision a few words a line (ov-412): they

@@ -21,6 +21,7 @@ struct PlanRulingRowLayoutTests {
         let width: CGFloat
         let seen: NavigatorFilterTests.Seen
         let decision: String
+        var alwaysShown = true
 
         var body: some View {
             PlanRulingRow(
@@ -29,7 +30,7 @@ struct PlanRulingRowLayoutTests {
                     reversal: "Two files change."),
                 copy: { _ in }
             )
-            .environment(\.planRulingActions, PlanRulingActions(canKeep: true, canAsk: true, alwaysShown: true))
+            .environment(\.planRulingActions, PlanRulingActions(canKeep: true, canAsk: true, alwaysShown: alwaysShown))
             .padding(.horizontal, 12)
             .frame(width: width, alignment: .topLeading)
             .frame(maxHeight: .infinity, alignment: .topLeading)
@@ -45,9 +46,9 @@ struct PlanRulingRowLayoutTests {
     }
 
     /// The row's probed frames at `width` points, with `decision`.
-    static func frames(width: CGFloat, decision: String = long) async -> [String: CGRect] {
+    static func frames(width: CGFloat, decision: String = long, alwaysShown: Bool = true) async -> [String: CGRect] {
         let seen = NavigatorFilterTests.Seen()
-        let host = NSHostingView(rootView: Hosted(width: width, seen: seen, decision: decision))
+        let host = NSHostingView(rootView: Hosted(width: width, seen: seen, decision: decision, alwaysShown: alwaysShown))
         let window = NavigatorFilterTests.KeyWindow(
             contentRect: NSRect(x: -4000, y: -4000, width: width, height: 400), styleMask: [.borderless],
             backing: .buffered, defer: false)
@@ -105,6 +106,31 @@ struct PlanRulingRowLayoutTests {
             // With the actions gone from beside it, the decision has the row but the copy icon.
             #expect(decision.maxX <= copy.minX + 1, "the decision stops before the copy icon at \(width)")
             #expect(decision.width >= (width - 24) * 0.6, "the decision gets most of the row at \(width): \(decision.width)")
+        }
+    }
+
+    @Test("Hidden actions hold no width: the decision runs right up to the copy icon, and hovering moves nothing")
+    func hiddenActionsReserveNothing() async throws {
+        // Wide enough for the actions to sit over the decision, narrow enough
+        // for it to wrap, so its frame is the room it was given.
+        for width in [500.0, 700] {
+            let shown = await Self.frames(width: width, alwaysShown: true)
+            let hidden = await Self.frames(width: width, alwaysShown: false)
+            let decision = try #require(shown["plan-ruling-R-34-decision"])
+            let keep = try #require(shown["plan-ruling-R-34-keep"])
+            let copy = try #require(shown["plan-ruling-R-34-copy"])
+            let actions = try #require(shown["plan-ruling-R-34-discuss"]).maxX - keep.minX
+            #expect(actions > 60, "the actions have a width to reserve: \(actions)")
+            // A wrapped line ends short of the edge by up to a word, never by
+            // the actions' width, so a reservation shows as a shortfall of it.
+            #expect(
+                decision.maxX >= copy.minX - Spacing.group - actions / 2,
+                "the decision stops short of the copy icon at \(width): \(decision.maxX) vs \(copy.minX)")
+            #expect(decision.maxX > keep.minX + 1, "the decision runs under the actions at \(width)")
+            #expect(keep.maxX <= copy.minX, "the actions sit left of the copy icon at \(width)")
+            // Showing the actions changes no line of the decision.
+            let still = try #require(hidden["plan-ruling-R-34-decision"])
+            #expect(abs(still.width - decision.width) < 1 && abs(still.height - decision.height) < 1, "hover reflows at \(width)")
         }
     }
 }

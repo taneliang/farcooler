@@ -1361,10 +1361,9 @@ struct TaskCard: View {
     /// draws from.
     struct Offer: Equatable {
         var question: TaskQuestion
-        /// Options drawn as buttons, in the order they were offered.
-        var buttons: [String]
-        /// Options past the buttons, in a More menu.
-        var more: [String]
+        /// Every option, in the order it was offered, drawn as a radio list
+        /// with its full text and an Answer button under it (ov-431).
+        var options: [String]
         /// Answer…, for a question that offered no options.
         var typed: Bool
     }
@@ -1373,15 +1372,14 @@ struct TaskCard: View {
     ///
     /// - In Needs Decision only: a question still in the record of a task
     ///   someone has since moved on is history, not a request.
-    /// - Three options at most as buttons, the rest in a menu; Answer… when
-    ///   there are none (spec §2.5).
+    /// - Every option in a radio list, then Answer; Answer… when there are
+    ///   none (spec §2.5).
     /// - On a read-scoped connection, the question with nothing to press.
     static func offer(row: TaskRow, question: TaskQuestion?, canAnswer: Bool) -> Offer? {
         guard row.status == .needsDecision, let question else { return nil }
-        guard canAnswer else { return Offer(question: question, buttons: [], more: [], typed: false) }
+        guard canAnswer else { return Offer(question: question, options: [], typed: false) }
         return Offer(
-            question: question, buttons: question.buttons, more: question.overflow,
-            typed: question.options.isEmpty)
+            question: question, options: question.options, typed: question.options.isEmpty)
     }
 
     @ViewBuilder private var understanding: some View {
@@ -1516,7 +1514,7 @@ struct TaskCard: View {
 
 /// A question waiting on the person reading, and the ways to answer it:
 /// `TaskCard.offer`'s, drawn and nothing decided here.
-private struct QuestionAnswers: View {
+struct QuestionAnswers: View {
     @Environment(\.colorScheme) private var scheme
 
     let offer: TaskCard.Offer
@@ -1528,6 +1526,8 @@ private struct QuestionAnswers: View {
     @State private var failed = false
     @State private var writing = false
     @State private var typed = ""
+    /// The option chosen in the radio list, not yet sent.
+    @State private var picked: String?
     @Environment(\.taskKeyLinker) private var linker
 
     var body: some View {
@@ -1548,20 +1548,8 @@ private struct QuestionAnswers: View {
                 }
             } else if offer.typed {
                 freeAnswer
-            } else if !offer.buttons.isEmpty {
-                HStack(spacing: 8) {
-                    ForEach(offer.buttons, id: \.self) { option in
-                        Button(option) { send(option) }
-                    }
-                    if !offer.more.isEmpty {
-                        Menu("More") {
-                            ForEach(offer.more, id: \.self) { option in
-                                Button(option) { send(option) }
-                            }
-                        }
-                        .fixedSize()
-                    }
-                }
+            } else if !offer.options.isEmpty {
+                optionList
             }
             if failed {
                 Text("Your answer wasn’t sent. Try again.")
@@ -1582,6 +1570,44 @@ private struct QuestionAnswers: View {
             if !typed.isEmpty { writing = true }
         }
         .onChange(of: typed) { _, text in draft.write(offer.question, text) }
+    }
+
+    /// The options as a radio list, each on its own row with its whole text
+    /// wrapping, and Answer under it, off until one is chosen. Choosing sends
+    /// nothing; Answer sends the chosen option's text, as the buttons did.
+    private var optionList: some View {
+        VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
+            VStack(alignment: .leading, spacing: ColumnGrid.rhythm / 2) {
+                ForEach(Array(offer.options.enumerated()), id: \.offset) { index, option in
+                    let chosen = picked == option
+                    Button {
+                        picked = option
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Image(systemName: chosen ? "largecircle.fill.circle" : "circle")
+                                .foregroundStyle(chosen ? Color.accentColor : Color.secondary)
+                                .accessibilityHidden(true)
+                            Text(option)
+                                .font(TaskTypography.body)
+                                .foregroundStyle(.primary)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(chosen ? .isSelected : [])
+                    .identified("task-card-option-\(index)")
+                }
+            }
+            .accessibilityElement(children: .contain)
+            Button("Answer") {
+                if let picked { send(picked) }
+            }
+            .disabled(picked == nil)
+            .identified("task-card-answer")
+        }
     }
 
     @ViewBuilder private var freeAnswer: some View {

@@ -55,7 +55,7 @@ struct TaskRecordSwitchTests {
         // may have been answered since.
         #expect(!store.canAnswer("t9"), "the leaving ticket's question is still live")
         let offer = TaskCard.offer(row: t9, question: store.question(for: "t9"), canAnswer: store.canAnswer("t9"))
-        #expect(offer.map { $0.buttons.isEmpty && $0.more.isEmpty && !$0.typed } ?? true, "the leaving ticket offers answers")
+        #expect(offer.map { $0.options.isEmpty && !$0.typed } ?? true, "the leaving ticket offers answers")
         // O2: t1 never shows t9's record or question.
         #expect(store.detail(for: "t1").notes.isEmpty, "drew t9's record under t1")
         #expect(store.question(for: "t1") == nil, "offered t9's question under t1")

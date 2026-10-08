@@ -55,14 +55,3 @@ func aQuestionAnsweredSinceIsNotOpen() {
     #expect(TaskQuestion.open(in: detail([note("n1", "created", at: 1)])) == nil)
     #expect(TaskQuestion.open(in: Data("not json".utf8)) == nil)
 }
-
-/// How many options are buttons; the rest go in a menu (spec §2.5).
-@Test("At most three options are buttons, and the rest are in a menu")
-func atMostThreeOptionsAreButtons() {
-    let q = TaskQuestion(id: "q", body: "?", options: ["a", "b", "c", "d", "e"])
-    #expect(q.buttons == ["a", "b", "c"])
-    #expect(q.overflow == ["d", "e"])
-    let few = TaskQuestion(id: "q", body: "?", options: ["a"])
-    #expect(few.buttons == ["a"])
-    #expect(few.overflow.isEmpty)
-}

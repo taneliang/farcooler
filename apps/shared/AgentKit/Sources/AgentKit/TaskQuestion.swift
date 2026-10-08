@@ -21,15 +21,9 @@ public struct TaskQuestion: Equatable, Sendable, Identifiable {
         self.options = options
     }
 
-    /// How many options are drawn as buttons. More than three in a row is a
-    /// row nobody reads, so the rest go in a menu.
+    /// How many of a Needs You row's decision options are buttons; the task
+    /// card lists every option instead (ov-431).
     public static let buttonLimit = 3
-
-    /// The options drawn as buttons.
-    public var buttons: [String] { Array(options.prefix(Self.buttonLimit)) }
-
-    /// The options past the buttons, for a menu beside them.
-    public var overflow: [String] { Array(options.dropFirst(Self.buttonLimit)) }
 
     /// The question still waiting in a task's record, or nil when there is
     /// none: no question, or the latest one answered since.

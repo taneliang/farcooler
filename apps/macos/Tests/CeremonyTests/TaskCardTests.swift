@@ -24,28 +24,26 @@ struct TaskCardTests {
         TaskQuestion(id: "q1", body: "Which store?", options: options)
     }
 
-    @Test("A card in Needs Decision shows its question's options as buttons")
-    func aCardInNeedsDecisionShowsItsQuestionsOptionsAsButtons() throws {
+    @Test("A card in Needs Decision offers every option of its question, none in a menu")
+    func aCardInNeedsDecisionOffersEveryOption() throws {
         let offer = try #require(
             TaskCard.offer(
                 row: Self.row(.needsDecision), question: Self.question(["SQLite", "Postgres"]),
                 canAnswer: true))
-        #expect(offer.buttons == ["SQLite", "Postgres"])
-        #expect(offer.more.isEmpty)
+        #expect(offer.options == ["SQLite", "Postgres"])
         #expect(!offer.typed)
 
-        // Past three, the rest go in the menu.
+        // Past three too: every option is a row of the list.
         let many = try #require(
             TaskCard.offer(
                 row: Self.row(.needsDecision), question: Self.question(["a", "b", "c", "d"]),
                 canAnswer: true))
-        #expect(many.buttons == ["a", "b", "c"])
-        #expect(many.more == ["d"])
+        #expect(many.options == ["a", "b", "c", "d"])
 
         // None offered: Answer…
         let open = try #require(
             TaskCard.offer(row: Self.row(.needsDecision), question: Self.question([]), canAnswer: true))
-        #expect(open.buttons.isEmpty && open.typed)
+        #expect(open.options.isEmpty && open.typed)
 
         // Moved on since: the question is history, and the card offers nothing.
         #expect(
@@ -57,7 +55,7 @@ struct TaskCardTests {
         let read = try #require(
             TaskCard.offer(
                 row: Self.row(.needsDecision), question: Self.question(["SQLite"]), canAnswer: false))
-        #expect(read.buttons.isEmpty && read.more.isEmpty && !read.typed)
+        #expect(read.options.isEmpty && !read.typed)
     }
 
     /// **A half-typed answer survives another task's write.** The daemon
