@@ -998,6 +998,7 @@ UI_TEST_SOURCES = [
     # `-native-agent-harness`: no runner.
     "NativeAgentViewTests.swift",
     "NativeAnswersUITests.swift",
+    "PolishSweepUITests.swift",
     "NativeComposerTests.swift",
 ]
 

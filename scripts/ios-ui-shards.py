@@ -119,6 +119,7 @@ LOCAL = {
     "KeyboardTabStripTests": "needs a real iPhone; skips on any simulator",
     "NewTerminalTests": "needs the demo runner",
     "PadWorkspaceUITests": "needs an iPad simulator (fc-lanes-ipad); CI's shards run on an iPhone",
+    "PolishSweepUITests": "a capture tool for the polish sweep (ov-412); skips unless TEST_RUNNER_FARCOOLER_CAPTURE_OUT is set",
     "TerminalPermissionTests": "needs the demo runner",
     "TerminalScrollTests": "needs the demo runner",
 }

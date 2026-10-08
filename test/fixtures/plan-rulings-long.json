@@ -1,0 +1,235 @@
+{
+  "plan": {
+    "cards": [
+      {
+        "key": "bil-1",
+        "status": "In Progress",
+        "task": "01a10b00-5adf-7bb1-a19f-adbacb144052",
+        "title": "Total each invoice"
+      },
+      {
+        "key": "bil-2",
+        "status": "Needs Decision",
+        "task": "01a10b00-5b11-7100-ad81-14b8bd626996",
+        "title": "Round half-cents"
+      }
+    ],
+    "landed_not_closed": [],
+    "lanes": [
+      {
+        "agents": [
+          {
+            "agent_id": "a1b2c3d4",
+            "ended_at": null,
+            "harness": "claude",
+            "model": "sonnet",
+            "role": "build",
+            "started_at": 1791186086572
+          }
+        ],
+        "branch": "",
+        "cards": [
+          {
+            "key": "bil-1",
+            "slice": "",
+            "task": "01a10b00-5adf-7bb1-a19f-adbacb144052"
+          }
+        ],
+        "fix_rounds": 0,
+        "harness": "claude",
+        "id": "01a10b02-aaab-76f0-a7a9-7629edfe85cb",
+        "landed_sha": null,
+        "model": "sonnet",
+        "name": "invoice-totals-with-a-very-long-lane-name-that-wraps",
+        "plan_rank": null,
+        "reason": "Totals first; rounding waits on the owner's answer about half-cent currencies, and the statement waits on rounding, so nothing else can start until then.",
+        "short": "edfe85cb",
+        "spend": {
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "cost_micros": null,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "runs": 0,
+          "shared_agents": 0,
+          "unmeasured_agents": 1
+        },
+        "stale": false,
+        "state": "building",
+        "state_since": 1791186086571,
+        "train": null,
+        "worktree_path": ""
+      }
+    ],
+    "no_lane": [],
+    "now_ms": 1791186097072,
+    "order": [],
+    "rulings": [
+      {
+        "actor": "manager",
+        "cards": [
+          {
+            "key": "bil-1",
+            "task": "01a10b00-5adf-7bb1-a19f-adbacb144052"
+          }
+        ],
+        "created_at": 1791186086630,
+        "decision": "Tiled panes and cards share one 12-point gutter across the Mac, the iPhone, the iPad and Android, including the long-title and right-to-left cases the owner raised on the 3rd, so that no surface invents its own spacing again.",
+        "id": "01a10b02-aae6-7710-8922-8a3df77ca17d",
+        "note": "",
+        "number": 4,
+        "reversal": "One constant, and the captures retaken Revisit if a surface ships a layout the shared rule can't express, then say which surface and why.",
+        "settled_at": null,
+        "settled_by": null,
+        "short": "R-4",
+        "state": "standing",
+        "theme": "Invoices: totals, rounding and the quarterly statement that finance reads",
+        "theme_id": "01a10b02-aa9a-76c0-9c84-a40b8c8030ca",
+        "why": "The canvas and the chat line up with the panes beside them Two reviews in a row found the same gap drawn two different ways, and every one of them cost a lane a fix round; one rule is cheaper than four careful readers."
+      },
+      {
+        "actor": "manager",
+        "cards": [
+          {
+            "key": "bil-2",
+            "task": "01a10b00-5b11-7100-ad81-14b8bd626996"
+          }
+        ],
+        "created_at": 1791186086614,
+        "decision": "The inbox is amber across the Mac, the iPhone, the iPad and Android, including the long-title and right-to-left cases the owner raised on the 3rd, so that no surface invents its own spacing again.",
+        "id": "01a10b02-aad6-7292-9eaf-c548a551ed9d",
+        "note": "",
+        "number": 3,
+        "reversal": "One token; every surface follows Revisit if a surface ships a layout the shared rule can't express, then say which surface and why.",
+        "settled_at": null,
+        "settled_by": null,
+        "short": "R-3",
+        "state": "standing",
+        "theme": "",
+        "theme_id": null,
+        "why": "It's the one attention color, so the inbox reads as needing you Two reviews in a row found the same gap drawn two different ways, and every one of them cost a lane a fix round; one rule is cheaper than four careful readers."
+      },
+      {
+        "actor": "manager",
+        "cards": [],
+        "created_at": 1791186086602,
+        "decision": "The plan is the canvas's home, beside the chat across the Mac, the iPhone, the iPad and Android, including the long-title and right-to-left cases the owner raised on the 3rd, so that no surface invents its own spacing again.",
+        "id": "01a10b02-aaca-72f0-9cee-0a4175d2c112",
+        "note": "",
+        "number": 2,
+        "reversal": "A day: the navigator takes the plan back Revisit if a surface ships a layout the shared rule can't express, then say which surface and why.",
+        "settled_at": null,
+        "settled_by": null,
+        "short": "R-2",
+        "state": "standing",
+        "theme": "Invoices: totals, rounding and the quarterly statement that finance reads",
+        "theme_id": "01a10b02-aa9a-76c0-9c84-a40b8c8030ca",
+        "why": "Concept A: the plan stays in view while the orchestrator talks Two reviews in a row found the same gap drawn two different ways, and every one of them cost a lane a fix round; one rule is cheaper than four careful readers."
+      },
+      {
+        "actor": "manager",
+        "cards": [],
+        "created_at": 1791186086589,
+        "decision": "Unread stays on the phones across the Mac, the iPhone, the iPad and Android, including the long-title and right-to-left cases the owner raised on the 3rd, so that no surface invents its own spacing again.",
+        "id": "01a10b02-aabd-74c3-8678-2130ddd8758a",
+        "note": "Owner: keep it, and say so on the phones before the Mac.",
+        "number": 1,
+        "reversal": "One setting and two screens Revisit if a surface ships a layout the shared rule can't express, then say which surface and why.",
+        "settled_at": 1791186086643,
+        "settled_by": "manager",
+        "short": "R-1",
+        "state": "confirmed",
+        "theme": "",
+        "theme_id": null,
+        "why": "The owner reads there first; the Mac's board already shows what moved Two reviews in a row found the same gap drawn two different ways, and every one of them cost a lane a fix round; one rule is cheaper than four careful readers."
+      }
+    ],
+    "themes": [
+      {
+        "cards": [
+          {
+            "key": "bil-1",
+            "task": "01a10b00-5adf-7bb1-a19f-adbacb144052"
+          },
+          {
+            "key": "bil-2",
+            "task": "01a10b00-5b11-7100-ad81-14b8bd626996"
+          }
+        ],
+        "counts": {
+          "backlog": 0,
+          "cancelled": 0,
+          "done": 0,
+          "in_progress": 1,
+          "in_review": 0,
+          "needs_decision": 1,
+          "todo": 0
+        },
+        "id": "01a10b02-aa9a-76c0-9c84-a40b8c8030ca",
+        "name": "Invoices: totals, rounding and the quarterly statement that finance reads",
+        "next": "",
+        "ordinal": 1,
+        "outcome": "Every invoice adds up to the cent, in every currency we bill, and the statement says so in words a customer can read without calling us.",
+        "owner_ask": "",
+        "short": "8c8030ca",
+        "state": "active",
+        "story": "",
+        "story_at": 0
+      }
+    ]
+  },
+  "records": {
+    "01a10b02-aa9a-76c0-9c84-a40b8c8030ca": {
+      "events": [
+        {
+          "actor": "manager",
+          "at": 1791186086554,
+          "body": "Created.",
+          "extra": {},
+          "kind": "state"
+        },
+        {
+          "actor": "manager",
+          "at": 1791186086554,
+          "body": "Added bil-1.",
+          "extra": {},
+          "kind": "cards"
+        },
+        {
+          "actor": "manager",
+          "at": 1791186086554,
+          "body": "Added bil-2.",
+          "extra": {},
+          "kind": "cards"
+        }
+      ]
+    },
+    "01a10b02-aaab-76f0-a7a9-7629edfe85cb": {
+      "events": [
+        {
+          "actor": "manager",
+          "at": 1791186086572,
+          "body": "Started building.",
+          "extra": {},
+          "kind": "state"
+        },
+        {
+          "actor": "manager",
+          "at": 1791186086572,
+          "body": "Added bil-1.",
+          "extra": {},
+          "kind": "cards"
+        },
+        {
+          "actor": "manager",
+          "at": 1791186086572,
+          "body": "Started a build agent.",
+          "extra": {
+            "agent_id": "a1b2c3d4"
+          },
+          "kind": "agent"
+        }
+      ]
+    }
+  }
+}

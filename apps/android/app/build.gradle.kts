@@ -253,6 +253,12 @@ android {
                         (project.findProperty("farcooler.captureDir") as String?)
                             ?: layout.buildDirectory.dir("captures").get().asFile.path,
                     )
+                    // The screen the captures draw on, when not the Pixel they name
+                    // (Robolectric qualifiers, e.g. `w320dp-h640dp-xxhdpi`), for the
+                    // polish sweep's narrowest and widest phones (ov-412).
+                    (project.findProperty("farcooler.captureQualifiers") as String?)?.let {
+                        test.systemProperty("farcooler.captureQualifiers", it)
+                    }
                     // A capture is a picture, never an up-to-date result.
                     test.outputs.upToDateWhen { false }
                 } else {

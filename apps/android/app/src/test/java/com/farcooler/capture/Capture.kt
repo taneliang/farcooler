@@ -72,6 +72,9 @@ object Capture {
         content: @androidx.compose.runtime.Composable () -> Unit,
         withDialog: Boolean = false,
     ) {
+        // `-Pfarcooler.captureQualifiers=w320dp-h640dp-xxhdpi` redraws every
+        // capture on another screen: the sweep's narrowest and widest (ov-412).
+        System.getProperty("farcooler.captureQualifiers")?.let { org.robolectric.RuntimeEnvironment.setQualifiers(it) }
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 activity.setContent {
