@@ -64,7 +64,7 @@ struct NativeSwitch<Content: View>: View {
     var body: some View {
         let model = model
         NativeSwitchBody(
-            terminal: terminal.id, model: model, unavailable: model == nil ? unavailable : nil, offer: NativeOffer(build),
+            terminal: terminal.id, model: model, unavailable: model == nil ? unavailable?.sentence(maySetSetting: maySetSetting) : nil, offer: NativeOffer(build),
             isOnScreen: isVisible && scenePhase == .active, isVisible: isVisible, toConversation: toConversation, content: content)
     }
 }
@@ -90,7 +90,7 @@ private struct NativeSwitchBody<Content: View>: View {
     let terminal: String
     let model: NativePaneModel?
     /// Why the conversation isn't offered, where a dimmed switch says so.
-    let unavailable: AgentConversation.Unavailable?
+    let unavailable: String?
     let offer: NativeOffer
     let isOnScreen: Bool
     let isVisible: Bool
@@ -109,7 +109,7 @@ private struct NativeSwitchBody<Content: View>: View {
     @State private var explaining = false
 
     init(
-        terminal: String, model: NativePaneModel?, unavailable: AgentConversation.Unavailable? = nil, offer: NativeOffer,
+        terminal: String, model: NativePaneModel?, unavailable: String? = nil, offer: NativeOffer,
         isOnScreen: Bool, isVisible: Bool, toConversation: @escaping () -> Void, content: @escaping () -> Content
     ) {
         self.terminal = terminal
@@ -181,7 +181,7 @@ private struct NativeSwitchBody<Content: View>: View {
                         Image(systemName: "text.bubble").foregroundStyle(.tertiary)
                     }
                     .accessibilityLabel("Conversation Unavailable")
-                    .accessibilityValue(unavailable.sentence(maySetSetting: maySetSetting))
+                    .accessibilityValue(unavailable)
                     .accessibilityIdentifier("native-switch-unavailable")
                 }
             }
@@ -189,7 +189,7 @@ private struct NativeSwitchBody<Content: View>: View {
         .alert("Conversation Unavailable", isPresented: $explaining) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(unavailable?.sentence(maySetSetting: maySetSetting) ?? "")
+            Text(unavailable ?? "")
         }
         .task(id: model.map(ObjectIdentifier.init)) {
             guard let model else {
