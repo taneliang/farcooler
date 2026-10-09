@@ -99,6 +99,9 @@ runs:
       shell: bash -e {0}
       env:
         SHARD: ${{ inputs.shard }}
+        # Reruns once, loudly, when the simulator or runner failed and no test
+        # did (ov-449); an assertion failure is never retried.
+        IOS_UI_RETRY_INFRA: "1"
       run: |
         # The class list is split into arguments on purpose.
         # shellcheck disable=SC2046

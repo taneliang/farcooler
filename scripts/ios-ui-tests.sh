@@ -166,16 +166,70 @@ WATCHDOG=$!
 # The assignments go BEFORE xcodebuild. See the note at the top: this position
 # is not a style choice, it is the difference between the suite running and the
 # suite skipping itself into a green.
+# ONE RETRY, FOR INFRASTRUCTURE ONLY (ov-449). With IOS_UI_RETRY_INFRA=1 (CI
+# sets it; a local run does not) a failed run is run once more when its output
+# carries a known infrastructure signature and no failure of any other kind.
+# Three of four main runs on 2026-10-09 needed a manual shard rerun for
+# "Failed to launch <XCUIApplicationImpl…>" or "Early unexpected exit, operation
+# never finished bootstrapping", about 25 to 35 minutes each.
+#
+# THE WHOLE SHARD, not only the failed classes. A runner crash kills the run
+# mid-flight, so the classes that never started have no result at all and a
+# "retry what failed" list would silently drop them: a green that skipped half
+# a shard, the failure mode this script exists to prevent. A shard is the unit
+# CI already schedules, and the retry costs one shard, not the whole suite.
+#
+# NEVER AN ASSERTION. Every `error:` line a test reports must match a signature;
+# one that does not (an XCTAssert, a timeout, a crash in the app) means a real
+# failure, and it is not retried however many launch errors sit beside it. The
+# second attempt is final: a second infrastructure failure goes red.
+INFRA_SIGNATURES='Failed to launch|Early unexpected exit|never finished bootstrapping|Unable to boot|Failed to boot|Simulator device failed to boot'
+
+# 0 (true) when the log shows an infrastructure failure and nothing else failed.
+infra_only_failure() {
+    grep -qE "$INFRA_SIGNATURES" "$1" || return 1
+    # Test failures are `file:line: error: -[Class test] : message`.
+    ! grep -E ': error: ' "$1" | grep -vE "$INFRA_SIGNATURES" | grep -q .
+}
+
+run_xcodebuild() {
+    env \
+        TEST_RUNNER_DEMO_USER="$DEMO_USER" \
+        TEST_RUNNER_DEMO_HOST="$DEMO_HOST" \
+        NSUnbufferedIO=YES \
+        xcodebuild "${ACTION[@]}" \
+        -destination "$DESTINATION" \
+        -collect-test-diagnostics never \
+        ${ONLY[@]+"${ONLY[@]}"} 2>&1 | tee "$LOG"
+    STATUS=${PIPESTATUS[0]}
+}
+
+# Errexit stays off until the watchdog is reaped below: `wait` on a killed job
+# returns 143.
 set +e
-env \
-    TEST_RUNNER_DEMO_USER="$DEMO_USER" \
-    TEST_RUNNER_DEMO_HOST="$DEMO_HOST" \
-    NSUnbufferedIO=YES \
-    xcodebuild "${ACTION[@]}" \
-    -destination "$DESTINATION" \
-    -collect-test-diagnostics never \
-    ${ONLY[@]+"${ONLY[@]}"} 2>&1 | tee "$LOG"
-STATUS=${PIPESTATUS[0]}
+run_xcodebuild
+if [ "$STATUS" -ne 0 ] && [ "${IOS_UI_RETRY_INFRA:-}" = 1 ] && infra_only_failure "$LOG"; then
+    SIGNATURE=$(grep -E "$INFRA_SIGNATURES" "$LOG" | head -1 | cut -c1-200)
+    echo
+    echo "::warning title=iOS UI shard retried::Infrastructure failure, not a test failure: $SIGNATURE"
+    echo "ios-ui-tests: RETRYING THE WHOLE RUN ONCE. Infrastructure failure (exit $STATUS): $SIGNATURE"
+    if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+        {
+            echo "### iOS UI shard retried once"
+            echo
+            echo "The first attempt failed on infrastructure, not on a test (exit $STATUS):"
+            echo
+            echo '```'
+            echo "$SIGNATURE"
+            echo '```'
+            echo
+            echo "The whole shard ran again. A second failure of any kind fails the job."
+        } >>"$GITHUB_STEP_SUMMARY"
+    fi
+    echo
+    : >"$LOG"
+    run_xcodebuild
+fi
 # The wait is what keeps bash from printing the whole watchdog as a
 # "Terminated" job notice into the output.
 kill "$WATCHDOG" 2>/dev/null
