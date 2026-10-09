@@ -901,7 +901,12 @@ struct OrchestratorChat {
 /// rather than `agent:<id>`, and nothing is exported twice. Its values are
 /// `shell_quote`d unless they're plain.
 ///
-/// A pane with nothing to export is launched exactly as `command`.
+/// **`COLORTERM=truecolor` on every pane** (R-42), first on the line. A pane
+/// inherits the runner's environment, and a runner started by launchd or over
+/// ssh has no `COLORTERM`, which makes agents fall back to 256 colors. tmux
+/// has no `default-terminal` to set for this: that's `TERM`, which the
+/// managed config already pins. The recipe above can still name `COLORTERM`
+/// and win, since a name already on the line takes the recipe's value.
 fn with_pane_env(
     terminal: Uuid,
     preset: &str,
@@ -910,7 +915,7 @@ fn with_pane_env(
     command: String,
 ) -> String {
     use farcooler_core::pane_env;
-    let mut vars: Vec<(String, String)> = Vec::new();
+    let mut vars: Vec<(String, String)> = vec![("COLORTERM".to_string(), "truecolor".to_string())];
     if preset_runs_an_agent(preset) {
         vars.push((pane_env::ACTOR.to_string(), format!("agent:{terminal}")));
         if let Some(key) = task_key.filter(|k| is_safe_model(k)) {
@@ -929,9 +934,6 @@ fn with_pane_env(
                 None => vars.push((name.clone(), value)),
             }
         }
-    }
-    if vars.is_empty() {
-        return command;
     }
     let vars: Vec<String> = vars.into_iter().map(|(name, value)| format!("{name}={value}")).collect();
     format!("env {} {command}", vars.join(" "))
@@ -12171,6 +12173,10 @@ mod project_skill_tests {
     }
 }
 
+#[cfg(test)]
+#[path = "pane_color_tests.rs"]
+mod pane_color_tests;
+
 /// The agent's first message as its launch argument: how it is quoted, when it
 /// goes through a file, and which launches carry it.
 #[cfg(test)]
@@ -12340,10 +12346,10 @@ mod launch_prompt_tests {
         let (terminal, ws) = (Uuid::now_v7(), Uuid::now_v7());
         let workspace = PaneWorkspace { id: ws, charter: None, env: Vec::new() };
         let agent = with_pane_env(terminal, "claude", Some("ov-3"), Some(&workspace), "claude".into());
-        assert_eq!(agent, format!("env FARCOOLER_ACTOR=agent:{terminal} FARCOOLER_TASK=ov-3 FARCOOLER_WORKSPACE={ws} claude"));
+        assert_eq!(agent, format!("env COLORTERM=truecolor FARCOOLER_ACTOR=agent:{terminal} FARCOOLER_TASK=ov-3 FARCOOLER_WORKSPACE={ws} claude"));
         let shell = with_pane_env(terminal, "shell", None, Some(&workspace), "zsh -il".into());
-        assert_eq!(shell, format!("env FARCOOLER_WORKSPACE={ws} zsh -il"));
-        assert_eq!(with_pane_env(terminal, "shell", None, None, "zsh -il".into()), "zsh -il");
+        assert_eq!(shell, format!("env COLORTERM=truecolor FARCOOLER_WORKSPACE={ws} zsh -il"));
+        assert_eq!(with_pane_env(terminal, "shell", None, None, "zsh -il".into()), "env COLORTERM=truecolor zsh -il");
     }
 
     /// The charter's path reaches the orchestrator as one value under every
