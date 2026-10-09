@@ -277,5 +277,7 @@ private struct ImagePasteChip: View {
         // whose corners curved half again as hard.
         .modifier(GlassSurface())
         .padding(.horizontal, PaneMetrics.surfaceInset)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("image-paste-chip")
     }
 }

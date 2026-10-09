@@ -220,7 +220,7 @@ struct WorkspaceScreen: View {
                         selection: $segment)
                     // The plan in one line, over the orchestrator's pane (ov-300).
                     if shown == .orchestrator {
-                        PhonePlanStrip(connection: connection, summary: summary, place: place)
+                        PhonePlanStrip(connection: connection, summary: summary, place: place, appearance: scheme)
                     }
                 }
                 // Over the orchestrator's pane the ground is the terminal
@@ -500,6 +500,9 @@ struct OrchestratorSegment: View {
             }
             state
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Images on their way into the orchestrator's terminal, over
+                // the pane as a shell pane's are (`ShellScreen`).
+                .overlay(alignment: .bottom) { ImagePasteChips(queue: pastes) }
         }
         .confirmationDialog(
             "Replace the Orchestrator?", isPresented: $replacing, titleVisibility: .visible
@@ -758,6 +761,7 @@ private struct OrchestratorTerminal: View {
 
     var body: some View {
         TerminalView(terminal: terminal, isVisible: live, connection: connection, pastes: pastes)
+            .modifier(OrchestratorImageDoor(terminal: terminal, connection: connection, pastes: pastes, isVisible: live))
             .background(TerminalPalette.background.ignoresSafeArea(edges: .bottom))
             // A terminal surface in a screen whose chrome is the system's: its
             // own text (the status states) reads against the theme's ground,

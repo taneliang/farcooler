@@ -37,6 +37,14 @@ struct PhonePlanStrip: View {
     @ObservedObject private var reads: PlanReads
     let summary: WorkspaceSummary
     let place: PhoneWorkspace
+    /// The phone's own Light or Dark, which the Plan sheet keeps whatever the
+    /// strip's surroundings say. The strip sits under the orchestrator's
+    /// ground, which forces the terminal theme's scheme on everything in it
+    /// (`WorkspaceScreen`), and a sheet inherits that environment value while
+    /// its bars, grabber and background follow the system. Half the sheet
+    /// came out in one scheme and half in the other, and the mix changed with
+    /// the detent (ov-444).
+    let appearance: ColorScheme
 
     @State private var peeking = false
     /// Where something chosen in the sheet goes (a page, the orchestrator's
@@ -46,11 +54,12 @@ struct PhonePlanStrip: View {
     @Environment(\.phoneNavigator) private var navigator
     @Environment(\.colorScheme) private var scheme
 
-    init(connection: Connection, summary: WorkspaceSummary, place: PhoneWorkspace) {
+    init(connection: Connection, summary: WorkspaceSummary, place: PhoneWorkspace, appearance: ColorScheme) {
         self.connection = connection
         reads = connection.plans
         self.summary = summary
         self.place = place
+        self.appearance = appearance
     }
 
     var body: some View {
@@ -83,6 +92,8 @@ struct PhonePlanStrip: View {
                 chosen = exit
                 peeking = false
             }
+            .environment(\.colorScheme, appearance)
+            .preferredColorScheme(appearance)
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }

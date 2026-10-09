@@ -87,6 +87,8 @@ SHARDS = {
         "FilesBrowserTests",  # 162 s; -phone-harness (ov-259)
         "PhoneReopenTests",  # 139 s; -phone-harness
         "WorkspaceChromeTests",  # 66 s; -phone-harness -phone-plan (ov-342)
+        "PlanSheetAppearanceUITests",  # ~240 s est.; -phone-harness -phone-plan (ov-444)
+        "OrchestratorImageDoorTests",  # ~60 s est.; -phone-harness (ov-444)
         "TerminalTaskKeyTests",  # 50 s; -phone-harness -phone-terminal-key (ov-215)
         "AgentRetrySendTests",  # 22 s; -agent-layout-harness
         "AgentStoppedTests",  # 22 s; -agent-layout-harness -stopped

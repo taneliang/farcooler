@@ -133,6 +133,9 @@ SOURCES = [
     "PhoneRoot.swift",
     "NeedsYouScreen.swift",
     "WorkspaceScreen.swift",
+    # An image into a terminal-mode orchestrator's message (ov-444): the door a
+    # shell pane's bar has, for the pane the shell doesn't host.
+    "OrchestratorImageDoor.swift",
     "TaskScreen.swift",
     # Unread, the board's first section (ov-113).
     "BoardUnreadSection.swift",
@@ -1011,6 +1014,8 @@ UI_TEST_SOURCES = [
     "NativeAnswersUITests.swift",
     "PolishSweepUITests.swift",
     "NativeComposerTests.swift",
+    "PlanSheetAppearanceUITests.swift",
+    "OrchestratorImageDoorTests.swift",
 ]
 
 FRAMEWORKS = ["farcooler_vt.xcframework", "farcooler_client.xcframework"]
