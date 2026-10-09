@@ -110,6 +110,33 @@ struct WebPaneTests {
         #expect(memory.page(for: "t-\(WebPaneMemory.limit)") != nil)
     }
 
+    @Test("A remembered page keeps no query or fragment, where a token could be")
+    func rememberedPagesKeepNoTokens() {
+        let defaults = Self.defaults()
+        let memory = WebPaneMemory(defaults: defaults)
+        memory.remember(URL(string: "https://user:pw@app.example.com:8443/cb/x?token=SECRET#access_token=SECRET2")!, for: "t-1")
+        #expect(memory.page(for: "t-1") == URL(string: "https://app.example.com:8443/cb/x"))
+        let stored = (defaults.dictionary(forKey: WebPaneMemory.key) as? [String: [String: Any]])?["t-1"]?["url"] as? String
+        #expect(stored == "https://app.example.com:8443/cb/x")
+        #expect(stored?.contains("SECRET") == false)
+    }
+
+    @Test("Pages saved before are stripped on launch")
+    func savedPagesAreScrubbed() {
+        let defaults = Self.defaults()
+        defaults.set([
+            "old": ["url": "https://a.example/p?token=SECRET#frag", "at": 1.0],
+            "clean": ["url": "https://b.example/q", "at": 2.0],
+            "bad": ["url": "https://c.example/?t=SECRET x", "at": 3.0],
+        ], forKey: WebPaneMemory.key)
+        WebPaneMemory(defaults: defaults).scrub()
+        let pages = defaults.dictionary(forKey: WebPaneMemory.key) as? [String: [String: Any]]
+        #expect(pages?["old"]?["url"] as? String == "https://a.example/p")
+        #expect(pages?["old"]?["at"] as? Double == 1.0)
+        #expect(pages?["clean"]?["url"] as? String == "https://b.example/q")
+        #expect(pages?["bad"] == nil, "an entry that is no web page is dropped, not kept with its query")
+    }
+
     /// One persistent store of their own, so a login survives relaunch and
     /// covers every pane, with nothing a page could call into (R-41).
     @Test("Every web pane shares one persistent store, and no scripts")

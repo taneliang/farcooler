@@ -142,7 +142,40 @@ struct WebPaneMemory {
 
     func page(for terminal: String) -> URL? {
         let pages = defaults.dictionary(forKey: Self.key) as? [String: [String: Any]]
-        return WebAddress.page(pages?[terminal]?["url"] as? String)
+        return WebAddress.page(pages?[terminal]?["url"] as? String).map(Self.bare)
+    }
+
+    /// Scheme, host, port and path only. A query or fragment can hold a
+    /// login token, and this lives in plain UserDefaults (ov-438).
+    static func bare(_ url: URL) -> URL {
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+        parts.query = nil
+        parts.fragment = nil
+        parts.user = nil
+        parts.password = nil
+        return parts.url ?? url
+    }
+
+    /// Rewrite every saved page bare, once at launch: entries saved before
+    /// ov-438 may still carry a query or fragment. An entry that is no web
+    /// page is dropped rather than kept with whatever it holds.
+    func scrub() {
+        guard var pages = defaults.dictionary(forKey: Self.key) as? [String: [String: Any]] else { return }
+        var changed = false
+        for (terminal, var entry) in pages {
+            guard let raw = entry["url"] as? String else { continue }
+            guard let url = WebAddress.page(raw) else {
+                pages[terminal] = nil
+                changed = true
+                continue
+            }
+            let bare = Self.bare(url).absoluteString
+            guard bare != raw else { continue }
+            entry["url"] = bare
+            pages[terminal] = entry
+            changed = true
+        }
+        if changed { defaults.set(pages, forKey: Self.key) }
     }
 
     /// A closed pane's place is forgotten with it.
@@ -155,7 +188,7 @@ struct WebPaneMemory {
     func remember(_ url: URL, for terminal: String, at now: Date = .now) {
         guard WebAddress.page(url) != nil else { return }
         var pages = defaults.dictionary(forKey: Self.key) as? [String: [String: Any]] ?? [:]
-        pages[terminal] = ["url": url.absoluteString, "at": now.timeIntervalSince1970]
+        pages[terminal] = ["url": Self.bare(url).absoluteString, "at": now.timeIntervalSince1970]
         while pages.count > Self.limit {
             let oldest = pages.min { ($0.value["at"] as? Double ?? 0) < ($1.value["at"] as? Double ?? 0) }
             guard let oldest else { break }
@@ -569,6 +602,8 @@ final class WebPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSWindowDele
 final class WebPanes {
     static let shared = WebPanes()
     static let limit = 12
+
+    init() { WebPaneMemory().scrub() }
     private var models: [String: WebPaneModel] = [:]
     private var order: [String] = []
 
