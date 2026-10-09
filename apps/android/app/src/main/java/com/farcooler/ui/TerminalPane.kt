@@ -206,8 +206,8 @@ fun TerminalPane(
     val native = rememberNativePane(
         terminalId = ref.terminalId,
         agentInTerminal = terminal != null &&
-            AgentConversation.isAgentInATerminal(terminal.paneMode, terminal.preset, daemon ?: lastDaemon),
-        preset = terminal?.preset ?: "claude",
+            AgentConversation.isAgentInATerminal(terminal.paneMode, AgentConversation.agent(terminal), daemon ?: lastDaemon),
+        preset = terminal?.let(AgentConversation::agent) ?: "claude",
         offered = AgentConversation.offered(daemon, lastDaemon, terminal),
         live = live,
         rich = AgentConversation.rich(daemon ?: lastDaemon),
@@ -219,6 +219,13 @@ fun TerminalPane(
     )
     // The conversation covers the terminal now.
     val covered = native.covered
+    // Why a Claude or Codex pane isn't offered it, for its dimmed switch (ov-443).
+    val projectorOn by connection.projector.on.collectAsStateWithLifecycle()
+    val unavailable = terminal?.takeIf { !native.switchable }?.let {
+        AgentConversation.unavailable(
+            it.paneMode, AgentConversation.agent(it), AgentConversation.isRunning(it.state), daemon ?: lastDaemon, projectorOn,
+        )
+    }?.takeIf { it.isAboutTheRunner }
 
     // What this pane costs while nobody is reading it: nothing. `resume` and
     // not `relink` — relinking drops the emulator and puts "Loading…" over a tab
@@ -333,6 +340,8 @@ fun TerminalPane(
             // gets the button in the first place.
             if (native.switchable) {
                 NativeSwitchButton(showing = covered, onClick = { native.toggle() })
+            } else if (unavailable != null) {
+                NativeUnavailableButton(unavailable)
             }
             if (terminal?.canSwitchPaneMode == true) {
                 IconButton(onClick = {
@@ -416,6 +425,7 @@ fun TerminalPane(
                 NativeLayer(
                     pane = native,
                     floatingSwitch = !showTopBar,
+                    unavailable = unavailable,
                 ) {
                     TerminalSurface(
                         session = session,

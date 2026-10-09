@@ -286,9 +286,10 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
                 }) { Text("Save") }
             }
 
-            // Shown only to the runner's host admin, on a runner that has the
-            // setting (ov-374). Changing it reconnects, so the panes are offered
-            // the view on the new hello.
+            // Shown on a runner that has the setting (ov-374), and dimmed with
+            // the reason for a device that isn't its host admin (ov-443).
+            // Changing it reconnects, so the panes are offered the view on the
+            // new hello.
             val projectorOn by connection.projector.on.collectAsStateWithLifecycle()
             if (AgentConversation.offersSetting(daemon, projectorOn)) {
                 Separator()
@@ -303,7 +304,7 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
                         checked = projectorOn == true,
                         // The switch waits while a change is on its way, so two
                         // flips can't land out of order.
-                        enabled = !changingConversation,
+                        enabled = !changingConversation && AgentConversation.maySetSetting(daemon),
                         onCheckedChange = { on ->
                             changingConversation = true
                             scope.launch {
@@ -317,7 +318,8 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
                     )
                 }
                 Text(
-                    AgentConversation.SETTING_FOOTER,
+                    AgentConversation.SETTING_FOOTER +
+                        (if (AgentConversation.maySetSetting(daemon)) "" else "\n\n" + restrictedSentence()),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

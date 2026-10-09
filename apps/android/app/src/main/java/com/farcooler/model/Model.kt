@@ -178,6 +178,18 @@ data class Terminal(
     val short: String = "",
     val title: String = "",
     val preset: String = "",
+    /**
+     * What the pane was launched as (`claude`, `shell`); null from a core too
+     * old to say. [preset] is what's running now, which for a claude that named
+     * its session is the session's title.
+     */
+    val program: String? = null,
+    /**
+     * The agent the runner sees running in the pane now; null where none is or
+     * from an older runner (ov-443). With [program], what the conversation view
+     * is offered by ([AgentConversation.agent]).
+     */
+    val runningAgent: String? = null,
     val state: String = "",
     /**
      * How the process ENDED: the code it exited with, and the signal that

@@ -121,6 +121,8 @@ fun NativeLayer(
     /** On a tab that draws no bar of its own, the switch floats over the pane. */
     floatingSwitch: Boolean,
     modifier: Modifier = Modifier,
+    /** Why the conversation isn't offered, where the switch is dimmed and says so (ov-443). */
+    unavailable: com.farcooler.model.AgentConversation.Unavailable? = null,
     terminal: @Composable () -> Unit,
 ) {
     Box(modifier.fillMaxSize()) {
@@ -144,6 +146,8 @@ fun NativeLayer(
                 onClick = { pane.toggle() },
                 modifier = Modifier.align(Alignment.TopEnd),
             )
+        } else if (floatingSwitch && unavailable != null) {
+            NativeUnavailableButton(unavailable, Modifier.align(Alignment.TopEnd))
         }
     }
 }

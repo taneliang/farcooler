@@ -60,16 +60,64 @@ object AgentConversation {
      */
     fun offered(daemon: DaemonBuild?, lastDaemon: DaemonBuild?, terminal: Terminal?): Boolean =
         terminal != null && served(daemon ?: lastDaemon) &&
-            isAgentInATerminal(terminal.paneMode, terminal.preset, daemon ?: lastDaemon) && isRunning(terminal.state)
+            isAgentInATerminal(terminal.paneMode, agent(terminal), daemon ?: lastDaemon) && isRunning(terminal.state)
 
     /**
-     * Whether the runner settings screen shows the conversation view's switch:
-     * only to the runner's host admin, on a runner that has the setting and says
-     * where it stands. Client-side display only; the runner enforces it
-     * (`settings.set_projector` is `host_admin`).
+     * The agent a pane runs, which the view is offered by (ov-443): the one the
+     * runner sees running there, else what it was launched as, else, from a
+     * runner too old to say either, the label. Never the label where either is
+     * there: claude names it after its session, so a pane offered by it was never
+     * offered, and a claude typed into a shell was launched as `shell`.
+     */
+    fun agent(running: String?, program: String?, preset: String): String = running ?: program ?: preset
+
+    fun agent(terminal: Terminal): String = agent(terminal.runningAgent, terminal.program, terminal.preset)
+
+    /** Why a pane isn't offered the conversation view (ov-443), AgentKit's `Unavailable` with its words. */
+    enum class Unavailable(val sentence: String, val isAboutTheRunner: Boolean = true) {
+        SETTING_OFF("Turn on the conversation view in this runner’s settings."),
+        RUNNER_NEEDS_UPDATE("This runner needs an update to show the conversation."),
+        NOT_AN_AGENT("Not a Claude or Codex pane.", isAboutTheRunner = false),
+        NOT_RUNNING("The agent in this pane isn’t running.", isAboutTheRunner = false),
+        UNREACHABLE("Far Cooler can’t reach this runner right now."),
+    }
+
+    /**
+     * Why the pane isn't offered the view, null where it is. The pane first, so a
+     * shell is never told to turn a setting on; then the runner: [build] null
+     * while there's no link, [projectorOn] null where unknown. `agent_rows` is
+     * offered only while the projector is on, so a runner with the setting that
+     * says it's off needs the setting, and any other without rows and compose
+     * needs an update.
+     */
+    fun unavailable(paneMode: String?, agent: String, running: Boolean, build: DaemonBuild?, projectorOn: Boolean?): Unavailable? {
+        val claude = agent.startsWith("claude")
+        val codex = agent.startsWith("codex")
+        if ((paneMode ?: "terminal") != "terminal" || !(claude || codex)) return Unavailable.NOT_AN_AGENT
+        if (!running) return Unavailable.NOT_RUNNING
+        if (build == null) return Unavailable.UNREACHABLE
+        if (!served(build)) {
+            return if (projectorOn == false && build.can(Capability.PROJECTOR_SETTING)) Unavailable.SETTING_OFF
+            else Unavailable.RUNNER_NEEDS_UPDATE
+        }
+        if (codex && !build.can(Capability.CODEX_VIEW)) return Unavailable.RUNNER_NEEDS_UPDATE
+        return null
+    }
+
+    /**
+     * Whether the runner settings screen shows the conversation view's switch: on
+     * a runner that has the setting and says where it stands. To every device, so
+     * one that may not change it still sees where it stands and why (ov-443).
      */
     fun offersSetting(build: DaemonBuild?, projectorOn: Boolean?): Boolean =
-        build != null && build.grantedScope == "host_admin" && build.can(Capability.PROJECTOR_SETTING) && projectorOn != null
+        build != null && build.can(Capability.PROJECTOR_SETTING) && projectorOn != null
+
+    /**
+     * Whether this device may change it: the runner's host admin only.
+     * Client-side display only; the runner enforces it (`settings.set_projector`
+     * is `host_admin`).
+     */
+    fun maySetSetting(build: DaemonBuild?): Boolean = build?.grantedScope == "host_admin"
 
     const val SETTING_TITLE = "Conversation view for Claude and Codex panes"
     const val SETTING_FOOTER =
