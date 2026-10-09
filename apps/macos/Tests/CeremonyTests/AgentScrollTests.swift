@@ -178,8 +178,33 @@ struct AgentScrollTests {
         }
     }
 
-    /// Lets layout and any scroll it asks for land.
-    static func settle() async { try? await Task.sleep(for: .milliseconds(400)) }
+    /// Waits until the chat has stopped changing: its geometry and last row
+    /// the same on three reads in a row, each after a flush. What a test
+    /// that checks a thing did NOT move waits for after the event it
+    /// sent, in place of a delay that a loaded machine overruns: the
+    /// event's own signal says it arrived, and this says what it set off has
+    /// been applied.
+    static func quiet(_ host: NSView, _ window: NSWindow, _ probe: AgentScrollProbe) async {
+        var last: (ScrollGeometry?, CGRect?)?
+        var same = 0
+        _ = await until {
+            flush(host, window)
+            let now = (probe.geometry, probe.lastRow)
+            if let last, last.0 == now.0, last.1 == now.1 { same += 1 } else { same = 0 }
+            last = now
+            return same >= 3
+        }
+    }
+
+    /// Waits until `done` holds, flushing SwiftUI's pending updates on each
+    /// look, since the update that makes it hold may be waiting for a loaded
+    /// machine to get to it.
+    static func flushing(_ host: NSView, _ window: NSWindow, _ done: () -> Bool) async -> Bool {
+        await until {
+            flush(host, window)
+            return done()
+        }
+    }
 
     @Test func theChatScrollsLikeMessages() async throws {
         var history: [String] = []
@@ -212,7 +237,11 @@ struct AgentScrollTests {
         // Up to a minute: alone it lays out in under a second, and inside the
         // full suite, with the main actor shared, it has taken 21 s.
         #expect(await Self.until(60) { (probe.geometry?.contentSize.height ?? 0) > 2_000 }, "the history never laid out")
-        await Self.settle()
+        #expect(
+            await Self.flushing(host, window) {
+                (probe.tailHiddenBy ?? .infinity) <= 0.5 && (probe.geometry?.contentInsets.bottom ?? 0) > 40 && probe.lastRow != nil
+            }, "the chat never opened at the tail, with its composer measured")
+        await Self.quiet(host, window, probe)
         let opened = try #require(probe.geometry)
         #expect((probe.tailHiddenBy ?? .infinity) <= 0.5, "opened with the tail \(probe.tailHiddenBy ?? -1) pt under the composer")
         #expect(opened.contentInsets.bottom > 40, "the composer makes no inset: \(opened.contentInsets.bottom)")
@@ -228,40 +257,46 @@ struct AgentScrollTests {
         // Pinned: a streamed reply is followed.
         try standIn.stream([Self.batch([Self.message("User", "And now?")], from: seq)])
         seq += 1
+        // One event at a time, each waited for by the chat's cursor, so the
+        // reply arrives as a stream however fast the machine is.
         for k in 0..<6 {
             try standIn.stream([Self.batch([Self.message("Agent", Self.sentence + "\n\n")], from: seq + k)])
-            try await Task.sleep(for: .milliseconds(150))
+            #expect(await Self.until { probe.cursor >= UInt64(seq + k + 1) }, "the chat never took streamed event \(k)")
         }
         seq += 6
         let before = opened.contentSize.height
         #expect(await Self.until { (probe.geometry?.contentSize.height ?? 0) > before + 100 })
-        await Self.settle()
+        #expect(
+            await Self.flushing(host, window) { (probe.tailHiddenBy ?? .infinity) <= 0.5 },
+            "streaming left the tail \(probe.tailHiddenBy ?? -1) pt under the composer")
+        await Self.quiet(host, window, probe)
         #expect((probe.tailHiddenBy ?? .infinity) <= 0.5, "streaming left the tail \(probe.tailHiddenBy ?? -1) pt under the composer")
 
         // Scrolled up: following stops, the way back is offered, and new
         // content moves nothing.
         let scroll = try #require(Self.scrollView(in: host))
-        scroll.contentView.scroll(to: NSPoint(x: 0, y: 200))
-        scroll.reflectScrolledClipView(scroll.contentView)
-        #expect(await Self.until { !probe.following && probe.showsJump }, "scrolling up didn't stop following")
+        #expect(await Self.scroll(scroll, to: 200) { !probe.following && probe.showsJump }, "scrolling up didn't stop following")
+        await Self.quiet(host, window, probe)
         let offset = try #require(probe.geometry?.contentOffset.y)
-        let height = probe.geometry?.contentSize.height
         try standIn.stream([Self.batch([Self.message("Agent", String(repeating: Self.sentence, count: 3))], from: seq)])
         seq += 1
-        _ = height
-        try await Task.sleep(for: .milliseconds(1_000))
+        #expect(await Self.until { probe.cursor >= UInt64(seq) }, "the chat never took the event")
+        await Self.quiet(host, window, probe)
         #expect(abs((probe.geometry?.contentOffset.y ?? 0) - offset) < 1, "content arriving moved a reader who'd scrolled up")
         #expect(!probe.following && probe.showsJump)
         Self.capture(window, "2-scrolled-up")
 
         // Nor does the composer growing, or Working… appearing: both re-anchor
         // a pinned transcript, and only a pinned one.
+        let insetAtOne = try #require(probe.geometry?.contentInsets.bottom)
         probe.prefill?((1...6).map { "Draft line \($0)" }.joined(separator: "\n"))
-        try await Task.sleep(for: .milliseconds(1_000))
+        #expect(await Self.until { (probe.geometry?.contentInsets.bottom ?? 0) > insetAtOne + 30 }, "the composer didn't grow")
+        await Self.quiet(host, window, probe)
         #expect(abs((probe.geometry?.contentOffset.y ?? 0) - offset) < 1, "the composer growing moved a reader who'd scrolled up")
         #expect(!probe.following && probe.showsJump)
         mount.terminal = try Self.terminal(pane, activity: "working")
-        try await Task.sleep(for: .milliseconds(1_000))
+        #expect(await Self.until { probe.working }, "the chat never took the pane's working state")
+        await Self.quiet(host, window, probe)
         #expect(abs((probe.geometry?.contentOffset.y ?? 0) - offset) < 1, "Working… appearing moved a reader who'd scrolled up")
         #expect(!probe.following && probe.showsJump)
         // One line again, for the growth below.
@@ -269,9 +304,11 @@ struct AgentScrollTests {
 
         // A sent message comes into view, from up there.
         probe.send?("Here's what I want next.")
-        #expect(await Self.until { probe.following && (probe.tailHiddenBy ?? .infinity) <= 0.5 }, "the sent message stayed out of view: \(probe.tailHiddenBy ?? -1) pt")
+        #expect(
+            await Self.flushing(host, window) { probe.following && (probe.tailHiddenBy ?? .infinity) <= 0.5 },
+            "the sent message stayed out of view: \(probe.tailHiddenBy ?? -1) pt")
         #expect(!probe.showsJump)
-        await Self.settle()
+        await Self.quiet(host, window, probe)
         #expect(
             (probe.clearance ?? 0) >= Spacing.inset - 1,
             "the sent message ends \(probe.clearance ?? -1) pt above the composer")
@@ -281,22 +318,33 @@ struct AgentScrollTests {
         let inset = try #require(probe.geometry?.contentInsets.bottom)
         probe.prefill?((1...6).map { "Line \($0) of a longer message" }.joined(separator: "\n"))
         #expect(await Self.until { (probe.geometry?.contentInsets.bottom ?? 0) > inset + 30 }, "the composer didn't grow")
-        await Self.settle()
+        #expect(
+            await Self.flushing(host, window) { (probe.tailHiddenBy ?? .infinity) <= 0.5 },
+            "the composer grew over the tail by \(probe.tailHiddenBy ?? -1) pt")
+        await Self.quiet(host, window, probe)
         #expect((probe.tailHiddenBy ?? .infinity) <= 0.5, "the composer grew over the tail by \(probe.tailHiddenBy ?? -1) pt")
         Self.capture(window, "4-composer-grown")
 
         // Jump to Latest goes back.
-        scroll.contentView.scroll(to: NSPoint(x: 0, y: 100))
-        scroll.reflectScrolledClipView(scroll.contentView)
-        #expect(await Self.until(10) { probe.showsJump })
-        await Self.settle()
+        #expect(await Self.scroll(scroll, to: 100) { probe.showsJump }, "scrolling up didn't offer Jump to Latest")
+        await Self.quiet(host, window, probe)
+        #expect(await Self.scroll(scroll, to: 100) { probe.showsJump }, "a late update put the chat back at the tail")
         // Clicked where it's drawn: centered, its bottom 8 pt over the
         // composer group, whose top is where the scroll view's container
         // ends. It's drawn outside that group's frame, which is where a
         // click can miss.
         let container = try #require(probe.geometry?.containerSize.height)
-        Self.click(host, at: NSPoint(x: 350, y: container - Spacing.group - 15), in: window)
-        #expect(await Self.until { probe.following && (probe.tailHiddenBy ?? .infinity) <= 0.5 }, "Jump to Latest didn't return to the tail")
+        // Clicked until the chat follows: the button fades in, and a click
+        // before it can be hit goes to nothing. A click that lands is the
+        // only one that matters, since it starts the jump and the rest stop.
+        _ = await Self.flushing(host, window) {
+            if probe.following { return true }
+            Self.click(host, at: NSPoint(x: 350, y: container - Spacing.group - 15), in: window)
+            return false
+        }
+        #expect(
+            await Self.flushing(host, window) { probe.following && (probe.tailHiddenBy ?? .infinity) <= 0.5 },
+            "Jump to Latest didn't return to the tail")
         #expect(!probe.showsJump)
 
         // A tail scrolled just under the composer isn't the tail: the part
@@ -384,10 +432,16 @@ struct AgentScrollTests {
         defer { window.close() }
 
         #expect(await Self.until(60) { (probe.geometry?.contentSize.height ?? 0) > 2_000 }, "the history never laid out")
-        await Self.settle()
+        // The opening scroll to the tail has landed before the reader leaves
+        // it, or it lands after and undoes the step up.
+        #expect(
+            await Self.flushing(host, window) { (probe.tailHiddenBy ?? .infinity) <= 0.5 && probe.lastRow != nil },
+            "the chat never opened at the tail")
+        await Self.quiet(host, window, probe)
         let scroll = try #require(Self.scrollView(in: host))
         #expect(await Self.scroll(scroll, to: 100) { probe.showsJump }, "scrolling up didn't offer Jump to Latest")
-        await Self.settle()
+        await Self.quiet(host, window, probe)
+        #expect(await Self.scroll(scroll, to: 100) { probe.showsJump }, "a late update put the chat back at the tail")
         try await body(probe, scroll, host, window)
     }
 
@@ -490,18 +544,18 @@ struct AgentScrollTests {
                 }
             }
             Self.clickJump(probe, host, window)
-            #expect(await Self.until { probe.following && (probe.tailHiddenBy ?? .infinity) <= 0.5 })
+            #expect(await Self.flushing(host, window) { probe.following && (probe.tailHiddenBy ?? .infinity) <= 0.5 })
             // Landed, or the scroll up below reads as a height correction.
             #expect(await Self.until { !probe.jumping }, "the first jump never landed")
-            Self.flush(host, window)
+            await Self.quiet(host, window, probe)
             #expect(await Self.scroll(scroll, to: 100) { probe.showsJump }, "scrolling up after the jump didn't offer Jump to Latest")
-            await Self.settle()
-            Self.flush(host, window)
+            await Self.quiet(host, window, probe)
+            #expect(await Self.scroll(scroll, to: 100) { probe.showsJump }, "a late update put the chat back at the tail")
             let detached = probe.detaches
             AgentSurface.jumpDuration = Self.longFlight
             Self.clickJump(probe, host, window)
             guard await Self.stepTaken(stepper, probe) else { return false }
-            #expect(await Self.until { probe.following && (probe.tailHiddenBy ?? .infinity) <= 0.5 })
+            #expect(await Self.flushing(host, window) { probe.following && (probe.tailHiddenBy ?? .infinity) <= 0.5 })
             #expect(await Self.until { !probe.jumping }, "the second jump never landed")
             #expect(probe.detaches == detached, "the second jump flickered: \(probe.detaches - detached)")
             return true
@@ -537,9 +591,8 @@ struct AgentScrollTests {
             #expect(await Self.until { !probe.jumping }, "the jump never ended")
             guard !stepper.carried else { return false }
             // What the completion would do is applied by the next update, so
-            // flush it, and give it a moment to show.
-            Self.flush(host, window)
-            await Self.settle()
+            // flush it, and wait for the chat to stop changing.
+            await Self.quiet(host, window, probe)
             #expect(!probe.following && probe.showsJump, "the reader was pulled back to the tail")
             return true
         }

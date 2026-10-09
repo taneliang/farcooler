@@ -406,7 +406,8 @@ struct AgentSurface: View {
         // Keyed on the CURSOR, not the row count: a streamed reply coalesces
         // into the row already on screen, so the count does not change while
         // the text grows off the bottom.
-        .onChange(of: stream.transcript.cursor) { _, _ in
+        .onChange(of: stream.transcript.cursor) { _, cursor in
+            probe?.cursor = cursor
             // Only while the reader is at the tail. Scrolling to the end on
             // every event made reading anything older impossible — a streamed
             // reply fires several a second, and each one yanked the view down.
@@ -437,7 +438,8 @@ struct AgentSurface: View {
             scrollToTail()
         }
         // Working… appearing or going is content too, and no event says so.
-        .onChange(of: terminal.agent == .working) { _, _ in
+        .onChange(of: terminal.agent == .working) { _, working in
+            probe?.working = working
             guard tail.following else { return }
             scrollToTail()
         }

@@ -28,6 +28,13 @@ final class AgentScrollProbe {
     /// its animation completes (or its backstop runs). A test waits on this
     /// rather than on a delay, which a loaded machine overruns.
     var jumping = false
+    /// The transcript's cursor as the chat last reacted to it: the next
+    /// event's seq, so a test that streamed event `n` waits for `n + 1`
+    /// instead of a delay.
+    var cursor: UInt64 = 0
+    /// Whether the chat last drew the turn as running (Working… in the
+    /// transcript), as it reacted to the pane's activity.
+    var working = false
     /// `AgentStream.send`, as the composer calls it.
     var send: ((String) -> Void)?
     /// Text into the composer, as Edit puts a sent message back.
