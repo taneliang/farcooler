@@ -112,7 +112,7 @@ else
 fi
 echo
 
-LOG="$(mktemp -t ios-ui-tests)"
+LOG="$(mktemp "${TMPDIR:-/tmp}/ios-ui-tests.XXXXXX")"
 WATCHDOG=""
 trap 'rm -f "$LOG"; [ -z "$WATCHDOG" ] || kill "$WATCHDOG" 2>/dev/null; true' EXIT
 
