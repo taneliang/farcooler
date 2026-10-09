@@ -194,6 +194,18 @@ class Settings(context: Context) : com.farcooler.net.PaneViewMemory {
     }
 
     /**
+     * The screens that were open over a workspace when it was last left, as
+     * `Backstack.encodeStack` writes them, or null (ov-442). Read by
+     * `WorkspacePlaces`.
+     */
+    fun workspacePlace(hostId: String, workspaceId: String): String? =
+        preferences.getString("$KEY_WORKSPACE_PLACE$hostId.$workspaceId", null)
+
+    fun setWorkspacePlace(hostId: String, workspaceId: String, stack: String) {
+        preferences.edit().putString("$KEY_WORKSPACE_PLACE$hostId.$workspaceId", stack).apply()
+    }
+
+    /**
      * The workspace last opened, as `runner/workspace`, or null: where the
      * app opens when nothing needs you (ruling 4).
      */
@@ -238,6 +250,7 @@ class Settings(context: Context) : com.farcooler.net.PaneViewMemory {
 
     companion object {
         private const val KEY_WORKSPACE_TAB = "workspace.tab."
+        private const val KEY_WORKSPACE_PLACE = "workspace.place."
         private const val KEY_LAST_WORKSPACE = "workspace.last"
         private const val KEY_DESTINATION = "nav.destination.v1"
 

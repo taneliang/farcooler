@@ -27,6 +27,8 @@ import SwiftUI
 //                            tapped
 //   -phone-keep-stack        reopen the stack the last launch kept, rather
 //                            than forgetting it
+//   -phone-keep-places       keep where each workspace was left (ov-442) rather than
+//                            forgetting it, to open one again after a relaunch
 //   -phone-stack-lags        a placed stack takes its pushes 0.3 s late, as a
 //                            loaded simulator's did (ov-337)
 //   -phone-saved-gone        the last launch kept a stack whose task is gone
@@ -141,8 +143,11 @@ struct PhoneHarness: View {
         if !CommandLine.arguments.contains("-phone-reopen-worktree") {
             FocusMemory<PaneFocus>.save([:], runner: HarnessRunner.host.id.uuidString)
         }
+        let keepPlaces = CommandLine.arguments.contains("-phone-keep-places")
         for key in UserDefaults.standard.dictionaryRepresentation().keys
-        where key.hasPrefix("workspace.segment.") || key.hasPrefix("board.collapsed.")
+        where key.hasPrefix("workspace.segment.")
+            || (!keepPlaces && (key.hasPrefix("workspace.place.") || key.hasPrefix("workspace.canvas.")))
+            || key.hasPrefix("board.collapsed.")
             || key.hasPrefix("board.read.") || key.hasPrefix("board.plan.") || key.hasPrefix("tree.filter.")
             || key.hasPrefix("pad.tree.")
         {

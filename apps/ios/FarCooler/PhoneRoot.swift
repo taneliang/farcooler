@@ -71,6 +71,7 @@ final class PhoneNavigator: ObservableObject {
     func keep(in defaults: UserDefaults = .standard) {
         guard decided || moved else { return }
         defaults.set(PhoneLaunch.encode(stack), forKey: PhoneLaunch.stackKey)
+        WorkspacePlaceMemory.keep(stack, in: defaults)
     }
 
     /// Open one screen over the one showing.

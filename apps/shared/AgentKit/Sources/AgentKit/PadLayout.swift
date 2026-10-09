@@ -73,7 +73,7 @@ enum PadLayout: Equatable, Sendable {
 
 /// What the iPad's plan column shows: the canvas's home, or what was picked
 /// in the tree or the toolbar.
-enum PadCanvas: Hashable, Sendable {
+enum PadCanvas: Hashable, Codable, Sendable {
     /// The plan's sections, as the phone's Plan sheet draws them.
     case plan
     /// The board, the toolbar's item (design §4).

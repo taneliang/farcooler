@@ -22,6 +22,9 @@ struct ContentView: View {
     @ObservedObject var nativeAgents = NativeAgents.shared
     @Environment(\.markReadConfirmation) var markReadConfirmation
     @State var selection: Selection?
+    /// Where a switch to another workspace began, while the place that
+    /// workspace was left at is being opened in its stead (`WorkspacePlaces`).
+    @State var placeSwitch = PlaceSwitch()
 
     /// What a `+` meant, carried whole from the control that was clicked to
     /// the sheet it opens — or nil when no sheet is up.
@@ -506,7 +509,19 @@ struct ContentView: View {
             guard let window = note.object as? NSWindow, window === windowBox.window else { return }
             markVisibleSeen()
         }
-        .onChange(of: selection) { old, new in
+        .onChange(of: selection) { was, new in
+            // Switching to another workspace goes back to where it was left
+            // (ov-442). The substitute is one more change, recorded below as
+            // a step from where the switch began, not from the board it
+            // replaced.
+            let old: Selection?
+            switch placeSwitch.changed(from: was, to: new, in: store.fleet) {
+            case .open(let place):
+                selection = place
+                return
+            case .carryOn(let from):
+                old = from
+            }
             // The notice is cleared on every navigation, so a sentence left
             // behind on one pane does not go on describing a pane the user is
             // no longer looking at. Selection is the one thing every

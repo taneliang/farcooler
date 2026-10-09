@@ -33,7 +33,7 @@ struct WorkspaceScreen: View {
     @State private var segment: WorkspaceSegment
     /// What an iPad's plan column shows (ov-348): kept while the screen is,
     /// across a turn or a resize to the phone's layout and back.
-    @State private var canvas: PadCanvas = .plan
+    @State private var canvas: PadCanvas
     /// Whether the tree is shown over the plan, where two columns leave no
     /// room for it as a third.
     @State private var treeShown = false
@@ -49,6 +49,7 @@ struct WorkspaceScreen: View {
         self.hosts = hosts
         self.connection = connection
         self.place = place
+        _canvas = State(initialValue: WorkspacePlaceMemory.canvas(for: place))
         _segment = State(
             initialValue: WorkspaceSegment.remembered(
                 place, implicit: connection.workspace(place.workspace)?.isImplicit ?? false))
@@ -76,6 +77,8 @@ struct WorkspaceScreen: View {
         .onAppear {
             UserDefaults.standard.set(place.stored, forKey: PhoneLaunch.lastWorkspaceKey)
         }
+        // Opening this workspace again shows what was last picked here.
+        .onChange(of: canvas) { _, shown in WorkspacePlaceMemory.keep(shown, for: place) }
     }
 
     private var summary: WorkspaceSummary? { connection.workspace(place.workspace) }

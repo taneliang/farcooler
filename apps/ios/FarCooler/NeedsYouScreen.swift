@@ -399,7 +399,14 @@ struct NeedsYouScreen: View {
 
     private func workspaceRow(_ row: PhoneWorkspaceRow, connection: Connection) -> some View {
         Button {
-            open([.workspace(row.place)])
+            // Where it was left: a task, a plan page, a tree level pushed
+            // over it, as long as that is still on its board (ov-442).
+            let board = connection.boards[row.place.workspace]
+            open(
+                WorkspacePlaceMemory.opening(row.place) { route in
+                    guard case .task(_, let task) = route, let board else { return true }
+                    return board.rows.contains { $0.id == task }
+                })
         } label: {
             HStack(spacing: 10) {
                 orchestratorMark(row, connection: connection)

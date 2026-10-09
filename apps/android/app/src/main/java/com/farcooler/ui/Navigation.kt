@@ -548,12 +548,15 @@ object Backstack {
      * visited, which is iOS's depth: Needs You, then one workspace.
      *
      * Arriving at the workspace already underneath keeps it, on the tab
-     * [target] names.
+     * [target] names, with nothing over it. Arriving at another puts [over]
+     * on it.
      */
-    fun goToWorkspace(stack: List<Route>, target: Route.Workspace): List<Route> {
+    fun goToWorkspace(stack: List<Route>, target: Route.Workspace, over: List<Route> = emptyList()): List<Route> {
         val base = stack.dropLastWhile { it.isOverlay || it is Route.Terminal }
         if (base.lastOrNull()?.let(target::sameWorkspace) == true) return base.dropLast(1) + target
-        return base.dropLastWhile { it is Route.Workspace } + target
+        // Switching to another workspace: [over] is what was open in it when
+        // it was left (`WorkspacePlaces`), put back on it (ov-442).
+        return base.dropLastWhile { it is Route.Workspace } + target + over
     }
 
     /**

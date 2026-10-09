@@ -647,6 +647,8 @@ AGENTKIT_SOURCES = [
     # The iPad's workspace in columns (ov-348): which windows get them, their
     # widths, and where a pick in the tree goes.
     "PadLayout.swift",
+    # Where each workspace was left, for opening it again (ov-442).
+    "WorkspacePlaceMemory.swift",
     # Orchestrator pages (ov-269): the document, its live references, the
     # layout rules and the renderer, one SwiftUI implementation the Mac and
     # the phone share (ov-284, ov-285). Experimental, and removable with pages.

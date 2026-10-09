@@ -94,6 +94,16 @@ class AppModel(
      */
     private val reachability = Reachability(application, viewModelScope) { fleet.reconnectAll() }
 
+    /** Where each workspace was left, for opening it again (ov-442). */
+    private val places = WorkspacePlaces(
+        object : WorkspacePlaces.Store {
+            override fun get(hostId: String, workspaceId: String) = settings.workspacePlace(hostId, workspaceId)
+
+            override fun set(hostId: String, workspaceId: String, stack: String) =
+                settings.setWorkspacePlace(hostId, workspaceId, stack)
+        },
+    )
+
     private val _stack = MutableStateFlow(listOf(Backstack.ROOT))
 
     /**
@@ -412,7 +422,10 @@ class AppModel(
             ?: WorkspaceTab.parse(settings.workspaceTab(hostId, workspaceId))
             ?: WorkspaceTab.ORCHESTRATOR
         settings.setLastWorkspace(hostId, workspaceId)
-        install(Backstack.goToWorkspace(_stack.value, Route.Workspace(hostId, workspaceId, shown)))
+        // Where it was left, unless the caller named a tab: an item about its
+        // board has somewhere in mind (ov-442).
+        val over = if (tab == null) places.over(hostId, workspaceId) else emptyList()
+        install(Backstack.goToWorkspace(_stack.value, Route.Workspace(hostId, workspaceId, shown), over))
     }
 
     /**
@@ -742,6 +755,7 @@ class AppModel(
         _stack.value = safe
         _route.value = safe.last()
         if (persist) saved[STACK] = Backstack.encodeStack(safe)
+        places.remember(safe)
         keepDestination()
     }
 
