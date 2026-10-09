@@ -1007,6 +1007,8 @@ struct Sampled {
     purpose: Option<String>,
     /// The same ports as `purpose` is read from, for `Terminal.ports`.
     ports: Vec<u32>,
+    /// The command lines in the pane's foreground (`running_agent::of`).
+    foreground_args: Vec<String>,
     /// The pane's foreground process, which is the only handle codex's session
     /// log can be found by — it holds its rollout file open, so `lsof -p` names
     /// it. `None` for a pane `ps` had nothing to say about.
@@ -4743,6 +4745,9 @@ impl Watcher {
                     title,
                     purpose,
                     ports: crate::foreground::pane_ports(running, &ports),
+                    foreground_args: pane
+                        .map(|p| foreground.foreground_args(p.tty.trim_start_matches("/dev/")))
+                        .unwrap_or_default(),
                     pid: running.map(|r| r.pid),
                     cwd: view.worktree.worktree_path.clone(),
                     // The same string `wire::worktree` puts on the wire as
@@ -4837,6 +4842,7 @@ impl Watcher {
             title,
             purpose,
             ports: open_ports,
+            foreground_args,
             pid,
             cwd,
             worktree,
@@ -4873,7 +4879,7 @@ impl Watcher {
             // `went_unwritten`. Set in the same arm, for the same reason.
             let mut log_turn = None;
             let mut lead = None;
-            // Which agent the screen arm identified (`Terminal.running_agent`).
+            // What the pane's processes say runs there (`Terminal.running_agent`).
             let mut running_agent = None;
             // One clock for the whole of this pane's tick. The log's staleness
             // bound and the state clocks are answering questions about the same
@@ -5013,7 +5019,11 @@ impl Watcher {
                         // below.
                         let agent =
                             registry.identify(&command, &screen).map(|rules| rules.preset.clone());
-                        running_agent = agent.clone();
+                        // What the CLIENTS are told is the process tree's
+                        // word alone: a shell showing claude's banner is not
+                        // a claude. "" says nothing runs, which a client
+                        // trusts over the preset the pane was launched as.
+                        running_agent = Some(crate::running_agent::of(&registry, &command, &foreground_args));
                         // Read once and used twice: what stage 1 alone makes of
                         // this pane is the log layer's own input as well as its
                         // fallback. A pane that stage 1 can see is working,
@@ -5207,7 +5217,8 @@ impl Watcher {
             // the unseen Done of a turn that worked, whose next turn is then
             // refused, folds Done -> Done: the activity never moves, and
             // without this the row went on showing the success.
-            let outcome_moved = entry.turn_failed != turn_failed;
+            let outcome_moved = entry.turn_failed != turn_failed
+                || entry.running_agent != running_agent;
             // A port opening or closing is news even when the row's name holds
             // still: a pane named by its OSC title never gains `web :PORT`.
             let ports_moved = entry.ports != open_ports;
@@ -8695,3 +8706,6 @@ mod needs_you_push_tests;
 
 #[cfg(test)]
 mod suggestion_tests;
+
+#[cfg(test)]
+mod running_agent_tests;

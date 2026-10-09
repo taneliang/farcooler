@@ -150,7 +150,8 @@ struct NativeAgentHarness: View {
                     + (CommandLine.arguments.contains("-native-no-compose") ? [] : ["compose", "compose_upload"])
                     + (CommandLine.arguments.contains("-native-no-interrupt") ? [] : ["terminal_interrupt"])
                     + (CommandLine.arguments.contains("-native-no-bring") ? [] : ["bring_draft"])
-                    + (CommandLine.arguments.contains("-native-codex-before") ? [] : ["codex_view"])))
+                    + (CommandLine.arguments.contains("-native-codex-before") ? [] : ["codex_view"])),
+            grantedScope: "host_admin")
     }
 
     /// The pane's agent: codex with `-native-codex` (ov-416; with

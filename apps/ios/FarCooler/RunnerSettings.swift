@@ -105,7 +105,7 @@ final class RunnerSettingsModel: ObservableObject {
     /// Turn the conversation view on or off for every client of this
     /// runner. The connection reconnects after, so its panes are offered it.
     func setConversation(_ on: Bool) async {
-        guard !changingConversation else { return }
+        guard mayChangeConversation, !changingConversation else { return }
         changingConversation = true
         defer { changingConversation = false }
         if let trouble = await connection.setProjector(on) {

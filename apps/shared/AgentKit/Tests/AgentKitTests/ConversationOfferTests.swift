@@ -17,6 +17,23 @@ import Testing
         #expect(AgentConversation.agent(running: nil, program: "shell", preset: "claude") == "shell", "never the label where program is there")
     }
 
+    /// A runner that looked and found a shell says so with an empty agent. That
+    /// beats the preset the pane was launched as: a claude that quit is no claude.
+    @Test func aRunnerThatSaysNothingRunsIsBelievedOverWhatWasLaunched() {
+        let agent = AgentConversation.agent(running: "", program: "claude", preset: "claude")
+        #expect(agent == "")
+        #expect(AgentConversation.unavailable(paneMode: "terminal", agent: agent, offered: served) == .notAnAgent)
+    }
+
+    /// A device that can't change the setting is told whose it is, not to turn it on.
+    @Test func aDeviceWithoutFullAccessIsNotToldToTurnTheSettingOn() {
+        let off = AgentConversation.Unavailable.settingOff
+        #expect(off.sentence(maySetSetting: true) == "Turn on Conversation view in Settings.")
+        #expect(off.sentence(maySetSetting: false).contains("device with full access"))
+        #expect(!off.sentence(maySetSetting: false).contains("Turn on Conversation view in Settings"))
+        #expect(AgentConversation.Unavailable.runnerNeedsUpdate.sentence(maySetSetting: false) == AgentConversation.Unavailable.runnerNeedsUpdate.sentence)
+    }
+
     @Test func aClaudeOrCodexPaneOnAServingRunnerIsOffered() {
         #expect(AgentConversation.unavailable(paneMode: "terminal", agent: "claude", offered: served) == nil)
         #expect(AgentConversation.unavailable(paneMode: nil, agent: "codex", offered: served) == nil)
@@ -51,7 +68,7 @@ import Testing
             #expect(!reason.sentence.contains("Error"), "\(reason)")
         }
         #expect(AgentConversation.Unavailable.settingOff.sentence == "Turn on Conversation view in Settings.")
-        #expect(AgentConversation.Unavailable.notAnAgent.sentence == "Not a Claude or Codex pane.")
+        #expect(AgentConversation.Unavailable.notAnAgent.sentence == "This isn’t a Claude or Codex pane.")
         #expect(all.filter(\.isAboutTheRunner).count == 5)
     }
 }

@@ -14,6 +14,10 @@ extension AgentConversation {
     /// its session (`Fix the login bug`), so a phone that offered the view
     /// by it never offered it to a claude that had named its session, and a
     /// claude typed into a shell was launched as `shell`.
+    ///
+    /// An empty `running` is the runner's answer, not a gap: it looked and
+    /// nothing runs there, so a pane launched as claude whose claude has
+    /// exited is not one (review 1). Only an absent one falls through.
     public static func agent(running: String?, program: String?, preset: String) -> String {
         running ?? program ?? preset
     }
@@ -42,12 +46,20 @@ extension AgentConversation {
             switch self {
             case .settingOff: return "Turn on Conversation view in Settings."
             case .runnerNeedsUpdate: return "This runner needs an update to show the conversation."
-            case .notAnAgent: return "Not a Claude or Codex pane."
+            case .notAnAgent: return "This isn’t a Claude or Codex pane."
             case .notRunning: return "The agent in this pane isn’t running."
             case .pairingNeeded: return "Pairing needed. Pair this runner in Settings, under Devices."
             case .unreachable: return "Far Cooler can’t reach this runner right now."
             case .said(let words): return words
             }
+        }
+
+        /// The reason as this device should read it. A device that may not
+        /// change the runner's setting is not told to turn it on (ov-443
+        /// review 1): it is told whose switch it is.
+        public func sentence(maySetSetting: Bool) -> String {
+            guard self == .settingOff, !maySetSetting else { return sentence }
+            return "Conversation view is off on this runner. Turn it on from a device with full access."
         }
 
         /// Whether the pane should still show a dimmed switch that says the

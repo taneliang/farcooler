@@ -101,6 +101,9 @@ class AgentConversationTest {
         assertTrue(AgentConversation.offered(serving, null, typed))
         assertTrue(AgentConversation.offered(serving, null, olderRunner))
         assertFalse(AgentConversation.offered(serving, null, shell))
+        // The runner looked and nothing runs: believed over what the pane was launched as.
+        val exited = Terminal(id = "t5", preset = "claude", program = "claude", runningAgent = "", state = "running")
+        assertFalse(AgentConversation.offered(serving, null, exited))
         assertEquals("claude", AgentConversation.agent(typed))
         assertEquals("claude", AgentConversation.agent(null, null, "claude"))
     }
@@ -120,6 +123,11 @@ class AgentConversationTest {
         assertEquals(AgentConversation.Unavailable.RUNNER_NEEDS_UPDATE, why("claude", off))
         assertEquals(AgentConversation.Unavailable.RUNNER_NEEDS_UPDATE, why("codex", serving))
         assertEquals("Turn on the conversation view in this runner’s settings.", AgentConversation.Unavailable.SETTING_OFF.sentence)
+        // A device that can't change it is told whose switch it is (review 1).
+        val settingOff = AgentConversation.Unavailable.SETTING_OFF
+        assertEquals(settingOff.sentence, settingOff.sentence(true))
+        assertTrue(settingOff.sentence(false).contains("device with full access"))
+        assertEquals(AgentConversation.Unavailable.UNREACHABLE.sentence, AgentConversation.Unavailable.UNREACHABLE.sentence(false))
         assertFalse(AgentConversation.Unavailable.NOT_AN_AGENT.isAboutTheRunner)
         assertTrue(u.enumConstants.all { it.sentence.endsWith(".") })
     }

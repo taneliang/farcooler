@@ -54,6 +54,10 @@ struct NativeSwitch<Content: View>: View {
         return reason?.isAboutTheRunner == true ? reason : nil
     }
 
+    /// Whether this device may turn the runner's setting on: the reason says so
+    /// when it may not.
+    private var maySetSetting: Bool { build?.grantedScope == "host_admin" }
+
     /// The build the layout reads: see `model`.
     private var build: DaemonBuild? { connection.daemon ?? connection.lastDaemon ?? connection.knownBuild }
 
@@ -177,7 +181,7 @@ private struct NativeSwitchBody<Content: View>: View {
                         Image(systemName: "text.bubble").foregroundStyle(.tertiary)
                     }
                     .accessibilityLabel("Conversation Unavailable")
-                    .accessibilityValue(unavailable.sentence)
+                    .accessibilityValue(unavailable.sentence(maySetSetting: maySetSetting))
                     .accessibilityIdentifier("native-switch-unavailable")
                 }
             }
@@ -185,7 +189,7 @@ private struct NativeSwitchBody<Content: View>: View {
         .alert("Conversation Unavailable", isPresented: $explaining) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(unavailable?.sentence ?? "")
+            Text(unavailable?.sentence(maySetSetting: maySetSetting) ?? "")
         }
         .task(id: model.map(ObjectIdentifier.init)) {
             guard let model else {

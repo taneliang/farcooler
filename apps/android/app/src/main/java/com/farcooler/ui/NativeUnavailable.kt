@@ -25,11 +25,15 @@ import com.farcooler.model.AgentConversation
  * same place, and a tap says why. Any other pane has no switch at all.
  */
 @Composable
-fun NativeUnavailableButton(reason: AgentConversation.Unavailable, modifier: Modifier = Modifier) {
+fun NativeUnavailableButton(
+    reason: AgentConversation.Unavailable,
+    modifier: Modifier = Modifier,
+    maySetSetting: Boolean = true,
+) {
     var explaining by remember { mutableStateOf(false) }
     IconButton(
         onClick = { explaining = true },
-        modifier = modifier.testTag("native-switch-unavailable").semantics { stateDescription = reason.sentence },
+        modifier = modifier.testTag("native-switch-unavailable").semantics { stateDescription = reason.sentence(maySetSetting) },
     ) {
         Icon(
             Icons.Outlined.Forum,
@@ -42,7 +46,7 @@ fun NativeUnavailableButton(reason: AgentConversation.Unavailable, modifier: Mod
             onDismissRequest = { explaining = false },
             confirmButton = { TextButton(onClick = { explaining = false }) { Text("OK") } },
             title = { Text("Conversation unavailable") },
-            text = { Text(reason.sentence) },
+            text = { Text(reason.sentence(maySetSetting)) },
         )
     }
 }

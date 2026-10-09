@@ -77,9 +77,18 @@ object AgentConversation {
     enum class Unavailable(val sentence: String, val isAboutTheRunner: Boolean = true) {
         SETTING_OFF("Turn on the conversation view in this runner’s settings."),
         RUNNER_NEEDS_UPDATE("This runner needs an update to show the conversation."),
-        NOT_AN_AGENT("Not a Claude or Codex pane.", isAboutTheRunner = false),
+        NOT_AN_AGENT("This isn’t a Claude or Codex pane.", isAboutTheRunner = false),
         NOT_RUNNING("The agent in this pane isn’t running.", isAboutTheRunner = false),
         UNREACHABLE("Far Cooler can’t reach this runner right now."),
+        ;
+
+        /** The reason as this device reads it: one that may not change the setting isn't told to turn it on. */
+        fun sentence(maySetSetting: Boolean): String =
+            if (this == SETTING_OFF && !maySetSetting) {
+                "Conversation view is off on this runner. Turn it on from a device with full access."
+            } else {
+                sentence
+            }
     }
 
     /**

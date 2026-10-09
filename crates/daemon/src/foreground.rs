@@ -60,12 +60,22 @@ pub struct Foreground {
     children: HashMap<i32, Vec<i32>>,
     /// Every process that has a controlling tty, by tty name.
     on_tty: HashMap<String, Vec<i32>>,
+    /// The command line of every foreground row, by tty name (ov-443).
+    ///
+    /// What `running_agent::of` reads: the pane's foreground processes, which is
+    /// where a typed `claude` is, and never what the pane has drawn.
+    foreground_args: HashMap<String, Vec<String>>,
 }
 
 impl Foreground {
     /// What a tty is showing, if anything.
     pub fn pane(&self, tty: &str) -> Option<&Running> {
         self.panes.get(tty)
+    }
+
+    /// The command lines of what is in a tty's foreground, wrappers included.
+    pub fn foreground_args(&self, tty: &str) -> Vec<String> {
+        self.foreground_args.get(tty).cloned().unwrap_or_default()
     }
 
     /// Listening ports by process GROUP rather than by process.
@@ -275,6 +285,7 @@ pub(crate) fn parse(stdout: &str) -> Foreground {
         if !row.stat.contains('+') || row.tty == "??" || row.args.is_empty() {
             continue;
         }
+        found.foreground_args.entry(row.tty.to_string()).or_default().push(row.args.to_string());
         foreground.entry(row.tty).or_default().push(row);
     }
     for (tty, rows) in &foreground {

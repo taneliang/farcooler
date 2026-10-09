@@ -341,7 +341,7 @@ fun TerminalPane(
             if (native.switchable) {
                 NativeSwitchButton(showing = covered, onClick = { native.toggle() })
             } else if (unavailable != null) {
-                NativeUnavailableButton(unavailable)
+                NativeUnavailableButton(unavailable, maySetSetting = AgentConversation.maySetSetting(daemon ?: lastDaemon))
             }
             if (terminal?.canSwitchPaneMode == true) {
                 IconButton(onClick = {
@@ -426,6 +426,7 @@ fun TerminalPane(
                     pane = native,
                     floatingSwitch = !showTopBar,
                     unavailable = unavailable,
+                    maySetSetting = AgentConversation.maySetSetting(daemon ?: lastDaemon),
                 ) {
                     TerminalSurface(
                         session = session,

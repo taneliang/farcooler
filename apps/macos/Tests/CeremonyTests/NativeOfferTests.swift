@@ -48,6 +48,11 @@ struct NativeOfferTests {
         #expect(agents.offers(titled, target: ""))
         #expect(!agents.offers(shell, target: ""))
         #expect(!agents.offers(quit, target: ""), "a claude that quit to its shell")
+        // A pane launched as claude whose claude has exited: the runner says
+        // nothing runs (empty), which beats the program it was launched as.
+        let exited = try Self.terminal(#""preset":"claude","program":"claude","runningAgent":"""#)
+        #expect(!agents.offers(exited, target: ""), "an exited claude is offered by what it was launched as")
+        #expect(agents.unavailable(exited, target: "") == .notAnAgent)
         #expect(NativeAgents.agent(of: typed) == "claude")
         #expect(agents.unavailable(typed, target: "") == nil)
     }

@@ -1680,12 +1680,16 @@ message Terminal {
   optional string web_url = 46;
 
   // The agent the runner sees running in this terminal-mode pane now, by its
-  // process or, where it renamed itself, by what it drew: `claude`, `codex`
-  // (ov-443). Unlike `command_preset`, what was launched, this finds a claude
-  // somebody typed into a shell; unlike `current_command`, it is never the
-  // title claude gave its session. What the clients offer the conversation
-  // view by. Absent when no agent is running there, before the first sample,
-  // and from an older runner.
+  // processes alone (the pane's foreground process and its command line),
+  // never by what the pane drew: `claude`, `codex` (ov-443). Unlike
+  // `command_preset`, what was launched, this finds a claude somebody typed
+  // into a shell; unlike `current_command`, it is never the title claude gave
+  // its session. What the clients offer the conversation view by.
+  //
+  // Present and empty means the runner looked and nothing runs there: a client
+  // believes it over `command_preset`, so a pane launched as claude whose claude
+  // has exited is not offered. Absent means the runner does not say (an older
+  // runner, a pane not yet sampled, or a pane that is not a terminal).
   optional string running_agent = 47;
 }
 
