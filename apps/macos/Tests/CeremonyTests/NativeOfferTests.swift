@@ -155,16 +155,22 @@ struct NativeOfferTests {
             let terminal = try #require(
                 (try JSONSerialization.jsonObject(with: created.out) as? [String: Any])?["id"] as? String, "\(created.err)")
             _ = await farcooler(["terminal", "send", terminal, "\(bin)/claude 600\r"])
+            // Until it says claude, not until it says anything: the runner
+            // says "" for the shell the pane starts as, and on a slow host
+            // (CI's VM) the first sample lands before the shell has read the
+            // typed line. Stopping on that "" read a shell, not the detection.
             var listed: Terminal?
             for _ in 0..<60 {
                 let list = await farcooler(["--json", "worktree", "list"])
                 let fleet = try JSONDecoder().decode(Fleet.self, from: list.out)
                 listed = fleet.worktrees.flatMap(\.terminals).first { $0.id == terminal }
-                if listed?.runningAgent != nil { break }
+                if listed?.runningAgent == "claude" { break }
                 try await Task.sleep(for: .milliseconds(500))
             }
             let pane = try #require(listed)
-            #expect(pane.runningAgent == "claude", "the runner never said claude runs here")
+            #expect(
+                pane.runningAgent == "claude",
+                "the runner never said claude runs here in 30 s; last said \(pane.runningAgent.map { "\"\($0)\"" } ?? "nothing")")
             #expect(pane.program == "shell")
             #expect(Self.agents().offers(pane, target: ""))
         } catch {
