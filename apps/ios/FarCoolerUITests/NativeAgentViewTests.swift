@@ -295,9 +295,11 @@ final class NativeAgentViewTests: XCTestCase {
         // A dimmed switch that says why (ov-443).
         let dimmed = element(app, "native-switch-unavailable")
         XCTAssertTrue(dimmed.waitForExistence(timeout: 30), "nothing says why")
+        capture("unavailable-switch")
         dimmed.tap()
         let alert = app.alerts["Conversation Unavailable"]
         XCTAssertTrue(alert.waitForExistence(timeout: 30), "no reason shown")
+        capture("unavailable-reason")
         XCTAssertTrue(alert.staticTexts["Turn on Conversation view in Settings."].exists, alert.debugDescription)
     }
 
