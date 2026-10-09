@@ -654,6 +654,9 @@ final class DaemonClient: ObservableObject {
             updated.preset = event.preset
             // Kept beside it, because a header names the program by this (ov-218).
             updated.program = event.program
+            // What the pane's processes say runs there; the conversation offer
+            // follows it live instead of waiting for a resync (ov-443).
+            updated.runningAgent = event.runningAgent
             // What can be switched to a chat, which is also what `⌃B a`
             // checks before it will even try.
             //

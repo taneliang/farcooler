@@ -26,6 +26,9 @@ struct TerminalEvent: Sendable, Decodable {
     var preset: String
     /// What the pane was launched as (ov-218), nil from an older CLI.
     var program: String?
+    // What the runner sees running in the pane (ov-443). Pushed because the
+    // conversation offer keys off it, and the runner announces its change.
+    var runningAgent: String?
     var state: String
     var activity: String?
     // Pushed for the same reason `preset` is: without it, a shell pane the
