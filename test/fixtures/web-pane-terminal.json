@@ -25,6 +25,7 @@
   "program": "web",
   "rank": 0,
   "role": null,
+  "runningAgent": null,
   "said": null,
   "short": "00000435",
   "splitOf": null,
