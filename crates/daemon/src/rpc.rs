@@ -2586,6 +2586,7 @@ impl Rpc {
         }
         message.ports = self.watcher.ports(view.terminal.id).await;
         message.chat_capable = self.watcher.chat_capable(view.terminal.id).await;
+        message.running_agent = self.watcher.running_agent(view.terminal.id).await;
         message.draft_hold = self.watcher.draft_hold(view.terminal.id);
         // The same lines the broadcast path sends, off the same `Observed`. A
         // client that reads a list and then watches events must not see the

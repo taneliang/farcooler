@@ -413,6 +413,8 @@ pub fn terminal(view: &TerminalView) -> wire::Terminal {
         // The watcher's to decide, for the same reason as `activity`: it takes
         // a screen read, and only the sampling loop does those.
         chat_capable: false,
+        // The watcher's too, off the same screen read (ov-443).
+        running_agent: None,
         // Also the watcher's: the feed is built by reading the agent's session
         // log line by line, and only the sampling loop holds that file offset.
         // A converter that guessed would report an empty feed over a real one.

@@ -1080,6 +1080,8 @@ struct Observed {
     /// Decided here because deciding it needs the screen, and the screen is
     /// already being read on this pass. A client cannot answer it at all.
     chat_capable: bool,
+    /// The agent seen running in a terminal-mode pane (`Terminal.running_agent`).
+    running_agent: Option<String>,
     /// What the agent is asking, while it is asking.
     blocked_question: Option<String>,
     /// When a live card was last refreshed for this terminal, in Unix
@@ -2342,6 +2344,7 @@ impl Observed {
             command: String::new(),
             ports: Vec::new(),
             chat_capable: false,
+            running_agent: None,
             blocked_question: None,
             last_card_push: None,
             turn_failed: false,
@@ -3750,6 +3753,19 @@ impl Watcher {
         self.state.lock().await.get(&terminal).is_some_and(|o| o.turn_failed)
     }
 
+    /// Put the agent `sample` would have seen in a pane, for the socket tests.
+    #[doc(hidden)]
+    pub async fn running_agent_for_tests(&self, terminal: Uuid, agent: Option<&str>) {
+        let mut state = self.state.lock().await;
+        let observed = state.entry(terminal).or_insert_with(|| Observed::begin(AgentActivity::Idle, 0));
+        observed.running_agent = agent.map(str::to_string);
+    }
+
+    /// The agent seen running in this pane, as last observed.
+    pub async fn running_agent(&self, terminal: Uuid) -> Option<String> {
+        self.state.lock().await.get(&terminal).and_then(|o| o.running_agent.clone())
+    }
+
     /// Whether this terminal could be shown as a chat, as last observed.
     pub async fn chat_capable(&self, terminal: Uuid) -> bool {
         self.state.lock().await.get(&terminal).is_some_and(|o| o.chat_capable)
@@ -4857,6 +4873,8 @@ impl Watcher {
             // `went_unwritten`. Set in the same arm, for the same reason.
             let mut log_turn = None;
             let mut lead = None;
+            // Which agent the screen arm identified (`Terminal.running_agent`).
+            let mut running_agent = None;
             // One clock for the whole of this pane's tick. The log's staleness
             // bound and the state clocks are answering questions about the same
             // instant, and reading the clock twice would let them disagree by
@@ -4995,6 +5013,7 @@ impl Watcher {
                         // below.
                         let agent =
                             registry.identify(&command, &screen).map(|rules| rules.preset.clone());
+                        running_agent = agent.clone();
                         // Read once and used twice: what stage 1 alone makes of
                         // this pane is the log layer's own input as well as its
                         // fallback. A pane that stage 1 can see is working,
@@ -5207,6 +5226,7 @@ impl Watcher {
             entry.command = command.clone();
             entry.ports = open_ports;
             entry.chat_capable = chat_capable;
+            entry.running_agent = running_agent;
             entry.blocked_question = blocked_question;
             entry.turn_failed = turn_failed;
             // A tier change is never withheld, and clearing the window is how
@@ -5367,6 +5387,7 @@ impl Watcher {
             message.current_command = observed.command.clone();
             message.ports = observed.ports.clone();
             message.chat_capable = observed.chat_capable;
+            message.running_agent = observed.running_agent.clone();
             message.draft_hold = self.draft_hold(terminal);
             // Finished lines, already redacted and already cut to a row's
             // width. See `farcooler_core::feed` for why both happen here and

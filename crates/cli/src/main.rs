@@ -3677,6 +3677,7 @@ fn worktree_list_terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_js
         // What was launched, which `preset` stops being once the program
         // renames itself: a pane header names its program by this (ov-218).
         "program": t.command_preset,
+        "runningAgent": t.running_agent,
         "ports": t.ports,
         // Which board task this pane was opened for, so a board card can go to
         // the agent working it. The daemon has recorded it since
@@ -3912,6 +3913,7 @@ fn terminal_event_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Valu
         // What was launched, which `preset` stops being once the program
         // renames itself: a pane header names its program by this (ov-218).
         "program": t.command_preset,
+        "runningAgent": t.running_agent,
         "ports": t.ports,
         // Which board task this pane was opened for, so a board card can go to
         // the agent working it. The daemon has recorded it since
