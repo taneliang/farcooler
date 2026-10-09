@@ -72,6 +72,9 @@ struct LayoutMenuFocus: Equatable {
     /// The key pane is Claude in a terminal, and its conversation view is
     /// offered (`NativeAgents.offers`).
     var switchesConversation = false
+    /// Why it isn't, for the item's help (ov-443): nil where it is, or where
+    /// there's no pane.
+    var conversationUnavailable: String?
     /// The runner serves web panes (`web_pane`): against an older one, Open
     /// Web Page would take an address and then only fail (M5, ov-435 review
     /// 1). HIG: dim an item that can't act.
@@ -92,7 +95,7 @@ struct LayoutMenuFocus: Equatable {
     /// finds it; `layouts` the ones the bar offers.
     static func make(
         group: PaneGroup?, here: PaneRect?, layouts: [PaneGroup], switchesMode: Bool,
-        switchesConversation: Bool = false, opensWebPage: Bool = false
+        switchesConversation: Bool = false, conversationUnavailable: String? = nil, opensWebPage: Bool = false
     ) -> LayoutMenuFocus {
         let neighbors = Set(TileDirection.allCases.filter { side in
             guard let group, let here else { return false }
@@ -104,7 +107,7 @@ struct LayoutMenuFocus: Equatable {
             // to go only with another layout, from one the bar lists.
             stepsLayouts: layouts.count > 1 && layouts.contains { $0.id == group?.id },
             switchesMode: switchesMode, switchesConversation: switchesConversation,
-            opensWebPage: opensWebPage)
+            conversationUnavailable: switchesConversation ? nil : conversationUnavailable, opensWebPage: opensWebPage)
     }
 }
 

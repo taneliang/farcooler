@@ -313,6 +313,10 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// says; nil from an older one. Unlike `preset`, which is what's running
     /// now, it stays put when the program renames itself (ov-218).
     var program: String?
+    /// The agent the runner sees running in the pane now (`claude`), nil
+    /// where none is or from an older runner: a claude typed into a shell
+    /// has `program` `shell` (ov-443).
+    var runningAgent: String?
     var state: String
     /// What the AGENT is doing, as the daemon derived it. Absent on older
     /// daemons, which is why it is optional rather than defaulted to something

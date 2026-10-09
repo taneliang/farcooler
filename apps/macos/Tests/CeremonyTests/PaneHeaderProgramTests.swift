@@ -30,7 +30,7 @@ struct PaneHeaderProgramTests {
 
     // MARK: - The real CLI
 
-    private static var cli: String? {
+    static var cli: String? {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()

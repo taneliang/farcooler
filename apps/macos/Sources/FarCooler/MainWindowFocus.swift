@@ -138,6 +138,13 @@ struct MainWindowFocus: Equatable {
         return layout[keyPath: can]
     }
 
+    /// Why Switch Between Terminal and Conversation is dimmed, for its help
+    /// (ov-443): nil where it acts or where no layout is on screen.
+    static func conversationUnavailable(_ focus: MainWindowFocus?) -> String? {
+        guard navigates(focus), let layout = focus?.layout, !layout.switchesConversation else { return nil }
+        return layout.conversationUnavailable
+    }
+
     /// A menu item that reads the main window (⌘N, ⌘P, ⌘R, ⌘/) acts only
     /// while it's key: with Settings or About key, nothing hears it.
     static func isKey(_ focus: MainWindowFocus?) -> Bool {

@@ -283,10 +283,36 @@ final class NativeAgents: ObservableObject {
 
     static func isAgentInATerminal(_ terminal: Terminal, offered: Set<String>) -> Bool {
         let mode = terminal.paneMode ?? "terminal"
-        let program = terminal.program ?? terminal.preset
+        let program = agent(of: terminal)
         guard mode == "terminal" else { return false }
         return program.hasPrefix("claude") || (program.hasPrefix("codex") && offered.contains("codex_view"))
     }
+
+    /// The agent `terminal` runs, as the view is offered by: the one the
+    /// runner sees running, so a claude typed into a shell counts (ov-443).
+    static func agent(of terminal: Terminal) -> String {
+        AgentConversation.agent(running: terminal.runningAgent, program: terminal.program, preset: terminal.preset)
+    }
+
+    /// Why `terminal` isn't offered the view, nil where it is (ov-443): what
+    /// the pane's switch and the menu item say.
+    func unavailable(_ terminal: Terminal, target: String) -> AgentConversation.Unavailable? {
+        let link = links[target]
+        let offered = link?.core == nil ? nil : link?.offered
+        if let pane = AgentConversation.unavailable(paneMode: terminal.paneMode, agent: Self.agent(of: terminal)) { return pane }
+        guard enabled else { return .settingOff }
+        if !target.isEmpty, link?.core == nil {
+            switch pairing.states[target] {
+            case .removed?, .unpaired?: return .pairingNeeded
+            case .unavailable(let words)?: return .said(words)
+            case .paired?, nil: break
+            }
+        }
+        if offered == nil, connecting[target] != nil || retrying[target] != nil { return .said(Self.connectingSentence) }
+        return AgentConversation.unavailable(paneMode: terminal.paneMode, agent: Self.agent(of: terminal), offered: offered)
+    }
+
+    static let connectingSentence = "Far Cooler is connecting to this runner."
 
     /// The pane's model, made once and kept, following its runner's rows.
     /// `program` names the agent, for its words and its keys.
@@ -336,7 +362,7 @@ final class NativeAgents: ObservableObject {
     func toggleView(of terminal: Terminal, target: String) -> Bool {
         guard offers(terminal, target: target) else { return false }
 
-        let model = model(for: terminal.id, target: target)
+        let model = model(for: terminal.id, target: target, program: Self.agent(of: terminal))
         model.showsNative.toggle()
         return true
     }

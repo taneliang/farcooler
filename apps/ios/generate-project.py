@@ -699,6 +699,8 @@ AGENTKIT_SOURCES = [
     "AgentRowStore.swift",
     "AgentRowCache.swift",
     "AgentConversation.swift",
+    # Which pane is offered the conversation, and why not (ov-443).
+    "ConversationOffer.swift",
     # Bring Here: claude's box's draft moved into the composer (ov-369).
     "BringHere.swift",
     # What a phone's composer sends with a message: a picked or pasted image as

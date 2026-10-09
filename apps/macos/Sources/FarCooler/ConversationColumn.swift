@@ -346,12 +346,17 @@ struct OrchestratorViewItem: View {
     var body: some View {
         if agents.offers(terminal, target: target) {
             ConversationSwitchItem(
-                model: agents.model(for: terminal.id, program: terminal.program ?? terminal.preset), terminal: terminal, opensAsChat: opensAsChat,
-                onTogglePaneMode: onTogglePaneMode)
+                model: agents.model(for: terminal.id, target: target, program: NativeAgents.agent(of: terminal)), terminal: terminal,
+                opensAsChat: opensAsChat, onTogglePaneMode: onTogglePaneMode)
         } else if let item = OrchestratorViewSwitch.of(
             terminal: terminal, offersConversation: false, conversationShown: false, opensAsChat: opensAsChat)
         {
             Button(item.title, action: onTogglePaneMode)
+        } else if let reason = agents.unavailable(terminal, target: target), reason.isAboutTheRunner {
+            // Dimmed, saying why (ov-443), rather than gone without a word.
+            Button(OrchestratorViewSwitch.showConversation.title) {}
+                .disabled(true)
+                .help(reason.sentence)
         }
     }
 }

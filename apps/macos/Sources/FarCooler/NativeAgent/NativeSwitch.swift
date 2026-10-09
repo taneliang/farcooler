@@ -7,9 +7,10 @@ import SwiftUI
 /// The terminal is always the first child and never leaves the tree, so a
 /// switch never respawns the pane, never restarts its stream and works
 /// mid-turn and mid-dialog; the native view keeps its draft and rows in its
-/// `NativePaneModel`, which outlives this view. The switch is hidden, and
-/// the terminal shows, wherever the native view isn't offered
-/// (`NativeAgents.offers`): never a blank pane.
+/// `NativePaneModel`, which outlives this view. The terminal shows wherever
+/// the native view isn't offered (`NativeAgents.offers`): never a blank pane.
+/// There a Claude or Codex pane's switch is dimmed and says why
+/// (`ConversationUnavailableChip`, ov-443); any other pane has none.
 struct NativeSwitch<Surface: View>: View {
     let terminal: Terminal
     /// The runner, as `DaemonClient.target` names it: empty for this Mac's.
@@ -41,7 +42,10 @@ struct NativeSwitch<Surface: View>: View {
     @Environment(\.windowVisible) private var windowVisible
 
     var body: some View {
-        let model = agents.offers(terminal, target: target) ? agents.model(for: terminal.id, target: target, program: terminal.program ?? terminal.preset) : nil
+        let model = agents.offers(terminal, target: target)
+            ? agents.model(for: terminal.id, target: target, program: NativeAgents.agent(of: terminal)) : nil
+        // Where it isn't offered, a Claude or Codex pane says why (ov-443).
+        let reason = model == nil ? NativeSwitchReason.shown(agents.unavailable(terminal, target: target)) : nil
         let showing = native && model != nil
         // The terminal first, always: the native layer coming and going
         // leaves its identity, and so its stream, alone.
@@ -72,6 +76,8 @@ struct NativeSwitch<Surface: View>: View {
                 .help(showing ? "Show Terminal" : "Show Conversation")
                 .accessibilityLabel(showing ? "Show Terminal" : "Show Conversation")
                 .identified("native-switch")
+            } else if let reason {
+                ConversationUnavailableChip(reason: reason)
             }
         }
         .onDisappear { agents.model(ifMade: terminal.id)?.setOnScreen(false, by: mount) }
@@ -91,5 +97,16 @@ struct NativeSwitch<Surface: View>: View {
             model?.setOnScreen(visible, by: mount)
         }
         
+    }
+}
+
+/// Which reasons a pane's dimmed switch shows (ov-443): one about the runner
+/// or the pairing. Not the setting being off, which is a choice: with it off
+/// by default, a dimmed switch on every Claude pane would be noise. The menu
+/// item's help still says it.
+enum NativeSwitchReason {
+    static func shown(_ reason: AgentConversation.Unavailable?) -> AgentConversation.Unavailable? {
+        guard let reason, reason.isAboutTheRunner, reason != .settingOff else { return nil }
+        return reason
     }
 }

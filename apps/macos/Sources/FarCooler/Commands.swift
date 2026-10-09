@@ -447,6 +447,8 @@ struct FarCoolerCommands: Commands {
             }
             .keyboardShortcut("t", modifiers: [.command, .control])
             .disabled(!MainWindowFocus.lays(\.switchesConversation, mainWindow))
+            // Dimmed, it says why (ov-443).
+            .help(MainWindowFocus.conversationUnavailable(mainWindow) ?? "")
         }
 
         // The diff pane had not one shortcut in this file, which made the only
