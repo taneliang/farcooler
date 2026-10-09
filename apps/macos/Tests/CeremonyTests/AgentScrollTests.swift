@@ -455,8 +455,15 @@ struct AgentScrollTests {
             AgentSurface.scheduleBackstop = { _ in stepper.arm(probe, scroll, back: 100) }
             Self.clickJump(probe, host, window)
             guard await Self.stepTaken(stepper, probe) else { return false }
-            #expect(await Self.until { probe.following && (probe.tailHiddenBy ?? .infinity) <= 0.5 }, "Jump to Latest didn't return to the tail")
+            // Landed first: the animation's completion re-targets the end,
+            // and SwiftUI applies that at its next update, which a loaded
+            // machine reaches late. So the update is flushed while waiting
+            // rather than waited for, and the tail is read after the landing.
             #expect(await Self.until { !probe.jumping }, "Jump to Latest never landed")
+            #expect(await Self.until {
+                Self.flush(host, window)
+                return probe.following && (probe.tailHiddenBy ?? .infinity) <= 0.5
+            }, "Jump to Latest didn't return to the tail")
             #expect(probe.detaches == detached, "the height correction stopped following \(probe.detaches - detached) time(s) mid-jump")
             #expect(probe.following && !probe.showsJump)
             return true
