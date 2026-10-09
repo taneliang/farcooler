@@ -42,10 +42,12 @@ async fn a_pane_has_true_color_when_the_runner_has_none() {
     let won = with_pane_env(Uuid::now_v7(), "claude", None, Some(&recipe), "printenv COLORTERM".into());
     let mut seen = Vec::new();
     for line in [&plain, &won] {
-        let out = tmux(&["new-session", "-d", "-x", "80", "-y", "24", "-P", "-F", "#{pane_id}", &format!("{line}; sleep 5")]);
+        let out = tmux(&["new-session", "-d", "-x", "80", "-y", "24", "-P", "-F", "#{pane_id}", &format!("{line}; sleep 60")]);
         let pane = String::from_utf8_lossy(&out.stdout).trim().to_string();
         let mut text = String::new();
-        for _ in 0..50 {
+        // A loaded CI runner can take seconds to start a server and run the
+        // pane's command, so wait up to 30 s (the pane lives for 60).
+        for _ in 0..300 {
             text = String::from_utf8_lossy(&tmux(&["capture-pane", "-p", "-t", &pane]).stdout).trim().to_string();
             if !text.is_empty() {
                 break;
