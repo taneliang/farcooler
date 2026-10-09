@@ -54,7 +54,7 @@
 //! unnamed mark that only a turn boundary ends, so it is typed into mid-turn
 //! only before its first tool call of the turn.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -149,6 +149,12 @@ pub struct OpenAsk {
 
 pub struct HookAsks {
     held: Mutex<HashMap<Uuid, Held>>,
+    /// Panes whose latest screen sample showed claude's permission dialog,
+    /// held or not. The hook that holds an ask lands a moment after the
+    /// dialog is drawn, so a sample may already have seen the dialog by the
+    /// time there is an ask to tell: a new ask starts from this, or a
+    /// keyboard answer inside the next sample would go unseen.
+    dialogs_up: Mutex<HashSet<Uuid>>,
     /// Per session id: when a hook was last heard from it, and when its last
     /// gate began. See this module's docs, "Sessions heard from".
     sessions: Mutex<HashMap<String, Heard>>,
@@ -254,6 +260,7 @@ impl HookAsks {
     pub fn new(sink: Arc<Mutex<Option<EventSink>>>) -> Self {
         Self {
             held: Mutex::new(HashMap::new()),
+            dialogs_up: Mutex::new(HashSet::new()),
             sessions: Mutex::new(HashMap::new()),
             sink,
             changes: watch::Sender::new(0),
@@ -516,13 +523,14 @@ impl HookAsks {
         let id = format!("{HOOK_ASK_PREFIX}{}", Uuid::now_v7());
         let (reply, rx) = oneshot::channel();
         let at = SystemTime::now();
+        let seen_dialog = self.dialogs_up.lock().unwrap_or_else(|e| e.into_inner()).contains(&terminal);
         let held = Held {
             id: id.clone(),
             since: Instant::now(),
             at,
             tool: tool.map(str::to_string),
             until: at + hold,
-            seen_dialog: false,
+            seen_dialog,
             absent_samples: 0,
             offered: false,
             shape,
@@ -616,6 +624,14 @@ impl HookAsks {
     /// What one sample of `terminal`'s screen showed: claude's permission
     /// dialog, or not.
     pub fn saw_screen(&self, terminal: Uuid, dialog_up: bool) {
+        {
+            let mut up = self.dialogs_up.lock().unwrap_or_else(|e| e.into_inner());
+            if dialog_up {
+                up.insert(terminal);
+            } else {
+                up.remove(&terminal);
+            }
+        }
         let gone = {
             let mut held = self.lock();
             let Some(ask) = held.get_mut(&terminal) else { return };
@@ -670,6 +686,7 @@ impl HookAsks {
     /// `Resolved`: the ring goes with the row, and recording into it would
     /// bring an entry back for a terminal nothing can reach.
     pub fn forget(&self, terminal: Uuid) {
+        self.dialogs_up.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal);
         self.settle(terminal, None, Settled { decision: None, ack: None }, "", false, "forgotten");
     }
 
@@ -1216,6 +1233,19 @@ mod tests {
         assert!(asks.is_holding(pane));
         asks.saw_screen(pane, false);
         assert!(!asks.is_holding(pane), "two samples without the dialog: the keyboard answered");
+        assert_eq!(rx.await.expect("an ending arrives").decision, None);
+        assert_eq!(resolved(&recorded, &id), [""]);
+    }
+
+    #[tokio::test]
+    async fn a_dialog_sampled_before_the_ask_was_held_counts_as_seen() {
+        let (asks, recorded) = ledger();
+        let pane = Uuid::now_v7();
+        asks.saw_screen(pane, true);
+        let (id, rx) = offered(&asks, pane);
+        asks.saw_screen(pane, false);
+        asks.saw_screen(pane, false);
+        assert!(!asks.is_holding(pane), "the keyboard answered before any sample after the hook");
         assert_eq!(rx.await.expect("an ending arrives").decision, None);
         assert_eq!(resolved(&recorded, &id), [""]);
     }

@@ -1829,7 +1829,7 @@ impl Asking {
     /// Waits for the ring to end in this ask's `Resolved`, and returns what
     /// was chosen.
     async fn resolved(&mut self) -> String {
-        for _ in 0..200 {
+        for _ in 0..600 {
             let ring = self.ring().await;
             if let Some(last) = ring.last() {
                 if last["Resolved"]["id"] == self.id.as_str() {
@@ -2058,10 +2058,16 @@ async fn a_permission_answered_at_the_keyboard_releases_the_held_hook_and_the_ph
     assert!(blocked, "the watcher never saw the dialog");
 
     asking.session.write(terminal, b"1\n".to_vec()).await.expect("typed");
-    assert!(asking.exists("tui-answered", std::time::Duration::from_secs(5)).await, "the keyboard answer never landed");
+    assert!(asking.exists("tui-answered", std::time::Duration::from_secs(30)).await, "the keyboard answer never landed");
+    // The daemon sees the dialog leave on its own sampling clock (two 1 s
+    // samples without it), so how long that takes is the machine's, not the
+    // behavior's. Wait on what that sampling ends in -- the ask's `Resolved` in
+    // the ring -- and then on the hook it releases; the bound is only how long
+    // a hang is allowed to go unnoticed, not a rate the daemon must meet.
+    assert_eq!(asking.resolved().await, "", "the keyboard decided; nobody chose");
     assert!(
-        asking.exists("hook-exited", std::time::Duration::from_secs(5)).await,
-        "the hook was still held 5 s after the dialog left"
+        asking.exists("hook-exited", std::time::Duration::from_secs(30)).await,
+        "the ask was resolved, but the hook was still held 30 s later"
     );
     assert_eq!(asking.hook_printed(), "", "the keyboard decided; the hook has nothing to say");
     assert_eq!(asking.resolved().await, "");
