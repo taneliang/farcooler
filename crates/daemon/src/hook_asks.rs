@@ -539,6 +539,11 @@ impl HookAsks {
         let sink = self.sink();
         let mut asks = self.lock();
         if let Some(older) = asks.insert(terminal, held) {
+            // The older ask's dialog is not the new one's.
+            self.dialogs_up.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal);
+            if let Some(new) = asks.get_mut(&terminal) {
+                new.seen_dialog = false;
+            }
             let was_open = older.offered;
             let older_id = older.id.clone();
             let settled = Settled { decision: None, ack: None };
@@ -766,6 +771,9 @@ impl HookAsks {
             return false;
         }
         let Some(held) = asks.remove(&terminal) else { return false };
+        // A sample taken before this ask ended says nothing of the next ask's
+        // dialog: it may not be drawn yet.
+        self.dialogs_up.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal);
         let was_open = held.offered;
         let ended = held.id.clone();
         end(terminal, held, settled, chosen, record, why, sink.as_ref());
@@ -1248,6 +1256,20 @@ mod tests {
         assert!(!asks.is_holding(pane), "the keyboard answered before any sample after the hook");
         assert_eq!(rx.await.expect("an ending arrives").decision, None);
         assert_eq!(resolved(&recorded, &id), [""]);
+    }
+
+    #[tokio::test]
+    async fn a_dialog_sampled_for_an_ask_that_ended_does_not_seed_the_next() {
+        let (asks, _) = ledger();
+        let pane = Uuid::now_v7();
+        let (id, _rx) = offered(&asks, pane);
+        asks.saw_screen(pane, true);
+        asks.withdraw(pane, &id);
+        let (_next, _rx2) = offered(&asks, pane);
+        for _ in 0..5 {
+            asks.saw_screen(pane, false);
+        }
+        assert!(asks.is_holding(pane), "the second dialog was never drawn, so it cannot have left");
     }
 
     #[tokio::test]
