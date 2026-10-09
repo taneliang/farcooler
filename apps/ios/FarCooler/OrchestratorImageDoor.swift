@@ -90,7 +90,7 @@ struct OrchestratorImageDoor: ViewModifier {
         } label: {
             Image(systemName: "photo.badge.plus")
         }
-        .accessibilityLabel("Add Image")
+        .accessibilityLabel("Send an image")
         .accessibilityIdentifier("orchestrator-image-menu")
     }
 }
