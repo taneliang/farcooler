@@ -36,9 +36,12 @@ final class RunnerSettingsModel: ObservableObject {
     /// screen never opens dimmed and then un-dims a moment later. The controls
     /// are honest either way: the runner enforces this, not the app.
     @Published private(set) var mayAdminister = true
-    /// Whether the conversation view's setting is shown (ov-373): only to
-    /// the runner's host admin, on a runner that has the setting.
+    /// Whether the conversation view's setting is shown (ov-373): on a
+    /// runner that has the setting. To every device, so one that may not
+    /// change it still sees where it stands and why (ov-443).
     @Published private(set) var offersConversation = false
+    /// Whether this device may change it: the runner's host admin only.
+    @Published private(set) var mayChangeConversation = false
     @Published private(set) var conversationOn = false
     /// A change to it is on its way: the switch waits, so two flips can't
     /// land out of order.
@@ -60,8 +63,8 @@ final class RunnerSettingsModel: ObservableObject {
         await connection.loadDaemonBuild()
         mayAdminister = connection.daemon?.mayAdministerRunner ?? true
         branchPrefix = connection.branchPrefix
-        offersConversation = (connection.daemon?.grantedScope == "host_admin")
-            && connection.daemon?.can(.projectorSetting) == true && connection.projectorOn != nil
+        offersConversation = connection.daemon?.can(.projectorSetting) == true && connection.projectorOn != nil
+        mayChangeConversation = connection.daemon?.grantedScope == "host_admin"
         conversationOn = connection.projectorOn ?? false
         let readThemes = await connection.hostThemes()
         let readAdapters = await connection.adapters()
@@ -324,14 +327,15 @@ struct RunnerSettingsView: View {
                         isOn: Binding(
                             get: { model.conversationOn },
                             set: { on in Task { await model.setConversation(on) } }))
-                        .disabled(model.changingConversation)
+                        .disabled(model.changingConversation || !model.mayChangeConversation)
                         .accessibilityIdentifier("runner-conversation-view")
                 } header: {
                     Text("Agents")
                 } footer: {
                     Text(
                         "Shows a Claude or Codex pane that runs in a terminal as a conversation you can read and "
-                            + "reply to, on every device that reaches this runner. Its terminal is one tap away.")
+                            + "reply to, on every device that reaches this runner. Its terminal is one tap away."
+                            + (model.mayChangeConversation ? "" : "\n\n" + restrictedSentence))
                 }
             }
 

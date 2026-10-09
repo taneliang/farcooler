@@ -125,6 +125,10 @@ struct NativeAgentHarness: View {
             build: Self.build(
                 rows: !CommandLine.arguments.contains("-native-flag-off")
                     && !CommandLine.arguments.contains("-native-on-later")))
+        // What `host` says of the projector: off where it serves no rows, so
+        // the pane's dimmed switch says to turn it on (ov-443).
+        connection.projectorOn = !CommandLine.arguments.contains("-native-flag-off")
+            && !CommandLine.arguments.contains("-native-on-later")
         fleetStore.republish()
         let connection = connection
         runner.links = { rows in
@@ -161,9 +165,12 @@ struct NativeAgentHarness: View {
             id: "native-ws", short: "native", task: "Conversation harness", branch: "fixture · no runner",
             state: "ready",
             terminals: [
+                // The owner's pane (ov-443): typed into a shell, and labeled
+                // with its session's title, as claude names it. Offered by the
+                // agent the runner sees running, never by that label.
                 Terminal(
-                    id: pane, short: agent, title: agent, preset: agent, state: "running",
-                    activity: "working", epoch: 1, paneMode: "terminal", chatCapable: false),
+                    id: pane, short: agent, title: agent, preset: "Tidy the parser", program: "shell", runningAgent: agent,
+                    state: "running", activity: "working", epoch: 1, paneMode: "terminal", chatCapable: false),
                 Terminal(
                     id: "native-shell", short: "shell", title: "shell", preset: "shell", state: "running", epoch: 1,
                     paneMode: "terminal"),

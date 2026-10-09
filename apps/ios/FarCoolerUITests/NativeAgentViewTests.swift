@@ -292,6 +292,13 @@ final class NativeAgentViewTests: XCTestCase {
         XCTAssertTrue(showing(app).hasPrefix("terminal-only"), showing(app))
         XCTAssertFalse(element(app, "native-transcript").exists)
         XCTAssertEqual(follows(app), 0, "rows read from a runner that doesn't serve them")
+        // A dimmed switch that says why (ov-443).
+        let dimmed = element(app, "native-switch-unavailable")
+        XCTAssertTrue(dimmed.waitForExistence(timeout: 30), "nothing says why")
+        dimmed.tap()
+        let alert = app.alerts["Conversation Unavailable"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 30), "no reason shown")
+        XCTAssertTrue(alert.staticTexts["Turn on Conversation view in Settings."].exists, alert.debugDescription)
     }
 
     /// A turn nobody typed, a background task finishing, is a notice line,

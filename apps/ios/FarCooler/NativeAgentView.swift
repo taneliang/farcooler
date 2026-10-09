@@ -32,10 +32,26 @@ struct NativeSwitch<Content: View>: View {
     /// (ov-373 review 1). Sends still go through the runner's own gate.
     private var model: NativePaneModel? {
         guard AgentConversation.served(by: build),
-            AgentConversation.isAgentInATerminal(paneMode: terminal.paneMode, preset: terminal.preset, build: build),
+            AgentConversation.isAgentInATerminal(paneMode: terminal.paneMode, preset: agent, build: build),
             AgentConversation.isRunning(state: terminal.state)
         else { return nil }
-        return NativePanes.shared.model(for: terminal.id, core: connection.core, preset: terminal.preset)
+        return NativePanes.shared.model(for: terminal.id, core: connection.core, preset: agent)
+    }
+
+    /// The agent the pane runs, by which the view is offered: never
+    /// `preset`, which for a claude that named its session is the title
+    /// (ov-443).
+    private var agent: String {
+        AgentConversation.agent(running: terminal.runningAgent, program: terminal.program, preset: terminal.preset)
+    }
+
+    /// Why a Claude or Codex pane isn't offered the view, for its dimmed
+    /// switch (ov-443); nil where it is, and for any other pane.
+    private var unavailable: AgentConversation.Unavailable? {
+        let reason = AgentConversation.unavailable(
+            paneMode: terminal.paneMode, agent: agent, running: AgentConversation.isRunning(state: terminal.state),
+            offered: build?.capabilities, projectorOn: connection.projectorOn)
+        return reason?.isAboutTheRunner == true ? reason : nil
     }
 
     /// The build the layout reads: see `model`.
@@ -44,8 +60,8 @@ struct NativeSwitch<Content: View>: View {
     var body: some View {
         let model = model
         NativeSwitchBody(
-            terminal: terminal.id, model: model, offer: NativeOffer(build), isOnScreen: isVisible && scenePhase == .active,
-            isVisible: isVisible, toConversation: toConversation, content: content)
+            terminal: terminal.id, model: model, unavailable: model == nil ? unavailable : nil, offer: NativeOffer(build),
+            isOnScreen: isVisible && scenePhase == .active, isVisible: isVisible, toConversation: toConversation, content: content)
     }
 }
 
@@ -69,6 +85,8 @@ struct NativeOffer: Equatable {
 private struct NativeSwitchBody<Content: View>: View {
     let terminal: String
     let model: NativePaneModel?
+    /// Why the conversation isn't offered, where a dimmed switch says so.
+    let unavailable: AgentConversation.Unavailable?
     let offer: NativeOffer
     let isOnScreen: Bool
     let isVisible: Bool
@@ -83,13 +101,16 @@ private struct NativeSwitchBody<Content: View>: View {
     /// offered (the setting turned off, claude exited) stops its follow and
     /// starts afresh when it's offered again.
     @State private var held: NativePaneModel?
+    /// The dimmed switch's reason is on screen.
+    @State private var explaining = false
 
     init(
-        terminal: String, model: NativePaneModel?, offer: NativeOffer, isOnScreen: Bool, isVisible: Bool,
-        toConversation: @escaping () -> Void, content: @escaping () -> Content
+        terminal: String, model: NativePaneModel?, unavailable: AgentConversation.Unavailable? = nil, offer: NativeOffer,
+        isOnScreen: Bool, isVisible: Bool, toConversation: @escaping () -> Void, content: @escaping () -> Content
     ) {
         self.terminal = terminal
         self.model = model
+        self.unavailable = unavailable
         self.offer = offer
         self.isOnScreen = isOnScreen
         self.isVisible = isVisible
@@ -147,7 +168,24 @@ private struct NativeSwitchBody<Content: View>: View {
                     .accessibilityLabel(showing ? "Show Terminal" : "Show Conversation")
                     .accessibilityIdentifier("native-switch")
                 }
+            } else if let unavailable, isVisible {
+                // Dimmed, and a tap says why (ov-443).
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        explaining = true
+                    } label: {
+                        Image(systemName: "text.bubble").foregroundStyle(.tertiary)
+                    }
+                    .accessibilityLabel("Conversation Unavailable")
+                    .accessibilityValue(unavailable.sentence)
+                    .accessibilityIdentifier("native-switch-unavailable")
+                }
             }
+        }
+        .alert("Conversation Unavailable", isPresented: $explaining) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(unavailable?.sentence ?? "")
         }
         .task(id: model.map(ObjectIdentifier.init)) {
             guard let model else {
