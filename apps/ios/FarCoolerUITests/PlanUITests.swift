@@ -219,6 +219,26 @@ final class PlanUITests: XCTestCase {
         keep(app, "plan-themes")
     }
 
+    /// Work reads by what it does (ov-462): the train as "Train 9" with what it
+    /// carries, and its lanes by title, with "in Train 9" and no slug in any text.
+    func testNowNamesWorkByTitleAndTheTrainOnce() {
+        let app = openBoard()
+        showPlan(app)
+        let train = element(app, "plan-train-integ-9")
+        for _ in 0..<10 where !(train.exists && train.isHittable) { app.swipeUp() }
+        XCTAssertTrue(train.exists, "no train row: \(app.debugDescription)")
+        XCTAssertTrue(train.label.contains("Train 9"), train.label)
+        XCTAssertTrue(train.label.contains("A read-only Files browser"), "the train doesn't say what it carries: \(train.label)")
+        XCTAssertTrue(train.label.contains("Agent working"), "the train doesn't say its agent: \(train.label)")
+        XCTAssertFalse(train.label.contains("integ-9"), "the slug is in the text: \(train.label)")
+        let lane = element(app, "plan-lane-phones-b")
+        for _ in 0..<4 where !lane.exists { app.swipeUp() }
+        XCTAssertTrue(lane.exists, "no lane under the train: \(app.debugDescription)")
+        XCTAssertTrue(lane.label.contains("A read-only Files browser"), lane.label)
+        XCTAssertTrue(lane.label.contains("in Train 9") && !lane.label.contains("integ-9") && !lane.label.contains("phones-b"), lane.label)
+        keep(app, "plan-now-train")
+    }
+
     func testAnOutcomeWrapsToThreeLines() {
         let app = openBoard(["-phone-plan", "-phone-plan-outcomes"])
         showPlan(app)

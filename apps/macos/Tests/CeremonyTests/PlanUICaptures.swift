@@ -63,7 +63,7 @@ struct PlanUICaptures {
         let lanes = [
             ("Agents tell the orchestrator when they are done", "agent-msg", LaneState.building),
             ("Mac interface polish", "mac-ux", LaneState.review),
-            ("fix-ac84", "fix-ac84", LaneState.fixing),
+            ("The start-line test is deterministic", "fix-ac84", LaneState.fixing),
         ].enumerated().map { index, row in
             var lane = plan.lanes[1]
             lane.id = "lane-\(index)"

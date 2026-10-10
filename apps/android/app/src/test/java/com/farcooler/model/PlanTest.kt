@@ -92,7 +92,7 @@ class PlanTest {
     fun `a lane's status says its round, its place, its commit and its train`() {
         val plan = Plan.decode(fixture)
         assertEquals("Queued · 1st", PlanWords.status(plan.lanes[0]))
-        assertEquals("In review · in integ-9", PlanWords.status(plan.lanes[1]))
+        assertEquals("In review · in Train 9", PlanWords.status(plan.lanes[1]))
         assertEquals("Landed · 4d3c8cb1", PlanWords.status(plan.lanes[2]))
         assertEquals("Fixing · round 2", PlanWords.status(plan.lanes[1].copy(state = LaneState.FIXING, fixRounds = 2, train = null)))
         assertEquals(listOf("1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st"), listOf(1, 2, 3, 4, 11, 12, 13, 21).map(PlanWords::ordinal))

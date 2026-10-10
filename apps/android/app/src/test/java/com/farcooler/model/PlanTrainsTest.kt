@@ -52,7 +52,7 @@ class PlanTrainsTest {
         assertTrue(TrainWords.needsAttention(groups[0].train!!, null))
         // "CI unknown" once, never "CI CI unknown" (review train-1005c L2).
         assertEquals("Red · c85bf83d · CI unknown · Agent working · 120K tokens · about \$4.00 estimated", TrainWords.train(groups[0].train!!, PlanCiRead("sha:c85bf83d", status = CiStatus.UNKNOWN)))
-        assertEquals("In review · in integ-9", PlanWords.status(plan.lanes[1]))
+        assertEquals("In review · in Train 9", PlanWords.status(plan.lanes[1]))
     }
 
     @Test

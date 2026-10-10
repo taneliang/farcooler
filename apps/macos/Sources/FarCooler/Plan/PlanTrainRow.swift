@@ -38,13 +38,6 @@ struct PlanTrainRow: View {
                             .lineLimit(1)
                             .layoutPriority(1)
                         Spacer(minLength: 0)
-                        if let slug = train.slug {
-                            Text(slug)
-                                .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                        }
                     }
                     if let carries = train.carries {
                         Text(carries)
@@ -71,7 +64,8 @@ struct PlanTrainRow: View {
         .buttonStyle(.plain)
         .disabled(run == nil)
         .onHover { hovering = $0 }
-        .help(run.map { "Open CI on \($0.host() ?? "GitHub")" } ?? "")
+        // The slug is for a person who needs it: here, and nowhere in the text.
+        .help([train.slug, run.map { "Open CI on \($0.host() ?? "GitHub")" }].compactMap { $0 }.joined(separator: " · "))
         .accessibilityElement(children: .combine)
         .accessibilityLabel([train.heading, train.carries, words].compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(run == nil ? [] : .isLink)

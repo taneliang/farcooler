@@ -276,6 +276,15 @@ extension PlanWords {
         [ciStatus(read.status), ciJobs(read)].compactMap { $0 }.joined(separator: " · ")
     }
 
+    /// `text` cut at a word to `max` characters, with an ellipsis: a title in
+    /// the strip's one line.
+    public static func short(_ text: String, max: Int = 24) -> String {
+        guard text.count > max else { return text }
+        let cut = String(text.prefix(max - 1))
+        let head = cut.lastIndex(of: " ").map { String(cut[..<$0]) }.flatMap { $0.count > max / 2 ? $0 : nil } ?? cut
+        return head.trimmingCharacters(in: .whitespaces) + "\u{2026}"
+    }
+
     /// A train's line under its name: "Red · c85bf83d · CI Failed · 1 of 3
     /// jobs failed", or "CI not read yet" once pushed and before the runner
     /// has read it.

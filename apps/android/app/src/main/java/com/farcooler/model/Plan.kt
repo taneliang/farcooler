@@ -141,6 +141,8 @@ data class PlanLane(
      * cards' titles. Null or empty from a runner before it, and for a lane with no cards and no title.
      */
     val title: String? = null,
+    /** The heading of the train it is on, set when the plan is read: rows say "in Train 9", not the slug. */
+    val trainHeading: String? = null,
 ) {
     /** What every surface shows first: the title, else the name. */
     val heading: String get() = title?.takeIf { it.isNotEmpty() } ?: name
@@ -256,7 +258,14 @@ data class Plan(
     companion object {
         fun decode(text: String): Plan = decode(Json.parseToJsonElement(text).jsonObject)
 
-        fun decode(o: JsonObject): Plan = Plan(
+        fun decode(o: JsonObject): Plan = decodeRaw(o).let { plan ->
+            plan.copy(lanes = plan.lanes.map { lane ->
+                val train = plan.trains.firstOrNull { it.name.equals(lane.train, ignoreCase = true) }
+                if (train == null) lane else lane.copy(trainHeading = train.heading)
+            })
+        }
+
+        private fun decodeRaw(o: JsonObject): Plan = Plan(
             nowMs = o.long("now_ms"),
             themes = o.list("themes").map { theme(it.jsonObject) },
             lanes = o.list("lanes").map { lane(it.jsonObject) },
@@ -474,8 +483,16 @@ object PlanWords {
         if (lane.state == LaneState.FIXING && lane.fixRounds > 0) parts += "round ${lane.fixRounds}"
         lane.planRank?.let { if (lane.state == LaneState.QUEUED) parts += ordinal(it) }
         lane.landedSha?.let { if (lane.state == LaneState.LANDED && it.isNotEmpty()) parts += it.take(8) }
-        lane.train?.let { if (lane.state.isLive && it.isNotEmpty()) parts += "in $it" }
+        lane.train?.let { if (lane.state.isLive && it.isNotEmpty()) parts += "in ${lane.trainHeading ?: it}" }
         return parts.joinToString(" · ")
+    }
+
+    /** [text] cut at a word to [max] characters, with an ellipsis: a title in the strip's one line. */
+    fun short(text: String, max: Int = 24): String {
+        if (text.length <= max) return text
+        val cut = text.take(max - 1)
+        val head = cut.substringBeforeLast(' ', cut).takeIf { it.length > max / 2 } ?: cut
+        return head.trimEnd() + "\u2026"
     }
 
     /** "1st", "2nd", "3rd", "4th", … "11th", "12th", "13th", "21st". */

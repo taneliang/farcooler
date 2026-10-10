@@ -17,7 +17,7 @@ struct PlanStripWordsTests {
         var object = try #require(try JSONSerialization.jsonObject(with: PlanViewTests.fixture()) as? [String: Any])
         let template = try #require((object["lanes"] as? [[String: Any]])?.first)
         object["lanes"] = lanes.map { name, state in
-            template.merging(["id": "lane-\(name)", "name": name, "short": name, "state": state]) { $1 }
+            template.merging(["id": "lane-\(name)", "name": name, "short": name, "state": state, "title": ""]) { $1 }
         }
         object["order"] = order.map { "lane-\($0)" }
         return try PlanModel.decode(JSONSerialization.data(withJSONObject: object))

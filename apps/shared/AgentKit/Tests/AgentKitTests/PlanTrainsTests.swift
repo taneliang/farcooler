@@ -59,7 +59,7 @@ struct PlanTrainsTests {
         let groups = plan.nowGroups
         #expect(groups.map { $0.train?.name } == ["integ-14", "integ-15", nil])
         #expect(groups.map { $0.lanes.map(\.name) } == [["mac-ux", "phones"], [], ["solo"]])
-        #expect(PlanWords.status(plan.lanes[0]) == "In Review · in integ-14")
+        #expect(PlanWords.status(plan.lanes[0]) == "In Review · in Train 14")
     }
 
     @Test("a train's line: its state, the SHA, and CI as it was last read, or that it hasn't been")

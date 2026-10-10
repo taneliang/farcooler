@@ -162,6 +162,9 @@ public struct PlanLane: Decodable, Equatable, Identifiable, Sendable {
     /// else one the runner derived from its cards' titles. Nil or empty from
     /// a runner before it, and for a lane with no cards and no title.
     public var title: String?
+    /// The heading of the train it is on, set when the plan is read: rows say
+    /// "in Train 9", not the slug.
+    public var trainHeading: String?
 
     /// What every surface shows first: the title, else the name.
     public var heading: String {
@@ -257,6 +260,7 @@ public struct PlanModel: Decodable, Equatable, Sendable {
         self.cards = cards
         self.rulings = rulings
         self.trains = trains
+        self.lanes = Self.naming(trains: trains, in: lanes)
         self.ci = ci
         self.boardCounts = boardCounts
         self.cost = cost
@@ -274,6 +278,7 @@ public struct PlanModel: Decodable, Equatable, Sendable {
         cards = try c.decode([PlanCard].self, forKey: .cards)
         rulings = try c.decodeIfPresent([PlanRuling].self, forKey: .rulings) ?? []
         trains = try c.decodeIfPresent([PlanTrain].self, forKey: .trains) ?? []
+        lanes = Self.naming(trains: trains, in: lanes)
         ci = try c.decodeIfPresent([PlanCIRead].self, forKey: .ci) ?? []
         boardCounts = try c.decodeIfPresent(PlanCounts.self, forKey: .boardCounts)
         cost = try c.decodeIfPresent(PlanCostRead.self, forKey: .cost)
@@ -284,6 +289,16 @@ public struct PlanModel: Decodable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case nowMs, themes, lanes, order, cards, rulings, trains, ci, boardCounts, cost, noLane, landedNotClosed, laneIsTrain
+    }
+
+    /// `lanes`, each told its train's heading (ov-462).
+    static func naming(trains: [PlanTrain], in lanes: [PlanLane]) -> [PlanLane] {
+        lanes.map { lane in
+            guard let name = lane.train, let train = trains.first(where: { $0.name.lowercased() == name.lowercased() }) else { return lane }
+            var named = lane
+            named.trainHeading = train.heading
+            return named
+        }
     }
 
     public static let empty = PlanModel()
@@ -485,7 +500,7 @@ public enum PlanWords {
         if lane.state == .fixing, lane.fixRounds > 0 { parts.append("round \(lane.fixRounds)") }
         if lane.state == .queued, let rank = lane.planRank { parts.append(ordinal(rank)) }
         if lane.state == .landed, let sha = lane.landedSha, !sha.isEmpty { parts.append(String(sha.prefix(8))) }
-        if lane.state.isLive, let train = lane.train, !train.isEmpty { parts.append("in \(train)") }
+        if lane.state.isLive, let train = lane.train, !train.isEmpty { parts.append("in \(lane.trainHeading ?? train)") }
         return parts.joined(separator: " · ")
     }
 

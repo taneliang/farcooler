@@ -37,9 +37,6 @@ struct PlanTrainRow: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityIdentifier("plan-train-\(train.name)-carries")
                     }
-                    if let slug = train.slug {
-                        Text(slug).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
-                    }
                     Text(words)
                         .font(.footnote.weight(attention ? .medium : .regular))
                         .foregroundStyle(attention ? AnyShapeStyle(GlancePalette.amber(scheme)) : AnyShapeStyle(.secondary))

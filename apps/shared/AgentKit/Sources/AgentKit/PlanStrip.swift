@@ -119,8 +119,8 @@ public struct PlanStrip: Equatable, Sendable {
         let working = plan.working
         self.init(
             orchestrator: orchestrator, line: line, needsYou: needsYou,
-            now: working.prefix(Self.nowShown).map { Lane(name: $0.name, state: $0.state) },
-            moreNow: working.count - min(working.count, Self.nowShown), next: plan.nextUp.first?.name)
+            now: working.prefix(Self.nowShown).map { Lane(name: PlanWords.short($0.heading), state: $0.state) },
+            moreNow: working.count - min(working.count, Self.nowShown), next: plan.nextUp.first.map { PlanWords.short($0.heading) })
     }
 
     // MARK: Words

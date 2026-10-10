@@ -144,7 +144,7 @@ class OneTreeTest {
     @Test
     fun `the strip says what needs you, two Now lanes and how many more, and the next lane`() {
         val strip = PlanStrip.of(plan, needsYou = 2, orchestrator = Terminal(id = "o", state = "running", activity = "idle", role = "orchestrator"))
-        assertEquals(listOf("2 need you", "mac-vis Building", "phones-b In review", "+4", "next: plan-phones"), strip.parts)
+        assertEquals(listOf("2 need you", "Mac looks like one app Building", "A read-only Files\u2026 In review", "+4", "next: Plan view on iOS and\u2026"), strip.parts)
         assertEquals(PlanStrip.Orchestrator.IDLE, strip.orchestrator)
         assertTrue(strip.accessibilityLabel.startsWith("Orchestrator, idle. 2 need you"))
         assertTrue(PlanStrip.of(Plan(), 0, null).isEmpty)

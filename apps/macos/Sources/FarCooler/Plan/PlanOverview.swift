@@ -351,15 +351,15 @@ struct PlanLaneRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibility)
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .help(lane.slug ?? "")
         .identified("plan-lane-\(lane.name)")
     }
 
     /// Next Up's reason; elsewhere, the state with its round, train or
     /// commit, and the cards.
     private var second: String {
-        let slug = lane.slug.map { "\($0) · " } ?? ""
-        if rank != nil { return slug + (lane.reason.isEmpty ? PlanWords.cards(lane.cards.count) : lane.reason) }
-        return "\(slug)\(PlanWords.status(lane)) · \(PlanWords.cards(lane.cards.count))"
+        if rank != nil { return lane.reason.isEmpty ? PlanWords.cards(lane.cards.count) : lane.reason }
+        return "\(PlanWords.status(lane)) · \(PlanWords.cards(lane.cards.count))"
     }
 
     @ViewBuilder private var mark: some View {
