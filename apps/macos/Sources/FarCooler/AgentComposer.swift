@@ -1177,6 +1177,20 @@ final class ComposerTextView: NSTextView {
         super.paste(sender)
     }
 
+    /// Paste enabled for images `onImages` takes (ov-454). A plain-text
+    /// view reads no image type, so on its own it greys Paste out for a
+    /// copied screenshot and ⌘V never reaches `paste`.
+    override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(paste(_:)), isEditable, offersImages?(pasteboard) == true { return true }
+        return super.validateUserInterfaceItem(item)
+    }
+
+    /// A drop of image data alone: a plain-text view refuses it here, before
+    /// `performDragOperation`, for the same reason as Paste (ov-454).
+    override func prepareForDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        offersImages?(sender.draggingPasteboard) == true || super.prepareForDragOperation(sender)
+    }
+
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
         offersImages?(sender.draggingPasteboard) == true ? .copy : super.draggingEntered(sender)
     }
