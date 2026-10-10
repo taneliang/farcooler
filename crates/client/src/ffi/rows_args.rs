@@ -106,6 +106,10 @@ pub(super) fn changes_of(follow: &farcooler_protocol::v1::AgentRowChanges) -> Va
 }
 
 #[cfg(test)]
+#[path = "subagent_rows_tests.rs"]
+mod subagent_rows_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

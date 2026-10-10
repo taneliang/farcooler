@@ -5,8 +5,8 @@
 
 use serde_json::json;
 
-use super::compose_upload_tests::a_recording_runner;
-use super::dispatch;
+use crate::ffi::compose_upload_tests::a_recording_runner;
+use crate::ffi::dispatch;
 use crate::session::Session;
 
 fn agent_of(req: &farcooler_protocol::v1::Request) -> String {

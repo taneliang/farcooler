@@ -79,11 +79,10 @@ impl SubagentProjectors {
         Page { epoch: open.epoch, rev: p.revision(), rows, more_before }
     }
 
-    /// What changed after `after` in projection `epoch`, read again every
-    /// `POLL` until something has or `deadline` passes.
-    pub async fn follow(
-        &self, terminal: Uuid, agent: &str, path: PathBuf, epoch: u64, after: u64, deadline: tokio::time::Instant, max: usize,
-    ) -> Follow {
+    /// What changed after revision `after` of projection `epoch` (`since`),
+    /// read again every `POLL` until something has or `deadline` passes.
+    pub async fn follow(&self, terminal: Uuid, agent: &str, path: PathBuf, since: (u64, u64), deadline: tokio::time::Instant, max: usize) -> Follow {
+        let (epoch, after) = since;
         let open = self.get(terminal, agent, path);
         loop {
             let read = open.clone();

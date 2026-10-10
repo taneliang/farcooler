@@ -220,7 +220,7 @@ async fn subagent_follow(
     let deadline = arrived + Duration::from_millis(u64::from(p.wait_ms)).min(MAX_WAIT);
     match subagent_path(open.await?, terminal, &p.agent_id)? {
         Some(path) => {
-            Ok(subagent_rows::global().follow(terminal, &p.agent_id, path, p.epoch, p.after_rev, deadline, session_projectors::MAX_CHANGES).await)
+            Ok(subagent_rows::global().follow(terminal, &p.agent_id, path, (p.epoch, p.after_rev), deadline, session_projectors::MAX_CHANGES).await)
         }
         None => {
             tokio::time::sleep_until(deadline).await;
