@@ -1333,3 +1333,64 @@ fn a_lane_s_pr_stage_is_printed_and_left_out_when_unsaid() {
     plan.lanes[at].state = pb::LaneState::Building as i32;
     assert!(!overview(&plan, NOW).contains("Building \u{b7} Building"));
 }
+
+// ---- titles, and a train's own agent (ov-462, ov-461) ----
+
+/// `--title` goes to the wire on a lane and a train, and an empty one on `set`
+/// takes the title away.
+#[tokio::test]
+async fn titles_go_to_the_wire() {
+    let mut link = runner();
+    say(&mut link, "lane start mac-new --title=Mac-catches-up --card ov-2").await.unwrap();
+    let Some(request::Payload::LaneCreate(p)) = &last(&link).payload else { panic!() };
+    assert_eq!(p.title, "Mac-catches-up");
+    say(&mut link, "lane set mac-ux --title=").await.unwrap();
+    let Some(request::Payload::LaneUpdate(p)) = &last(&link).payload else { panic!() };
+    assert_eq!(p.title.as_deref(), Some(""));
+    say(&mut link, "train start integ-10 --title=Phones").await.unwrap();
+    let Some(request::Payload::TrainStart(p)) = &last(&link).payload else { panic!() };
+    assert_eq!(p.title, "Phones");
+    say(&mut link, "train set integ-9 --title=").await.unwrap();
+    let Some(request::Payload::TrainSet(p)) = &last(&link).payload else { panic!() };
+    assert_eq!(p.title.as_deref(), Some(""));
+    link.refuse = Some("title");
+    let err = say(&mut link, "lane set mac-ux --title long").await.unwrap_err();
+    assert_eq!(err.to_string(), "A title is one short line, up to 80 characters.");
+}
+
+/// A train records its integrating agent and card (ov-461), and `--ended`
+/// marks it finished.
+#[tokio::test]
+async fn a_train_records_its_agent_and_card() {
+    let mut link = runner();
+    say(&mut link, "train start integ-10 --agent i9 --model opus --card ov-2").await.unwrap();
+    let Some(request::Payload::TrainStart(p)) = &last(&link).payload else { panic!() };
+    let agent = p.agent.clone().unwrap();
+    assert_eq!((agent.harness.as_str(), agent.agent_id.as_str(), agent.model.as_deref(), agent.ended), ("claude", "i9", Some("opus"), false));
+    assert_eq!(p.card_id, Some(id_bytes(Uuid::from_u128(0x1002))));
+    say(&mut link, "train set integ-9 --agent i9 --harness codex --ended").await.unwrap();
+    let Some(request::Payload::TrainSet(p)) = &last(&link).payload else { panic!() };
+    let agent = p.agent.clone().unwrap();
+    assert_eq!((agent.harness.as_str(), agent.ended, p.card_id.clone()), ("codex", true, None));
+    assert!(say(&mut link, "train set integ-9 --card ov-40").await.unwrap_err().to_string().contains("ov-40"));
+}
+
+/// A lane named like a live train is the integrating agent modeled as a lane
+/// (ov-461): Now lists the train once, and Worth a look says what to do.
+#[test]
+fn a_lane_named_like_a_live_train_is_flagged_and_not_listed_twice() {
+    let mut plan = the_plan();
+    plan.lanes.push(lane(9, "INTEG-9", pb::LaneState::Building, &[1]));
+    let text = overview_text::overview(&plan, NOW);
+    let now: Vec<&str> = text.lines().skip_while(|l| *l != "Now").take_while(|l| !l.starts_with("Themes")).collect();
+    assert_eq!(now.len(), 3, "the train and its lane, not the shadow: {text}");
+    assert!(!text.lines().any(|l| l.contains("INTEG-9 ·")), "no row of its own: {text}");
+    assert!(text.contains("Worth a look\n  INTEG-9  is a lane and a train. Record its agent on the train (`plan train set INTEG-9 --agent <id>`), then drop the lane."), "{text}");
+    let json = plan_json(&plan, &Keys::of_plan(&plan));
+    assert_eq!(json["lane_is_train"][0]["name"], "INTEG-9");
+    plan.lanes[3].state = pb::LaneState::Landed as i32;
+    assert!(plan_json(&plan, &Keys::of_plan(&plan))["lane_is_train"].as_array().unwrap().is_empty(), "a finished lane is history");
+    plan.lanes[3].state = pb::LaneState::Building as i32;
+    plan.trains[0].state = pb::BoardTrainState::Landed as i32;
+    assert!(plan_json(&plan, &Keys::of_plan(&plan))["lane_is_train"].as_array().unwrap().is_empty(), "a landed train is history");
+}

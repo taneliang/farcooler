@@ -156,3 +156,58 @@ async fn a_read_client_reads_trains_and_cannot_write_them() {
         other => panic!("expected a scope denial, got {other:?}"),
     }
 }
+
+/// A train's title, integrating agent and card cross the socket (ov-461,
+/// ov-462): the answer to a write is what a read says, "Train 14" is read off
+/// the name, the agent is no lane, and a lane's title is derived from its card.
+#[tokio::test]
+async fn a_train_carries_its_agent_and_a_lane_its_derived_title() {
+    let h = start(Scope::Control).await;
+    let repo = a_repository(&h);
+    let card = h.service.store.create_task(repo.workspace, "Plan: lanes read as sentences", Actor::Manager).unwrap();
+    let lane = h
+        .service
+        .store
+        .create_lane(
+            repo.workspace,
+            &NewLane { name: "names".into(), ..Default::default() },
+            &[farcooler_store::plan::LaneCard { task_id: card.id, slice: String::new() }],
+            None,
+            Actor::Manager,
+        )
+        .unwrap();
+    let mut a = connect(&h).await;
+    let mut start = pb::TrainStart {
+        workspace_id: id(repo.workspace),
+        name: "integ-14".into(),
+        lane_ids: vec![id(lane.id)],
+        actor: "manager".into(),
+        agent: Some(pb::TrainAgentRecord { harness: "claude".into(), agent_id: "i14".into(), model: Some("opus".into()), ended: false }),
+        card_id: Some(id(card.id)),
+        ..Default::default()
+    };
+    let started = train(&mut a, payload::Payload::TrainStart(start.clone()), "train.start").await;
+    assert_eq!((started.title.as_str(), started.summary.as_str()), ("Train 14", "Lanes read as sentences"));
+    let agent = started.agent.clone().unwrap();
+    assert_eq!((agent.agent_id.as_str(), agent.model.as_str(), agent.ended_at), ("i14", "opus", None));
+    assert_eq!(agent.spend.unwrap().unmeasured_agents, 1, "no turn read: not reported");
+    assert_eq!(started.card_id, Some(id(card.id)));
+
+    start.name = "integ-15".into();
+    start.title = "Phones catch up".into();
+    start.lane_ids.clear();
+    let second = train(&mut a, payload::Payload::TrainStart(start), "train.start").await;
+    assert_eq!(second.title, "Phones catch up");
+    let ended = pb::TrainSet {
+        train_id: started.id.clone(),
+        agent: Some(pb::TrainAgentRecord { harness: "claude".into(), agent_id: "i14".into(), model: None, ended: true }),
+        actor: "manager".into(),
+        ..Default::default()
+    };
+    let ended = train(&mut a, payload::Payload::TrainSet(ended), "train.set").await;
+    assert!(ended.agent.unwrap().ended_at.is_some());
+
+    let read = plan(&mut a, repo.workspace).await;
+    assert_eq!(read.lanes.len(), 1, "the agent is no lane");
+    assert_eq!(read.lanes[0].title, "Lanes read as sentences");
+}
