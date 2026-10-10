@@ -20,9 +20,12 @@ struct NativeAgentTray: View {
     @ObservedObject var model: NativePaneModel
     @Environment(\.verticalSizeClass) private var height
 
-    /// The most agents listed before the rest are counted: fewer in a
-    /// phone held sideways, where five would cover the conversation.
-    private var listed: Int { height == .compact ? 2 : 5 }
+    /// The tallest the list grows before it scrolls: about four agents, and
+    /// less with the phone held sideways, so the conversation keeps the
+    /// screen. Every agent stays reachable.
+    private var tallest: CGFloat { height == .compact ? 96 : 260 }
+    /// The list's own height, measured, so a short list takes only its room.
+    @State private var listHeight: CGFloat = 0
 
     var body: some View {
         let drill = model.drill
@@ -50,15 +53,17 @@ struct NativeAgentTray: View {
                 .accessibilityValue(drill.collapsed ? "Collapsed" : "Expanded")
                 .accessibilityIdentifier("native-agent-tray-header")
                 if !drill.collapsed {
-                    ForEach(entries.prefix(listed + 1)) { entry in
-                        row(entry, drill: drill)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: Spacing.tight) {
+                            ForEach(entries) { entry in
+                                row(entry, drill: drill)
+                            }
+                        }
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
                     }
-                    if entries.count > listed + 1 {
-                        Text("\(entries.count - listed - 1) more running")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.leading, 16 + Spacing.group)
-                    }
+                    .scrollBounceBehavior(.basedOnSize)
+                    .frame(height: min(max(listHeight, 1), tallest))
+                    .accessibilityIdentifier("native-agent-tray-list")
                 }
             }
             .padding(.horizontal, Spacing.inset)

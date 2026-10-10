@@ -9,9 +9,9 @@ final class NativeAgentTrayUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    private func launch() -> XCUIApplication {
+    private func launch(_ flags: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-native-agent-harness", "-native-agents"]
+        app.launchArguments = ["-native-agent-harness", "-native-agents"] + flags
         // A capture run's terminal theme, which the conversation's scheme
         // follows (`TEST_RUNNER_FARCOOLER_CAPTURE_THEME`).
         if let theme = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_THEME"] {
@@ -94,6 +94,22 @@ final class NativeAgentTrayUITests: XCTestCase {
         XCTAssertTrue(element(app, "native-agent-back").waitForExistence(timeout: 20))
         element(app, "native-agent-tray-tray:main").tap()
         XCTAssertTrue(element(app, "native-composer").waitForExistence(timeout: 20))
+    }
+
+    func testEightAgentsScrollAndTheLastOneOpens() {
+        let app = launch(["-native-agents-eight"])
+        _ = tray(app)
+        let list = element(app, "native-agent-tray-list")
+        XCTAssertTrue(list.waitForExistence(timeout: 10))
+        XCTAssertLessThanOrEqual(list.frame.height, 261, "it scrolls rather than covering the screen")
+        let last = element(app, "native-agent-tray-sub:a9")
+        XCTAssertTrue(last.exists, "every agent is in the list, none counted away")
+        capture("eight")
+        for _ in 0..<4 where !last.isHittable { list.swipeUp() }
+        XCTAssertTrue(last.isHittable, "scrolled into reach")
+        last.tap()
+        XCTAssertTrue(element(app, "native-agent-back").waitForExistence(timeout: 20))
+        XCTAssertTrue(wait(20) { harness(app).contains("opened=agent-a9") }, harness(app))
     }
 
     /// Opt-in captures in landscape too, the phone's wide width.

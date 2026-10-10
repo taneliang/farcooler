@@ -18,8 +18,11 @@ struct NativeAgentTray: View {
     let open: (AgentTray.Entry) -> Void
     let back: () -> Void
 
-    /// The most agents listed before the rest are counted.
-    static let listed = 6
+    /// The tallest the list grows before it scrolls: about five agents, so
+    /// the conversation keeps the pane. Every agent stays reachable.
+    static let tallest: CGFloat = 230
+    /// The list's own height, measured, so a short list takes only its room.
+    @State private var listHeight: CGFloat = 0
 
     var body: some View {
         let entries = AgentTray.entries(store)
@@ -27,18 +30,18 @@ struct NativeAgentTray: View {
             VStack(alignment: .leading, spacing: Spacing.tight) {
                 header(entries)
                 if !drill.collapsed {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(entries.prefix(Self.listed + 1)) { entry in
-                            row(entry)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(entries) { entry in
+                                row(entry)
+                            }
                         }
-                        if entries.count > Self.listed + 1 {
-                            Text("\(entries.count - Self.listed - 1) more running")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .padding(.leading, 14 + Spacing.group * 2)
-                                .padding(.vertical, Spacing.tight)
-                        }
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
                     }
+                    .scrollBounceBehavior(.basedOnSize)
+                    .scrollIndicators(.automatic)
+                    .frame(height: min(max(listHeight, 1), Self.tallest))
+                    .identified("native-agent-tray-list")
                 }
             }
             .padding(Spacing.group)

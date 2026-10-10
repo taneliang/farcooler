@@ -43,6 +43,7 @@ import UIKit
 /// - `-native-agents` (ov-453): four subagents running, the runner offering
 ///   `subagent_rows`, and each agent's own rows (`agent.rows` with `agent`)
 ///   its task, a call and its words.
+///   With `-native-agents-eight`, four more run, eight in all.
 /// - `-native-flag-off`: a runner whose projector is off, so no `agent_rows`.
 /// - `-native-reconnect`: once the box holds a draft, the link comes up
 ///   again, so the build is unread for two seconds.
@@ -638,6 +639,18 @@ final class NativeHarnessRunner: ObservableObject {
                 "status": "Running", "started_ms": now - lane.4 * 1000, "tool_count": 12, "current_action": lane.3, "last_ms": now - 2000,
                 "tokens": lane.5,
             ]])
+        }
+        // `-native-agents-eight`: four more, so eight run and the tray
+        // scrolls.
+        if CommandLine.arguments.contains("-native-agents-eight") {
+            for (n, id) in ["a6", "a7", "a8", "a9"].enumerated() {
+                rows.append(row("sub:\(id)", ord: 40 + UInt64(n), rev: 40 + UInt64(n), kind: ["Subagent": [
+                    "tool_use_id": id, "agent_id": "agent-\(id)", "agent_type": "general-purpose",
+                    "description": "ov-46\(n) lane \(id)", "background": true, "status": "Running",
+                    "started_ms": now - Int64(60 - n * 10) * 1000, "tool_count": 4, "current_action": "Read Package.swift",
+                    "last_ms": now - 2000, "tokens": 3_000 + n * 500,
+                ]]))
+            }
         }
         rows.append(row("sub:a5", ord: 34, rev: 34, kind: ["Subagent": [
             "tool_use_id": "a5", "agent_id": "agent-a5", "agent_type": "general-purpose", "description": "ov-451 strip URL tokens",
