@@ -11,6 +11,13 @@ public protocol AgentRowSource: Sendable {
     /// What changed after `afterRev`, the runner holding the call up to
     /// `waitMs` for something to.
     func follow(epoch: UInt64, afterRev: UInt64, waitMs: Int) async throws -> Data
+    /// The same calls for subagent `agentId`'s own rows (ov-453), where the
+    /// runner serves them (`subagent_rows`); nil where it doesn't.
+    func subagent(_ agentId: String) -> (any AgentRowSource)?
+}
+
+extension AgentRowSource {
+    public func subagent(_ agentId: String) -> (any AgentRowSource)? { nil }
 }
 
 /// A source's failure that retrying won't fix: the runner doesn't serve rows
@@ -70,6 +77,9 @@ public final class AgentRowStore {
     /// (`AgentRowDelta.items`), from each row's kind, which never changes,
     /// so no row is observed for it.
     public private(set) var items: [ConversationItem] = []
+    /// Every `Subagent` row held, oldest first: what the agent tray reads
+    /// (ov-453). Changes only when one arrives or goes.
+    public private(set) var subagentIds: [String] = []
     public private(set) var phase: Phase = .loading
     /// Whether older rows exist than the oldest held.
     public private(set) var moreBefore = false
@@ -119,15 +129,22 @@ public final class AgentRowStore {
     /// Put `delta` on screen. The only main-thread work an update costs.
     public func apply(_ delta: AgentRowDelta) {
         let began = ContinuousClock.now
+        var agents: [String] = []
         for row in delta.rows {
             if let box = boxes[row.id] {
                 box.row = row
             } else {
                 boxes[row.id] = AgentRowBox(row)
+                if case .subagent = row.kind { agents.append(row.id) }
             }
         }
         for id in delta.removed { boxes[id] = nil }
         if let order = delta.order { ids = order }
+        if !agents.isEmpty || delta.removed.contains(where: subagentIds.contains) {
+            // In the order they were launched, a page of older ones too.
+            let held = Set(subagentIds + agents).filter { boxes[$0] != nil }
+            subagentIds = ids.filter(held.contains)
+        }
         if let items = delta.items { self.items = items }
         if moreBefore != delta.moreBefore { moreBefore = delta.moreBefore }
         applied += 1
@@ -184,6 +201,7 @@ public final class AgentRowStore {
     private func show(_ snapshot: AgentRowSnapshot) {
         for row in snapshot.rows { boxes[row.id] = AgentRowBox(row) }
         ids = snapshot.rows.map(\.id)
+        subagentIds = snapshot.rows.filter { if case .subagent = $0.kind { true } else { false } }.map(\.id)
         let kinds = Dictionary(snapshot.rows.map { ($0.id, $0) }, uniquingKeysWith: { $1 })
         items = AgentRowLedger.items(ids) { kinds[$0] }
         moreBefore = snapshot.moreBefore

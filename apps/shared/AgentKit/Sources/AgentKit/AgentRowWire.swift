@@ -77,6 +77,10 @@ public struct AgentRow: Sendable, Equatable, Identifiable, Codable {
         /// in the terminal or sent from a composer. Their bytes come one at a
         /// time through `agent.image`, by this row's id and the index here.
         public var images: [PromptImage] = []
+        /// The tokens main's newest model call used, context and answer
+        /// together (ov-453). Optional for the cache's sake; nil until a call
+        /// says.
+        public var tokens: Int? = nil
 
         public enum Outcome: Sendable, Equatable, Codable {
             case finished, interrupted, unrecorded
@@ -167,6 +171,12 @@ public struct AgentRow: Sendable, Equatable, Identifiable, Codable {
         /// Its latest tool call, as `Name summary`.
         public var currentAction: String
         public var lastMs: Int64?
+        /// Its `agentId`, once the runner knows it: what its own rows are
+        /// asked for by (ov-453). Optional for the cache's sake.
+        public var agentId: String? = nil
+        /// The tokens its newest model call used, as claude's agent panel
+        /// counts them (ov-453); nil until its transcript says.
+        public var tokens: Int? = nil
     }
 
     public struct Ask: Sendable, Equatable, Codable {
@@ -395,7 +405,8 @@ extension AgentRow {
                 backgroundRunning: AgentRowJSON.int(p["background_running"]),
                 activity: AgentRowJSON.tag(p["activity"])?.name,
                 suggestion: (p["suggestion"] as? String).flatMap { $0.isEmpty ? nil : $0 },
-                images: (p["images"] as? [Any] ?? []).compactMap { $0 as? [String: Any] }.map { PromptImage(mime: $0["mime"] as? String ?? "") }))
+                images: (p["images"] as? [Any] ?? []).compactMap { $0 as? [String: Any] }.map { PromptImage(mime: $0["mime"] as? String ?? "") },
+                tokens: (p["tokens"] as? NSNumber)?.intValue))
         case "Prose":
             return .prose(Prose(text: text("text"), conclusion: p["conclusion"] as? Bool ?? false, atMs: AgentRowJSON.ms(p["at_ms"])))
         case "Thinking":
@@ -418,7 +429,8 @@ extension AgentRow {
                 background: p["background"] as? Bool ?? false, status: status(p["status"]),
                 startedMs: AgentRowJSON.ms(p["started_ms"]), endedMs: AgentRowJSON.ms(p["ended_ms"]),
                 toolCount: AgentRowJSON.int(p["tool_count"]), currentAction: text("current_action"),
-                lastMs: AgentRowJSON.ms(p["last_ms"])))
+                lastMs: AgentRowJSON.ms(p["last_ms"]), agentId: (p["agent_id"] as? String).flatMap { $0.isEmpty ? nil : $0 },
+                tokens: (p["tokens"] as? NSNumber)?.intValue))
         case "Ask":
             let questions = (p["questions"] as? [Any] ?? []).compactMap { $0 as? [String: Any] }.map { q in
                 Ask.Question(

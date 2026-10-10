@@ -73,6 +73,8 @@ func theSharedRowFixtureDecodes() throws {
     #expect(sub.agentType == "Explore" && sub.description == "Find the callers" && sub.background)
     #expect(sub.status == .ended("Killed") && sub.toolCount == 7 && sub.currentAction == "Grep fn main")
     #expect(sub.startedMs == 6_000 && sub.endedMs == nil && sub.lastMs == 9_000)
+    #expect(sub.agentId == "a1" && sub.tokens == 87_200, "ov-453: what the tray opens it by, and what it has used")
+    #expect(turn.tokens == 52_100, "ov-453: main's tokens ride its turn")
 
     // A question the runner's hook holds (ov-370): its id and its options.
     #expect(page.rows[5].kind == .ask(.init(
