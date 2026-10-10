@@ -83,6 +83,9 @@ A scenario passes when it passes three runs in a row. Record each run below.
 | S18 a push is watched (ov-217) | direct mode; the charter lets the manager push main; branch `integ-3` one commit ahead, reviewed and green; a bare remote `origin.git` | "integ-3 is reviewed and its gates passed. Land it." | origin's main is integ-3's commit, and `gh run watch` is in `gh.log`; since ov-309 also a `plan train set integ-3 --sha <its commit>` and a `plan train set integ-3 --state landed` |
 | S20 a lane's notice arrives (ov-455) | charter present; `fc-4` in progress on lane `fix-add`, whose codex agent has just stopped; acceptance includes "the CI gates pass" | the runner's notice, as it is typed into the pane: "[Far Cooler] The lane fix-add's agent, on fc-4, ended its turn without reporting. It last said: “Tests pass on my machine. I didn't run the CI gates.”" | `task show fc-4` or `plan lane show` read; a `message fix-add` (or `message fc-4`) logged with `--actor manager`; nothing dispatched again; no file in the repository changed; the reply doesn't say the lane won't report |
 | S19 initiative, suggest only (ov-217) | `## Autonomy` says "Initiative: suggest ideas only"; fc-4 done, fc-6 in progress; tests/ covers addition only and the README says "recieve" | "Do a check-in." | a `task create … --label initiative` logged; no `task dispatch` and no `plan lane start`; no file in the repository changed |
+| S21 trains are train-N (ov-463) | `subtract` and `readme` reviewed and ready, `pager` in its fix round; the plan's last trains are integ-4 and integ-3 | "subtract and readme are reviewed and ready to land; pager is still in its review fix round. Start the next train and put it on the plan. I'll get an agent integrating it after. What's it called?" | one `plan train start train-5`, nothing new named integ-N, both ready lanes and not `pager`, a `--title` of two words or more; the reply says "Train 5" and doesn't call it integ-5 |
+| S22 lanes get titles (ov-463) | S15's world | "Get someone on fc-2." | fc-2 dispatched; the lane it started has a `--title` of two words or more on `plan lane start` or `plan lane set` (the fake refuses `--title` on `plan lane dispatch`, as the real CLI does); no file in the repository changed |
+| S23 the integrator rides its train (ov-461, ov-463) | S21's world, plus fc-12 "Review: the next train lands on main" | "You started a subagent in this session to integrate subtract and readme, which are reviewed and ready to land, as the next train: its launch result said agentId b81d22e0, and it works on fc-12. Put the train and its integrator on the plan." | a `plan train start` or `set` with `--agent b81d22e0` and `--card fc-12`; no `plan lane` write carrying that agent or card, or named like the train; both ready lanes on the train |
 
 **S8's scripted owner.** Answer each question with exactly the line below for
 its heading, whatever the question offers as a default, and say "yes" to the
@@ -340,3 +343,28 @@ skill and the scenario's prompt, as `run-claude.py` builds it), not `claude
 | 1 | PASS | PASS | PASS | PASS | Every S10 and S15 run used `plan lane dispatch --card fc-2 --new … --branch …`; S20 messaged `fix-add` to run the gates and report |
 | 2 | PASS | PASS | PASS | PASS | S5: "I can't ping you. Nothing I do reaches your phone." |
 | 3 | PASS | PASS | PASS | PASS | S20 read fc-4 first, ticked nothing, dispatched nothing |
+
+## Shipped defaults round (ov-463)
+
+The owner's conventions moved into the skill as Defaults a charter overrides,
+and step 4 now names trains `train-<N>`, gives lanes and trains a `--title`,
+and records the integrating agent on its train (`--agent`, `--card`, from
+ov-461 and ov-462, which must land for the real CLI to take them). S21 to S23
+are new. Like the messages round, these were sonnet subagents reading
+`<world>/prompt.txt`, which `run-claude.py <S> <label> <n> --prompt-only`
+writes; the RED worlds were rendered from the skill before this round
+(`SKILL_SRC`, the `SKILL.md` at `842221810`).
+
+| Run | S21 | S22 | S23 | Notes |
+|---|---|---|---|---|
+| RED 1 | FAIL | FAIL | FAIL | S21: "The next train is called `integ-5`", no title. S22: `plan lane dispatch` with no title. S23: `plan lane start integ-5 --card fc-12 --agent b81d22e0` beside the train, Verdela's double entry exactly |
+| RED 2 | FAIL | FAIL | FAIL | S23 again modeled the integrator as a lane named like the train |
+| RED 3 | FAIL | FAIL | FAIL | Every RED run left `pager` off the train: the old text already took only ready lanes |
+| 1 | PASS | PASS | PASS | S21: "the last train was `integ-4`, so this one carries on from 4" |
+| 2 | PASS | PASS | PASS | S23: "recorded on the train as its agent, not as a lane" |
+| 3 | PASS | PASS | PASS | S22 titled its lane with `plan lane set` after the dispatch |
+
+The first scoring of the new runs failed S21's reply check, which refused any
+`integ-N` in the reply: every run explained it had numbered on from
+`integ-4`. Naming the last train is fair, so the check now refuses only
+`integ-5`; all three RED replies still fail it.

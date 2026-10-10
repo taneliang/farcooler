@@ -430,7 +430,8 @@ def score_names(scenario, writes, plan_writes, has, check, changed, status, repl
             check("S21 reply saved to reply.txt", False, "save the final reply to score it")
         else:
             check("S21 the reply calls it Train 5", "train 5" in reply, reply[:200])
-            check("S21 the reply says no integ-N", not re.search(r"\binteg-\d", reply), reply[:200])
+            # Naming the last train, integ-4, is fair; calling this one integ-5 isn't.
+            check("S21 the reply doesn't call it integ-5", not re.search(r"\binteg-5\b", reply), reply[:200])
     elif scenario == "S22":
         by_lane = [c for c in plan_writes if c[:3] == ["plan", "lane", "dispatch"] and has(c, "--card", "fc-2")]
         dispatched = [c for c in writes if c[1] == "dispatch" and "fc-2" in c] + by_lane
