@@ -27,11 +27,13 @@ fn a_line_run_with_no_colorterm_still_has_it() {
 /// `COLORTERM`.
 #[tokio::test]
 async fn a_pane_has_true_color_when_the_runner_has_none() {
-    let sock = format!("fc-truecolor-{}", std::process::id());
-    let tmux = |args: &[&str]| {
+    // One server per pane: a new-session on a socket whose server is still
+    // exiting from the last kill-server can land in that dying server, and
+    // the pane's output is never seen (CI run 38032155398).
+    let tmux = |sock: &str, args: &[&str]| {
         std::process::Command::new("tmux")
             .env_remove("COLORTERM")
-            .args(["-L", &sock])
+            .args(["-L", sock])
             .args(args)
             .output()
             .expect("tmux")
@@ -41,21 +43,23 @@ async fn a_pane_has_true_color_when_the_runner_has_none() {
     let plain = with_pane_env(Uuid::now_v7(), "shell", None, None, "printenv COLORTERM".into());
     let won = with_pane_env(Uuid::now_v7(), "claude", None, Some(&recipe), "printenv COLORTERM".into());
     let mut seen = Vec::new();
-    for line in [&plain, &won] {
-        let out = tmux(&["new-session", "-d", "-x", "80", "-y", "24", "-P", "-F", "#{pane_id}", &format!("{line}; sleep 60")]);
+    for (i, line) in [&plain, &won].into_iter().enumerate() {
+        let sock = format!("fc-truecolor-{}-{i}", std::process::id());
+        let out = tmux(&sock, &["new-session", "-d", "-x", "80", "-y", "24", "-P", "-F", "#{pane_id}", &format!("{line}; sleep 60")]);
         let pane = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        assert!(!pane.is_empty(), "tmux started no pane: {}", String::from_utf8_lossy(&out.stderr));
         let mut text = String::new();
         // A loaded CI runner can take seconds to start a server and run the
         // pane's command, so wait up to 30 s (the pane lives for 60).
         for _ in 0..300 {
-            text = String::from_utf8_lossy(&tmux(&["capture-pane", "-p", "-t", &pane]).stdout).trim().to_string();
+            text = String::from_utf8_lossy(&tmux(&sock, &["capture-pane", "-p", "-t", &pane]).stdout).trim().to_string();
             if !text.is_empty() {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
         seen.push(text);
-        tmux(&["kill-server"]);
+        tmux(&sock, &["kill-server"]);
     }
     assert_eq!(seen, ["truecolor", "24bit"]);
 }
