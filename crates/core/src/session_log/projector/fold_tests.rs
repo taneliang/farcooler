@@ -25,10 +25,10 @@ fn a_recorded_session_folds_into_its_prompts_queued_message_and_replies() {
     assert!(t.iter().all(|(_, t)| t.outcome.as_ref() == Some(&revoked)), "isApiErrorMessage fails the turn: {t:?}");
     assert_eq!(t[1].1.duration_ms, Some(14247), "turn_duration's own number wins over the span");
 
-    let queued: Vec<&Queued> = p.rows().iter().filter_map(|r| match &r.kind { RowKind::Queued(q) => Some(q), _ => None }).collect();
+    let queued: Vec<&Row> = p.rows().iter().filter(|r| matches!(r.kind, RowKind::Queued(_))).collect();
     assert_eq!(queued.len(), 1);
-    assert_eq!(queued[0].text, "second message typed while busy");
-    assert_eq!(queued[0].state, QueuedState::Sent, "the dequeue sent it");
+    assert!(matches!(&queued[0].kind, RowKind::Queued(q) if q.text == "second message typed while busy"));
+    assert!(queued[0].retracted, "the dequeue sent it as its own turn, which shows it (ov-452)");
 
     assert!(prose(&p).is_empty(), "claude's error report is the outcome, not the model's prose");
     assert_eq!(p.stats().gaps, 0, "nothing in a real session is unreadable");

@@ -24,14 +24,15 @@ struct NativeRowView: View {
                 // Selectable once settled: `MarkdownPiece` turns selection
                 // on for the pieces that are done.
                 AgentReplyText(text: prose.text, trailingClearance: 0, streaming: isLast)
-            case .thinking(let thinking): ThinkingRow(thinking: thinking)
-            case .tool(let tool): ToolRow(tool: tool)
+            case .thinking(let thinking): NativeThinkingRow(thinking: thinking)
+            case .tool(let tool): NativeToolRow(id: row.id, tool: tool)
             case .subagent(let subagent): SubagentRow(subagent: subagent)
             case .ask(let ask): NativeAskRow(ask: ask, answer: answer, showTerminal: showTerminal)
             case .queued(let queued): QueuedLine(text: queued.text, state: queued.state, sendNow: sendNow)
             case .notice(let notice): NoticeLine(text: notice.text)
             case .handoff(let handoff): HandoffRow(reason: handoff.reason, showTerminal: showTerminal)
             case .gap(let gap): NoticeLine(text: NativeCopy.gap(gap))
+            case .tasks(let tasks): NativeTasksRow(tasks: tasks)
             case .hint, .unknown: EmptyView()
             }
         }
@@ -66,6 +67,16 @@ enum NativeCopy {
     /// never as the person's message.
     static func isNotice(_ turn: AgentRow.Turn) -> Bool {
         turn.origin == "Notification" || turn.origin == "System"
+    }
+
+    /// A tool's or a subagent's state, as VoiceOver says it.
+    static func status(_ status: AgentRow.Status) -> String {
+        switch status {
+        case .running: "Running"
+        case .done: "Done"
+        case .failed: "Failed"
+        case .ended: "Ended"
+        }
     }
 
     static func outcome(_ turn: AgentRow.Turn) -> String? {
@@ -110,23 +121,25 @@ private struct TurnRow: View {
     var body: some View {
         VStack(alignment: .trailing, spacing: Spacing.tight) {
             // A turn whose prompt the projection never saw (a resume) has
-            // only its outcome to show; one nobody typed is a notice.
-            if NativeCopy.isNotice(turn), !turn.prompt.isEmpty {
-                Text(turn.prompt.replacingOccurrences(of: "\"", with: ""))
+            // only its outcome to show; one nobody typed is a notice, and a
+            // scheduled task's says it is one (ov-452). Long ones fold.
+            if AgentConversation.isScheduled(turn), !turn.prompt.isEmpty {
+                ScheduledPrompt(prompt: turn.prompt)
+            } else if NativeCopy.isNotice(turn), !turn.prompt.isEmpty {
+                FoldedText(text: AgentConversation.noticeText(turn), lines: 3)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .identified("native-notice-turn")
             } else if !turn.prompt.isEmpty {
-                Text(turn.prompt)
-                    .textSelection(.enabled)
+                FoldedText(text: turn.prompt)
                     .padding(.horizontal, Spacing.inset)
                     .padding(.vertical, Spacing.group)
                     .surface(.inset, in: .card)
                     .frame(maxWidth: 560, alignment: .trailing)
             }
             HStack(spacing: Spacing.group) {
-                if turn.origin == "Queued" { Text("From the queue") }
+                if let note = AgentConversation.originNote(turn) { Text(note) }
                 if turn.backgroundRunning > 0 {
                     Text(turn.backgroundRunning == 1 ? "1 agent still running" : "\(turn.backgroundRunning) agents still running")
                 }
@@ -149,7 +162,7 @@ private struct TurnRow: View {
     }
 }
 
-private struct ThinkingRow: View {
+struct NativeThinkingRow: View {
     let thinking: AgentRow.Thinking
 
     var body: some View {
@@ -164,7 +177,7 @@ private struct ThinkingRow: View {
 
 /// A glyph for a tool's or a subagent's state. Color only where it needs
 /// attention: a failure.
-private struct StatusMark: View {
+struct NativeStatusMark: View {
     let status: AgentRow.Status
 
     var body: some View {
@@ -177,65 +190,17 @@ private struct StatusMark: View {
     }
 }
 
-private struct ToolRow: View {
-    let tool: AgentRow.Tool
-    @State private var open = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.tight) {
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
-                StatusMark(status: tool.status)
-                if !tool.diff.isEmpty {
-                    DisclosureButton(expanded: open, accessibilityLabel: "Diff", width: 12) { open.toggle() }
-                }
-                Text(tool.name).fontWeight(.medium)
-                Text(tool.summary)
-                    .font(.callout.monospaced())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer(minLength: Spacing.group)
-                RunTimeChip(startedMs: tool.startedMs, endedMs: tool.endedMs)
-            }
-            if open {
-                NativeDiff(hunks: tool.diff)
-            }
-        }
-        .font(.callout)
-    }
-}
-
-/// An edit's hunks, as unified-diff lines.
-private struct NativeDiff: View {
-    let hunks: [AgentRow.Hunk]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(hunks.indices, id: \.self) { h in
-                ForEach(hunks[h].lines.indices, id: \.self) { l in
-                    let line = hunks[h].lines[l]
-                    Text(line.isEmpty ? " " : line)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(line.hasPrefix("-") ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-        }
-        .textSelection(.enabled)
-        .padding(Spacing.group)
-        .surface(.inset, in: .control)
-    }
-}
-
 private struct SubagentRow: View {
     let subagent: AgentRow.Subagent
 
     var body: some View {
+        // Unfilled and secondary, as a tool row is: the agent's machinery
+        // sits below its words (ov-452).
         VStack(alignment: .leading, spacing: Spacing.tight) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
-                StatusMark(status: subagent.status)
+                NativeStatusMark(status: subagent.status)
                 Text(NativeCopy.agentType(subagent.agentType)).fontWeight(.medium)
-                Text(subagent.description).foregroundStyle(.secondary).lineLimit(1)
+                Text(subagent.description).lineLimit(1).layoutPriority(-1)
                 Spacer(minLength: Spacing.group)
                 Text(subagent.toolCount == 1 ? "1 tool" : "\(subagent.toolCount) tools")
                     .font(.caption)
@@ -247,12 +212,31 @@ private struct SubagentRow: View {
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .padding(.leading, 22)
+                    .padding(.leading, 14 + Spacing.group)
             }
         }
-        .font(.callout)
-        .padding(Spacing.group)
-        .surface(.inset, in: .card)
+        .font(MachineryStyle.font)
+        .foregroundStyle(.secondary)
+        .padding(.leading, 14)
+    }
+}
+
+/// A scheduled task's prompt (ov-452): said to be one, its words folded to a
+/// few lines, at the leading edge where claude's own notices sit, since
+/// nobody typed it.
+private struct ScheduledPrompt: View {
+    let prompt: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.tight) {
+            Label(AgentConversation.scheduledTask, systemImage: "clock")
+                .font(.caption.weight(.medium))
+            FoldedText(text: prompt, lines: 3)
+                .font(.callout)
+        }
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .identified("native-scheduled-turn")
     }
 }
 
@@ -266,21 +250,27 @@ struct QueuedLine: View {
     var sendNow: (() -> Void)?
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
-            Text(state == "Withdrawn" ? "Withdrawn" : state == "Sent" ? "Sent from the queue" : "Queued")
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-            Text(text).lineLimit(2)
-            if state == "Waiting", let sendNow {
-                Button("Send Now", action: sendNow)
-                    .controlSize(.small)
-                    .help("Claude reads the queued messages now instead of after this turn.")
-                    .identified("native-send-now")
+        // The person's message, as a prompt is drawn, with what became of
+        // it under it: still queued, taken into the running turn, or taken
+        // back (ov-452).
+        VStack(alignment: .trailing, spacing: Spacing.tight) {
+            FoldedText(text: text)
+                .padding(.horizontal, Spacing.inset)
+                .padding(.vertical, Spacing.group)
+                .surface(.inset, in: .card)
+                .frame(maxWidth: 560, alignment: .trailing)
+            HStack(spacing: Spacing.group) {
+                Text(AgentConversation.queuedLabel(state))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if state == "Waiting", let sendNow {
+                    Button("Send Now", action: sendNow)
+                        .controlSize(.small)
+                        .help("Claude reads the queued messages now instead of after this turn.")
+                        .identified("native-send-now")
+                }
             }
         }
-        .padding(.horizontal, Spacing.inset)
-        .padding(.vertical, Spacing.group)
-        .surface(.inset, in: .card)
         .frame(maxWidth: .infinity, alignment: .trailing)
         .identified("native-queued")
     }

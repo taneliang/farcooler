@@ -6,7 +6,8 @@ use super::rows::*;
 use super::{Projection, SessionProjector};
 
 fn queued(p: &Projection) -> Vec<(&str, QueuedState)> {
-    p.rows().iter().filter_map(|r| match &r.kind { RowKind::Queued(q) => Some((q.text.as_str(), q.state)), _ => None }).collect()
+    // A retracted row is one a page no longer holds (ov-452).
+    p.rows().iter().filter(|r| !r.retracted).filter_map(|r| match &r.kind { RowKind::Queued(q) => Some((q.text.as_str(), q.state)), _ => None }).collect()
 }
 
 #[test]
@@ -14,7 +15,7 @@ fn an_is_meta_prompt_with_its_own_prompt_id_is_a_turn_and_a_companion_is_not() {
     let p = fold(META_PROMPT);
     assert_eq!(turns(&p).len(), 2, "the heartbeat is a turn; the image companion is not");
     let heartbeat = turn(&p, "turn:p2");
-    assert_eq!(heartbeat.origin, TurnOrigin::System);
+    assert_eq!(heartbeat.origin, TurnOrigin::Scheduled, "a heartbeat is a scheduled task's firing (ov-452)");
     assert_eq!(heartbeat.duration_ms, Some(500));
     assert_eq!(turn(&p, "turn:p1").duration_ms, Some(2000), "the heartbeat's turn_duration is not the last turn's");
     let reply = prose(&p).into_iter().find(|(_, t)| t.text == "Nothing new on the board.").unwrap();
@@ -39,14 +40,14 @@ fn a_dequeue_sends_the_message_its_prompt_was_not_the_oldest_one() {
         if line.contains("\"promptId\":\"p2\"") {
             assert_eq!(
                 queued(&p),
-                [("Also update the docs.", QueuedState::Sent), ("Then run the tests.", QueuedState::Sent)],
-                "the first was absorbed mid-turn, and the dequeue sent the newest, not the peer's message ahead of it"
+                [("Also update the docs.", QueuedState::Sent)],
+                "the first was absorbed mid-turn, and the dequeue sent the newest (its row taken back for its turn), not the peer's message ahead of it"
             );
         }
     }
     assert_eq!(
         queued(&p),
-        [("Also update the docs.", QueuedState::Sent), ("Then run the tests.", QueuedState::Sent), ("One more idea.", QueuedState::Withdrawn)],
+        [("Also update the docs.", QueuedState::Sent), ("One more idea.", QueuedState::Withdrawn)],
         "no row for the empty enqueue or the peer's message, and popAll hands the last back"
     );
     assert_eq!(turn(&p, "turn:p3").origin, TurnOrigin::System);
@@ -140,5 +141,6 @@ fn two_identical_dequeues_in_one_millisecond_are_two_dequeues() {
         r#"{"type":"user","promptId":"p3","promptSource":"queued","uuid":"u3","message":{"content":"Second queued."}}"#,
     ];
     let p = fold(&lines.join("\n"));
-    assert_eq!(queued(&p), [("First queued.", QueuedState::Sent), ("Second queued.", QueuedState::Sent)]);
+    assert!(queued(&p).is_empty(), "both were sent as turns of their own: {:?}", queued(&p));
+    assert_eq!(p.rows().iter().filter(|r| r.retracted).count(), 2);
 }

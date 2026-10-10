@@ -284,6 +284,13 @@ pub(super) struct Record<'a> {
     pub prompt_id: Str<'a>,
     #[serde(rename = "promptSource", borrow)]
     pub prompt_source: Str<'a>,
+    /// Who started the turn, as claude 2.1.28x names it: `human`,
+    /// `scheduled`, `peer`, `task_notification`, `auto_continuation`.
+    #[serde(rename = "turnOrigin", borrow)]
+    pub turn_origin: Str<'a>,
+    /// The scheduled task (`CronCreate`) whose firing this prompt is.
+    #[serde(rename = "scheduledTaskId", borrow)]
+    pub scheduled_task_id: Str<'a>,
     #[serde(rename = "isMeta")]
     pub is_meta: Bool,
     #[serde(rename = "isCompactSummary")]
@@ -352,10 +359,91 @@ pub(super) struct Block<'a> {
     #[serde(borrow)]
     pub name: Str<'a>,
     #[serde(borrow)]
-    pub input: Obj<Input<'a>>,
+    pub input: ToolInput<'a>,
     #[serde(borrow)]
     pub tool_use_id: Str<'a>,
     pub is_error: Bool,
+    /// A `tool_result`'s text, already cut to what a row keeps.
+    pub content: ResultText,
+}
+
+/// A `tool_use`'s input: the fields a summary is made of, and the object as
+/// written, which a row opens to (ov-452). Read once as raw JSON, so the
+/// fields borrow from it and nothing is copied that no row keeps.
+#[derive(Debug, Default)]
+pub(super) struct ToolInput<'a> {
+    pub fields: Option<Input<'a>>,
+    pub raw: Option<Cow<'a, str>>,
+}
+
+impl<'a> ToolInput<'a> {
+    /// The input a hook's payload carried.
+    pub fn owned(fields: Input<'a>, raw: Option<String>) -> ToolInput<'a> {
+        ToolInput { fields: Some(fields), raw: raw.map(Cow::Owned) }
+    }
+}
+
+impl<'de: 'a, 'a> Deserialize<'de> for ToolInput<'a> {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let raw = <&'de serde_json::value::RawValue>::deserialize(d)?;
+        let text = raw.get();
+        if !text.starts_with('{') {
+            return Ok(ToolInput::default());
+        }
+        let fields = serde_json::from_str::<Input<'de>>(text).ok();
+        Ok(ToolInput { fields, raw: Some(Cow::Borrowed(text)) })
+    }
+}
+
+/// A `tool_result`'s `content`: a string, or blocks whose text parts are
+/// joined. Cut as it is read (`detail::excerpt`), so a file dump costs the
+/// parser's pass over it and no copy.
+#[derive(Debug, Default)]
+pub(super) struct ResultText(pub Option<String>);
+
+impl<'de> Deserialize<'de> for ResultText {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = ResultText;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("anything")
+            }
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<ResultText, E> {
+                Ok(ResultText(super::detail::excerpt(v)))
+            }
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<ResultText, A::Error> {
+                let mut joined = String::new();
+                while let Some(part) = seq.next_element::<Obj<ResultPart>>()? {
+                    let Some(text) = part.0.and_then(|p| p.text.0) else { continue };
+                    if joined.len() > super::detail::DETAIL_CHARS * 4 {
+                        continue;
+                    }
+                    if !joined.is_empty() {
+                        joined.push('\n');
+                    }
+                    joined.push_str(&text);
+                }
+                Ok(ResultText(super::detail::excerpt(&joined)))
+            }
+            nothing_for!(ResultText; visit_bool(bool), visit_i64(i64), visit_u64(u64), visit_f64(f64));
+            fn visit_unit<E: de::Error>(self) -> Result<ResultText, E> {
+                Ok(ResultText(None))
+            }
+            fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<ResultText, A::Error> {
+                drain_map(map).map(|()| ResultText(None))
+            }
+        }
+        d.deserialize_any(V)
+    }
+}
+
+/// One block of a `tool_result`'s content: its text, cut; an image's data is
+/// skipped unread.
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(default)]
+struct ResultPart {
+    text: ResultText,
 }
 
 /// The few `tool_use.input` fields a row's summary line is made of.
@@ -427,6 +515,16 @@ pub(super) struct ToolUseResult<'a> {
     #[serde(rename = "totalDurationMs")]
     pub total_duration_ms: Num,
     pub interrupted: Bool,
+    /// A `TaskCreate`'s new task: its `id` is what `TaskUpdate` names.
+    #[serde(borrow)]
+    pub task: Obj<TaskRef<'a>>,
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(default)]
+pub(super) struct TaskRef<'a> {
+    #[serde(borrow)]
+    pub id: Str<'a>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]

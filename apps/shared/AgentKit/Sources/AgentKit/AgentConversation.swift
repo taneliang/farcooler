@@ -432,10 +432,13 @@ public enum AgentConversation {
         }
     }
 
+    /// A Queued row's label. `Sent` is a message claude took into the turn
+    /// it was running; one sent as a turn of its own is that turn, and its
+    /// row is gone (ov-452).
     public static func queuedLabel(_ state: String) -> String {
         switch state {
         case "Withdrawn": "Withdrawn"
-        case "Sent": "Sent from the queue"
+        case "Sent": "Sent mid-turn"
         default: "Queued"
         }
     }

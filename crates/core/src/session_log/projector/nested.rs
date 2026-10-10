@@ -62,7 +62,7 @@ impl Projection {
                 }
                 continue;
             }
-            let summary = block.input.0.as_ref().map(summarize).unwrap_or_default();
+            let summary = block.input.fields.as_ref().map(summarize).unwrap_or_default();
             self.sub_tools.entry(agent.to_string()).or_default().push((call.to_string(), name.to_string(), summary.clone()));
             self.link_tool(Some(agent), call, name, &summary, true);
         }

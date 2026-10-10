@@ -18,11 +18,14 @@
 //! - `held`: the id a view answers a held ask with, on its row (ov-370).
 //! - `nested`: what a subagent's own transcript launches and asks.
 //! - `codex`: a codex rollout and codex's hooks, into the same rows (ov-378).
+//! - `detail`: what a tool row opens to, its input and result (ov-452).
+//! - `tasks`: the agent's task list, as one checklist row a turn (ov-452).
 //!
 //! Pure apart from `files`, and that only reads.
 
 mod asks;
 mod codex;
+pub mod detail;
 pub mod held;
 pub mod files;
 pub mod fold;
@@ -31,6 +34,7 @@ pub mod hooks;
 mod nested;
 pub mod record;
 pub mod rows;
+mod tasks;
 
 pub use files::{LineReader, SessionProjector};
 pub use fold::{FoldStats, Projection};
@@ -66,3 +70,5 @@ mod subagent_link_tests;
 mod codex_tests;
 #[cfg(test)]
 mod suggestion_tests;
+#[cfg(test)]
+mod polish_tests;

@@ -26,7 +26,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::fold::{clip, squeeze, Projection, PROMPT_CHARS};
-use super::record::{Block, Bool, Input, List, Obj, Str};
+use super::record::{Block, Bool, Input, List, Str, ToolInput};
 use super::rows::*;
 
 /// What a hook asks of whoever holds this projection, beyond its rows.
@@ -145,7 +145,7 @@ impl Projection {
                     kind: Str(Some("tool_use".into())),
                     id: Str(text(payload, "tool_use_id").map(|s| s.to_string().into())),
                     name: Str(text(payload, "tool_name").map(|s| s.to_string().into())),
-                    input: Obj(Some(input_of(payload))),
+                    input: ToolInput::owned(input_of(payload), payload.get("tool_input").map(Value::to_string)),
                     ..Block::default()
                 };
                 self.tool_use(turn, &block, at, true);

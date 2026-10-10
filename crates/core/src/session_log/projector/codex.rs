@@ -381,6 +381,7 @@ impl Projection {
                     None => "",
                 };
                 self.codex_call_done(call, output_failed(output), at);
+                self.codex_result(call, output);
             }
             Some(kind) if SILENT_ITEMS.contains(&kind) => {}
             Some(kind) => self.gap(GapReason::Unknown(format!("response_item/{kind}"))),
@@ -461,9 +462,23 @@ impl Projection {
             ended_ms: None,
             diff: Vec::new(),
             file_path,
+            input: super::detail::input_text(args),
+            result: None,
         };
         self.push(row_id, Some(turn), provisional, RowKind::Tool(tool));
         self.link_tool(None, call, &name, &summary, !provisional);
+    }
+
+    /// A call's output, on its row for a view to open (ov-452).
+    fn codex_result(&mut self, call: &str, output: &str) {
+        let Some(&i) = self.index.get(&format!("tool:{call}")) else { return };
+        let result = super::detail::excerpt(output);
+        if let RowKind::Tool(tool) = &mut self.rows[i].kind {
+            if tool.result != result {
+                tool.result = result;
+                self.touch(i);
+            }
+        }
     }
 
     /// `request_user_input`, codex's question to the person: an `Ask`, as

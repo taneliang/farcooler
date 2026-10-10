@@ -65,6 +65,11 @@ public final class AgentRowStore {
     /// Every held row's id, oldest first. Changes only when a row arrives or
     /// goes, never when one's contents change.
     public private(set) var ids: [String] = []
+    /// What a transcript draws (ov-452): `shownIds` with each run of tool
+    /// calls folded into one item. Built off the main thread with `ids`
+    /// (`AgentRowDelta.items`), from each row's kind, which never changes,
+    /// so no row is observed for it.
+    public private(set) var items: [ConversationItem] = []
     public private(set) var phase: Phase = .loading
     /// Whether older rows exist than the oldest held.
     public private(set) var moreBefore = false
@@ -123,6 +128,7 @@ public final class AgentRowStore {
         }
         for id in delta.removed { boxes[id] = nil }
         if let order = delta.order { ids = order }
+        if let items = delta.items { self.items = items }
         if moreBefore != delta.moreBefore { moreBefore = delta.moreBefore }
         applied += 1
         if applyTimes.count == Self.timesKept { applyTimes.removeFirst() }
@@ -178,6 +184,8 @@ public final class AgentRowStore {
     private func show(_ snapshot: AgentRowSnapshot) {
         for row in snapshot.rows { boxes[row.id] = AgentRowBox(row) }
         ids = snapshot.rows.map(\.id)
+        let kinds = Dictionary(snapshot.rows.map { ($0.id, $0) }, uniquingKeysWith: { $1 })
+        items = AgentRowLedger.items(ids) { kinds[$0] }
         moreBefore = snapshot.moreBefore
         phase = snapshot.rows.isEmpty ? .loading : .cached
     }

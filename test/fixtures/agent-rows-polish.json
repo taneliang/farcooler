@@ -1,0 +1,71 @@
+{
+  "epoch": 8,
+  "moreBefore": false,
+  "rev": 4,
+  "rows": [
+    {
+      "id": "turn:p2",
+      "kind": {
+        "Turn": {
+          "activity": null,
+          "background_running": 0,
+          "duration_ms": null,
+          "ended_ms": null,
+          "origin": "Scheduled",
+          "outcome": null,
+          "prompt": "Check-in for the project.\nRe-evaluate the plan.",
+          "started_ms": 1000
+        }
+      },
+      "ord": 0,
+      "provisional": false,
+      "rev": 4,
+      "turn": null
+    },
+    {
+      "id": "tool:toolu_c",
+      "kind": {
+        "Tool": {
+          "diff": [],
+          "ended_ms": 2100,
+          "file_path": null,
+          "input": "cron: 4 15 3 10 *\nrecurring: false",
+          "name": "CronCreate",
+          "result": "Scheduled f56f5668",
+          "started_ms": 2000,
+          "status": "Done",
+          "summary": ""
+        }
+      },
+      "ord": 1,
+      "provisional": false,
+      "rev": 2,
+      "turn": "turn:p2"
+    },
+    {
+      "id": "tasks:turn:p2",
+      "kind": {
+        "Tasks": {
+          "items": [
+            {
+              "status": "Completed",
+              "subject": "Read the code"
+            },
+            {
+              "status": "InProgress",
+              "subject": "Fix it"
+            },
+            {
+              "status": "Pending",
+              "subject": "Ship it"
+            }
+          ]
+        }
+      },
+      "ord": 2,
+      "provisional": false,
+      "rev": 4,
+      "turn": "turn:p2"
+    }
+  ]
+}

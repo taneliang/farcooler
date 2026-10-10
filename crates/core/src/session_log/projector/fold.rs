@@ -175,6 +175,8 @@ pub struct Projection {
     stats: FoldStats,
     /// What only a codex rollout's fold keeps (`codex.rs`).
     pub(super) codex: super::codex::CodexState,
+    /// The agent's task list, and its calls waiting on results (`tasks.rs`).
+    pub(super) tasks: super::tasks::TaskState,
 }
 
 /// Collapses whitespace, and cuts to `max` characters.
@@ -746,10 +748,14 @@ impl Projection {
             self.open_turn(id, TurnOrigin::Other, text, at, false);
             return;
         };
+        // A scheduled task's firing: claude 2.1.28x says so twice, as
+        // `turnOrigin` and as the task's id (657 and 705 times in the corpus).
+        let scheduled = record.turn_origin.get() == Some("scheduled") || record.scheduled_task_id.get().is_some();
         let origin = match source {
             "typed" | "suggestion_accepted" => TurnOrigin::Typed,
             "queued" => TurnOrigin::Queued,
             "system" if trimmed.starts_with("<task-notification>") => TurnOrigin::Notification,
+            "system" if scheduled => TurnOrigin::Scheduled,
             "system" => TurnOrigin::System,
             "sdk" => TurnOrigin::Sdk,
             _ => TurnOrigin::Other,
@@ -771,6 +777,11 @@ impl Projection {
     /// it took. The entry whose first words are the prompt's, else (claude
     /// rewrites a peer's `<agent-message>` before delivering it) the newest
     /// entry that is no person's message.
+    ///
+    /// Its `Queued` row is taken back: the turn it became shows the message,
+    /// with where it came from, and the row beside it was the same words
+    /// twice (ov-452). A row a mid-turn `remove` sent stays, being the only
+    /// place that message shows.
     fn delivered(&mut self, prompt: &str) {
         if self.pending_dequeues == 0 {
             return;
@@ -785,7 +796,7 @@ impl Projection {
         if let Some(n) = found {
             let entry = self.queue.remove(n);
             if let Some(i) = entry.row {
-                self.set_queued(i, QueuedState::Sent);
+                self.retract(i);
             }
         }
     }
@@ -880,8 +891,11 @@ impl Projection {
     pub(super) fn tool_use(&mut self, turn: usize, block: &Block<'_>, at: Option<i64>, provisional: bool) {
         let Some(id) = block.id.get() else { return };
         let name = block.name.get().unwrap_or_default();
+        if super::tasks::writes_tasks(name) {
+            return self.task_call(turn, id, name, block.input.raw.as_deref(), provisional);
+        }
         let empty = Input::default();
-        let input = block.input.0.as_ref().unwrap_or(&empty);
+        let input = block.input.fields.as_ref().unwrap_or(&empty);
         let (row_id, kind) = match name {
             "Agent" | "Task" => {
                 let sub = Subagent {
@@ -929,6 +943,8 @@ impl Projection {
                     ended_ms: None,
                     diff: Vec::new(),
                     file_path: input.file_path.get().map(str::to_string),
+                    input: block.input.raw.as_deref().and_then(super::detail::input_text_of),
+                    result: None,
                 };
                 (format!("tool:{id}"), RowKind::Tool(tool))
             }
@@ -977,11 +993,15 @@ impl Projection {
     fn tool_result(&mut self, block: &Block<'_>, result: Option<&ToolUseResult<'_>>, at: Option<i64>) {
         let Some(id) = block.tool_use_id.get() else { return };
         let failed = block.is_error.yes();
+        if self.task_result(id, failed, block.content.0.as_deref(), result) {
+            return;
+        }
         if let Some(&i) = self.index.get(&format!("tool:{id}")) {
             let is_tool = matches!(self.rows[i].kind, RowKind::Tool(_));
             if let RowKind::Tool(tool) = &mut self.rows[i].kind {
                 tool.status = if failed { ToolStatus::Failed } else { ToolStatus::Done };
                 tool.ended_ms = clamp_end(tool.started_ms, at);
+                tool.result = block.content.0.clone();
                 if let Some(result) = result {
                     tool.diff = result
                         .structured_patch
@@ -1282,7 +1302,7 @@ impl Projection {
                 for block in blocks.iter().filter_map(|b| b.0.as_ref()) {
                     if block.kind.get() == Some("tool_use") {
                         tools += 1;
-                        let summary = block.input.0.as_ref().map(summarize).unwrap_or_default();
+                        let summary = block.input.fields.as_ref().map(summarize).unwrap_or_default();
                         let name = block.name.get().unwrap_or("Tool");
                         action = Some(if summary.is_empty() { name.to_string() } else { format!("{name} {summary}") });
                     }

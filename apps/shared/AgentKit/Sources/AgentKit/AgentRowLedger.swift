@@ -11,6 +11,9 @@ public struct AgentRowDelta: Sendable, Equatable {
     /// Every held row's id, oldest first, when a row arrived, went or moved;
     /// nil when only the contents of held rows changed.
     public var order: [String]?
+    /// `order` as a transcript draws it, runs of tool calls folded
+    /// (`AgentConversation.items`, ov-452), with `order` and only then.
+    public var items: [ConversationItem]?
     /// Rows that arrived or whose contents changed.
     public var rows: [AgentRow] = []
     /// Rows no longer held.
@@ -184,9 +187,21 @@ public actor AgentRowLedger {
 
     private func stamped(_ delta: AgentRowDelta) -> AgentRowDelta {
         var delta = delta
+        if let order = delta.order {
+            delta.items = Self.items(order) { rows[$0] }
+        }
         delta.epoch = epoch
         delta.rev = rev
         delta.moreBefore = moreBefore
         return delta
+    }
+
+    /// `order`'s items, the hint left out (it's the composer's): what a
+    /// row's kind says about its grouping never changes, so they're rebuilt
+    /// only when the order does, here, off the main thread.
+    static func items(_ order: [String], row: (String) -> AgentRow?) -> [ConversationItem] {
+        AgentConversation.items(order.filter { $0 != AgentRow.hintID }) { id in
+            row(id).map { AgentConversation.groupRole($0.kind) } ?? .other
+        }
     }
 }

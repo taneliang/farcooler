@@ -84,6 +84,7 @@ pub enum RowKind {
     Handoff(Handoff),
     Gap(Gap),
     Hint(Hint),
+    Tasks(Tasks),
 }
 
 /// One prompt and everything the agent did about it.
@@ -126,9 +127,12 @@ pub enum TurnOrigin {
     Notification,
     /// A program driving claude, not a person.
     Sdk,
-    /// Claude woke itself for something no person typed: a scheduled task's
-    /// heartbeat, another session's message (`promptSource: system`).
+    /// Claude woke itself for something no person typed: another session's
+    /// message, a continuation (`promptSource: system`).
     System,
+    /// A scheduled task fired (`CronCreate`, `/loop`): `turnOrigin:
+    /// scheduled`, with the task's `scheduledTaskId` (ov-452).
+    Scheduled,
     /// A turn whose start this projection never saw (it began before the file
     /// was read, or the source said something new).
     Other,
@@ -186,6 +190,14 @@ pub struct Tool {
     /// An edit's hunks, from the result's `structuredPatch`.
     pub diff: Vec<Hunk>,
     pub file_path: Option<String>,
+    /// What it was called with, a `key: value` line per field, cut short
+    /// (`detail`): what the row opens to, with `result` (ov-452).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input: Option<String>,
+    /// What it answered, cut likewise. Absent until it answers, and for an
+    /// answer with no text (an image).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -300,8 +312,9 @@ pub struct Queued {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum QueuedState {
     Waiting,
-    /// Taken off the queue; its turn follows as a prompt with
-    /// `promptSource: queued`.
+    /// Taken into the turn that was running (`absorbed_mid_turn`), or handed
+    /// to an agent. One a dequeue sent as a turn of its own is retracted
+    /// instead: that turn shows it (ov-452).
     Sent,
     /// Taken back before it was sent.
     Withdrawn,
@@ -346,6 +359,28 @@ pub const HINT_ID: &str = "hint:composer";
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Hint {
     pub text: String,
+}
+
+/// The agent's task list as this turn left it (ov-452): a `TodoWrite`'s
+/// list, or the one `TaskCreate` and `TaskUpdate` build. One row per turn
+/// that changed the list, where its first change was; each later change in
+/// the turn updates it, so a run of updates is one checklist, not a row each.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Tasks {
+    pub items: Vec<TaskItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TaskItem {
+    pub subject: String,
+    pub status: TaskStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum TaskStatus {
+    Pending,
+    InProgress,
+    Completed,
 }
 
 /// Where the projection cannot say what happened.

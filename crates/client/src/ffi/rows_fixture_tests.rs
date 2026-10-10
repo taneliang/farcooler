@@ -44,6 +44,8 @@ fn rows() -> Vec<Row> {
             ended_ms: Some(5_400),
             diff: vec![Hunk { old_start: 3, old_lines: 1, new_start: 3, new_lines: 1, lines: vec!["-a".into(), "+b".into()] }],
             file_path: Some("/w/src/main.rs".into()),
+            input: None,
+            result: None,
         })),
         row(4, 8, "sub:toolu_2", t, RowKind::Subagent(Subagent {
             tool_use_id: "toolu_2".into(),
@@ -161,5 +163,59 @@ fn the_hint_fixture_is_what_the_rows_boundary_writes() {
         hint_written(),
         "test/fixtures/agent-rows-hint.json is not what rows_args writes; regenerate it:\n{}",
         serde_json::to_string_pretty(&hint_written()).unwrap_or_default()
+    );
+}
+
+const POLISH_FIXTURE: &str = include_str!("../../../../test/fixtures/agent-rows-polish.json");
+
+/// What ov-452 added, as the boundary writes it: a scheduled task's turn, a
+/// tool row's input and result, and a task list's checklist row. Swift
+/// decodes the same file.
+fn polish_written() -> Value {
+    let t = Some("turn:p2");
+    let rows = [
+        row(0, 4, "turn:p2", None, RowKind::Turn(Turn {
+            prompt: "Check-in for the project.\nRe-evaluate the plan.".into(),
+            origin: TurnOrigin::Scheduled,
+            started_ms: Some(1_000),
+            ended_ms: None,
+            duration_ms: None,
+            outcome: None,
+            background_running: 0,
+            activity: None,
+            suggestion: None,
+        })),
+        row(1, 2, "tool:toolu_c", t, RowKind::Tool(Tool {
+            name: "CronCreate".into(),
+            summary: String::new(),
+            status: ToolStatus::Done,
+            started_ms: Some(2_000),
+            ended_ms: Some(2_100),
+            diff: Vec::new(),
+            file_path: None,
+            input: Some("cron: 4 15 3 10 *\nrecurring: false".into()),
+            result: Some("Scheduled f56f5668".into()),
+        })),
+        row(2, 4, "tasks:turn:p2", t, RowKind::Tasks(Tasks {
+            items: vec![
+                TaskItem { subject: "Read the code".into(), status: TaskStatus::Completed },
+                TaskItem { subject: "Fix it".into(), status: TaskStatus::InProgress },
+                TaskItem { subject: "Ship it".into(), status: TaskStatus::Pending },
+            ],
+        })),
+    ];
+    let page = AgentRowPage { terminal_id: Default::default(), epoch: 8, rev: 4, rows: rows.iter().map(wire).collect(), more_before: false };
+    super::rows_args::page_of(&page)
+}
+
+#[test]
+fn the_polish_fixture_is_what_the_rows_boundary_writes() {
+    let written = polish_written();
+    let fixture: Value = serde_json::from_str(POLISH_FIXTURE).unwrap_or(Value::Null);
+    assert_eq!(
+        fixture,
+        written,
+        "test/fixtures/agent-rows-polish.json is not what rows_args writes; regenerate it:\n{}",
+        serde_json::to_string_pretty(&written).unwrap_or_default()
     );
 }

@@ -13,7 +13,8 @@ tracing.workspace = true
 serde.workspace = true
 # Runtime, not just tests: `activity::handshake` speaks JSON-RPC to an ACP
 # adapter, which is the same wire the tests used to build by hand.
-serde_json.workspace = true
+# `raw_value`: a tool call's input is kept as written, for its row (ov-452).
+serde_json = { workspace = true, features = ["raw_value"] }
 toml.workspace = true
 toml_edit.workspace = true
 libc.workspace = true

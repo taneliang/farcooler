@@ -47,6 +47,9 @@ public struct AgentRow: Sendable, Equatable, Identifiable, Codable {
         /// claude's generic `Try "…"` example (ov-409): not part of the
         /// conversation, shown as the composer's placeholder.
         case hint(Hint)
+        /// The agent's task list as a turn left it (ov-452): one checklist
+        /// row a turn, changed in place.
+        case tasks(Tasks)
         /// A kind this build doesn't know, by its name.
         case unknown(String)
     }
@@ -54,7 +57,8 @@ public struct AgentRow: Sendable, Equatable, Identifiable, Codable {
     /// One prompt and everything the agent did about it.
     public struct Turn: Sendable, Equatable, Codable {
         public var prompt: String
-        /// `Typed`, `Queued`, `Notification`, `Sdk`, `System` or `Other`.
+        /// `Typed`, `Queued`, `Notification`, `Sdk`, `System`, `Scheduled`
+        /// (a scheduled task firing, ov-452) or `Other`.
         public var origin: String
         public var startedMs: Int64?
         public var endedMs: Int64?
@@ -97,6 +101,31 @@ public struct AgentRow: Sendable, Equatable, Identifiable, Codable {
         public var endedMs: Int64?
         public var diff: [Hunk]
         public var filePath: String?
+        /// What it was called with, a `key: value` line per field, cut short
+        /// by the runner (ov-452). Optional for the cache's sake.
+        public var input: String? = nil
+        /// What it answered, cut likewise; nil until it does.
+        public var result: String? = nil
+
+        /// Whether it has anything to open to.
+        public var opens: Bool { input != nil || result != nil || !diff.isEmpty }
+    }
+
+    public struct Tasks: Sendable, Equatable, Codable {
+        public var items: [TaskItem]
+
+        public init(items: [TaskItem]) { self.items = items }
+    }
+
+    public struct TaskItem: Sendable, Equatable, Codable {
+        public var subject: String
+        /// `Pending`, `InProgress` or `Completed`.
+        public var status: String
+
+        public init(subject: String, status: String) {
+            self.subject = subject
+            self.status = status
+        }
     }
 
     /// A tool's or a subagent's state, folded to what a row draws.
@@ -370,7 +399,8 @@ extension AgentRow {
             return .tool(Tool(
                 name: text("name"), summary: text("summary"), status: status(p["status"]),
                 startedMs: AgentRowJSON.ms(p["started_ms"]), endedMs: AgentRowJSON.ms(p["ended_ms"]),
-                diff: hunks, filePath: p["file_path"] as? String))
+                diff: hunks, filePath: p["file_path"] as? String,
+                input: p["input"] as? String, result: p["result"] as? String))
         case "Subagent":
             return .subagent(Subagent(
                 toolUseId: text("tool_use_id"), agentType: text("agent_type"), description: text("description"),
@@ -405,6 +435,11 @@ extension AgentRow {
             return .gap(Gap(reason: reason ?? "", count: AgentRowJSON.int(p["count"])))
         case "Hint":
             return .hint(Hint(text: text("text")))
+        case "Tasks":
+            let items = (p["items"] as? [Any] ?? []).compactMap { $0 as? [String: Any] }.map {
+                TaskItem(subject: $0["subject"] as? String ?? "", status: AgentRowJSON.tag($0["status"])?.name ?? "Pending")
+            }
+            return .tasks(Tasks(items: items))
         default:
             return .unknown(name)
         }
