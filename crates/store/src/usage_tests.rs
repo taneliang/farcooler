@@ -1,7 +1,7 @@
 use super::*;
 
 const OPUS: TokenCounts =
-    TokenCounts { input: 2, output: 4, cache_read: 19912, cache_write: 7018, cache_write_1h: 7018 };
+    TokenCounts { input: 2, output: 4, cache_read: 19912, cache_write: 7018, cache_write_1h: 7018, fast: false };
 
 fn turn(key: &str, task: Option<Uuid>, harness: &str, ended_at: i64, models: Vec<TurnModel>) -> NewTurn {
     NewTurn {
@@ -162,4 +162,53 @@ fn a_subagent_run_replaces_itself_as_it_grows_and_is_not_a_turn() {
     let (total, _) = s.task_usage(task).unwrap();
     assert_eq!((total.turns, total.subagent_runs, total.active_ms), (1, 1, 1000));
     assert_eq!(total.tokens.output, 4 + 681);
+}
+
+/// The one-hour share of a turn's cache writes is kept, and a row from before
+/// it was kept is the one an estimate can be low on.
+#[test]
+fn one_hour_writes_are_kept_and_older_rows_are_marked() {
+    let s = Store::open_in_memory().unwrap();
+    let task = Uuid::from_u128(1);
+    let sonnet = TokenCounts { cache_write: 1000, cache_write_1h: 400, ..Default::default() };
+    s.record_turn(&turn("new", Some(task), "claude", 10_000, vec![TurnModel::priced(Some("claude-opus-5".into()), sonnet, None)]))
+        .unwrap();
+    let kept: Option<i64> = s
+        .conn()
+        .query_row("SELECT cache_write_1h_tokens FROM agent_turn_models", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(kept, Some(400));
+    let (total, _) = s.task_usage(task).unwrap();
+    assert_eq!(total.unsplit_cache_write_tokens, 0);
+    // 600 five-minute at $6.25 and 400 one-hour at $10 a million.
+    assert_eq!(total.cost_estimated_micros, 3750 + 4000);
+    assert_eq!(total.tokens.cache_write_1h, 400);
+
+    // The same row as an older build wrote it: no split.
+    s.conn().execute("UPDATE agent_turn_models SET cache_write_1h_tokens = NULL", []).unwrap();
+    let (total, _) = s.task_usage(task).unwrap();
+    assert_eq!(total.unsplit_cache_write_tokens, 1000);
+}
+
+/// The migration is the 33rd, `Welcome`, and gives a row from before it no
+/// split rather than a guessed one.
+#[test]
+fn the_split_migration_is_welcome_and_leaves_old_rows_unsplit() {
+    use crate::compat::Older;
+    let last = &crate::migrate::MIGRATIONS[32];
+    assert!(std::ptr::fn_addr_eq(last.0, crate::usage::migration_0042_cache_write_1h as fn(&rusqlite::Transaction) -> rusqlite::Result<()>));
+    assert_eq!(last.1, Older::Welcome);
+
+    let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);").unwrap();
+    crate::migrate::migrate_only_to(&mut conn, 32);
+    conn.execute_batch(
+        "INSERT INTO agent_turns VALUES (x'01', 'k', NULL, NULL, NULL, NULL, NULL, 'claude', 'chat', NULL, 1, NULL, 'reported', 'turn');
+         INSERT INTO agent_turn_models VALUES (x'01', 'claude-opus-5', 1, 1, 1, 1, 5, 'estimated', '2026-09-25');",
+    )
+    .unwrap();
+    crate::migrate::migrate(&mut conn, 32).unwrap();
+    let split: Option<i64> =
+        conn.query_row("SELECT cache_write_1h_tokens FROM agent_turn_models", [], |r| r.get(0)).unwrap();
+    assert_eq!(split, None);
 }

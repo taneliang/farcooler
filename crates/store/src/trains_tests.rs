@@ -56,7 +56,7 @@ fn the_migration_is_welcome() {
     let last = &crate::migrate::MIGRATIONS[26];
     assert!(std::ptr::fn_addr_eq(last.0, migration_0027_trains as fn(&Transaction) -> rusqlite::Result<()>));
     assert_eq!(last.1, Older::Welcome);
-    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 32);
+    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 33);
 }
 
 /// A train starts integrating, its lanes say they're on it, and its name is
@@ -258,7 +258,7 @@ fn turn(store: &Store, agent: &str, tokens: u64) {
             usage: "reported",
             models: vec![TurnModel::priced(
                 Some("claude-opus-5".into()),
-                TokenCounts { input: tokens, output: 0, cache_read: 0, cache_write: 0, cache_write_1h: 0 },
+                TokenCounts { input: tokens, output: 0, cache_read: 0, cache_write: 0, cache_write_1h: 0, fast: false },
                 Some(2_000),
             )],
             kind: TurnKind::Subagent,

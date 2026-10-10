@@ -78,6 +78,19 @@ pub(crate) fn migration_0020_agent_turns(tx: &Transaction) -> rusqlite::Result<(
     )
 }
 
+/// One nullable column on `agent_turn_models`: how much of `cache_write_tokens`
+/// went to Claude's one-hour cache, which costs 1.6 times the five-minute one
+/// (twice input, not 1.25 times). NULL on every row written before this: the
+/// split was not kept, so those rows were priced as five-minute writes and an
+/// estimate among them can be low (see `UsageTotals::unsplit_cache_write_tokens`).
+/// A row from a harness with no such cache says 0, which is known.
+///
+/// Additive, so a build from before it inserts without naming the column and
+/// reads every table it knows exactly as it did.
+pub(crate) fn migration_0042_cache_write_1h(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch("ALTER TABLE agent_turn_models ADD COLUMN cache_write_1h_tokens INTEGER;")
+}
+
 /// Which way a turn was heard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Surface {
@@ -202,6 +215,11 @@ pub struct UsageTotals {
     pub cost_estimated_micros: i64,
     /// Tokens on model rows whose cost is unknown: no model, or no rate.
     pub unpriced_tokens: u64,
+    /// Cache-write tokens on estimated rows from before the one-hour split was
+    /// kept (ov-460). They were priced at the five-minute rate, and Claude Code
+    /// writes the one-hour cache, so the estimate over them can be low by up to
+    /// 60% of what they cost. Zero means no estimate here has that doubt.
+    pub unsplit_cache_write_tokens: u64,
     /// Every price table an estimate here came from, oldest first.
     pub price_tables: Vec<String>,
     pub first_ended_at: Option<i64>,
@@ -250,6 +268,8 @@ struct ModelRow {
     cost_micros: Option<i64>,
     source: CostSource,
     table: Option<String>,
+    /// The row says how much of its cache writes were one-hour ones.
+    split_kept: bool,
 }
 
 impl Store {
@@ -320,13 +340,15 @@ impl Store {
             // rather than colliding on the key.
             tx.execute(
                 "INSERT INTO agent_turn_models (turn_id, model, input_tokens, output_tokens,
-                     cache_read_tokens, cache_write_tokens, cost_micros, cost_source, price_table)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                     cache_read_tokens, cache_write_tokens, cost_micros, cost_source, price_table,
+                     cache_write_1h_tokens)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                  ON CONFLICT (turn_id, model) DO UPDATE SET
                      input_tokens = input_tokens + excluded.input_tokens,
                      output_tokens = output_tokens + excluded.output_tokens,
                      cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens,
                      cache_write_tokens = cache_write_tokens + excluded.cache_write_tokens,
+                     cache_write_1h_tokens = cache_write_1h_tokens + excluded.cache_write_1h_tokens,
                      cost_micros = CASE WHEN cost_source = excluded.cost_source
                                         THEN cost_micros + excluded.cost_micros END,
                      cost_source = CASE WHEN cost_source = excluded.cost_source
@@ -341,6 +363,7 @@ impl Store {
                     m.cost_micros,
                     m.cost_source.as_str(),
                     m.price_table,
+                    t.cache_write_1h.min(t.cache_write) as i64,
                 ],
             )
             .map_err(map_err)?;
@@ -457,7 +480,7 @@ impl Store {
         let mut stmt = conn
             .prepare(
                 "SELECT turn_id, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-                        cost_micros, cost_source, price_table
+                        cost_micros, cost_source, price_table, cache_write_1h_tokens
                    FROM agent_turn_models WHERE turn_id = ?1",
             )
             .map_err(map_err)?;
@@ -473,11 +496,13 @@ impl Store {
                             output: n(3)?,
                             cache_read: n(4)?,
                             cache_write: n(5)?,
-                            cache_write_1h: 0,
+                            cache_write_1h: r.get::<_, Option<i64>>(9)?.unwrap_or(0).max(0) as u64,
+                            fast: false,
                         },
                         cost_micros: r.get(6)?,
                         source: CostSource::parse(&source),
                         table: r.get(8)?,
+                        split_kept: r.get::<_, Option<i64>>(9)?.is_some(),
                     })
                 })
                 .map_err(map_err)?
@@ -531,6 +556,9 @@ fn add_model(t: &mut UsageTotals, tables: &mut BTreeSet<String>, row: &ModelRow)
         (CostSource::Reported, Some(c)) => t.cost_reported_micros += c,
         (CostSource::Estimated, Some(c)) => {
             t.cost_estimated_micros += c;
+            if !row.split_kept {
+                t.unsplit_cache_write_tokens += row.tokens.cache_write;
+            }
             tables.extend(row.table.clone());
         }
         _ => {

@@ -105,7 +105,7 @@ async fn a_budget_is_set_over_the_wire_and_read_back_with_the_trend_and_the_week
             usage: "reported",
             models: vec![TurnModel::priced(
                 Some("claude-opus-5".into()),
-                TokenCounts { input: 1_000, output: 0, cache_read: 0, cache_write: 0, cache_write_1h: 0 },
+                TokenCounts { input: 1_000, output: 0, cache_read: 0, cache_write: 0, cache_write_1h: 0, fast: false },
                 Some(2_000),
             )],
             kind: TurnKind::Subagent,

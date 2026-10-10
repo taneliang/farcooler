@@ -16,7 +16,7 @@ fn board(n: usize) -> (Store, Uuid, Vec<Task>) {
 }
 
 fn counts(tokens: u64) -> TokenCounts {
-    TokenCounts { input: tokens, output: 0, cache_read: 0, cache_write: 0, cache_write_1h: 0 }
+    TokenCounts { input: tokens, output: 0, cache_read: 0, cache_write: 0, cache_write_1h: 0, fast: false }
 }
 
 /// The one repository a single-board fixture has: where a turn is filed unless

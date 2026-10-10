@@ -82,6 +82,7 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     (crate::rulings::migration_0030_ruling_reversals, Older::Welcome), // ov-333: one column on 0026's own table (rulings.rs says why)
     (crate::wakes::migration_0038_wake_pasted, Older::Welcome), // ov-385: one nullable column per wake queue (wakes.rs says why)
     (crate::web_panes::migration_0040_web_url, Older::Welcome), // ov-435: one nullable column (web_panes.rs says why)
+    (crate::usage::migration_0042_cache_write_1h, Older::Welcome), // ov-460: one nullable column (usage.rs says why)
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;

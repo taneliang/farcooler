@@ -86,6 +86,7 @@ pub(crate) fn record_chat(store: &Store, terminal: Uuid, usage: &TurnUsage) {
                 cache_read: m.cache_read,
                 cache_write: m.cache_write,
                 cache_write_1h: m.cache_write_1h,
+                fast: false,
             };
             TurnModel::priced(m.model.clone(), tokens, m.reported_cost_micros)
         })

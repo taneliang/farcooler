@@ -32,7 +32,7 @@ fn without_usage(mut lines: Vec<String>, n: usize) -> Vec<String> {
 /// The complete turn's two model calls: `msg_…Fm` written twice (thinking,
 /// then tool_use) with the same usage, and `msg_…Ru`.
 const OPUS_TURN: TokenCounts =
-    TokenCounts { input: 4, output: 868, cache_read: 55595, cache_write: 11792, cache_write_1h: 11792 };
+    TokenCounts { input: 4, output: 868, cache_read: 55595, cache_write: 11792, cache_write_1h: 11792, fast: false };
 
 #[test]
 fn a_claude_turn_counts_each_model_call_once() {
@@ -44,6 +44,36 @@ fn a_claude_turn_counts_each_model_call_once() {
     assert_eq!(turn.state, UsageState::Reported);
     assert_eq!(turn.active_ms, Some(14681), "claude's own durationMs");
     assert_eq!(turn.started_at_ms.zip(turn.ended_at_ms).map(|(s, e)| e - s), Some(87686));
+}
+
+/// Set `message.usage.speed` on line `n`: the only line of the recorded turn
+/// shapes this field is on is `standard`, and a fast-mode recording would
+/// differ in nothing else.
+fn with_speed(mut lines: Vec<String>, n: usize, speed: &str) -> Vec<String> {
+    let mut record: Value = serde_json::from_str(&lines[n]).unwrap();
+    record["message"]["usage"]["speed"] = Value::String(speed.to_string());
+    lines[n] = record.to_string();
+    lines
+}
+
+/// Fast mode bills a premium, so a model's fast calls and standard calls are
+/// two entries rather than one sum that is wrong for both.
+#[test]
+fn fast_calls_are_kept_apart_from_standard_ones() {
+    let lines = fixture("claude-complete-turn.jsonl");
+    let calls: Vec<usize> =
+        lines.iter().enumerate().filter(|(_, l)| l.contains("\"usage\"") && l.contains("msg_")).map(|(i, _)| i).collect();
+    let standard = claude(&with_speed(lines.clone(), calls[0], "standard"));
+    assert!(standard[0].models.iter().all(|(_, t)| !t.fast));
+    let all_fast = calls.iter().fold(lines.clone(), |l, i| with_speed(l, *i, "fast"));
+    let turn = &claude(&all_fast)[0];
+    assert_eq!(turn.models.len(), 1);
+    assert!(turn.models[0].1.fast);
+    assert_eq!(turn.models[0].1.output, 868);
+    let last = *calls.last().unwrap();
+    let mixed = &claude(&with_speed(lines, last, "fast"))[0];
+    assert_eq!(mixed.models.len(), 2, "{:?}", mixed.models);
+    assert_eq!(mixed.models.iter().map(|(_, t)| t.output).sum::<u64>(), 868);
 }
 
 /// Two lines that are one streamed message, read as two, would put this
@@ -159,7 +189,7 @@ fn a_codex_turn_without_a_token_count_is_not_reported() {
 /// over eight assistant lines, one of them written first with 2 output tokens
 /// and then with 658. Summed by line, output would read 688.
 const SUBAGENT: TokenCounts =
-    TokenCounts { input: 10, output: 681, cache_read: 110128, cache_write: 31610, cache_write_1h: 0 };
+    TokenCounts { input: 10, output: 681, cache_read: 110128, cache_write: 31610, cache_write_1h: 0, fast: false };
 
 #[test]
 fn a_subagents_transcript_counts_each_call_once_as_its_own_entry() {

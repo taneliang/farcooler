@@ -124,12 +124,13 @@ impl Calls {
         }
     }
 
-    /// Tokens per model, in the order each model first appeared.
+    /// Tokens per model, in the order each model first appeared. A model that
+    /// ran in fast mode and out of it is two entries: they bill differently.
     fn by_model(&self) -> Vec<(Option<String>, TokenCounts)> {
         let mut models: Vec<(Option<String>, TokenCounts)> = Vec::new();
         for id in &self.order {
             let (model, counts) = &self.by_id[id];
-            match models.iter_mut().find(|(m, _)| m == model) {
+            match models.iter_mut().find(|(m, sum)| m == model && sum.fast == counts.fast) {
                 Some((_, sum)) => sum.add(counts),
                 None => models.push((model.clone(), *counts)),
             }
@@ -339,6 +340,7 @@ impl LogUsage {
                             cache_read: d.cached,
                             cache_write: d.cache_write,
                             cache_write_1h: 0,
+                            fast: false,
                         };
                         (vec![(self.codex_model.clone(), counts)], UsageState::Reported)
                     }
@@ -372,6 +374,7 @@ fn claude_counts(usage: &Value) -> Option<TokenCounts> {
             .get("cache_creation")
             .and_then(|c| c["ephemeral_1h_input_tokens"].as_u64())
             .unwrap_or(0),
+        fast: usage.get("speed").and_then(Value::as_str) == Some("fast"),
     })
 }
 
@@ -382,6 +385,7 @@ fn max(a: TokenCounts, b: TokenCounts) -> TokenCounts {
         cache_read: a.cache_read.max(b.cache_read),
         cache_write: a.cache_write.max(b.cache_write),
         cache_write_1h: a.cache_write_1h.max(b.cache_write_1h),
+        fast: a.fast || b.fast,
     }
 }
 
