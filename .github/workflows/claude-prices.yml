@@ -1,0 +1,32 @@
+# Does crates/core/src/usage.rs still match Anthropic's pricing page?
+#
+# The table behind every API-equivalent dollar was typed by hand and had two
+# wrong rows and three missing models before anyone looked (ov-460). This
+# reads the page (scripts/claude-prices.py) and fails with a diff when the
+# table differs, so the same day's fix is `scripts/claude-prices.py --write`.
+#
+# Scheduled, never on a push or a pull request: a price change on someone
+# else's website must not redden main or block a merge. A red run here is a
+# reminder to update the table, not a verdict on any commit.
+#
+# 22:07 UTC is 3:07 pm Pacific in summer (PDT) and 2:07 pm in winter (PST);
+# cron has no time zone, so the hour drifts by one when the clocks change.
+name: Claude prices
+
+on:
+  schedule:
+    - cron: "7 22 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prices:
+    name: Prices match the docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/claude-prices.py --self-test
+      - run: python3 scripts/claude-prices.py --check

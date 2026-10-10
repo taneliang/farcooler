@@ -100,6 +100,10 @@ jobs:
         run: |
           ./scripts/capability-names.py --self-test
           ./scripts/capability-names.py --check
+      # The price script's parser, on a page written in the test (no network).
+      # The page itself is checked daily by claude-prices.yml, which no push
+      # waits on.
+      - run: ./scripts/claude-prices.py --self-test
       # No source file grows past 1,500 lines (ov-169); the ones already past
       # it are grandfathered in scripts/file-size-budget.txt, each with a
       # ceiling of its size then plus max(2%, 50 lines). The rule against its
