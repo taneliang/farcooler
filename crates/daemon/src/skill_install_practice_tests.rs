@@ -71,11 +71,16 @@ fn pr_mode_never_lands_without_approval() {
 fn a_lane_goes_on_the_plan_with_its_dispatch() {
     for h in ALL {
         let third = section(&prose(h), "3. Dispatch, answer, or report");
-        assert!(third.contains("Start the lane on the plan with the dispatch"), "{h:?}: {third}");
+        // A lane dispatch puts the lane on the plan by itself (ov-457); a
+        // subagent's lane is started by hand beside its launch.
+        assert!(third.contains("A lane dispatch puts the lane on the plan"), "{h:?}: {third}");
         assert!(third.contains("move it as each thing happens"), "{h:?}: {third}");
-        let dispatch = third.find("farcooler task dispatch").expect("a dispatch command");
+        let dispatch = third.find("farcooler plan lane dispatch").expect("a lane dispatch command");
         let start = third.find("farcooler plan lane start").expect("a plan lane start command");
         assert!(dispatch < start, "{h:?}: the lane is started before anything is dispatched");
+        // Lanes report to the orchestrator (ov-455), and it steers them.
+        assert!(third.contains("A lane reports to you in this pane"), "{h:?}: {third}");
+        assert!(third.contains("farcooler message <lane>"), "{h:?}: {third}");
         assert!(third.contains("farcooler plan lane set <name>"), "{h:?}: {third}");
     }
 }

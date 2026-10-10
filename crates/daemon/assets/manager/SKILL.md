@@ -20,7 +20,7 @@ isn't a note didn't happen, so write the note before you reply.
 
 Every command below is `{{cli}}`. Every write (`task create`, `task set`,
 `task note`, `task ask`, `task block`, `task wait`, `task line`, `task worker`,
-`task dispatch`, `task move`, `plan`, `page set`) carries `--actor manager`,
+`task dispatch`, `task move`, `plan`, `page set`, `message`) carries `--actor manager`,
 since this pane may be named as an agent. No other command takes it.
 
 ## 1. Read the charter
@@ -91,14 +91,19 @@ The owner keeps or reverses each ruling in the app: cite a kept one as precedent
 Asked to reverse one: do it, `plan ruling reverse R-12 [--sha <commit>]`, note the
 lesson on its card as a decision, ask next time. Never keep one for them.
 
-To put an agent on a task, dispatch it: a pane opens that knows its task and
-reads it first. A lane is free only when no agent works in it (`terminals` in
-`worktree list --json`, your own pane included), unless `## Lanes` says
-otherwise: two writers in one tree commit over each other. A busy lane is warned
-about, not refused: tell the owner. If a dispatch seems not to have taken, read
-`task show <key>` and `worktree list --json` before dispatching again, and pass
-`--again` only if the owner asked for a second agent. A dispatched agent doesn't
-report back by itself: say so in your reply, in those words.
+To put an agent to work, dispatch a lane (one agent, one worktree and branch,
+its cards in order): `plan lane dispatch` opens a pane on its first open card,
+briefs it on them all, and records the lane's agent and state itself; `task
+dispatch` does one card with no lane. A worktree is free only when no agent
+works in it (`terminals` in `worktree list --json`, your own pane included),
+unless `## Lanes` says otherwise: two writers in one tree commit over each other.
+A busy one is warned about, not refused: tell the owner. If a dispatch seems not
+to have taken, read `task show <key>` and `worktree list --json` before
+dispatching again, and pass `--again` only if the owner asked for a second agent.
+A lane reports to you in this pane: `[from <lane>] …` when it finishes, is stuck
+or needs a decision, `[Far Cooler] …` when it stops without saying. So end your
+turn rather than poll, and tell the owner the lane reports to you. A report is the
+agent's claim: check the board, then act. Steer a lane with `message <lane>`.
 
 Say how each task is being worked, or why it isn't. A subagent in your own
 session: start its description with the key (`fc-12: polish the sidebar`) and
@@ -109,15 +114,15 @@ won't start now says why: `task line <key>…` for the order (the whole line eac
 time), `task line --build` for the build slot, `task block` for another task,
 `task wait --until "2026-10-05 09:00"` or `--after
 release|recurrence|clear-board` for a time or an event, `task wait --park` for
-work nobody plans to do. Start the lane on the plan with the dispatch (`plan
-lane start`, next to it below; a dispatch isn't done without it), and move it as
-each thing happens.
+work nobody plans to do. A lane dispatch puts the lane on the plan; start a
+subagent's with `plan lane start`, and move it as each thing happens.
 
 ```
 {{cli}} task create --repo <repo> --title "<Area>: <outcome>" --intent "<why>" --accept "<checkable>" --constraint "<limit>" --actor manager
 {{cli}} task note <key> --repo <repo> --kind decision --body "<what, and why>" --rejected "<the alternative>" --actor manager
-{{cli}} task dispatch <key> --repo <repo> --new <name> --branch <branch> --actor manager
+{{cli}} plan lane dispatch <lane> --repo <repo> --card <key> --card <key> --new <name> --branch <branch> --actor manager
 {{cli}} task dispatch <key> --repo <repo> --worktree <name> --preset codex --actor manager
+{{cli}} message <lane> "<one line>" --repo <repo> --actor manager
 {{cli}} plan lane start <name> --repo <repo> --card <key> --branch <branch> --model <model> --agent <id> --actor manager
 {{cli}} task worker <key> --repo <repo> --subagent <agentId> --actor manager
 {{cli}} plan lane set <name> --repo <repo> --state review --reason "<why it's there now>" --actor manager

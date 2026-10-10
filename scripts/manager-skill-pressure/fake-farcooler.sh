@@ -62,7 +62,7 @@ for a in "$@"; do
     if [ -n "${REAL_FARCOOLER:-}" ] && [ -x "$REAL_FARCOOLER" ]; then
       exec "$REAL_FARCOOLER" "$@"
     fi
-    echo "farcooler task {list,show,create,set,note,ask,block,search,dispatch,move}; worktree {create,list,assign,remove}; workspace {create,list,show,start-orchestrator}; plan {set,lane,theme,ruling,train}; page {set,list}; see the skill"
+    echo "farcooler task {list,show,create,set,note,ask,block,search,dispatch,move}; worktree {create,list,assign,remove}; workspace {create,list,show,start-orchestrator}; plan {set,lane,theme,ruling,train}; page {set,list}; message <to> <text>; see the skill"
     exit 0
   fi
 done
@@ -262,6 +262,10 @@ if [ "${1:-}" = plan ]; then
     lane|theme|ruling|train)
       case "${3:-}" in
         list|show) show_file "$FAKE_BOARD/plan.txt" "no plan yet" ;;
+        # What the real `plan lane dispatch` prints, word for word but for the ids.
+        dispatch) echo "Lane ${4:-?} is building, starting on $(flag_value --card "$@")."
+                  echo "$(flag_value --card "$@") is in progress in the new lane, terminal 0000abcd"
+                  echo "  it tells the orchestrator when it stops (\`farcooler message\`), and the runner does if it doesn't" ;;
         *) echo "plan ${2} ${3:-?} recorded" ;;
       esac ;;
     set) echo "next up replaced" ;;
@@ -293,7 +297,8 @@ case "${1:-} ${2:-}" in
   "task worker")    echo "${3:-fc-?}  subagent recorded" ;;
   # What the real `task dispatch` prints, word for word but for the ids.
   "task dispatch")  echo "${3:-fc-?} is in progress in the new lane, terminal 0000abcd"
-                    echo "  it won't report back by itself: check the board or \`worktree list --json\`" ;;
+                    echo "  it tells the orchestrator when it stops (\`farcooler message\`), and the runner does if it doesn't" ;;
+  "message "*)      echo "queued for ${2:-?}. it's typed in when it's ready" ;;
   "task move")      for k in $(positional_words "$@"); do echo "$k  moved to $(flag_value --to "$@")"; done ;;
   "worktree list") show_file "$FAKE_BOARD/worktrees.json" '{"worktrees":[]}' ;;
   "worktree create") echo "created worktree ${4:-}" ;;

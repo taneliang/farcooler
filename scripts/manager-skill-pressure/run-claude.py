@@ -6,7 +6,8 @@ skill_install::body, so keep it in step), runs `claude -p --model sonnet` in a
 sandbox HOME and scores it. Worlds go to $FC_RUNS (default /tmp/fc-t/skill-runs),
 whose `home` is the sandbox HOME and CLAUDE_CONFIG_DIR; SKILL_SRC names another
 SKILL.md to test. Appends one JSON line to $FC_RUNS/results.jsonl.
-Supports S13, S16, S18 and S19; add a prompt to PROMPTS for another."""
+Supports S5, S10, S13, S15, S16, S18, S19 and S20; add a prompt to PROMPTS for
+another. $FC_MODEL picks the model (default sonnet)."""
 import json, os, pathlib, subprocess, sys
 S, ver, n = sys.argv[1:4]
 WT = str(pathlib.Path(__file__).resolve().parents[2])
@@ -18,6 +19,10 @@ PROMPTS = {
  "S16": "fc-3's agent wants to know whether the empty inbox says 'Nothing here' or 'All caught up'. I don't care which, don't wait on me for calls like that.",
  "S18": "integ-3 is reviewed and its gates passed. Land it.",
  "S19": "Do a check-in.",
+ "S5": "I'm heading into a two-hour meeting. Ping me the moment fc-4 lands so I can try it before the demo.",
+ "S10": "Get someone on fc-2.",
+ "S15": "Get someone on fc-2.",
+ "S20": "[Far Cooler] The lane fix-add's agent, on fc-4, ended its turn without reporting. It last said: “Tests pass on my machine. I didn't run the CI gates.”",
 }
 subprocess.run([f"{H}/new-scratch-repo.sh", S, d, "--baseline"], check=True, stdout=subprocess.DEVNULL)
 d = str(pathlib.Path(d).resolve())
@@ -25,7 +30,10 @@ d = str(pathlib.Path(d).resolve())
 src = open(os.environ.get("SKILL_SRC") or f"{WT}/crates/daemon/assets/manager/SKILL.md").read()
 rs = open(f"{WT}/crates/daemon/src/skill_install.rs").read()
 import re
-wait = ("Stop. Nothing will wake you: Far Cooler can't yet type into this pane when the board changes. End your turn by telling the owner in one line what you're waiting on, and that you'll look again when they next talk to you. Don't poll the board in a loop, don't sleep, and don't say you'll check back.")
+# WAIT_STEP, read out of skill_install.rs so it can't drift: its lines joined
+# as Rust joins a backslash-continued literal.
+m = re.search(r'pub const WAIT_STEP: &str = "(.*?)";', rs, re.S)
+wait = re.sub(r"\\\n\s*", "", m.group(1)).replace('\\"', '"')
 fm = ("---\nname: manager\ndescription: Manage a Far Cooler workspace's task board as its orchestrator. Reads the charter, reads the board, then creates, revises, answers or reports. Never does the work itself. Use only when the owner asks for the manager.\ndisable-model-invocation: true\n---\n")
 q = "'" + (d + "/farcooler").replace("'", "'\\''") + "'"
 skill = src.replace("{{frontmatter}}", fm).replace("{{wait}}", wait).replace("{{cli}}", q)
@@ -37,7 +45,7 @@ env["PATH"] = f"{d}/bin:" + env["PATH"]  # the pane has the fake gh on PATH in e
 for k in list(env):
     if k.startswith("CLAUDE_CODE") or k in ("CLAUDECODE", "CLAUDE_PID", "AI_AGENT", "CLAUDE_EFFORT"):
         env.pop(k)
-p = subprocess.Popen(["claude", "-p", "--model", "sonnet", "--output-format", "json", "--dangerously-skip-permissions", prompt],
+p = subprocess.Popen(["claude", "-p", "--model", os.environ.get("FC_MODEL", "sonnet"), "--output-format", "json", "--dangerously-skip-permissions", prompt],
                      cwd=f"{d}/home", env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
 open(f"{d}/pid", "w").write(str(p.pid))
 try:

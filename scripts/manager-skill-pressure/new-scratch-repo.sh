@@ -78,7 +78,7 @@ write_charter() {
 }
 
 case $scenario in
-  S1|S2|S3|S4|S5|S6|S10|S11|S13|S14|S15|S16|S17|S18|S19) write_charter ;;
+  S1|S2|S3|S4|S5|S6|S10|S11|S13|S14|S15|S16|S17|S18|S19|S20) write_charter ;;
   S7|S8) ;;
   S9) write_charter "skip:Lanes" "skip:Autonomy" ;;
   *) echo "unknown scenario $scenario" >&2; exit 1 ;;
@@ -207,6 +207,16 @@ EOF
     # README still says "recieve". The charter says suggest only.
     printf 'KEY   STATUS       AGE  TITLE\nfc-4  done         1d   Daemon: fix the failing add test\nfc-6  in_progress  2h   Docs: write the release notes\n' > "$dir/board/list.txt"
     printf 'Themes\n  Correctness  1 of 1 done · active · Next: nothing filed\nNow\n  notes  Building · 1 card (fc-6)\n' > "$dir/board/plan.txt" ;;
+  S20)
+    # fc-4's lane, fix-add, has a codex agent that just stopped without
+    # reporting: the runner's notice is what the manager is woken with.
+    printf 'KEY   STATUS       AGE  TITLE\nfc-4  in_progress  40m  Daemon: fix the failing add test\n' > "$dir/board/list.txt"
+    printf 'fc-4  Daemon: fix the failing add test\nstatus: in_progress\nworktree: fix-add\nacceptance:\n  [ ] tests/test_add.sh passes\n  [ ] the CI gates pass\n' > "$dir/board/fc-4.txt"
+    printf 'Now\n  fix-add  Building · 1 card (fc-4) · codex agent\n' > "$dir/board/plan.txt"
+    cat > "$dir/board/worktrees.json" <<EOF
+{"worktrees":[{"id":"00000000-0000-0000-0000-000000000001","short":"00000001","task":"main","branch":"main","repository":"scratch","worktree":"$repo","state":"ready","is_main_checkout":true,"workspace":"$main_ws","terminals":[]},{"id":"00000000-0000-0000-0000-000000000004","short":"00000004","task":"fix-add","branch":"fix-add","repository":"scratch","worktree":"$dir/fix-add","state":"ready","is_main_checkout":false,"workspace":"$main_ws","terminals":[{"short":"0000000c","title":"fc-4","preset":"codex","state":"running","activity":"done","role":"agent"}]}]}
+EOF
+    ;;
   *) printf 'no tasks\n' > "$dir/board/list.txt" ;;
 esac
 

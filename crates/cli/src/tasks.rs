@@ -362,8 +362,8 @@ pub enum TaskCmd {
     ///
     /// The pane exports FARCOOLER_TASK, now and after every restart, and its
     /// agent starts on a short message telling it to read the task: the task
-    /// on the board is the brief. Nothing reports back by itself; read the
-    /// board, or `worktree list --json`, to see how it's going.
+    /// on the board is the brief. It reports to its workspace's orchestrator
+    /// (`farcooler message`), and the runner does if it stops without saying.
     ///
     /// Into an existing worktree of the task's repository (`--worktree`),
     /// or a new one (`--new` and `--branch`). A worktree that already has an
@@ -2441,7 +2441,7 @@ pub(crate) fn dispatched_output(key: &str, done: &Dispatched, json: bool) -> Str
         .to_string();
     }
     let moved = format!("{key} is in progress in {}, terminal {}", done.worktree_name, done.terminal_short);
-    let silent = "  it won't report back by itself: check the board or `worktree list --json`";
+    let silent = "  it tells the orchestrator when it stops (`farcooler message`), and the runner does if it doesn't";
     if done.confirmed() {
         return format!("{moved}\n{silent}");
     }
@@ -3382,8 +3382,10 @@ mod tests {
         }
         // Dispatch is the one verb that starts an agent, so the skill has to
         // name it, both ways into a lane.
-        let dispatches: Vec<&String> =
-            commands.iter().filter(|c| c.starts_with("farcooler task dispatch ")).collect();
+        let dispatches: Vec<&String> = commands
+            .iter()
+            .filter(|c| c.starts_with("farcooler task dispatch ") || c.starts_with("farcooler plan lane dispatch "))
+            .collect();
         assert!(dispatches.iter().any(|c| c.contains("--new")), "{commands:?}");
         assert!(dispatches.iter().any(|c| c.contains("--worktree")), "{commands:?}");
         // Splitting a workstream off, and finding the board from the home,
@@ -4635,8 +4637,8 @@ mod tests {
             said,
             format!(
                 "fc-2 is in progress in lane, terminal {short}\n  dispatched, but the pane couldn't be confirmed \
-                 yet: check `farcooler terminal screen {short}` (it last read starting)\n  it won't report back \
-                 by itself: check the board or `worktree list --json`"
+                 yet: check `farcooler terminal screen {short}` (it last read starting)\n  it tells the orchestrator \
+                 when it stops (`farcooler message`), and the runner does if it doesn't"
             )
         );
         let json: serde_json::Value = serde_json::from_str(&dispatched_output("fc-2", &done, true)).unwrap();
@@ -4686,7 +4688,7 @@ mod tests {
             let said = dispatched_output("fc-2", &done, false);
             assert!(said.contains(&format!("\n  {sentence}\n")), "{state:?}: {said}");
             assert!(!said.contains("yet"), "{state:?}: {said}");
-            assert!(said.ends_with("it won't report back by itself: check the board or `worktree list --json`"));
+            assert!(said.ends_with("it tells the orchestrator when it stops (`farcooler message`), and the runner does if it doesn't"));
         }
         // Starting, then exited on the first look: it stops there.
         let mut link = FakeLink {

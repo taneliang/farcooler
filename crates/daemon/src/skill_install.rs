@@ -135,31 +135,34 @@ pub const CHARTER_SECTIONS: &[&str] = &[
     "## Anything else",
 ];
 
-/// Whether anything can wake a manager that has ended its turn. Nothing can
-/// yet (see `WAIT_STEP`).
+/// Whether anything can wake a manager that has ended its turn. Something
+/// can (ov-455): the runner types its lanes' messages, its own notice that a
+/// lane stopped without reporting, and the owner's answers (ov-90) into the
+/// orchestrator's pane (`watch::answer_wake`). See `WAIT_STEP`.
 ///
-/// Until something can, the manager's next wake-up is the owner talking to it
-/// again, and step 1 of the skill tells it to re-read `$FARCOOLER_CHARTER`
-/// then. The wake-up prompt that replaces this has to say the same (the spec's
-/// "every wake-up prompt tells it to re-read" the charter): the owner edits the
-/// charter between turns, and a compacted conversation remembers it wrong.
-pub const WAKE_LOOP_EXISTS: bool = false;
+/// What wakes it is a line, not a prompt that restates the skill, so
+/// `WAIT_STEP` itself tells it to re-read `$FARCOOLER_CHARTER` first when
+/// something comes in (the spec's "every wake-up prompt tells it to re-read"
+/// the charter): the owner edits the charter between turns, and a compacted
+/// conversation remembers it wrong.
+pub const WAKE_LOOP_EXISTS: bool = true;
 
-/// Step 4 of the skill: stop, and say so honestly.
+/// Step 6 of the skill: wait to be woken (the spec's step 4), and say so
+/// honestly.
 ///
-/// The spec's step 4 is "wait to be woken", and the wake loop that would do
-/// the waking needs Phase 3 of live-agent-sessions (typing into a running
-/// agent's pane when its screen is ready), which doesn't exist yet. Until it
-/// does, a manager that says "I'll check back" is making a promise nothing on
-/// the runner keeps, and the owner finds out by waiting. So the step tells the
-/// manager to end its turn and say what it's waiting on.
+/// The runner types into this pane when there's something for the manager
+/// (`WAKE_LOOP_EXISTS`), so the manager ends its turn rather than polling or
+/// sleeping. What it still can't do is reach the owner: nothing it does
+/// sends a phone a notification, so the step forbids promising one.
 ///
-/// `the_skill_promises_no_wake_while_none_exists` holds this to that while
-/// `WAKE_LOOP_EXISTS` is false.
-pub const WAIT_STEP: &str = "Stop. Nothing will wake you: Far Cooler can't yet type into this pane when \
-the board changes. End your turn by telling the owner in one line what you're waiting on, and that \
-you'll look again when they next talk to you. Don't poll the board in a loop, don't sleep, and \
-don't say you'll check back.";
+/// `the_skill_says_what_wakes_it_and_promises_the_owner_nothing` holds it
+/// to that.
+pub const WAIT_STEP: &str = "Stop and end your turn: Far Cooler types into this pane when there's \
+something for you. A lane's agent reports when it finishes, gets stuck or needs a decision, the \
+runner says when one stops without reporting, and the owner's answers on the board come in the same \
+way. When something comes in, re-read $FARCOOLER_CHARTER first, then the board. Tell the owner in \
+one line what you're waiting on. Don't poll the board in a loop and don't sleep, and don't promise \
+the owner a ping: nothing you do reaches their phone.";
 
 /// codex's switch for the same thing, measured the same way.
 const CODEX_POLICY: &str = "policy:\n  allow_implicit_invocation: false\n";
@@ -789,12 +792,12 @@ mod tests {
         }
     }
 
-    /// Nothing wakes the manager yet, and nothing pushes a question to the
-    /// owner's phone. The day something does, this test forces whoever flips
-    /// `WAKE_LOOP_EXISTS` to rewrite `WAIT_STEP` too.
+    /// The runner wakes the manager (ov-455), and the skill says what with,
+    /// but nothing the manager does pushes anything to the owner's phone, so
+    /// it promises the owner nothing.
     #[test]
-    fn the_skill_promises_no_wake_while_none_exists() {
-        const { assert!(!WAKE_LOOP_EXISTS) };
+    fn the_skill_says_what_wakes_it_and_promises_the_owner_nothing() {
+        const { assert!(WAKE_LOOP_EXISTS) };
         for h in ALL {
             let body = skill_body(h).to_lowercase();
             for promise in [
@@ -809,7 +812,8 @@ mod tests {
             ] {
                 assert!(!body.contains(promise), "{h:?} promises a wake: {promise}");
             }
-            assert!(body.contains("nothing will wake you"), "{h:?}");
+            assert!(body.contains("far cooler types into this pane"), "{h:?}");
+            assert!(body.contains("don't promise the owner a ping"), "{h:?}");
             assert!(body.contains(&WAIT_STEP.to_lowercase()), "{h:?}");
         }
     }
@@ -1069,7 +1073,9 @@ mod tests {
         // 249 until the watch step said to ask `gh` rather than guess (ov-323).
         // 253 once the owner could keep or reverse a ruling (ov-333): three
         // lines for precedent and the lesson a reversal leaves.
-        assert!(lines <= 253, "{lines} lines");
+        // 258 once lanes are dispatched whole and report to the orchestrator
+        // (ov-457, ov-455): what a report is and how to steer a lane.
+        assert!(lines <= 258, "{lines} lines");
     }
 
     #[test]

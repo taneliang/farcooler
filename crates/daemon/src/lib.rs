@@ -27,6 +27,7 @@ pub mod layout;
 pub mod log_join;
 pub mod log_watch;
 pub mod needs_you;
+pub mod opening;
 pub mod orchestrator;
 pub mod paste_mode;
 pub mod pastes;
