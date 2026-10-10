@@ -186,6 +186,8 @@ fn polish_written() -> Value {
             background_running: 0,
             activity: None,
             suggestion: None,
+            images: Vec::new(),
+            source: None,
         })),
         row(1, 2, "tool:toolu_c", t, RowKind::Tool(Tool {
             name: "CronCreate".into(),
