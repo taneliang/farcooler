@@ -514,6 +514,11 @@ message AgentRowsPage {
   // a fresh session would lose its empty state: the runner leaves the row
   // out unless this is set.
   bool hint_rows = 4;
+  // A subagent's own rows instead of the pane's (ov-453): its `agentId`, as
+  // the `Subagent` row names it. Its transcript is read as a conversation of
+  // its own. Only where the runner offers `subagent_rows`: an older one
+  // ignores it and answers with the pane's rows.
+  string agent_id = 5;
 }
 
 // `agent.rows_follow`: what changed after `after_rev`, held open up to
@@ -529,6 +534,8 @@ message AgentRowsFollow {
   uint32 wait_ms = 4;
   // As on `AgentRowsPage`: the `Hint` row is sent only when this is set.
   bool hint_rows = 5;
+  // As on `AgentRowsPage`: a subagent's own rows (ov-453).
+  string agent_id = 6;
 }
 
 message AgentRow {

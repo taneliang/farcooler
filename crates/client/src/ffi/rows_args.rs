@@ -16,6 +16,8 @@ use crate::session::{Session, SessionError};
 ///
 /// - `settings.set_projector {on}` answers `{projector}`, what was set. The
 ///   hello already made doesn't change: reconnect to be offered `agent_rows`.
+/// - Either takes `agent`, a subagent's `agentId`, for that agent's own rows
+///   (ov-453), where the runner offers `subagent_rows`.
 /// - `agent.rows {terminal, before?, limit?}` answers
 ///   `{epoch, rev, moreBefore, rows: [row]}`.
 /// - `agent.rows_follow {terminal, epoch, afterRev, waitMs?}` answers
@@ -43,19 +45,26 @@ pub(super) async fn call(session: &Session, method: &str, args: &Value) -> Resul
         let (mime, bytes) = session.agent_image(terminal, row, index).await?;
         return Ok(json!({ "mime": mime, "base64": farcooler_core::base64::encode(&bytes) }));
     }
+    let agent = agent_of(args);
     if method == "agent.rows" {
         let limit = number("limit").unwrap_or(0).min(u64::from(u32::MAX)) as u32;
-        let page = session.agent_rows(terminal, number("before"), limit).await?;
+        let page = session.agent_rows(terminal, number("before"), limit, agent).await?;
         return Ok(page_of(&page));
     }
     let wait = wait_of(args);
-    let follow = session.agent_rows_follow(terminal, number("epoch").unwrap_or(0), number("afterRev").unwrap_or(0), wait).await?;
+    let follow = session.agent_rows_follow(terminal, number("epoch").unwrap_or(0), number("afterRev").unwrap_or(0), wait, agent).await?;
     Ok(changes_of(&follow))
 }
 
 /// How long a follow waits when the app doesn't say: inside the 30 s a call
 /// has (`deadlines.rs`), with room for the round trip.
 pub(super) const DEFAULT_WAIT_MS: u32 = 20_000;
+
+/// A subagent's own rows (ov-453): `agent`, its `agentId`. Absent or empty
+/// is the pane's.
+fn agent_of(args: &Value) -> Option<&str> {
+    args.get("agent").and_then(Value::as_str).filter(|a| !a.is_empty())
+}
 
 fn wait_of(args: &Value) -> u32 {
     args.get("waitMs").and_then(Value::as_u64).map_or(DEFAULT_WAIT_MS, |ms| ms.min(u64::from(u32::MAX)) as u32)
@@ -99,6 +108,13 @@ pub(super) fn changes_of(follow: &farcooler_protocol::v1::AgentRowChanges) -> Va
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_agent_named_asks_for_its_rows_and_none_or_empty_for_the_panes() {
+        assert_eq!(agent_of(&json!({ "agent": "a1" })), Some("a1"));
+        assert_eq!(agent_of(&json!({ "agent": "" })), None);
+        assert_eq!(agent_of(&json!({})), None);
+    }
 
     #[test]
     fn a_follow_with_no_wait_named_waits_twenty_seconds_and_zero_is_zero() {

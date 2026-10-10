@@ -437,6 +437,7 @@ impl HookIngress {
         self.asks.forget(terminal);
         self.assemblers.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal);
         crate::session_projectors::global().forget(terminal);
+        crate::subagent_rows::global().forget(terminal);
         if let Some(alive) = self.tails.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal) {
             alive.store(false, Ordering::Relaxed);
         }

@@ -35,6 +35,7 @@ fn rows() -> Vec<Row> {
             suggestion: Some("run the tests again".into()),
             images: vec![PromptImage { mime: "image/png".into() }],
             source: None,
+            tokens: 52_100,
         })),
         row(1, 2, "prose:1", t, RowKind::Prose(Prose { text: "Looking at **main.rs**.".into(), conclusion: false, at_ms: Some(2_000) })),
         row(2, 3, "think:1", t, RowKind::Thinking(Thinking { started_ms: Some(2_500), ended_ms: Some(4_500) })),
@@ -61,6 +62,7 @@ fn rows() -> Vec<Row> {
             tool_count: 7,
             current_action: "Grep fn main".into(),
             last_ms: Some(9_000),
+            tokens: 87_200,
         })),
         // A question the runner's hook holds (ov-370): its id and its
         // options are what a view answers it with.
@@ -188,6 +190,7 @@ fn polish_written() -> Value {
             suggestion: None,
             images: Vec::new(),
             source: None,
+            tokens: 0,
         })),
         row(1, 2, "tool:toolu_c", t, RowKind::Tool(Tool {
             name: "CronCreate".into(),

@@ -107,7 +107,7 @@ impl Open {
 /// A projection's epoch: the daemon's start in milliseconds, times a
 /// thousand, plus a count, so no two projectors share one, before a restart
 /// or after it.
-fn next_epoch() -> u64 {
+pub(crate) fn next_epoch() -> u64 {
     static NEXT: OnceLock<AtomicU64> = OnceLock::new();
     NEXT.get_or_init(|| AtomicU64::new((now_ms().max(1) as u64).saturating_mul(1000))).fetch_add(1, Ordering::Relaxed)
 }
@@ -240,10 +240,12 @@ fn by_environment() -> bool {
 /// one opens, and `agent.rows` is refused.
 pub fn set_shadowing(on: bool) {
     SETTING.store(on, Ordering::Relaxed);
-    let rows = farcooler_protocol::capability::AGENT_ROWS;
-    match shadowing() {
-        true => farcooler_protocol::capability::offer(rows),
-        false => farcooler_protocol::capability::withhold(rows),
+    use farcooler_protocol::capability::{AGENT_ROWS, SUBAGENT_ROWS};
+    for rows in [AGENT_ROWS, SUBAGENT_ROWS] {
+        match shadowing() {
+            true => farcooler_protocol::capability::offer(rows),
+            false => farcooler_protocol::capability::withhold(rows),
+        }
     }
 }
 
@@ -608,7 +610,7 @@ impl SessionProjectors {
     }
 }
 
-fn owned(changes: Vec<Change<'_>>) -> Vec<RowChange> {
+pub(crate) fn owned(changes: Vec<Change<'_>>) -> Vec<RowChange> {
     changes
         .into_iter()
         .map(|c| match c {

@@ -137,7 +137,7 @@ where
     R: AsyncRead + Unpin + Send + 'static,
     W: AsyncWrite + Unpin + Send + 'static,
 {
-    let payload = request::Payload::AgentRowsPage(pb::AgentRowsPage { terminal_id: terminal.id.clone(), before, limit, hint_rows: true });
+    let payload = request::Payload::AgentRowsPage(pb::AgentRowsPage { terminal_id: terminal.id.clone(), before, limit, hint_rows: true, agent_id: String::new() });
     let result::Value::AgentRowPage(page) = call(client, "agent.rows", payload).await else { panic!("agent.rows") };
     page
 }
@@ -147,7 +147,7 @@ where
     R: AsyncRead + Unpin + Send + 'static,
     W: AsyncWrite + Unpin + Send + 'static,
 {
-    let payload = request::Payload::AgentRowsFollow(pb::AgentRowsFollow { terminal_id: terminal.id.clone(), epoch, after_rev, wait_ms, hint_rows: true });
+    let payload = request::Payload::AgentRowsFollow(pb::AgentRowsFollow { terminal_id: terminal.id.clone(), epoch, after_rev, wait_ms, hint_rows: true, agent_id: String::new() });
     let result::Value::AgentRowChanges(changes) = call(client, "agent.rows_follow", payload).await else { panic!("agent.rows_follow") };
     changes
 }
@@ -259,6 +259,59 @@ async fn rows_page_follow_and_survive_a_restart_on_every_transport() {
     the_contract("stdio after restart", &relayed, &terminal, &path, 2).await;
 }
 
+/// A subagent's own rows (ov-453): its file beside the pane's, read as a
+/// conversation of its own, paged and followed by its `agentId`, and an id
+/// that would reach outside that folder refused.
+#[tokio::test]
+async fn a_subagents_own_rows_page_and_follow_by_its_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let _daemon = daemon(dir.path()).await;
+    let mut client = socket(dir.path()).await;
+    assert!(client.server_hello().capabilities.iter().any(|c| c == "subagent_rows"), "offered with agent_rows");
+    let worktree = a_worktree(&mut client, dir.path()).await;
+    let terminal = a_claude_pane(&mut client, &worktree).await;
+    let path = transcript(dir.path(), &worktree, &terminal);
+    append(&path, prompt("p1", "Look into it."));
+    let session = path.file_stem().unwrap().to_string_lossy().into_owned();
+    let subs = path.with_file_name(&session).join("subagents");
+    std::fs::create_dir_all(&subs).unwrap();
+    let own = subs.join("agent-a1.jsonl");
+    append(&own, prompt("s1", "Find the parser."));
+
+    let ask = |agent: &str, before: Option<u64>| {
+        request::Payload::AgentRowsPage(pb::AgentRowsPage { terminal_id: terminal.id.clone(), before, limit: 0, hint_rows: true, agent_id: agent.into() })
+    };
+    let result::Value::AgentRowPage(page) = call(&client, "agent.rows", ask("a1", None)).await else { panic!("agent.rows") };
+    let first: serde_json::Value = serde_json::from_str(&page.rows[0].row_json).unwrap();
+    assert_eq!(first["kind"]["Turn"]["prompt"], "Find the parser.", "the agent's task, not the pane's prompt: {first}");
+
+    let writer = {
+        let own = own.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            append(&own, reply("r1", "Found it."));
+        })
+    };
+    let payload = request::Payload::AgentRowsFollow(pb::AgentRowsFollow {
+        terminal_id: terminal.id.clone(),
+        epoch: page.epoch,
+        after_rev: page.rev,
+        wait_ms: 10_000,
+        hint_rows: true,
+        agent_id: "a1".into(),
+    });
+    let result::Value::AgentRowChanges(changes) = call(&client, "agent.rows_follow", payload).await else { panic!("follow") };
+    writer.await.unwrap();
+    assert!(changes.changes.iter().any(|c| c.id.starts_with("prose:r1")), "{changes:?}");
+
+    let mut req = call_named("agent.rows");
+    req.payload = Some(ask("../../x", None));
+    match client.call_with(req, Default::default()).await {
+        Err(farcooler_transport::ClientError::Daemon { code, .. }) => assert_eq!(code, pb::ErrorCode::InvalidArgument as i32),
+        other => panic!("{other:?}"),
+    }
+}
+
 /// Without `FARCOOLER_PROJECTOR=1` the capability is not offered, over the
 /// socket or the relayed stdio, and the methods are refused.
 #[tokio::test]
@@ -270,10 +323,11 @@ async fn without_the_flag_rows_are_refused_as_unsupported() {
     let _daemon = common::listening_daemon_with_env(dir.path(), &[("FARCOOLER_CONFIG", &config)]).await;
     let client = socket(dir.path()).await;
     assert!(!client.server_hello().capabilities.iter().any(|c| c == "agent_rows"), "offered and then refused");
+    assert!(!client.server_hello().capabilities.iter().any(|c| c == "subagent_rows"), "nor a subagent's");
     let (_relay, relayed) = spawn(dir.path()).await;
     assert!(!relayed.server_hello().capabilities.iter().any(|c| c == "agent_rows"));
     let mut req = call_named("agent.rows");
-    req.payload = Some(request::Payload::AgentRowsPage(pb::AgentRowsPage { terminal_id: uuid::Uuid::now_v7().as_bytes().to_vec().into(), before: None, limit: 0, hint_rows: false }));
+    req.payload = Some(request::Payload::AgentRowsPage(pb::AgentRowsPage { terminal_id: uuid::Uuid::now_v7().as_bytes().to_vec().into(), before: None, limit: 0, hint_rows: false, agent_id: String::new() }));
     match client.call_with(req, Default::default()).await {
         Err(farcooler_transport::ClientError::Daemon { code, .. }) => assert_eq!(code, pb::ErrorCode::CapabilityUnsupported as i32),
         other => panic!("{other:?}"),

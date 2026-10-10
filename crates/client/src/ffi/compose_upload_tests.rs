@@ -15,7 +15,7 @@ use crate::session::{Session, SessionError};
 
 /// A runner that advertises `capabilities`, takes every paste chunk and
 /// answers a compose Sent, and records each request.
-async fn a_recording_runner(socket: &std::path::Path, capabilities: Vec<String>) -> Arc<Mutex<Vec<pb::Request>>> {
+pub(super) async fn a_recording_runner(socket: &std::path::Path, capabilities: Vec<String>) -> Arc<Mutex<Vec<pb::Request>>> {
     let envelope = |body| pb::WireEnvelope {
         protocol_version: farcooler_protocol::PROTOCOL_VERSION,
         message_id: farcooler_protocol::ids::new_id(),

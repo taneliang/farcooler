@@ -657,6 +657,12 @@ pub mod capability {
     /// runner's own notice to the orchestrator when a lane stops without
     /// reporting.
     pub const AGENT_MESSAGES: &str = "agent_messages";
+    /// A subagent's own conversation (ov-453): `agent_id` on `agent.rows`
+    /// and `agent.rows_follow`, its transcript read as rows of its own. A
+    /// field on an existing payload, so a client checks for it before
+    /// setting one: an older runner drops the id and answers with the pane's
+    /// rows. Offered and withheld with `agent_rows`.
+    pub const SUBAGENT_ROWS: &str = "subagent_rows";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -676,6 +682,7 @@ pub mod capability {
             COMPOSE, COMPOSE_UPLOAD, TERMINAL_INTERRUPT, CODEX_VIEW, BRING_DRAFT, WEB_PANE,
             AGENT_IMAGES, COMPOSE_FILES, TERMINAL_LANE,
             AGENT_MESSAGES,
+            SUBAGENT_ROWS,
         ];
 
     /// Capabilities this process has but does not offer: a feature behind a

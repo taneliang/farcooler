@@ -22,6 +22,7 @@ use uuid::Uuid;
 
 use crate::service::Service;
 use crate::session_projectors::{self, Follow, Page, RowChange};
+use crate::subagent_rows;
 use crate::wire;
 
 /// Rows in a page a client asked no size for: about a screen and a half.
@@ -49,7 +50,16 @@ pub(crate) async fn dispatch(svc: &Service, req: Request) -> Result<result::Valu
                 0 => DEFAULT_PAGE,
                 n => n.min(MAX_PAGE),
             };
-            let page = open.then(|| session_projectors::global().read_page(terminal, p.before, limit)).flatten();
+            let page = match p.agent_id.is_empty() {
+                true => open.then(|| session_projectors::global().read_page(terminal, p.before, limit)).flatten(),
+                false => match subagent_path(open, terminal, &p.agent_id)? {
+                    Some(path) => {
+                        let (agent, before) = (p.agent_id.clone(), p.before);
+                        tokio::task::spawn_blocking(move || subagent_rows::global().page(terminal, &agent, path, before, limit)).await.ok()
+                    }
+                    None => None,
+                },
+            };
             let mut page = page.unwrap_or(Page { epoch: 0, rev: 0, rows: Vec::new(), more_before: false });
             keep_hint_for(&mut page.rows, p.hint_rows);
             Ok(result::Value::AgentRowPage(pb::AgentRowPage {
@@ -62,7 +72,10 @@ pub(crate) async fn dispatch(svc: &Service, req: Request) -> Result<result::Valu
         }
         ("agent.rows_follow", Some(request::Payload::AgentRowsFollow(p))) => {
             let terminal = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-            let follow = follow_answer(session_projectors::global(), terminal, &p, arrived, ensure_open(svc, terminal)).await?;
+            let follow = match p.agent_id.is_empty() {
+                true => follow_answer(session_projectors::global(), terminal, &p, arrived, ensure_open(svc, terminal)).await?,
+                false => subagent_follow(terminal, &p, arrived, ensure_open(svc, terminal)).await?,
+            };
             Ok(result::Value::AgentRowChanges(pb_changes(terminal, follow, p.hint_rows)))
         }
         _ => Err(DomainError::InvalidArgument { what: "payload" }),
@@ -186,6 +199,34 @@ pub(crate) async fn follow_answer(
             Follow::Changes { epoch: 0, rev: 0, changes: Vec::new() }
         }
     })
+}
+
+/// Where subagent `agent` of `terminal` writes its own transcript, beside
+/// the pane's (ov-453). `None` while the pane has no session open; refused
+/// for an id claude never writes.
+fn subagent_path(open: bool, terminal: Uuid, agent: &str) -> Result<Option<PathBuf>> {
+    let Some(main) = open.then(|| session_projectors::global().transcript(terminal)).flatten() else { return Ok(None) };
+    farcooler_core::session_log::projector::subagent_transcript(&main, agent).map(Some).ok_or(DomainError::InvalidArgument { what: "agent_id" })
+}
+
+/// A follow of a subagent's own rows, its wait counted from `arrived` as
+/// `follow_answer`'s is.
+async fn subagent_follow(
+    terminal: Uuid,
+    p: &pb::AgentRowsFollow,
+    arrived: tokio::time::Instant,
+    open: impl std::future::Future<Output = Result<bool>>,
+) -> Result<Follow> {
+    let deadline = arrived + Duration::from_millis(u64::from(p.wait_ms)).min(MAX_WAIT);
+    match subagent_path(open.await?, terminal, &p.agent_id)? {
+        Some(path) => {
+            Ok(subagent_rows::global().follow(terminal, &p.agent_id, path, p.epoch, p.after_rev, deadline, session_projectors::MAX_CHANGES).await)
+        }
+        None => {
+            tokio::time::sleep_until(deadline).await;
+            Ok(Follow::Changes { epoch: 0, rev: 0, changes: Vec::new() })
+        }
+    }
 }
 
 /// Open `terminal`'s projector if it has none, from its transcript on disk.

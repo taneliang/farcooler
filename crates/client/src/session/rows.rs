@@ -6,21 +6,24 @@ use super::*;
 
 impl Session {
     /// Up to `limit` of `terminal`'s rows before `before` (`agent.rows`),
-    /// oldest first, with the epoch and revision to follow from.
+    /// oldest first, with the epoch and revision to follow from. With
+    /// `agent`, that subagent's own rows instead (ov-453).
     pub async fn agent_rows(
         &self,
         terminal: Uuid,
         before: Option<u64>,
         limit: u32,
+        agent: Option<&str>,
     ) -> Result<farcooler_protocol::v1::AgentRowPage, SessionError> {
-        require(self.capabilities(), farcooler_protocol::capability::AGENT_ROWS, "agent.rows")?;
+        let required = self.rows_required(agent, "agent.rows")?;
         let payload = request::Payload::AgentRowsPage(farcooler_protocol::v1::AgentRowsPage {
             terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
             before,
             limit,
             hint_rows: true,
+            agent_id: agent.unwrap_or_default().to_string(),
         });
-        match self.value("agent.rows", None, Some(payload)).await? {
+        match self.value_requiring("agent.rows", None, Some(payload), required).await? {
             result::Value::AgentRowPage(page) => Ok(page),
             other => Err(wrong("agent_row_page", &other)),
         }
@@ -28,23 +31,25 @@ impl Session {
 
     /// What changed in `terminal`'s rows after `after_rev` of projection
     /// `epoch` (`agent.rows_follow`), the runner holding the call up to
-    /// `wait_ms` while nothing has.
+    /// `wait_ms` while nothing has. With `agent`, that subagent's own rows.
     pub async fn agent_rows_follow(
         &self,
         terminal: Uuid,
         epoch: u64,
         after_rev: u64,
         wait_ms: u32,
+        agent: Option<&str>,
     ) -> Result<farcooler_protocol::v1::AgentRowChanges, SessionError> {
-        require(self.capabilities(), farcooler_protocol::capability::AGENT_ROWS, "agent.rows_follow")?;
+        let required = self.rows_required(agent, "agent.rows_follow")?;
         let payload = request::Payload::AgentRowsFollow(farcooler_protocol::v1::AgentRowsFollow {
             terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
             epoch,
             after_rev,
             wait_ms,
             hint_rows: true,
+            agent_id: agent.unwrap_or_default().to_string(),
         });
-        match self.value("agent.rows_follow", None, Some(payload)).await? {
+        match self.value_requiring("agent.rows_follow", None, Some(payload), required).await? {
             result::Value::AgentRowChanges(changes) => Ok(changes),
             other => Err(wrong("agent_row_changes", &other)),
         }
@@ -76,6 +81,20 @@ impl Session {
                 return Ok((piece.mime_type, bytes));
             }
         }
+    }
+
+    /// What a rows call needs the runner to have: `agent_rows`, and for a
+    /// subagent's own rows `subagent_rows` too, named on the request as well,
+    /// since a runner without it would drop the id and answer with the
+    /// pane's rows as though they were the agent's.
+    fn rows_required(&self, agent: Option<&str>, method: &str) -> Result<Vec<String>, SessionError> {
+        use farcooler_protocol::capability::{AGENT_ROWS, SUBAGENT_ROWS};
+        require(self.capabilities(), AGENT_ROWS, method)?;
+        if agent.is_none() {
+            return Ok(Vec::new());
+        }
+        require(self.capabilities(), SUBAGENT_ROWS, method)?;
+        Ok(vec![SUBAGENT_ROWS.to_string()])
     }
 
     /// Turn the runner's projector on or off (`settings.set_projector`,

@@ -105,7 +105,7 @@ async fn a_follows_wait_counts_from_arrival_not_from_the_open() {
     let terminal = Uuid::now_v7();
     projectors.open(terminal, path);
     let page = projectors.read_page(terminal, None, 10).unwrap();
-    let p = pb::AgentRowsFollow { terminal_id: wire::id_bytes(terminal), epoch: page.epoch, after_rev: page.rev, wait_ms: 500, hint_rows: true };
+    let p = pb::AgentRowsFollow { terminal_id: wire::id_bytes(terminal), epoch: page.epoch, after_rev: page.rev, wait_ms: 500, hint_rows: true, agent_id: String::new() };
     let arrived = tokio::time::Instant::now();
     let slow_open = async {
         tokio::time::sleep(Duration::from_millis(300)).await;
