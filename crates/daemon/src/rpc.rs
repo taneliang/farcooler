@@ -1928,17 +1928,9 @@ impl Rpc {
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
                 // Carried, or uploaded first and named (ov-393).
                 let images = crate::pastes::staged::images(svc.root_dir(), &p.blocks).await?;
-                // Files of any kind (ov-454): written here, their paths typed
-                // before the text.
+                // Files of any kind (ov-454), written here; their paths typed first.
                 let files = crate::pastes::staged::files(svc.root_dir(), &p.blocks).await?;
-                let turn = self.watcher.compose_files_into(id, &wire::prompt_text(&p.blocks), &images, &files).await.inspect_err(|e| {
-                    // Refused before anything was typed: the copies go now.
-                    if !matches!(e, DomainError::Conflict { what: "unconfirmed" }) {
-                        for file in &files {
-                            let _ = std::fs::remove_file(file);
-                        }
-                    }
-                })?;
+                let turn = self.watcher.compose_files_into(id, &wire::prompt_text(&p.blocks), &images, &files).await?;
                 let queued = turn == crate::watch::answer_wake::Turn::During;
                 Ok(result::Value::TerminalTold(farcooler_protocol::v1::TerminalTold { queued }))
             }

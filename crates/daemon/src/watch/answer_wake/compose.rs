@@ -232,8 +232,23 @@ impl Watcher {
     }
 
     /// `compose_into`, with `files` already written on the runner, their
-    /// paths typed before the text (ov-454).
+    /// paths typed before the text (ov-454). Refused before anything was
+    /// typed, the files go at once; once it may have been, the sweep takes
+    /// them with the composed images.
     pub(crate) async fn compose_files_into(&self, id: Uuid, raw: &str, images: &[(String, Vec<u8>)], files: &[PathBuf]) -> Result<Turn> {
+        let composed = self.compose_checked(id, raw, images, files).await;
+        if let Err(e) = &composed
+            && !matches!(e, DomainError::Conflict { what: "unconfirmed" })
+        {
+            for file in files {
+                let _ = std::fs::remove_file(file);
+            }
+        }
+        composed
+    }
+
+    /// `compose_files_into` past what becomes of its files.
+    async fn compose_checked(&self, id: Uuid, raw: &str, images: &[(String, Vec<u8>)], files: &[PathBuf]) -> Result<Turn> {
         let to = self.service.store.get_terminal(id)?;
         if to.pane_mode == PaneMode::Agent {
             return Err(DomainError::InvalidArgument { what: "terminal" });

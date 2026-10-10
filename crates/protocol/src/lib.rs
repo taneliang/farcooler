@@ -641,14 +641,11 @@ pub mod capability {
     /// an existing payload, so a client that sets it names this in the
     /// request: an older runner drops the URL and launches `web` as a program.
     pub const WEB_PANE: &str = "web_pane";
-    /// A prompt's images (ov-454): `images` on a `Turn` row, and
-    /// `agent.image`, one of them a piece at a time. Its own word, so a
-    /// client asks only a runner that keeps them.
+    /// A prompt's images (ov-454): `images` on a `Turn` row, and `agent.image`
+    /// serving one a piece at a time. A client asks only a runner offering it.
     pub const AGENT_IMAGES: &str = "agent_images";
-    /// A compose's files (ov-454): `terminal.compose`'s `staged_file`, any
-    /// kind of file written on the runner and its path typed before the text.
-    /// Its own word because an older runner drops a block it doesn't know:
-    /// a client that reads it absent attaches images alone.
+    /// `terminal.compose`'s `staged_file` (ov-454): any file, written on the
+    /// runner, its path typed before the text. An older runner drops the block.
     pub const COMPOSE_FILES: &str = "compose_files";
 
     /// Every capability this build has, in a stable order.
@@ -912,8 +909,7 @@ pub const MAX_COMPOSE_IMAGE_BYTES: usize = 900 * 1024;
 /// (`compose_upload`, ov-393): ten Retina screenshots and room to spare.
 pub const MAX_COMPOSE_UPLOAD_BYTES: usize = 50 * 1024 * 1024;
 
-/// The most bytes one `agent.image` answer carries (ov-454): half the
-/// envelope, so a 5 MB screenshot is ten round trips.
+/// The most bytes one `agent.image` answer carries (ov-454): half the envelope.
 pub const MAX_AGENT_IMAGE_CHUNK: usize = 512 * 1024;
 
 /// `TerminalFrame.payload` is capped at 64 KiB.
