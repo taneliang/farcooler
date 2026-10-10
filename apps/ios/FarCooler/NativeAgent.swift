@@ -71,18 +71,29 @@ struct CoreInterruptSink: InterruptSink {
 struct CoreRowSource: AgentRowSource {
     let core: ClientCore
     let terminal: String
+    /// The subagent whose own rows these are (ov-453); nil for the pane's.
+    var agent: String? = nil
 
     func page(before: UInt64?, limit: Int) async throws -> Data {
         var args: [String: Any] = ["terminal": terminal, "limit": limit]
         if let before { args["before"] = before }
+        if let agent { args["agent"] = agent }
         return try await mapped { try await core.call("agent.rows", args) }
     }
 
     func follow(epoch: UInt64, afterRev: UInt64, waitMs: Int) async throws -> Data {
-        try await mapped {
-            try await core.call(
-                "agent.rows_follow", ["terminal": terminal, "epoch": epoch, "afterRev": afterRev, "waitMs": waitMs])
-        }
+        var args: [String: Any] = ["terminal": terminal, "epoch": epoch, "afterRev": afterRev, "waitMs": waitMs]
+        if let agent { args["agent"] = agent }
+        return try await mapped { try await core.call("agent.rows_follow", args) }
+    }
+
+    /// The model asks only where the runner offers `subagent_rows`
+    /// (`NativePaneModel.opensAgents`).
+    func subagent(_ agentId: String) -> (any AgentRowSource)? {
+        guard agent == nil else { return nil }
+        var own = self
+        own.agent = agentId
+        return own
     }
 
     /// A runner that doesn't serve rows (its projector turned off since the
@@ -239,6 +250,13 @@ final class NativePaneModel: ObservableObject {
     /// What the pane shows: the conversation, when wanted and available.
     @Published private(set) var showing = false
 
+    /// The agent tray's state, and the subagent open in the conversation's
+    /// place (ov-453).
+    let drill = AgentDrill()
+    /// Whether a subagent opens to its own rows here: the runner serves them
+    /// (`subagent_rows`).
+    @Published private(set) var opensAgents = false
+
     /// The follow loop is running.
     @Published private(set) var following = false
     /// How many times the follow has been stopped, for the harness's probe.
@@ -283,6 +301,7 @@ final class NativePaneModel: ObservableObject {
 
     private func followIfDue() {
         let due = onScreen && showing
+        drill.follow(due)
         // A loop that ended because the runner stopped serving rows isn't
         // following, whatever was set when it started.
         if due, following, store.phase == .unavailable { following = false }
@@ -325,7 +344,12 @@ final class NativePaneModel: ObservableObject {
     /// breaks, images and commands with `compose` (ov-367), Stop and Send Now
     /// with `terminal_interrupt` (ov-368).
     /// Bring Here with `bring_draft` (ov-369).
-    func offer(rich: Bool, interrupts: Bool, bring: Bool = false) {
+    /// A subagent opened to its own rows with `subagent_rows` (ov-453).
+    func offer(rich: Bool, interrupts: Bool, bring: Bool = false, agents: Bool = false) {
+        if opensAgents != agents {
+            opensAgents = agents
+            if !agents { drill.close() }
+        }
         let drafting: (any DraftSink)? = bring ? draftSink : nil
         if (drafts == nil) != (drafting == nil) { drafts = drafting }
         if self.rich != rich {
@@ -392,6 +416,22 @@ final class NativePaneModel: ObservableObject {
     /// The page above the oldest row held.
     func loadOlder() {
         store.loadOlder(source)
+    }
+
+    /// Open subagent `agentId`, whose row in this pane's rows is `row`, in the
+    /// conversation's place (ov-453). False where it can't be opened.
+    @discardableResult
+    func openAgent(row: String, agentId: String?) -> Bool {
+        guard opensAgents else { return false }
+        let opened = drill.open(row: row, agentId: agentId, from: source, pane: terminal)
+        if opened { objectWillChange.send() }
+        return opened
+    }
+
+    /// Back to the pane's own conversation.
+    func closeAgent() {
+        drill.close()
+        objectWillChange.send()
     }
 
     /// Drop a local Queued echo once the transcript shows the message.

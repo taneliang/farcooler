@@ -40,6 +40,9 @@ import UIKit
 ///   by nothing.
 /// - `-native-polish` (ov-452): the page ends on a scheduled task's turn, a
 ///   run of two calls with their input and result, a task list and a reply.
+/// - `-native-agents` (ov-453): four subagents running, the runner offering
+///   `subagent_rows`, and each agent's own rows (`agent.rows` with `agent`)
+///   its task, a call and its words.
 /// - `-native-flag-off`: a runner whose projector is off, so no `agent_rows`.
 /// - `-native-reconnect`: once the box holds a draft, the link comes up
 ///   again, so the build is unread for two seconds.
@@ -152,7 +155,8 @@ struct NativeAgentHarness: View {
                     + (CommandLine.arguments.contains("-native-no-compose") ? [] : ["compose", "compose_upload"])
                     + (CommandLine.arguments.contains("-native-no-interrupt") ? [] : ["terminal_interrupt"])
                     + (CommandLine.arguments.contains("-native-no-bring") ? [] : ["bring_draft"])
-                    + (CommandLine.arguments.contains("-native-codex-before") ? [] : ["codex_view"])),
+                    + (CommandLine.arguments.contains("-native-codex-before") ? [] : ["codex_view"])
+                    + (CommandLine.arguments.contains("-native-agents") ? ["subagent_rows"] : [])),
             grantedScope: "host_admin")
     }
 
@@ -271,7 +275,9 @@ final class NativeHarnessRunner: ObservableObject {
     /// sent=a|b images=mime:bytes,mime:bytes pressed=stop,sendnow
     /// answered=<ask> <option> <answers>|…`. A line break in a sent message
     /// reads `⏎`.
-    @Published private(set) var said = "follows=0 background=0 changed=false linked=0 sent= images= pressed= answered= brought="
+    @Published private(set) var said = "follows=0 background=0 changed=false linked=0 sent= images= pressed= answered= brought= opened="
+    /// The subagents whose own rows were asked for (ov-453).
+    private var opened: [String] = []
     /// Each answer the held ask was given (ov-370).
     private var answered: [String] = []
     /// The held ask was answered, and the next follow is to say so.
@@ -310,8 +316,16 @@ final class NativeHarnessRunner: ObservableObject {
         switch method {
         case "agent.rows":
             try await MainActor.run { try refuseIfOff() }
+            if let agent = args["agent"] as? String {
+                await MainActor.run { opened.append(agent); report() }
+                return try await MainActor.run { try json(Self.agentPage(agent)) }
+            }
             return try await MainActor.run { try json(page()) }
         case "agent.rows_follow":
+            if args["agent"] is String {
+                try await Task.sleep(for: .milliseconds(700))
+                return try json(["epoch": 9, "rev": (args["afterRev"] as? NSNumber)?.uint64Value ?? 6, "reset": false, "changes": [Any]()])
+            }
             return try await follow()
         case "terminal.compose":
             let text = args["text"] as? String ?? ""
@@ -351,7 +365,8 @@ final class NativeHarnessRunner: ObservableObject {
         said = "follows=\(follows) background=\(background) changed=\(updated) linked=\(linked) "
             + "sent=\(sent.joined(separator: "|").replacingOccurrences(of: "\n", with: "⏎")) "
             + "images=\(images.joined(separator: ",")) pressed=\(pressed.joined(separator: ",")) "
-            + "answered=\(answered.joined(separator: "|")) brought=\(brought.joined(separator: "|"))"
+            + "answered=\(answered.joined(separator: "|")) brought=\(brought.joined(separator: "|")) "
+            + "opened=\(opened.joined(separator: ","))"
     }
 
     /// `terminal.bring_draft`: the box read, or cleared of `expected`.
@@ -573,6 +588,7 @@ final class NativeHarnessRunner: ObservableObject {
             rows.append(Self.row("hint:composer", ord: 11, rev: 11, kind: ["Hint": ["text": Self.exampleHint]]))
         }
         if CommandLine.arguments.contains("-native-polish") { rows += Self.polishRows(now: now) }
+        if CommandLine.arguments.contains("-native-agents") { rows += Self.agentRows(now: now) }
         return ["epoch": Self.epoch, "rev": rev, "moreBefore": false, "rows": rows]
     }
 
@@ -605,6 +621,51 @@ final class NativeHarnessRunner: ObservableObject {
             ]]]),
             row("prose:s1:0", ord: 24, rev: 24, kind: ["Prose": ["text": "Check-in at 09:34: nothing has changed. Main is green and no lanes are running. The next check-in is at 11:31.", "conclusion": true]]),
         ]
+    }
+
+    /// `-native-agents`' rows (ov-453): four lanes running, as the owner's
+    /// own session of Oct 10 had them, and one already back.
+    private static func agentRows(now: Int64) -> [[String: Any]] {
+        let lanes: [(String, String, String, String, Int64, Int)] = [
+            ("a1", "general-purpose", "ov-452 conversation view hierarchy", "Bash Read old normalize result and task list code", 190, 87_200),
+            ("a2", "general-purpose", "ov-454 image paste and attachments", "Read ComposerTextView paste and drag handling", 185, 80_100),
+            ("a3", "Explore", "ov-453 subagent tray", "Grep subagents folder beside the session", 120, 41_900),
+            ("a4", "general-purpose", "ov-455 queue phrasing", "Bash Tally turnOrigin values in transcripts", 82, 12_400),
+        ]
+        var rows = lanes.enumerated().map { n, lane -> [String: Any] in
+            row("sub:\(lane.0)", ord: 30 + UInt64(n), rev: 30 + UInt64(n), kind: ["Subagent": [
+                "tool_use_id": lane.0, "agent_id": "agent-\(lane.0)", "agent_type": lane.1, "description": lane.2, "background": true,
+                "status": "Running", "started_ms": now - lane.4 * 1000, "tool_count": 12, "current_action": lane.3, "last_ms": now - 2000,
+                "tokens": lane.5,
+            ]])
+        }
+        rows.append(row("sub:a5", ord: 34, rev: 34, kind: ["Subagent": [
+            "tool_use_id": "a5", "agent_id": "agent-a5", "agent_type": "general-purpose", "description": "ov-451 strip URL tokens",
+            "background": true, "status": "Completed", "started_ms": now - 400_000, "ended_ms": now - 5000, "tool_count": 30,
+            "current_action": "", "last_ms": now - 5000, "tokens": 30_000,
+        ]]))
+        return rows
+    }
+
+    /// An agent's own rows (ov-453): the task it was given, a call, its words.
+    private static func agentPage(_ agent: String) -> [String: Any] {
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let rows: [[String: Any]] = [
+            row("turn:\(agent)", ord: 0, rev: 1, kind: ["Turn": [
+                "prompt": "Make the conversation view read text first: fold long prompts, put tool rows under the words, and open each call to its input and result.",
+                "origin": "Other", "background_running": 0, "tokens": 87_200,
+            ]]),
+            row("tool:\(agent)-1", ord: 1, rev: 2, kind: ["Tool": [
+                "name": "Bash", "summary": "Find the conversation view's rows", "status": "Done", "started_ms": now - 90_000,
+                "ended_ms": now - 89_000, "diff": [Any](), "input": "command: rg -n NativeRows apps",
+                "result": "apps/ios/FarCooler/NativeRows.swift",
+            ]]),
+            row("prose:\(agent)-1", ord: 2, rev: 3, kind: ["Prose": [
+                "text": "The rows are drawn in `NativeRows.swift`. A tool row is heavier than the reply, so I'll set it in the callout size, in secondary, and let it open to its input and result.",
+                "conclusion": false,
+            ]]),
+        ]
+        return ["epoch": 9, "rev": 6, "moreBefore": false, "rows": rows]
     }
 
     private static func turn(_ prompt: String, origin: String, open: Bool = false) -> [String: Any] {

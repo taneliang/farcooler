@@ -96,6 +96,7 @@ SHARDS = {
     ],
     "phone3": [
         "NativeAgentViewTests",  # 440 s
+        "NativeAgentTrayUITests",  # ~70 s est.; -native-agent-harness -native-agents (ov-453)
         "ShellPaneScrollTests",  # 210 s; -shell-harness; one live method, in SKIP
         "ActionFailureTests",  # 187 s; -phone-harness and -agent-layout-harness
         "DynamicTypeTests",  # 144 s; -agent-layout-harness

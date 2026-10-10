@@ -77,11 +77,14 @@ struct NativeOffer: Equatable {
     var interrupts = false
     /// Bring Here, with `bring_draft` (ov-369).
     var bring = false
+    /// A subagent opened to its own rows, with `subagent_rows` (ov-453).
+    var agents = false
 
     init(_ build: DaemonBuild?) {
         rich = build?.can(.compose) == true
         interrupts = build?.can(.terminalInterrupt) == true
         bring = build?.can(.bringDraft) == true
+        agents = build?.can(.subagentRows) == true
     }
 }
 
@@ -206,14 +209,16 @@ private struct NativeSwitchBody<Content: View>: View {
             #endif
         }
         .onChange(of: isOnScreen, initial: true) { _, now in model?.setOnScreen(now) }
-        .onChange(of: offer, initial: true) { _, now in model?.offer(rich: now.rich, interrupts: now.interrupts, bring: now.bring) }
+        .onChange(of: offer, initial: true) { _, now in
+            model?.offer(rich: now.rich, interrupts: now.interrupts, bring: now.bring, agents: now.agents)
+        }
         .onChange(of: model.map(ObjectIdentifier.init)) { _, _ in
             #if DEBUG
             if held != nil, model == nil { NativeProbe.dropped[terminal, default: 0] += 1 }
             #endif
             if let held, held !== model { held.release() }
             held = model
-            model?.offer(rich: offer.rich, interrupts: offer.interrupts, bring: offer.bring)
+            model?.offer(rich: offer.rich, interrupts: offer.interrupts, bring: offer.bring, agents: offer.agents)
             model?.setOnScreen(isOnScreen)
         }
         .onAppear {
@@ -324,8 +329,18 @@ struct NativeAgentView: View {
     private static let settleLadder = [80, 180, 300, 440]
 
     var body: some View {
+        // A subagent opened from the tray or its row (ov-453) takes the
+        // conversation's place, in the same style, with the way back above.
+        if let opened = model.drill.opened {
+            NativeAgentConversation(model: model, opened: opened, showTerminal: showTerminal)
+        } else {
+            conversation
+        }
+    }
+
+    private var conversation: some View {
         let store = model.store
-        ScrollView {
+        return ScrollView {
             LazyVStack(alignment: .leading, spacing: Spacing.inset) {
                 if store.moreBefore {
                     ProgressView()
@@ -433,8 +448,15 @@ struct NativeAgentView: View {
             if !store.shownIds.isEmpty, store.isStale { staleBanner(store.phase) }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            NativeComposer(model: model, showTerminal: showTerminal)
+            VStack(spacing: 0) {
+                // The agents at work, pinned while any runs (ov-453).
+                NativeAgentTray(model: model)
+                    .padding(.horizontal, Spacing.section)
+                    .padding(.bottom, Spacing.group)
+                NativeComposer(model: model, showTerminal: showTerminal)
+            }
         }
+        .environment(\.nativeOpenAgent, model.opensAgents ? { model.openAgent(row: $0, agentId: $1) } : nil)
         .background(Surface.contentFill.ignoresSafeArea())
         .onChange(of: store.ids.count) { _, _ in model.settleQueued() }
         .onChange(of: store.phase) { _, _ in model.phaseChanged() }

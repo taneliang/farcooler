@@ -24,7 +24,7 @@ struct NativeRowView: View {
             case .prose(let prose): AgentReplyText(text: prose.text, trailingClearance: 0, streaming: isLast)
             case .thinking(let thinking): NativeThinkingRow(thinking: thinking)
             case .tool(let tool): NativeToolRow(id: row.id, tool: tool)
-            case .subagent(let subagent): SubagentRow(subagent: subagent)
+            case .subagent(let subagent): SubagentRow(id: row.id, subagent: subagent)
             case .ask(let ask): NativeAskRow(ask: ask, answer: answer, showTerminal: showTerminal)
             case .queued(let queued): QueuedLine(text: queued.text, state: queued.state, sendNow: sendNow)
             case .notice(let notice): NoticeLine(text: notice.text)
@@ -184,9 +184,25 @@ struct NativeDiff: View {
 }
 
 private struct SubagentRow: View {
+    let id: String
     let subagent: AgentRow.Subagent
+    @Environment(\.nativeOpenAgent) private var openAgent
 
     var body: some View {
+        if let openAgent, let agentId = subagent.agentId {
+            // Opens to its own conversation (ov-453).
+            Button { openAgent(id, agentId) } label: {
+                content(opens: true).contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens this agent’s conversation")
+            .accessibilityIdentifier("native-subagent-open-\(id)")
+        } else {
+            content(opens: false)
+        }
+    }
+
+    private func content(opens: Bool) -> some View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
                 NativeStatusMark(status: subagent.status)
@@ -198,6 +214,12 @@ private struct SubagentRow: View {
                 NativeRunTime(
                     startedMs: subagent.startedMs,
                     endedMs: subagent.status == .running ? nil : (subagent.endedMs ?? subagent.lastMs))
+                if opens {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .accessibilityHidden(true)
+                }
             }
             Text(subagent.description).lineLimit(2)
             if subagent.status == .running, !subagent.currentAction.isEmpty {

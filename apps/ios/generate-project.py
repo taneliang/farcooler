@@ -200,6 +200,8 @@ SOURCES = [
     "NativeAgentView.swift",
     "NativeRows.swift",
     "NativeToolRows.swift",
+    # The agents at work, pinned above the composer, and one opened (ov-453).
+    "NativeAgentTray.swift",
     # A held ask answered from its row (ov-370).
     "NativeAskRow.swift",
     "NativeAgentHarness.swift",
@@ -704,6 +706,8 @@ AGENTKIT_SOURCES = [
     "AgentRowCache.swift",
     "AgentConversation.swift",
     "ConversationItems.swift",
+    # The agent tray's rows and words, and a subagent opened (ov-453).
+    "AgentTray.swift",
     # Which pane is offered the conversation, and why not (ov-443).
     "ConversationOffer.swift",
     # Bring Here: claude's box's draft moved into the composer (ov-369).
@@ -1014,6 +1018,7 @@ UI_TEST_SOURCES = [
     # `-native-agent-harness`: no runner.
     "NativeAgentViewTests.swift",
     "NativeAnswersUITests.swift",
+    "NativeAgentTrayUITests.swift",
     "PolishSweepUITests.swift",
     "NativeComposerTests.swift",
     "PlanSheetAppearanceUITests.swift",
