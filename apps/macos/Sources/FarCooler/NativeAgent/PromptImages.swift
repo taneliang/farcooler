@@ -232,3 +232,53 @@ struct TrailingFlow: Layout {
         }
     }
 }
+
+/// A turn with its images (ov-454): the thumbnails above the message, and
+/// the message without the `[Image #N]` placeholders they stand for. Each
+/// image is matched to a placeholder in order; one with no thumbnail drawn
+/// (the runner doesn't serve them) keeps its words.
+struct PromptTurn<Message: View>: View {
+    let row: String
+    let turn: AgentRow.Turn
+    @ViewBuilder let message: (AgentRow.Turn) -> Message
+    @Environment(\.promptImages) private var store
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: Spacing.tight) {
+            PromptImageStrip(row: row, images: turn.images)
+            if let store {
+                Served(turn: turn, store: store, message: message)
+            } else {
+                message(turn)
+            }
+        }
+    }
+
+    private struct Served: View {
+        let turn: AgentRow.Turn
+        @ObservedObject var store: PromptImageStore
+        let message: (AgentRow.Turn) -> Message
+
+        var body: some View {
+            var shown = turn
+            if store.source != nil {
+                shown.prompt = PromptTurn<EmptyView>.withoutPlaceholders(turn.prompt, shown: turn.images.count)
+            }
+            return message(shown)
+        }
+    }
+
+    /// `prompt` without its first `shown` `[Image #N]` placeholders, and the
+    /// space before each; the rest, and every other word, as they are.
+    static func withoutPlaceholders(_ prompt: String, shown: Int) -> String {
+        guard shown > 0, let pattern = try? NSRegularExpression(pattern: #"[ \t]?\[Image #\d+\]"#) else { return prompt }
+        let text = prompt as NSString
+        let matches = pattern.matches(in: prompt, range: NSRange(location: 0, length: text.length)).prefix(shown)
+        var out = prompt
+        for match in matches.reversed() {
+            guard let range = Range(match.range, in: out) else { continue }
+            out.removeSubrange(range)
+        }
+        return out.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}

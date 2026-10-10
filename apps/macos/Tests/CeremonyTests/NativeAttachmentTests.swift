@@ -139,6 +139,44 @@ struct NativeAttachmentTests {
         #expect(tiny.height == 472, "one a row where even one doesn't fit: \(tiny)")
     }
 
+    @Test("A placeholder with a thumbnail drawn is left out of the message; one without stays")
+    func placeholdersGoWithTheirThumbnails() {
+        let strip = PromptTurn<EmptyView>.withoutPlaceholders
+        #expect(strip("Look at [Image #3] and [Image #4]", 2) == "Look at and")
+        #expect(strip("[Image #60] what's wrong here?", 1) == "what's wrong here?")
+        #expect(strip("Look at [Image #3] and [Image #4]", 1) == "Look at and [Image #4]", "an image without a thumbnail keeps its words")
+        #expect(strip("No [Image #3] thumbnails", 0) == "No [Image #3] thumbnails")
+    }
+
+    /// The words the message is drawn with, as `PromptTurn` hands them over.
+    final class Drawn { var prompt = "" }
+
+    @Test("The message drawn drops a placeholder only where its thumbnail is drawn")
+    func theDrawnMessageMatchesTheThumbnails() async throws {
+        let turn = try #require({ () -> AgentRow.Turn? in
+            let page = try? AgentRowPage.decode(NativeAgentTests.page([NativeAgentTests.row(0, "turn:p1", ["Turn": [
+                "prompt": "What's this? [Image #7] And [Image #8]", "origin": "Typed", "background_running": 0, "images": [["mime": "image/png"]],
+            ]])]))
+            if case .turn(let t)? = page?.rows.first?.kind { return t }
+            return nil
+        }())
+        for served in [true, false] {
+            let store = PromptImageStore(terminal: Self.terminal, source: served ? StandInImages(C.png()) : nil)
+            let drawn = Drawn()
+            let window = NativeAgentTests.window(
+                PromptTurn(row: "turn:p1", turn: turn) { t in
+                    let _ = drawn.prompt = t.prompt
+                    Text(t.prompt)
+                }
+                .environment(\.promptImages, store))
+            await NativeAgentTests.settle(window)
+            window.close()
+            let expected = served ? "What's this? And [Image #8]" : "What's this? [Image #7] And [Image #8]"
+            #expect(drawn.prompt == expected, "served: \(served)")
+        }
+        try? FileManager.default.removeItem(at: PromptImageStore(terminal: Self.terminal, source: nil).folder)
+    }
+
     @Test("A runner without prompt images shows the message alone")
     func noSourceNoThumbnails() async throws {
         let model = NativeAgentTests.model(try NativeAgentTests.terminal(id: Self.terminal))

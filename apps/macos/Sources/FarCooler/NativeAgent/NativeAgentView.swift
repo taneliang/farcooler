@@ -187,6 +187,9 @@ struct NativeComposer: View {
         .identified("native-suggestion")
     }
 
+    /// The width of the chip row's trailing fade.
+    static let fade: CGFloat = 32
+
     /// The images waiting to go, each with a button to take it out.
     private var chips: some View {
         ScrollView(.horizontal) {
@@ -201,6 +204,16 @@ struct NativeComposer: View {
             .padding(.top, Spacing.tight)
         }
         .scrollIndicators(.never)
+        // A fade at the trailing edge says the row goes on past it (ov-454):
+        // a chip there is cut softly, never hard. Nothing reaches it while
+        // the chips fit.
+        .mask {
+            HStack(spacing: 0) {
+                Color.black
+                LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
+                    .frame(width: Self.fade)
+            }
+        }
         .identified("native-image-chips")
     }
 

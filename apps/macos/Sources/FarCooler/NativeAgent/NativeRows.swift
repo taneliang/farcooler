@@ -21,10 +21,7 @@ struct NativeRowView: View {
             switch row.kind {
             case .turn(let turn):
                 // Its images above it, in their own view (ov-454).
-                VStack(alignment: .trailing, spacing: Spacing.tight) {
-                    PromptImageStrip(row: row.id, images: turn.images)
-                    TurnRow(turn: turn)
-                }
+                PromptTurn(row: row.id, turn: turn) { TurnRow(turn: $0) }
             case .prose(let prose):
                 // Selectable once settled: `MarkdownPiece` turns selection
                 // on for the pieces that are done.
