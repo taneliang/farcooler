@@ -25,10 +25,14 @@ struct NativeComposerTests {
         let text: ComposerTextView
     }
 
-    static func composer(rich: Bool, answer: Result<Bool, RunnerCore.Failure> = .success(false)) async throws -> Composer {
+    /// `terminal` names the pane: a suite of its own passes its own, so its
+    /// remembered view (`NativePaneModel.remember`) is never another's.
+    static func composer(
+        rich: Bool, answer: Result<Bool, RunnerCore.Failure> = .success(false), terminal: String = "0199aaaa-0000-7000-8000-000000000001"
+    ) async throws -> Composer {
         let sink = Sink()
         await sink.set(answer)
-        let model = NativeAgentTests.model(try NativeAgentTests.terminal(), sink: sink)
+        let model = NativeAgentTests.model(try NativeAgentTests.terminal(id: terminal), sink: sink)
         model.rich = rich
         let seen = NativeAgentTests.Seen()
         let window = NativeAgentTests.window(

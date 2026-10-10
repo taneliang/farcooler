@@ -13,6 +13,8 @@ import Testing
 @Suite(.serialized)
 struct NativeAttachmentTests {
     typealias C = NativeComposerTests
+    /// This suite's own pane, so no other suite's remembered view is touched.
+    static let terminal = "0199aaaa-0000-7000-8000-0000000004a4"
 
     /// A file of the test's own, `name`, holding `bytes`.
     static func file(_ name: String, _ bytes: Data) throws -> URL {
@@ -34,7 +36,7 @@ struct NativeAttachmentTests {
 
     @Test("A dropped PDF waits as a chip and goes with the message, by name")
     func aDroppedFileIsSent() async throws {
-        let c = try await C.composer(rich: true)
+        let c = try await C.composer(rich: true, terminal: Self.terminal)
         defer { c.window.close() }
         c.model.takesFiles = true
         let pdf = Data("%PDF-1.7 a report".utf8)
@@ -56,7 +58,7 @@ struct NativeAttachmentTests {
 
     @Test("Without compose_files a file isn't taken, and the text view drops its path as before")
     func withoutFilesAFileIsNotTaken() async throws {
-        let c = try await C.composer(rich: true)
+        let c = try await C.composer(rich: true, terminal: Self.terminal)
         defer { c.window.close() }
         let board = Self.pasteboard(with: [try Self.file("notes.txt", Data("n".utf8))])
         #expect(c.text.onImages?(board) == false)
@@ -65,7 +67,7 @@ struct NativeAttachmentTests {
 
     @Test("A file past 16 MB is left out, with its sentence")
     func aFileTooLargeIsSaid() async throws {
-        let c = try await C.composer(rich: true)
+        let c = try await C.composer(rich: true, terminal: Self.terminal)
         defer { c.window.close() }
         c.model.takesFiles = true
         let big = try Self.file("dump.bin", Data(count: ComposeFile.largest + 1))
@@ -97,7 +99,7 @@ struct NativeAttachmentTests {
     func aPromptsImagesShow() async throws {
         let png = C.png()
         let images = StandInImages(png)
-        let model = NativeAgentTests.model(try NativeAgentTests.terminal())
+        let model = NativeAgentTests.model(try NativeAgentTests.terminal(id: Self.terminal))
         model.promptImages.source = images
         model.store.apply(try await model.store.ledger.page(NativeAgentTests.page([
             NativeAgentTests.row(0, "turn:p1", ["Turn": [
@@ -124,7 +126,7 @@ struct NativeAttachmentTests {
 
     @Test("A runner without prompt images shows the message alone")
     func noSourceNoThumbnails() async throws {
-        let model = NativeAgentTests.model(try NativeAgentTests.terminal())
+        let model = NativeAgentTests.model(try NativeAgentTests.terminal(id: Self.terminal))
         model.store.apply(try await model.store.ledger.page(NativeAgentTests.page([
             NativeAgentTests.row(0, "turn:p1", ["Turn": [
                 "prompt": "Look [Image #1]", "origin": "Typed", "background_running": 0, "images": [["mime": "image/png"]],

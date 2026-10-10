@@ -12,6 +12,8 @@ import Testing
 @Suite(.serialized)
 struct NativeComposerPasteTests {
     typealias C = NativeComposerTests
+    /// This suite's own pane, so no other suite's remembered view is touched.
+    static let terminal = "0199aaaa-0000-7000-8000-0000000004a5"
 
     /// Whether the Paste menu item, targeted at `text` as the responder chain
     /// would, is enabled when the menu updates.
@@ -27,21 +29,21 @@ struct NativeComposerPasteTests {
 
     @Test("Paste is enabled for a copied screenshot, and only where the runner takes images")
     func pasteIsEnabledForAScreenshot() async throws {
-        let rich = try await C.composer(rich: true)
+        let rich = try await C.composer(rich: true, terminal: Self.terminal)
         defer { rich.window.close() }
         rich.text.pasteboard = C.pasteboard(with: C.png())
         #expect(Self.pasteEnabled(rich.text))
 
         // Without compose, the images aren't offered, and Paste is the text
         // view's own rule (which reads the real clipboard, so isn't asked).
-        let plain = try await C.composer(rich: false)
+        let plain = try await C.composer(rich: false, terminal: Self.terminal)
         defer { plain.window.close() }
         #expect(plain.text.offersImages?(C.pasteboard(with: C.png())) == false)
     }
 
     @Test("A drop of image data alone is prepared for and attaches")
     func aDropOfImageDataAttaches() async throws {
-        let c = try await C.composer(rich: true)
+        let c = try await C.composer(rich: true, terminal: Self.terminal)
         defer { c.window.close() }
         let drop = Drop(C.pasteboard(with: C.png()))
         #expect(c.text.draggingEntered(drop) == .copy)
