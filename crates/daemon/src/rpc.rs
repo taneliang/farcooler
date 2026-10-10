@@ -1928,10 +1928,10 @@ impl Rpc {
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
                 // Carried, or uploaded first and named (ov-393).
                 let images = crate::pastes::staged::images(svc.root_dir(), &p.blocks).await?;
-                // Files of any kind (ov-454): written here, their paths typed first.
+                // Files of any kind (ov-454): written here, their paths typed
+                // before the text.
                 let files = crate::pastes::staged::files(svc.root_dir(), &p.blocks).await?;
-                let text = crate::pastes::staged::with_files(&files, &wire::prompt_text(&p.blocks));
-                let turn = self.watcher.compose_into(id, &text, &images).await.inspect_err(|e| {
+                let turn = self.watcher.compose_files_into(id, &wire::prompt_text(&p.blocks), &images, &files).await.inspect_err(|e| {
                     // Refused before anything was typed: the copies go now.
                     if !matches!(e, DomainError::Conflict { what: "unconfirmed" }) {
                         for file in &files {

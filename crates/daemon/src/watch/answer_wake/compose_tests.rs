@@ -5,7 +5,7 @@
 //! says what claude's hook would, from what the stand-in logs it submitted.
 //! On the board and tmux server of `tests`, whose helpers these use.
 
-use super::compose::{Composition, composition, normalized};
+use super::compose::{Composition, composition, composition_with, normalized};
 use super::tell_tests::refused_with;
 use super::*;
 
@@ -262,6 +262,20 @@ fn a_composition_is_checked_before_anything_is_typed() {
     let padded = |n: usize| ("image/png".to_string(), [PNG, &vec![0u8; n - PNG.len()]].concat());
     assert!(composition("x", &[padded(cap / 2), padded(cap / 2)]).is_ok());
     assert_eq!(composition("x", &[padded(cap / 2), padded(cap / 2 + 1)]).unwrap_err().what(), "images_too_large");
+}
+
+/// A compose's files (ov-454): their paths go before the text once it's
+/// checked, so a path's `/` is never taken for a command; a message of files
+/// alone is their paths; and a command carries none.
+#[test]
+fn a_composes_file_paths_go_before_its_checked_text() {
+    let files = [std::path::PathBuf::from("/r/pastes/compose-01-notes.txt"), std::path::PathBuf::from("/r/a b/compose-02-x.csv")];
+    let composed = composition_with("summarize these", &[], &files).unwrap();
+    assert_eq!(composed.text, r#"/r/pastes/compose-01-notes.txt "/r/a b/compose-02-x.csv" summarize these"#);
+    assert_eq!(composed.command, None);
+    assert_eq!(composition_with("", &[], &files[..1]).unwrap().text, "/r/pastes/compose-01-notes.txt");
+    assert_eq!(composition_with("/init", &[], &files[..1]).unwrap_err().what(), "files");
+    assert_eq!(composition_with("!ls", &[], &files[..1]).unwrap_err().what(), "command");
 }
 
 /// A prompt with an image is a list of blocks in claude's transcript, its

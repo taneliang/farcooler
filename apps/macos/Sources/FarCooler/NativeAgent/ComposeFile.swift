@@ -70,6 +70,7 @@ struct ComposeFileChip: View {
                 .frame(maxWidth: 180, alignment: .leading)
             Button(action: remove) {
                 Image(systemName: "xmark.circle.fill")
+                    .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)

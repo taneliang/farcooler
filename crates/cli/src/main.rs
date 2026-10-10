@@ -42,6 +42,7 @@ mod files;
 mod clients;
 mod compose;
 mod bring_draft;
+mod prompt_image;
 mod interrupt;
 mod draft_prompt;
 mod board_reads;
@@ -977,6 +978,9 @@ enum TerminalCmd {
     /// Print the draft in claude's box in a terminal pane; `--expected <text|->`, what it printed,
     /// clears the box too (Bring Here), only while it still holds exactly that.
     BringDraft { terminal: String, #[arg(long)] expected: Option<String> },
+    /// Write one image a prompt carried to a file: the turn row's id (`turn:<promptId>`, from
+    /// `terminal rows`) and the image's place among its `images`, from 0.
+    PromptImage { terminal: String, row: String, #[arg(long, default_value_t = 0)] index: u32, #[arg(long)] out: std::path::PathBuf },
     /// Answer a pending agent question, carrying the ids back exactly as the
     /// adapter sent them — inventing one here would make the answer
     /// unroutable and hang the agent on its own question.
@@ -3098,6 +3102,7 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
         TerminalCmd::Compose { terminal, text, images, files } => compose::run(runner, &terminal, text, images, files, json).await?,
         cmd @ (TerminalCmd::Interrupt { .. } | TerminalCmd::SendNow { .. }) => interrupt::press(runner, cmd).await?,
         TerminalCmd::BringDraft { terminal, expected } => bring_draft::run(runner, &terminal, expected, json).await?,
+        TerminalCmd::PromptImage { terminal, row, index, out } => prompt_image::run(runner, &terminal, &row, index, &out, json).await?,
         TerminalCmd::AgentAnswer { terminal, request_id, option_id, answers } => {
             let answers = agent_answer::parse_answers(answers.as_deref())?;
             let (mut link, id) = terminal_by_record(runner, &terminal).await?;

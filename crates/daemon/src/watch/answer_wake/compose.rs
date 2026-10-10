@@ -130,9 +130,17 @@ impl Composition {
 /// `pastes::staged::images`),
 /// `too_long`, `command` for a shell escape or
 /// a command that isn't one, and `handoff` for one of claude's own that isn't a prompt.
+#[cfg(test)]
 pub(crate) fn composition(raw: &str, images: &[(String, Vec<u8>)]) -> Result<Composition> {
+    composition_with(raw, images, &[])
+}
+
+/// `composition`, with `files` written on the runner (ov-454): their paths
+/// go before the text once it's checked, so a path's leading `/` is never
+/// read as a command; beside a command, refused as `files`.
+pub(crate) fn composition_with(raw: &str, images: &[(String, Vec<u8>)], files: &[PathBuf]) -> Result<Composition> {
     let text = normalized(raw);
-    if text.is_empty() && images.is_empty() {
+    if text.is_empty() && images.is_empty() && files.is_empty() {
         return Err(DomainError::InvalidArgument { what: "text" });
     }
     if text.chars().count() > LONGEST_TEXT {
@@ -163,6 +171,7 @@ pub(crate) fn composition(raw: &str, images: &[(String, Vec<u8>)]) -> Result<Com
         return Err(DomainError::Conflict { what: "command" });
     }
     let Some(rest) = lead.strip_prefix('/') else {
+        let text = if files.is_empty() { text } else { crate::pastes::staged::with_files(files, &text) };
         return Ok(Composition { text, command: None, images: kept });
     };
     let name: String = rest.chars().take_while(|c| !c.is_whitespace()).collect();
@@ -175,6 +184,9 @@ pub(crate) fn composition(raw: &str, images: &[(String, Vec<u8>)]) -> Result<Com
     }
     if !kept.is_empty() {
         return Err(DomainError::InvalidArgument { what: "images" });
+    }
+    if !files.is_empty() {
+        return Err(DomainError::InvalidArgument { what: "files" });
     }
     let args = rest[name.len()..].to_string();
     Ok(Composition { text: args, command: Some(format!("/{name}")), images: kept })
@@ -214,7 +226,14 @@ impl Watcher {
     /// it: `Turn::Between` when claude took it as its next prompt (Sent),
     /// `Turn::During` when it's in claude's queue behind the turn running
     /// (Queued). See this module's docs.
+    #[cfg(test)]
     pub(crate) async fn compose_into(&self, id: Uuid, raw: &str, images: &[(String, Vec<u8>)]) -> Result<Turn> {
+        self.compose_files_into(id, raw, images, &[]).await
+    }
+
+    /// `compose_into`, with `files` already written on the runner, their
+    /// paths typed before the text (ov-454).
+    pub(crate) async fn compose_files_into(&self, id: Uuid, raw: &str, images: &[(String, Vec<u8>)], files: &[PathBuf]) -> Result<Turn> {
         let to = self.service.store.get_terminal(id)?;
         if to.pane_mode == PaneMode::Agent {
             return Err(DomainError::InvalidArgument { what: "terminal" });
@@ -225,7 +244,7 @@ impl Watcher {
         if !self.service.is_running(&to) {
             return Err(DomainError::Conflict { what: "not_running" });
         }
-        let composed = composition(raw, images)?;
+        let composed = composition_with(raw, images, files)?;
         // Nothing else types into this box, an answer, a draft or another
         // send, from the gate's first check through the confirmation
         // (`Watcher::typing`, ov-372).
