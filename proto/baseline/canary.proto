@@ -1,4 +1,4 @@
-// Shipped by Canary at 3df97ee63d2d0fb1526e25b8681ce81dc65c8393. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 728f411f826917011845f62212f3deae522445b4. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -258,6 +258,12 @@ message Request {
     // `terminal.bring_draft` (ov-369), behind `bring_draft`. 421-429 are held
     // by `reserved` below.
     BringDraft bring_draft = 420;
+    // `message.send` (ov-455), behind `agent_messages`. 431-439 are held by
+    // `reserved` below.
+    MessageSend message_send = 430;
+    // `agent.image` (ov-454), behind `agent_images`. 451-459 are held by
+    // `reserved` below.
+    AgentImageRequest agent_image = 450;
   }
   // The rest of rulings' block, kept for them (review 1005a L1).
   reserved 182 to 189;
@@ -271,6 +277,10 @@ message Request {
   reserved 401 to 409;
   // The rest of Bring Here's block (ov-369).
   reserved 421 to 429;
+  // The rest of messages' block (ov-455).
+  reserved 431 to 439;
+  // The rest of prompt images' block (ov-454).
+  reserved 451 to 459;
 }
 
 message Response {
@@ -406,6 +416,10 @@ message Result {
     // `terminal.bring_draft` (ov-369), behind `bring_draft`: the box's draft,
     // and whether it was cleared.
     BroughtDraft brought_draft = 420;
+    // `message.send` (ov-455), behind `agent_messages`: the message, queued.
+    MessageSent message_sent = 430;
+    // `agent.image` (ov-454), behind `agent_images`: a piece of one image.
+    AgentImage agent_image = 450;
   }
   // The rest of rulings' block, kept for them (review 1005a L1).
   reserved 181 to 189;
@@ -423,6 +437,10 @@ message Result {
   reserved 411 to 419;
   // The rest of Bring Here's block (ov-369).
   reserved 421 to 429;
+  // The rest of messages' block (ov-455).
+  reserved 431 to 439;
+  // The rest of prompt images' block (ov-454).
+  reserved 451 to 459;
 }
 
 // ---------------------------------------------------------------------------
@@ -463,6 +481,27 @@ message AgentSubscribe {
 // Experimental: served only while the runner runs with FARCOOLER_PROJECTOR=1,
 // until a client reads it (ov-372); otherwise both methods are refused as
 // unsupported.
+
+// `agent.image` (ov-454): one image a prompt carried, from its turn row's
+// `images`, a piece at a time. The bytes stay in the agent's transcript on
+// the runner; a client asks from `offset` 0 and again from each piece's end
+// until it has `total_size`.
+message AgentImageRequest {
+  bytes terminal_id = 1;
+  // The `Turn` row's id, `turn:<promptId>`.
+  string row_id = 2;
+  // Which of the row's `images`, from 0.
+  uint32 index = 3;
+  uint64 offset = 4;
+}
+
+// A piece of one image, at most `MAX_AGENT_IMAGE_CHUNK` bytes.
+message AgentImage {
+  string mime_type = 1;
+  uint64 total_size = 2;
+  uint64 offset = 3;
+  bytes chunk = 4;
+}
 
 // `agent.rows`: up to `limit` rows before `before`, oldest first.
 message AgentRowsPage {
@@ -562,7 +601,20 @@ message AgentPromptBlock {
     // `transfer_id`. Used once: the runner deletes the upload as it reads it.
     // Sent with `compose_upload` in `required_capabilities`.
     bytes staged_image = 4;
+    // `terminal.compose` only (ov-454): a file of any kind, uploaded first
+    // as `staged_image` is, written into the runner's paste directory under
+    // its name, and its path typed before the text. Sent with
+    // `compose_files` in `required_capabilities`.
+    StagedFile staged_file = 5;
   }
+}
+
+// A compose's file, uploaded first (ov-454).
+message StagedFile {
+  // The upload's `transfer_id`, read once as `staged_image` is.
+  bytes transfer_id = 1;
+  // What the sender called it: sanitized on the runner as a paste's name is.
+  string name = 2;
 }
 
 message AgentPrompt {
@@ -2078,6 +2130,17 @@ message TerminalCreate {
   // daemon drops the field and would open a pane that knows no task, while
   // the client moved the task into progress.
   optional string task_key = 5;
+  // The plan lane this pane is opened to work (ov-457), by its name on the
+  // task's board, with `task_key` one of its cards. The runner records the
+  // pane as the lane's build agent, moves a queued lane to building, exports
+  // FARCOOLER_LANE on every launch while the pane works it, and its first
+  // message names every card on the lane after the task's own. What
+  // `farcooler plan lane dispatch` sends. Refused as `lane` when no live lane
+  // of that name holds the task.
+  //
+  // Gated by the `terminal_lane` capability, named in
+  // `Request.required_capabilities` by a client that fills it in.
+  optional string lane = 6;
 }
 
 message TerminalResize {
@@ -4691,6 +4754,34 @@ message RulingKeepAll {
 // The rulings `ruling.keep_all` kept, newest first; empty when none was open.
 message RulingsKept {
   repeated BoardRuling rulings = 1;
+}
+
+// A message between a workspace's orchestrator and its lanes (ov-455),
+// queued and typed into the recipient's box past the answer wake's gate,
+// attributed ("[from mac-ux]"), in order, and kept across a restart.
+//
+// `to` is `orchestrator`, a card's key (its lane's agent, or its own when it
+// is on no lane), or a live lane's name. `actor` is the sender, as every
+// board write names it (`agent:<terminal>`, `manager`, `user`); an agent may
+// only message its orchestrator. `task` is the sender's card by key, which
+// files the message when the sender is an agent; empty to read it off the
+// sender's pane. `workspace_id` is the board the names are read on: the
+// sender's pane's when empty.
+message MessageSend {
+  string to = 1;
+  string text = 2;
+  string actor = 3;
+  string task = 4;
+  bytes workspace_id = 5;
+}
+
+// A message queued (ov-455): the note it is filed as, on `task_key`'s card,
+// and who it is for, as a person reads it ("the orchestrator", "the lane
+// mac-ux").
+message MessageSent {
+  bytes note_id = 1;
+  string task_key = 2;
+  string recipient = 3;
 }
 
 // What `terminal.tell` did with a message (ov-360). `queued`: the agent was
