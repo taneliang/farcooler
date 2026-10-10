@@ -205,21 +205,30 @@ private struct TaskMark: View {
 }
 
 /// A message that may be long: its first lines, and Show More for the rest.
-/// Whether it's long is estimated (`AgentConversation.isLong`), so nothing is
-/// measured to decide.
+/// Whether it runs past them is measured at the width it's drawn at: the
+/// text as shown against the same text unlimited, so a long line on a narrow
+/// pane folds as surely as many short ones (ov-452 review).
 struct FoldedText: View {
     let text: String
     var lines = AgentConversation.collapsedLines
     @State private var open = false
+    @State private var whole: CGFloat = 0
+    @State private var shown: CGFloat = 0
 
     var body: some View {
-        let long = AgentConversation.isLong(text, lines: lines)
         VStack(alignment: .leading, spacing: Spacing.tight) {
             Text(text)
                 .textSelection(.enabled)
-                .lineLimit(long && !open ? lines : nil)
+                .lineLimit(open ? nil : lines)
                 .fixedSize(horizontal: false, vertical: true)
-            if long {
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { shown = $0 }
+                .background(alignment: .topLeading) {
+                    Text(text)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .hidden()
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { whole = $0 }
+                }
+            if open || whole > shown + 1 {
                 Button(open ? "Show Less" : "Show More") { open.toggle() }
                     .buttonStyle(.link)
                     .font(.caption)

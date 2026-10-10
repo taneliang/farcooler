@@ -589,7 +589,12 @@ final class NativeHarnessRunner: ObservableObject {
         let tool = { (id: String, name: String, summary: String, input: String, result: String, at: Int64) -> [String: Any] in
             ["name": name, "summary": summary, "status": "Done", "started_ms": at, "ended_ms": at + 400, "diff": [Any](), "input": input, "result": result]
         }
+        // One line of 259 characters, which wraps to seven on a phone: a
+        // guess of 45 characters a line said six, and never folded it
+        // (ov-452 review).
+        let line = String(repeating: "Fold this where it wraps past six lines. ", count: 6) + "And one more."
         return [
+            row("queued:s0", ord: 19, rev: 19, kind: ["Queued": ["text": line, "state": "Sent"]]),
             row("turn:s1", ord: 20, rev: 20, kind: ["Turn": scheduled]),
             row("tool:c1", ord: 21, rev: 21, kind: ["Tool": tool("c1", "Bash", "Get current time", "command: date\ndescription: Get current time", "Sat Oct 10 09:34:02 PDT 2026", now - 7000)]),
             row("tool:c2", ord: 22, rev: 22, kind: ["Tool": tool("c2", "CronCreate", "", "cron: 31 11 10 10 *\nrecurring: false\nprompt: Coordinator heartbeat for `overnight`.", "Scheduled 573b639b (31 11 10 10 *)", now - 6000)]),

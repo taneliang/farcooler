@@ -166,6 +166,25 @@ struct NativePolishTests {
     }
 }
 
+extension NativePolishTests {
+    /// A 410-character message on one line: six lines or fewer in a wide
+    /// pane, more in a 420 pt one, where it has to fold. A guess from its
+    /// length (90 characters a line) never folded it (ov-452 review).
+    @Test("A long one-line message folds in a narrow pane and not in a wide one")
+    func aLongLineFoldsWhereItWraps() async throws {
+        let line = String(repeating: "Fold this where it wraps past six lines. ", count: 10)
+        for (width, folds) in [(CGFloat(420), true), (CGFloat(1_400), false)] {
+            let model = T.model(try T.terminal())
+            let frames = Frames()
+            let window = Self.window(width: width, height: 900, Framed(frames: frames, content: NativeAgentView(model: model, isFocused: true, showTerminal: {})))
+            model.store.apply(try await model.store.ledger.page(T.page([Self.turn(0, "turn:p1", line, origin: "Typed", ms: 1_000)])))
+            await T.settle(window, 300)
+            #expect(frames.views.keys.contains("native-show-more") == folds, "at \(Int(width)) pt")
+            window.close()
+        }
+    }
+}
+
 /// Opt-in (FARCOOLER_CAPTURE_OUT): the same rows at a narrow and a wide
 /// width, light and dark, folded and opened, for the polish review.
 @MainActor

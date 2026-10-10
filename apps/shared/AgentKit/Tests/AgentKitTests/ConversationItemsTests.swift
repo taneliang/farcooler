@@ -66,14 +66,6 @@ struct ConversationItemsTests {
         #expect(AgentConversation.groupStatus(reads) == .running)
     }
 
-    @Test("A long message folds; a short one doesn't")
-    func longMessages() {
-        #expect(!AgentConversation.isLong("Fix the build."))
-        #expect(!AgentConversation.isLong((1...6).map { "line \($0)" }.joined(separator: "\n")))
-        #expect(AgentConversation.isLong((1...7).map { "line \($0)" }.joined(separator: "\n")))
-        #expect(AgentConversation.isLong(String(repeating: "word ", count: 120)), "one long paragraph wraps past six lines")
-    }
-
     @Test("Where a message came from is said in words that say what happened")
     func origins() {
         let turn = { (origin: String) in

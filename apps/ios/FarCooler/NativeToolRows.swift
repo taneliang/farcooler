@@ -175,19 +175,30 @@ struct NativeTasksRow: View {
 }
 
 /// A message that may be long: its first lines, and Show More for the rest.
+/// Whether it runs past them is measured at the width it's drawn at: the
+/// text as shown against the same text unlimited, so a long line on a narrow
+/// pane folds as surely as many short ones (ov-452 review).
 struct FoldedText: View {
     let text: String
     var lines = AgentConversation.collapsedLines
     @State private var open = false
+    @State private var whole: CGFloat = 0
+    @State private var shown: CGFloat = 0
 
     var body: some View {
-        // A phone's line holds fewer characters than the Mac's.
-        let long = AgentConversation.isLong(text, lines: lines, width: 45)
         VStack(alignment: .leading, spacing: Spacing.tight) {
             Text(text)
                 .textSelection(.enabled)
-                .lineLimit(long && !open ? lines : nil)
-            if long {
+                .lineLimit(open ? nil : lines)
+                .fixedSize(horizontal: false, vertical: true)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { shown = $0 }
+                .background(alignment: .topLeading) {
+                    Text(text)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .hidden()
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { whole = $0 }
+                }
+            if open || whole > shown + 1 {
                 Button(open ? "Show Less" : "Show More") { withAnimation(.snappy) { open.toggle() } }
                     .font(.caption.weight(.semibold))
                     .frame(minHeight: 44)

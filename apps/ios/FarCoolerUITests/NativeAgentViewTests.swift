@@ -327,6 +327,9 @@ final class NativeAgentViewTests: XCTestCase {
     func testTheTextLeads() {
         let app = launch(["-native-polish"])
         _ = conversation(app)
+        let line = element(app, "native-row-queued:s0")
+        XCTAssertTrue(line.waitForExistence(timeout: 30), "no long message")
+        XCTAssertTrue(line.buttons["Show More"].exists, "a long single line that wraps past six lines doesn't fold")
         let scheduled = element(app, "native-row-turn:s1")
         XCTAssertTrue(scheduled.waitForExistence(timeout: 30), "no scheduled turn")
         XCTAssertTrue(scheduled.staticTexts["Scheduled task"].exists, "a scheduled task doesn't say it is one")

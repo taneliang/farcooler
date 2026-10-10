@@ -127,20 +127,10 @@ extension AgentConversation {
 
     // MARK: - Long messages
 
-    /// The lines a long message shows before Show More.
+    /// The lines a long message shows before Show More. Whether it runs
+    /// past them is measured at the width it's drawn at (`FoldedText`), never
+    /// guessed from its length (ov-452 review).
     public static let collapsedLines = 6
-
-    /// Whether `text` runs past `lines` lines at about `width` characters a
-    /// line: it then shows that many, with Show More. An estimate on purpose,
-    /// so no row is measured to decide.
-    public static func isLong(_ text: String, lines: Int = collapsedLines, width: Int = 90) -> Bool {
-        var count = 0
-        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            count += max(1, (line.count + width - 1) / width)
-            if count > lines { return true }
-        }
-        return false
-    }
 
     // MARK: - Where a message came from
 
