@@ -94,7 +94,11 @@ class NativeComposeModelTest {
         model.onDraft("one\ntwo")
         assertEquals("one two", model.draft)
         model.onDraft("one two\n")
-        eventually("a Return sent it") { sent.size == 1 && model.draft.isEmpty() }
+        // Done sending, not just sent: the draft empties and `sending` clears a
+        // beat after the sink has the text, and a send made in between is
+        // refused as one already in flight (no issue set, which is not the
+        // command refusal this test is about).
+        eventually("a Return sent it") { sent.size == 1 && model.draft.isEmpty() && !model.sending }
         model.onDraft("/clear")
         model.send()
         assertEquals(AgentConversation.SendIssue.Said(AgentConversation.COMMAND), model.issue)
