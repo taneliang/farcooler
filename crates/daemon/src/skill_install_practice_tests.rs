@@ -128,9 +128,9 @@ fn landing_is_watched_and_cleaned_up() {
         assert!(land.contains("as a background command"), "{h:?}: {land}");
         assert!(land.contains("delete its build output, and `worktree remove` it"), "{h:?}: {land}");
         assert!(land.contains("tick each verified `--met` line"), "{h:?}: {land}");
-        assert!(land.contains("farcooler plan train start <integ-N> --repo <repo> --lane <lane>"), "{h:?}: {land}");
-        assert!(land.contains("farcooler plan train set <integ-N> --repo <repo> --sha <pushed sha>"), "{h:?}: {land}");
-        assert!(land.contains("plan train set <integ-N> --state landed"), "{h:?}: {land}");
+        assert!(land.contains("farcooler plan train start train-<N> --repo <repo> --title"), "{h:?}: {land}");
+        assert!(land.contains("farcooler plan train set train-<N> --repo <repo> --sha <pushed sha>"), "{h:?}: {land}");
+        assert!(land.contains("plan train set train-<N> --state landed"), "{h:?}: {land}");
         assert!(!land.contains("page set trains"), "{h:?}: the hand-kept trains page is gone: {land}");
         assert!(land.contains(r#"`{"ci":"main"}`"#) && land.contains(r#"`{"cards":"in_review"}`"#), "{h:?}: {land}");
         assert!(land.contains("Local gates mirror CI"), "{h:?}: {land}");
@@ -181,5 +181,48 @@ fn every_plan_and_page_write_names_the_manager() {
     assert!(writes.len() >= 3, "too few plan writes to check: {writes:?}");
     for line in writes {
         assert!(line.contains("--actor manager"), "a write that doesn't name the manager: {line}");
+    }
+}
+
+/// The owner's conventions ship as defaults a charter overrides (ov-463):
+/// trains are train-N, lanes and trains carry titles for people, the agent
+/// integrating a train is recorded on it, and a train takes every ready lane.
+/// S21 to S23 in `scripts/manager-skill-pressure` score the first three from
+/// what an agent ran; this holds the words.
+#[test]
+fn the_owners_conventions_ship_as_defaults() {
+    for h in ALL {
+        let body = prose(h);
+        let first = section(&body, "1. Read the charter");
+        assert!(first.contains("That includes the Defaults at the end: each holds until the charter says otherwise."), "{h:?}: {first}");
+        let defaults = section(&body, "Defaults");
+        for rule in [
+            "a line under the heading it concerns, or under `## Anything else`, wins",
+            "A train is `train-<N>`, numbered on from the last train",
+            "\"Train N\" when you speak of it; never `integ-N`",
+            "Every lane and train gets a title that says what it does",
+            "Cards are `<Area>: <outcome>`",
+            "Each `--option` of an ask is a short name",
+            "Ready work never waits for a lane still building or fixing",
+            "Chain them and the push with `&&`, never `;`",
+            "judged by exit codes, never by grepping output",
+            "A test nobody has seen fail proves nothing",
+            "Make a reversible call yourself as a ruling",
+            "In each theme, as step 5 says, as far as `## Autonomy` allows",
+            "No merge commits: rebase, or rebase and squash",
+            "noted waived (why) or split (to which card)",
+        ] {
+            assert!(defaults.contains(rule), "{h:?} lacks {rule:?}: {defaults}");
+        }
+        // The repository's own area list is not a default (ov-463).
+        assert!(!body.contains("Phones, Watch, Daemon, Relay"), "{h:?}: Far Cooler's areas leaked into the skill");
+        let third = section(&body, "3. Dispatch");
+        assert!(third.contains("then give the lane its title (`plan lane set <lane> --title`)"), "{h:?}: {third}");
+        assert!(third.contains("plan lane start <name> --repo <repo> --title"), "{h:?}: {third}");
+        let land = section(&body, "4. Land");
+        assert!(land.contains("A train starts when a lane is ready and takes every lane ready then"), "{h:?}: {land}");
+        assert!(land.contains("Record that agent on the train (`--agent`, `--card`), never as a lane"), "{h:?}: {land}");
+        assert!(land.contains("--base origin/main --agent <id> --card <key> --actor manager"), "{h:?}: {land}");
+        assert!(!body.contains("integ-N>"), "{h:?}: a command still names integ-N");
     }
 }

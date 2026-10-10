@@ -39,6 +39,7 @@ you after you've stopped, and after a compaction. The owner edits it between
 turns, and your memory of it isn't it.
 
 The charter overrides anything in this skill except the two rules above.
+That includes the Defaults at the end: each holds until the charter says otherwise.
 
 `## Workflow` names the landing mode. **Direct**: work lands on main and you
 push it. **PR**: each change is a pull request a person approves. A protected
@@ -74,12 +75,8 @@ dispatched agent reads its task and never the charter, so put what it needs
 from the charter on the task: what done means, what it may not do, where it
 goes when it's done.
 
-Write notes, intents and asks as a one-sentence lead, short paragraphs, `-`
-lists, SHAs and paths in backticks, under ~120 words, linking a report rather
-than pasting it; pass the lines in a file (`--body "$(cat note.md)"`). Titles
-are `<Area>: <outcome>`, sentence case, 45 characters or fewer, Area one of Mac,
-iOS, Android, Phones, Watch, Daemon, Relay, CLI, Site, CI, Docs, Skill, Spike or
-Review. A feature says what will be true, a bug what goes wrong, one idea each.
+Write notes, asks and titles as the Defaults say: the owner reads them on a
+phone.
 
 When only the owner can decide, `task ask <key> --body "<the question>" --option
 "<one answer>"` (repeat `--option`), and put the question in your reply too: it
@@ -93,9 +90,10 @@ lesson on its card as a decision, ask next time. Never keep one for them.
 
 To put an agent to work, dispatch a lane (one agent, one worktree and branch,
 its cards in order): `plan lane dispatch` opens a pane on its first open card,
-briefs it on them all, and records the lane's agent and state itself; `task
-dispatch` does one card with no lane. A worktree is free only when no agent
-works in it (`terminals` in `worktree list --json`, your own pane included),
+briefs it on them all, and records the lane's agent and state itself; then
+give the lane its title (`plan lane set <lane> --title`). `task dispatch` does
+one card with no lane. A worktree is free only when no agent works in it
+(`terminals` in `worktree list --json`, your own pane included),
 unless `## Lanes` says otherwise: two writers in one tree commit over each other.
 A busy one is warned about, not refused: tell the owner. If a dispatch seems not
 to have taken, read `task show <key>` and `worktree list --json` before
@@ -121,9 +119,10 @@ subagent's with `plan lane start`, and move it as each thing happens.
 {{cli}} task create --repo <repo> --title "<Area>: <outcome>" --intent "<why>" --accept "<checkable>" --constraint "<limit>" --actor manager
 {{cli}} task note <key> --repo <repo> --kind decision --body "<what, and why>" --rejected "<the alternative>" --actor manager
 {{cli}} plan lane dispatch <lane> --repo <repo> --card <key> --card <key> --new <name> --branch <branch> --actor manager
+{{cli}} plan lane set <lane> --repo <repo> --title "<what it does, for people>" --actor manager
 {{cli}} task dispatch <key> --repo <repo> --worktree <name> --preset codex --actor manager
 {{cli}} message <lane> "<one line>" --repo <repo> --actor manager
-{{cli}} plan lane start <name> --repo <repo> --card <key> --branch <branch> --model <model> --agent <id> --actor manager
+{{cli}} plan lane start <name> --repo <repo> --title "<what it does>" --card <key> --branch <branch> --model <model> --agent <id> --actor manager
 {{cli}} task worker <key> --repo <repo> --subagent <agentId> --actor manager
 {{cli}} plan lane set <name> --repo <repo> --state review --reason "<why it's there now>" --actor manager
 ```
@@ -137,19 +136,20 @@ each lane's tokens, model and fix rounds, and route by that record.
 
 ## 4. Land
 
-Every non-trivial change gets an agent's review first. Batch lanes that are
-ready together into a train: one integration lane merges them, applies the
-reviews' fixes and runs every gate once. Local gates mirror CI: every step,
-in its environment (display scale, `CI=true`, shard timeouts), and a failure
-only CI caught earns a local gate. A red main comes first.
+Every non-trivial change gets an agent's review first. A train starts when a
+lane is ready and takes every lane ready then: one integrating agent rebases
+them, applies the reviews' fixes and runs every gate once. Record that agent
+on the train (`--agent`, `--card`), never as a lane. Local gates mirror CI:
+every step, in its environment (display scale, `CI=true`, shard timeouts), and
+a failure only CI caught earns a local gate. A red main comes first.
 
 Keep trains on the plan, never on a hand-kept page: start one with its lanes,
 move it (`--state gating`), and give it the SHA it pushed. The runner reads
 that SHA's CI and turns the train green or red; Now shows it above its lanes.
 
 ```
-{{cli}} plan train start <integ-N> --repo <repo> --lane <lane> --base origin/main --actor manager
-{{cli}} plan train set <integ-N> --repo <repo> --sha <pushed sha> --actor manager
+{{cli}} plan train start train-<N> --repo <repo> --title "<what it carries>" --lane <lane> --lane <lane> --base origin/main --agent <id> --card <key> --actor manager
+{{cli}} plan train set train-<N> --repo <repo> --sha <pushed sha> --actor manager
 ```
 
 - **Direct.** Rebase the train onto main (no merge commits unless the charter
@@ -175,7 +175,7 @@ and a green one frees the next train. Without one, check it before you stop.
 
 On landing, tick each verified `--met` line, close the card (`task set --status
 done`), set the lane landed (`plan lane set <name> --state landed --sha <sha>`)
-and the train too (`plan train set <integ-N> --state landed`), copy out its
+and the train too (`plan train set train-<N> --state landed`), copy out its
 reports, delete its build output, and `worktree remove` it.
 
 A page names what the runner knows, never types it: `{"ci":"main"}`,
@@ -206,6 +206,49 @@ Report from the board, not memory: what moved, what's stale, what waits on the o
 ## 6. Wait
 
 {{wait}}
+
+## Defaults
+
+How the owner's own orchestrators ended up running work. Each holds until the
+charter says otherwise: a line under the heading it concerns, or under
+`## Anything else`, wins. When the owner overrules one in chat, ask to put it
+in the charter.
+
+- **Names.** A train is `train-<N>`, numbered on from the last train whatever
+  it was called, and "Train N" when you speak of it; never `integ-N`. Every lane
+  and train gets a title that says what it does ("Agents message the
+  orchestrator"); the slug stays its branch and worktree.
+- **Titles.** Cards are `<Area>: <outcome>`, sentence case, 45 characters or
+  fewer (never over 60): Area a part of the product (Mac, CLI, Docs; the
+  charter may list them), Spike for a question, Review for an audit. A feature
+  says what will be true, a bug what goes wrong, one idea each; keys, quotes
+  and identifiers go in the intent.
+- **Notes.** A one-sentence lead, short paragraphs, `-` lists, SHAs and paths
+  in backticks, under ~120 words, linking a report rather than pasting it;
+  pass the lines in a file (`--body "$(cat note.md)"`). Each `--option` of an
+  ask is a short name, 30 characters or fewer.
+- **Trains.** Ready work never waits for a lane still building or fixing: a
+  lane that would conflict rebases onto the train and rides the next. Two
+  lanes in one module are sequenced, or reserve shared numbers (migrations,
+  wire tags) up front.
+- **Gates.** Every CI step (read from the remote's main), built for every
+  platform the change touches, judged by exit codes, never by grepping output.
+  Chain them and the push with `&&`, never `;`: `lint && test && git push`.
+- **Tests.** A test nobody has seen fail proves nothing: break the code, watch
+  it go red, put it back, and say so in the commit. Show a mutation landed.
+  Test the owner's real setup, grep a new capability's callers, and review UI
+  at its narrowest width with long real content.
+- **Rulings.** Make a reversible call yourself as a ruling and keep ready work
+  moving while a question waits; only an irreversible or outward one waits
+  (publishing, deleting, spending, other people's data).
+- **Initiative.** In each theme, as step 5 says, as far as `## Autonomy` allows.
+- **Landing.** No merge commits: rebase, or rebase and squash, with the why in
+  the commit body; never rewrite pushed history. A card closes when each
+  acceptance line is met, or noted waived (why) or split (to which card).
+- **Briefs.** Check the premise against the tree first (a grep, `git log -S`).
+  Ask for the full test suite, not just what was touched. About 150 words;
+  agents reply in about 80, the detail in a report. A failure that repeats
+  gets a root-cause lane, not another patch. Never cut quality to save cost.
 
 ## Splitting a workstream off
 

@@ -1075,7 +1075,10 @@ mod tests {
         // lines for precedent and the lesson a reversal leaves.
         // 258 once lanes are dispatched whole and report to the orchestrator
         // (ov-457, ov-455): what a report is and how to steer a lane.
-        assert!(lines <= 258, "{lines} lines");
+        // 301 once the owner's conventions shipped as Defaults a charter
+        // overrides (ov-463): 37 lines of defaults, after 6 moved out of step 3,
+        // plus train names, titles and the integrator on its train.
+        assert!(lines <= 301, "{lines} lines");
     }
 
     #[test]
