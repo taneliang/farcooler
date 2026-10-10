@@ -372,7 +372,15 @@ impl Watcher {
                 return;
             }
         };
+        // Messages for a recipient that one of theirs is still waiting on, told
+        // in order: none passes one sent before it (`messages::in_line`).
+        let mut held_up = std::collections::HashSet::new();
         for (n, wake) in pending.iter().enumerate() {
+            let line = messages::in_line(store, wake);
+            if line.as_ref().is_some_and(|l| held_up.contains(l)) {
+                self.wakes_hint.store(true, Ordering::SeqCst);
+                continue;
+            }
             // A newer answer on the same task is waiting too: tell only it.
             // Holds aren't answers, and one that ended is told on its own.
             if wake.kind == WakeKind::Answer
@@ -382,7 +390,13 @@ impl Watcher {
                 self.settle(wake, None, Some(SUPERSEDED.into()));
                 continue;
             }
-            match self.wake(wake).await {
+            let pass = self.wake(wake).await;
+            if pass != Pass::Settled
+                && let Some(line) = line
+            {
+                held_up.insert(line);
+            }
+            match pass {
                 Pass::Settled => {}
                 Pass::Waiting(held) => {
                     self.wake_holds.lock().unwrap_or_else(|e| e.into_inner()).insert(wake.note, held);
@@ -394,6 +408,10 @@ impl Watcher {
     }
 
     async fn wake(&self, wake: &PendingWake) -> Pass {
+        #[cfg(test)]
+        if messages::held_for_tests(wake.note) {
+            return Pass::Waiting(Held::Busy);
+        }
         // Claimed and never finished: the daemon stopped mid-typing. It may
         // have reached the agent, so it's never typed again. One pasted and
         // stopped short of its Enter by a dialog may have the Enter pressed

@@ -58,6 +58,40 @@ const TURN_FALLBACK_MS: i64 = 30 * 60 * 1_000;
 /// The widest an agent's last words or question are quoted in a notice.
 const QUOTED: usize = 160;
 
+/// The recipient a message waits in line for: its pane, or its workspace's
+/// orchestrator. `None` for anything that isn't a message. The pump tells a
+/// recipient's messages in the order sent: one still waiting holds back
+/// every later one for the same recipient in that pass.
+pub(super) fn in_line(store: &farcooler_store::Store, wake: &PendingWake) -> Option<(Option<Uuid>, Uuid)> {
+    if wake.kind != WakeKind::Message {
+        return None;
+    }
+    let workspace = store.get_task(wake.task).map(|t| t.workspace_id).unwrap_or_default();
+    Some((wake.to, workspace))
+}
+
+/// Notes a test holds waiting, as an agent too busy to be typed to would.
+#[cfg(test)]
+static HELD_FOR_TESTS: std::sync::Mutex<Vec<Uuid>> = std::sync::Mutex::new(Vec::new());
+
+/// Whether a test holds `note` waiting (`hold_for_tests`).
+#[cfg(test)]
+pub(super) fn held_for_tests(note: Uuid) -> bool {
+    HELD_FOR_TESTS.lock().unwrap_or_else(|e| e.into_inner()).contains(&note)
+}
+
+/// Hold `note` waiting on every pass, until `release_for_tests`.
+#[cfg(test)]
+pub(super) fn hold_for_tests(note: Uuid) {
+    HELD_FOR_TESTS.lock().unwrap_or_else(|e| e.into_inner()).push(note);
+}
+
+/// Let `note` be told again.
+#[cfg(test)]
+pub(super) fn release_for_tests(note: Uuid) {
+    HELD_FOR_TESTS.lock().unwrap_or_else(|e| e.into_inner()).retain(|n| *n != note);
+}
+
 /// Whom a message is for, once resolved: a pane, or the orchestrator.
 struct Recipient {
     terminal: Option<Uuid>,
@@ -67,6 +101,15 @@ struct Recipient {
 
 impl Watcher {
     /// `message.send`: file a message and queue it. See this module's docs.
+    ///
+    /// **Who sent it is the caller's word.** `actor` comes from the CLI, which
+    /// reads it from the pane's `FARCOOLER_ACTOR`, and anything that can run
+    /// a command in a pane can set that variable. So the hub rule below, and
+    /// the tag a message is typed with, are a guardrail against an agent's
+    /// mistake, not a security boundary: `message.send` needs Control scope,
+    /// which can already type into any pane (`terminal.write`). The CLI
+    /// refuses `--actor` in an agent's pane, so a mistake can't name another
+    /// sender, and no message is ever tagged as the owner's (`message_text`).
     pub(crate) async fn message_send(&self, req: Request) -> Result<result::Value> {
         let Some(request::Payload::MessageSend(p)) = req.payload else {
             return Err(DomainError::InvalidArgument { what: "payload" });
@@ -109,11 +152,6 @@ impl Watcher {
         };
         if task.workspace_id != workspace {
             return Err(DomainError::InvalidArgument { what: "to" });
-        }
-        if let (Some(from), Some(to)) = (sender.as_ref(), recipient.terminal)
-            && from.id == to
-        {
-            return Err(DomainError::Conflict { what: "self" });
         }
         let hour_ago = now_millis() - 60 * 60 * 1_000;
         if store.messages_waiting(workspace, recipient.terminal)? >= MOST_WAITING
@@ -163,6 +201,10 @@ impl Watcher {
         if let Some(lane) = lane {
             let pane = store.lane_pane(lane.id)?.ok_or(nobody.clone())?;
             let row = store.get_terminal(pane).map_err(|_| nobody.clone())?;
+            // A lane's pane since made the orchestrator is the sender itself.
+            if row.role == TerminalRole::Orchestrator {
+                return Err(DomainError::Conflict { what: "self" });
+            }
             let task = match card {
                 Some(card) => card,
                 None => row.task_id.and_then(|t| store.get_task(t).ok()).ok_or(nobody)?,
@@ -203,7 +245,10 @@ impl Watcher {
         let tag = match wake.actor {
             Actor::Agent { terminal } => format!("[from {}]", self.lane_or_key(terminal, task)),
             Actor::Manager => "[from the orchestrator]".to_string(),
-            Actor::User => "[from the owner]".to_string(),
+            // `user` is only what a pane with no agent in it says, and a
+            // person's own message comes from the apps' paths, never this
+            // one: so nobody is named the owner (see `message_send`).
+            Actor::User => "[from the terminal]".to_string(),
             Actor::Runner => "[Far Cooler]".to_string(),
             Actor::Unknown => "[from an agent]".to_string(),
         };

@@ -305,8 +305,11 @@ sub draw {
                 "    Skip & tell the agent what to do instead (esc or n)";
         } else {
             push @rows, " Running  71 tokens", "" if working($mode);
-            my $box = $composer eq "" ? "\e[2mAdd a follow-up\e[0m" : join(" ", box_rows());
-            push @rows, "  → $box" . (working($mode) ? "      ctrl+c to stop" : ""), "", "  Auto · 7.9%", "  ~/src";
+            # A long draft wraps four columns in, under its first row's text.
+            my @box = $composer eq "" ? ("\e[2mAdd a follow-up\e[0m") : box_rows();
+            my $first = shift(@box);
+            push @rows, "  → $first" . (working($mode) ? "      ctrl+c to stop" : ""), (map { "    $_" } @box),
+                "", "  Auto · 7.9%", "  ~/src";
         }
     } else {
         push @rows, " OpenAI Codex stand-in", "";

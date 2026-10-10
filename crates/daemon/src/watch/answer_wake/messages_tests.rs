@@ -238,3 +238,73 @@ async fn a_cursor_pane_is_told_between_turns_and_not_during_one() {
     assert_eq!(si.submitted(), ["[from the orchestrator] Run the gates"], "{}", si.log());
     assert!(b.messages().is_empty());
 }
+
+/// A message too long for one row of cursor's box wraps there, is read back
+/// whole, and is sent (R-47): it isn't left pasted in the box.
+#[tokio::test]
+async fn a_long_message_wraps_in_cursors_box_and_is_sent() {
+    let b = board().await;
+    let agent = b.agent("Agent 2", "cursor").await;
+    let si = b.stand_in(&agent, "cursor", "cursor-agent").await;
+    b.doing(agent.id, AgentActivity::Idle).await;
+    let long = "Run every CI gate in the foreground, fix whatever fails, commit as you go without pushing, and then report each gate's result back to me here.";
+    b.send("manager", &b.task.key, long).await.unwrap();
+    b.pump().await;
+    si.submits(1).await;
+    assert_eq!(si.submitted(), [format!("[from the orchestrator] {long}")], "{}", si.log());
+    assert!(b.progress().is_empty(), "nothing was left in the box: {:?}", b.progress());
+}
+
+/// A recipient's messages go in the order sent: while the first waits, a
+/// later one for the same pane waits behind it, and then both are told in
+/// order. Another pane's message isn't held up.
+#[tokio::test]
+async fn a_waiting_message_holds_back_later_ones_for_its_pane() {
+    let b = board().await;
+    let orchestrator = b.orchestrator().await;
+    let si = b.stand_in(&orchestrator, "claude", "claude").await;
+    b.doing(orchestrator.id, AgentActivity::Idle).await;
+    let agent = b.agent("Agent 2", "claude").await;
+    let first = b.send(&agent_actor(&agent), "orchestrator", "First").await.unwrap();
+    let first = Uuid::from_slice(&first.note_id).unwrap();
+    b.send(&agent_actor(&agent), "orchestrator", "Second").await.unwrap();
+    messages::hold_for_tests(first);
+    b.pump().await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(si.submitted().is_empty(), "the second passed the first: {}", si.log());
+    assert_eq!(b.messages().len(), 2);
+    messages::release_for_tests(first);
+    b.pump().await;
+    si.submits(1).await;
+    b.doing(orchestrator.id, AgentActivity::Idle).await;
+    tokio::time::sleep(Duration::from_millis(TOLD_SPACING_MS as u64 + 100)).await;
+    b.pump().await;
+    si.submits(2).await;
+    let tag = format!("[from {}]", b.task.key);
+    assert_eq!(si.submitted(), [format!("{tag} First"), format!("{tag} Second")], "{}", si.log());
+}
+
+/// A lane's pane that has since been made the orchestrator is the sender
+/// itself: the orchestrator messaging that lane is refused as `self`.
+#[tokio::test]
+async fn the_orchestrator_cant_message_itself_through_a_lane() {
+    let b = board().await;
+    let pane = b.lane_pane("phones").await;
+    b.svc.set_terminal_role(pane.id, farcooler_store::models::TerminalRole::Orchestrator).await.unwrap();
+    assert_eq!(refused(b.send("manager", "phones", "hello me").await), "self");
+    assert!(b.messages().is_empty());
+}
+
+/// Nobody is typed as the owner: a message with no agent behind it is from
+/// the terminal it was run in.
+#[tokio::test]
+async fn no_message_is_tagged_as_the_owners() {
+    let b = board().await;
+    let agent = b.agent("Agent 2", "claude").await;
+    let si = b.stand_in(&agent, "claude", "claude").await;
+    b.doing(agent.id, AgentActivity::Idle).await;
+    b.send("user", &b.task.key, "Hello").await.unwrap();
+    b.pump().await;
+    si.submits(1).await;
+    assert_eq!(si.submitted(), ["[from the terminal] Hello"], "{}", si.log());
+}

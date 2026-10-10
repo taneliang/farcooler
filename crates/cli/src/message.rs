@@ -52,7 +52,7 @@ pub(crate) async fn message(runner: Option<&str>, args: MessageArgs, json: bool)
     if !link.daemon_capabilities().iter().any(|c| c == capability::AGENT_MESSAGES) {
         return Err("this runner's Far Cooler can't pass messages yet. update it and try again".into());
     }
-    let actor = actor_for(args.actor.as_deref())?;
+    let actor = actor_for(sender(args.actor.as_deref(), std::env::var(farcooler_core::pane_env::ACTOR).ok().as_deref())?)?;
     let env = std::env::var(WORKSPACE_ENV).ok();
     let board = board_for(&mut link, args.repo.as_deref(), args.workspace.as_deref(), env).await?;
     let task = args.task.or_else(|| std::env::var(farcooler_core::pane_env::TASK).ok()).unwrap_or_default();
@@ -84,6 +84,22 @@ async fn workspace_of(link: &mut crate::Link, board: &tasks::Board) -> Result<by
     }
     let main = crate::workspaces::workspaces_on(link, Some(board.repository)).await?.into_iter().find(|w| w.is_main);
     Ok(main.map(|w| w.id).unwrap_or_default())
+}
+
+/// Who a message is from: `--actor`, unless this is an agent's pane
+/// (`FARCOOLER_ACTOR=agent:…`), where only the pane's own name is taken. An
+/// agent that names another sender, the orchestrator to get past the hub
+/// rule, or a person, is refused rather than believed. A guardrail against
+/// a mistake, not a boundary: the variable itself can be set by anything in
+/// the pane (`message_send` in the daemon says the same).
+pub(crate) fn sender<'a>(given: Option<&'a str>, pane: Option<&'a str>) -> Result<Option<&'a str>, Box<dyn std::error::Error>> {
+    match (given, pane) {
+        (Some(named), Some(own)) if own.starts_with("agent:") && named != own => {
+            Err("an agent's pane messages as itself: leave out --actor".into())
+        }
+        (Some(named), _) => Ok(Some(named)),
+        (None, _) => Ok(None),
+    }
 }
 
 /// What's printed once it's queued.
@@ -139,6 +155,21 @@ mod tests {
             let said = said_about(what).unwrap_or_else(|| panic!("no line for {what}"));
             assert!(!said.ends_with('.') && said.chars().next().is_some_and(char::is_lowercase), "{said}");
         }
+    }
+
+    /// In an agent's pane `--actor` can't name anyone else: not the
+    /// orchestrator, not a person. Its own name, or none, is taken; outside
+    /// an agent's pane `--actor` is as given.
+    #[test]
+    fn an_agent_cannot_message_as_someone_else() {
+        let pane = Some("agent:01a0dad0-afd0-7bd1-9d62-3d125ede9ae2");
+        for other in ["manager", "user", "agent:01a0dad0-afd0-7bd1-9d62-000000000000"] {
+            assert!(sender(Some(other), pane).is_err(), "{other}");
+        }
+        assert_eq!(sender(pane, pane).unwrap(), pane);
+        assert_eq!(sender(None, pane).unwrap(), None);
+        assert_eq!(sender(Some("manager"), Some("manager")).unwrap(), Some("manager"));
+        assert_eq!(sender(Some("user"), None).unwrap(), Some("user"));
     }
 
     /// The agent's own line parses: the destination and the text, in order.
