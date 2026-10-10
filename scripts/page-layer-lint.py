@@ -89,7 +89,9 @@ REGISTRIES = {
     "crates/client/src/lib.rs": r"^\s*pub mod page_json;\s*$",
     "crates/client/src/session.rs": r"^\s*Payload::PagesChanged\(p\) => Some\(FleetEvent::Pages \{",
     "crates/client/src/session/results.rs": r"^\s*result::Value::(BoardPageList|BoardPage|PageSetResult|PageStatsList)\(_\) =>",
-    "crates/cli/src/main.rs": r"event::Payload::PagesChanged\(p\) => event_lines::pages_event_json\(&p\),|\(Payload::PagesChanged\(Default::default\(\)\), \"pages\"\),",
+    "crates/cli/src/main.rs": r"event::Payload::PagesChanged\(p\) => event_lines::pages_event_json\(&p\),",
+    # main.rs's tests, moved to their own file (ov-455): the event table.
+    "crates/cli/src/main_tests.rs": r"\(Payload::PagesChanged\(Default::default\(\)\), \"pages\"\),",
     "crates/cli/src/event_lines.rs": r"pages_event_json|pb::PagesChanged",
     # The CI watch (ov-306) reads the subjects pages name, asked of the pages'
     # own file in one line.
@@ -229,6 +231,7 @@ REGISTRY_LINES = {
     "crates/client/src/session.rs": "Payload::PagesChanged(p) => Some(FleetEvent::Pages { workspace: w }),",
     "crates/client/src/session/results.rs": "result::Value::BoardPage(_) => \"board_page\",",
     "crates/cli/src/main.rs": "event::Payload::PagesChanged(p) => event_lines::pages_event_json(&p),",
+    "crates/cli/src/main_tests.rs": "        (Payload::PagesChanged(Default::default()), \"pages\"),",
     "crates/cli/src/event_lines.rs": "pub(crate) fn pages_event_json() {}",
     "crates/daemon/src/ci_watch.rs": "    for (workspace, subject) in crate::rpc_pages::ci_subjects(svc) {",
 }
