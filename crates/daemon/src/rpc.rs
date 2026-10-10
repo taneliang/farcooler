@@ -1524,14 +1524,7 @@ impl Rpc {
                     }
                 }
                 let term = svc
-                    .create_terminal_in_lane(
-                        worktree,
-                        &p.title,
-                        &p.command_preset,
-                        p.prompt.as_deref(),
-                        task,
-                        p.lane.as_deref(),
-                    )
+                    .create_terminal_in_lane(worktree, &p.title, &p.command_preset, p.prompt.as_deref(), task, p.lane.as_deref())
                     .await?;
                 // A new terminal is a new tmux window, which IS a new layout —
                 // so the worktree's set of layouts just changed and every

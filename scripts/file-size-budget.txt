@@ -6,7 +6,7 @@
 12760 crates/daemon/src/service.rs
 8719 crates/daemon/src/watch.rs
 4813 crates/cli/src/tasks.rs
-4246 crates/cli/src/main.rs
+4237 crates/cli/src/main.rs
 3606 apps/ios/FarCooler/AgentView.swift
 3544 crates/client/src/ffi.rs
 3380 services/relay/src/index.ts

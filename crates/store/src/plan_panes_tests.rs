@@ -119,7 +119,7 @@ fn a_panes_turns_are_its_lanes_spend() {
                 usage: "reported",
                 models: vec![TurnModel::priced(
                     Some("gpt-5".into()),
-                    TokenCounts { input: tokens, output: 0, cache_read: 0, cache_write: 0, cache_write_1h: 0 },
+                    TokenCounts { input: tokens, output: 0, cache_read: 0, cache_write: 0, cache_write_1h: 0, fast: false },
                     Some(1_000),
                 )],
                 kind: TurnKind::Turn,
