@@ -24,6 +24,7 @@ mod migrate;
 pub mod pages;
 pub mod plan;
 pub mod plan_read;
+pub mod plan_panes;
 pub mod review;
 pub mod rulings;
 pub mod trains;

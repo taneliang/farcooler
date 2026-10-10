@@ -519,6 +519,7 @@ async fn scene(h: &Harness, client: &mut SocketClient) -> Scene {
         join_active_group: false,
         prompt: None,
         task_key: None,
+        lane: None,
     }));
     let Some(result::Value::Terminal(shell)) = client.call(create).await.expect("terminal.create").value else {
         panic!("wrong result")
@@ -689,6 +690,7 @@ async fn another_shell_window(client: &mut SocketClient, main: &bytes::Bytes, jo
         join_active_group: join,
         prompt: None,
         task_key: None,
+        lane: None,
     }));
     let Some(result::Value::Terminal(t)) = client.call(create).await.expect("terminal.create").value else {
         panic!("wrong result")

@@ -1500,7 +1500,7 @@ impl Rpc {
                 //
                 // A no-op when there is no layout to join, which is what makes
                 // it safe to pass unconditionally from a `%` binding.
-                if p.join_active_group {
+                if p.join_active_group && p.lane.is_none() {
                     // The active layout among the worktree's own, so a new
                     // pane never joins an orchestrator's window.
                     let anchor = svc.active_layout(worktree).await.ok().flatten().and_then(|view| {
@@ -1524,12 +1524,13 @@ impl Rpc {
                     }
                 }
                 let term = svc
-                    .create_terminal_with_prompt(
+                    .create_terminal_in_lane(
                         worktree,
                         &p.title,
                         &p.command_preset,
                         p.prompt.as_deref(),
                         task,
+                        p.lane.as_deref(),
                     )
                     .await?;
                 // A new terminal is a new tmux window, which IS a new layout —

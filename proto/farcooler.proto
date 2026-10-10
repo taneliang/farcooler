@@ -2120,6 +2120,17 @@ message TerminalCreate {
   // daemon drops the field and would open a pane that knows no task, while
   // the client moved the task into progress.
   optional string task_key = 5;
+  // The plan lane this pane is opened to work (ov-457), by its name on the
+  // task's board, with `task_key` one of its cards. The runner records the
+  // pane as the lane's build agent, moves a queued lane to building, exports
+  // FARCOOLER_LANE on every launch while the pane works it, and its first
+  // message names every card on the lane after the task's own. What
+  // `farcooler plan lane dispatch` sends. Refused as `lane` when no live lane
+  // of that name holds the task.
+  //
+  // Gated by the `terminal_lane` capability, named in
+  // `Request.required_capabilities` by a client that fills it in.
+  optional string lane = 6;
 }
 
 message TerminalResize {

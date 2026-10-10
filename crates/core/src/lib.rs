@@ -76,6 +76,15 @@ pub mod pane_env {
     /// somebody else's ticket.
     pub const TASK: &str = "FARCOOLER_TASK";
 
+    /// The plan lane this pane works (ov-457), by name: one agent in one
+    /// worktree on one branch, working one or more cards.
+    ///
+    /// `farcooler_daemon::lane_panes` exports it for a pane a lane dispatch
+    /// opened, on every launch while the lane is live and the pane is its
+    /// agent, read off the plan layer. `TASK` beside it names the card the
+    /// pane started on.
+    pub const LANE: &str = "FARCOOLER_LANE";
+
     /// The workspace (workstream) this pane's work belongs to, as a uuid.
     ///
     /// `farcooler_daemon::service` exports it for EVERY pane whose terminal

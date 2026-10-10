@@ -571,8 +571,14 @@ fn fix_rounds_of(conn: &Connection, lane: Uuid) -> Result<u32> {
     Ok(n.max(0) as u32)
 }
 
-/// Totals over the turns recorded for the lane's Claude agents: a subagent's
-/// turns are keyed `claude-log:agent:<agentId>` (`daemon/src/usage.rs`).
+/// The turns a lane agent `a` ran, joined as `t`: a Claude subagent's are keyed
+/// `claude-log:agent:<agentId>` (`daemon/src/usage.rs`), and a pane's
+/// (`plan_panes::pane_agent_id`, ov-457) are every turn filed under its
+/// terminal, whatever its harness.
+const TURNS_OF_AGENT: &str = "((a.harness = 'claude' AND t.turn_key = 'claude-log:agent:' || a.agent_id)
+     OR (a.agent_id LIKE 'pane:%' AND t.terminal_id = unhex(replace(substr(a.agent_id, 6), '-', ''))))";
+
+/// Totals over the turns recorded for the lane's agents (`TURNS_OF_AGENT`).
 ///
 /// An agent recorded on several lanes (a reviewer given two branches) did
 /// one run's work for all of them, and its turns can't say which part was
@@ -584,7 +590,7 @@ fn fix_rounds_of(conn: &Connection, lane: Uuid) -> Result<u32> {
 fn spend_of(conn: &Connection, lane: Uuid, agents: &[LaneAgent]) -> Result<LaneSpend> {
     let (input, output, read, write, priced, unpriced, runs): (i64, i64, i64, i64, i64, i64, i64) = conn
         .query_row(
-            "WITH lanes_of AS (
+            &format!("WITH lanes_of AS (
                  SELECT harness, agent_id, count(*) AS lanes FROM lane_agents GROUP BY harness, agent_id
              )
              SELECT CAST(coalesce(round(sum(m.input_tokens * 1.0 / s.lanes)), 0) AS INTEGER),
@@ -596,9 +602,9 @@ fn spend_of(conn: &Connection, lane: Uuid, agents: &[LaneAgent]) -> Result<LaneS
                     count(DISTINCT t.id)
                FROM lane_agents a
                JOIN lanes_of s ON s.harness = a.harness AND s.agent_id = a.agent_id
-               JOIN agent_turns t ON t.turn_key = 'claude-log:agent:' || a.agent_id
+               JOIN agent_turns t ON {TURNS_OF_AGENT}
                JOIN agent_turn_models m ON m.turn_id = t.id
-              WHERE a.lane_id = ?1 AND a.harness = 'claude'",
+              WHERE a.lane_id = ?1"),
             params![uuid_blob(lane)],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
         )
@@ -615,9 +621,8 @@ fn spend_of(conn: &Connection, lane: Uuid, agents: &[LaneAgent]) -> Result<LaneS
         .map_err(map_err)?;
     let measured: i64 = conn
         .query_row(
-            "SELECT count(DISTINCT a.agent_id)
-               FROM lane_agents a JOIN agent_turns t ON t.turn_key = 'claude-log:agent:' || a.agent_id
-              WHERE a.lane_id = ?1 AND a.harness = 'claude'",
+            &format!("SELECT count(DISTINCT a.agent_id) FROM lane_agents a JOIN agent_turns t ON {TURNS_OF_AGENT}
+              WHERE a.lane_id = ?1"),
             params![uuid_blob(lane)],
             |r| r.get(0),
         )

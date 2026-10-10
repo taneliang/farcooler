@@ -30,6 +30,7 @@ pub(crate) fn terminal_create_request(
             join_active_group: tile,
             prompt: prompt.clone(),
             task_key: task.clone(),
+            lane: None,
         }),
     );
     if prompt.is_some() {
@@ -37,6 +38,18 @@ pub(crate) fn terminal_create_request(
     }
     if task.is_some() {
         req.required_capabilities.push(farcooler_protocol::capability::TERMINAL_TASK.to_string());
+    }
+    req
+}
+
+/// `req`, a `terminal.create`, opened for the plan lane `lane` when there is
+/// one (ov-457), naming `capability::TERMINAL_LANE`: an older runner refuses
+/// it rather than open a pane that knows only its first card.
+pub(crate) fn with_lane(mut req: farcooler_protocol::v1::Request, lane: Option<&str>) -> farcooler_protocol::v1::Request {
+    let Some(lane) = lane.map(str::trim).filter(|l| !l.is_empty()) else { return req };
+    if let Some(request::Payload::TerminalCreate(create)) = &mut req.payload {
+        create.lane = Some(lane.to_string());
+        req.required_capabilities.push(farcooler_protocol::capability::TERMINAL_LANE.to_string());
     }
     req
 }

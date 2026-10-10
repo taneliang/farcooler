@@ -946,8 +946,8 @@ fn with_pane_env(
 /// workspace. `charter` is set for its workspace's orchestrator and nobody
 /// else: the charter is the orchestrator's instructions, and a worker told
 /// where they are would be reading someone else's brief. `env` is an
-/// orchestrator's recipe (`orchestrator::extra_env`), empty for everyone
-/// else and for an orchestrator running something that isn't a harness.
+/// orchestrator's recipe (`orchestrator::extra_env`), or a lane agent's
+/// `FARCOOLER_LANE` (`lane_panes::env`), and empty for everyone else.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PaneWorkspace {
     pub id: Uuid,
@@ -3046,6 +3046,7 @@ impl Service {
         // model needed a separate step here to stop a stored group pointing at a
         // terminal that no longer existed.
         let _ = self.kill_pane(id).await;
+        let _ = self.store.end_lane_pane(id, models::Actor::Runner); // its lane's agent has finished (ov-457)
         self.delete_terminal_record(id, record.resource_version)
     }
 
@@ -3545,7 +3546,15 @@ impl Service {
         prompt: Option<&str>,
         task: Option<Uuid>,
     ) -> Result<models::Terminal> {
-        self.open_terminal(worktree_id, title, command_preset, prompt, task, None).await
+        self.open_terminal(worktree_id, title, command_preset, prompt, task, None, None).await
+    }
+
+    /// `create_terminal_with_prompt` for `task` on the plan lane `lane`
+    /// (ov-457): see `lane_panes`, which refuses, briefs, records and exports.
+    pub async fn create_terminal_in_lane(
+        &self, worktree_id: Uuid, title: &str, command_preset: &str, prompt: Option<&str>, task: Option<Uuid>, lane: Option<&str>,
+    ) -> Result<models::Terminal> {
+        self.open_terminal(worktree_id, title, command_preset, prompt, task, None, lane).await
     }
 
     /// Start `workspace`'s orchestrator running `harness` (`claude`, `codex`
@@ -3605,7 +3614,7 @@ impl Service {
             self.stop_terminal(live.id).await?;
             self.remove_terminal(live.id).await?;
         }
-        self.open_terminal(main.id, "orchestrator", harness, Some(&prompt), None, Some(workspace)).await
+        self.open_terminal(main.id, "orchestrator", harness, Some(&prompt), None, Some(workspace), None).await
     }
 
     /// The key of the task `key` names on `workspace`'s own board, as the
@@ -3634,6 +3643,7 @@ impl Service {
         prompt: Option<&str>,
         task: Option<Uuid>,
         orchestrating: Option<Uuid>,
+        lane: Option<&str>,
     ) -> Result<models::Terminal> {
         validate::display_name(title)?;
         validate::command_preset(command_preset)?;
@@ -3643,7 +3653,9 @@ impl Service {
         }
 
         let ws = self.store.get_worktree(worktree_id)?;
+        let lane = crate::lane_panes::resolve(&self.store, task, lane)?;
         let (task_key, prompt) = self.opening_for(&ws, command_preset, task, prompt)?;
+        let prompt = crate::lane_panes::with_brief(&self.store, lane.as_ref(), prompt)?;
         self.claim_for_task(&ws, task)?;
 
         // 1. Commit the durable record with intent RUNNING, unconfirmed.
@@ -3677,6 +3689,9 @@ impl Service {
             }
         };
 
+        if let Some(lane) = &lane {
+            crate::lane_panes::start(&self.store, lane, &term, command_preset, &ws)?;
+        }
         // A claude terminal gets its session id now, so that adopting it into
         // agent pane mode later is exact.
         //
@@ -3739,8 +3754,9 @@ impl Service {
         };
 
         if let Err(e) = created {
-            // No pane will ever read a prompt file for this terminal.
+            // No pane will ever read a prompt file for this terminal, nor work a lane.
             remove_prompt_file(&self.root, term.id);
+            let _ = self.store.end_lane_pane(term.id, models::Actor::Runner);
             // Creation never established a live runtime.
             let _ = self.store.update_terminal(
                 term.id,
@@ -3858,10 +3874,11 @@ impl Service {
         let id = term.workspace_id?;
         let charter = (term.role == models::TerminalRole::Orchestrator)
             .then(|| crate::workspace_home::charter_path(&self.root, id));
-        let env = self
+        let mut env = self
             .orchestrator_launch(term)
             .map(|(harness, launch)| crate::orchestrator::extra_env(harness, &launch))
             .unwrap_or_default();
+        env.extend(crate::lane_panes::env(&self.store, term));
         Some(PaneWorkspace { id, charter, env })
     }
 
@@ -7693,7 +7710,7 @@ mod orchestrator_launch_tests {
         assert!(svc.inventory.refresh().await.panes.is_empty(), "a pane was started");
 
         // And past `start_orchestrator`'s own look: the launch itself refuses.
-        let late = svc.open_terminal(ws.id, "orchestrator", "claude", None, None, Some(main.id)).await;
+        let late = svc.open_terminal(ws.id, "orchestrator", "claude", None, None, Some(main.id), None).await;
         assert!(matches!(late, Err(DomainError::InvalidArgument { what: "orchestrator_home" })), "{late:?}");
         assert!(svc.store.list_terminals_for_worktree(ws.id).unwrap().is_empty(), "a record was left");
         assert!(svc.inventory.refresh().await.panes.is_empty(), "a pane was started");
@@ -7751,7 +7768,7 @@ mod orchestrator_launch_tests {
         let (_dir, svc, ws) = a_worktree().await;
         let main = main_of(&svc, &ws);
         let first = svc.start_orchestrator(main.id, "claude", false, None).await.expect("first");
-        let late = svc.open_terminal(ws.id, "orchestrator", "claude", None, None, Some(main.id)).await;
+        let late = svc.open_terminal(ws.id, "orchestrator", "claude", None, None, Some(main.id), None).await;
         assert!(matches!(late, Err(DomainError::InvalidArgument { what: "orchestrator_taken" })), "{late:?}");
         let left: Vec<Uuid> = svc.store.list_terminals_for_worktree(ws.id).unwrap().iter().map(|t| t.id).collect();
         assert_eq!(left, [first.id], "the loser's record is gone");

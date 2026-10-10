@@ -61,4 +61,5 @@ public enum Capability: String, CaseIterable, Sendable {
     case webPane = "web_pane"
     case agentImages = "agent_images"
     case composeFiles = "compose_files"
+    case terminalLane = "terminal_lane"
 }

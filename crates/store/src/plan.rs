@@ -32,7 +32,7 @@ use crate::error::map_err;
 use crate::models::{Actor, get_uuid, uuid_blob};
 use crate::store::Store;
 use crate::tasks::now_millis;
-use crate::workers::HARNESSES;
+use crate::plan_panes::LANE_HARNESSES;
 
 /// Six new tables that only this file and `plan_read.rs` touch.
 ///
@@ -354,7 +354,7 @@ pub struct LaneAgent {
 /// An agent to record on a lane, or to fill in what's new about.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentRecord {
-    /// One of `workers::HARNESSES`.
+    /// One of `plan_panes::LANE_HARNESSES`.
     pub harness: String,
     pub agent_id: String,
     pub role: AgentRole,
@@ -757,7 +757,7 @@ impl Store {
         let branch = clean(&new.branch, NAME_MAX * 4, false, "branch")?;
         let model = clean(&new.model, NAME_MAX, false, "model")?;
         let harness = clean(&new.harness, NAME_MAX, false, "harness")?;
-        if !harness.is_empty() && !HARNESSES.contains(&harness.as_str()) {
+        if !harness.is_empty() && !LANE_HARNESSES.contains(&harness.as_str()) {
             return Err(invalid("harness"));
         }
         let mut conn = self.conn();
@@ -1045,7 +1045,7 @@ fn add_lane_cards(tx: &Connection, lane: Uuid, cards: &[LaneCard], actor: Actor)
 }
 
 fn record_agent(tx: &Connection, lane: Uuid, agent: &AgentRecord, actor: Actor) -> Result<()> {
-    if !HARNESSES.contains(&agent.harness.as_str()) {
+    if !LANE_HARNESSES.contains(&agent.harness.as_str()) {
         return Err(invalid("harness"));
     }
     let id = clean(&agent.agent_id, NAME_MAX * 2, true, "agent_id")?;

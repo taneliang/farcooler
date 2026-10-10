@@ -647,6 +647,11 @@ pub mod capability {
     /// `terminal.compose`'s `staged_file` (ov-454): any file, written on the
     /// runner, its path typed before the text. An older runner drops the block.
     pub const COMPOSE_FILES: &str = "compose_files";
+    /// A pane opened for a plan lane (ov-457): `TerminalCreate.lane`. A field
+    /// on an existing payload, so a client that sets it names this in the
+    /// request: an older runner drops the lane and opens a pane that knows
+    /// only its first card.
+    pub const TERMINAL_LANE: &str = "terminal_lane";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -664,7 +669,7 @@ pub mod capability {
             BOARD_TRAINS, BOARD_COST, LANDING, BOARD_RULING_ACTIONS, AGENT_ROWS, DRAFT_HOLD,
             PROJECTOR_SETTING, AGENT_COMPOSE,
             COMPOSE, COMPOSE_UPLOAD, TERMINAL_INTERRUPT, CODEX_VIEW, BRING_DRAFT, WEB_PANE,
-            AGENT_IMAGES, COMPOSE_FILES,
+            AGENT_IMAGES, COMPOSE_FILES, TERMINAL_LANE,
         ];
 
     /// Capabilities this process has but does not offer: a feature behind a

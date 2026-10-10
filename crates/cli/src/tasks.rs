@@ -657,7 +657,7 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
                 // clap requires one of the two, and `--new` requires `--branch`.
                 _ => return Err("name a worktree with --worktree, or a new one with --new and --branch".into()),
             };
-            let asked = Dispatch { task: &task, lane, preset: &preset, actor, again };
+            let asked = Dispatch { task: &task, lane, preset: &preset, actor, again, plan_lane: None };
             let done = dispatch(&mut link, asked, &mut |w| eprintln!("{w}")).await?;
             println!("{}", dispatched_output(&task.key, &done, json));
         }
@@ -1994,7 +1994,7 @@ fn uncoded(said: &str) -> Refused {
 
 /// Where a dispatched task is asked to work, as the caller named it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Lane {
+pub(crate) enum Lane {
     /// A worktree that exists, by name or id, on the task's own repository.
     Existing(String),
     /// A worktree to make, on the task's repository.
@@ -2003,7 +2003,7 @@ enum Lane {
 
 /// What a dispatch made.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Dispatched {
+pub(crate) struct Dispatched {
     worktree: Uuid,
     worktree_name: String,
     terminal: Uuid,
@@ -2030,13 +2030,15 @@ const RECHECKS: [Duration; 4] =
 const RECHECK_BUDGET: Duration = Duration::from_secs(3);
 
 /// What `task dispatch` was asked to do, once the task is found.
-struct Dispatch<'a> {
-    task: &'a pb::Task,
-    lane: Lane,
-    preset: &'a str,
-    actor: Actor,
+pub(crate) struct Dispatch<'a> {
+    pub(crate) task: &'a pb::Task,
+    pub(crate) lane: Lane,
+    pub(crate) preset: &'a str,
+    pub(crate) actor: Actor,
     /// `--again`: a second agent on a task whose first is still running.
-    again: bool,
+    pub(crate) again: bool,
+    /// The plan lane the pane works, by name: `plan lane dispatch` (ov-457).
+    pub(crate) plan_lane: Option<&'a str>,
 }
 
 /// The one seam between `dispatch` and a runner: send a request, get its
@@ -2068,7 +2070,7 @@ impl DispatchLink for crate::Link {
 }
 
 /// The error the refusal that stopped a dispatch deserves.
-type Refusal = Box<dyn std::error::Error>;
+pub(crate) type Refusal = Box<dyn std::error::Error>;
 
 /// A preset `task dispatch` can start: claude, codex or cursor, the agents
 /// that are told the task on their first launch.
@@ -2122,14 +2124,10 @@ fn lane_on_board(
 
 /// `terminal.create` for the task, by key, naming the capability the key
 /// needs. The pane is titled with the key.
-fn open_pane_request(worktree: Uuid, preset: &str, key: &str) -> pb::Request {
-    crate::terminal_create_request(
-        worktree,
-        key.to_string(),
-        preset.to_string(),
-        false,
-        None,
-        Some(key.to_string()),
+fn open_pane_request(worktree: Uuid, preset: &str, key: &str, plan_lane: Option<&str>) -> pb::Request {
+    crate::terminal_requests::with_lane(
+        crate::terminal_create_request(worktree, key.to_string(), preset.to_string(), false, None, Some(key.to_string())),
+        plan_lane,
     )
 }
 
@@ -2429,7 +2427,7 @@ fn pane_state_word(state: i32) -> &'static str {
 /// *yet*; one that exited, failed or was lost is a finding, said as that.
 /// Either way it says where to look, and `--json` carries `pane_confirmed`
 /// beside `pane_state`, so a script can tell them apart without prose.
-fn dispatched_output(key: &str, done: &Dispatched, json: bool) -> String {
+pub(crate) fn dispatched_output(key: &str, done: &Dispatched, json: bool) -> String {
     if json {
         return serde_json::json!({
             "key": key,
@@ -2497,7 +2495,7 @@ fn task_get_request(task: Uuid) -> pb::Request {
 /// pane is looked for again for up to `RECHECK_BUDGET` (`recheck_pane`). One
 /// still not seen is a dispatch that says so (`Dispatched::confirmed`), not
 /// a failure: tearing it down could stop an agent that is working.
-async fn dispatch<L: DispatchLink>(
+pub(crate) async fn dispatch<L: DispatchLink>(
     link: &mut L,
     d: Dispatch<'_>,
     warn: &mut dyn FnMut(String),
@@ -2668,7 +2666,7 @@ async fn dispatch<L: DispatchLink>(
         (None, Lane::Existing(_)) => unreachable!("an existing lane was resolved above"),
     };
 
-    let opened = match link.call(open_pane_request(worktree, d.preset, &task.key)).await {
+    let opened = match link.call(open_pane_request(worktree, d.preset, &task.key, d.plan_lane)).await {
         Ok(r) => match expect_value(r.value)? {
             result::Value::Terminal(t) => t,
             _ => return Err(crate::daemon_link::UNREADABLE.into()),
@@ -3669,7 +3667,7 @@ mod tests {
         again: bool,
     ) -> (Result<Dispatched, String>, Vec<String>) {
         let mut warned = Vec::new();
-        let asked = Dispatch { task, lane, preset, actor: Actor::Manager, again };
+        let asked = Dispatch { task, lane, preset, actor: Actor::Manager, again, plan_lane: None };
         let done = dispatch(link, asked, &mut |w| warned.push(w)).await.map_err(|e| e.to_string());
         (done, warned)
     }
@@ -3709,7 +3707,7 @@ mod tests {
     /// `error_code_lines`.
     async fn refused_with_code(link: &mut FakeLink, lane: Lane) -> (String, Option<String>) {
         let task = fc_2();
-        let asked = Dispatch { task: &task, lane, preset: "claude", actor: Actor::Manager, again: false };
+        let asked = Dispatch { task: &task, lane, preset: "claude", actor: Actor::Manager, again: false, plan_lane: None };
         let e = dispatch(link, asked, &mut |_| {}).await.expect_err("refused");
         (e.to_string(), crate::error_code_lines(e.as_ref(), true).into_iter().next())
     }

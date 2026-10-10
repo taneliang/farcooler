@@ -241,6 +241,7 @@ async fn a_terminal(
         join_active_group: false,
         prompt: None,
         task_key: None,
+        lane: None,
     }));
     let result = client.call(create).await.expect("terminal.create");
     let Some(result::Value::Terminal(terminal)) = result.value else { panic!("wrong result") };

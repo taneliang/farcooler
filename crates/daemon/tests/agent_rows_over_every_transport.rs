@@ -101,6 +101,7 @@ async fn a_claude_pane(client: &mut Socket, worktree: &pb::Worktree) -> pb::Term
         join_active_group: false,
         prompt: None,
         task_key: None,
+        lane: None,
     }));
     let Some(result::Value::Terminal(terminal)) = client.call(create).await.expect("terminal.create").value else { panic!("terminal") };
     assert!(terminal.agent_session_id.is_some(), "a claude pane declares its session");

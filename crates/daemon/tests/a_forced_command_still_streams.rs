@@ -336,6 +336,7 @@ async fn a_pane(runner: &Runner) -> uuid::Uuid {
             join_active_group: false,
             prompt: None,
             task_key: None,
+            lane: None,
         },
     ));
     let result = client.call(terminal).await.expect("terminal.create");

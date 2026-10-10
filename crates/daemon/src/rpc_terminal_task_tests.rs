@@ -31,6 +31,7 @@ fn create(ws: Uuid, preset: &str, key: Option<&str>, join: bool) -> Request {
             join_active_group: join,
             prompt: None,
             task_key: key.map(str::to_string),
+            lane: None,
         })),
         ..Default::default()
     }
