@@ -53,6 +53,36 @@ struct PlanUICaptures {
         }
     }
 
+    /// Now with a train and its lanes named by what they do (ov-461, ov-462): long
+    /// titles, a summary, the integrating agent's state and spend, the slug second.
+    @Test(arguments: [320.0, 900])
+    func now(_ width: CGFloat) async throws {
+        let plan = try PlanModel.decode(PlanViewTests.fixture())
+        var train = plan.trains[0]
+        train.summary = "Mac interface polish; Agents tell the orchestrator when they are done; Phones show the plan"
+        let lanes = [
+            ("Agents tell the orchestrator when they are done", "agent-msg", LaneState.building),
+            ("Mac interface polish", "mac-ux", LaneState.review),
+            ("fix-ac84", "fix-ac84", LaneState.fixing),
+        ].enumerated().map { index, row in
+            var lane = plan.lanes[1]
+            lane.id = "lane-\(index)"
+            lane.name = row.1
+            lane.title = row.0 == row.1 ? nil : row.0
+            lane.state = row.2
+            return lane
+        }
+        try await Self.shoot(
+            "now-\(Int(width))", width: width, height: 460,
+            VStack(alignment: .leading, spacing: 8) {
+                PlanTrainRow(train: train, ci: plan.ci(of: train), now: plan.nowMs)
+                ForEach(lanes) { lane in
+                    PlanLaneRow(lane: lane, theme: nil, rank: nil, now: plan.nowMs, waitsOnOwner: false, selected: false, keyed: false, action: {})
+                        .padding(.leading, 16)
+                }
+            })
+    }
+
     @Test(arguments: [320.0, 900])
     func question(_ width: CGFloat) async throws {
         let options = TaskQuestionOptionsTests.options

@@ -133,7 +133,7 @@ struct PlanThemeEntryTests {
         let drawn = await Self.frames(try Self.entry(moving), width: 640)
         #expect(drawn[Self.id("track")] != nil && drawn[Self.id("over-budget")] == nil, "\(drawn.keys.sorted())")
         let brief = PlanThemeBrief(moving.themes[0], in: moving)
-        #expect(PlanWords.track(brief.track, now: moving.nowMs) == "mac-ux is in review")
+        #expect(PlanWords.track(brief.track, now: moving.nowMs) == "Mac interface polish is in review")
     }
 
     @Test("A narrow canvas wraps the entry: nothing draws past its edges")

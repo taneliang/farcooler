@@ -312,7 +312,8 @@ struct PlanLaneRow: View {
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
                         Text(lane.heading)
                             .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
-                            .lineLimit(1)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                             .layoutPriority(1)
                         Spacer(minLength: 0)
                         // Which theme it serves (the owner's ask, ov-273).

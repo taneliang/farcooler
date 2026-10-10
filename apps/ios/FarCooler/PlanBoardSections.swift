@@ -354,7 +354,8 @@ struct PlanLaneRow: View {
     private var name: some View {
         Text(lane.heading)
             .font(.subheadline.weight(.medium))
-            .lineLimit(1)
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
             .layoutPriority(1)
             .frameProbe("plan-lane-name")
     }

@@ -86,11 +86,11 @@ struct PlanTitlesTests {
         #expect(PlanWords.tidy(PlanOutside(lanes: [], openCards: 0, tidy: [], shadows: [lane, lane])) == "2 lanes to tidy")
     }
 
-    @Test("a train's task line and strip use the lane's title")
-    func titlesReachTheLineAndTheStrip() throws {
+    @Test("a task's line uses the lane's title; the strip, a status line of slugs, keeps the names")
+    func titlesReachTheLineButNotTheStrip() throws {
         let plan = try PlanModelTests.fixture()
         let line = try #require(plan.taskLine("00000000-0000-0000-0000-000000001001"))
         #expect(line.laneWords == "In lane Mac interface polish")
-        #expect(PlanStrip(plan: plan, needsYou: 0, orchestrator: .working).now.map(\.name) == ["Mac interface polish"])
+        #expect(PlanStrip(plan: plan, needsYou: 0, orchestrator: .working).now.map(\.name) == ["mac-ux"])
     }
 }

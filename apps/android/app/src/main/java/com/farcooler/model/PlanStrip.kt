@@ -67,8 +67,8 @@ data class PlanStrip(
             val state = state(orchestrator)
             return PlanStrip(
                 orchestrator = state, line = line(orchestrator, state), needsYou = maxOf(0, needsYou),
-                now = working.take(NOW_SHOWN).map { it.heading to it.state },
-                moreNow = maxOf(0, working.size - NOW_SHOWN), next = plan.nextUp.firstOrNull()?.heading,
+                now = working.take(NOW_SHOWN).map { it.name to it.state },
+                moreNow = maxOf(0, working.size - NOW_SHOWN), next = plan.nextUp.firstOrNull()?.name,
             )
         }
 

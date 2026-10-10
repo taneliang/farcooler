@@ -347,7 +347,8 @@ fun PlanLaneRow(lane: PlanLane, theme: PlanTheme?, rank: Int?, now: Long, waitsO
         },
         headlineContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(lane.heading, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                // The title is the row; the theme it serves gives way first.
+                Text(lane.heading, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(2f, fill = false))
                 if (theme != null) {
                     Spacer(Modifier.width(12.dp))
                     // Which theme it serves (the owner's ask, ov-273).

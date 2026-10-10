@@ -403,7 +403,10 @@ impl Store {
             let summary = lanes
                 .iter()
                 .filter_map(|id| views.get(id))
-                .map(|v| if v.title.is_empty() { v.lane.name.clone() } else { v.title.clone() })
+                .map(|v| match derived_title(&v.lane, &v.cards, &statuses, false) {
+                    t if t.is_empty() => v.lane.name.clone(),
+                    t => t,
+                })
                 .collect::<Vec<_>>()
                 .join("; ");
             let spend = match &train.agent {
@@ -552,6 +555,12 @@ impl Shares {
 /// without the "Area: " lead, with "+N more" when it works others. Empty when
 /// it has no card to say it from.
 pub(crate) fn lane_title(lane: &Lane, cards: &[LaneCard], titles: &HashMap<Uuid, CardRef>) -> String {
+    derived_title(lane, cards, titles, true)
+}
+
+/// [`lane_title`], with or without the "+N more" a derived title ends in. A
+/// train's summary leaves it off: the lane's row already counts its cards.
+fn derived_title(lane: &Lane, cards: &[LaneCard], titles: &HashMap<Uuid, CardRef>, with_more: bool) -> String {
     if !lane.title.is_empty() {
         return lane.title.clone();
     }
@@ -563,7 +572,7 @@ pub(crate) fn lane_title(lane: &Lane, cards: &[LaneCard], titles: &HashMap<Uuid,
     }
     let Some(first) = tasks.first().and_then(|id| titles.get(id)) else { return String::new() };
     let mut title = sentence(&first.title);
-    if tasks.len() > 1 {
+    if tasks.len() > 1 && with_more {
         let tail = format!(" +{} more", tasks.len() - 1);
         let room = crate::plan::TITLE_MAX.saturating_sub(tail.chars().count());
         title = format!("{}{tail}", shorten(&title, room));

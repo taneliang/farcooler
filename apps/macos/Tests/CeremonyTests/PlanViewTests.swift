@@ -303,7 +303,7 @@ struct PlanViewTests {
         #expect(!(await drawn(old)).contains("plan-task-line"))
         let store = try await Self.store(plan: true, defaults: Self.defaults())
         #expect((await drawn(store)).contains("plan-task-line"), "read on its own, with no navigator")
-        #expect(store.plan.plan.taskLine("00000000-0000-0000-0000-000000001001")?.text == "In lane mac-ux · Visual language")
+        #expect(store.plan.plan.taskLine("00000000-0000-0000-0000-000000001001")?.text == "In lane Mac interface polish · Visual language")
     }
 
     @Test("A plan page is kept across a relaunch, and its crumb is its name")

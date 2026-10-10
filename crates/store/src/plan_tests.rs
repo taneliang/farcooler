@@ -751,6 +751,11 @@ fn a_train_reads_train_n_and_what_it_carries() {
     let read = || store.plan(main, 0).unwrap().trains;
     let by = |n: &str| read().into_iter().find(|t| t.train.name == n).unwrap();
     assert_eq!((by("integ-72").title.as_str(), by("integ-72").summary.as_str()), ("Train 72", "Agents message the orchestrator; Attach files"));
+    let more = store.create_lane(main, &NewLane { name: "many".into(), ..Default::default() }, &[whole(&a), whole(&titled(&store, main, "Mac: another"))], None, Actor::Manager).unwrap();
+    store.update_lane(more.id, &LaneUpdate { train: Some("integ-72".into()), ..Default::default() }, Actor::Manager).unwrap();
+    let summary = by("integ-72").summary;
+    assert!(summary.ends_with("; Agents message the orchestrator"), "a derived title carries no '+N more' into the summary: {summary}");
+    assert_eq!(store.plan(main, 0).unwrap().lanes.iter().find(|l| l.lane.name == "many").unwrap().title, "Agents message the orchestrator +1 more");
     assert_eq!((by("spring").title.as_str(), by("spring").summary.as_str()), ("spring", ""));
     assert_eq!(by("train-3").title, "Phones catch up");
     store.set_train(t3.id, &TrainUpdate { title: Some(String::new()), ..Default::default() }, Actor::Manager).unwrap();
