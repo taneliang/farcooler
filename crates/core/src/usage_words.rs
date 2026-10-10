@@ -191,9 +191,15 @@ impl SpendRow {
         if self.model.is_empty() { self.harness.clone() } else { format!("{} · {}", self.harness, self.model) }
     }
 
-    /// "1.2M tokens · $3.20", or "Not reported" when it stated nothing.
+    /// "1.2M tokens · $3.20", or "Not reported" when it stated nothing. A
+    /// model the price table has no rate for says so by name: "1.2M tokens ·
+    /// No price listed for claude-opus-9".
     pub fn detail(&self) -> String {
-        self.totals.line_detail()
+        let t = &self.totals;
+        if !self.model.is_empty() && t.priced_micros() <= 0 && t.unpriced_tokens > 0 {
+            return format!("{} tokens · No price listed for {}", tokens(t.total_tokens()), self.model);
+        }
+        t.line_detail()
     }
 }
 

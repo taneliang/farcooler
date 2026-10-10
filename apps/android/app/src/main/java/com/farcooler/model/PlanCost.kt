@@ -158,6 +158,9 @@ object PlanCostWords {
     /** What is said where a dollar figure can't be: API-equivalent dollars the runner has no price for. */
     const val DOLLARS_NOT_REPORTED = "API-equivalent dollars: Not reported"
 
+    /** Where a row has no dollar figure: "No price listed for opus-9" when it names a model (the price table has no rate for it), else Not reported. */
+    fun noDollars(model: String): String = if (model.isEmpty()) DOLLARS_NOT_REPORTED else "No price listed for $model"
+
     /** A harness as a person names it. */
     fun harnessName(harness: String): String = when (harness) {
         "claude" -> "Claude Code"
@@ -237,7 +240,7 @@ object PlanCostWords {
     /** One row of the week's split: "Claude Code · opus", then "28M tokens · about $41.20 API-equivalent". */
     fun weekRow(w: PlanWeekSpend, locale: Locale = Locale.getDefault()): PlanCompareRow {
         val model = w.model.ifEmpty { "no model named" }
-        val dollars = w.costMicros?.let { "about ${TaskUsageFormat.dollars(it, locale)} API-equivalent" } ?: DOLLARS_NOT_REPORTED
+        val dollars = w.costMicros?.let { "about ${TaskUsageFormat.dollars(it, locale)} API-equivalent" } ?: noDollars(w.model)
         val name = harnessName(w.harness)
         return PlanCompareRow(
             "week/${w.id}", "$name · $model", "${TaskUsageFormat.tokens(w.tokens, locale)} tokens · $dollars",
@@ -263,8 +266,8 @@ object PlanCostWords {
             detail += "about $dollars a card API-equivalent"
             spoken += "about $dollars a card, API-equivalent"
         } else {
-            detail += DOLLARS_NOT_REPORTED
-            spoken += DOLLARS_NOT_REPORTED
+            detail += noDollars(p.model)
+            spoken += noDollars(p.model)
         }
         val name = harnessName(p.harness)
         return PlanCompareRow(p.id, "$name · $model", detail.joinToString(" · "), "$name, $model. ${spoken.joinToString(", ")}")

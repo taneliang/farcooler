@@ -51,7 +51,7 @@ final class TaskUsageUITests: XCTestCase {
         // Ask the Orchestrator section (ov-241): on an iPhone 17 claude's row
         // ends at the bottom of the screen and codex's is a cell the list has
         // not made yet. So scroll to it, as a reader would.
-        let codex = rows.matching(NSPredicate(format: "label CONTAINS 'Cost not reported'")).firstMatch
+        let codex = rows.matching(NSPredicate(format: "label CONTAINS 'No price listed for gpt-5.5'")).firstMatch
         for _ in 0..<4 where !(codex.exists && codex.isHittable) {
             app.swipeUp()
         }

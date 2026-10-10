@@ -96,7 +96,7 @@ mod tests {
              Agent time 41 h · 4 turns\n\
              \n\
              By harness and model\n  \
-             codex · gpt-5.5         1.5K tokens · Cost not reported\n  \
+             codex · gpt-5.5         1.5K tokens · No price listed for gpt-5.5\n  \
              claude · claude-opus-5  500 tokens · $3.20"
         );
     }

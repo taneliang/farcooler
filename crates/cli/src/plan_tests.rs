@@ -436,7 +436,7 @@ async fn the_overview_reads_next_up_now_themes_and_landed() {
         "    Claude Code opus · 28M tokens · about $41.20 API-equivalent",
         "    Codex gpt-5.6 · 6.2M tokens · about $3.80 API-equivalent",
         "  Claude Code opus · 5 finished cards · 1.5M tokens a card · about $2.50 a card API-equivalent",
-        "  Codex gpt-5.6 · 3.4 finished cards · 300K tokens a card · API-equivalent dollars: Not reported",
+        "  Codex gpt-5.6 · 3.4 finished cards · 300K tokens a card · No price listed for gpt-5.6",
         "  2 other harness and model pairs held back until three cards have landed",
         "  In flight  1.2M tokens on cards that haven't landed · API-equivalent dollars: Not reported",
         "Landed today",
@@ -1260,7 +1260,7 @@ async fn the_plan_flags_what_is_over_budget_and_never_invents_a_limit() {
     assert!(text.contains("Last 7 days  34M tokens · about $45.00 API-equivalent in this project (its weekly limit isn't known)"), "{text}");
     assert!(!text.contains('%'), "no share of a limit nobody can read: {text}");
     assert!(text.contains("Claude Code opus · 5 finished cards · 1.5M tokens a card · about $2.50 a card API-equivalent"), "{text}");
-    assert!(text.contains("Codex gpt-5.6 · 3.4 finished cards · 300K tokens a card · API-equivalent dollars: Not reported"), "{text}");
+    assert!(text.contains("Codex gpt-5.6 · 3.4 finished cards · 300K tokens a card · No price listed for gpt-5.6"), "{text}");
     assert!(text.contains("2 other harness and model pairs held back until three cards have landed"), "{text}");
     assert!(text.contains("In flight  1.2M tokens on cards that haven't landed"), "{text}");
     let theme = say(&mut link, "theme show Visual").await.unwrap();

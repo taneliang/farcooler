@@ -184,7 +184,7 @@
       "cost": "Not reported",
       "time": "Agent time 1 h · 3 turns",
       "rows": [
-        { "title": "codex · gpt-5.5", "detail": "830K tokens · Cost not reported" }
+        { "title": "codex · gpt-5.5", "detail": "830K tokens · No price listed for gpt-5.5" }
       ]
     },
     {
@@ -222,7 +222,7 @@
       "cost": "$3.20 · API-equivalent, partly not reported",
       "time": "Agent time 41 h · 4 turns",
       "rows": [
-        { "title": "codex · gpt-5.5", "detail": "1.5K tokens · Cost not reported" },
+        { "title": "codex · gpt-5.5", "detail": "1.5K tokens · No price listed for gpt-5.5" },
         { "title": "claude · claude-opus-5", "detail": "500 tokens · $3.20" }
       ]
     },

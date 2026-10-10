@@ -116,6 +116,9 @@ struct PlanCostTests {
         #expect(PlanWords.weekDollars(PlanCostRead(weekTokens: 5), locale: us) == nil, "an older runner sent no split")
         let none = PlanWords.weekRow(PlanWeekSpend(harness: "cursor", model: "", tokens: 900), locale: us)
         #expect(none.detail == "900 tokens · API-equivalent dollars: Not reported")
+        let named = PlanWords.weekRow(PlanWeekSpend(harness: "codex", model: "gpt-9", tokens: 900), locale: us)
+        #expect(named.detail == "900 tokens · No price listed for gpt-9")
+        #expect(named.spoken.hasSuffix("No price listed for gpt-9"))
     }
 
     @Test("each comparison row says n, tokens a card, and dollars only when every turn was priced")
@@ -129,8 +132,8 @@ struct PlanCostTests {
         let codex = PlanWords.compareRow(cost.compare[1], locale: us)
         #expect(codex.title == "Codex · gpt-5.6")
         #expect(
-            codex.detail == "3.4 finished cards · 300K tokens a card · API-equivalent dollars: Not reported",
-            "unpriced reads Not reported, never nothing and never $0")
+            codex.detail == "3.4 finished cards · 300K tokens a card · No price listed for gpt-5.6",
+            "an unpriced model is named, never nothing and never $0")
         let unnamed = PlanWords.compareRow(PlanHarnessCost(harness: "cursor", model: "", cardShareMilli: 3000, tokens: 30), locale: us)
         #expect(unnamed.title == "Cursor · no model named")
         #expect(PlanWords.heldBack(2) == "2 other harness and model pairs held back until three cards have landed")

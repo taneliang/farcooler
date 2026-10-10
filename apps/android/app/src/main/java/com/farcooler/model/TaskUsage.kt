@@ -223,7 +223,8 @@ object TaskUsageFormat {
         val s = row.totals
         if (s.totalTokens == 0L && s.pricedMicros <= 0) return NOT_REPORTED
         val cost = if (s.pricedMicros <= 0) {
-            "Cost not reported"
+            // A model the price table has no rate for says so by name.
+            if (row.model.isNotEmpty() && s.unpricedTokens > 0) "No price listed for ${row.model}" else "Cost not reported"
         } else {
             val words = buildList {
                 if (s.costReportedMicros == 0L) add("estimated")

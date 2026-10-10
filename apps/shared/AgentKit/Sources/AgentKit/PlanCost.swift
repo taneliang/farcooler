@@ -261,8 +261,9 @@ extension PlanWords {
     public static func weekRow(_ w: PlanWeekSpend, locale: Locale = .current) -> PlanCompareRow {
         let model = w.model.isEmpty ? "no model named" : w.model
         let dollars = w.costMicros.map { "about \(TaskUsageFormat.dollars($0, locale: locale)) API-equivalent" }
-        let detail = ["\(TaskUsageFormat.tokens(w.tokens, locale: locale)) tokens", dollars ?? dollarsNotReported]
-        let spoken = ["\(spokenTokens(w.tokens, locale: locale)) tokens", dollars ?? dollarsNotReported]
+        let missing = noDollars(model: w.model)
+        let detail = ["\(TaskUsageFormat.tokens(w.tokens, locale: locale)) tokens", dollars ?? missing]
+        let spoken = ["\(spokenTokens(w.tokens, locale: locale)) tokens", dollars ?? missing]
         return PlanCompareRow(
             id: "week/\(w.id)", title: "\(harnessName(w.harness)) · \(model)", detail: detail.joined(separator: " · "),
             spoken: "\(harnessName(w.harness)), \(model). \(spoken.joined(separator: ", "))")
@@ -275,6 +276,12 @@ extension PlanWords {
     /// What is said where a dollar figure can't be: API-equivalent dollars the
     /// runner has no price for.
     public static let dollarsNotReported = "API-equivalent dollars: Not reported"
+
+    /// Where a row has no dollar figure: "No price listed for opus-9" when it
+    /// names a model (the price table has no rate for it), else Not reported.
+    public static func noDollars(model: String) -> String {
+        model.isEmpty ? dollarsNotReported : "No price listed for \(model)"
+    }
 
     /// "4.2 finished cards", or "4 finished cards": a pair's share of the
     /// landed cards, with its decimal when it isn't whole.
@@ -301,8 +308,8 @@ extension PlanWords {
             detail.append("about \(dollars) a card API-equivalent")
             spoken.append("about \(dollars) a card, API-equivalent")
         } else {
-            detail.append(dollarsNotReported)
-            spoken.append(dollarsNotReported)
+            detail.append(noDollars(model: p.model))
+            spoken.append(noDollars(model: p.model))
         }
         let title = "\(harnessName(p.harness)) · \(model)"
         return PlanCompareRow(

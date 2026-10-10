@@ -84,3 +84,16 @@ fn the_sections_sentences_are_the_fixtures() {
     assert_eq!(API_EQUIVALENT, w["api_equivalent"]);
     assert!(w.get("try_again").is_none(), "a button's label is each platform's own");
 }
+
+/// A model with no rate is named, not left to a bare "Cost not reported".
+#[test]
+fn a_row_for_a_model_with_no_price_says_so_by_name() {
+    let row = |model: &str, unpriced: u64, priced: i64| SpendRow {
+        harness: "codex".into(),
+        model: model.into(),
+        totals: Spend { input_tokens: 100, unpriced_tokens: unpriced, cost_estimated_micros: priced, ..Default::default() },
+    };
+    assert_eq!(row("gpt-9", 100, 0).detail(), "100 tokens · No price listed for gpt-9");
+    assert_eq!(row("", 100, 0).detail(), "100 tokens · Cost not reported", "no model, nothing to name");
+    assert_eq!(row("gpt-9", 0, 3_200_000).detail(), "100 tokens · $3.20 estimated");
+}

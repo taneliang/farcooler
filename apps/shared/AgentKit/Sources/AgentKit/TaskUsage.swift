@@ -236,7 +236,8 @@ public enum TaskUsageFormat {
         guard s.totalTokens > 0 || s.pricedMicros > 0 else { return notReported }
         let cost: String
         if s.pricedMicros <= 0 {
-            cost = "Cost not reported"
+            // A model the price table has no rate for says so by name.
+            cost = !row.model.isEmpty && s.unpricedTokens > 0 ? "No price listed for \(row.model)" : "Cost not reported"
         } else {
             var words: [String] = []
             if s.costReportedMicros == 0 {

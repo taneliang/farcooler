@@ -111,6 +111,7 @@ class PlanCostTest {
         assertEquals(PlanCostWords.DOLLARS_NOT_REPORTED, PlanCostWords.weekDollars(cost.copy(weekCostMicros = null), us))
         assertNull("an older runner sent no split", PlanCostWords.weekDollars(PlanCostRead(weekTokens = 5), us))
         assertEquals("900 tokens · API-equivalent dollars: Not reported", PlanCostWords.weekRow(PlanWeekSpend("cursor", "", 900), us).detail)
+        assertEquals("900 tokens · No price listed for gpt-9", PlanCostWords.weekRow(PlanWeekSpend("codex", "gpt-9", 900), us).detail)
     }
 
     @Test
@@ -122,7 +123,7 @@ class PlanCostTest {
         assertTrue(claude.spoken.contains("1.5 million tokens a card") && claude.spoken.contains("API-equivalent"))
         val codex = PlanCostWords.compareRow(cost.compare[1], us)
         assertEquals("Codex · gpt-5.6", codex.title)
-        assertEquals("unpriced reads Not reported, never nothing", "3.4 finished cards · 300K tokens a card · API-equivalent dollars: Not reported", codex.detail)
+        assertEquals("an unpriced model is named, never nothing", "3.4 finished cards · 300K tokens a card · No price listed for gpt-5.6", codex.detail)
         assertEquals("Cursor · no model named", PlanCostWords.compareRow(PlanHarnessCost("cursor", "", 3000, 30), us).title)
         assertEquals("2 other harness and model pairs held back until three cards have landed", PlanCostWords.heldBack(2))
         assertEquals("1 other harness and model pair held back until three cards have landed", PlanCostWords.heldBack(1))

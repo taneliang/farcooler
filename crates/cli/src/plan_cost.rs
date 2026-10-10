@@ -120,14 +120,14 @@ pub(super) fn overview_lines(plan: &pb::Plan) -> Vec<String> {
     let mut out = vec!["Cost".to_string()];
     // No percentage: no harness reports the weekly limit to the runner. The
     // total comes first, then what each harness and model spent (ov-434).
-    let week_dollars = if cost.week.is_empty() { String::new() } else { dollars_words(cost.week_cost_micros, false) };
+    let week_dollars = if cost.week.is_empty() { String::new() } else { dollars_words(cost.week_cost_micros, false, "") };
     out.push(format!(
         "  Last 7 days  {} tokens{week_dollars} in this project (its weekly limit isn't known)",
         tokens(cost.week_tokens)
     ));
     for w in &cost.week {
         let model = if w.model.is_empty() { "no model named" } else { w.model.as_str() };
-        out.push(format!("    {} {} · {} tokens{}", harness_name(&w.harness), model, tokens(w.tokens), dollars_words(w.cost_micros, false)));
+        out.push(format!("    {} {} · {} tokens{}", harness_name(&w.harness), model, tokens(w.tokens), dollars_words(w.cost_micros, false, &w.model)));
     }
     out.extend(compare_lines(cost));
     out
@@ -139,10 +139,13 @@ pub(super) fn cards_words(milli: u32) -> String {
     if milli % 1000 == 0 { format!("{} finished cards", milli / 1000) } else { format!("{:.1} finished cards", milli as f64 / 1000.0) }
 }
 
-/// " · about $2.50 a card API-equivalent" or " · API-equivalent dollars: Not reported".
-fn dollars_words(micros: Option<i64>, a_card: bool) -> String {
+/// " · about $2.50 a card API-equivalent"; where there is no figure,
+/// " · No price listed for opus-9" when the row names a model (the table has
+/// no rate for it), else " · API-equivalent dollars: Not reported".
+fn dollars_words(micros: Option<i64>, a_card: bool, model: &str) -> String {
     match micros {
         Some(m) => format!(" · about {}{} API-equivalent", dollars(m), if a_card { " a card" } else { "" }),
+        None if !model.is_empty() => format!(" · No price listed for {model}"),
         None => " · API-equivalent dollars: Not reported".to_string(),
     }
 }
@@ -161,7 +164,7 @@ pub(super) fn compare_lines(cost: &pb::PlanCost) -> Vec<String> {
             model,
             cards_words(p.card_share_milli),
             tokens(each),
-            dollars_words(per_card, true)
+            dollars_words(per_card, true, &p.model)
         ));
     }
     if cost.compare_held_back > 0 {
@@ -172,7 +175,7 @@ pub(super) fn compare_lines(cost: &pb::PlanCost) -> Vec<String> {
         out.push(format!(
             "  In flight  {} tokens on cards that haven't landed{}",
             tokens(cost.in_flight_tokens),
-            dollars_words(cost.in_flight_cost_micros, false)
+            dollars_words(cost.in_flight_cost_micros, false, "")
         ));
     }
     out
