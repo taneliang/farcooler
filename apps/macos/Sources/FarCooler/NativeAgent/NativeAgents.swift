@@ -336,7 +336,8 @@ final class NativeAgents: ObservableObject {
     /// follow on the runner.
     private func follow(_ model: NativePaneModel, on core: RunnerCore, target: String) {
         let offered = links[target]?.offered ?? []
-        model.source = CoreRowSource(core: core, terminal: model.terminal) { [weak self] in
+        model.source = CoreRowSource(core: core, terminal: model.terminal, opensAgents: offered.contains(Capability.subagentRows.rawValue)) {
+            [weak self] in
             Task { @MainActor in self?.linkLost(target, core: core) }
         }
         model.sink = core

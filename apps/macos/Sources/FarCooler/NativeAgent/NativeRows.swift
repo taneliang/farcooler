@@ -28,7 +28,7 @@ struct NativeRowView: View {
                 AgentReplyText(text: prose.text, trailingClearance: 0, streaming: isLast)
             case .thinking(let thinking): NativeThinkingRow(thinking: thinking)
             case .tool(let tool): NativeToolRow(id: row.id, tool: tool)
-            case .subagent(let subagent): SubagentRow(subagent: subagent)
+            case .subagent(let subagent): SubagentRow(id: row.id, subagent: subagent)
             case .ask(let ask): NativeAskRow(ask: ask, answer: answer, showTerminal: showTerminal)
             case .queued(let queued): QueuedLine(text: queued.text, state: queued.state, sendNow: sendNow)
             case .notice(let notice): NoticeLine(text: notice.text)
@@ -192,10 +192,33 @@ struct NativeStatusMark: View {
     }
 }
 
+extension EnvironmentValues {
+    /// Opens a subagent's own conversation in the pane's place, by its row id
+    /// and `agentId` (ov-453); nil where the runner can't.
+    @Entry var nativeOpenAgent: ((String, String?) -> Void)? = nil
+}
+
 private struct SubagentRow: View {
+    let id: String
     let subagent: AgentRow.Subagent
+    @Environment(\.nativeOpenAgent) private var openAgent
 
     var body: some View {
+        if let openAgent, let agentId = subagent.agentId {
+            // Opens to its own conversation (ov-453).
+            Button { openAgent(id, agentId) } label: {
+                content(opens: true).contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .help("Open This Agent’s Conversation")
+            .accessibilityHint("Opens this agent’s conversation")
+            .identified("native-subagent-open-\(id)")
+        } else {
+            content(opens: false)
+        }
+    }
+
+    private func content(opens: Bool) -> some View {
         // Unfilled and secondary, as a tool row is: the agent's machinery
         // sits below its words (ov-452).
         VStack(alignment: .leading, spacing: Spacing.tight) {
@@ -208,6 +231,12 @@ private struct SubagentRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 RunTimeChip(startedMs: subagent.startedMs, endedMs: subagent.status == .running ? nil : (subagent.endedMs ?? subagent.lastMs))
+                if opens {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .accessibilityHidden(true)
+                }
             }
             if subagent.status == .running, !subagent.currentAction.isEmpty {
                 Text(subagent.currentAction)

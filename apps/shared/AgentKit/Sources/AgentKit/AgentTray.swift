@@ -114,10 +114,11 @@ public enum AgentTray {
         return first.uppercased() + words.dropFirst()
     }
 
-    /// "950 tokens", "87.2K tokens", "1.2M tokens".
-    public static func tokens(_ count: Int) -> String {
+    /// "950 tokens", "87.2K tokens", "1.2M tokens"; `short`, the number
+    /// alone, for a narrow row.
+    public static func tokens(_ count: Int, short: Bool = false) -> String {
         let number = count.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)).locale(Locale(identifier: "en_US")))
-        return "\(number) \(count == 1 ? "token" : "tokens")"
+        return short ? number : "\(number) \(count == 1 ? "token" : "tokens")"
     }
 
     /// The tray's header: how many agents run besides main.

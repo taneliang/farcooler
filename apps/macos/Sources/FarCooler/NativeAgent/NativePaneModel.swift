@@ -126,8 +126,16 @@ final class NativePaneModel: ObservableObject {
     @Published var answerIssues: [String: String] = [:]
     /// Where rows come from, once the runner is connected.
     var source: (any AgentRowSource)? {
-        didSet { if source != nil { following = false } }
+        didSet {
+            if source != nil { following = false }
+            if drill.opened != nil { drill.close() }
+        }
     }
+    /// The agent tray's state, and the subagent open in the pane's place
+    /// (ov-453).
+    let drill = AgentDrill()
+    /// Whether a subagent opens to its own rows here: the runner serves them.
+    var opensAgents: Bool { source?.subagent("") != nil }
     /// Whether `store` follows `source` now.
     private var following = false
 
@@ -164,6 +172,7 @@ final class NativePaneModel: ObservableObject {
     func followIfShown() {
         guard let source else { return }
         let wanted = showsNative && onScreen
+        drill.follow(wanted)
         if wanted, following, store.phase == .unavailable {
             store.start(source)
         } else if wanted, !following {
@@ -321,6 +330,21 @@ final class NativePaneModel: ObservableObject {
             .replacingOccurrences(of: composedFile, with: "", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return "\(images) \(words)"
+    }
+
+    /// Open subagent `agentId`, whose row in this pane's rows is `row`, in the
+    /// conversation's place (ov-453). False where it can't be opened.
+    @discardableResult
+    func openAgent(row: String, agentId: String?) -> Bool {
+        let opened = drill.open(row: row, agentId: agentId, from: source, pane: terminal)
+        if opened { objectWillChange.send() }
+        return opened
+    }
+
+    /// Back to the pane's own conversation.
+    func closeAgent() {
+        drill.close()
+        objectWillChange.send()
     }
 
     /// The page above the oldest row held.

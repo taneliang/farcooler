@@ -183,6 +183,11 @@ actor RunnerCore {
 struct CoreRowSource: AgentRowSource {
     let core: RunnerCore
     let terminal: String
+    /// Whether the runner serves a subagent's own rows (`subagent_rows`,
+    /// ov-453).
+    var opensAgents = false
+    /// The subagent whose own rows these are; nil for the pane's.
+    var agent: String? = nil
     /// Told when a call finds the link gone, so the runner's connection is
     /// made again now (`NativeAgents.linkLost`).
     var lost: (@Sendable () -> Void)? = nil
@@ -190,13 +195,21 @@ struct CoreRowSource: AgentRowSource {
     func page(before: UInt64?, limit: Int) async throws -> Data {
         var args: [String: any Sendable] = ["terminal": terminal, "limit": limit]
         if let before { args["before"] = before }
+        if let agent { args["agent"] = agent }
         return try await mapped { try await core.call("agent.rows", args) }
     }
 
     func follow(epoch: UInt64, afterRev: UInt64, waitMs: Int) async throws -> Data {
-        try await mapped {
-            try await core.call("agent.rows_follow", ["terminal": terminal, "epoch": epoch, "afterRev": afterRev, "waitMs": waitMs])
-        }
+        var args: [String: any Sendable] = ["terminal": terminal, "epoch": epoch, "afterRev": afterRev, "waitMs": waitMs]
+        if let agent { args["agent"] = agent }
+        return try await mapped { try await core.call("agent.rows_follow", args) }
+    }
+
+    func subagent(_ agentId: String) -> (any AgentRowSource)? {
+        guard opensAgents, agent == nil else { return nil }
+        var own = self
+        own.agent = agentId
+        return own
     }
 
     /// A runner that doesn't serve rows, or a pane that's gone, is not

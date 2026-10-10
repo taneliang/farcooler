@@ -15,60 +15,51 @@ struct NativeAgentView: View {
     let showTerminal: () -> Void
 
     var body: some View {
-        let store = model.store
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: Spacing.inset) {
-                if store.moreBefore {
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(maxWidth: .infinity)
-                        .onAppear { model.loadOlder() }
-                }
-                let last = store.items.last?.id
-                let sendNow: (() -> Void)? = model.offersSendNow ? { Task { await model.sendNow() } } : nil
-                let answer = model.nativeAnswer
-                // A run of tool calls is one line (ov-452).
-                ForEach(store.items) { item in
-                    switch item {
-                    case .row(let id):
-                        if let box = store.box(id) {
-                            NativeRowView(box: box, isLast: id == last, showTerminal: showTerminal, sendNow: sendNow, answer: answer)
-                        }
-                    case .tools(let id, let rows):
-                        ToolGroupRow(id: id, boxes: rows.compactMap(store.box))
-                    }
-                }
-                ForEach(model.queued.indices, id: \.self) { i in
-                    QueuedLine(text: model.queued[i], sendNow: sendNow)
-                }
-                if model.issue == .handoff {
-                    HandoffRow(reason: AgentConversation.handoff(model.agent), showTerminal: showTerminal)
-                } else if model.issue == .panel {
-                    HandoffRow(reason: AgentConversation.panel(model.agent), showTerminal: showTerminal)
+        // A subagent opened from the tray or its row (ov-453) takes the
+        // conversation's place, in the same style, with the way back above.
+        let opened = model.drill.opened
+        let store = opened?.store ?? model.store
+        NativeTranscript(model: model, store: store, isPane: opened == nil, showTerminal: showTerminal)
+            // Clear of the switch that floats in the pane's top corner.
+            .contentMargins(.top, opened == nil ? 36 : Spacing.group, for: .scrollContent)
+            .overlay {
+                if store.shownIds.isEmpty { emptyState(store.phase, agent: opened != nil) }
+            }
+            // Rows held and the runner not answering: said over them, so stale
+            // rows never pass for live ones, and the box waits (`canSend`).
+            .overlay(alignment: .top) {
+                if !store.shownIds.isEmpty, store.isStale { staleBanner(store.phase) }
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if let opened {
+                    let row = model.store.box(opened.id)?.row
+                    NativeAgentHeader(subagent: row.flatMap(Self.subagent), isFocused: isFocused, back: model.closeAgent)
+                        .padding(.leading, Spacing.section)
+                        // Clear of the switch in the top trailing corner.
+                        .padding(.trailing, 72)
+                        .padding(.top, Spacing.group)
                 }
             }
-            .padding(Spacing.section)
-        }
-        // Clear of the switch that floats in the pane's top corner.
-        .contentMargins(.top, 36, for: .scrollContent)
-        .defaultScrollAnchor(.bottom)
-        .scrollEdgeEffectStyle(.soft, for: .bottom)
-        .overlay {
-            if store.shownIds.isEmpty { emptyState(store.phase) }
-        }
-        // Rows held and the runner not answering: said over them, so stale
-        // rows never pass for live ones, and the box waits (`canSend`).
-        .overlay(alignment: .top) {
-            if !store.shownIds.isEmpty, store.isStale { staleBanner(store.phase) }
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            NativeComposer(model: model, isFocused: isFocused, showTerminal: showTerminal)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(spacing: Spacing.group) {
+                    NativeAgentTray(
+                        store: model.store, drill: model.drill, opens: model.opensAgents,
+                        open: { model.openAgent(row: $0.id, agentId: $0.agentId) }, back: model.closeAgent)
+                    if opened == nil {
+                        NativeComposer(model: model, isFocused: isFocused, showTerminal: showTerminal)
+                    }
+                }
                 .padding(Spacing.inset)
-        }
-        .background(WorkspaceStyle.paper)
-        .environment(\.promptImages, model.promptImages)
-        .onChange(of: store.ids.count) { _, _ in model.settleQueued() }
-        .identified("native-agent-view")
+            }
+            .environment(\.nativeOpenAgent, model.opensAgents ? { model.openAgent(row: $0, agentId: $1) } : nil)
+            .background(WorkspaceStyle.paper)
+            .environment(\.promptImages, model.promptImages)
+            .onChange(of: model.store.ids.count) { _, _ in model.settleQueued() }
+            .identified("native-agent-view")
+    }
+
+    private static func subagent(_ row: AgentRow) -> AgentRow.Subagent? {
+        if case .subagent(let sub) = row.kind { sub } else { nil }
     }
 
     private func staleBanner(_ phase: AgentRowStore.Phase) -> some View {
@@ -90,13 +81,67 @@ struct NativeAgentView: View {
     }
 
     @ViewBuilder
-    private func emptyState(_ phase: AgentRowStore.Phase) -> some View {
+    private func emptyState(_ phase: AgentRowStore.Phase, agent: Bool) -> some View {
         switch phase {
         case .loading, .cached: ProgressView().controlSize(.small)
-        case .live: Text("Nothing in this session yet.").foregroundStyle(.secondary)
+        case .live: Text(agent ? "This agent hasn’t written anything yet." : "Nothing in this session yet.").foregroundStyle(.secondary)
+        case .unavailable where agent: Text(AgentTray.unopenable).foregroundStyle(.secondary)
         case .unavailable: Text("This pane’s session can’t be shown here. Use the terminal.").foregroundStyle(.secondary)
         case .trouble: Text("Can’t reach the runner. Trying again…").foregroundStyle(.secondary)
         }
+    }
+}
+
+/// The rows of a conversation, newest at the bottom: the pane's own, or a
+/// subagent's opened in its place (ov-453), drawn the same way. Only the
+/// pane's take Send Now and a held ask's answers, and show what the
+/// composer queued.
+private struct NativeTranscript: View {
+    @ObservedObject var model: NativePaneModel
+    let store: AgentRowStore
+    let isPane: Bool
+    let showTerminal: () -> Void
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: Spacing.inset) {
+                if store.moreBefore {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(maxWidth: .infinity)
+                        .onAppear { if isPane { model.loadOlder() } }
+                }
+                let last = store.items.last?.id
+                let sendNow: (() -> Void)? = isPane && model.offersSendNow ? { Task { await model.sendNow() } } : nil
+                let answer = isPane ? model.nativeAnswer : nil
+                // A run of tool calls is one line (ov-452).
+                ForEach(store.items) { item in
+                    switch item {
+                    case .row(let id):
+                        if let box = store.box(id) {
+                            NativeRowView(box: box, isLast: id == last, showTerminal: showTerminal, sendNow: sendNow, answer: answer)
+                        }
+                    case .tools(let id, let rows):
+                        ToolGroupRow(id: id, boxes: rows.compactMap(store.box))
+                    }
+                }
+                if isPane {
+                    ForEach(model.queued.indices, id: \.self) { i in
+                        QueuedLine(text: model.queued[i], sendNow: sendNow)
+                    }
+                    if model.issue == .handoff {
+                        HandoffRow(reason: AgentConversation.handoff(model.agent), showTerminal: showTerminal)
+                    } else if model.issue == .panel {
+                        HandoffRow(reason: AgentConversation.panel(model.agent), showTerminal: showTerminal)
+                    }
+                }
+            }
+            .padding(Spacing.section)
+        }
+        .defaultScrollAnchor(.bottom)
+        .scrollEdgeEffectStyle(.soft, for: .bottom)
+        // A subagent opened is a list of its own, at its own tail.
+        .id(store.key)
     }
 }
 
