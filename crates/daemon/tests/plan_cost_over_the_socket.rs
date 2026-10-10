@@ -91,8 +91,10 @@ async fn a_budget_is_set_over_the_wire_and_read_back_with_the_trend_and_the_week
         .record_turn(&NewTurn {
             key: "claude-log:agent:a1".into(),
             terminal_id: None,
-            worktree_id: None,
-            repository_id: None,
+            // Filed where the session ran, as the daemon files a turn: the
+            // week counts this project's repository and its worktrees.
+            worktree_id: Some(repo.worktree),
+            repository_id: Some(repo.id),
             workspace_id: None,
             task_id: None,
             harness: "claude".into(),
