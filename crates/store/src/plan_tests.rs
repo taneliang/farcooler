@@ -678,7 +678,7 @@ fn whole(t: &Task) -> LaneCard {
 fn the_titles_migration_is_welcome() {
     use crate::compat::Older;
     let last = crate::migrate::MIGRATIONS.last().unwrap();
-    assert!(std::ptr::fn_addr_eq(last.0, migration_0043_plan_titles as fn(&Transaction) -> rusqlite::Result<()>));
+    assert!(std::ptr::fn_addr_eq(last.0, migration_0044_plan_titles as fn(&Transaction) -> rusqlite::Result<()>));
     assert_eq!(last.1, Older::Welcome);
 }
 

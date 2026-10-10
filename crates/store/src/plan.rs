@@ -133,7 +133,7 @@ pub(crate) fn migration_0023_plan_layer(tx: &Transaction) -> rusqlite::Result<()
 /// card. Nullable or defaulted, so a build from before reads every table as it
 /// did (`Older::Welcome`): its lane and train inserts name no new column, and
 /// its reads select the old ones.
-pub(crate) fn migration_0043_plan_titles(tx: &Transaction) -> rusqlite::Result<()> {
+pub(crate) fn migration_0044_plan_titles(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch(
         r#"
         ALTER TABLE lanes ADD COLUMN title TEXT NOT NULL DEFAULT '';
