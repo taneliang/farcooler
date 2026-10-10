@@ -49,13 +49,35 @@ pub(crate) struct MessageArgs {
 /// `farcooler message`, on a connected runner.
 pub(crate) async fn message(runner: Option<&str>, args: MessageArgs, json: bool) -> Fallible {
     let mut link = connect_to(runner).await?;
-    if !link.daemon_capabilities().iter().any(|c| c == capability::AGENT_MESSAGES) {
+    let var = |name: &str| std::env::var(name).ok();
+    let pane = Pane { actor: var(ACTOR_ENV), workspace: var(WORKSPACE_ENV), task: var(farcooler_core::pane_env::TASK) };
+    println!("{}", send(&mut link, args, pane, json).await?);
+    Ok(())
+}
+
+/// What the pane the CLI runs in says about it: `FARCOOLER_ACTOR`,
+/// `FARCOOLER_WORKSPACE` and `FARCOOLER_TASK`.
+pub(crate) struct Pane {
+    pub(crate) actor: Option<String>,
+    pub(crate) workspace: Option<String>,
+    pub(crate) task: Option<String>,
+}
+
+const ACTOR_ENV: &str = farcooler_core::pane_env::ACTOR;
+
+/// `farcooler message` on `link`, from `pane`, answering what to print.
+pub(crate) async fn send<L: tasks::DispatchLink>(
+    link: &mut L,
+    args: MessageArgs,
+    pane: Pane,
+    json: bool,
+) -> Result<String, Box<dyn std::error::Error>> {
+    if !link.capabilities().iter().any(|c| c == capability::AGENT_MESSAGES) {
         return Err("this runner's Far Cooler can't pass messages yet. update it and try again".into());
     }
-    let actor = actor_for(sender(args.actor.as_deref(), std::env::var(farcooler_core::pane_env::ACTOR).ok().as_deref())?)?;
-    let env = std::env::var(WORKSPACE_ENV).ok();
-    let board = board_for(&mut link, args.repo.as_deref(), args.workspace.as_deref(), env).await?;
-    let task = args.task.or_else(|| std::env::var(farcooler_core::pane_env::TASK).ok()).unwrap_or_default();
+    let actor = actor_for(sender(args.actor.as_deref(), pane.actor.as_deref())?.or(pane.actor.as_deref()))?;
+    let board = board_for(link, args.repo.as_deref(), args.workspace.as_deref(), pane.workspace).await?;
+    let task = args.task.or(pane.task).unwrap_or_default();
     let mut r = with(
         req("message.send"),
         request::Payload::MessageSend(pb::MessageSend {
@@ -63,7 +85,7 @@ pub(crate) async fn message(runner: Option<&str>, args: MessageArgs, json: bool)
             text: args.text,
             actor: actor.to_string(),
             task,
-            workspace_id: workspace_of(&mut link, &board).await?,
+            workspace_id: workspace_of(link, &board).await?,
         }),
     );
     r.required_capabilities.push(capability::AGENT_MESSAGES.to_string());
@@ -71,14 +93,13 @@ pub(crate) async fn message(runner: Option<&str>, args: MessageArgs, json: bool)
     let result::Value::MessageSent(sent) = expect_value(answer.value)? else {
         return Err(crate::daemon_link::UNREADABLE.into());
     };
-    println!("{}", sent_line(&sent, json));
-    Ok(())
+    Ok(sent_line(&sent, json))
 }
 
 /// The board's workspace, or with none named, its repository's Main, as
 /// `task create` and `plan` take it: an orchestrator outside its pane names
 /// only `--repo`.
-async fn workspace_of(link: &mut crate::Link, board: &tasks::Board) -> Result<bytes::Bytes, Box<dyn std::error::Error>> {
+async fn workspace_of<L: tasks::DispatchLink>(link: &mut L, board: &tasks::Board) -> Result<bytes::Bytes, Box<dyn std::error::Error>> {
     if let Some(ws) = &board.workspace {
         return Ok(ws.id.clone());
     }
@@ -170,6 +191,54 @@ mod tests {
         assert_eq!(sender(None, pane).unwrap(), None);
         assert_eq!(sender(Some("manager"), Some("manager")).unwrap(), Some("manager"));
         assert_eq!(sender(Some("user"), None).unwrap(), Some("user"));
+    }
+
+    /// A runner that answers every read and records what it's sent.
+    struct Runner(Vec<pb::Request>);
+
+    impl tasks::DispatchLink for Runner {
+        fn capabilities(&self) -> Vec<String> {
+            ["workstreams", "tasks", capability::AGENT_MESSAGES].map(String::from).to_vec()
+        }
+        async fn call(&mut self, req: pb::Request) -> Result<pb::Result, farcooler_transport::ClientError> {
+            let value = match req.method.as_str() {
+                "workspace.list" => result::Value::WorkspaceList(pb::WorkspaceList {
+                    items: vec![pb::Workspace { id: crate::id_bytes(WS), repository_id: crate::id_bytes(WS), is_main: true, ..Default::default() }],
+                }),
+                "message.send" => result::Value::MessageSent(pb::MessageSent::default()),
+                other => panic!("message sent {other}, which this fake doesn't expect"),
+            };
+            self.0.push(req);
+            Ok(pb::Result { value: Some(value) })
+        }
+        async fn pause(&mut self, _wait: std::time::Duration) {}
+    }
+
+    const WS: uuid::Uuid = uuid::Uuid::from_u128(0x0202);
+
+    fn args(line: &str) -> MessageArgs {
+        use clap::Parser;
+        let cli = crate::Cli::try_parse_from(line.split_whitespace()).unwrap();
+        let crate::Command::Message(args) = cli.command else { panic!("not message") };
+        args
+    }
+
+    /// The real command, in an agent's pane, with `--actor user`: refused,
+    /// and nothing is sent to be queued. Its own name goes through.
+    #[tokio::test]
+    async fn the_command_in_an_agents_pane_refuses_another_actor() {
+        let agent = "agent:01a0dad0-afd0-7bd1-9d62-3d125ede9ae2";
+        let pane = || Pane { actor: Some(agent.into()), workspace: Some(WS.to_string()), task: Some("ov-1".into()) };
+        let mut link = Runner(Vec::new());
+        let refused = send(&mut link, args("farcooler message orchestrator hi --actor user"), pane(), false).await;
+        assert!(refused.is_err(), "an agent sent as the owner");
+        assert!(!link.0.iter().any(|r| r.method == "message.send"), "something was sent to be queued");
+        send(&mut link, args("farcooler message orchestrator hi"), pane(), false).await.unwrap();
+        let sent: Vec<_> = link.0.iter().filter_map(|r| match &r.payload {
+            Some(request::Payload::MessageSend(m)) => Some(m.actor.clone()),
+            _ => None,
+        }).collect();
+        assert_eq!(sent, [agent]);
     }
 
     /// The agent's own line parses: the destination and the text, in order.
