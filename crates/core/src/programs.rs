@@ -678,16 +678,41 @@ mod tests {
 
     /// A fake login shell: `body` as a `/bin/sh` script, ignoring the `-lc`
     /// it is handed.
+    ///
+    /// Not returned until it can be executed. On Linux a script just written
+    /// cannot be exec'd (`ETXTBSY`) while any other thread's `fork` still holds
+    /// a copy of the write descriptor, and the other tests in this binary fork
+    /// all the time; on a loaded runner the window was wide enough for the
+    /// shell to fail to start and the test to wait for a pid file that never
+    /// came. Once the write descriptor is closed no new fork can inherit it,
+    /// so one exec that succeeds proves the rest will. The probe is the script
+    /// run with `FAKE_SHELL_PROBE` set, which it answers by exiting first.
     fn fake_shell(dir: &Path, body: &str) -> PathBuf {
         let path = dir.join("fake-shell");
-        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::write(
+            &path,
+            format!("#!/bin/sh\n[ -n \"$FAKE_SHELL_PROBE\" ] && exit 0\n{body}\n"),
+        )
+        .unwrap();
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        path
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            match std::process::Command::new(&path).env("FAKE_SHELL_PROBE", "1").status() {
+                Ok(_) => return path,
+                Err(e) if e.raw_os_error() == Some(libc::ETXTBSY) && Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(e) => panic!("cannot run the fake shell {}: {e}", path.display()),
+            }
+        }
     }
 
     fn wait_for_file(path: &Path) -> String {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        // Generous: the file is written by a process this test started, on a
+        // runner that may be running a hundred other tests. A shell that
+        // never runs fails the test just the same, thirty seconds later.
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if let Ok(text) = std::fs::read_to_string(path)
                 && !text.trim().is_empty()
@@ -718,7 +743,9 @@ mod tests {
                 pid_file.display()
             ),
         );
-        let timeout = Duration::from_secs(2);
+        // Long enough that a loaded runner has started the shell and let it
+        // write its pids before the lookup gives up on it and kills it.
+        let timeout = Duration::from_secs(10);
         let finder = std::sync::Arc::new(Finder::new(LoginPath::new(
             shell,
             timeout,
@@ -742,7 +769,7 @@ mod tests {
         let waited = started.elapsed();
         assert!(sh.is_some(), "sh is on the inherited PATH");
         assert!(
-            waited < Duration::from_millis(500),
+            waited < timeout / 2,
             "a lookup that needs no login shell waited {waited:?} behind one that does"
         );
         assert!(!stuck.is_finished(), "the hanging lookup should still be waiting");
@@ -764,7 +791,7 @@ mod tests {
     /// is reaped by init or launchd once it is reparented, not by this
     /// process, so it may linger as a zombie for a moment after the kill.
     fn gone_soon(pid: libc::pid_t) -> bool {
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < deadline {
             // SAFETY: signal 0 checks for existence and delivers nothing.
             if unsafe { libc::kill(pid, 0) } != 0 {
