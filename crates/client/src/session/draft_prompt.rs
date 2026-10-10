@@ -68,10 +68,30 @@ impl Session {
     /// so they may be `MAX_COMPOSE_UPLOAD_BYTES` together; an older one gets
     /// them inside the request, `MAX_COMPOSE_IMAGE_BYTES` together.
     pub async fn compose(&self, terminal: Uuid, text: &str, images: &[(String, Vec<u8>)]) -> Result<bool, SessionError> {
-        use farcooler_protocol::capability::{AGENT_COMPOSE, COMPOSE, COMPOSE_UPLOAD};
+        self.compose_with_files(terminal, text, images, &[]).await
+    }
+
+    /// `compose`, with `files` (each a name and its bytes, any kind) too
+    /// (ov-454): each uploaded first as an image is, then named in a
+    /// `staged_file` block, which the runner writes into its paste directory
+    /// and types the path of before the text. Needs `compose_files`, and
+    /// refused here without it rather than dropped there.
+    pub async fn compose_with_files(
+        &self,
+        terminal: Uuid,
+        text: &str,
+        images: &[(String, Vec<u8>)],
+        files: &[(String, Vec<u8>)],
+    ) -> Result<bool, SessionError> {
+        use farcooler_protocol::capability::{AGENT_COMPOSE, COMPOSE, COMPOSE_FILES, COMPOSE_UPLOAD};
         require(self.capabilities(), AGENT_COMPOSE, "terminal.compose")?;
         if !images.is_empty() || text.trim_end().contains(['\n', '\r']) {
             require(self.capabilities(), COMPOSE, "terminal.compose")?;
+        }
+        if !files.is_empty() {
+            require(self.capabilities(), COMPOSE_FILES, "terminal.compose")?;
+            require(self.capabilities(), COMPOSE_UPLOAD, "terminal.compose")?;
+            images_fit(files, true)?;
         }
         let upload = !images.is_empty() && self.can(COMPOSE_UPLOAD);
         images_fit(images, upload)?;
@@ -84,6 +104,11 @@ impl Session {
             };
             blocks.push(pb::AgentPromptBlock { content: Some(content) });
         }
+        for (name, data) in files {
+            let transfer_id = crate::actions::stage_compose_image(&self.client, terminal, "application/octet-stream", data).await?;
+            let file = pb::StagedFile { transfer_id, name: name.clone() };
+            blocks.push(pb::AgentPromptBlock { content: Some(Content::StagedFile(file)) });
+        }
         let payload = request::Payload::AgentPrompt(pb::AgentPrompt {
             terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
             blocks,
@@ -91,7 +116,10 @@ impl Session {
         });
         // Named, so a runner that lost `compose_upload` refuses rather than
         // dropping the images it can't read.
-        let required = if upload { vec![COMPOSE_UPLOAD.to_string()] } else { Vec::new() };
+        let mut required = if upload || !files.is_empty() { vec![COMPOSE_UPLOAD.to_string()] } else { Vec::new() };
+        if !files.is_empty() {
+            required.push(COMPOSE_FILES.to_string());
+        }
         // Targeted, so it keeps its order against this terminal's other
         // input and runs beside every other pane's calls.
         match self.value_requiring("terminal.compose", Some(terminal), Some(payload), required).await? {

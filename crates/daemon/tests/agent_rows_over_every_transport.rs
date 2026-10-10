@@ -404,3 +404,71 @@ async fn tell_refuses_a_worker_and_compose_takes_it_to_the_gate() {
     assert_ne!(what, "terminal", "compose refused as tell is: {code}");
     assert_eq!(code, pb::ErrorCode::ResourceConflict as i32, "compose reached the gate: {what}");
 }
+
+/// A prompt's images (ov-454): named on its turn row by type alone, and
+/// served by `agent.image` a piece at a time from the transcript, over the
+/// socket and relayed `--stdio` alike; and again after a restart, from the
+/// projection rebuilt from the file.
+#[tokio::test]
+async fn a_prompts_image_comes_back_whole_in_pieces_on_every_transport() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut first = daemon(dir.path()).await;
+    let mut client = socket(dir.path()).await;
+    assert!(client.server_hello().capabilities.iter().any(|c| c == "agent_images"), "offered where served");
+    let worktree = a_worktree(&mut client, dir.path()).await;
+    let terminal = a_claude_pane(&mut client, &worktree).await;
+    let path = transcript(dir.path(), &worktree, &terminal);
+    // Past two pieces, so the pieces are counted, not one answer.
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    png.extend((0..(farcooler_protocol::MAX_AGENT_IMAGE_CHUNK * 2 + 1234)).map(|i| (i % 251) as u8));
+    let mut with_image = prompt("p1", "");
+    with_image["imagePasteIds"] = json!([3]);
+    with_image["message"]["content"] = json!([
+        {"type":"text","text":"What's wrong here? [Image #3]"},
+        {"type":"image","source":{"type":"base64","media_type":"image/png","data":farcooler_core::base64::encode(&png)}},
+    ]);
+    append(&path, prompt("p0", "First."));
+    append(&path, with_image);
+    append(&path, reply("a1", "A typo."));
+
+    async fn whole<R, W>(client: &Client<R, W>, terminal: &pb::Terminal) -> (String, Vec<u8>, usize)
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+        W: AsyncWrite + Unpin + Send + 'static,
+    {
+        let page = page(client, terminal, None, 100).await;
+        let row = page.rows.iter().find(|r| r.id == "turn:p1").expect("the turn");
+        let row: serde_json::Value = serde_json::from_str(&row.row_json).unwrap();
+        assert_eq!(row["kind"]["Turn"]["images"], json!([{ "mime": "image/png" }]), "{row}");
+        let (mut bytes, mut pieces) = (Vec::new(), 0);
+        loop {
+            let ask = pb::AgentImageRequest { terminal_id: terminal.id.clone(), row_id: "turn:p1".into(), index: 0, offset: bytes.len() as u64 };
+            let result::Value::AgentImage(piece) = call(client, "agent.image", request::Payload::AgentImage(ask)).await else { panic!("agent.image") };
+            assert_eq!(piece.offset, bytes.len() as u64);
+            assert!(piece.chunk.len() <= farcooler_protocol::MAX_AGENT_IMAGE_CHUNK);
+            bytes.extend_from_slice(&piece.chunk);
+            pieces += 1;
+            if bytes.len() as u64 >= piece.total_size {
+                return (piece.mime_type, bytes, pieces);
+            }
+        }
+    }
+
+    let (mime, bytes, pieces) = whole(&client, &terminal).await;
+    assert_eq!((mime.as_str(), pieces), ("image/png", 3));
+    assert!(bytes == png, "the same bytes");
+    let (_relay, relayed) = spawn(dir.path()).await;
+    assert!(whole(&relayed, &terminal).await.1 == png, "relayed");
+
+    // No such image: refused, not an empty answer.
+    let ask = pb::AgentImageRequest { terminal_id: terminal.id.clone(), row_id: "turn:p0".into(), index: 0, offset: 0 };
+    let mut req = call_named("agent.image");
+    req.payload = Some(request::Payload::AgentImage(ask));
+    assert!(client.call_with(req, Default::default()).await.is_err(), "a prompt with no image");
+    drop((client, relayed));
+
+    first.child.kill().await.unwrap();
+    let _second = daemon(dir.path()).await;
+    let client = socket(dir.path()).await;
+    assert!(whole(&client, &terminal).await.1 == png, "after a restart");
+}

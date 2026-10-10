@@ -15,7 +15,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use farcooler_core::session_log::projector::HINT_ID;
+use farcooler_core::session_log::projector::{HINT_ID, RowKind, prompt_images};
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1::{self as pb, Request, request, result};
 use uuid::Uuid;
@@ -68,6 +68,83 @@ pub(crate) async fn dispatch(svc: &Service, req: Request) -> Result<result::Valu
         _ => Err(DomainError::InvalidArgument { what: "payload" }),
     }
 }
+
+/// `agent.image` (ov-454): a piece of one image a prompt carried, read back
+/// from its record in the transcript (`prompt_images::read`). The image is
+/// decoded once and held for the pieces after it (`RecentImages`). Refused
+/// as not found for a row that isn't a turn, an index it has no image at,
+/// or a record that can't be read back.
+pub(crate) async fn image(svc: &Service, req: Request) -> Result<result::Value> {
+    if !session_projectors::shadowing() {
+        return Err(DomainError::CapabilityUnsupported { needed: farcooler_protocol::capability::AGENT_ROWS });
+    }
+    let Some(request::Payload::AgentImage(p)) = req.payload else { return Err(DomainError::InvalidArgument { what: "payload" }) };
+    let terminal = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
+    ensure_open(svc, terminal).await?;
+    let key = (terminal, p.row_id.clone(), p.index);
+    let held = RECENT.lock().unwrap_or_else(|e| e.into_inner()).get(&key);
+    let (mime, bytes) = match held {
+        Some(held) => held,
+        None => {
+            let source = session_projectors::global()
+                .with_session(terminal, |s| match s.projection().row(&p.row_id).map(|r| &r.kind) {
+                    Some(RowKind::Turn(turn)) if (p.index as usize) < turn.images.len() => turn.source.clone(),
+                    _ => None,
+                })
+                .flatten()
+                .ok_or(DomainError::NotFound)?;
+            let prompt = p.row_id.strip_prefix("turn:").unwrap_or_default().to_string();
+            let index = p.index as usize;
+            let read = tokio::task::spawn_blocking(move || prompt_images::read(&source, &prompt, index))
+                .await
+                .ok()
+                .flatten()
+                .ok_or(DomainError::NotFound)?;
+            let held = (read.0, std::sync::Arc::new(read.1));
+            RECENT.lock().unwrap_or_else(|e| e.into_inner()).put(key, held.clone());
+            held
+        }
+    };
+    let start = (p.offset as usize).min(bytes.len());
+    let end = (start + farcooler_protocol::MAX_AGENT_IMAGE_CHUNK).min(bytes.len());
+    Ok(result::Value::AgentImage(pb::AgentImage {
+        mime_type: mime,
+        total_size: bytes.len() as u64,
+        offset: start as u64,
+        chunk: bytes::Bytes::copy_from_slice(&bytes[start..end]),
+    }))
+}
+
+/// The images `agent.image` decoded last, by terminal, row and index: a
+/// client asks for one a piece at a time, and a view shows a few at once.
+struct RecentImages(Vec<(ImageKey, Decoded)>);
+
+type ImageKey = (Uuid, String, u32);
+
+/// An image's MIME type and bytes, shared by the pieces served from it.
+type Decoded = (String, std::sync::Arc<Vec<u8>>);
+
+/// How many decoded images are held: a message's worth.
+const RECENT_IMAGES: usize = 4;
+
+impl RecentImages {
+    fn get(&mut self, key: &ImageKey) -> Option<Decoded> {
+        let at = self.0.iter().position(|(k, _)| k == key)?;
+        let entry = self.0.remove(at);
+        let held = entry.1.clone();
+        self.0.push(entry);
+        Some(held)
+    }
+
+    fn put(&mut self, key: ImageKey, held: Decoded) {
+        self.0.retain(|(k, _)| *k != key);
+        self.0.push((key, held));
+        let over = self.0.len().saturating_sub(RECENT_IMAGES);
+        self.0.drain(..over);
+    }
+}
+
+static RECENT: std::sync::Mutex<RecentImages> = std::sync::Mutex::new(RecentImages(Vec::new()));
 
 /// `settings.set_projector` (ov-372): `[agents] projector` written to
 /// config.toml, then the projector turned on or off in this daemon at once.

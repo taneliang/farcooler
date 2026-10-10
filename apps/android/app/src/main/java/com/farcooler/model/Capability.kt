@@ -61,5 +61,7 @@ enum class Capability(val wire: String) {
     TERMINAL_INTERRUPT("terminal_interrupt"),
     CODEX_VIEW("codex_view"),
     BRING_DRAFT("bring_draft"),
-    WEB_PANE("web_pane");
+    WEB_PANE("web_pane"),
+    AGENT_IMAGES("agent_images"),
+    COMPOSE_FILES("compose_files");
 }

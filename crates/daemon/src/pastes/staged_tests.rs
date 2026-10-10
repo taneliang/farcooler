@@ -160,3 +160,46 @@ async fn a_staged_file_past_the_paste_limit_is_refused_as_read() {
     assert_eq!(images(tmp.path(), &[staged_block(&[1])]).await.unwrap_err().what(), "image_too_large");
     assert!(!path.exists());
 }
+
+fn file_block(id: &[u8], name: &str) -> AgentPromptBlock {
+    let file = farcooler_protocol::v1::StagedFile { transfer_id: bytes::Bytes::copy_from_slice(id), name: name.into() };
+    AgentPromptBlock { content: Some(Content::StagedFile(file)) }
+}
+
+fn text_block(text: &str) -> AgentPromptBlock {
+    AgentPromptBlock { content: Some(Content::Text(text.into())) }
+}
+
+/// A compose's files (ov-454): any kind, moved into the paste directory
+/// under a composed name that keeps the sender's (made safe), in order, and
+/// read once; their paths typed before the text, quoted where they need it.
+#[tokio::test]
+async fn a_composes_files_land_in_the_paste_directory_under_their_names() {
+    let tmp = tempfile::tempdir().unwrap();
+    stage(tmp.path(), &[3], b"%PDF-1.7 a report").await;
+    stage(tmp.path(), &[4], b"col\n1\n").await;
+    let blocks = [text_block("summarize these"), file_block(&[3], "Q3 report.pdf"), file_block(&[4], "../../etc/data.csv")];
+    let written = super::files(tmp.path(), &blocks).await.expect("written");
+    assert_eq!(written.len(), 2);
+    let names: Vec<String> = written.iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
+    assert!(names[0].starts_with(COMPOSED_PREFIX) && names[0].ends_with("-Q3report.pdf"), "{names:?}");
+    assert!(names[1].ends_with("-data.csv"), "{names:?}");
+    assert!(written.iter().all(|p| p.parent() == Some(crate::paths::pastes_dir_in(tmp.path()).unwrap().as_path())));
+    assert_eq!(std::fs::read(&written[0]).unwrap(), b"%PDF-1.7 a report");
+    assert!(written.iter().all(|p| is_composed(&p.file_name().unwrap().to_string_lossy())), "swept with the composed");
+    assert!(super::files(tmp.path(), &blocks).await.is_err(), "read once: `file`");
+
+    let typed = with_files(&[PathBuf::from("/a b/x.pdf"), PathBuf::from("/c/y.csv")], "summarize these");
+    assert_eq!(typed, r#""/a b/x.pdf" /c/y.csv summarize these"#);
+    assert_eq!(with_files(&[PathBuf::from("/c/y.csv")], "  "), "/c/y.csv");
+}
+
+/// A slash command carries no file, and the upload it named goes anyway.
+#[tokio::test]
+async fn a_file_beside_a_command_is_refused_and_its_upload_deleted() {
+    let tmp = tempfile::tempdir().unwrap();
+    let staged = stage(tmp.path(), &[5], b"notes").await;
+    let refused = super::files(tmp.path(), &[text_block("/init"), file_block(&[5], "notes.txt")]).await;
+    assert!(matches!(refused, Err(DomainError::InvalidArgument { what: "files" })), "{refused:?}");
+    assert!(!staged.exists());
+}

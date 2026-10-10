@@ -433,7 +433,7 @@ fn scope_of(method: Method) -> Scope {
         | Method::TerminalAgentEditQueued
         | Method::TerminalAgentCancelQueued
         | Method::TerminalAgentSteerQueued
-        | Method::WorktreeFileSearch | Method::AgentRows | Method::AgentRowsFollow => Scope::Control,
+        | Method::WorktreeFileSearch | Method::AgentRows | Method::AgentRowsFollow | Method::AgentImage => Scope::Control,
         // Review is `control`, and for exactly the reason the screen above is.
         //
         // A diff IS source. `read` is the scope handed to something that should
@@ -1928,7 +1928,17 @@ impl Rpc {
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
                 // Carried, or uploaded first and named (ov-393).
                 let images = crate::pastes::staged::images(svc.root_dir(), &p.blocks).await?;
-                let turn = self.watcher.compose_into(id, &wire::prompt_text(&p.blocks), &images).await?;
+                // Files of any kind (ov-454): written here, their paths typed first.
+                let files = crate::pastes::staged::files(svc.root_dir(), &p.blocks).await?;
+                let text = crate::pastes::staged::with_files(&files, &wire::prompt_text(&p.blocks));
+                let turn = self.watcher.compose_into(id, &text, &images).await.inspect_err(|e| {
+                    // Refused before anything was typed: the copies go now.
+                    if !matches!(e, DomainError::Conflict { what: "unconfirmed" }) {
+                        for file in &files {
+                            let _ = std::fs::remove_file(file);
+                        }
+                    }
+                })?;
                 let queued = turn == crate::watch::answer_wake::Turn::During;
                 Ok(result::Value::TerminalTold(farcooler_protocol::v1::TerminalTold { queued }))
             }
@@ -2133,6 +2143,7 @@ impl Rpc {
             }
             "repository.landing" => crate::landing_read::handle(svc, req).await, // ov-313
             "agent.rows" | "agent.rows_follow" | "settings.set_projector" => crate::rpc_rows::dispatch(svc, req).await, // ov-366, ov-372
+            "agent.image" => crate::rpc_rows::image(svc, req).await, // ov-454
 
             // ---- workspaces ----
             //

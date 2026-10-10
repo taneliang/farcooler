@@ -365,6 +365,18 @@ pub(super) struct Block<'a> {
     pub is_error: Bool,
     /// A `tool_result`'s text, already cut to what a row keeps.
     pub content: ResultText,
+    /// An `image` block's source: its type alone, the base64 left unread
+    /// (ov-454).
+    #[serde(borrow)]
+    pub source: Obj<ImageSource<'a>>,
+}
+
+/// An `image` block's `source`, without its `data`.
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(default)]
+pub(super) struct ImageSource<'a> {
+    #[serde(borrow)]
+    pub media_type: Str<'a>,
 }
 
 /// A `tool_use`'s input: the fields a summary is made of, and the object as

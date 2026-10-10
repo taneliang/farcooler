@@ -77,6 +77,11 @@
             "background_running": 1,
             "duration_ms": 60000,
             "ended_ms": 61000,
+            "images": [
+              {
+                "mime": "image/png"
+              }
+            ],
             "origin": "Typed",
             "outcome": {
               "Failed": {

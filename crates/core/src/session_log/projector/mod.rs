@@ -20,6 +20,7 @@
 //! - `codex`: a codex rollout and codex's hooks, into the same rows (ov-378).
 //! - `detail`: what a tool row opens to, its input and result (ov-452).
 //! - `tasks`: the agent's task list, as one checklist row a turn (ov-452).
+//! - `prompt_images`: a prompt's images, read back from its record (ov-454).
 //!
 //! Pure apart from `files`, and that only reads.
 
@@ -32,6 +33,7 @@ pub mod fold;
 mod follow;
 pub mod hooks;
 mod nested;
+pub mod prompt_images;
 pub mod record;
 pub mod rows;
 mod tasks;
@@ -72,3 +74,5 @@ mod codex_tests;
 mod suggestion_tests;
 #[cfg(test)]
 mod polish_tests;
+#[cfg(test)]
+mod prompt_images_tests;

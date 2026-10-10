@@ -641,6 +641,15 @@ pub mod capability {
     /// an existing payload, so a client that sets it names this in the
     /// request: an older runner drops the URL and launches `web` as a program.
     pub const WEB_PANE: &str = "web_pane";
+    /// A prompt's images (ov-454): `images` on a `Turn` row, and
+    /// `agent.image`, one of them a piece at a time. Its own word, so a
+    /// client asks only a runner that keeps them.
+    pub const AGENT_IMAGES: &str = "agent_images";
+    /// A compose's files (ov-454): `terminal.compose`'s `staged_file`, any
+    /// kind of file written on the runner and its path typed before the text.
+    /// Its own word because an older runner drops a block it doesn't know:
+    /// a client that reads it absent attaches images alone.
+    pub const COMPOSE_FILES: &str = "compose_files";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -658,6 +667,7 @@ pub mod capability {
             BOARD_TRAINS, BOARD_COST, LANDING, BOARD_RULING_ACTIONS, AGENT_ROWS, DRAFT_HOLD,
             PROJECTOR_SETTING, AGENT_COMPOSE,
             COMPOSE, COMPOSE_UPLOAD, TERMINAL_INTERRUPT, CODEX_VIEW, BRING_DRAFT, WEB_PANE,
+            AGENT_IMAGES, COMPOSE_FILES,
         ];
 
     /// Capabilities this process has but does not offer: a feature behind a
@@ -887,6 +897,7 @@ pub mod method {
         RepositoryLanding = "repository.landing" => LANDING,
         AgentRows = "agent.rows" => AGENT_ROWS,
         AgentRowsFollow = "agent.rows_follow" => AGENT_ROWS,
+        AgentImage = "agent.image" => AGENT_IMAGES,
     }
 }
 
@@ -900,6 +911,10 @@ pub const MAX_COMPOSE_IMAGE_BYTES: usize = 900 * 1024;
 /// The most image bytes one `terminal.compose` names, uploaded first
 /// (`compose_upload`, ov-393): ten Retina screenshots and room to spare.
 pub const MAX_COMPOSE_UPLOAD_BYTES: usize = 50 * 1024 * 1024;
+
+/// The most bytes one `agent.image` answer carries (ov-454): half the
+/// envelope, so a 5 MB screenshot is ten round trips.
+pub const MAX_AGENT_IMAGE_CHUNK: usize = 512 * 1024;
 
 /// `TerminalFrame.payload` is capped at 64 KiB.
 pub const MAX_TERMINAL_PAYLOAD_BYTES: usize = 64 * 1024;

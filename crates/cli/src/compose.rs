@@ -20,6 +20,7 @@ pub(crate) async fn run(
     terminal: &str,
     text: String,
     images: Vec<PathBuf>,
+    files: Vec<PathBuf>,
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let text = if text == "-" {
@@ -33,6 +34,7 @@ pub(crate) async fn run(
     blocks.extend(super::images::image_blocks(&images)?);
     let (mut link, id) = terminal_by_record(runner, terminal).await?;
     let offered = link.daemon_capabilities().to_vec();
+    blocks.extend(staged_files(link.client_mut(), id, &files, &offered).await?);
     let ask = request_for(link.client_mut(), id, blocks, &offered).await?;
     let answer = link.call(ask).await.map_err(refused)?;
     let queued = matches!(answer.value, Some(pb::result::Value::TerminalTold(pb::TerminalTold { queued: true })));
@@ -42,6 +44,38 @@ pub(crate) async fn run(
         println!("{}", tell::told(answer.value.as_ref(), &short(id)));
     }
     Ok(())
+}
+
+/// Each of `files` uploaded to the runner first, as a compose's images are,
+/// and named in a `staged_file` block (ov-454): refused before a byte is
+/// sent by a runner that doesn't take them.
+async fn staged_files<R, W>(
+    client: &farcooler_transport::Client<R, W>,
+    id: uuid::Uuid,
+    files: &[PathBuf],
+    offered: &[String],
+) -> Result<Vec<pb::AgentPromptBlock>, Box<dyn std::error::Error>>
+where
+    R: tokio::io::AsyncRead + Unpin + Send + 'static,
+    W: tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    use farcooler_protocol::capability::{COMPOSE_FILES, COMPOSE_UPLOAD};
+    if files.is_empty() {
+        return Ok(Vec::new());
+    }
+    if ![COMPOSE_FILES, COMPOSE_UPLOAD].iter().all(|need| offered.iter().any(|c| c == need)) {
+        return Err("this runner can't take files in a compose yet. update it".into());
+    }
+    let mut blocks = Vec::new();
+    for path in files {
+        let data = std::fs::read(path)?;
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let transfer_id = farcooler_client::actions::stage_compose_image(client, id, "application/octet-stream", &data)
+            .await
+            .map_err(refused)?;
+        blocks.push(pb::AgentPromptBlock { content: Some(Content::StagedFile(pb::StagedFile { transfer_id, name })) });
+    }
+    Ok(blocks)
 }
 
 /// The `terminal.compose` request for `blocks`, to a runner offering
@@ -79,6 +113,13 @@ where
         return Err(Box::new(tasks::Refused::naming(said, pb::ErrorCode::ResourceConflict as i32, what.into())));
     }
     let mut required = vec![AGENT_COMPOSE.to_string(), COMPOSE.to_string()];
+    if blocks.iter().any(|b| matches!(b.content, Some(Content::StagedFile(_)))) {
+        use farcooler_protocol::capability::COMPOSE_FILES;
+        required.push(COMPOSE_FILES.to_string());
+        if !upload {
+            required.push(COMPOSE_UPLOAD.to_string());
+        }
+    }
     if upload {
         for block in &mut blocks {
             if let Some(Content::Image(image)) = &block.content {
@@ -111,6 +152,8 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "images_too_large" => "the images are too large to send together. send fewer, or smaller ones",
         "image_too_large" => "that image is over 16 MB, too large to send. use a smaller one",
         "images" => "a message takes at most 10 images, and a slash command none",
+        "files" => "a message takes at most 10 files, and a slash command none",
+        "file" => "one of the files didn't reach the runner, so nothing was sent",
         "image" => "one of the images couldn't be read, so nothing was sent",
         "backslash" => "claude reads a backslash at the end as a new line, so it wasn't sent. remove it, or add a word after it",
         "unconfirmable" => "the agent's session can't be found, so a send couldn't be confirmed. nothing was typed",
@@ -147,7 +190,7 @@ mod tests {
         for what in [
             "busy", "prompt", "draft", "typing", "not_an_agent", "unfamiliar", "unproven", "too_long", "command",
             "not_running", "paste_left", "left_at_shell", "dialog", "unconfirmed", "handoff", "unsupported", "unconfirmable",
-            "images_too_large", "image_too_large", "images", "image", "backslash", "picker", "too_tall",
+            "images_too_large", "image_too_large", "images", "image", "files", "file", "backslash", "picker", "too_tall",
         ] {
             let said = said_about(what).unwrap_or_else(|| panic!("no line for {what}"));
             assert!(!said.ends_with('.') && said.chars().next().is_some_and(char::is_lowercase), "{said}");

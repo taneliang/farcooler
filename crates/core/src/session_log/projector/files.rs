@@ -107,6 +107,12 @@ impl LineReader {
     /// Hand every complete line appended since the last call to `each`, in
     /// file order. A missing file is nothing yet, not an error.
     pub fn read(&mut self, mut each: impl FnMut(Line<'_>)) -> ReadReport {
+        self.read_at(|_, line| each(line))
+    }
+
+    /// `read`, with the byte each line starts at in the file (ov-454): a
+    /// prompt's images are read back from there.
+    pub fn read_at(&mut self, mut each: impl FnMut(u64, Line<'_>)) -> ReadReport {
         let mut report = ReadReport::default();
         let Ok(mut file) = File::open(&self.path) else { return report };
         let Ok(meta) = file.metadata() else { return report };
@@ -118,7 +124,7 @@ impl LineReader {
             self.partial.clear();
             self.skipping = None;
             report.rewritten = true;
-            each(Line::Restart);
+            each(0, Line::Restart);
         }
         let want = meta.len().saturating_sub(self.offset);
         if want == 0 {
@@ -141,6 +147,7 @@ impl LineReader {
             }
         }
         chunk.truncate(got);
+        let base = self.offset;
         self.offset += got as u64;
         report.bytes = got as u64;
         // A short read (an error, or the file cut while reading) is not "more
@@ -150,26 +157,29 @@ impl LineReader {
         let mut rest = &chunk[..];
         while let Some(newline) = rest.iter().position(|&b| b == b'\n') {
             let (line, after) = rest.split_at(newline);
+            // Where this line starts: in this slice, or back where the held
+            // part of it began.
+            let start = base + (chunk.len() - rest.len()) as u64 - self.partial.len() as u64;
             rest = &after[1..];
             report.lines += 1;
             if let Some(skipped) = self.skipping.take() {
-                each(Line::TooLarge(skipped + line.len() as u64));
+                each(start, Line::TooLarge(skipped + line.len() as u64));
                 continue;
             }
             if self.partial.is_empty() {
                 if line.len() > MAX_LINE_BYTES {
-                    each(Line::TooLarge(line.len() as u64));
+                    each(start, Line::TooLarge(line.len() as u64));
                 } else if !line.iter().all(u8::is_ascii_whitespace) {
-                    each(Line::Complete(line));
+                    each(start, Line::Complete(line));
                 }
             } else if self.partial.len() + line.len() > MAX_LINE_BYTES {
-                each(Line::TooLarge((self.partial.len() + line.len()) as u64));
+                each(start, Line::TooLarge((self.partial.len() + line.len()) as u64));
                 self.partial.clear();
             } else {
                 self.partial.extend_from_slice(line);
                 let whole = std::mem::take(&mut self.partial);
                 if !whole.iter().all(u8::is_ascii_whitespace) {
-                    each(Line::Complete(&whole));
+                    each(start, Line::Complete(&whole));
                 }
             }
         }
@@ -366,9 +376,10 @@ impl SessionProjector {
     }
 
     fn drain(reader: &mut LineReader, projection: &mut Projection, agent: Option<(&str, Option<&SubagentMeta>)>, codex: bool) -> ReadReport {
-        let report = reader.read(|line| match (line, agent) {
+        let path: std::sync::Arc<Path> = reader.path().into();
+        let report = reader.read_at(|at, line| match (line, agent) {
             (Line::Complete(bytes), None) if codex => projection.fold_codex_line(bytes),
-            (Line::Complete(bytes), None) => projection.fold_line(bytes),
+            (Line::Complete(bytes), None) => projection.fold_line_at(bytes, super::RecordAt { path: path.clone(), at }),
             (Line::Complete(bytes), Some((agent, meta))) => projection.fold_subagent_line(agent, meta, bytes),
             (Line::TooLarge(n), None) => projection.fold_too_large(n),
             (Line::TooLarge(_), Some(_)) => {}

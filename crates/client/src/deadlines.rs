@@ -55,6 +55,9 @@ const WORK_METHODS: &[&str] = &[
     // The first page of a terminal's agent rows reads its whole transcript
     // (ov-366). A follow is held at most 25 s, inside the ordinary 30.
     "agent.rows",
+    // The first piece of a prompt's image may read the transcript back the
+    // same way, and then a line of up to 8 MB (ov-454).
+    "agent.image",
     // A send waits out the spacing after the last, a paste's read-back and,
     // mid-turn, the queue's confirmation: give up early and the person sends
     // again what the runner then types anyway (ov-372 review).

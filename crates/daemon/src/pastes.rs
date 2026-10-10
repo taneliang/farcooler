@@ -298,6 +298,13 @@ fn name_parts(given: &str, kind: Option<Kind>) -> (String, String) {
     (if base.is_empty() { "file".to_string() } else { base }, ext)
 }
 
+/// A sender's file name made safe to keep on this runner, by `name_parts`'s
+/// rules: a compose's file (ov-454) keeps its name and extension.
+pub(crate) fn safe_name(given: &str) -> String {
+    let (base, ext) = name_parts(given, None);
+    if ext.is_empty() { base } else { format!("{base}.{ext}") }
+}
+
 /// `2026-08-07-141233Z`.
 ///
 /// UTC, and said so with the `Z`. There is no date library in this workspace

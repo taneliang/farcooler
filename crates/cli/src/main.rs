@@ -962,8 +962,14 @@ enum TerminalCmd {
     Tell { terminal: String, text: String },
     /// Type a message into claude's or codex's box in a terminal pane and submit it, with its line breaks,
     /// images (`--image`, repeated) and slash command; queued when it's working. Refused, typing
-    /// nothing, unless safe. `--text -` reads stdin.
-    Compose { terminal: String, #[arg(long)] text: String, #[arg(long = "image")] images: Vec<std::path::PathBuf> },
+    /// nothing, unless safe. `--text -` reads stdin. `--file`, repeated: any file, copied to the
+    /// runner and its path typed before the text.
+    Compose {
+        terminal: String,
+        #[arg(long)] text: String,
+        #[arg(long = "image")] images: Vec<std::path::PathBuf>,
+        #[arg(long = "file")] files: Vec<std::path::PathBuf>,
+    },
     /// Stop the turn claude is working on in a terminal pane: one Esc, refused unless safe.
     Interrupt { terminal: String },
     /// Send what waits in claude's queue now (its ctrl+x ctrl+s), refused unless safe.
@@ -3089,7 +3095,7 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
         TerminalCmd::DraftPrompt { terminal, text, hold } => draft_prompt::run(runner, &terminal, text, hold).await?,
         TerminalCmd::DraftWithdraw { terminal, hold } => draft_prompt::withdraw(runner, &terminal, &hold).await?,
         TerminalCmd::Tell { terminal, text } => tell::run(runner, &terminal, text).await?,
-        TerminalCmd::Compose { terminal, text, images } => compose::run(runner, &terminal, text, images, json).await?,
+        TerminalCmd::Compose { terminal, text, images, files } => compose::run(runner, &terminal, text, images, files, json).await?,
         cmd @ (TerminalCmd::Interrupt { .. } | TerminalCmd::SendNow { .. }) => interrupt::press(runner, cmd).await?,
         TerminalCmd::BringDraft { terminal, expected } => bring_draft::run(runner, &terminal, expected, json).await?,
         TerminalCmd::AgentAnswer { terminal, request_id, option_id, answers } => {

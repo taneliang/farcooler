@@ -114,6 +114,28 @@ pub struct Turn {
     /// absent when there is none. Never sent by anything but a person.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub suggestion: Option<String>,
+    /// The images the prompt carried, in its order: pasted in the terminal
+    /// (`[Image #N]`) or sent from a composer (ov-454). Their bytes stay in
+    /// the transcript, fetched one at a time through `agent.image`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<PromptImage>,
+    /// Where the prompt's record is, for `agent.image` to read its images
+    /// back. Never sent.
+    #[serde(skip)]
+    pub source: Option<RecordAt>,
+}
+
+/// One image a prompt carried: its type, as the transcript says it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PromptImage {
+    pub mime: String,
+}
+
+/// A transcript record's place: its file and the byte its line starts at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordAt {
+    pub path: std::sync::Arc<std::path::Path>,
+    pub at: u64,
 }
 
 /// Who started a turn: claude's own `promptSource` / `origin.kind`, folded.

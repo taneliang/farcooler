@@ -257,6 +257,9 @@ message Request {
     // `terminal.bring_draft` (ov-369), behind `bring_draft`. 421-429 are held
     // by `reserved` below.
     BringDraft bring_draft = 420;
+    // `agent.image` (ov-454), behind `agent_images`. 451-459 are held by
+    // `reserved` below.
+    AgentImageRequest agent_image = 450;
   }
   // The rest of rulings' block, kept for them (review 1005a L1).
   reserved 182 to 189;
@@ -270,6 +273,8 @@ message Request {
   reserved 401 to 409;
   // The rest of Bring Here's block (ov-369).
   reserved 421 to 429;
+  // The rest of prompt images' block (ov-454).
+  reserved 451 to 459;
 }
 
 message Response {
@@ -405,6 +410,8 @@ message Result {
     // `terminal.bring_draft` (ov-369), behind `bring_draft`: the box's draft,
     // and whether it was cleared.
     BroughtDraft brought_draft = 420;
+    // `agent.image` (ov-454), behind `agent_images`: a piece of one image.
+    AgentImage agent_image = 450;
   }
   // The rest of rulings' block, kept for them (review 1005a L1).
   reserved 181 to 189;
@@ -422,6 +429,8 @@ message Result {
   reserved 411 to 419;
   // The rest of Bring Here's block (ov-369).
   reserved 421 to 429;
+  // The rest of prompt images' block (ov-454).
+  reserved 451 to 459;
 }
 
 // ---------------------------------------------------------------------------
@@ -464,6 +473,27 @@ message AgentSubscribe {
 // unsupported.
 
 // `agent.rows`: up to `limit` rows before `before`, oldest first.
+// `agent.image` (ov-454): one image a prompt carried, from its turn row's
+// `images`, a piece at a time. The bytes stay in the agent's transcript on
+// the runner; a client asks from `offset` 0 and again from each piece's end
+// until it has `total_size`.
+message AgentImageRequest {
+  bytes terminal_id = 1;
+  // The `Turn` row's id, `turn:<promptId>`.
+  string row_id = 2;
+  // Which of the row's `images`, from 0.
+  uint32 index = 3;
+  uint64 offset = 4;
+}
+
+// A piece of one image, at most `MAX_AGENT_IMAGE_CHUNK` bytes.
+message AgentImage {
+  string mime_type = 1;
+  uint64 total_size = 2;
+  uint64 offset = 3;
+  bytes chunk = 4;
+}
+
 message AgentRowsPage {
   bytes terminal_id = 1;
   // Rows before this `ord`; absent for the newest.
@@ -561,7 +591,20 @@ message AgentPromptBlock {
     // `transfer_id`. Used once: the runner deletes the upload as it reads it.
     // Sent with `compose_upload` in `required_capabilities`.
     bytes staged_image = 4;
+    // `terminal.compose` only (ov-454): a file of any kind, uploaded first
+    // as `staged_image` is, written into the runner's paste directory under
+    // its name, and its path typed before the text. Sent with
+    // `compose_files` in `required_capabilities`.
+    StagedFile staged_file = 5;
   }
+}
+
+// A compose's file, uploaded first (ov-454).
+message StagedFile {
+  // The upload's `transfer_id`, read once as `staged_image` is.
+  bytes transfer_id = 1;
+  // What the sender called it: sanitized on the runner as a paste's name is.
+  string name = 2;
 }
 
 message AgentPrompt {

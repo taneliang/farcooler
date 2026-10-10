@@ -95,6 +95,8 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // A terminal's agent rows (ov-366), for the native views (ov-372).
         | Method::AgentRows
         | Method::AgentRowsFollow
+        // A prompt's images on its turn row (ov-454).
+        | Method::AgentImage
         // The native view's composer (ov-372), and its Stop and Send Now (ov-368).
         | Method::TerminalCompose
         | Method::TerminalInterrupt

@@ -18,6 +18,7 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::Terminal(_) => "terminal",
         result::Value::DraftHold(_) => "draft_hold",
         result::Value::BroughtDraft(_) => "brought_draft",
+        result::Value::AgentImage(_) => "agent_image",
         result::Value::TerminalList(_) => "terminal_list",
         result::Value::Operation(_) => "operation",
         result::Value::DaemonVersion(_) => "daemon_version",

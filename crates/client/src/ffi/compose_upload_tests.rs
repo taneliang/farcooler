@@ -147,3 +147,47 @@ async fn a_runner_without_uploads_keeps_the_old_cap() {
     let [Content::Image(carried)] = images.as_slice() else { panic!("{compose:?}") };
     assert_eq!(carried.data.as_ref(), small.as_slice());
 }
+
+/// A compose's files from an app (ov-454): `files: [{name, base64}]`, each
+/// staged as an image is and named in a `staged_file` block with its name,
+/// the compose naming `compose_files`. A runner without it is refused here,
+/// with nothing uploaded.
+#[tokio::test]
+async fn a_composes_files_are_staged_and_named_with_their_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("r.sock");
+    let all = farcooler_protocol::capability::ALL.iter().map(|c| c.to_string()).collect();
+    let seen = a_recording_runner(&socket, all).await;
+    let session = Session::connect_local(&socket).await.expect("connect");
+    let terminal = uuid::Uuid::now_v7();
+    let pdf = b"%PDF-1.7 a report".to_vec();
+    let call = json!({
+        "terminal": terminal.to_string(),
+        "text": "summarize this",
+        "files": [{ "name": "Q3 report.pdf", "base64": farcooler_core::base64::encode(&pdf) }],
+    });
+    dispatch(&session, "terminal.compose", &call).await.expect("sent");
+    let seen = seen.lock().unwrap().clone();
+    let put = seen.iter().find(|r| r.method == "terminal.paste_file").expect("uploaded first");
+    let Some(pb::request::Payload::TerminalFilePut(p)) = &put.payload else { panic!() };
+    assert!(p.stage);
+    assert_eq!(p.chunk.as_ref(), pdf.as_slice());
+    let compose = seen.iter().find(|r| r.method == "terminal.compose").expect("a compose");
+    assert_eq!(compose.required_capabilities, ["compose_upload", "compose_files"]);
+    assert_eq!(
+        images_of(compose),
+        [Content::StagedFile(pb::StagedFile { transfer_id: p.transfer_id.clone(), name: "Q3 report.pdf".into() })]
+    );
+
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("r.sock");
+    let older = farcooler_protocol::capability::ALL
+        .iter()
+        .filter(|c| **c != farcooler_protocol::capability::COMPOSE_FILES)
+        .map(|c| c.to_string())
+        .collect();
+    let seen = a_recording_runner(&socket, older).await;
+    let session = Session::connect_local(&socket).await.expect("connect");
+    assert!(dispatch(&session, "terminal.compose", &call).await.is_err(), "refused here");
+    assert!(seen.lock().unwrap().is_empty(), "nothing sent");
+}

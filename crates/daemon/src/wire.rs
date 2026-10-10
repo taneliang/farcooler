@@ -693,7 +693,12 @@ pub fn prompt_text(blocks: &[wire::AgentPromptBlock]) -> String {
         .filter_map(|b| match &b.content {
             Some(wire::agent_prompt_block::Content::Text(t)) => Some(t.clone()),
             Some(wire::agent_prompt_block::Content::FileMention(p)) => Some(format!("@{p}")),
-            Some(wire::agent_prompt_block::Content::Image(_) | wire::agent_prompt_block::Content::StagedImage(_)) | None => None,
+            Some(
+                wire::agent_prompt_block::Content::Image(_)
+                | wire::agent_prompt_block::Content::StagedImage(_)
+                | wire::agent_prompt_block::Content::StagedFile(_),
+            )
+            | None => None,
         })
         .collect::<Vec<_>>()
         .concat()

@@ -2328,10 +2328,11 @@ async fn dispatch(
             files_args::call(session, method, args).await
         }
         // A terminal's agent rows, a page and a follow (ov-366), and their setting (ov-373).
-        "agent.rows" | "agent.rows_follow" | "settings.set_projector" => rows_args::call(session, method, args).await,
-        // `{terminal, text, images?}` → `{queued}` (ov-372, ov-367).
+        "agent.rows" | "agent.rows_follow" | "agent.image" | "settings.set_projector" => rows_args::call(session, method, args).await,
+        // `{terminal, text, images?, files?}` → `{queued}` (ov-372, ov-367, ov-454).
         "terminal.compose" => {
-            let queued = session.compose(id("terminal")?, &text("text"), &images_arg::images(args)).await?;
+            let (images, files) = (images_arg::images(args), images_arg::files(args));
+            let queued = session.compose_with_files(id("terminal")?, &text("text"), &images, &files).await?;
             Ok(json!({ "queued": queued }))
         }
 

@@ -1,6 +1,7 @@
 //! A terminal's agent rows, as an app passes and reads them (ov-366):
-//! `agent.rows` and `agent.rows_follow`, and the setting that serves them,
-//! `settings.set_projector` (ov-373).
+//! `agent.rows` and `agent.rows_follow`, a prompt's image (`agent.image`,
+//! ov-454), and the setting that serves them, `settings.set_projector`
+//! (ov-373).
 //!
 //! Each row arrives as the object `projector::Row` serializes to, not as a
 //! string of JSON, so an app decodes rows in the same pass as the page.
@@ -22,6 +23,8 @@ use crate::session::{Session, SessionError};
 ///   `insert`, `update` and `remove` (which carries no row). Without
 ///   `waitMs` the runner holds it `DEFAULT_WAIT_MS`: an app that forgets it
 ///   must not poll in a tight loop.
+/// - `agent.image {terminal, row, index}` answers `{mime, base64}`: one image
+///   a turn row's prompt carried, whole (ov-454).
 pub(super) async fn call(session: &Session, method: &str, args: &Value) -> Result<Value, SessionError> {
     if method == "settings.set_projector" {
         let on = args.get("on").and_then(Value::as_bool).ok_or_else(|| SessionError::Protocol(format!("{method} needs on")))?;
@@ -34,6 +37,12 @@ pub(super) async fn call(session: &Session, method: &str, args: &Value) -> Resul
         .and_then(|s| s.parse::<Uuid>().ok())
         .ok_or_else(|| SessionError::Protocol(format!("{method} needs a terminal")))?;
     let number = |key: &str| args.get(key).and_then(Value::as_u64);
+    if method == "agent.image" {
+        let row = args.get("row").and_then(Value::as_str).ok_or_else(|| SessionError::Protocol(format!("{method} needs a row")))?;
+        let index = number("index").unwrap_or(0).min(u64::from(u32::MAX)) as u32;
+        let (mime, bytes) = session.agent_image(terminal, row, index).await?;
+        return Ok(json!({ "mime": mime, "base64": farcooler_core::base64::encode(&bytes) }));
+    }
     if method == "agent.rows" {
         let limit = number("limit").unwrap_or(0).min(u64::from(u32::MAX)) as u32;
         let page = session.agent_rows(terminal, number("before"), limit).await?;

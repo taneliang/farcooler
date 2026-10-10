@@ -50,6 +50,34 @@ impl Session {
         }
     }
 
+    /// Image `index` of the prompt on turn row `row` (`agent.image`, ov-454),
+    /// its MIME type and bytes, asked for a piece at a time until whole.
+    pub async fn agent_image(&self, terminal: Uuid, row: &str, index: u32) -> Result<(String, Vec<u8>), SessionError> {
+        require(self.capabilities(), farcooler_protocol::capability::AGENT_IMAGES, "agent.image")?;
+        let mut bytes = Vec::new();
+        loop {
+            let payload = request::Payload::AgentImage(farcooler_protocol::v1::AgentImageRequest {
+                terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
+                row_id: row.to_string(),
+                index,
+                offset: bytes.len() as u64,
+            });
+            let piece = match self.value("agent.image", None, Some(payload)).await? {
+                result::Value::AgentImage(piece) => piece,
+                other => return Err(wrong("agent_image", &other)),
+            };
+            // A piece from anywhere but where this left off, or none past
+            // it, is a runner that changed its mind about the image.
+            if piece.offset != bytes.len() as u64 || (piece.chunk.is_empty() && (bytes.len() as u64) < piece.total_size) {
+                return Err(SessionError::Protocol("agent.image answered out of order".into()));
+            }
+            bytes.extend_from_slice(&piece.chunk);
+            if bytes.len() as u64 >= piece.total_size {
+                return Ok((piece.mime_type, bytes));
+            }
+        }
+    }
+
     /// Turn the runner's projector on or off (`settings.set_projector`,
     /// ov-372): `[agents] projector` in its config.toml, live at once. A
     /// hello offers `agent_rows` only while it's on, and a hello is made once

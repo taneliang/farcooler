@@ -177,6 +177,9 @@ pub struct Projection {
     pub(super) codex: super::codex::CodexState,
     /// The agent's task list, and its calls waiting on results (`tasks.rs`).
     pub(super) tasks: super::tasks::TaskState,
+    /// Where the main transcript's line being folded is, when the reader
+    /// said (`fold_line_at`): a prompt with images keeps it (ov-454).
+    line_at: Option<RecordAt>,
 }
 
 /// Collapses whitespace, and cuts to `max` characters.
@@ -584,6 +587,8 @@ impl Projection {
             background_running: 0,
             activity: None,
             suggestion: None,
+            images: Vec::new(),
+            source: None,
         };
         let i = self.push(id, None, provisional, RowKind::Turn(turn));
         self.newest_turn = Some(i);
@@ -673,6 +678,13 @@ impl Projection {
         }
     }
 
+    /// `fold_line`, for the line that starts at `at`.
+    pub fn fold_line_at(&mut self, line: &[u8], at: RecordAt) {
+        self.line_at = Some(at);
+        self.fold_line(line);
+        self.line_at = None;
+    }
+
     /// Count one line read, for `stats`.
     pub(super) fn count_line(&mut self, bytes: usize) {
         self.stats.lines += 1;
@@ -696,6 +708,7 @@ impl Projection {
         let content = message.map(|m| &m.content);
         let mut text: Option<&str> = None;
         let mut results = false;
+        let mut images = Vec::new();
         match content {
             Some(Content::Text(t)) => text = Some(t),
             Some(Content::Blocks(blocks)) => {
@@ -706,6 +719,10 @@ impl Projection {
                             self.tool_result(block, record.tool_use_result.0.as_ref(), at);
                         }
                         Some("text") if text.is_none() => text = block.text.get(),
+                        Some("image") => {
+                            let mime = block.source.0.as_ref().and_then(|s| s.media_type.get()).unwrap_or_default();
+                            images.push(PromptImage { mime: mime.to_string() });
+                        }
                         _ => {}
                     }
                 }
@@ -770,7 +787,15 @@ impl Projection {
             _ => text,
         };
         self.delivered(text);
-        self.open_turn(id, origin, prompt, at, false);
+        let i = self.open_turn(id, origin, prompt, at, false);
+        if !images.is_empty() {
+            let source = self.line_at.clone();
+            if let Some(turn) = self.turn_mut(i) {
+                turn.images = images;
+                turn.source = source;
+            }
+            self.touch(i);
+        }
     }
 
     /// A prompt arrived: if a dequeue is waiting to be matched, this is what

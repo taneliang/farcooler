@@ -59,4 +59,6 @@ public enum Capability: String, CaseIterable, Sendable {
     case codexView = "codex_view"
     case bringDraft = "bring_draft"
     case webPane = "web_pane"
+    case agentImages = "agent_images"
+    case composeFiles = "compose_files"
 }

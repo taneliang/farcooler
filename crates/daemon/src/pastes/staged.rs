@@ -136,6 +136,60 @@ pub(crate) async fn images(root: &Path, blocks: &[AgentPromptBlock]) -> Result<V
     Ok(out)
 }
 
+/// A compose's files (ov-454), in the order its blocks name them: each
+/// staged upload moved into the paste directory as `compose-<id>-<name>`,
+/// so the agent reads it under the name it was sent with, and swept with
+/// the composed images (`KEEP_COMPOSED`). Refused as `files` past
+/// `MOST_IMAGES` or beside a slash command, and as `file` for an upload
+/// that isn't here (used, or swept). Every staged one named is deleted
+/// either way.
+pub(crate) async fn files(root: &Path, blocks: &[AgentPromptBlock]) -> Result<Vec<PathBuf>> {
+    let named: Vec<_> = blocks
+        .iter()
+        .filter_map(|b| match &b.content {
+            Some(Content::StagedFile(file)) => Some(file),
+            _ => None,
+        })
+        .collect();
+    let mut used = Used(named.iter().filter_map(|f| staged_path(root, &f.transfer_id).ok()).collect());
+    if named.is_empty() {
+        return Ok(Vec::new());
+    }
+    let command = blocks.iter().find_map(|b| match &b.content {
+        Some(Content::Text(t)) => Some(t.trim_start().starts_with('/')),
+        _ => None,
+    });
+    if named.len() > MOST_IMAGES || command == Some(true) {
+        return Err(DomainError::InvalidArgument { what: "files" });
+    }
+    let dir = crate::paths::pastes_dir_in(root)?;
+    let mut out = Vec::new();
+    for file in named {
+        let from = staged_path(root, &file.transfer_id)?;
+        let name = format!("{COMPOSED_PREFIX}{}-{}", &uuid::Uuid::now_v7().simple().to_string()[..12], super::safe_name(&file.name));
+        let to = dir.join(name);
+        if tokio::fs::rename(&from, &to).await.is_err() {
+            for written in &out {
+                let _ = std::fs::remove_file(written);
+            }
+            return Err(DomainError::InvalidArgument { what: "file" });
+        }
+        out.push(to);
+    }
+    used.0.clear();
+    Ok(out)
+}
+
+/// `text` as a compose with `files` types it: each file's path first, in
+/// double quotes where it needs them (`quote_for_paste`), then the text.
+pub(crate) fn with_files(files: &[PathBuf], text: &str) -> String {
+    let mut parts: Vec<String> = files.iter().map(|f| super::quote_for_paste(&f.display().to_string())).collect();
+    if !text.trim().is_empty() {
+        parts.push(text.to_string());
+    }
+    parts.join(" ")
+}
+
 /// `path`'s bytes, at most `cap` of them: past it, `image_too_large` for a
 /// file over a paste's limit, else `images_too_large` for the message's.
 async fn read_capped(path: &Path, cap: usize) -> Result<Vec<u8>> {
