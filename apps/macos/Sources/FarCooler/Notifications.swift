@@ -494,7 +494,11 @@ final class PushDelegate: NSObject, NSApplicationDelegate {
 
     /// `farcooler app` can reach the app from here on (`AppControl`).
     func applicationDidFinishLaunching(_ notification: Notification) {
-        MainActor.assumeIsolated { AppControlRequests.listen() }
+        MainActor.assumeIsolated {
+            AppControlRequests.listen()
+            // Pages saved before they were kept bare may hold a login token (ov-451).
+            WebPaneMemory().scrub()
+        }
     }
 
     /// Quitting keeps every window's record: windows closing under it aren't

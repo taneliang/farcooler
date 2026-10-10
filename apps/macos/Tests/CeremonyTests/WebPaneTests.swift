@@ -137,6 +137,17 @@ struct WebPaneTests {
         #expect(pages?["bad"] == nil, "an entry that is no web page is dropped, not kept with its query")
     }
 
+    @Test("A pane saved with a token restores to the same scheme, host and path after a reload")
+    func restoresBarePageAfterReload() {
+        let defaults = Self.defaults()
+        WebPaneMemory(defaults: defaults).remember(URL(string: "https://app.example.com/cb/x?code=SECRET#t=SECRET2")!, for: "t-9")
+        // A fresh model over the same defaults is a relaunch.
+        let model = WebPaneModel(terminal: "t-9", memory: WebPaneMemory(defaults: defaults))
+        let restored = model.firstPage(opened: URL(string: "https://other.example/"))
+        #expect(restored == URL(string: "https://app.example.com/cb/x"))
+        #expect(restored?.query == nil && restored?.fragment == nil)
+    }
+
     /// One persistent store of their own, so a login survives relaunch and
     /// covers every pane, with nothing a page could call into (R-41).
     @Test("Every web pane shares one persistent store, and no scripts")
