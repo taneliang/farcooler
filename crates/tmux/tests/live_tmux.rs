@@ -847,18 +847,34 @@ async fn drawing_and_restoring_the_cursor_still_moves_the_windows_activity() {
     let Some(srv) = live_server("drawing_and_restoring_the_cursor_still_moves_the_windows_activity").await else {
         return;
     };
-    // Parks the cursor, waits out a whole second, then saves it, draws and
-    // restores it.
-    let program = r"printf '[10;10H'; sleep 2.5; printf '7[5;5HDIALOG8'; sleep 30";
+    // Parks the cursor, then waits for the test's word (a file) before it
+    // saves the cursor, draws and restores it. The word, not a clock: a
+    // sleep of its own would run out while a loaded machine was still
+    // starting the program, and the draw would land before the first read.
+    let go = std::env::temp_dir().join(format!("fc-cursor-{}", Uuid::now_v7()));
+    let program = r"printf '[10;10H'; while [ ! -e @GO@ ]; do sleep 0.1; done; printf '7[5;5HDIALOG8'; sleep 30"
+    .replace("@GO@", &go.display().to_string());
     srv.create_terminal_window(Uuid::now_v7(), Uuid::now_v7(), "x", "/tmp", &format!("sh -c \"{program}\""))
         .await
         .unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
-    let first = srv.read_panes().await.unwrap().panes[0].stamp;
-    assert_eq!(first.cursor, (9, 9), "the program parked the cursor");
+    // Until the program has parked the cursor, however long that takes.
+    let mut first = None;
+    for _ in 0..300 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        if let Some(pane) = srv.read_panes().await.unwrap().panes.first()
+            && pane.stamp.cursor == (9, 9)
+        {
+            first = Some(pane.stamp);
+            break;
+        }
+    }
+    let first = first.expect("the program never parked the cursor");
+    // Activity is kept to the second: the draw has to land in a later one.
+    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+    std::fs::write(&go, "go").unwrap();
 
     let mut moved = None;
-    for _ in 0..60 {
+    for _ in 0..300 {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         let now = srv.read_panes().await.unwrap().panes[0].stamp;
         if now.activity != first.activity {
@@ -866,6 +882,7 @@ async fn drawing_and_restoring_the_cursor_still_moves_the_windows_activity() {
             break;
         }
     }
+    let _ = std::fs::remove_file(&go);
     let now = moved.expect("tmux never reported the draw as activity");
     assert!(now.activity > first.activity);
     assert_eq!((now.cursor, now.history, now.pid), (first.cursor, first.history, first.pid), "only the activity moved");
