@@ -329,12 +329,15 @@ private struct PlanPageLaneRow: View {
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
                     .foregroundStyle(.secondary)
                     .frame(width: ColumnGrid.step)
-                Text(lane.name)
+                Text(lane.heading)
                     .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
-                    .frame(minWidth: 110, alignment: .leading)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .layoutPriority(1)
                 Text(PlanWords.status(lane))
                     .font(.system(size: WorkspaceStyle.PaneText.body))
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
                 Spacer(minLength: Spacing.group)
                 // Each key shows its card on hover (ov-299).
                 TaskKeyText(keysIn: lane.cards.map(\.key).joined(separator: " "))
@@ -411,7 +414,7 @@ struct PlanLanePage: View {
     var body: some View {
         PlanDocument(id: "plan-lane-page") {
             VStack(alignment: .leading, spacing: Spacing.group) {
-                PlanTitle(title: lane.name, state: PlanWords.status(lane))
+                PlanTitle(title: lane.heading, state: PlanWords.status(lane))
                 if !lane.reason.isEmpty { Text(lane.reason).planBody() }
                 if !place.isEmpty {
                     Text(place)
@@ -469,7 +472,7 @@ struct PlanLanePage: View {
     /// ".claude/worktrees/mac-ux · mac-ux · Opus · in integ-9".
     private var place: String {
         [
-            lane.worktreePath, lane.branch == lane.worktreePath ? "" : lane.branch, PlanWords.model(lane.model),
+            lane.slug ?? "", lane.worktreePath, lane.branch == lane.worktreePath ? "" : lane.branch, PlanWords.model(lane.model),
             lane.train.map { "in \($0)" } ?? "",
         ].filter { !$0.isEmpty }.joined(separator: " · ")
     }
@@ -532,7 +535,7 @@ struct PlanTaskLineView: View {
             HStack(spacing: Spacing.tight) {
                 if let lane = line.lane, let words = line.laneWords {
                     Button(words) { onOpen(.lane(lane.id)) }
-                        .help("Open lane \(lane.name)")
+                        .help("Open lane \(lane.heading)")
                 }
                 if line.lane != nil, line.theme != nil {
                     Text("·").foregroundStyle(.secondary)

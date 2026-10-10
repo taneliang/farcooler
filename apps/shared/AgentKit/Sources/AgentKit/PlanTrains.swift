@@ -43,6 +43,45 @@ public struct PlanTrain: Decodable, Equatable, Identifiable, Sendable {
     public var lanes: [PlanTrainLane]
     /// The CI subject its pushed SHA is read under, or empty before it has one.
     public var ciSubject: String
+    /// What a person reads for it (ov-462): the title the orchestrator wrote,
+    /// else "Train 72" for `integ-72`. Nil from a runner before it.
+    public var title: String?
+    /// One line of what it carries: its lanes' titles (ov-462).
+    public var summary: String?
+    /// The card its integrating agent works for it (ov-461).
+    public var card: PlanCardRef?
+    /// The agent integrating it, with its state and spend (ov-461).
+    public var agent: PlanTrainAgent?
+
+    /// What every surface shows first: the title, else "Train 72" read off
+    /// the name, else the name.
+    public var heading: String {
+        if let title, !title.isEmpty { return title }
+        return PlanWords.trainNumber(name).map { "Train \($0)" } ?? name
+    }
+
+    /// The slug, shown second where there is room: nil when the heading is
+    /// the name already.
+    public var slug: String? { heading == name ? nil : name }
+
+    /// Its lanes' titles on one line, or nil when it carries none.
+    public var carries: String? {
+        guard let summary, !summary.isEmpty else { return nil }
+        return summary
+    }
+}
+
+/// The agent integrating a train (ov-461): its state and what it has spent.
+/// Recorded on the train, never as a lane of the train's own name.
+public struct PlanTrainAgent: Decodable, Equatable, Sendable {
+    public var harness: String
+    public var agentId: String
+    public var model: String
+    public var startedAt: Int64
+    public var endedAt: Int64?
+    public var spend: PlanSpend
+
+    public var isWorking: Bool { endedAt == nil }
 }
 
 /// Where a CI subject stands, over all its runs.
@@ -138,7 +177,10 @@ extension PlanModel {
     /// then the lanes on none. A train with no lane working now still heads
     /// its group, so a pushed train waiting on CI is never out of sight.
     public var nowGroups: [PlanNowGroup] {
-        let lanes = working + unranked
+        // A lane named like a live train is the train's agent, drawn by the
+        // train (ov-461).
+        let shadows = Set(laneIsTrain.map(\.lane))
+        let lanes = (working + unranked).filter { !shadows.contains($0.id) }
         var grouped = Set<String>()
         var groups: [PlanNowGroup] = []
         for train in liveTrains {
@@ -248,7 +290,28 @@ extension PlanWords {
         } else if train.pushedSha != nil && !train.state.isSettled {
             parts.append("CI not read yet")
         }
+        if let agent = train.agent { parts.append(trainAgent(agent)) }
         return parts.joined(separator: " · ")
+    }
+
+    /// The integrating agent's state and spend: "Agent working · 120K
+    /// tokens", "Agent finished", "Agent working · Not reported".
+    public static func trainAgent(_ agent: PlanTrainAgent) -> String {
+        let state = agent.isWorking ? "Agent working" : "Agent finished"
+        guard agent.spend.runs > 0 || agent.spend.unmeasuredAgents > 0 else { return state }
+        return "\(state) · \(spend(agent.spend))"
+    }
+
+    /// The number in `train-72` or `integ-72`: what a person calls the
+    /// train. Nil for any other name.
+    public static func trainNumber(_ name: String) -> Int? {
+        let lower = name.trimmingCharacters(in: .whitespaces).lowercased()
+        for prefix in ["train-", "integ-"] where lower.hasPrefix(prefix) {
+            let digits = lower.dropFirst(prefix.count)
+            return digits.isEmpty || digits.count > 9 || !digits.allSatisfy(\.isASCII) || !digits.allSatisfy(\.isNumber)
+                ? nil : Int(digits)
+        }
+        return nil
     }
 
     /// Whether a train needs the owner: red, or its CI failed.

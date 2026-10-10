@@ -158,6 +158,32 @@ public struct PlanLane: Decodable, Equatable, Identifiable, Sendable {
     public var spend: PlanSpend
     /// Its token budget (ov-307); nil when it has none.
     public var budgetTokens: UInt64?
+    /// What a person reads for it (ov-462): the title the orchestrator wrote,
+    /// else one the runner derived from its cards' titles. Nil or empty from
+    /// a runner before it, and for a lane with no cards and no title.
+    public var title: String?
+
+    /// What every surface shows first: the title, else the name.
+    public var heading: String {
+        if let title, !title.isEmpty { return title }
+        return name
+    }
+
+    /// The slug, shown second where there is room: nil when the heading is
+    /// the name already.
+    public var slug: String? { heading == name ? nil : name }
+}
+
+/// A lane the plan flags because a live train has its name (ov-461): the
+/// integrating agent modeled as a lane.
+public struct PlanFlaggedLane: Decodable, Equatable, Sendable {
+    public var lane: String
+    public var name: String
+
+    public init(lane: String, name: String) {
+        self.lane = lane
+        self.name = name
+    }
 }
 
 /// A card's row, as the plan read it: what a theme page lists for a card
@@ -214,12 +240,15 @@ public struct PlanModel: Decodable, Equatable, Sendable {
     /// from an older runner.
     public var noLane: [PlanFlaggedCard]
     public var landedNotClosed: [PlanFlaggedCard]
+    /// Live lanes named like a live train (ov-461): Now draws the train once,
+    /// and "Worth a look" says to record its agent on the train.
+    public var laneIsTrain: [PlanFlaggedLane]
 
     public init(
         nowMs: Int64 = 0, themes: [PlanTheme] = [], lanes: [PlanLane] = [], order: [String] = [],
         cards: [PlanCard] = [], rulings: [PlanRuling] = [], trains: [PlanTrain] = [], ci: [PlanCIRead] = [],
         boardCounts: PlanCounts? = nil, cost: PlanCostRead? = nil, noLane: [PlanFlaggedCard] = [],
-        landedNotClosed: [PlanFlaggedCard] = []
+        landedNotClosed: [PlanFlaggedCard] = [], laneIsTrain: [PlanFlaggedLane] = []
     ) {
         self.nowMs = nowMs
         self.themes = themes
@@ -233,6 +262,7 @@ public struct PlanModel: Decodable, Equatable, Sendable {
         self.cost = cost
         self.noLane = noLane
         self.landedNotClosed = landedNotClosed
+        self.laneIsTrain = laneIsTrain
     }
 
     public init(from decoder: Decoder) throws {
@@ -249,10 +279,11 @@ public struct PlanModel: Decodable, Equatable, Sendable {
         cost = try c.decodeIfPresent(PlanCostRead.self, forKey: .cost)
         noLane = try c.decodeIfPresent([PlanFlaggedCard].self, forKey: .noLane) ?? []
         landedNotClosed = try c.decodeIfPresent([PlanFlaggedCard].self, forKey: .landedNotClosed) ?? []
+        laneIsTrain = try c.decodeIfPresent([PlanFlaggedLane].self, forKey: .laneIsTrain) ?? []
     }
 
     private enum CodingKeys: String, CodingKey {
-        case nowMs, themes, lanes, order, cards, rulings, trains, ci, boardCounts, cost, noLane, landedNotClosed
+        case nowMs, themes, lanes, order, cards, rulings, trains, ci, boardCounts, cost, noLane, landedNotClosed, laneIsTrain
     }
 
     public static let empty = PlanModel()
@@ -422,9 +453,9 @@ public struct PlanTaskLine: Equatable, Sendable {
     public var laneWords: String? {
         guard let lane else { return nil }
         switch lane.state {
-        case .queued: return "Queued in \(lane.name)"
-        case .landed: return "Landed in \(lane.name)"
-        default: return "In lane \(lane.name)"
+        case .queued: return "Queued in \(lane.heading)"
+        case .landed: return "Landed in \(lane.heading)"
+        default: return "In lane \(lane.heading)"
         }
     }
 

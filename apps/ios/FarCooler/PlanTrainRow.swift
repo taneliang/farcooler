@@ -1,7 +1,8 @@
 import SwiftUI
 
-// A train heading its lanes in Now (ov-309), on the iPhone as on the Mac: its
-// name, where it stands and its CI as the runner last read it. Red, or a
+// A train heading its lanes in Now (ov-309), on the iPhone as on the Mac:
+// "Train 72" and what it carries (ov-462), its slug second, where it stands,
+// its integrating agent (ov-461) and its CI as the runner last read it. Red, or a
 // failed run, is the one thing drawn in amber, with its word. A tap opens the
 // CI run in the browser, the one place it goes.
 
@@ -27,7 +28,18 @@ struct PlanTrainRow: View {
                     .frame(width: 22, alignment: .leading)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(train.name).font(.body.weight(.semibold))
+                    Text(train.heading).font(.body.weight(.semibold))
+                    if let carries = train.carries {
+                        Text(carries)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("plan-train-\(train.name)-carries")
+                    }
+                    if let slug = train.slug {
+                        Text(slug).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
+                    }
                     Text(words)
                         .font(.footnote.weight(attention ? .medium : .regular))
                         .foregroundStyle(attention ? AnyShapeStyle(GlancePalette.amber(scheme)) : AnyShapeStyle(.secondary))
@@ -47,7 +59,7 @@ struct PlanTrainRow: View {
         .buttonStyle(.plain)
         .disabled(run == nil)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Train \(train.name), \(words)")
+        .accessibilityLabel([train.heading, train.carries, words].compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(run == nil ? [] : .isLink)
         .accessibilityIdentifier("plan-train-\(train.name)")
     }

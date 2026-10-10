@@ -310,7 +310,7 @@ struct PlanLaneRow: View {
                 mark.glyphColumn()
                 VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
-                        Text(lane.name)
+                        Text(lane.heading)
                             .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
                             .lineLimit(1)
                             .layoutPriority(1)
@@ -356,8 +356,9 @@ struct PlanLaneRow: View {
     /// Next Up's reason; elsewhere, the state with its round, train or
     /// commit, and the cards.
     private var second: String {
-        if rank != nil { return lane.reason.isEmpty ? PlanWords.cards(lane.cards.count) : lane.reason }
-        return "\(PlanWords.status(lane)) · \(PlanWords.cards(lane.cards.count))"
+        let slug = lane.slug.map { "\($0) · " } ?? ""
+        if rank != nil { return slug + (lane.reason.isEmpty ? PlanWords.cards(lane.cards.count) : lane.reason) }
+        return "\(slug)\(PlanWords.status(lane)) · \(PlanWords.cards(lane.cards.count))"
     }
 
     @ViewBuilder private var mark: some View {
@@ -374,7 +375,7 @@ struct PlanLaneRow: View {
     }
 
     private var accessibility: String {
-        var parts = [rank.map { "\(PlanWords.ordinal($0)) up" }, lane.name, theme?.name, second, warning, PlanWords.overBudgetSpoken(lane)]
+        var parts = [rank.map { "\(PlanWords.ordinal($0)) up" }, lane.heading, theme?.name, second, warning, PlanWords.overBudgetSpoken(lane)]
         parts.removeAll { $0 == nil }
         return parts.compactMap { $0 }.joined(separator: ", ")
     }

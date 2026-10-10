@@ -207,7 +207,7 @@ final class PlanStore: ObservableObject {
     func title(_ page: PlanPage) -> String? {
         switch page {
         case .theme(let id): theme(id)?.name
-        case .lane(let id): lane(id)?.name
+        case .lane(let id): lane(id)?.heading
         case .page(let slot): self.page(slot)?.title
         case .needsYou: OneTreeWords.needsYou
         }

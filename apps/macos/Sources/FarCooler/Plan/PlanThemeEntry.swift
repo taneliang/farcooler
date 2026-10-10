@@ -287,7 +287,7 @@ struct PlanThemeEntry: View {
                     .foregroundStyle(.secondary)
                     .frame(width: NavigatorGrid.mark, alignment: .center)  // one column, whatever the glyph's width
                     .accessibilityHidden(true)
-                Text(lane.name)
+                Text(lane.heading)
                     .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
                     .lineLimit(1)
                     .layoutPriority(1)
@@ -301,7 +301,7 @@ struct PlanThemeEntry: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(lane.name), \(PlanWords.status(lane))")
+        .accessibilityLabel("\(lane.heading), \(PlanWords.status(lane))")
         .accessibilityHint("Opens the lane")
         .probed("plan-theme-entry-\(theme.name)-lane-\(lane.name)")
     }

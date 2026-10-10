@@ -352,7 +352,7 @@ struct PlanLaneRow: View {
     }
 
     private var name: some View {
-        Text(lane.name)
+        Text(lane.heading)
             .font(.subheadline.weight(.medium))
             .lineLimit(1)
             .layoutPriority(1)
@@ -373,8 +373,9 @@ struct PlanLaneRow: View {
     /// Next Up's reason; elsewhere, the state with its round, train or
     /// commit, and the cards.
     private var second: String {
-        if rank != nil { return lane.reason.isEmpty ? PlanWords.cards(lane.cards.count) : lane.reason }
-        return "\(PlanWords.status(lane)) · \(PlanWords.cards(lane.cards.count))"
+        let slug = lane.slug.map { "\($0) · " } ?? ""
+        if rank != nil { return slug + (lane.reason.isEmpty ? PlanWords.cards(lane.cards.count) : lane.reason) }
+        return "\(slug)\(PlanWords.status(lane)) · \(PlanWords.cards(lane.cards.count))"
     }
 
     @ViewBuilder private var mark: some View {

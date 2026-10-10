@@ -1,8 +1,9 @@
 import AgentKit
 import SwiftUI
 
-// A train heading its lanes in Now (ov-309): its name, where it stands and its
-// CI as the runner last read it, "Red · c85bf83d · CI Failed · 1 of 3 jobs
+// A train heading its lanes in Now (ov-309): "Train 72" and what it carries
+// (ov-462), its slug second, where it stands, its integrating agent's state
+// and spend (ov-461), and its CI as the runner last read it, "Red · c85bf83d · CI Failed · 1 of 3 jobs
 // failed". Red, or a failed run, is the one thing drawn in amber, with its
 // word. A click opens the CI run on GitHub, the one place it goes.
 
@@ -31,9 +32,28 @@ struct PlanTrainRow: View {
                     .glyphColumn()
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
-                    Text(train.name)
-                        .font(.system(size: WorkspaceStyle.PaneText.body, weight: .semibold))
-                        .lineLimit(1)
+                    HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
+                        Text(train.heading)
+                            .font(.system(size: WorkspaceStyle.PaneText.body, weight: .semibold))
+                            .lineLimit(1)
+                            .layoutPriority(1)
+                        Spacer(minLength: 0)
+                        if let slug = train.slug {
+                            Text(slug)
+                                .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                    }
+                    if let carries = train.carries {
+                        Text(carries)
+                            .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .identified("plan-train-\(train.name)-carries")
+                    }
                     Text(words)
                         .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: attention ? .medium : .regular))
                         .foregroundStyle(attention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.secondary))
@@ -53,7 +73,7 @@ struct PlanTrainRow: View {
         .onHover { hovering = $0 }
         .help(run.map { "Open CI on \($0.host() ?? "GitHub")" } ?? "")
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Train \(train.name), \(words)")
+        .accessibilityLabel([train.heading, train.carries, words].compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(run == nil ? [] : .isLink)
         .identified("plan-train-\(train.name)")
     }

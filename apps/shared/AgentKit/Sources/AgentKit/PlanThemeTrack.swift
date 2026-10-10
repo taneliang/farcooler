@@ -122,11 +122,11 @@ extension PlanModel {
         // stands alone when nothing else is moving (an hour is routine for a
         // build, so it never hides the lanes that are).
         let stalled = working.filter(\.stale).min { $0.stateSince < $1.stateSince }
-        if let stalled, working.allSatisfy(\.stale) { return .stuck(lane: stalled.name, since: stalled.stateSince) }
+        if let stalled, working.allSatisfy(\.stale) { return .stuck(lane: stalled.heading, since: stalled.stateSince) }
         if !working.isEmpty {
             return .moving(
-                lanes: working.map { PlanTrackLane(name: $0.name, state: $0.state, fixRounds: $0.fixRounds) },
-                stalled: stalled.map { PlanTrackStalled(lane: $0.name, since: $0.stateSince) })
+                lanes: working.map { PlanTrackLane(name: $0.heading, state: $0.state, fixRounds: $0.fixRounds) },
+                stalled: stalled.map { PlanTrackStalled(lane: $0.heading, since: $0.stateSince) })
         }
         let queued = lanes(in: theme).filter { $0.state == .queued }
         if !queued.isEmpty {
@@ -164,7 +164,8 @@ extension PlanModel {
         let open = statuses.filter { id, status in
             !inThemes.contains(id) && status != .done && status != .cancelled
         }.count
-        return PlanOutside(lanes: outsideLanes.map(\.name), openCards: open, tidy: noLane + landedNotClosed)
+        return PlanOutside(
+            lanes: outsideLanes.map(\.heading), openCards: open, tidy: noLane + landedNotClosed, shadows: laneIsTrain)
     }
 
     /// "3 waiting on you · 4 moving · 1 quiet": the Themes section's one
@@ -208,8 +209,13 @@ public struct PlanOutside: Equatable, Sendable {
     /// The cards the CLI's "Worth a look" lists: in review with no lane
     /// working them, or whose lanes all landed.
     public var tidy: [PlanFlaggedCard]
+    /// The lanes named like a live train (ov-461), which "Worth a look" also
+    /// lists: record the agent on the train and drop the lane.
+    public var shadows: [PlanFlaggedLane] = []
 
-    public var isEmpty: Bool { lanes.isEmpty && openCards == 0 && tidy.isEmpty }
+    public var isEmpty: Bool { lanes.isEmpty && openCards == 0 && tidy.isEmpty && shadows.isEmpty }
+    /// Everything "to tidy": cards and lanes.
+    public var tidyCount: Int { tidy.count + shadows.count }
 }
 
 extension PlanWords {
@@ -266,7 +272,7 @@ extension PlanWords {
 
     /// "Landed this week": lane names, newest first, "+3 more" past `limit`.
     public static func lanesLine(_ lanes: [PlanLane], limit: Int = 3) -> String {
-        let names = lanes.prefix(limit).map(\.name).joined(separator: ", ")
+        let names = lanes.prefix(limit).map(\.heading).joined(separator: ", ")
         return lanes.count > limit ? "\(names), +\(lanes.count - limit) more" : names
     }
 
@@ -283,4 +289,17 @@ extension PlanWords {
 
     /// "11 cards to tidy".
     public static func tidy(_ n: Int) -> String { n == 1 ? "1 card to tidy" : "\(n) cards to tidy" }
+
+    /// "11 cards to tidy", "1 lane to tidy" or "2 cards and 1 lane to tidy":
+    /// the cards and the lanes "Worth a look" names.
+    public static func tidy(_ outside: PlanOutside) -> String {
+        let (cards, lanes) = (outside.tidy.count, outside.shadows.count)
+        guard lanes > 0 else { return tidy(cards) }
+        let lane = lanes == 1 ? "1 lane" : "\(lanes) lanes"
+        guard cards > 0 else { return "\(lane) to tidy" }
+        return "\(cards == 1 ? "1 card" : "\(cards) cards") and \(lane) to tidy"
+    }
+
+    /// Why a lane is on the list: "integ-2 is a lane and a train".
+    public static func shadow(_ lane: PlanFlaggedLane) -> String { "\(lane.name) is a lane and a train" }
 }

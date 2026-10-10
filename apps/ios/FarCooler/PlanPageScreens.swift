@@ -71,7 +71,7 @@ struct PlanPageScreen: View {
         guard let plan else { return page.word }
         switch page {
         case .theme(let id): return plan.themes.first { $0.id == id }?.name ?? page.word
-        case .lane(let id): return plan.lanes.first { $0.id == id }?.name ?? page.word
+        case .lane(let id): return plan.lanes.first { $0.id == id }?.heading ?? page.word
         case .page(let slot): return pages.first { $0.slot == slot }?.title ?? page.word
         }
     }
@@ -296,7 +296,7 @@ private struct PlanPageLaneRow: View {
                     .frame(width: 22, alignment: .leading)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(lane.name).font(.subheadline.weight(.medium))
+                    Text(lane.heading).font(.subheadline.weight(.medium))
                     Text(PlanWords.status(lane)).font(.footnote).foregroundStyle(.secondary)
                     // Each key's title in what VoiceOver says (ov-299).
                     TaskKeyText(keysIn: lane.cards.map(\.key).joined(separator: " "))
@@ -375,7 +375,7 @@ struct PlanLanePage: View {
             Section {
                 VStack(alignment: .leading, spacing: PaneMetrics.step) {
                     HStack(alignment: .firstTextBaseline) {
-                        Text(lane.name).font(.title3.weight(.semibold))
+                        Text(lane.heading).font(.title3.weight(.semibold))
                         Spacer()
                         Text(PlanWords.status(lane)).font(.subheadline).foregroundStyle(.secondary)
                     }
@@ -445,8 +445,8 @@ struct PlanLanePage: View {
     /// ".claude/worktrees/mac-ux · mac-ux · Opus · in integ-9".
     private var place: String {
         [
-            lane.worktreePath, lane.branch == lane.worktreePath ? "" : lane.branch, PlanWords.model(lane.model),
-            lane.train.map { "in \($0)" } ?? "",
+            lane.slug ?? "", lane.worktreePath, lane.branch == lane.worktreePath ? "" : lane.branch,
+            PlanWords.model(lane.model), lane.train.map { "in \($0)" } ?? "",
         ].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 

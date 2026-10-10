@@ -20,8 +20,8 @@ struct PlanOutsideRow: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .probed("plan-outside")
                 }
-                if !outside.tidy.isEmpty {
-                    Button(PlanWords.tidy(outside.tidy.count)) { listing = true }
+                if outside.tidyCount > 0 {
+                    Button(PlanWords.tidy(outside)) { listing = true }
                         .buttonStyle(.link)
                         .font(.system(size: WorkspaceStyle.PaneText.secondary))
                         .popover(isPresented: $listing, arrowEdge: .bottom) { tidyList }
@@ -37,15 +37,22 @@ struct PlanOutsideRow: View {
         }
     }
 
-    private var tidyList: some View { PlanTidyList(cards: outside.tidy) }
+    private var tidyList: some View { PlanTidyList(cards: outside.tidy, shadows: outside.shadows) }
 }
 
 /// Each card the CLI's "Worth a look" names, with why, a key to hover each.
 struct PlanTidyList: View {
     let cards: [PlanFlaggedCard]
+    /// Lanes named like a live train (ov-461).
+    var shadows: [PlanFlaggedLane] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
+            ForEach(shadows, id: \.lane) { lane in
+                Text(PlanWords.shadow(lane))
+                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                    .probed("plan-tidy-lane-\(lane.name)")
+            }
             ForEach(cards, id: \.task) { card in
                 TaskKeyText(keysIn: "\(card.key) · \(card.status.replacingOccurrences(of: "_", with: " ").capitalized)")
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
