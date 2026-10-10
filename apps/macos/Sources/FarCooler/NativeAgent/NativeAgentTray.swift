@@ -52,9 +52,8 @@ struct NativeAgentTray: View {
             withAnimation(.snappy(duration: 0.2)) { drill.collapsed.toggle() }
         } label: {
             HStack(spacing: Spacing.group) {
-                Image(systemName: "chevron.right")
-                    .font(.caption2.weight(.semibold))
-                    .rotationEffect(.degrees(drill.collapsed ? 0 : 90))
+                // The app's one disclosure chevron (ov-101).
+                DisclosureChevron(expanded: !drill.collapsed)
                     .frame(width: 14)
                 Text(AgentTray.summary(entries))
                 Spacer(minLength: 0)
