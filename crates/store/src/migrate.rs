@@ -84,7 +84,6 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     (crate::web_panes::migration_0040_web_url, Older::Welcome), // ov-435: one nullable column (web_panes.rs says why)
     (crate::usage::migration_0042_cache_write_1h, Older::Welcome), // ov-460: one nullable column (usage.rs says why)
     (crate::messages::migration_0043_message_wakes, Older::Welcome), // ov-455: one new table (messages.rs says why)
-    (crate::plan::migration_0043_plan_titles, Older::Welcome), // ov-461, ov-462: titles, and a train's agent, on the layer's own tables (plan.rs says why)
     (crate::plan::migration_0044_plan_titles, Older::Welcome), // ov-461, ov-462: titles, and a train's agent, on the layer's own tables (plan.rs says why)
 ];
 
