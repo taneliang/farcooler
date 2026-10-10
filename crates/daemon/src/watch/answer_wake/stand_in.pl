@@ -1,5 +1,5 @@
 #!/usr/bin/perl
-# A stand-in for claude's or codex's TUI, for answer_wake's tests: never the
+# A stand-in for claude's, codex's or cursor's TUI, for answer_wake's tests: never the
 # real agent. Run as a copy of perl named `claude` or `codex`, so the pane's
 # foreground process carries that name as the real one does.
 #
@@ -291,6 +291,22 @@ sub draw {
             push @rows, $mode =~ /^working-(hidden|long)$/ ? "  paste again to expand"
                 : working($mode) && $composer eq "" ? "  ⏸ manual mode on · esc to interrupt"
                 : working($mode) ? "  ⏸ manual mode on" : "  ⏸ manual mode on · ? for shortcuts";
+        }
+    } elsif ($agent eq 'cursor') {
+        # cursor-agent 2026.08.11's screens (`captures/cursor-*.txt`, R-47):
+        # one `  → ` row, a blank row, the model footer; `ctrl+c to stop` at
+        # the row's right while it works; its permission menu under the same
+        # arrow.
+        push @rows, "  Cursor Agent stand-in", "";
+        push @rows, map { "  $_" } @said;
+        push @rows, "";
+        if ($mode eq 'menu' || $mode eq 'working-menu') {
+            push @rows, " Run this command?", " Not in allowlist: echo", "  → Run (once) (y)",
+                "    Skip & tell the agent what to do instead (esc or n)";
+        } else {
+            push @rows, " Running  71 tokens", "" if working($mode);
+            my $box = $composer eq "" ? "\e[2mAdd a follow-up\e[0m" : join(" ", box_rows());
+            push @rows, "  → $box" . (working($mode) ? "      ctrl+c to stop" : ""), "", "  Auto · 7.9%", "  ~/src";
         }
     } else {
         push @rows, " OpenAI Codex stand-in", "";

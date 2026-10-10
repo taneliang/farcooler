@@ -914,8 +914,9 @@ pub(crate) fn agent_of_executable(path: &str) -> Option<&'static str> {
 
 /// Which agent a process is, by its executable or, when that's Node, by the
 /// script Node runs: the first argument that isn't a flag, `…/bin/claude`,
-/// `…/@anthropic-ai/claude-code/cli.js`, `…/bin/codex` or
-/// `…/@openai/codex/…`. Anything else is `None`.
+/// `…/@anthropic-ai/claude-code/cli.js`, `…/bin/codex`, `…/@openai/codex/…`,
+/// or cursor-agent's own `…/cursor-agent/versions/<v>/index.js`, which its
+/// launcher runs with the node beside it (R-47). Anything else is `None`.
 pub(crate) fn agent_of_process(exe: &str, args: &str) -> Option<&'static str> {
     if let Some(agent) = agent_of_executable(exe) {
         return Some(agent);
@@ -930,6 +931,9 @@ pub(crate) fn agent_of_process(exe: &str, args: &str) -> Option<&'static str> {
     }
     if script.contains("/@openai/codex/") {
         return Some("codex");
+    }
+    if script.contains("/cursor-agent/versions/") && script.ends_with("/index.js") {
+        return Some("cursor");
     }
     match script.rsplit('/').next()? {
         "claude" => Some("claude"),

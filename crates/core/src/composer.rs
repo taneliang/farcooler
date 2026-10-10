@@ -21,6 +21,8 @@
 //!   (`codex-idle-after-turn.txt`). A paste's blank lines are blank rows in
 //!   the box, read up to a footer that can only be the model's
 //!   (`codex-0.153.4-blank-lines-160x45-e.txt`, ov-416).
+//! - cursor: a row `  → ` with a blank row and the model footer below it
+//!   (`cursor-idle.txt`); see `cursor` for its placeholders (R-47).
 //!
 //! Placeholder text is drawn DIM (SGR 2) and doesn't count as content: a box
 //! showing only a dim suggestion is empty. The cursor sits on a placeholder's
@@ -34,6 +36,7 @@
 //! codebase` and claude's suggested prompt both read as `Holds`.
 
 pub mod codex;
+mod cursor;
 pub mod draft;
 pub mod drawn;
 mod suggestion;
@@ -54,12 +57,14 @@ pub enum Composer {
 }
 
 /// The input box on `screen`, for the agent `preset` names (`claude`,
-/// `codex`, or either with `:<model>`). Any other agent is `Unrecognized`.
+/// `codex`, `cursor`, or any with `:<model>`). Any other agent is
+/// `Unrecognized`.
 pub fn read(preset: &str, screen: &str) -> Composer {
     let lines: Vec<Vec<(char, bool)>> = screen.lines().map(cells).collect();
     match preset.split(':').next().unwrap_or_default() {
         "claude" => claude(&lines),
         "codex" => codex(&lines),
+        "cursor" => cursor::read(&lines),
         _ => Composer::Unrecognized,
     }
 }
@@ -390,7 +395,8 @@ mod tests {
             ("claude", "claude-permission-hook-waiting.txt"),
             ("codex", "codex-blocked.txt"),
             ("codex", "codex-trust-gate.txt"),
-            ("cursor", "cursor-idle.txt"),
+            ("cursor", "cursor-blocked.txt"),
+            ("cursor", "cursor-trust-gate.txt"),
             ("claude", "codex-idle-after-turn.txt"),
             ("codex", "claude-idle-fresh.txt"),
         ] {

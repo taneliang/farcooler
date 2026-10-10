@@ -744,6 +744,10 @@ fn a_node_install_is_known_by_its_script() {
     assert_eq!(agent_of_process("/opt/homebrew/bin/node", "node"), None);
     assert_eq!(agent_of_process("/bin/zsh", "zsh /x/bin/claude"), None, "only node's script counts");
     assert_eq!(agent_of_process("/x/claude/versions/2.1.237", "2.1.237"), Some("claude"));
+    // cursor-agent's launcher `exec -a`s its own node on its index.js (R-47).
+    let cursor = "/Users/x/.local/bin/cursor-agent --use-system-ca /Users/x/.local/share/cursor-agent/versions/2026.09.26-dd393fe/index.js";
+    assert_eq!(agent_of_process("/Users/x/.local/share/cursor-agent/versions/2026.09.26-dd393fe/node", cursor), Some("cursor"));
+    assert_eq!(agent_of_process("node", "node /x/cursor-agent/versions/1/other.js"), None);
 }
 
 /// claude under node, as npm installs it: told.

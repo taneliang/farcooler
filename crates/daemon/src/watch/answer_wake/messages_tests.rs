@@ -217,3 +217,24 @@ async fn a_message_survives_a_restart() {
     assert_eq!(si.submitted(), [format!("[from {}] Still here", b.task.key)], "{}", si.log());
     assert!(b.messages().is_empty());
 }
+
+/// A cursor pane (R-47) is told between turns: its box is read, the
+/// message pasted, read back and sent. While it works, the message waits.
+#[tokio::test]
+async fn a_cursor_pane_is_told_between_turns_and_not_during_one() {
+    let b = board().await;
+    let agent = b.agent("Agent 2", "cursor").await;
+    let si = b.stand_in(&agent, "cursor", "cursor-agent").await;
+    si.show("working").await;
+    b.doing(agent.id, AgentActivity::Working).await;
+    b.send("manager", &b.task.key, "Run the gates").await.unwrap();
+    b.pump().await;
+    assert!(si.submitted().is_empty(), "typed into a cursor mid-turn: {}", si.log());
+    assert_eq!(b.messages().len(), 1, "it waits");
+    si.show("idle").await;
+    b.doing(agent.id, AgentActivity::Idle).await;
+    b.pump().await;
+    si.submits(1).await;
+    assert_eq!(si.submitted(), ["[from the orchestrator] Run the gates"], "{}", si.log());
+    assert!(b.messages().is_empty());
+}
