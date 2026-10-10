@@ -22,14 +22,15 @@ struct NativeRowView: View {
             switch row.kind {
             case .turn(let turn): TurnRow(turn: turn)
             case .prose(let prose): AgentReplyText(text: prose.text, trailingClearance: 0, streaming: isLast)
-            case .thinking(let thinking): ThinkingRow(thinking: thinking)
-            case .tool(let tool): NativeToolRow(tool: tool)
+            case .thinking(let thinking): NativeThinkingRow(thinking: thinking)
+            case .tool(let tool): NativeToolRow(id: row.id, tool: tool)
             case .subagent(let subagent): SubagentRow(subagent: subagent)
             case .ask(let ask): NativeAskRow(ask: ask, answer: answer, showTerminal: showTerminal)
             case .queued(let queued): QueuedLine(text: queued.text, state: queued.state, sendNow: sendNow)
             case .notice(let notice): NoticeLine(text: notice.text)
             case .handoff(let handoff): HandoffRow(reason: handoff.reason, showTerminal: showTerminal)
             case .gap(let gap): NoticeLine(text: AgentConversation.gap(gap))
+            case .tasks(let tasks): NativeTasksRow(tasks: tasks)
             case .hint, .unknown: EmptyView()
             }
         }
@@ -41,7 +42,7 @@ struct NativeRowView: View {
 
 /// A run time that ticks without anything re-laying out: the system redraws
 /// a timer `Text` itself, so no row's body is evaluated again (ov-382).
-private struct RunTimeChip: View {
+struct NativeRunTime: View {
     let startedMs: Int64?
     let endedMs: Int64?
 
@@ -68,17 +69,26 @@ private struct TurnRow: View {
         VStack(alignment: .trailing, spacing: Spacing.tight) {
             // A turn whose prompt the projection never saw (a resume) has
             // only its outcome to show; one nobody typed is a notice, never
-            // the person's message.
-            if AgentConversation.isNotice(turn), !turn.prompt.isEmpty {
-                Text(AgentConversation.noticeText(turn))
+            // the person's message, and a scheduled task's says it is one
+            // (ov-452). Long ones fold.
+            if AgentConversation.isScheduled(turn), !turn.prompt.isEmpty {
+                VStack(alignment: .leading, spacing: Spacing.tight) {
+                    Label(AgentConversation.scheduledTask, systemImage: "clock")
+                        .font(.caption.weight(.medium))
+                    FoldedText(text: turn.prompt, lines: 3).font(.callout)
+                }
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("native-scheduled-turn")
+            } else if AgentConversation.isNotice(turn), !turn.prompt.isEmpty {
+                FoldedText(text: AgentConversation.noticeText(turn), lines: 3)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity, alignment: .center)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityIdentifier("native-notice-turn")
             } else if !turn.prompt.isEmpty {
-                Text(turn.prompt)
-                    .textSelection(.enabled)
+                FoldedText(text: turn.prompt)
                     .padding(.horizontal, Spacing.inset)
                     .padding(.vertical, Spacing.group)
                     .surface(.inset, in: .card)
@@ -87,14 +97,14 @@ private struct TurnRow: View {
             }
             // A notice's own turn says no time of its own: it's the line
             // above, not a message the person sent.
-            if !AgentConversation.isNotice(turn) { status }
+            if !AgentConversation.isNotice(turn), !AgentConversation.isScheduled(turn) { status }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     private var status: some View {
             HStack(spacing: Spacing.group) {
-                if turn.origin == "Queued" { Text("From the queue") }
+                if let note = AgentConversation.originNote(turn) { Text(note) }
                 if turn.backgroundRunning > 0 {
                     Text(turn.backgroundRunning == 1 ? "1 agent still running" : "\(turn.backgroundRunning) agents still running")
                 }
@@ -104,7 +114,7 @@ private struct TurnRow: View {
                 } else {
                     HStack(spacing: Spacing.tight) {
                         ProgressView().controlSize(.mini)
-                        RunTimeChip(startedMs: turn.startedMs, endedMs: nil)
+                        NativeRunTime(startedMs: turn.startedMs, endedMs: nil)
                     }
                 }
             }
@@ -118,13 +128,13 @@ private struct TurnRow: View {
     }
 }
 
-private struct ThinkingRow: View {
+struct NativeThinkingRow: View {
     let thinking: AgentRow.Thinking
 
     var body: some View {
         HStack(spacing: Spacing.tight) {
             Text(thinking.endedMs == nil ? "Thinking" : "Thought for")
-            RunTimeChip(startedMs: thinking.startedMs, endedMs: thinking.endedMs)
+            NativeRunTime(startedMs: thinking.startedMs, endedMs: thinking.endedMs)
         }
         .font(.caption)
         .foregroundStyle(.secondary)
@@ -133,7 +143,7 @@ private struct ThinkingRow: View {
 
 /// A glyph for a tool's or a subagent's state. Color only where it needs
 /// attention: a failure.
-private struct StatusMark: View {
+struct NativeStatusMark: View {
     let status: AgentRow.Status
 
     var body: some View {
@@ -149,46 +159,8 @@ private struct StatusMark: View {
     }
 }
 
-private struct NativeToolRow: View {
-    let tool: AgentRow.Tool
-    @State private var open = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.tight) {
-            Button {
-                if !tool.diff.isEmpty { open.toggle() }
-            } label: {
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
-                    StatusMark(status: tool.status)
-                    Text(tool.name).fontWeight(.medium).foregroundStyle(.primary)
-                    Text(tool.summary)
-                        .font(.callout.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer(minLength: Spacing.group)
-                    if !tool.diff.isEmpty {
-                        Image(systemName: open ? "chevron.up" : "chevron.down")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    RunTimeChip(startedMs: tool.startedMs, endedMs: tool.endedMs)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(tool.diff.isEmpty)
-            .accessibilityHint(tool.diff.isEmpty ? "" : (open ? "Hides the diff" : "Shows the diff"))
-            if open {
-                NativeDiff(hunks: tool.diff)
-            }
-        }
-        .font(.callout)
-    }
-}
-
 /// An edit's hunks, as unified-diff lines.
-private struct NativeDiff: View {
+struct NativeDiff: View {
     let hunks: [AgentRow.Hunk]
 
     var body: some View {
@@ -217,17 +189,17 @@ private struct SubagentRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
-                StatusMark(status: subagent.status)
+                NativeStatusMark(status: subagent.status)
                 Text(AgentConversation.agentType(subagent.agentType)).fontWeight(.medium)
                 Spacer(minLength: Spacing.group)
                 Text(subagent.toolCount == 1 ? "1 tool" : "\(subagent.toolCount) tools")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                RunTimeChip(
+                NativeRunTime(
                     startedMs: subagent.startedMs,
                     endedMs: subagent.status == .running ? nil : (subagent.endedMs ?? subagent.lastMs))
             }
-            Text(subagent.description).foregroundStyle(.secondary).lineLimit(2)
+            Text(subagent.description).lineLimit(2)
             if subagent.status == .running, !subagent.currentAction.isEmpty {
                 Text(subagent.currentAction)
                     .font(.caption.monospaced())
@@ -235,9 +207,10 @@ private struct SubagentRow: View {
                     .lineLimit(1)
             }
         }
-        .font(.callout)
-        .padding(Spacing.inset)
-        .surface(.inset, in: .card)
+        // Unfilled and secondary, as a tool row is: the agent's machinery
+        // sits below its words (ov-452).
+        .font(MachineryStyle.font)
+        .foregroundStyle(.secondary)
     }
 }
 
@@ -252,7 +225,7 @@ struct QueuedLine: View {
 
     var body: some View {
         VStack(alignment: .trailing, spacing: Spacing.tight) {
-            Text(text)
+            FoldedText(text: text)
                 .padding(.horizontal, Spacing.inset)
                 .padding(.vertical, Spacing.group)
                 .surface(.inset, in: .card)

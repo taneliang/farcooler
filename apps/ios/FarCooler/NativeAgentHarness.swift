@@ -38,6 +38,8 @@ import UIKit
 /// - `-native-hint` (ov-409): the page ends on the `Hint` row, claude's
 ///   `Try "…"` example (`exampleHint`), shown as the placeholder and taken
 ///   by nothing.
+/// - `-native-polish` (ov-452): the page ends on a scheduled task's turn, a
+///   run of two calls with their input and result, a task list and a reply.
 /// - `-native-flag-off`: a runner whose projector is off, so no `agent_rows`.
 /// - `-native-reconnect`: once the box holds a draft, the link comes up
 ///   again, so the build is unread for two seconds.
@@ -570,7 +572,34 @@ final class NativeHarnessRunner: ObservableObject {
         if CommandLine.arguments.contains("-native-hint") {
             rows.append(Self.row("hint:composer", ord: 11, rev: 11, kind: ["Hint": ["text": Self.exampleHint]]))
         }
+        if CommandLine.arguments.contains("-native-polish") { rows += Self.polishRows(now: now) }
         return ["epoch": Self.epoch, "rev": rev, "moreBefore": false, "rows": rows]
+    }
+
+    /// `-native-polish`'s rows (ov-452), as the owner's own check-in came.
+    private static func polishRows(now: Int64) -> [[String: Any]] {
+        let prompt = """
+            1. **Re-evaluate the plan.** Step back from the queue. Is the current execution plan still balancing the owner's priorities: engineering quality, product quality, cost/token efficiency and velocity?
+            2. **Re-check the themes and lanes themselves** (`farcooler-canary plan --repo overnight`).
+            3. **Take initiative within each theme.**
+            4. **Learn.** What went well or badly since the last check-in?
+            5. **Run the loop:** board triage, verify and land finished lanes.
+            """
+        let scheduled = turn(prompt, origin: "Scheduled")
+        let tool = { (id: String, name: String, summary: String, input: String, result: String, at: Int64) -> [String: Any] in
+            ["name": name, "summary": summary, "status": "Done", "started_ms": at, "ended_ms": at + 400, "diff": [Any](), "input": input, "result": result]
+        }
+        return [
+            row("turn:s1", ord: 20, rev: 20, kind: ["Turn": scheduled]),
+            row("tool:c1", ord: 21, rev: 21, kind: ["Tool": tool("c1", "Bash", "Get current time", "command: date\ndescription: Get current time", "Sat Oct 10 09:34:02 PDT 2026", now - 7000)]),
+            row("tool:c2", ord: 22, rev: 22, kind: ["Tool": tool("c2", "CronCreate", "", "cron: 31 11 10 10 *\nrecurring: false\nprompt: Coordinator heartbeat for `overnight`.", "Scheduled 573b639b (31 11 10 10 *)", now - 6000)]),
+            row("tasks:turn:s1", ord: 23, rev: 23, kind: ["Tasks": ["items": [
+                ["subject": "Re-evaluate the plan", "status": "Completed"],
+                ["subject": "Re-check the themes and lanes", "status": "InProgress"],
+                ["subject": "Learn from the last check-in", "status": "Pending"],
+            ]]]),
+            row("prose:s1:0", ord: 24, rev: 24, kind: ["Prose": ["text": "Check-in at 09:34: nothing has changed. Main is green and no lanes are running. The next check-in is at 11:31.", "conclusion": true]]),
+        ]
     }
 
     private static func turn(_ prompt: String, origin: String, open: Bool = false) -> [String: Any] {

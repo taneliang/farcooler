@@ -199,6 +199,7 @@ SOURCES = [
     "NativeAgent.swift",
     "NativeAgentView.swift",
     "NativeRows.swift",
+    "NativeToolRows.swift",
     # A held ask answered from its row (ov-370).
     "NativeAskRow.swift",
     "NativeAgentHarness.swift",
@@ -702,6 +703,7 @@ AGENTKIT_SOURCES = [
     "AgentRowStore.swift",
     "AgentRowCache.swift",
     "AgentConversation.swift",
+    "ConversationItems.swift",
     # Which pane is offered the conversation, and why not (ov-443).
     "ConversationOffer.swift",
     # Bring Here: claude's box's draft moved into the composer (ov-369).

@@ -514,7 +514,7 @@ object AgentConversation {
 
     fun queuedLabel(state: String): String = when (state) {
         "Withdrawn" -> "Withdrawn"
-        "Sent" -> "Sent from the queue"
+        "Sent" -> "Sent mid-turn"
         else -> "Queued"
     }
 }

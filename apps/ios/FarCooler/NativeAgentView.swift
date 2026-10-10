@@ -332,13 +332,19 @@ struct NativeAgentView: View {
                         .frame(maxWidth: .infinity)
                         .onAppear { model.loadOlder() }
                 }
-                let last = store.shownIds.last
+                let last = store.items.last?.id
                 let answer = model.nativeAskAnswer
                 let sendNow: (() -> Void)? = model.offersSendNow ? { Task { await model.sendNow() } } : nil
-                ForEach(store.shownIds, id: \.self) { id in
-                    if let box = store.box(id) {
-                        NativeRowView(
-                            box: box, isLast: id == last, showTerminal: showTerminal, answer: answer, sendNow: sendNow)
+                // A run of tool calls is one line (ov-452).
+                ForEach(store.items) { item in
+                    switch item {
+                    case .row(let id):
+                        if let box = store.box(id) {
+                            NativeRowView(
+                                box: box, isLast: id == last, showTerminal: showTerminal, answer: answer, sendNow: sendNow)
+                        }
+                    case .tools(let id, let rows):
+                        NativeToolGroupRow(id: id, boxes: rows.compactMap(store.box))
                     }
                 }
                 ForEach(model.queued.indices, id: \.self) { i in

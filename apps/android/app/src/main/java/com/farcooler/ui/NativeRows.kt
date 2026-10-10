@@ -154,7 +154,7 @@ private fun TurnStatus(turn: AgentRow.Turn) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         val style = MaterialTheme.typography.labelMedium
         val quiet = MaterialTheme.colorScheme.onSurfaceVariant
-        if (turn.origin == "Queued") Text("From the queue", style = style, color = quiet)
+        if (turn.origin == "Queued") Text("Queued during the last turn", style = style, color = quiet)
         if (turn.backgroundRunning > 0) {
             Text(
                 if (turn.backgroundRunning == 1) "1 agent still running" else "${turn.backgroundRunning} agents still running",

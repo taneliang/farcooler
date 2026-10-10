@@ -321,6 +321,28 @@ final class NativeAgentViewTests: XCTestCase {
             "a notice says a time as if it were a message sent")
     }
 
+    /// The text leads (ov-452): a scheduled task says it is one, a run of
+    /// calls is one line that opens to each call and each call to its input
+    /// and result, and the task list is a checklist.
+    func testTheTextLeads() {
+        let app = launch(["-native-polish"])
+        _ = conversation(app)
+        let scheduled = element(app, "native-row-turn:s1")
+        XCTAssertTrue(scheduled.waitForExistence(timeout: 30), "no scheduled turn")
+        XCTAssertTrue(scheduled.staticTexts["Scheduled task"].exists, "a scheduled task doesn't say it is one")
+        let group = element(app, "native-tool-group")
+        XCTAssertTrue(group.waitForExistence(timeout: 30), "two calls in a row aren't one line")
+        XCTAssertTrue(element(app, "native-row-tasks:turn:s1").staticTexts["1 of 3 done"].exists, "no checklist")
+        XCTAssertFalse(element(app, "native-tool-tool:c2").exists, "the group's calls show before it opens")
+        capture("polish")
+        group.buttons.firstMatch.tap()
+        let cron = element(app, "native-tool-tool:c2")
+        XCTAssertTrue(cron.waitForExistence(timeout: 10), "the group didn't open")
+        cron.buttons.firstMatch.tap()
+        XCTAssertTrue(cron.staticTexts["Scheduled 573b639b (31 11 10 10 *)"].waitForExistence(timeout: 10), "CronCreate didn't open to its result")
+        capture("polish-opened")
+    }
+
     /// A link coming up again leaves the build unread for a round trip: the
     /// conversation stays, and so does the keyboard on its box.
     func testAReconnectKeepsTheConversationAndTheKeyboard() {

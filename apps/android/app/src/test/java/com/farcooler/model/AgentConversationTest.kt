@@ -223,7 +223,7 @@ class AgentConversationTest {
         assertEquals(null, outcome(null))
         assertEquals("Some of this session couldn’t be read.", AgentConversation.gap(AgentRow.Gap("Unparsed", 2)))
         assertEquals("A line of this session couldn’t be read.", AgentConversation.gap(AgentRow.Gap("Unparsed", 1)))
-        assertEquals("Sent from the queue", AgentConversation.queuedLabel("Sent"))
+        assertEquals("Sent mid-turn", AgentConversation.queuedLabel("Sent"))
         assertEquals("Queued", AgentConversation.queuedLabel("Waiting"))
     }
 
