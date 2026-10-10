@@ -68,9 +68,9 @@ struct PlanTitlesTests {
         #expect(plan.nowGroups.map { $0.train?.name } == ["integ-2"])
         #expect(plan.nowGroups[0].lanes.map(\.name) == ["mlx-ram"], "integ-2 is the train, not also a lane")
         let outside = plan.outsideThemes(statuses: [:])
-        #expect(outside.shadows.map(\.name) == ["integ-2"] && !outside.isEmpty)
+        #expect(outside.trainLanes.map(\.name) == ["integ-2"] && !outside.isEmpty)
         #expect(PlanWords.tidy(outside) == "1 lane to tidy")
-        #expect(PlanWords.shadow(outside.shadows[0]) == "integ-2 is a lane and a train")
+        #expect(PlanWords.trainLane(outside.trainLanes[0]) == "integ-2 is a lane and a train")
         // Without the runner's flag nothing is hidden.
         object["lane_is_train"] = nil
         plan = try PlanModel.decode(JSONSerialization.data(withJSONObject: object))
@@ -81,9 +81,9 @@ struct PlanTitlesTests {
     func tidyWords() {
         let card = PlanFlaggedCard(task: "t", key: "ov-1", status: "in_review")
         let lane = PlanFlaggedLane(lane: "l", name: "integ-2")
-        #expect(PlanWords.tidy(PlanOutside(lanes: [], openCards: 0, tidy: [card, card], shadows: [])) == "2 cards to tidy")
-        #expect(PlanWords.tidy(PlanOutside(lanes: [], openCards: 0, tidy: [card], shadows: [lane])) == "1 card and 1 lane to tidy")
-        #expect(PlanWords.tidy(PlanOutside(lanes: [], openCards: 0, tidy: [], shadows: [lane, lane])) == "2 lanes to tidy")
+        #expect(PlanWords.tidy(PlanOutside(lanes: [], openCards: 0, tidy: [card, card], trainLanes: [])) == "2 cards to tidy")
+        #expect(PlanWords.tidy(PlanOutside(lanes: [], openCards: 0, tidy: [card], trainLanes: [lane])) == "1 card and 1 lane to tidy")
+        #expect(PlanWords.tidy(PlanOutside(lanes: [], openCards: 0, tidy: [], trainLanes: [lane, lane])) == "2 lanes to tidy")
     }
 
     @Test("a task's line uses the lane's title; the strip, a status line of slugs, keeps the names")

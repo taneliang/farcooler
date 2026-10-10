@@ -165,7 +165,7 @@ extension PlanModel {
             !inThemes.contains(id) && status != .done && status != .cancelled
         }.count
         return PlanOutside(
-            lanes: outsideLanes.map(\.heading), openCards: open, tidy: noLane + landedNotClosed, shadows: laneIsTrain)
+            lanes: outsideLanes.map(\.heading), openCards: open, tidy: noLane + landedNotClosed, trainLanes: laneIsTrain)
     }
 
     /// "3 waiting on you · 4 moving · 1 quiet": the Themes section's one
@@ -211,11 +211,11 @@ public struct PlanOutside: Equatable, Sendable {
     public var tidy: [PlanFlaggedCard]
     /// The lanes named like a live train (ov-461), which "Worth a look" also
     /// lists: record the agent on the train and drop the lane.
-    public var shadows: [PlanFlaggedLane] = []
+    public var trainLanes: [PlanFlaggedLane] = []
 
-    public var isEmpty: Bool { lanes.isEmpty && openCards == 0 && tidy.isEmpty && shadows.isEmpty }
+    public var isEmpty: Bool { lanes.isEmpty && openCards == 0 && tidy.isEmpty && trainLanes.isEmpty }
     /// Everything "to tidy": cards and lanes.
-    public var tidyCount: Int { tidy.count + shadows.count }
+    public var tidyCount: Int { tidy.count + trainLanes.count }
 }
 
 extension PlanWords {
@@ -293,7 +293,7 @@ extension PlanWords {
     /// "11 cards to tidy", "1 lane to tidy" or "2 cards and 1 lane to tidy":
     /// the cards and the lanes "Worth a look" names.
     public static func tidy(_ outside: PlanOutside) -> String {
-        let (cards, lanes) = (outside.tidy.count, outside.shadows.count)
+        let (cards, lanes) = (outside.tidy.count, outside.trainLanes.count)
         guard lanes > 0 else { return tidy(cards) }
         let lane = lanes == 1 ? "1 lane" : "\(lanes) lanes"
         guard cards > 0 else { return "\(lane) to tidy" }
@@ -301,5 +301,5 @@ extension PlanWords {
     }
 
     /// Why a lane is on the list: "integ-2 is a lane and a train".
-    public static func shadow(_ lane: PlanFlaggedLane) -> String { "\(lane.name) is a lane and a train" }
+    public static func trainLane(_ lane: PlanFlaggedLane) -> String { "\(lane.name) is a lane and a train" }
 }

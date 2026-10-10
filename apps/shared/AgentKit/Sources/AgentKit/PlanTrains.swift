@@ -179,8 +179,8 @@ extension PlanModel {
     public var nowGroups: [PlanNowGroup] {
         // A lane named like a live train is the train's agent, drawn by the
         // train (ov-461).
-        let shadows = Set(laneIsTrain.map(\.lane))
-        let lanes = (working + unranked).filter { !shadows.contains($0.id) }
+        let trainNamed = Set(laneIsTrain.map(\.lane))
+        let lanes = (working + unranked).filter { !trainNamed.contains($0.id) }
         var grouped = Set<String>()
         var groups: [PlanNowGroup] = []
         for train in liveTrains {
