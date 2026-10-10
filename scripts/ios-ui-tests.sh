@@ -183,11 +183,27 @@ WATCHDOG=$!
 # one that does not (an XCTAssert, a timeout, a crash in the app) means a real
 # failure, and it is not retried however many launch errors sit beside it. The
 # second attempt is final: a second infrastructure failure goes red.
+#
+# A HUNG TEST IS A FAILURE, AND NOT AN INFRASTRUCTURE ONE (ov-450). Without a
+# limit a hung test sat inside xcodebuild for 40 minutes until the job was
+# cancelled (run 37995297799, phone2, testNoAdapterIsSaidWithoutRestart, which
+# takes 22 s when it works). Every test now gets TEST_TIME_LIMIT seconds,
+# default 360: the slowest test in the last three green main runs took 128 s,
+# so that is 2.8x of headroom, and a hang costs six minutes with the test's
+# name in the log. XCTest reports an exceeded allowance as
+# `Test Case '-[Class test]' exceeded execution time allowance of 6 minutes.`
+# (measured on Xcode 27), which is NOT an `: error: ` line, so the check below
+# would not see it; and killing the runner can print a launch error beside it,
+# which would pass as infrastructure. infra_only_failure therefore refuses any
+# log carrying that sentence. Do not add it to the signatures: a slow test is a
+# finding, not weather.
+TEST_TIME_LIMIT="${TEST_TIME_LIMIT:-360}"
 INFRA_SIGNATURES='Failed to launch|Early unexpected exit|never finished bootstrapping|Unable to boot|Failed to boot|Simulator device failed to boot'
 
 # 0 (true) when the log shows an infrastructure failure and nothing else failed.
 infra_only_failure() {
     grep -qE "$INFRA_SIGNATURES" "$1" || return 1
+    ! grep -qE "' exceeded execution time allowance" "$1" || return 1
     # Test failures are `file:line: error: -[Class test] : message`.
     ! grep -E ': error: ' "$1" | grep -vE "$INFRA_SIGNATURES" | grep -q .
 }
@@ -200,6 +216,9 @@ run_xcodebuild() {
         xcodebuild "${ACTION[@]}" \
         -destination "$DESTINATION" \
         -collect-test-diagnostics never \
+        -test-timeouts-enabled YES \
+        -default-test-execution-time-allowance "$TEST_TIME_LIMIT" \
+        -maximum-test-execution-time-allowance "$TEST_TIME_LIMIT" \
         ${ONLY[@]+"${ONLY[@]}"} 2>&1 | tee "$LOG"
     STATUS=${PIPESTATUS[0]}
 }

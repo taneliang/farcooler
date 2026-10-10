@@ -7,7 +7,7 @@
 # next canned log from a queue and counts its calls. Asserted: an infrastructure
 # log is retried once and a green second attempt is green; an assertion failure
 # is not retried; an assertion failure beside a launch failure is not retried;
-# a second infrastructure failure is red; and with IOS_UI_RETRY_INFRA unset
+# a second infrastructure failure is red; a test that exceeded its time allowance is never retried, alone or beside a launch error; and with IOS_UI_RETRY_INFRA unset
 # nothing retries. Run on a mutated script (the signature check removed, or the
 # retry made unconditional) it fails.
 set -euo pipefail
@@ -43,6 +43,12 @@ ASSERT="/x/Tests.swift:20: error: -[FarCoolerUITests.B testB] : XCTAssertTrue fa
 Test Suite 'All tests' failed at 2026-10-09.
 	 Executed 8 tests, with 1 failure (0 unexpected) in 4.0 (4.0) seconds
 ** TEST FAILED **"
+HUNG="Test Case '-[FarCoolerUITests.A testA]' exceeded execution time allowance of 6 minutes. The test may have hung.
+Failing tests:
+	A.testA()
+** TEST FAILED **"
+HUNG_LAUNCH="$LAUNCH
+$HUNG"
 MIXED="$LAUNCH
 $ASSERT"
 
@@ -82,6 +88,16 @@ run 1 "$ASSERT" 65 "$PASS" 0
 run 1 "$MIXED" 65 "$PASS" 0
 [ "$CALLS" -eq 1 ] || fail "an assertion failure beside a launch failure was retried ($CALLS calls)"
 [ "$CODE" -eq 65 ] || fail "a mixed failure exited $CODE, wanted 65"
+
+# A hung test is a real failure, even beside a launch error from the runner
+# restarting after it.
+for hung in "$HUNG" "$HUNG_LAUNCH"; do
+    run 1 "$hung" 65 "$PASS" 0
+    [ "$CALLS" -eq 1 ] || fail "a test that exceeded its time allowance was retried ($CALLS calls)"
+    [ "$CODE" -eq 65 ] || fail "a hung test exited $CODE, wanted 65"
+done
+
+grep -q -- '-test-timeouts-enabled YES' scripts/ios-ui-tests.sh || fail "xcodebuild is not given a test time limit"
 
 run 1 "$LAUNCH" 65 "$BOOTSTRAP" 65 "$PASS" 0
 [ "$CALLS" -eq 2 ] || fail "a second infrastructure failure ran xcodebuild $CALLS time(s), wanted 2"
