@@ -117,7 +117,7 @@ public struct PlanThemeSpend: View {
     }
 }
 
-/// The runner's week, and cost per finished card by harness and model. The
+/// This project's week, and cost per finished card by harness and model. The
 /// week has no percentage, and says why; a pair with fewer than three finished
 /// cards isn't drawn, and the note says how many weren't.
 public struct PlanCostBlock: View {
@@ -158,10 +158,14 @@ public struct PlanCostBlock: View {
             }
             if !cost.compare.isEmpty || cost.compareHeldBack > 0 || cost.inFlightTokens > 0 {
                 VStack(alignment: .leading, spacing: Spacing.group) {
-                    Text("Cost per landed card")
-                        .font(secondaryFont.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .accessibilityAddTraits(.isHeader)
+                    // Only when something sits under it: with just spend in
+                    // flight there is no landed card to put a cost on.
+                    if PlanWords.showsCompareHeading(cost) {
+                        Text("Cost per landed card")
+                            .font(secondaryFont.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .accessibilityAddTraits(.isHeader)
+                    }
                     ForEach(cost.compare.map { PlanWords.compareRow($0) }) { row in
                         VStack(alignment: .leading, spacing: 2) {
                             Text(row.title).font(bodyFont.weight(.medium))

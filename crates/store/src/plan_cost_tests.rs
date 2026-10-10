@@ -19,6 +19,12 @@ fn counts(tokens: u64) -> TokenCounts {
     TokenCounts { input: tokens, output: 0, cache_read: 0, cache_write: 0, cache_write_1h: 0 }
 }
 
+/// The one repository a single-board fixture has: where a turn is filed unless
+/// a test says otherwise, since the week counts only this project's turns.
+fn the_repo(store: &Store) -> Uuid {
+    store.conn().query_row("SELECT repository_id FROM workspaces", [], |r| get_uuid(r, 0)).unwrap()
+}
+
 /// A Claude subagent's run, the kind a lane's agent is read from.
 fn agent_turn(store: &Store, agent: &str, tokens: u64, ended_at: i64) {
     turn(store, &format!("claude-log:agent:{agent}"), None, "claude", "claude-opus-5", tokens, Some(1_000), ended_at);
@@ -45,7 +51,7 @@ fn turn(
             key: key.into(),
             terminal_id: None,
             worktree_id: None,
-            repository_id: None,
+            repository_id: Some(the_repo(store)),
             workspace_id: None,
             task_id: task,
             harness: harness.into(),
@@ -66,7 +72,7 @@ fn turn_between(store: &Store, key: &str, started: i64, ended: i64, tokens: u64)
             key: key.into(),
             terminal_id: None,
             worktree_id: None,
-            repository_id: None,
+            repository_id: Some(the_repo(store)),
             workspace_id: None,
             task_id: None,
             harness: "claude".into(),
@@ -210,7 +216,7 @@ fn a_shared_agent_is_split_in_the_trend() {
     assert_eq!(view.trend[6], 500);
 }
 
-/// The week's tokens are the runner's own, every harness, and stop at seven days.
+/// The week's tokens are this project's, every harness, and stop at seven days.
 #[test]
 fn the_week_counts_seven_days_and_no_limit() {
     let (store, main, _) = board(0);
@@ -329,4 +335,46 @@ fn a_closed_lane_keeps_its_days() {
     store.update_lane(ln.id, &LaneUpdate { state: Some(LaneState::Dropped), ..Default::default() }, Actor::Manager).unwrap();
     let plan = store.plan(main, i64::MAX).unwrap();
     assert_eq!(plan.themes.iter().find(|v| v.theme.id == th.id).unwrap().trend.iter().sum::<u64>(), 70);
+}
+
+/// Two repositories on one runner: each board's week is its own repository's
+/// sessions, root or worktree, and neither sees the other's (ov-456). A turn
+/// filed to no repository counts only where its card is on the board.
+#[test]
+fn the_week_counts_this_project_and_not_the_runner() {
+    let (store, main, tasks) = board(1);
+    let other_repo = store.register_repository_for_test("elsewhere");
+    let other = store.ensure_main_workspace(other_repo).unwrap().id;
+    let now = now_millis();
+    let mine = the_repo(&store);
+    let filed = |key: &str, repo: Option<Uuid>, task: Option<Uuid>, tokens: u64| {
+        store
+            .record_turn(&NewTurn {
+                key: key.into(),
+                terminal_id: None,
+                worktree_id: Some(Uuid::now_v7()),
+                repository_id: repo,
+                workspace_id: None,
+                task_id: task,
+                harness: "claude".into(),
+                surface: Surface::Terminal,
+                started_at: None,
+                ended_at: now - 1000,
+                active_ms: None,
+                usage: "reported",
+                models: vec![TurnModel::priced(Some("claude-opus-5".into()), counts(tokens), Some(10))],
+                kind: TurnKind::Turn,
+            })
+            .unwrap();
+    };
+    filed("in-root", Some(mine), None, 100);
+    filed("in-worktree", Some(mine), None, 20);
+    filed("in-other", Some(other_repo), None, 9_000);
+    filed("unfiled-mine", None, Some(tasks[0].id), 3);
+    filed("unfiled-nobody", None, None, 7_000);
+    let here = store.plan(main, 0).unwrap().cost;
+    assert_eq!(here.week_tokens, 123);
+    assert_eq!(here.week.iter().map(|w| w.tokens).sum::<u64>(), 123);
+    assert_eq!(here.week_cost_micros, Some(30));
+    assert_eq!(store.plan(other, 0).unwrap().cost.week_tokens, 9_000);
 }

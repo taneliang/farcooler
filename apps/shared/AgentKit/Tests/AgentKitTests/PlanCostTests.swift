@@ -92,7 +92,7 @@ struct PlanCostTests {
     @Test("the week is a count with no percentage, and says why")
     func theWeek() {
         let us = Locale(identifier: "en_US")
-        #expect(PlanWords.week(34_200_000, locale: us) == "34M tokens in the last 7 days on this runner")
+        #expect(PlanWords.week(34_200_000, locale: us) == "34M tokens in the last 7 days in this project")
         #expect(!PlanWords.week(34_200_000, locale: us).contains("%"))
         #expect(!PlanWords.weekNote.contains("%"))
         #expect(PlanWords.weekNote.contains("weekly limit"))
@@ -151,6 +151,8 @@ struct PlanCostTests {
         #expect(PlanWords.inFlight(priced, locale: us) == "1.2M tokens on cards that haven’t landed · about $9.00 API-equivalent")
         #expect(PlanWords.inFlight(PlanCostRead(), locale: us) == nil)
         #expect(PlanCostRead(inFlightTokens: 1).isWorthShowing)
+        #expect(!PlanWords.showsCompareHeading(PlanCostRead(inFlightTokens: 1)), "spend in flight alone is no cost per landed card")
+        #expect(PlanWords.showsCompareHeading(PlanCostRead(compareHeldBack: 1, inFlightTokens: 1)))
     }
 
     @Test("a share of the landed cards reads with its decimal only when it isn't whole")

@@ -91,7 +91,7 @@ class PlanCostTest {
 
     @Test
     fun `the week is a count with no percentage and says why`() {
-        assertEquals("34M tokens in the last 7 days on this runner", PlanCostWords.week(34_200_000, us))
+        assertEquals("34M tokens in the last 7 days in this project", PlanCostWords.week(34_200_000, us))
         assertFalse(PlanCostWords.week(34_200_000, us).contains("%"))
         assertFalse(PlanCostWords.WEEK_NOTE.contains("%"))
         assertTrue(PlanCostWords.WEEK_NOTE.contains("weekly limit"))
@@ -139,6 +139,8 @@ class PlanCostTest {
             PlanCostWords.inFlight(cost.copy(inFlightCostMicros = 9_000_000), us),
         )
         assertNull(PlanCostWords.inFlight(PlanCostRead(), us))
+        assertFalse("spend in flight alone is no cost per landed card", PlanCostWords.showsCompareHeading(PlanCostRead(inFlightTokens = 1)))
+        assertTrue(PlanCostWords.showsCompareHeading(PlanCostRead(compareHeldBack = 1, inFlightTokens = 1)))
         assertEquals("5 finished cards", PlanCostWords.cardShare(5000))
         assertEquals("3.6 finished cards", PlanCostWords.cardShare(3600))
     }

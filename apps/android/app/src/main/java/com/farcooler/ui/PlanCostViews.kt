@@ -120,7 +120,7 @@ fun PlanThemeSpend(theme: PlanTheme, modifier: Modifier = Modifier) {
 }
 
 /**
- * The runner's week, and cost per finished card by harness and model. The week
+ * This project's week, and cost per finished card by harness and model. The week
  * has no percentage, and says why; a pair with fewer than three finished cards
  * isn't drawn, and the note says how many weren't.
  */
@@ -150,12 +150,15 @@ fun PlanCostBlock(cost: PlanCostRead, modifier: Modifier = Modifier) {
         }
         if (cost.compare.isNotEmpty() || cost.compareHeldBack > 0 || cost.inFlightTokens > 0) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "Cost per landed card",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.semantics { heading() },
-                )
+                // Only when something sits under it: with just spend in flight there is no landed card to put a cost on.
+                if (PlanCostWords.showsCompareHeading(cost)) {
+                    Text(
+                        "Cost per landed card",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.semantics { heading() },
+                    )
+                }
                 for (row in cost.compare.map { PlanCostWords.compareRow(it) }) {
                     Column(
                         verticalArrangement = Arrangement.spacedBy(2.dp),

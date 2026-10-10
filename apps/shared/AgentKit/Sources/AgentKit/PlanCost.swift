@@ -70,7 +70,7 @@ public struct PlanWeekSpend: Decodable, Equatable, Identifiable, Sendable {
 
 /// The week and the comparison, as one plan read carries them.
 public struct PlanCostRead: Decodable, Equatable, Sendable {
-    /// The runner's tokens over the last seven days, every harness and board.
+    /// This project's tokens over the last seven days: sessions in the board's repository or its worktrees.
     public var weekTokens: UInt64
     /// The same week split by harness and model, most tokens first; the tokens
     /// add up to `weekTokens`. Empty from a runner older than ov-434.
@@ -241,10 +241,10 @@ extension PlanWords {
         return "Last 7 days by UTC day, oldest first: \(said). \(spokenTokens(t.total, locale: locale)) tokens in all."
     }
 
-    /// "34M tokens in the last 7 days on this runner": the same seven UTC days
+    /// "34M tokens in the last 7 days in this project": the same seven UTC days
     /// as the trend, today so far.
     public static func week(_ tokens: UInt64, locale: Locale = .current) -> String {
-        "\(TaskUsageFormat.tokens(tokens, locale: locale)) tokens in the last 7 days on this runner"
+        "\(TaskUsageFormat.tokens(tokens, locale: locale)) tokens in the last 7 days in this project"
     }
 
     /// "about $45.00 API-equivalent", or Not reported when any turn went
@@ -317,6 +317,12 @@ extension PlanWords {
         let tokens = TaskUsageFormat.tokens(cost.inFlightTokens, locale: locale)
         let dollars = cost.inFlightCostMicros.map { "about \(TaskUsageFormat.dollars($0, locale: locale)) API-equivalent" }
         return "\(tokens) tokens on cards that haven’t landed · \(dollars ?? dollarsNotReported)"
+    }
+
+    /// Whether "Cost per landed card" has anything under it: a comparison row
+    /// or the held-back note. Spend in flight alone doesn't earn the heading.
+    public static func showsCompareHeading(_ cost: PlanCostRead) -> Bool {
+        !cost.compare.isEmpty || cost.compareHeldBack > 0
     }
 
     /// "2 other harness and model pairs held back until three cards have landed", or nil.

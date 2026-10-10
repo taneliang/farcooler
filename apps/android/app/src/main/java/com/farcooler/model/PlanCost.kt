@@ -58,7 +58,7 @@ data class PlanWeekSpend(
 
 /** The week and the comparison, as one plan read carries them. */
 data class PlanCostRead(
-    /** The runner's tokens over the last seven days, every harness and board. */
+    /** This project's tokens over the last seven days: sessions in the board's repository or its worktrees. */
     val weekTokens: Long = 0,
     /** Harness and model pairs with enough finished cards to compare, most cards first. */
     val compare: List<PlanHarnessCost> = emptyList(),
@@ -220,9 +220,9 @@ object PlanCostWords {
             "${spokenTokens(t.total, locale)} tokens in all."
     }
 
-    /** "34M tokens in the last 7 days on this runner": the same seven UTC days as the trend, today so far. */
+    /** "34M tokens in the last 7 days in this project": the same seven UTC days as the trend, today so far. */
     fun week(tokens: Long, locale: Locale = Locale.getDefault()): String =
-        "${TaskUsageFormat.tokens(tokens, locale)} tokens in the last 7 days on this runner"
+        "${TaskUsageFormat.tokens(tokens, locale)} tokens in the last 7 days in this project"
 
     /**
      * "about $45.00 API-equivalent", Not reported when any turn went unpriced; null when the runner sent no split
@@ -277,6 +277,9 @@ object PlanCostWords {
         val dollars = cost.inFlightCostMicros?.let { "about ${TaskUsageFormat.dollars(it, locale)} API-equivalent" }
         return "$tokens tokens on cards that haven’t landed · ${dollars ?: DOLLARS_NOT_REPORTED}"
     }
+
+    /** Whether "Cost per landed card" has anything under it: a comparison row or the held-back note. */
+    fun showsCompareHeading(cost: PlanCostRead): Boolean = cost.compare.isNotEmpty() || cost.compareHeldBack > 0
 
     /** "2 other harness and model pairs held back until three cards have landed", or null. */
     fun heldBack(n: Int): String? {

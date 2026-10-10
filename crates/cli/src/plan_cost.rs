@@ -122,7 +122,7 @@ pub(super) fn overview_lines(plan: &pb::Plan) -> Vec<String> {
     // total comes first, then what each harness and model spent (ov-434).
     let week_dollars = if cost.week.is_empty() { String::new() } else { dollars_words(cost.week_cost_micros, false) };
     out.push(format!(
-        "  Last 7 days  {} tokens{week_dollars} on this runner (its weekly limit isn't known)",
+        "  Last 7 days  {} tokens{week_dollars} in this project (its weekly limit isn't known)",
         tokens(cost.week_tokens)
     ));
     for w in &cost.week {

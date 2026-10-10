@@ -4411,7 +4411,7 @@ message Plan {
 
 // Cost read for a board's plan (ov-307), all derived on read.
 message PlanCost {
-  // The runner's tokens over the last seven days, every harness and board.
+  // This project's tokens over the last seven days: sessions in the board's repository or its worktrees.
   // There is no limit and no share: neither harness reports a plan's weekly
   // limit to the runner, so a client shows the count and no percentage.
   uint64 week_tokens = 1;

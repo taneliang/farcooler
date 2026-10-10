@@ -22,7 +22,7 @@
 //! Neither Claude Code nor Codex reports the limit or how much of it is used
 //! to the runner: a Claude turn's usage carries token counts and, at best, its
 //! own cost, and the one rate-limit event in the stream is ignored because it
-//! carries no figure. `week_tokens` is therefore the runner's tokens over the
+//! carries no figure. `week_tokens` is therefore this project's tokens over the
 //! last seven UTC days (today so far) and nothing more; a client shows it with no percentage. A
 //! budget is the way to give the plan a number to measure against.
 
@@ -77,8 +77,9 @@ pub(crate) fn migration_0028_plan_budgets(tx: &Transaction) -> rusqlite::Result<
 /// The cost half of a plan read.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PlanCost {
-    /// The runner's tokens over the last seven days, every harness and every
-    /// board. No limit and no share: see the module doc.
+    /// This project's tokens over the last seven days, every harness: the
+    /// sessions that ran in the board's repository or one of its worktrees,
+    /// not the whole runner's. No limit and no share: see the module doc.
     pub week_tokens: u64,
     /// The same week split by harness and model, most tokens first; the
     /// tokens add up to `week_tokens` (ov-434).
@@ -209,7 +210,18 @@ pub(crate) fn lane_days(conn: &Connection, lane: Uuid, start_ms: i64) -> Result<
 }
 
 /// The cost half of a board's plan read.
-pub(crate) fn cost_of(conn: &Connection, cards: &HashMap<Uuid, CardRef>, now_ms: i64) -> Result<PlanCost> {
+///
+/// The week is this project's: a turn counts when it ran in this board's
+/// repository (its root or any of its worktrees; a turn is filed to the
+/// repository of the worktree its terminal sat in), or, when it was filed to
+/// no repository (a subagent run with no pane, a terminal since removed), when
+/// it belongs to one of this board's cards.
+pub(crate) fn cost_of(
+    conn: &Connection,
+    workspace: Uuid,
+    cards: &HashMap<Uuid, CardRef>,
+    now_ms: i64,
+) -> Result<PlanCost> {
     // One window for the week and the trend: the same seven UTC days, today
     // so far, each run spread over the days it ran.
     let window = trend_start(now_ms);
@@ -221,11 +233,15 @@ pub(crate) fn cost_of(conn: &Connection, cards: &HashMap<Uuid, CardRef>, now_ms:
                     sum(m.input_tokens + m.output_tokens + m.cache_read_tokens + m.cache_write_tokens),
                     coalesce(sum(m.cost_micros), 0), coalesce(sum(m.cost_micros IS NULL), 0)
                FROM agent_turns t JOIN agent_turn_models m ON m.turn_id = t.id
-              WHERE t.ended_at >= ?1 GROUP BY t.id, t.harness, m.model",
+              WHERE t.ended_at >= ?1
+                AND (t.repository_id = (SELECT repository_id FROM workspaces WHERE id = ?2)
+                     OR (t.repository_id IS NULL
+                         AND t.task_id IN (SELECT id FROM tasks WHERE workspace_id = ?2)))
+              GROUP BY t.id, t.harness, m.model",
         )
         .map_err(map_err)?;
     let week_rows = stmt
-        .query_map(params![window], |r| {
+        .query_map(params![window, uuid_blob(workspace)], |r| {
             Ok((
                 r.get::<_, Option<i64>>(0)?,
                 r.get::<_, i64>(1)?,

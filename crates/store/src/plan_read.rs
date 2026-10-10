@@ -406,7 +406,7 @@ impl Store {
             .collect();
         coverage.sort_by_key(|c| c.task_id);
         let order = order.into_iter().map(|(_, id)| id).collect();
-        let cost = cost_of(&conn, &statuses, now_ms)?;
+        let cost = cost_of(&conn, workspace, &statuses, now_ms)?;
         Ok(Plan { now_ms, themes, lanes, order, cards, coverage, rulings, trains, ci, board_counts, cost })
     }
 
