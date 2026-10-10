@@ -63,7 +63,7 @@ pub(crate) async fn message(runner: Option<&str>, args: MessageArgs, json: bool)
             text: args.text,
             actor: actor.to_string(),
             task,
-            workspace_id: board.workspace.map(|w| w.id).unwrap_or_default(),
+            workspace_id: workspace_of(&mut link, &board).await?,
         }),
     );
     r.required_capabilities.push(capability::AGENT_MESSAGES.to_string());
@@ -73,6 +73,17 @@ pub(crate) async fn message(runner: Option<&str>, args: MessageArgs, json: bool)
     };
     println!("{}", sent_line(&sent, json));
     Ok(())
+}
+
+/// The board's workspace, or with none named, its repository's Main, as
+/// `task create` and `plan` take it: an orchestrator outside its pane names
+/// only `--repo`.
+async fn workspace_of(link: &mut crate::Link, board: &tasks::Board) -> Result<bytes::Bytes, Box<dyn std::error::Error>> {
+    if let Some(ws) = &board.workspace {
+        return Ok(ws.id.clone());
+    }
+    let main = crate::workspaces::workspaces_on(link, Some(board.repository)).await?.into_iter().find(|w| w.is_main);
+    Ok(main.map(|w| w.id).unwrap_or_default())
 }
 
 /// What's printed once it's queued.
